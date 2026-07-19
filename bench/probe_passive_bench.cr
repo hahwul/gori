@@ -76,11 +76,35 @@ HTML_FLOW = flow("GET", "/dashboard", "text/html; charset=utf-8",
   ("GET /dashboard HTTP/1.1\r\nHost: app.example.com\r\n\r\n").to_slice, nil,
   HTML_RESP_HEAD, HTML_BODY)
 
+# A minified-bundle-shaped JS response at the Context::CLIENT_BODY_CAP ceiling (256 KiB). This
+# is the worst case for the client-side rules: `client_scripts` is the WHOLE body, and both
+# strip (client_code) and strip_comments (client_scripts_nocomment) lex all of it.
+JS_BODY = begin
+  io = IO::Memory.new
+  i = 0
+  while io.bytesize < 256 * 1024
+    io << "function f" << i << "(a,b){var c=\"str" << i << "\",d=/*x*/a+b;return c+d};"
+    i += 1
+  end
+  io.to_slice.dup
+end
+
+JS_RESP_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n" \
+                "Server: nginx/1.24.0\r\nCache-Control: max-age=31536000\r\n\r\n").to_slice
+
+JS_FLOW = flow("GET", "/static/app.min.js", "application/javascript",
+  ("GET /static/app.min.js HTTP/1.1\r\nHost: app.example.com\r\n\r\n").to_slice, nil,
+  JS_RESP_HEAD, JS_BODY)
+
 puts "Probe passive scan — full Passive.analyze per flow:"
 puts "  JSON POST body: #{JSON_BODY.size} bytes; HTML document: #{HTML_BODY.size} bytes"
-puts "  (detections: json=#{Gori::Probe::Passive.analyze(JSON_FLOW).size} html=#{Gori::Probe::Passive.analyze(HTML_FLOW).size})"
+puts "  JS bundle: #{JS_BODY.size} bytes (at the CLIENT_BODY_CAP ceiling)"
+puts "  (detections: json=#{Gori::Probe::Passive.analyze(JSON_FLOW).size}" \
+     " html=#{Gori::Probe::Passive.analyze(HTML_FLOW).size}" \
+     " js=#{Gori::Probe::Passive.analyze(JS_FLOW).size})"
 
 Benchmark.ips do |x|
   x.report("JSON API POST flow") { Gori::Probe::Passive.analyze(JSON_FLOW) }
   x.report("HTML document flow") { Gori::Probe::Passive.analyze(HTML_FLOW) }
+  x.report("JS bundle flow    ") { Gori::Probe::Passive.analyze(JS_FLOW) }
 end
