@@ -127,8 +127,7 @@ module Gori
     RETENTION_DEFAULT = 100_000
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
-    # Per-side ceiling on body text fed to the FTS index (keeps the index small;
-    # must match the substr() length in Schema V8's backfill).
+    # Per-side ceiling on body text fed to the FTS index (keeps the index small).
     FTS_INDEX_MAX = 64 * 1024
 
     @events : Channel(FlowEvent)?
@@ -151,13 +150,7 @@ module Gori
       # Make REGEXP byte-safe on every connection before any query runs (so a binary
       # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
       SafeRegexp.install(db)
-      pre_version = db.scalar("PRAGMA user_version").as(Int64).to_i
       Schema.migrate!(db)
-      # V25 empties duplicated h2 DATA payloads (often ~40% of the DB), freeing pages but not
-      # shrinking the file — reclaim to disk once, only when an EXISTING db (pre_version >= 1)
-      # just crossed into the reclaim version. A fresh db (0) has nothing to reclaim; a db
-      # already at/after it won't re-run.
-      reclaim_to_disk(db) if pre_version >= 1 && pre_version < Schema::RECLAIM_VERSION
       new(db, events, probe_events, retention_flows)
     end
 
@@ -171,26 +164,6 @@ module Gori
       File.chmod(path, 0o600) rescue nil
       File.chmod("#{path}-wal", 0o600) rescue nil
       File.chmod("#{path}-shm", 0o600) rescue nil
-    end
-
-    # Ceiling on the db we auto-VACUUM on the boot path. VACUUM rewrites the WHOLE file
-    # (disk-bandwidth-bound) and holds an exclusive lock, so above this we SKIP it rather than
-    # freeze startup on a huge project — the freed pages are still reused by later writes, and
-    # the operator can VACUUM manually.
-    VACUUM_MAX_BYTES = 512_i64 * 1024 * 1024
-
-    # One-time disk reclaim after the V25 payload-emptying migration. NOT run inside migrate!'s
-    # transaction (VACUUM is illegal there). Best-effort: a failure (disk full, or a concurrent
-    # instance holding the db past busy_timeout) leaves the db fully usable, just un-shrunk.
-    private def self.reclaim_to_disk(db : DB::Database) : Nil
-      bytes = db.scalar("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()").as(Int64)
-      if bytes > VACUUM_MAX_BYTES
-        Log.info { "store: skipping post-migration VACUUM (#{bytes // (1024 * 1024)} MiB > #{VACUUM_MAX_BYTES // (1024 * 1024)} MiB cap); freed pages will be reused, or VACUUM manually to reclaim disk" }
-        return
-      end
-      db.exec("VACUUM")
-    rescue ex
-      Log.warn(exception: ex) { "store: post-migration VACUUM failed (non-fatal; db un-shrunk)" }
     end
 
     # Count of write batches that failed (e.g. disk full) — surfaced in the TUI

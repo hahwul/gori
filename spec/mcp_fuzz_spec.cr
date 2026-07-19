@@ -79,7 +79,7 @@ describe "MCP fuzz tools" do
       results = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))
       results["results"].as_a.size.should eq(3)
       results["results"][0]["status"].as_i.should eq(200)
-      results["complete"].as_bool.should be_true
+      results["job_complete"].as_bool.should be_true
     end
   end
 

@@ -37,7 +37,6 @@ gori tui --listen 0.0.0.0 --port 8080
 | `-p`, `--port=PORT` | 이 프로세스의 전역 바인드 포트, `0`-`65535` (`settings.json` 기본값, 없으면 `8070`). 저장되지 않음. 프로젝트 `net.bind_port`가 설정되어 있으면 그쪽이 우선 |
 | `--db=PATH` | SQLite 데이터베이스 경로 |
 | `--ca-dir=PATH` | 루트 CA 디렉터리 |
-| `--headless` | TUI 없이 실행 (STDOUT으로 캡처) |
 | `--insecure-upstream` | 업스트림 TLS 인증서를 검증하지 않음 |
 
 > `GORI_HOME`은 플래그가 아니라 환경 변수입니다. TUI에서는 프로젝트 피커로 프로젝트를 고릅니다. 바인드 플래그는 이번 실행에 한해 전역 계층만 설정합니다. [설정](/ko/getting-started/configuration/#network)을 참고하세요. 루트 CA 경로는 [`gori ca`](#gori-ca)를 사용하세요.
@@ -274,14 +273,14 @@ gori run jwt eyJhbGci... --attacks
 | `--secret=SECRET` | HS 알고리즘 `--encode`용 HMAC 시크릿 |
 | `--format` | `text`(기본) 또는 `json` |
 
-### run convert {#run-convert}
+### run decoder {#run-decoder}
 
 값에 대해 [Decoder](/ko/guide/decoder/) 체인을 실행합니다. 단계는 `|`, `>`, `,`로 구분합니다.
 
 ```bash
-gori run convert 'base64-decode | jwt-decode' "$TOKEN"
-echo -n secret | gori run convert 'sha256 | hex-encode'
-gori run convert list                           # every converter (name, category, direction)
+gori run decoder 'base64-decode | jwt-decode' "$TOKEN"
+echo -n secret | gori run decoder 'sha256 | hex-encode'
+gori run decoder list                           # every converter (name, category, direction)
 ```
 
 | Option | Description |

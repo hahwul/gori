@@ -95,7 +95,7 @@ describe Gori::Tui::IssuesView do
       view.start_notes_edit
       "junk".each_char { |c| view.notes_insert(c) }
       view.cancel_notes_edit
-      view.editing_notes?.should be_false
+      view.notes_insert_mode?.should be_false
       store.get_issue(id).not_nil!.notes.should eq("") # nothing persisted
     end
   end
@@ -110,7 +110,7 @@ describe Gori::Tui::IssuesView do
       view.enter_notes_insert!
       view.exit_notes_insert!
       view.notes_focused?.should be_true
-      view.editing_notes?.should be_false
+      view.notes_insert_mode?.should be_false
 
       rect = Rect.new(0, 0, 80, 24)
       backend = MemoryBackend.new(80, 24)
@@ -165,7 +165,7 @@ describe Gori::Tui::IssuesView do
       store.get_issue(id).not_nil!.severity.should eq(Gori::Store::Severity::Critical)
 
       view.start_notes_edit
-      view.editing_notes?.should be_true
+      view.notes_insert_mode?.should be_true
       "poc".each_char { |c| view.notes_insert(c) }
       view.save_notes(store)
       store.get_issue(id).not_nil!.notes.should eq("poc")

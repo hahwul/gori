@@ -161,11 +161,6 @@ module Gori::Tui
       @notes_mode == InputMode::Insert
     end
 
-    # Back-compat alias (specs / older call sites).
-    def editing_notes? : Bool
-      notes_insert_mode?
-    end
-
     def notes_focused? : Bool
       @detail_focus == :notes
     end

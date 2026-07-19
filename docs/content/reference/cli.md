@@ -37,7 +37,6 @@ gori tui --listen 0.0.0.0 --port 8080
 | `-p`, `--port=PORT` | Global bind port for this process, `0`-`65535` (defaults to `settings.json`, else `8070`). Not persisted. Project `net.bind_port` still wins when set. |
 | `--db=PATH` | SQLite database path |
 | `--ca-dir=PATH` | Directory for the root CA |
-| `--headless` | Run without the TUI (capture to STDOUT) |
 | `--insecure-upstream` | Do not verify upstream TLS certificates |
 
 > `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the global layer for this run. See [Configuration](/getting-started/configuration/#network). For the root CA path, use [`gori ca`](#gori-ca).
@@ -274,14 +273,14 @@ gori run jwt eyJhbGci... --attacks
 | `--secret=SECRET` | HMAC secret for `--encode` with an HS algorithm |
 | `--format` | `text` (default) or `json` |
 
-### run convert
+### run decoder
 
 Run a [Decoder](/guide/decoder/) chain over a value. Steps are separated by `|`, `>`, or `,`.
 
 ```bash
-gori run convert 'base64-decode | jwt-decode' "$TOKEN"
-echo -n secret | gori run convert 'sha256 | hex-encode'
-gori run convert list                           # every converter (name, category, direction)
+gori run decoder 'base64-decode | jwt-decode' "$TOKEN"
+echo -n secret | gori run decoder 'sha256 | hex-encode'
+gori run decoder list                           # every converter (name, category, direction)
 ```
 
 | Option | Description |

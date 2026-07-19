@@ -3,100 +3,103 @@ require "db"
 module Gori
   class Store
     # Tiny `PRAGMA user_version` migration runner. Each entry in MIGRATIONS is a
-    # list of statements taking the DB from version N to N+1. New subsystems
-    # (FTS5 for QL, a tags table, a connections table) arrive as *later*
-    # migrations — which is exactly why none of them exist in v1 (P0).
+    # list of statements taking the DB from version N to N+1. V1 is the v0.1.0
+    # baseline schema; every later change to a released schema arrives as a NEW
+    # entry appended to MIGRATIONS (never an edit to an existing one).
     module Schema
-      VERSION = 41
-
-      # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
-      # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
-      # freed pages actually shrink the file. Pin it to the exact version (not `VERSION`)
-      # so a later migration doesn't re-trigger the VACUUM.
-      RECLAIM_VERSION = 25
+      VERSION = 1
 
       V1 = [
+        # ── Capture ──────────────────────────────────────────────────────────────
+        # The flow firehose. `request_size`/`response_size` keep the TRUE wire size;
+        # the stored body BLOBs may be truncated to a ceiling so a huge transfer can't
+        # OOM the proxy or bloat one row, and the *_body_truncated flags mark the cut.
+        # h2_conn_id/h2_stream_id link a decoded h2 projection back to its raw frame log.
         <<-SQL,
         CREATE TABLE flows (
-          id            INTEGER PRIMARY KEY,
-          created_at    INTEGER NOT NULL,
-          scheme        TEXT    NOT NULL,
-          host          TEXT    NOT NULL,
-          port          INTEGER NOT NULL,
-          method        TEXT    NOT NULL,
-          target        TEXT    NOT NULL,
-          http_version  TEXT    NOT NULL,
-          sni           TEXT,
-          alpn          TEXT,
-          tls_version   TEXT,
-          request_head  BLOB    NOT NULL,
-          request_body  BLOB,
-          response_head BLOB,
-          response_body BLOB,
-          status        INTEGER,
-          reason        TEXT,
-          content_type  TEXT,
-          request_size  INTEGER NOT NULL DEFAULT 0,
-          response_size INTEGER,
-          state         INTEGER NOT NULL,
-          ttfb_us       INTEGER,
-          duration_us   INTEGER,
-          error         TEXT
+          id                      INTEGER PRIMARY KEY,
+          created_at              INTEGER NOT NULL,
+          scheme                  TEXT    NOT NULL,
+          host                    TEXT    NOT NULL,
+          port                    INTEGER NOT NULL,
+          method                  TEXT    NOT NULL,
+          target                  TEXT    NOT NULL,
+          http_version            TEXT    NOT NULL,
+          sni                     TEXT,
+          alpn                    TEXT,
+          tls_version             TEXT,
+          request_head            BLOB    NOT NULL,
+          request_body            BLOB,
+          response_head           BLOB,
+          response_body           BLOB,
+          status                  INTEGER,
+          reason                  TEXT,
+          content_type            TEXT,
+          request_size            INTEGER NOT NULL DEFAULT 0,
+          response_size           INTEGER,
+          state                   INTEGER NOT NULL,
+          ttfb_us                 INTEGER,
+          duration_us             INTEGER,
+          error                   TEXT,
+          h2_conn_id              INTEGER,
+          h2_stream_id            INTEGER,
+          request_body_truncated  INTEGER NOT NULL DEFAULT 0,
+          response_body_truncated INTEGER NOT NULL DEFAULT 0
         )
         SQL
         "CREATE INDEX idx_flows_created_at ON flows (created_at)",
-      ]
+        # The one projection filter with useful cardinality + range queries.
+        "CREATE INDEX idx_flows_status ON flows (status)",
+        # So the retention sweep's orphan-h2 cleanup doesn't full-scan flows.
+        "CREATE INDEX idx_flows_h2_conn ON flows (h2_conn_id)",
+        # `SELECT DISTINCT host, method, target ... ORDER BY host, target` is the Sitemap
+        # tab's query (re-run on tab-enter AND the live poll). Without an index it
+        # full-scans + sorts every flow — ~25ms at 100k rows. This covering index lets
+        # SQLite walk it in order and emit distinct endpoints directly (~1.8ms at 100k).
+        "CREATE INDEX idx_flows_sitemap ON flows (host, target, method)",
+        # Covering index over the two byte-size columns so the Project tab's `total_size`
+        # (SUM(request_size + COALESCE(response_size,0))) and `size:`/`reqsize:`/`respsize:`
+        # range filters are answered from a compact index scan instead of a full-table scan.
+        # The `flows` rows carry the multi-MB req/resp BLOBs inline, so a plain SUM scan
+        # pages through the ENTIRE table (~170ms / 100k flows, measured); this narrow index
+        # is a few MB and scans in ~2ms.
+        "CREATE INDEX idx_flows_sizes ON flows (request_size, response_size)",
 
-      V2 = [
+        # A compact full-text index over body text so `body:` doesn't CAST+scan every BLOB.
+        # The FTS rowid is flows.id; the indexed text per side is capped (Store::FTS_INDEX_MAX)
+        # so a big body can't bloat the index. host/path stay substring LIKE (unindexable) but
+        # are bounded by retention.
+        #
+        # trigram tokenizer => case-insensitive SUBSTRING matching (like a body: LIKE), just
+        # indexed. Query terms must be >=3 chars (QL falls back to a BLOB LIKE scan below that).
+        #
+        # CONTENTLESS (content='') because we already store the raw bodies in
+        # flows.{request,response}_body — the default FTS5 shadow %_content copy would be pure
+        # duplication (~half the FTS footprint, measured), and we only ever `MATCH` for rowids,
+        # never read columns back. contentless_delete=1 (SQLite >= 3.43; ours is 3.51) keeps
+        # prune's `DELETE ... WHERE rowid <= ?` and the response-side re-index working.
+        # Contentless forbids UPDATE, so the writer does DELETE + re-INSERT (see update_one).
+        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp, content='', contentless_delete=1, tokenize='trigram')",
+
+        # WebSocket message log. `repeater_id` is set for messages sent from a WS Repeater tab.
         <<-SQL,
         CREATE TABLE ws_messages (
-          id         INTEGER PRIMARY KEY,
-          flow_id    INTEGER NOT NULL,
-          created_at INTEGER NOT NULL,
-          direction  TEXT    NOT NULL,
-          opcode     INTEGER NOT NULL,
-          payload    BLOB    NOT NULL
+          id          INTEGER PRIMARY KEY,
+          flow_id     INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL,
+          direction   TEXT    NOT NULL,
+          opcode      INTEGER NOT NULL,
+          payload     BLOB    NOT NULL,
+          repeater_id INTEGER
         )
         SQL
         "CREATE INDEX idx_ws_messages_flow ON ws_messages (flow_id)",
-      ]
+        "CREATE INDEX idx_ws_messages_repeater ON ws_messages (repeater_id)",
 
-      # Scope (display lens) + Findings (human-confirmed vuln records).
-      V3 = [
-        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-        "CREATE TABLE scope_rules (id INTEGER PRIMARY KEY, pattern TEXT NOT NULL UNIQUE)",
-        <<-SQL,
-        CREATE TABLE findings (
-          id         INTEGER PRIMARY KEY,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          title      TEXT    NOT NULL,
-          severity   INTEGER NOT NULL,
-          host       TEXT,
-          flow_id    INTEGER,
-          notes      TEXT    NOT NULL DEFAULT ''
-        )
-        SQL
-        "CREATE INDEX idx_findings_severity ON findings (severity)",
-      ]
-
-      # Match&Replace lens: literal head rewrites applied to in-flight traffic.
-      V4 = [
-        <<-SQL,
-        CREATE TABLE match_rules (
-          id          INTEGER PRIMARY KEY,
-          enabled     INTEGER NOT NULL DEFAULT 1,
-          target      TEXT    NOT NULL,
-          pattern     TEXT    NOT NULL,
-          replacement TEXT    NOT NULL DEFAULT '',
-          position    INTEGER NOT NULL DEFAULT 0
-        )
-        SQL
-      ]
-
-      # HTTP/2: raw frame log per connection (the truth, P7) + a decoded
-      # projection (streams become rows in `flows`, added by a later slice).
-      V5 = [
+        # HTTP/2: the raw frame log per connection (the truth, P7). DATA (type 0) payloads are
+        # stored EMPTY — the same bytes already live in flows.request_body/response_body, and
+        # the frame-log detail view only ever renders the `length` column (see
+        # Store#insert_h2_frame_one).
         <<-SQL,
         CREATE TABLE h2_connections (
           id         INTEGER PRIMARY KEY,
@@ -120,108 +123,18 @@ module Gori
         )
         SQL
         "CREATE INDEX idx_h2_frames_conn ON h2_frames (conn_id)",
-      ]
+        # So the retention prune's orphan-connection reap (`SELECT conn_id FROM h2_frames
+        # WHERE created_at >= ?`) is answered index-only instead of full-scanning the frame
+        # log. That scan runs inside the writer's own transaction, so on an h2-heavy project
+        # it would stall ALL capture writes each sweep. (created_at, conn_id) is covering.
+        "CREATE INDEX idx_h2_frames_created ON h2_frames (created_at, conn_id)",
 
-      # Link a flow (decoded h2 projection) back to its raw frame log so the
-      # detail view can show the underlying frames.
-      V6 = [
-        "ALTER TABLE flows ADD COLUMN h2_conn_id INTEGER",
-        "ALTER TABLE flows ADD COLUMN h2_stream_id INTEGER",
-      ]
+        # ── Project state ────────────────────────────────────────────────────────
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 
-      # Capture cap (P-stability): the stored body BLOB may be truncated to a
-      # size ceiling so a huge transfer can't OOM the proxy or bloat one row;
-      # request_size/response_size keep the TRUE wire size, these flag the cut.
-      V7 = [
-        "ALTER TABLE flows ADD COLUMN request_body_truncated INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE flows ADD COLUMN response_body_truncated INTEGER NOT NULL DEFAULT 0",
-      ]
-
-      # Query scalability: a status index (the one projection filter with useful
-      # cardinality + range queries) and a compact full-text index over body text
-      # so `body:` doesn't CAST+scan every BLOB. The FTS rowid is flows.id; the
-      # indexed text per side is capped (Store::FTS_INDEX_MAX) so a big body can't
-      # bloat the index. Existing rows are backfilled. host/path stay substring
-      # LIKE (unindexable) but are now bounded by retention.
-      V8 = [
-        "CREATE INDEX idx_flows_status ON flows (status)",
-        # Index h2_conn_id so the retention sweep's orphan-h2 cleanup doesn't
-        # full-scan flows.
-        "CREATE INDEX idx_flows_h2_conn ON flows (h2_conn_id)",
-        # trigram tokenizer => case-insensitive SUBSTRING matching (like the old
-        # body: LIKE), just indexed. Query terms must be >=3 chars (QL falls back
-        # to a BLOB LIKE scan below that).
-        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp, tokenize='trigram')",
-        <<-SQL,
-        INSERT INTO flows_fts(rowid, req, resp)
-        SELECT id,
-               substr(CAST(request_body AS TEXT), 1, 65536),
-               substr(CAST(response_body AS TEXT), 1, 65536)
-        FROM flows
-        SQL
-      ]
-
-      # Replay workbench tabs, persisted so they survive a reopen AND sync across
-      # sessions sharing the project (the TUI reconciles by `id` on the
-      # data_version poll). The editable request is stored here; the last send
-      # response is added in V11 (scroll + focus stay transient). `flow_id` is the
-      # source History flow for a `^R`-opened tab (NULL for a hand-authored `^N`).
-      V9 = [
-        <<-SQL,
-        CREATE TABLE replays (
-          id                  INTEGER PRIMARY KEY,
-          created_at          INTEGER NOT NULL,
-          updated_at          INTEGER NOT NULL,
-          target              TEXT    NOT NULL,
-          request             TEXT    NOT NULL,
-          http2               INTEGER NOT NULL DEFAULT 0,
-          auto_content_length INTEGER NOT NULL DEFAULT 1,
-          flow_id             INTEGER,
-          position            INTEGER NOT NULL DEFAULT 0
-        )
-        SQL
-        "CREATE INDEX idx_replays_position ON replays (position, id)",
-      ]
-
-      # Sitemap index: `SELECT DISTINCT host, method, target ... ORDER BY host,
-      # target` is the Sitemap tab's query (re-run on tab-enter AND the live poll).
-      # Without an index it full-scans + sorts every flow — ~25ms at 100k rows. This
-      # covering index lets SQLite walk it in order and emit distinct endpoints
-      # directly (~1.8ms at 100k, verified).
-      V10 = [
-        "CREATE INDEX idx_flows_sitemap ON flows (host, target, method)",
-      ]
-
-      # Persist a replay tab's LAST send result so it survives a reopen (and shows
-      # on a fresh open) instead of starting empty. Full bytes (head + body, like
-      # the captured-flow BLOBs); `response_error` + `response_duration_us` let
-      # restore() rebuild the Replay::Result faithfully — including an errored send.
-      # All NULL until the first send. Scroll/focus/diff-baseline stay transient.
-      V11 = [
-        "ALTER TABLE replays ADD COLUMN response_head BLOB",
-        "ALTER TABLE replays ADD COLUMN response_body BLOB",
-        "ALTER TABLE replays ADD COLUMN response_error TEXT",
-        "ALTER TABLE replays ADD COLUMN response_duration_us INTEGER",
-      ]
-
-      # Findings gain a triage STATUS axis (separate from severity): open /
-      # confirmed / false-positive / resolved. Additive, backfilled to 0 (Open) so
-      # existing findings stay valid. Lets a false positive be a reversible state
-      # instead of a delete.
-      V12 = [
-        "ALTER TABLE findings ADD COLUMN status INTEGER NOT NULL DEFAULT 0",
-      ]
-
-      # Scope rules gain a KIND (include/exclude) + MATCH_TYPE (host/string/regex)
-      # so scope is a real include/exclude lens with substring & regex matching (not
-      # just host globs). Rebuild the table to move UNIQUE onto the (kind,match_type,
-      # pattern) triple (same pattern can now be both an include and an exclude, or a
-      # host rule and a string rule). Pre-V13 rows were bare host include patterns →
-      # migrated as include/host. INSERT OR IGNORE is defensive (old pattern was
-      # already UNIQUE, so the triples can't collide). migrate! wraps this list in one
-      # transaction, so the rename/insert/drop is atomic.
-      V13 = [
-        "ALTER TABLE scope_rules RENAME TO scope_rules_old",
+        # Scope: a real include/exclude lens with host-glob, substring & regex matching.
+        # UNIQUE sits on the (kind, match_type, pattern) triple, so the same pattern can be
+        # both an include and an exclude, or a host rule and a string rule.
         <<-SQL,
         CREATE TABLE scope_rules (
           id         INTEGER PRIMARY KEY,
@@ -231,35 +144,129 @@ module Gori
           UNIQUE(kind, match_type, pattern)
         )
         SQL
-        "INSERT OR IGNORE INTO scope_rules (kind, match_type, pattern) SELECT 'include', 'host', pattern FROM scope_rules_old",
-        "DROP TABLE scope_rules_old",
-      ]
 
-      # A replay tab can carry a custom NAME (the sub-tab chip label, set via rename).
-      # NULL = derive the label from the request line (the default). Persisted so a
-      # rename survives a reopen.
-      V14 = [
-        "ALTER TABLE replays ADD COLUMN name TEXT",
-      ]
+        # Issues: human-confirmed vuln records, with a triage STATUS axis (open / confirmed /
+        # false-positive / resolved) separate from severity, so a false positive is a
+        # reversible state instead of a delete. NOTE: distinct from probe_issues below
+        # (machine-found scan results).
+        <<-SQL,
+        CREATE TABLE issues (
+          id         INTEGER PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          title      TEXT    NOT NULL,
+          severity   INTEGER NOT NULL,
+          host       TEXT,
+          flow_id    INTEGER,
+          notes      TEXT    NOT NULL DEFAULT '',
+          status     INTEGER NOT NULL DEFAULT 0
+        )
+        SQL
+        "CREATE INDEX idx_issues_severity ON issues (severity)",
 
-      # A replay tab can carry a custom SNI host — the name presented in the TLS
-      # ClientHello, decoupled from the dialed target host (domain fronting / vhost
-      # confusion / IP-direct sends). NULL = present the target host (the default).
-      # Request-side config, so it syncs across sessions like target/request.
-      V15 = [
-        "ALTER TABLE replays ADD COLUMN sni TEXT",
-      ]
+        # Cross-entity links: attach History/Repeater/Fuzzer/Miner refs to an Issue or Note.
+        <<-SQL,
+        CREATE TABLE entity_links (
+          id         INTEGER PRIMARY KEY,
+          owner_kind TEXT    NOT NULL,
+          owner_id   INTEGER NOT NULL,
+          ref_kind   TEXT    NOT NULL,
+          ref_id     INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE(owner_kind, owner_id, ref_kind, ref_id)
+        )
+        SQL
+        "CREATE INDEX idx_entity_links_owner ON entity_links (owner_kind, owner_id)",
 
-      # Fuzzer / Intruder persistence:
-      #  - fuzz_sessions: a saved template + opaque config JSON (the TUI manages its
-      #    shape), mirroring `replays` so a Fuzzer tab survives reopen and syncs across
-      #    sessions sharing the project (reconciled by `id` on the data_version poll).
-      #  - fuzz_runs: one sweep's metadata (live counters + status), linked to a session.
-      #  - fuzz_results: per-request rows (metrics + optional captured bytes for the
-      #    matched/kept results), so a finished run can be reopened and inspected. The
-      #    frontends persist selectively per keep_bodies (a billion-row cluster bomb is
-      #    never stored whole).
-      V16 = [
+        # Sitemap path tags: a free-text memo pinned to a (host, path) node in the Sitemap
+        # tree ("payment flow", "admin area"). Per-project, so it syncs across sessions
+        # sharing the DB (reconciled on the data_version poll like issues). UNIQUE(host, path)
+        # makes the write an upsert; an empty tag deletes the row.
+        <<-SQL,
+        CREATE TABLE sitemap_tags (
+          id   INTEGER PRIMARY KEY,
+          host TEXT NOT NULL,
+          path TEXT NOT NULL,
+          tag  TEXT NOT NULL,
+          UNIQUE(host, path)
+        )
+        SQL
+
+        # Project-level hostname overrides (a per-project /etc/hosts): map a host to the IP the
+        # proxy should DIAL for it, while SNI/cert/Host header keep the original host. `host` is
+        # stored lowercased and UNIQUE (one IP per host — re-adding the same host is rejected;
+        # edit the row to change its IP). Read on the proxy hot path (Upstream.dial) via the
+        # Mutex-guarded HostOverrides model.
+        <<-SQL,
+        CREATE TABLE host_overrides (
+          id   INTEGER PRIMARY KEY,
+          host TEXT NOT NULL UNIQUE,
+          ip   TEXT NOT NULL
+        )
+        SQL
+
+        # ── Rewriter (Match & Replace) ───────────────────────────────────────────
+        # A rule rewrites either the message HEAD (request/status line + headers) or its BODY
+        # (buffer + re-frame in flight). Four further axes: an OPERATION (replace / add-header /
+        # set-header / remove-header), a MATCH KIND (literal / regex, for replace), an optional
+        # NAME, and an optional HOST glob ('' = all hosts) that scopes the rule.
+        <<-SQL,
+        CREATE TABLE match_rules (
+          id          INTEGER PRIMARY KEY,
+          enabled     INTEGER NOT NULL DEFAULT 1,
+          target      TEXT    NOT NULL,
+          pattern     TEXT    NOT NULL,
+          replacement TEXT    NOT NULL DEFAULT '',
+          position    INTEGER NOT NULL DEFAULT 0,
+          part        TEXT    NOT NULL DEFAULT 'head',
+          op          TEXT    NOT NULL DEFAULT 'replace',
+          match_kind  TEXT    NOT NULL DEFAULT 'literal',
+          name        TEXT    NOT NULL DEFAULT '',
+          host        TEXT    NOT NULL DEFAULT ''
+        )
+        SQL
+
+        # ── Workbenches ──────────────────────────────────────────────────────────
+        # Repeater tabs, persisted so they survive a reopen AND sync across sessions sharing
+        # the project (the TUI reconciles by `id` on the data_version poll). `flow_id` is the
+        # source History flow for a `^R`-opened tab (NULL for a hand-authored `^N`). `name`
+        # NULL = derive the sub-tab label from the request line. `sni` NULL = present the
+        # target host; set it to decouple the TLS ClientHello name from the dialed host
+        # (domain fronting / vhost confusion / IP-direct sends). `tags` is a space-joined set
+        # of free-text labels for filtering the sub-tab strip; NULL = untagged. The response_*
+        # columns persist the LAST send result (full bytes, like the captured-flow BLOBs) so
+        # restore() can rebuild the Replay::Result faithfully — including an errored send.
+        # All NULL until the first send. Scroll/focus/diff-baseline stay transient.
+        <<-SQL,
+        CREATE TABLE repeaters (
+          id                   INTEGER PRIMARY KEY,
+          created_at           INTEGER NOT NULL,
+          updated_at           INTEGER NOT NULL,
+          target               TEXT    NOT NULL,
+          request              TEXT    NOT NULL,
+          http2                INTEGER NOT NULL DEFAULT 0,
+          auto_content_length  INTEGER NOT NULL DEFAULT 1,
+          flow_id              INTEGER,
+          position             INTEGER NOT NULL DEFAULT 0,
+          response_head        BLOB,
+          response_body        BLOB,
+          response_error       TEXT,
+          response_duration_us INTEGER,
+          name                 TEXT,
+          sni                  TEXT,
+          tags                 TEXT
+        )
+        SQL
+        "CREATE INDEX idx_repeaters_position ON repeaters (position, id)",
+
+        # Fuzzer / Intruder persistence:
+        #  - fuzz_sessions: a saved template + opaque config JSON (the TUI manages its shape),
+        #    mirroring `repeaters` so a Fuzzer tab survives reopen and syncs across sessions.
+        #  - fuzz_runs: one sweep's metadata (live counters + status), linked to a session.
+        #  - fuzz_results: per-request rows (metrics + optional captured bytes for the
+        #    matched/kept results), so a finished run can be reopened and inspected. The
+        #    frontends persist selectively per keep_bodies (a billion-row cluster bomb is
+        #    never stored whole).
         <<-SQL,
         CREATE TABLE fuzz_sessions (
           id         INTEGER PRIMARY KEY,
@@ -312,45 +319,11 @@ module Gori
         )
         SQL
         "CREATE INDEX idx_fuzz_results_run ON fuzz_results (run_id, idx)",
-      ]
 
-      # Project-level hostname overrides (a per-project /etc/hosts): map a host to the
-      # IP the proxy should DIAL for it, while SNI/cert/Host header keep the original
-      # host. `host` is stored lowercased and UNIQUE (one IP per host — re-adding the
-      # same host is rejected; edit the row to change its IP). Read on the proxy hot
-      # path (Upstream.dial) via the Mutex-guarded HostOverrides model.
-      V17 = [
-        <<-SQL,
-        CREATE TABLE host_overrides (
-          id   INTEGER PRIMARY KEY,
-          host TEXT NOT NULL UNIQUE,
-          ip   TEXT NOT NULL
-        )
-        SQL
-      ]
-
-      # Sitemap path tags: a free-text memo pinned to a (host, path) node in the Sitemap
-      # tree ("payment flow", "admin area"). Per-project, so it syncs across sessions
-      # sharing the DB (reconciled on the data_version poll like findings). UNIQUE(host,
-      # path) makes the write an upsert; an empty tag deletes the row.
-      V18 = [
-        <<-SQL,
-        CREATE TABLE sitemap_tags (
-          id   INTEGER PRIMARY KEY,
-          host TEXT NOT NULL,
-          path TEXT NOT NULL,
-          tag  TEXT NOT NULL,
-          UNIQUE(host, path)
-        )
-        SQL
-      ]
-
-      # Param-miner sessions: a persisted mining session (sub-tab under the Miner tab).
-      # Mirrors fuzz_sessions, but stores the byte-exact `request` (BLOB) to re-run rather
-      # than an editable template, and there is no runs/results table — mining results stay
-      # in-memory per session (like Replay responses before V11). `config` is opaque JSON
-      # managed by the frontend (locations, bucket sizes, concurrency, …).
-      V19 = [
+        # Param-miner sessions. Mirrors fuzz_sessions, but stores the byte-exact `request`
+        # (BLOB) to re-run rather than an editable template, and there is no runs/results
+        # table — mining results stay in-memory per session. `config` is opaque JSON managed
+        # by the frontend (locations, bucket sizes, concurrency, …).
         <<-SQL,
         CREATE TABLE miner_sessions (
           id         INTEGER PRIMARY KEY,
@@ -367,216 +340,94 @@ module Gori
         )
         SQL
         "CREATE INDEX idx_miner_sessions_position ON miner_sessions (position, id)",
-      ]
 
-      # Prism passive/active scan issues, GROUPED by (code, host): one row per distinct
-      # issue type per host, with the affected URLs accumulated in `affected` (JSON, capped)
-      # and `hit_count` counting every observation. `category` is the lens used by both the
-      # Prism filter and the project-level technology summary (category='tech'). Per-project,
-      # so it syncs across sessions sharing the DB (reconciled on the data_version poll, like
-      # findings/sitemap_tags). The Prism MODE itself lives in the generic `settings` table
-      # (key "prism_mode"), not here.
-      V20 = [
+        # Sequencer sessions: token-randomness collection. Structurally identical to
+        # miner_sessions. Collected tokens are live secrets, so like the miner there is NO
+        # results table: samples and the computed report stay in-memory and never hit disk.
         <<-SQL,
-        CREATE TABLE prism_issues (
-          id             INTEGER PRIMARY KEY,
-          code           TEXT    NOT NULL,
-          category       TEXT    NOT NULL,
-          host           TEXT    NOT NULL,
-          title          TEXT    NOT NULL,
-          severity       INTEGER NOT NULL,
-          status         INTEGER NOT NULL DEFAULT 0,
-          hit_count      INTEGER NOT NULL DEFAULT 1,
-          affected       TEXT    NOT NULL DEFAULT '[]',
-          sample_flow_id INTEGER,
-          evidence       TEXT,
-          first_seen     INTEGER NOT NULL,
-          last_seen      INTEGER NOT NULL,
+        CREATE TABLE sequencer_sessions (
+          id         INTEGER PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          target     TEXT    NOT NULL,
+          request    BLOB    NOT NULL,
+          http2      INTEGER NOT NULL DEFAULT 0,
+          sni        TEXT,
+          config     TEXT    NOT NULL DEFAULT '',
+          flow_id    INTEGER,
+          position   INTEGER NOT NULL DEFAULT 0,
+          name       TEXT
+        )
+        SQL
+        "CREATE INDEX idx_sequencer_sessions_position ON sequencer_sessions (position, id)",
+
+        # ── Probe (passive/active scanner) ───────────────────────────────────────
+        # Issues GROUPED by (code, host): one row per distinct issue type per host, with the
+        # affected URLs accumulated in `affected` (JSON, capped) and `hit_count` counting every
+        # observation. `category` is the lens used by both the Probe filter and the
+        # project-level technology summary (category='tech'). sample_repeater_id is the
+        # first-seen Repeater evidence link when there is no parent flow (or as a secondary).
+        # The Probe MODE itself lives in the generic `settings` table (key "probe_mode").
+        <<-SQL,
+        CREATE TABLE probe_issues (
+          id                 INTEGER PRIMARY KEY,
+          code               TEXT    NOT NULL,
+          category           TEXT    NOT NULL,
+          host               TEXT    NOT NULL,
+          title              TEXT    NOT NULL,
+          severity           INTEGER NOT NULL,
+          status             INTEGER NOT NULL DEFAULT 0,
+          hit_count          INTEGER NOT NULL DEFAULT 1,
+          affected           TEXT    NOT NULL DEFAULT '[]',
+          sample_flow_id     INTEGER,
+          sample_repeater_id INTEGER,
+          evidence           TEXT,
+          first_seen         INTEGER NOT NULL,
+          last_seen          INTEGER NOT NULL,
           UNIQUE(code, host)
         )
         SQL
-        "CREATE INDEX idx_prism_issues_cat ON prism_issues (category, host)",
-      ]
+        "CREATE INDEX idx_probe_issues_cat ON probe_issues (category, host)",
 
-      # Cross-entity links: attach History/Replay/Fuzzer/Miner refs to a Finding or Note.
-      # V21 also backfills existing findings.flow_id rows as flow links.
-      V21 = [
+        # Hard-deleted Probe issues must stay gone across Project leave/re-open: without a
+        # durable record, Active backfill on the next Session re-probes History and re-inserts
+        # the same (code, host). Checked by Store#upsert_probe_issue and reloaded into the
+        # analyzer on start. Clear-all removes both issues and suppressions so a full rescan
+        # is still possible.
         <<-SQL,
-        CREATE TABLE entity_links (
-          id         INTEGER PRIMARY KEY,
-          owner_kind TEXT    NOT NULL,
-          owner_id   INTEGER NOT NULL,
-          ref_kind   TEXT    NOT NULL,
-          ref_id     INTEGER NOT NULL,
-          created_at INTEGER NOT NULL,
-          UNIQUE(owner_kind, owner_id, ref_kind, ref_id)
-        )
-        SQL
-        "CREATE INDEX idx_entity_links_owner ON entity_links (owner_kind, owner_id)",
-        <<-SQL,
-        INSERT INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at)
-        SELECT 'finding', id, 'flow', flow_id, created_at
-        FROM findings
-        WHERE flow_id IS NOT NULL
-        SQL
-      ]
-
-      # Replay tabs gain a per-tab MARK-transform toggle: when on, `§…§` markers in the
-      # request carry inline Decoder chains applied on send. Off (0) = byte-identical to
-      # today, so existing rows backfill to disabled.
-      V22 = [
-        "ALTER TABLE replays ADD COLUMN mark_transform INTEGER NOT NULL DEFAULT 0",
-      ]
-
-      # Covering index over the two byte-size columns so the Project tab's
-      # `total_size` (SUM(request_size + COALESCE(response_size,0))) and `size:`/
-      # `reqsize:`/`respsize:` range filters are answered from a compact index scan
-      # instead of a full-table scan. The `flows` rows carry the multi-MB req/resp
-      # BLOBs inline, so a plain SUM scan pages through the ENTIRE table (~170ms /
-      # 100k flows, measured); this narrow index is a few MB and scans in ~2ms.
-      V23 = [
-        "CREATE INDEX idx_flows_sizes ON flows (request_size, response_size)",
-      ]
-
-      # Rebuild flows_fts as a CONTENTLESS FTS5 index (content='') instead of the
-      # default (which keeps a shadow %_content copy of the indexed body text). We
-      # already store the raw bodies in flows.{request,response}_body, so that copy
-      # was pure duplication — ~half of the FTS footprint, measured. Dropping it
-      # roughly halves the index size with ZERO change to `body:` search semantics
-      # (we only ever `MATCH` for rowids, never read columns back). contentless_delete=1
-      # (SQLite >= 3.43; ours is 3.51) keeps prune's `DELETE ... WHERE rowid <= ?` and
-      # the response-side re-index working. Contentless forbids UPDATE, so the writer
-      # switched from `UPDATE flows_fts SET resp` to DELETE + re-INSERT (see update_one).
-      # Backfill re-indexes every surviving row from the raw bodies (bounded by retention).
-      V24 = [
-        "DROP TABLE flows_fts",
-        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp, content='', contentless_delete=1, tokenize='trigram')",
-        <<-SQL,
-        INSERT INTO flows_fts(rowid, req, resp)
-        SELECT id,
-               substr(CAST(request_body AS TEXT), 1, 65536),
-               substr(CAST(response_body AS TEXT), 1, 65536)
-        FROM flows
-        SQL
-      ]
-
-      # Reclaim the single biggest source of on-disk bloat: h2 DATA frames (type 0) stored
-      # their payload in full even though the SAME bytes already live in flows.request_body/
-      # response_body. In one real capture this raw-frame duplication was ~44% of the whole
-      # DB. The frame-log detail view only ever renders the `length` column, never the
-      # payload, so empty every historical DATA payload while leaving `length` (already the
-      # true byte count) untouched. NEW inserts already store empty DATA payloads — see
-      # Store#insert_h2_frame_one. Freed pages are returned to the OS by the one-time VACUUM
-      # in Store.open (see RECLAIM_VERSION).
-      #
-      # NOTE: flows_fts is deliberately NOT rebuilt here. Its bloat comes from trigram-
-      # indexing COMPRESSED text bodies (high-entropy → trigram explosion), which the write
-      # path now skips going forward (Store#content_encoded?/#binary_content?). It can't be
-      # reclaimed cheaply in place: flows_fts is contentless, so DELETE only adds tombstones
-      # (grows it), and a SQL rebuild via CAST(body AS TEXT) truncates at the first NUL byte
-      # — silently dropping search coverage the runtime (String.new) had indexed. So the
-      # existing index is left to shrink naturally via retention rather than risk a lossy
-      # auto-rebuild on everyone's data.
-      V25 = [
-        "UPDATE h2_frames SET payload = X'' WHERE type = 0",
-      ]
-
-      # Add replay_id column to ws_messages to support WebSocket Replay tab persistence
-      V26 = [
-        "ALTER TABLE ws_messages ADD COLUMN replay_id INTEGER",
-        "CREATE INDEX idx_ws_messages_replay ON ws_messages (replay_id)",
-      ]
-
-      # Index h2_frames on created_at so the retention prune's orphan-connection reap
-      # (`SELECT conn_id FROM h2_frames WHERE created_at >= ?`) is answered index-only
-      # instead of full-scanning the frame log. The scan ran inside the writer's own
-      # transaction, so on an h2-heavy project it stalled ALL capture writes each sweep.
-      # (created_at, conn_id) is covering — no table lookup for the projected conn_id.
-      V27 = [
-        "CREATE INDEX idx_h2_frames_created ON h2_frames (created_at, conn_id)",
-      ]
-
-      # Prism issues can be sourced from a Replay tab (not only History). sample_replay_id
-      # is the first-seen Replay evidence link when there is no parent flow (or as a secondary).
-      V28 = [
-        "ALTER TABLE prism_issues ADD COLUMN sample_replay_id INTEGER",
-      ]
-
-      # Hard-deleted Prism issues must stay gone across Project leave/re-open. The analyzer
-      # used to keep an in-memory suppress set only for the current process — Active
-      # backfill on the next Session re-probed History and re-inserted the same (code, host).
-      # Durable suppressions are checked by Store#upsert_prism_issue and reloaded into the
-      # analyzer on start. Clear-all removes both issues and suppressions so a full rescan
-      # is still possible.
-      V29 = [
-        <<-SQL,
-        CREATE TABLE prism_suppressions (
+        CREATE TABLE probe_suppressions (
           code       TEXT    NOT NULL,
           host       TEXT    NOT NULL,
           created_at INTEGER NOT NULL,
           PRIMARY KEY (code, host)
         )
         SQL
-      ]
 
-      # Match&Replace rules gain a PART axis (head/body): a rule now targets either the
-      # message HEAD (the original behaviour) or its BODY (buffer + re-frame in flight).
-      # Additive, backfilled to 'head' so every existing rule keeps its exact meaning.
-      V30 = [
-        "ALTER TABLE match_rules ADD COLUMN part TEXT NOT NULL DEFAULT 'head'",
-      ]
+        # Per-project user-defined Probe match rules (the Rules sub-tab's project-scope custom
+        # rules). Global-scope rules live in settings.json instead. `severity` is the lowercase
+        # Store::Severity label; side/region/kind are validated in the store layer before insert.
+        <<-SQL,
+        CREATE TABLE probe_custom_rules (
+          id          INTEGER PRIMARY KEY,
+          title       TEXT    NOT NULL,
+          description TEXT    NOT NULL DEFAULT '',
+          side        TEXT    NOT NULL,
+          region      TEXT    NOT NULL,
+          kind        TEXT    NOT NULL,
+          pattern     TEXT    NOT NULL,
+          severity    TEXT    NOT NULL,
+          enabled     INTEGER NOT NULL DEFAULT 1
+        )
+        SQL
 
-      # Replay tabs gain flat multi-label TAGS: a space-joined set of free-text tokens
-      # ("idor", "auth-bypass") for organizing and filtering the sub-tab strip. Stored
-      # as one delimited column (tags are few per session; the multi-label set lives
-      # in-memory as an Array). NULL = untagged; additive, so existing rows keep their
-      # exact meaning. Persist + restore-on-open only (like `name`) — not reconciled.
-      V31 = [
-        "ALTER TABLE replays ADD COLUMN tags TEXT",
-      ]
-
-      # The "Replay" workbench is renamed to "Repeater" tool-wide. Rename its table and the
-      # replay-id references on other tables so existing project DBs keep their data under the
-      # new names. Dependent indexes (idx_replays_position, idx_ws_messages_replay) auto-follow
-      # the table/column rename in SQLite ≥3.25; their now-stale names are internal-only
-      # (sqlite_master, never surfaced) and left as-is — no code references index names.
-      # entity_links rows that pointed at a Replay are relabeled so Finding↔Repeater links
-      # keep resolving.
-      V32 = [
-        "ALTER TABLE replays RENAME TO repeaters",
-        "ALTER TABLE ws_messages RENAME COLUMN replay_id TO repeater_id",
-        "ALTER TABLE prism_issues RENAME COLUMN sample_replay_id TO sample_repeater_id",
-        "UPDATE entity_links SET ref_kind = 'repeater' WHERE ref_kind = 'replay'",
-      ]
-
-      # The "Prism" scanner is renamed to "Probe" tool-wide. Rename its two tables and the
-      # per-project scan-mode setting row so existing project DBs keep their issues,
-      # suppressions, and saved scan mode under the new names. The idx_prism_issues_cat index
-      # auto-follows the table rename (its stale name is internal-only, left as-is).
-      V33 = [
-        "ALTER TABLE prism_issues RENAME TO probe_issues",
-        "ALTER TABLE prism_suppressions RENAME TO probe_suppressions",
-        "UPDATE settings SET key = 'probe_mode' WHERE key = 'prism_mode'",
-      ]
-
-      # The "Findings" tab is renamed to "Issues" tool-wide. Rename its table and relabel the
-      # entity_links owner rows so existing project DBs keep their findings (now issues) and
-      # their finding↔flow/repeater links. idx_findings_severity auto-follows the table rename
-      # (its stale name is internal-only). NOTE: this "Issues" table (human-confirmed records)
-      # is distinct from probe_issues (machine-found scan results) renamed in V33.
-      V34 = [
-        "ALTER TABLE findings RENAME TO issues",
-        "UPDATE entity_links SET owner_kind = 'issue' WHERE owner_kind = 'finding'",
-      ]
-
-      # #124 — the AI-facing event feed. An append-only log of job lifecycle (miner/fuzzer/
-      # probe) and agent actions that the MCP process tails via a forward `id > cursor`
-      # cursor (list_events). Flows stay the flow firehose (list_history since:) — this table
-      # NEVER duplicates flow rows; `flow_id` is only an optional cross-ref. AUTOINCREMENT is
-      # mandatory (not a bare rowid): a never-reused id guarantees a since_id watermark
-      # consumer can't silently skip a row even if a future retention sweep deletes rows.
-      # created_at is unix micros for display only — the cursor key is always `id`.
-      V35 = [
+        # ── AI seam (MCP) ────────────────────────────────────────────────────────
+        # The AI-facing event feed: an append-only log of job lifecycle (miner/fuzzer/probe)
+        # and agent actions that the MCP process tails via a forward `id > cursor` cursor
+        # (list_events). Flows stay the flow firehose (list_history since:) — this table NEVER
+        # duplicates flow rows; `flow_id` is only an optional cross-ref. AUTOINCREMENT is
+        # mandatory (not a bare rowid): a never-reused id guarantees a since_id watermark
+        # consumer can't silently skip a row even if a future retention sweep deletes rows.
+        # created_at is unix micros for display only — the cursor key is always `id`.
         <<-SQL,
         CREATE TABLE events (
           id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -591,17 +442,16 @@ module Gori
           payload         TEXT
         )
         SQL
-      ]
 
-      # #123 — the cross-process live-intercept bridge. The MCP process (Store only, no live
-      # Interceptor) drives hold/forward/drop/edit through the DB: the capturing TUI publishes a
-      # MIRROR of the currently-held queue into intercept_held, and the MCP process appends
-      # decisions to the intercept_commands queue which the TUI drains + applies. intercept_held
-      # is keyed by (session_token, item_id) — a snapshot mirror, NOT a cursor log, so the id-reuse
-      # hazard doesn't apply. intercept_commands IS a forward-cursored queue, so its id MUST be
-      # AUTOINCREMENT (a recycled rowid would let the TUI's drain watermark silently skip a row).
-      # session_token defeats cross-session reuse of the interceptor's per-session item ids.
-      V36 = [
+        # The cross-process live-intercept bridge. The MCP process (Store only, no live
+        # Interceptor) drives hold/forward/drop/edit through the DB: the capturing TUI
+        # publishes a MIRROR of the currently-held queue into intercept_held, and the MCP
+        # process appends decisions to the intercept_commands queue which the TUI drains +
+        # applies. intercept_held is keyed by (session_token, item_id) — a snapshot mirror,
+        # NOT a cursor log, so the id-reuse hazard doesn't apply. intercept_commands IS a
+        # forward-cursored queue, so its id MUST be AUTOINCREMENT (a recycled rowid would let
+        # the TUI's drain watermark silently skip a row). session_token defeats cross-session
+        # reuse of the interceptor's per-session item ids.
         <<-SQL,
         CREATE TABLE intercept_held (
           session_token TEXT    NOT NULL,
@@ -635,65 +485,13 @@ module Gori
           origin        TEXT
         )
         SQL
-      ]
 
-      # Drop the per-repeater MARK-transform toggle: `§…§` markers are now always active
-      # in the Repeater (like the Fuzzer), so the flag no longer gates send behaviour — the
-      # request carries markers or it doesn't. SQLite (>= 3.35, ours is 3.51) supports
-      # ALTER TABLE ... DROP COLUMN; existing rows just lose the (unused) column.
-      V37 = [
-        "ALTER TABLE repeaters DROP COLUMN mark_transform",
-      ]
-
-      # Per-project user-defined Probe match rules (the Rules sub-tab's project-scope custom rules).
-      # Global-scope rules live in settings.json instead. `severity` is the lowercase Store::Severity
-      # label; side/region/kind are validated in the store layer before insert.
-      V38 = [
-        <<-SQL,
-        CREATE TABLE probe_custom_rules (
-          id          INTEGER PRIMARY KEY,
-          title       TEXT    NOT NULL,
-          description TEXT    NOT NULL DEFAULT '',
-          side        TEXT    NOT NULL,
-          region      TEXT    NOT NULL,
-          kind        TEXT    NOT NULL,
-          pattern     TEXT    NOT NULL,
-          severity    TEXT    NOT NULL,
-          enabled     INTEGER NOT NULL DEFAULT 1
-        )
-        SQL
-      ]
-
-      # Sequencer sessions: a persisted token-randomness session (sub-tab under the
-      # Sequencer tab). Structurally identical to miner_sessions — the byte-exact
-      # `request` (BLOB) to re-collect, `config` opaque JSON (mode, token location, goal,
-      # …). Collected tokens are live secrets, so like the miner there is NO results table:
-      # samples and the computed report stay in-memory per session and never hit disk.
-      V39 = [
-        <<-SQL,
-        CREATE TABLE sequencer_sessions (
-          id         INTEGER PRIMARY KEY,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          target     TEXT    NOT NULL,
-          request    BLOB    NOT NULL,
-          http2      INTEGER NOT NULL DEFAULT 0,
-          sni        TEXT,
-          config     TEXT    NOT NULL DEFAULT '',
-          flow_id    INTEGER,
-          position   INTEGER NOT NULL DEFAULT 0,
-          name       TEXT
-        )
-        SQL
-        "CREATE INDEX idx_sequencer_sessions_position ON sequencer_sessions (position, id)",
-      ]
-
-      # OAST (out-of-band) tab: configured providers, listening sessions, and the durable
-      # callback history. Providers are config (name/kind/host/token). Sessions hold the
-      # secrets needed to poll + decrypt (interactsh RSA private key PEM lives here — the DB
-      # is already 0600 and holds captured credentials; never logged). Callbacks are
-      # append-only/immutable; UNIQUE(session_id, provider_uid) + INSERT OR IGNORE dedups.
-      V40 = [
+        # ── OAST (out-of-band) ───────────────────────────────────────────────────
+        # Configured providers, listening sessions, and the durable callback history.
+        # Providers are config (name/kind/host/token). Sessions hold the secrets needed to
+        # poll + decrypt (the interactsh RSA private key PEM lives here — the DB is already
+        # 0600 and holds captured credentials; never logged). Callbacks are
+        # append-only/immutable; UNIQUE(session_id, provider_uid) + INSERT OR IGNORE dedups.
         <<-SQL,
         CREATE TABLE oast_providers (
           id         INTEGER PRIMARY KEY,
@@ -739,19 +537,7 @@ module Gori
         "CREATE INDEX idx_oast_callbacks_session ON oast_callbacks (session_id, id)",
       ]
 
-      # Match&Replace rules grow to the level of a dedicated rewrite tool (the "Rewriter"
-      # tab). Four additive axes: an OPERATION (replace / add-header / set-header /
-      # remove-header), a MATCH KIND (literal / regex, for replace), an optional NAME, and
-      # an optional HOST glob that scopes the rule to matching hosts. Backfilled so every
-      # existing rule keeps its exact meaning: a literal replace, unnamed, over all hosts.
-      V41 = [
-        "ALTER TABLE match_rules ADD COLUMN op TEXT NOT NULL DEFAULT 'replace'",
-        "ALTER TABLE match_rules ADD COLUMN match_kind TEXT NOT NULL DEFAULT 'literal'",
-        "ALTER TABLE match_rules ADD COLUMN name TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE match_rules ADD COLUMN host TEXT NOT NULL DEFAULT ''",
-      ]
-
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37, V38, V39, V40, V41]
+      MIGRATIONS = [V1]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

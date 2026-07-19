@@ -568,10 +568,6 @@ private class FakeContext < ExecContext
     true
   end
 
-  def rules_open : Nil
-    @calls << :rules_open
-  end
-
   def issue_create : Nil
     @calls << :issue_create
   end

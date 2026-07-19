@@ -20,24 +20,9 @@ module Gori::Settings
       next unless o = e.as_h?
       id = o["id"]?.try(&.as_s?)
       next if id.nil? || id.empty?
-      out << {remap_legacy_id(id), o["visible"]?.try(&.as_bool?) != false} # only explicit false hides
+      out << {id, o["visible"]?.try(&.as_bool?) != false} # only explicit false hides
     end
     out
-  end
-
-  # Rewrite a pre-rename tab id or verb id to its current name, so a settings.json
-  # written before the Repeater/Probe/Issues/Decoder rename keeps its saved tab
-  # order/visibility and custom keybindings instead of Chrome.reconcile /
-  # Hotkeys.rebindable_overrides silently dropping the now-unknown id. Whole-string
-  # (not prefix) substitution so compound ids like "finding.replay-flow" become
-  # "issue.repeater-flow". Idempotent on already-new ids (they contain no old token).
-  # Order matters: "findings" before "finding".
-  private def self.remap_legacy_id(id : String) : String
-    id.gsub("findings", "issues")
-      .gsub("finding", "issue")
-      .gsub("replay", "repeater")
-      .gsub("prism", "probe")
-      .gsub("convert", "decoder")
   end
 
   # Omit when empty so an untouched install never writes an ambiguous "tabs": []

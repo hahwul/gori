@@ -321,8 +321,6 @@ class FakeExecContext < Gori::Verb::ExecContext
     @env_has_var
   end
 
-  def rules_open : Nil; end
-
   def issue_create : Nil; end
 
   def issues_new : Nil; end

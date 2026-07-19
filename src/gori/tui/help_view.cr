@@ -247,11 +247,6 @@ module Gori::Tui
       centered(screen, rect, top + 4, Gori::REPOSITORY_URL, Theme.muted) if top + 4 < rect.bottom
     end
 
-    # Back-compat alias (HelpController used to call render_version).
-    def render_version(screen : Screen, rect : Rect) : Nil
-      render_about(screen, rect)
-    end
-
     # Horizontally center `text` on row `y` within `rect` (mirrors ProjectPicker).
     private def centered(screen : Screen, rect : Rect, y : Int32, text : String, fg : Color,
                          attr : Attribute = Attribute::None) : Nil

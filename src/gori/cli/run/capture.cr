@@ -37,7 +37,7 @@ module Gori
         Settings.bind_port = port
         project = resolve_capture_project(project_name, db_path)
         config = Config.new(listen, port, project.db_path, Paths.default_ca_dir,
-          headless: true, insecure_upstream: insecure)
+          insecure_upstream: insecure)
         App.new(config).run_capture(project, format: format, max: max, every: every)
       end
     end

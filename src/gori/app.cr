@@ -52,7 +52,7 @@ module Gori
       # /dev/tty guard at the shared construction point: covers both this TUI and the
       # first-run wizard auto-launched below, so a no-tty run (CI/detached) gets a clean
       # message instead of a raw backtrace.
-      term = Tui.open_terminal("run it directly, not under CI or a detached/background job, or use --headless for non-interactive capture")
+      term = Tui.open_terminal("run it directly, not under CI or a detached/background job, or use 'gori run capture' for non-interactive capture")
 
       begin
         # enable_* run INSIDE the begin so `ensure term.close` restores the tty if either
@@ -73,13 +73,6 @@ module Gori
       ensure
         term.close # restore the terminal even on error
       end
-    end
-
-    # Legacy `--headless`: capture into a single default project at --db, text
-    # output, runs until INT/TERM. A thin wrapper over the shared capture engine so
-    # `gori run capture` and `--headless` can never drift.
-    def run_headless : Nil
-      run_capture(Project.new("default", @config.db_path), format: :text, max: nil, every: nil)
     end
 
     # Non-interactive capture into `project`. Binds the proxy (fatal on failure, as

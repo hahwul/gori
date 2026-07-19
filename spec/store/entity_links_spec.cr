@@ -66,58 +66,6 @@ describe "entity_links (V21)" do
     end
   end
 
-  it "backfills flow links when upgrading from V20" do
-    path = File.tempname("gori-v20-links", ".db")
-    begin
-      store = Gori::Store.open(path)
-      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
-        created_at: 5_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
-        target: "/old", http_version: "HTTP/1.1",
-        head: "GET /old HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice))
-      store.@db.exec(
-        "INSERT INTO issues (id, created_at, updated_at, title, severity, host, flow_id, notes, status) " \
-        "VALUES (1, 5, 5, 'legacy', 2, 'a.test', ?, '', 0)", fid)
-      store.@db.exec("DROP TABLE entity_links")
-      store.@db.exec("DROP INDEX idx_flows_sizes")                            # V23
-      store.@db.exec("DROP INDEX idx_ws_messages_replay")                      # V26 (index keeps its historical name)
-      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN repeater_id")         # V26
-      store.@db.exec("DROP INDEX idx_h2_frames_created")                      # V27
-      store.@db.exec("ALTER TABLE probe_issues DROP COLUMN sample_repeater_id") # V28
-      store.@db.exec("DROP TABLE probe_suppressions")                         # V29
-      store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")              # V30
-      store.@db.exec("ALTER TABLE repeaters DROP COLUMN tags")                  # V31
-      store.@db.exec("ALTER TABLE repeaters RENAME TO replays")                 # undo V32 so historical <V32 migrations replay against the old table name
-      store.@db.exec("ALTER TABLE probe_issues RENAME TO prism_issues")         # undo V33 so historical <V33 migrations replay against the old table name
-      store.@db.exec("ALTER TABLE issues RENAME TO findings")                   # undo V34 so historical <V34 migrations replay against the old table name
-      store.@db.exec("DROP TABLE events")                                       # V35
-      store.@db.exec("DROP TABLE intercept_held")                               # V36
-      store.@db.exec("DROP TABLE intercept_commands")                           # V36
-      store.@db.exec("DROP TABLE probe_custom_rules")                           # V38
-      store.@db.exec("DROP TABLE sequencer_sessions")                           # V39
-      store.@db.exec("DROP TABLE oast_callbacks")                               # V40
-      store.@db.exec("DROP TABLE oast_sessions")                                # V40
-      store.@db.exec("DROP TABLE oast_providers")                               # V40
-      store.@db.exec("ALTER TABLE match_rules DROP COLUMN op")                  # V41
-      store.@db.exec("ALTER TABLE match_rules DROP COLUMN match_kind")           # V41
-      store.@db.exec("ALTER TABLE match_rules DROP COLUMN name")                 # V41
-      store.@db.exec("ALTER TABLE match_rules DROP COLUMN host")                 # V41
-      store.@db.exec("PRAGMA user_version = 20")
-      store.close
-
-      store = Gori::Store.open(path)
-      store.@db.scalar("PRAGMA user_version").should eq(Gori::Store::Schema::VERSION)
-      links = store.list_links(Gori::Store::LinkOwnerKind::Issue, 1_i64)
-      links.size.should eq(1)
-      links[0].ref_kind.should eq(Gori::Store::LinkRefKind::Flow)
-      links[0].ref_id.should eq(fid)
-      store.close
-    ensure
-      File.delete?(path)
-      File.delete?("#{path}-wal")
-      File.delete?("#{path}-shm")
-    end
-  end
-
   it "skips corrupt entity_links rows with unknown kinds" do
     with_store do |store|
       issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)

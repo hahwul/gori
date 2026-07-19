@@ -108,7 +108,6 @@ module Gori
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", mjob.results.size
-            j.field "complete", mjob.status != :running
             j.field "job_complete", mjob.status != :running
             j.field "page_complete", offset + page.size >= mjob.results.size
             j.field "has_more", offset + page.size < mjob.results.size

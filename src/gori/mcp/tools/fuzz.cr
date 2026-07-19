@@ -189,9 +189,8 @@ module Gori
             j.field "returned", returned
             j.field "offset", offset
             j.field "total_available", rows.size
-            # `complete` (kept for back-compat) = the JOB finished. `page_complete`
-            # is about THIS page: whether it reached the end of the stored rows.
-            j.field "complete", fjob.status != :running
+            # `job_complete` = the JOB finished. `page_complete` is about THIS page:
+            # whether it reached the end of the stored rows.
             j.field "job_complete", fjob.status != :running
             j.field "page_complete", last >= rows.size
             j.field "has_more", last < rows.size

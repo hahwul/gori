@@ -105,9 +105,8 @@ module Gori::Settings
   private def self.parse_layout(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
     self.history_preview = load_bool_h(o, "history_preview", history_preview)
-    # "prism_preview"/"findings_preview" are the pre-rename keys, read as a fallback.
-    self.probe_preview = load_bool_h(o, "probe_preview", load_bool_h(o, "prism_preview", probe_preview))
-    self.issues_preview = load_bool_h(o, "issues_preview", load_bool_h(o, "findings_preview", issues_preview))
+    self.probe_preview = load_bool_h(o, "probe_preview", probe_preview)
+    self.issues_preview = load_bool_h(o, "issues_preview", issues_preview)
     if ord = o["history_list_order"]?.try(&.as_s?)
       self.history_list_order = normalize_history_list_order(ord)
     end
