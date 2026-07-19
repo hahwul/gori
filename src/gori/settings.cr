@@ -69,9 +69,7 @@ module Gori
       parse_env(root["env"]?)
       self.scan_rules = parse_scan_rules(root["scan_rules"]?)
       parse_hotkeys(root["hotkeys"]?)
-      if cv = (root["decoder"]? || root["convert"]?) # "convert" = pre-rename key (read for back-compat)
-        self.decoder_input = cv["input"]?.try(&.as_s?) || decoder_input
-        self.decoder_chain = cv["chain"]?.try(&.as_s?) || decoder_chain
+      if cv = root["decoder"]?
         self.decoder_sessions = parse_decoder_sessions(cv["sessions"]?)
         self.decoder_chains = parse_decoder_chains(cv["chains"]?)
       end

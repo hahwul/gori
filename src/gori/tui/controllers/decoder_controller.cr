@@ -56,10 +56,9 @@ module Gori::Tui
       @prompt_buf = ""
       @chain_pre = "" # IME preedit for the focused CHAIN field
       @dirty = false  # session set changed since the last persist
-      # Restore open sub-tabs; fall back to the legacy single input/chain (migration)
-      # when no "sessions" array was persisted. Always ≥1 (blank when all empty).
+      # Restore open sub-tabs. Always ≥1 (a blank session when nothing was persisted).
       src = Settings.decoder_sessions
-      src = [{Settings.decoder_input, Settings.decoder_chain, ""}] if src.empty?
+      src = [{"", "", ""}] if src.empty?
       @sessions = src.map { |(input, chain, name)| make_session(input, chain, name.empty? ? nil : name) }
       @idx = 0
     end

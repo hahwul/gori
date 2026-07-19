@@ -1,13 +1,13 @@
-# `gori run convert` — run a value through the Decoder engine's converter chain
-# (the same engine behind the TUI Convert tab): base64/hex/url/gzip/jwt/… encode,
+# `gori run decoder` — run a value through the Decoder engine's converter chain
+# (the same engine behind the TUI Decoder tab): base64/hex/url/gzip/jwt/… encode,
 # decode, hash and transform, composed left-to-right. Exposes the whole catalog to
 # scripts, which previously only had the single-purpose `gori run jwt`.
 module Gori
   module CLI
     module Run
-      private def self.cmd_convert(args : Array(String)) : Nil
+      private def self.cmd_decoder(args : Array(String)) : Nil
         if args.first? == "list"
-          cmd_convert_list(args[1..])
+          cmd_decoder_list(args[1..])
           return
         end
 
@@ -17,37 +17,37 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run convert <chain> [input] [options]\n\n" \
+          p.banner = "Usage: gori run decoder <chain> [input] [options]\n\n" \
                      "Run INPUT through a left-to-right converter CHAIN (separators: > | ,).\n" \
                      "INPUT comes from the 2nd positional arg, --input, or STDIN (verbatim).\n\n" \
                      "Examples:\n" \
-                     "  gori run convert base64-decode SGVsbG8=\n" \
-                     "  gori run convert 'url-decode > base64-decode' %53%47%56%73%62%47%38%3D\n" \
-                     "  printf hello | gori run convert sha256\n" \
-                     "  gori run convert base64-decode --output hex <base64-of-binary>\n\n" \
-                     "Run 'gori run convert list' for every converter name."
+                     "  gori run decoder base64-decode SGVsbG8=\n" \
+                     "  gori run decoder 'url-decode > base64-decode' %53%47%56%73%62%47%38%3D\n" \
+                     "  printf hello | gori run decoder sha256\n" \
+                     "  gori run decoder base64-decode --output hex <base64-of-binary>\n\n" \
+                     "Run 'gori run decoder list' for every converter name."
           p.on("--input=STR", "Value to convert (else 2nd positional arg, else STDIN)") { |v| input_flag = v }
           p.on("-oMODE", "--output=MODE", "Render final bytes: auto (default) | text | base64 | hex") { |v| output_mode = parse_render_mode(v) }
           p.on("--format=FMT", "Output: text (default) | json (per-step detail)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
-          p.invalid_option { |f| abort "gori run convert: unknown option: #{f}\n#{p}" }
-          p.missing_option { |f| abort "gori run convert: missing value for #{f}" }
+          p.invalid_option { |f| abort "gori run decoder: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run decoder: missing value for #{f}" }
         end
         parser.parse(args)
 
-        abort "gori run convert: missing <chain> (e.g. 'base64-decode'; see 'gori run convert list')" if positional.empty?
-        abort "gori run convert: too many arguments (expected <chain> [input])" if positional.size > 2
+        abort "gori run decoder: missing <chain> (e.g. 'base64-decode'; see 'gori run decoder list')" if positional.empty?
+        abort "gori run decoder: too many arguments (expected <chain> [input])" if positional.size > 2
         chain = positional[0]
 
         input_str = input_flag || positional[1]?
         input_str ||= STDIN.gets_to_end unless STDIN.tty?
-        abort "gori run convert: no input (pass it as an argument, --input, or via STDIN)" if input_str.nil?
+        abort "gori run decoder: no input (pass it as an argument, --input, or via STDIN)" if input_str.nil?
 
         result = Decoder.run(Decoder.shared_registry, input_str.to_slice, chain)
 
         if format == :json
-          puts convert_json(result, output_mode)
+          puts decoder_json(result, output_mode)
         else
           if final_bytes = result.output
             rendered, _ = Decoder.display(final_bytes, output_mode)
@@ -66,11 +66,11 @@ module Gori
         i = result.failed_at
         return unless i
         s = result.steps[i]
-        reason = s.state.unknown? ? "is not a known converter (see 'gori run convert list')" : "failed"
-        STDERR.puts "gori run convert: step ##{i + 1} '#{s.token}' #{reason}#{s.error ? ": #{s.error}" : ""}"
+        reason = s.state.unknown? ? "is not a known converter (see 'gori run decoder list')" : "failed"
+        STDERR.puts "gori run decoder: step ##{i + 1} '#{s.token}' #{reason}#{s.error ? ": #{s.error}" : ""}"
       end
 
-      private def self.convert_json(result : Decoder::ChainResult, mode : Decoder::RenderAs?) : String
+      private def self.decoder_json(result : Decoder::ChainResult, mode : Decoder::RenderAs?) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -109,17 +109,17 @@ module Gori
         when "text"   then Decoder::RenderAs::Text
         when "base64" then Decoder::RenderAs::Base64
         when "hex"    then Decoder::RenderAs::Hex
-        else               abort "gori run convert: invalid --output '#{v}' (auto|text|base64|hex)"
+        else               abort "gori run decoder: invalid --output '#{v}' (auto|text|base64|hex)"
         end
       end
 
-      private def self.cmd_convert_list(args : Array(String)) : Nil
+      private def self.cmd_decoder_list(args : Array(String)) : Nil
         format = :text
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run convert list [options]\n\nList every converter (name, category, direction)."
+          p.banner = "Usage: gori run decoder list [options]\n\nList every converter (name, category, direction)."
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run convert list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort "gori run decoder list: unknown option: #{f}\n#{p}" }
         end
         parser.parse(args)
 

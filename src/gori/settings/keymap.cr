@@ -30,9 +30,8 @@ module Gori::Settings
       arr = v.as_a?
       next unless arr # a non-array entry is dropped (tolerant)
       # Keep only labels that parse to a real chord (round-trip safe); a list that
-      # ends up empty is a deliberate unbind and is preserved. The id is remapped from
-      # any pre-rename spelling so a saved binding on e.g. replay.send still resolves.
-      out[remap_legacy_id(id)] = arr.compact_map(&.as_s?).select { |s| !Verb::Chord.parse(s).nil? }
+      # ends up empty is a deliberate unbind and is preserved.
+      out[id] = arr.compact_map(&.as_s?).select { |s| !Verb::Chord.parse(s).nil? }
     end
     out
   end

@@ -13,7 +13,7 @@ require "./proxy/tls/cert_authority"
 module Gori
   # Subcommand-based CLI entrypoint.
   #
-  # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for capture-only)
+  # - `gori` or `gori tui [flags]`  → interactive TUI (`gori run capture` for capture-only)
   # - `gori settings [--edit]`      → print (and lazily init) / edit settings.json
   # - `gori ca`                     → print root CA path (or PEM); `ca regenerate` rotates it
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
@@ -83,14 +83,13 @@ module Gori
       puts "Flags like --version and --help work at the top level too."
     end
 
-    # Runs the TUI (or headless capture-only mode).
+    # Runs the TUI.
     private def self.run_tui(args : Array(String)) : Nil
       Settings.load # persisted bind/upstream are the defaults; CLI flags override below
       listen = Settings.bind_host
       port = Settings.bind_port
       db_path = Paths.default_db
       ca_dir = Paths.default_ca_dir
-      headless = false
       insecure = false
 
       parser = OptionParser.new do |p|
@@ -103,7 +102,6 @@ module Gori
         end
         p.on("--db=PATH", "SQLite database path") { |v| db_path = v }
         p.on("--ca-dir=PATH", "Directory for the root CA") { |v| ca_dir = v }
-        p.on("--headless", "Run without the TUI (capture to STDOUT)") { headless = true }
         p.on("--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.on("-v", "--version", "Show version") { puts "gori #{VERSION}"; exit 0 }
@@ -121,14 +119,8 @@ module Gori
       # bind override above): force verify off for this session so the settings:network editor
       # reflects the active state; toggling it there re-syncs the live proxy + persists.
       Settings.verify_upstream = false if insecure
-      config = Config.new(listen, port, db_path, ca_dir, headless, !Settings.verify_upstream?)
-      app = App.new(config)
-
-      if config.headless?
-        app.run_headless
-      else
-        app.run_tui
-      end
+      config = Config.new(listen, port, db_path, ca_dir, !Settings.verify_upstream?)
+      App.new(config).run_tui
     end
 
     # `gori settings` prints the path to the persisted settings file (settings.json

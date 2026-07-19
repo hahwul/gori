@@ -44,7 +44,7 @@ require "./run/notes"
 require "./run/sitemap"
 require "./run/issues"
 require "./run/jwt"
-require "./run/convert"
+require "./run/decoder"
 require "./run/rewriter"
 require "./run/project"
 
@@ -101,7 +101,7 @@ module Gori
         when "notes"    then cmd_notes(rest)
         when "issues"   then cmd_issues(rest)
         when "jwt"      then cmd_jwt(rest)
-        when "convert"  then cmd_convert(rest)
+        when "decoder"  then cmd_decoder(rest)
         when "rewriter" then cmd_rewriter(rest)
         when "project"  then cmd_project(rest)
         else
@@ -129,7 +129,7 @@ module Gori
         {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, or update issues (text, json, markdown)"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
-        {"convert <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
+        {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},
         {"project [list]", "List known projects"},
         {"project scope", "Manage scope rules (list, add, delete, enable/disable)"},
@@ -179,7 +179,7 @@ module Gori
       end
 
       # Capture creates-or-reopens its target (unlike reads, which require an
-      # existing one). --db keeps the explicit-file behaviour of legacy --headless.
+      # existing one). --db targets an explicit database file instead of a project.
       private def self.resolve_capture_project(project_name : String?, db_path : String?) : Project
         if path = db_path
           # Catch the unopenable cases up front with a clean message — otherwise

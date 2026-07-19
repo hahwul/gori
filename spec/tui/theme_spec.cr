@@ -84,11 +84,8 @@ describe Gori::Tui::Theme do
     Theme.active_name.should eq(Theme::DEFAULT_THEME)
   end
 
-  it "maps the pre-rename legacy theme names" do
-    Theme.canonical("dark").should eq("goridark")
-    Theme.canonical("light").should eq("goriday")
-    Theme.apply("light")
-    Theme.active_name.should eq("goriday")
+  it "falls back to the default theme for an unknown name" do
+    Theme.canonical("nope").should eq("goridark")
   end
 
   it "keeps HTTP status colours functional in every theme" do
@@ -236,22 +233,21 @@ describe "Theme custom loading" do
     end
   end
 
-  it "lets a custom theme named like a legacy alias (dark/light) be selected, not shadowed" do
+  it "registers and selects a custom theme whose name is not a built-in" do
     with_themes({"dark.json" => %({"base": "tokyonight", "accent": "#00ffcc"})}) do
       Gori::Tui::Theme.load_custom
-      Gori::Tui::Theme.available.should contain("dark")    # registered (not a built-in name)
-      Gori::Tui::Theme.canonical("dark").should eq("dark") # the real theme wins over the LEGACY_ALIAS
+      Gori::Tui::Theme.available.should contain("dark") # registered (not a built-in name)
+      Gori::Tui::Theme.canonical("dark").should eq("dark")
       Gori::Tui::Theme.apply("dark").should be_true
       Gori::Tui::Theme.active_name.should eq("dark")
       Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#00ffcc"))
     end
   end
 
-  it "still maps a legacy alias when no custom theme by that name is loaded" do
+  it "falls back to the default when a name matches no built-in or custom theme" do
     with_themes({} of String => String) do
-      Gori::Tui::Theme.load_custom # no custom "dark"/"light"
+      Gori::Tui::Theme.load_custom
       Gori::Tui::Theme.canonical("dark").should eq("goridark")
-      Gori::Tui::Theme.canonical("light").should eq("goriday")
     end
   end
 end

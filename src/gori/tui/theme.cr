@@ -787,8 +787,6 @@ module Gori::Tui
 
     BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "synthwave84" => SYNTHWAVE84, "cyberpunk" => CYBERPUNK, "matrix" => MATRIX, "cobalt2" => COBALT2, "high_contrast" => HIGH_CONTRAST, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT}
     DEFAULT_THEME  = "goridark"
-    # Pre-rename names so a settings.json from the first theme release still resolves.
-    LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
 
     # User themes loaded from <GORI_HOME>/themes/*.json (filename stem = name), merged
     # AFTER the built-ins. Empty until load_custom runs (startup + on opening
@@ -817,14 +815,9 @@ module Gori::Tui
       @@custom[name]? || BUILTIN_THEMES[name]?
     end
 
-    # Resolve a (possibly legacy / unknown) name to a valid theme name: a real theme
-    # (built-in OR custom) wins as-is; otherwise map a legacy alias; otherwise fall
-    # back to the default. The real-theme check comes FIRST so a custom theme named
-    # `dark`/`light` isn't shadowed by the pre-rename aliases (which only matter for an
-    # old settings.json that has no matching theme loaded).
+    # Resolve a (possibly unknown) name to a valid theme name: a real theme (built-in
+    # OR custom) wins as-is; anything else falls back to the default.
     def self.canonical(name : String) : String
-      return name if palette(name)
-      name = LEGACY_ALIASES[name]? || name
       palette(name) ? name : DEFAULT_THEME
     end
 
@@ -901,7 +894,6 @@ module Gori::Tui
     # A theme's `base` must be a BUILT-IN (custom themes can't chain off each other —
     # load order would matter); unknown → the default.
     private def self.canonical_builtin(name : String) : String
-      name = LEGACY_ALIASES[name]? || name
       BUILTIN_THEMES.has_key?(name) ? name : DEFAULT_THEME
     end
 

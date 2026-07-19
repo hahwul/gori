@@ -1,11 +1,6 @@
 # Rewriter (Match & Replace rules) — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  # Legacy "Match & Replace" entry: the editor is now the Rewriter tab.
-  def rules_open : Nil
-    focus_tab(:rewriter)
-  end
-
   def rewriter_add : Nil
     rewriter_controller.rewriter_add
   end
