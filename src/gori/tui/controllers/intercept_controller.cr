@@ -37,7 +37,7 @@ module Gori::Tui
       if @intercept.editing?
         "type to edit · ^R forward · ⇧↹/esc queue"
       elsif @intercept.querying?
-        "type condition · ↵ apply · esc clear"
+        "type condition · ↹ complete · ↵ apply · esc clear"
       else
         f = Hotkeys.binding_label(reg, "intercept.forward", "f")
         d = Hotkeys.binding_label(reg, "intercept.drop", "d")
@@ -170,6 +170,7 @@ module Gori::Tui
       case
       when key.enter?     then @intercept.stop_query
       when key.escape?    then @intercept.cancel_query; ic.set_filter("")
+      when key.tab?       then ic.set_filter(@intercept.query) if @intercept.query_complete
       when key.backspace? then @intercept.query_backspace; ic.set_filter(@intercept.query)
       when key.left?      then @intercept.query_move(-1)
       when key.right?     then @intercept.query_move(1)
@@ -283,8 +284,8 @@ module Gori::Tui
 
     # Open the catch-condition filter bar (a query that narrows which messages hold).
     def intercept_query : Nil
-      @intercept.start_query
-      @host.status("catch condition: host: method: path: status: scheme: · ↵ apply · esc clear")
+      @intercept.start_query(@host.session.store) # store backs `host:` Tab-completion
+      @host.status("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear")
     end
 
     # Cycle which leg(s) to hold: all → requests → responses → all.

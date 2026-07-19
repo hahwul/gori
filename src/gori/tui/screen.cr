@@ -392,16 +392,21 @@ module Gori::Tui
     # rendering used by every single-line input (Scope/Rules/Palette/History
     # query) so they all show live composition identically to the multi-line
     # TextArea. `bg` is the field background; the caret always inverts onto ACCENT.
+    # `colors` (optional) gives a per-character colour for `value` — one entry per
+    # character — so a caller can syntax-highlight what is being typed. The live IME
+    # preedit always uses `fg`: it is not part of `value` yet, so nothing has classified
+    # it. A short/absent array simply falls back to `fg` for the uncovered tail.
     def input_line(x : Int32, y : Int32, value : String, cx : Int32, preedit : String,
-                   fg : Color, bg : Color = Theme.bg, width : Int32? = nil) : Nil
+                   fg : Color, bg : Color = Theme.bg, width : Int32? = nil,
+                   colors : Array(Color)? = nil) : Nil
       cx = cx.clamp(0, value.size)
       right = x + (width || (@width - x))
       prefix = value[0, cx]
       suffix = value[cx..]
       px = x
-      px = text(px, y, prefix, fg, bg, width: {right - px, 0}.max) unless prefix.empty?
+      px = styled_run(px, y, prefix, 0, colors, fg, bg, right) unless prefix.empty?
       px = text(px, y, preedit, fg, bg, attr: Attribute::Underline, width: {right - px, 0}.max) unless preedit.empty?
-      text(px, y, suffix, fg, bg, width: {right - px, 0}.max) unless suffix.empty?
+      styled_run(px, y, suffix, cx, colors, fg, bg, right) unless suffix.empty?
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
       caret_x = x + Screen.display_width(prefix) + Screen.display_width(preedit)
@@ -410,6 +415,34 @@ module Gori::Tui
         cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)
         cursor(caret_x, y)
       end
+    end
+
+    # Per-character-coloured text with no caret — the static counterpart to input_line,
+    # for readouts like a committed filter query. Returns the x after the last cell.
+    def styled_text(x : Int32, y : Int32, str : String, colors : Array(Color)?,
+                    fg : Color, bg : Color = Theme.bg, width : Int32? = nil) : Int32
+      styled_run(x, y, str, 0, colors, fg, bg, x + (width || (@width - x)))
+    end
+
+    # Draw `str` (whose first character is `value[offset]`) in same-colour runs, so a
+    # highlighted line still goes through the normal `text` path — one call per run
+    # rather than per character, which keeps wide-glyph handling and clipping intact.
+    private def styled_run(x : Int32, y : Int32, str : String, offset : Int32,
+                           colors : Array(Color)?, fg : Color, bg : Color, right : Int32) : Int32
+      return text(x, y, str, fg, bg, width: {right - x, 0}.max) unless colors
+      px = x
+      i = 0
+      while i < str.size
+        c = colors[offset + i]? || fg
+        j = i + 1
+        while j < str.size && (colors[offset + j]? || fg) == c
+          j += 1
+        end
+        px = text(px, y, str[i...j], c, bg, width: {right - px, 0}.max)
+        break if px >= right
+        i = j
+      end
+      px
     end
   end
 end

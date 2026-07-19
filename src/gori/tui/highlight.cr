@@ -194,6 +194,30 @@ module Gori::Tui
       request ? lines.map { |line| with_env_tokens(line) } : lines
     end
 
+    # Per-character colours for a filter/QL query, so its boolean structure reads apart
+    # from the values being matched — `(host:a OR host:b) -method:GET` should show at a
+    # glance which words are operators and where the group closes.
+    #
+    # Classification comes from FilterAst's own lexer, so the colour is a truthful
+    # preview of how the query will be PARSED: a lowercase `or`, a quoted "AND", and a
+    # `(` sitting inside a value all stay plain, because none of them group anything.
+    # Characters no span covers (the whitespace between terms) keep `base`.
+    def self.filter_query(query : String, base : Color = Theme.text) : Array(Color)
+      colors = Array(Color).new(query.size, base)
+      FilterAst.spans(query).each do |span|
+        fg = case span.kind
+             in .operator? then Theme.syn_keyword
+             in .paren?    then Theme.syn_keyword
+             in .field?    then Theme.syn_header
+             in .value?    then Theme.text_bright
+             in .quote?    then Theme.syn_string
+             in .plain?    then base
+             end
+        (span.start...(span.start + span.size)).each { |i| colors[i] = fg if i < colors.size }
+      end
+      colors
+    end
+
     # Single-line env overlay (TARGET fields, ENV pane values).
     def self.env_line(raw : String, base_fg : Color = Theme.text, attr : Attribute = Attribute::None) : Line
       with_env_tokens([Span.new(raw, base_fg, attr)])

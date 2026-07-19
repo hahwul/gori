@@ -332,7 +332,7 @@ module Gori::Tui
     # True at a cold start (nothing typed, or the caret sits just after a space) — decides
     # whether the suggestion row shows the standing field hint.
     private def filter_token_empty? : Bool
-      Repeater::SubtabFilter.token_at(@subtab_filter, @filter_cx)[0].empty?
+      FilterAst.token_at(@subtab_filter, @filter_cx).core.empty?
     end
 
     # Open the `/` filter bar (from the strip or the space menu), seeding the caret.
@@ -398,10 +398,10 @@ module Gori::Tui
     def complete_subtab_filter : Bool
       sugg = filter_suggestions
       return false if sugg.empty?
-      _, s, e = Repeater::SubtabFilter.token_at(@subtab_filter, @filter_cx)
+      cur = FilterAst.token_at(@subtab_filter, @filter_cx)
       first = sugg.first
-      @subtab_filter = "#{@subtab_filter[0, s]}#{first}#{@subtab_filter[e..]}"
-      @filter_cx = s + first.size
+      @subtab_filter = "#{@subtab_filter[0, cur.start]}#{first}#{@subtab_filter[cur.stop..]}"
+      @filter_cx = cur.start + first.size
       @filter_preedit = ""
       true
     end
@@ -490,9 +490,13 @@ module Gori::Tui
         px = screen.text(rect.x, row_y, "filter › ", Theme.accent, Theme.panel)
         field_w = {count_x - 1 - px, 1}.max
         screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
-          Theme.text_bright, Theme.panel, width: field_w)
+          Theme.text_bright, Theme.panel, width: field_w,
+          colors: Highlight.filter_query(@subtab_filter, Theme.text_bright))
       elsif !@subtab_filter.blank?
-        screen.text(rect.x, row_y, ": #{@subtab_filter}", Theme.text, Theme.panel, width: left_w)
+        px = screen.text(rect.x, row_y, ": ", Theme.muted, Theme.panel, width: left_w)
+        screen.styled_text(px, row_y, @subtab_filter,
+          Highlight.filter_query(@subtab_filter, Theme.text),
+          Theme.text, Theme.panel, width: {count_x - 1 - px, 0}.max)
       else
         screen.text(rect.x, row_y, "/ filter  ·  #{filter_fields.map { |f| "#{f}:" }.join("  ")}", Theme.muted, Theme.panel, width: left_w)
       end

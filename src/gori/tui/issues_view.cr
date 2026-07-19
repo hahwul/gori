@@ -19,7 +19,7 @@ module Gori::Tui
     QUERY_FIELDS = %w(severity: status: host: title:)
 
     def initialize
-      @all = [] of Store::Issue      # the raw store list (severity-desc)
+      @all = [] of Store::Issue    # the raw store list (severity-desc)
       @issues = [] of Store::Issue # the filtered/visible subset
       @selected = 0
       @scroll = 0
@@ -134,8 +134,6 @@ module Gori::Tui
       enter_notes_insert!
       @notes.click_to_cursor(notes_rect, mx, my)
     end
-
-
 
     def select_index(idx : Int32) : Nil
       return if @issues.empty?
@@ -576,7 +574,8 @@ module Gori::Tui
         prefix = "filter › "
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
+        screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
+          colors: Highlight.filter_query(@query, Theme.text_bright))
         return
       end
       rx = rect.right - 1
@@ -587,7 +586,11 @@ module Gori::Tui
       end
       left_w = {rx - (rect.x + 1), 0}.max
       if filtering?
-        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: left_w)
+        # The committed query stays highlighted — this readout is what you scan to
+        # check how the active filter is actually being read.
+        qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+          Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  status:open  status:closed  host:", Theme.muted, width: left_w)
       end

@@ -1,4 +1,5 @@
 require "db"
+require "./filter_ast"
 
 module Gori
   # The query language (DESIGN.md §4): a Lucene/KQL-style boolean filter over the
@@ -6,8 +7,8 @@ module Gori
   # always parameterised — never interpolated — so the projection columns stay
   # injection-safe). The analysis surface; QL is how you find things (P8: pull).
   #
-  #   host:acme status:>=500            # AND of terms
-  #   method:post path:/api OR status:5xx # OR of AND-groups
+  #   host:acme status:>=500            # AND of terms (whitespace)
+  #   (host:a OR host:b) -method:GET    # OR, grouping, negation
   #   -host:cdn  status:5xx  login      # negation, status class, free text
   #   body:token                        # scan request/response body bytes
   #   size:>10000 dur:>=500 dur:<2s     # total bytes (req+resp) / latency (ms; ms|s)
@@ -28,13 +29,24 @@ module Gori
 
     EMPTY = Filter.new("1", [] of DB::Any)
 
+    # What one term compiles to: a SQL fragment plus the values bound into its `?`s.
+    alias SqlTerm = {String, Array(DB::Any)}
+
     # One-page reference for MCP clients / models. Kept in sync with the parser above.
     REFERENCE = <<-DOC
-      gori QL filters captured HTTP flows (AND within a group, OR between groups):
+      gori QL filters captured HTTP flows:
 
-        host:example.com status:>=500 method:POST   # AND of terms
-        host:api OR status:5xx                        # OR of AND-groups
-        -host:cdn login                               # negation + free-text search
+        host:example.com status:>=500 method:POST   # AND is implicit (whitespace)
+        host:api AND status:5xx                     # ...and can also be spelled out
+        host:api OR status:5xx                      # OR
+        (host:a OR host:b) -method:GET              # parentheses group
+        NOT (host:cdn OR host:static)               # NOT negates a term or a group
+        host:"my host"  "two words"                 # quotes keep spaces in one term
+        -host:cdn login                             # negation + free-text search
+
+      AND/OR/NOT are recognised UPPERCASE and unquoted, so searching for the words
+      and/or/not still works; quote them ("AND") to force a literal. Precedence is
+      NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
         host path method scheme proto status size reqsize respsize dur header body url
@@ -68,30 +80,37 @@ module Gori
       Filter.new("(#{a.sql}) AND (#{b.sql})", a.args + b.args)
     end
 
+    # Boolean structure (AND/OR/NOT, parentheses, quoting) comes from the shared
+    # FilterAst grammar; QL only says what a single term compiles to. A term the
+    # backend rejects (bad numeric, unknown proto) folds away, and a combinator left
+    # with nothing folds away in turn — so a query whose every term was dropped
+    # yields EMPTY, exactly as the old flat parser did.
     def self.parse(query : String) : Filter
-      tokens = query.split
-      return EMPTY if tokens.empty?
-
-      groups = [[] of String]
-      tokens.each do |tok|
-        tok == "OR" ? (groups << [] of String) : groups.last << tok
-      end
-
+      tree = FilterAst.build(FilterAst.parse(query)) { |t| term_to_sql(t) }
+      return EMPTY unless tree
       args = [] of DB::Any
-      clauses = [] of String
-      groups.each do |group|
-        conds = [] of String
-        group.each do |term|
-          if result = term_to_sql(term)
-            cond, cargs = result
-            conds << cond
-            args.concat(cargs)
-          end
-        end
-        clauses << "(#{conds.join(" AND ")})" unless conds.empty?
-      end
+      Filter.new(wrap_sql(tree, args), args)
+    end
 
-      clauses.empty? ? EMPTY : Filter.new(clauses.join(" OR "), args)
+    # A bare leaf/negation is parenthesised at the top so the fragment is always safe
+    # to splice after "WHERE " and to AND with the Scope lens (QL.and).
+    private def self.wrap_sql(tree : FilterAst::Tree(SqlTerm), args : Array(DB::Any)) : String
+      sql = tree_sql(tree, args)
+      tree.op.and? || tree.op.or? ? sql : "(#{sql})"
+    end
+
+    # Depth-first, left to right — `args` MUST be appended in the same order the `?`
+    # placeholders are emitted, or every bound value shifts by one.
+    private def self.tree_sql(tree : FilterAst::Tree(SqlTerm), args : Array(DB::Any)) : String
+      case tree.op
+      in .leaf?
+        cond, cargs = tree.leaf
+        args.concat(cargs)
+        cond
+      in .not? then "NOT (#{tree_sql(tree.children.first, args)})"
+      in .and? then "(#{tree.children.map { |c| tree_sql(c, args) }.join(" AND ")})"
+      in .or?  then "(#{tree.children.map { |c| tree_sql(c, args) }.join(" OR ")})"
+      end
     end
 
     # A `~` (regex) term whose pattern fails to compile silently degrades to a
@@ -104,23 +123,11 @@ module Gori
     # terms that would compile to the never-match clause — no more, no less.
     def self.invalid_regex_terms(query : String) : Array(String)
       bad = [] of String
-      query.split.each do |tok|
-        next if tok == "OR"
-        term = tok.starts_with?('-') ? tok[1..] : tok
-        next if term.empty?
-
-        ci = term.index(':')
-        ti = term.index('~')
-        sep = [ci, ti].compact.min?
-        next unless sep && sep > 0 && ti == sep # a regex op, not free text / field op
-
-        field = term[0...sep].downcase
-        next unless field.in?("host", "path", "url", "header", "body")
-
-        value = term[(sep + 1)..]
+      FilterAst.terms(FilterAst.parse(query)).each do |term|
+        field, value, op = split_field(term.text) || next
+        next unless op == :regex && field.in?(REGEX_FIELDS)
         next if value.empty?
-
-        bad << tok unless valid_regex?(value)
+        bad << term.source unless valid_regex?(value)
       end
       bad
     end
@@ -138,37 +145,43 @@ module Gori
     def self.analyze(query : String) : TermAnalysis
       applied = [] of String
       ignored = [] of String
-      query.split.each do |tok|
-        next if tok == "OR"
-        (term_to_sql(tok) ? applied : ignored) << tok
+      FilterAst.terms(FilterAst.parse(query)).each do |term|
+        (term_to_sql(term) ? applied : ignored) << term.source
       end
       TermAnalysis.new(applied, ignored, invalid_regex_terms(query))
     end
 
-    private def self.term_to_sql(term : String) : {String, Array(DB::Any)}?
-      negate = term.starts_with?('-')
-      term = term[1..] if negate
-      return nil if term.empty?
+    REGEX_FIELDS = %w(host path url header body)
 
-      # The field/operator separator is the first ':' (field op) or '~' (regex op) —
-      # whichever appears first wins, so a regex value may itself contain ':' (e.g.
-      # body~https?://x). A leading separator (`:foo` / `~foo`) is treated as free text.
-      ci = term.index(':')
-      ti = term.index('~')
+    # The field/operator split, shared by compilation and diagnosis so the two can't
+    # disagree about what counts as a term. The first ':' (field op) or '~' (regex op)
+    # wins — whichever appears first — so a regex value may itself contain ':' (e.g.
+    # body~https?://x). nil means free text: no separator, or a leading one (`:foo`).
+    private def self.split_field(text : String) : {String, String, Symbol}?
+      ci = text.index(':')
+      ti = text.index('~')
       sep = [ci, ti].compact.min?
+      return nil unless sep && sep > 0
+      {text[0...sep].downcase, text[(sep + 1)..], ti == sep ? :regex : :field}
+    end
+
+    # `term.text` arrives already stripped of its quotes and `-` prefix by the grammar;
+    # the negation rides on `term.negate?` and wraps whatever the field compiled to.
+    private def self.term_to_sql(term : FilterAst::Term) : SqlTerm?
+      text = term.text
+      return nil if text.empty?
 
       result =
-        if sep && sep > 0
-          field = term[0...sep].downcase
-          value = term[(sep + 1)..]
-          ti == sep ? regex_cond(field, value, term) : field_cond(field, value, term)
+        if split = split_field(text)
+          field, value, op = split
+          op == :regex ? regex_cond(field, value, text) : field_cond(field, value, text)
         else
-          free_text(term)
+          free_text(text)
         end
       return nil unless result
 
       cond, args = result
-      {negate ? "NOT (#{cond})" : cond, args}
+      {term.negate? ? "NOT (#{cond})" : cond, args}
     end
 
     private def self.field_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
@@ -341,7 +354,7 @@ module Gori
       # the validity guard — otherwise `foo~[` (an unterminated char class) would compile to
       # the never-match clause instead of free-texting "foo~[".
       case field
-      when "host", "path", "url", "header", "body"
+      when "host", "path", "url", "header", "body" # = REGEX_FIELDS
         return nil if value.empty?
         # An invalid pattern would raise inside the SQLite REGEXP callback, so validate up
         # front and emit a never-matches clause instead.

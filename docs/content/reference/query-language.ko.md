@@ -60,17 +60,34 @@ header~set-cookie
 
 ## 항목 결합 {#combining-terms}
 
-- 공백으로 구분된 항목들은 **AND**로 결합됩니다.
-- 필드 앞에 `-`를 붙이면 **부정**합니다.
-- `OR`는 서로 대안이 되는 AND 그룹을 나눕니다.
-- `field:`가 없는 단순 단어는 method, host, path를 대상으로 하는 자유 텍스트 검색입니다.
+- 공백으로 구분된 항목들은 **AND**로 결합됩니다. `AND`를 직접 써도 됩니다.
+- `OR`는 둘 중 하나를 매칭합니다. `NOT`과 `-` 접두사는 모두 부정입니다.
+- 괄호로 묶을 수 있습니다. 우선순위는 `NOT`, `AND`, `OR` 순입니다.
+- `field:`가 없는 단순 단어는 method, host, target을 대상으로 하는 자유 텍스트 검색입니다.
 
 ```text
 host:example.com status:5xx           둘 다 매칭되어야 함
+host:api AND status:5xx               같은 의미를 풀어 쓴 것
 method:POST -status:200               POST이지만 200은 아님
 host:a.com OR host:b.com              둘 중 하나의 호스트
+(host:a.com OR host:b.com) -path:/js  둘 중 하나의 호스트, /js 제외
+NOT (host:cdn OR host:static)         둘 다 아닌 것
 login                                 자유 텍스트 검색
 ```
+
+`AND`, `OR`, `NOT`은 대문자로 쓸 때만 연산자로 인식합니다. 따라서 "and", "or", "not"이라는
+단어를 검색하는 것도 그대로 됩니다. 대문자라도 따옴표로 감싸면 리터럴이 됩니다.
+
+큰따옴표는 공백이 포함된 값을 하나의 항목으로 유지합니다:
+
+```text
+host:"my host"                        공백까지 포함한 하나의 host 값
+"two words"                           구 전체를 자유 텍스트로
+"OR"                                  연산자가 아닌 단어 그대로
+```
+
+값 안의 괄호는 리터럴로 남으므로 `path:/a(b)`는 이스케이프가 필요 없습니다. `(`는 항목의
+맨 앞에서만 그룹을 열고, `)`는 맨 뒤에서만 그룹을 닫습니다.
 
 ## 예제 {#examples}
 

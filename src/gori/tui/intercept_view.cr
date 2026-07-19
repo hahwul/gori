@@ -7,6 +7,7 @@ require "./highlight"
 require "./text_area"
 require "./url"
 require "../interceptor"
+require "../store"
 require "../fuzz/content_length"
 require "../env"
 
@@ -19,8 +20,13 @@ module Gori::Tui
   # actual forward/drop. No diff (that's Repeater's job).
   class InterceptView
     # Height of the top filter bar (catch direction + condition), reserved above the
-    # queue|detail split — the Intercept tab's analogue of History's QL bar.
+    # queue|detail split — the Intercept tab's analogue of History's QL bar. While the
+    # condition is being edited a second row carries Tab suggestions (see bar_h).
     FILTER_BAR_H = 1
+    # Standing hint on the suggestion row at a cold start (editing, but nothing typed
+    # yet to complete), so the condition language is discoverable the moment `/` opens.
+    # Example values double as syntax cues; keep in sync with InterceptFilter::FIELDS.
+    QUERY_HINT = "fields:  host:  path:  method:  scheme:  status:    ·    AND OR NOT ( ) combine  ·  -term negates"
 
     getter? editing : Bool
     getter? querying : Bool
@@ -43,6 +49,12 @@ module Gori::Tui
       @query = ""
       @qcx = 0
       @preedit = ""
+      # Weak back-pointer for `host:` Tab suggestions, handed over when the bar opens.
+      # Nil until then — suggestions simply skip the host pool. The DISTINCT query is
+      # memoised on the typed prefix so a keystroke doesn't re-hit SQLite.
+      @suggest_store = nil.as(Store?)
+      @host_suggest_prefix = nil.as(String?)
+      @host_suggest_values = [] of String
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
       @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
       # Cached highlight of the selected held item's bytes (read-only detail pane).
@@ -113,9 +125,13 @@ module Gori::Tui
     end
 
     # --- catch-condition filter bar (a text sub-mode; mirrors History's QL bar) ---
-    def start_query : Nil
+    # `store` (optional) backs `host:` Tab-completion; without it every other field
+    # still completes from its static pool.
+    def start_query(store : Store? = nil) : Nil
       @querying = true
       @qcx = @query.size
+      @suggest_store = store
+      @host_suggest_prefix = nil # invalidate: peers may have captured new hosts since
     end
 
     def stop_query : Nil # Enter: keep the condition, leave edit mode
@@ -142,6 +158,35 @@ module Gori::Tui
 
     def query_move(d : Int32) : Nil
       @qcx = (@qcx + d).clamp(0, @query.size)
+    end
+
+    # Tab: splice the first suggestion over the token under the caret. False when there
+    # is nothing to complete, so the caller can leave the query untouched.
+    def query_complete : Bool
+      sugg = query_suggestions
+      return false if sugg.empty?
+      cur = FilterAst.token_at(@query, @qcx)
+      @query = "#{@query[0, cur.start]}#{sugg.first}#{@query[cur.stop..]}"
+      @qcx = cur.start + sugg.first.size
+      true
+    end
+
+    def query_suggestions : Array(String)
+      InterceptFilter.suggestions(@query, @qcx, host_suggestions)
+    end
+
+    # DISTINCT hosts for the `host:` pool, memoised on the typed prefix (single-entry,
+    # like History's) so holding a key doesn't issue a query per keystroke.
+    private def host_suggestions : Array(String)
+      core = FilterAst.token_at(@query, @qcx).core
+      return [] of String unless (colon = core.index(':')) && core[0...colon].downcase == "host"
+      prefix = FilterAst.unquote_prefix(core[(colon + 1)..])
+      key = prefix.downcase
+      return @host_suggest_values if @host_suggest_prefix == key
+      store = @suggest_store
+      @host_suggest_prefix = key
+      @host_suggest_values = store ? store.distinct_hosts(prefix: prefix, limit: 16) : [] of String
+      @host_suggest_values
     end
 
     # Live IME composition shown underlined ahead of the committed query; cleared
@@ -329,10 +374,17 @@ module Gori::Tui
 
     # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
 
+    # Rows the bar occupies: one for the condition itself, plus a suggestion row while
+    # it's being edited. Both render() and every hit-test derive from this, so the two
+    # can't drift as the bar grows/shrinks under the caret.
+    private def bar_h : Int32
+      @querying ? FILTER_BAR_H + 1 : FILTER_BAR_H
+    end
+
     # The body (queue|detail split) sits BELOW the filter bar — every hit-test must
-    # subtract the bar row first, exactly as render() does.
+    # subtract the bar rows first, exactly as render() does.
     private def body_rect(rect : Rect) : Rect
-      Rect.new(rect.x, rect.y + FILTER_BAR_H, rect.w, {rect.h - FILTER_BAR_H, 0}.max)
+      Rect.new(rect.x, rect.y + bar_h, rect.w, {rect.h - bar_h, 0}.max)
     end
 
     # The w//3 split render() uses (render: `half = {body.w // 3, 1}.max`). `body` is
@@ -416,6 +468,7 @@ module Gori::Tui
                listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
+      render_suggestions(screen, rect, rect.y + FILTER_BAR_H) if @querying
       body = body_rect(rect)
       return if body.empty?
 
@@ -440,7 +493,9 @@ module Gori::Tui
         prefix = "catch › "
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
+          width: {rect.w - prefix.size - 2, 0}.max,
+          colors: Highlight.filter_query(@query, Theme.text_bright))
         return
       end
 
@@ -462,8 +517,28 @@ module Gori::Tui
       if @query.blank?
         screen.text(x, rect.y, "/ condition  ·  host:  method:  path:  status:>=500  scheme:", Theme.muted, width: left_w)
       else
-        screen.text(x, rect.y, ": #{@query}", Theme.text, width: left_w)
+        # The committed condition stays highlighted — this readout is what you scan to
+        # check WHY something is (or isn't) being held.
+        x = screen.text(x, rect.y, ": ", Theme.muted, width: left_w)
+        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+          Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
+    end
+
+    # The Tab-completion row under the condition input: the leading candidate is what ↹
+    # takes, the rest preview what typing one more char would narrow to. With nothing to
+    # complete, a cold-start token (empty, or the caret just past a space) shows the
+    # standing field hint; a non-empty token with no match stays quiet, since the human
+    # is then deliberately typing a free-text word.
+    private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
+      return if y >= rect.bottom
+      sugg = query_suggestions
+      unless sugg.empty?
+        screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: {rect.w - 2, 0}.max)
+        return
+      end
+      return unless FilterAst.token_at(@query, @qcx).core.empty?
+      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: {rect.w - 2, 0}.max)
     end
 
     # The catch-direction chip: `c`-chord + which direction, coloured by enabled state.

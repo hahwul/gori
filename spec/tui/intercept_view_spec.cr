@@ -228,6 +228,97 @@ describe "Intercept filter bar" do
     end
   end
 
+  it "Tab-completes the condition and shows a suggestion row while editing" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+
+      # Cold start: nothing typed, so the row carries the standing field hint.
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.row(1).includes?("fields:").should be_true
+
+      "me".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["method:"])
+      view.query_complete.should be_true
+      view.query.should eq("method:")
+
+      "P".each_char { |c| view.query_insert(c) }
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.row(0).includes?("method:P").should be_true    # the input line
+      backend.row(1).includes?("method:POST").should be_true # the ↹ row below it
+      view.query_complete.should be_true
+      view.query.should eq("method:POST")
+    end
+  end
+
+  it "pushes the queue down by the suggestion row only while the condition is being edited" do
+    # The suggestion row grows the bar, so render() and every hit-test must agree on
+    # the offset — a stale FILTER_BAR_H would leave clicks selecting the wrong row.
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      idle_row = (0...12).find { |y| backend.row(y).includes?("QUEUE (1)") }
+
+      view.start_query
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      query_row = (0...12).find { |y| backend.row(y).includes?("QUEUE (1)") }
+
+      idle_row.should_not be_nil
+      query_row.should eq(idle_row.not_nil! + 1)
+      # And the click hit-test follows the same offset (row 0 of the queue card).
+      view.list_row_at(Rect.new(0, 0, 100, 12), 3, query_row.not_nil! + 1).should eq(0)
+    end
+  end
+
+  it "highlights the condition's operators, fields and grouping while editing" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      q = "(host:a OR host:b) -method:GET"
+      q.each_char { |c| view.query_insert(c) }
+
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      row = backend.row(0)
+      base = row.index(q).not_nil!
+      at = ->(needle : String) { backend.fg_at(base + q.index(needle).not_nil!, 0) }
+
+      at.call("(").should eq(Theme.syn_keyword)       # grouping
+      at.call("OR").should eq(Theme.syn_keyword)      # operator
+      at.call("-method").should eq(Theme.syn_keyword) # `-` is NOT, so it matches
+      at.call("host:").should eq(Theme.syn_header)    # field prefix
+      at.call("GET").should eq(Theme.text_bright)     # the value being matched
+    end
+  end
+
+  it "colours by how the query PARSES, not by how it looks" do
+    # A lowercase `or` and a paren inside a value are not operators, so they must not be
+    # painted as any. This is the property that makes the colour trustworthy.
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      q = "path:/a(b) or x"
+      q.each_char { |c| view.query_insert(c) }
+
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      base = backend.row(0).index(q).not_nil!
+      backend.fg_at(base + q.index("(b)").not_nil!, 0).should eq(Theme.text_bright) # part of the value
+      backend.fg_at(base + q.index("or").not_nil!, 0).should eq(Theme.text_bright)  # free text, not OR
+      backend.fg_at(base + q.index("path:").not_nil!, 0).should eq(Theme.syn_header)
+    end
+  end
+
   it "keeps the queue rendered below the filter bar" do
     tmp_interceptor do |ic|
       hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")

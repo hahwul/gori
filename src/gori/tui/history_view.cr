@@ -48,7 +48,7 @@ module Gori::Tui
     # yet) and also spells out that bare words are a free-text search. Example values
     # double as syntax cues.
     FILTER_HINT = "/ filter  ·  host:  method:  status:>=500  proto:ws  path:  size:>10000  dur:>500  header:  body~regex"
-    QUERY_HINT  = "fields:  host:  method:  status:  proto:  path:  scheme:  size:  dur:  header:  body    ·    or type words to search"
+    QUERY_HINT  = "fields:  host:  method:  status:  proto:  path:  scheme:  size:  dur:  header:  body    ·    AND OR NOT ( ) combine  ·  or type words to search"
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool
@@ -525,26 +525,24 @@ module Gori::Tui
     def query_complete : Bool
       sugg = query_suggestions
       return false if sugg.empty?
-      s, e = current_token_bounds
-      @query = "#{@query[0, s]}#{sugg.first}#{@query[e..]}"
-      @qcx = s + sugg.first.size
+      cur = FilterAst.token_at(@query, @qcx)
+      @query = "#{@query[0, cur.start]}#{sugg.first}#{@query[cur.stop..]}"
+      @qcx = cur.start + sugg.first.size
       true
     end
 
     # Suggestions for the token under the cursor: field names, then field values.
-    # Honours a leading `-` (QL negation) so `-ho` → `-host:` and `-host:a` → `-host:api…`.
+    # FilterAst::Cursor carries the grammar's punctuation through, so `-ho` → `-host:`
+    # and `(ho` → `(host:` — the same peeling every other filter bar uses.
     def query_suggestions : Array(String)
-      token = current_token
-      return [] of String if token.empty?
-      neg = token.starts_with?('-') && token.size > 1
-      core = neg ? token[1..] : token
-      neg_p = neg ? "-" : ""
-      if (colon = core.index(':'))
-        field = core[0...colon].downcase
-        prefix = core[(colon + 1)..]
-        suggest_values(field, prefix).map { |s| "#{neg_p}#{s}" }
+      cur = FilterAst.token_at(@query, @qcx)
+      return [] of String if cur.core.empty?
+      if (colon = cur.core.index(':'))
+        field = cur.core[0...colon].downcase
+        prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
+        suggest_values(field, prefix).map { |s| "#{cur.prefix}#{s}" }
       else
-        QL_FIELDS.select(&.starts_with?(core.downcase)).map { |f| "#{neg_p}#{f}:" }
+        QL_FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}:" }
       end
     end
 
@@ -1558,7 +1556,8 @@ module Gori::Tui
         prefix = "filter › "
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2,
+          colors: Highlight.filter_query(@query, Theme.text_bright))
         return
       end
 
@@ -1587,7 +1586,11 @@ module Gori::Tui
 
       left_w = {(follow_shown ? fx : scope_x) - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
-        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: left_w)
+        # The committed query stays highlighted — this readout is what you scan to
+        # check how the active filter is actually being read.
+        qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+          Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter
         # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
@@ -1607,7 +1610,7 @@ module Gori::Tui
       # cursor sits just after a space) show a standing hint so the query language is
       # discoverable from the moment `/` opens; on a non-empty token with no match stay
       # quiet — the user is deliberately free-texting a word.
-      return unless current_token.empty?
+      return unless FilterAst.token_at(@query, @qcx).core.empty?
       screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: rect.w - 2)
     end
 
@@ -1627,7 +1630,7 @@ module Gori::Tui
                end
       # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
       # stale cache entry can't surface a non-matching host if the key ever drifts.
-      values.select(&.downcase.starts_with?(p)).map { |v| "#{field}:#{v}" }
+      values.select(&.downcase.starts_with?(p)).map { |v| "#{field}:#{FilterAst.quote(v)}" }
     end
 
     # DISTINCT hosts for the typed prefix. Cached per prefix so Tab + suggestion
@@ -1646,23 +1649,6 @@ module Gori::Tui
     private def invalidate_host_suggest_cache : Nil
       @host_suggest_prefix = nil
       @host_suggest_values = [] of String
-    end
-
-    private def current_token : String
-      s, e = current_token_bounds
-      @query[s...e]
-    end
-
-    private def current_token_bounds : {Int32, Int32}
-      s = @qcx
-      while s > 0 && @query[s - 1] != ' '
-        s -= 1
-      end
-      e = @qcx
-      while e < @query.size && @query[e] != ' '
-        e += 1
-      end
-      {s, e}
     end
 
     private def ensure_visible(list_h : Int32) : Nil

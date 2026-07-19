@@ -542,7 +542,8 @@ module Gori::Tui
         prefix = "filter › "
         screen.text(rect.x + 1, y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
-        screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
+        screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
+          colors: Highlight.filter_query(@query, Theme.text_bright))
         return
       end
       # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable,
