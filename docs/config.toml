@@ -1,6 +1,6 @@
 title = "gori"
 description = "Sit in the loop. A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal."
-base_url = "http://localhost:3000"
+base_url = "https://gori.hahwul.com"
 default_language = "en"
 
 [languages.en]
