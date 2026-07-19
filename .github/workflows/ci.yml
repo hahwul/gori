@@ -1,0 +1,109 @@
+---
+name: CI
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/ci.yml
+      - shard.yml
+      - shard.lock
+      - docker/Dockerfile
+      - "**/*.cr"
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: manual run
+        required: false
+        default: ""
+jobs:
+  build-crystal:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The floor shard.yml declares (`>= 1.20.2`) and the version development
+        # actually happens on. 1.21 is not incidental: the termisu fork and the
+        # ameba master pin in shard.yml exist specifically because upstream does
+        # not compile under it, so leaving 1.21 untested would test a toolchain
+        # nobody uses.
+        crystal-version: [1.20.2, 1.21.0]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal-version }}
+      - name: Install native link dependencies
+        # brotli/zstd are linked via `@[Link(pkg_config:)]` (proxy/codec), sqlite3
+        # via the sqlite3 shard. The rest (openssl, yaml, gmp, pcre2, gc, zlib)
+        # arrive as dependencies of the Crystal package itself.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
+      - name: Install dependencies
+        run: shards install
+      - name: Build
+        # Deliberately NO `-Dpreview_mt`. Store, Fuzz::Engine, Miner::Engine and
+        # Store::SafeRegexp each document that their plain ivars and unguarded
+        # counters are safe *because* gori runs on the single-threaded fiber
+        # scheduler. Enabling MT here would build a binary those files do not
+        # describe.
+        run: shards build
+  # No lint job, and no `crystal tool format --check` job: the tree does not
+  # currently pass either (ameba reports ~700 pre-existing findings, and the
+  # formatter rewrites 100+ files). Both are run locally via `just check`. Add
+  # them back as gates once the backlog is cleared, not before — a check that is
+  # always red is a check nobody reads.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crystal-version: [1.20.2, 1.21.0]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal-version }}
+      - name: Install native link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
+      - name: Install dependencies
+        run: shards install
+      - name: Run tests
+        run: crystal spec
+  build-docker:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: linux/amd64
+            runner: ubuntu-latest
+          - arch: linux/arm64
+            # Native ARM runner: the image builds a static Crystal binary from
+            # source, which is far too slow to cross-build under QEMU.
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: ${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}

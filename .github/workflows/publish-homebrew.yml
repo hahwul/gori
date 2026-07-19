@@ -1,0 +1,119 @@
+---
+name: Homebrew tap Publish
+# Publishes the prebuilt formula to the Homebrew tap. Runs automatically once
+# "Build and Release Binaries" succeeds for a release (that workflow produces
+# the assets this one checksums), and can also be dispatched manually to
+# re-publish or backfill a version.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.1.0)"
+        required: true
+        type: string
+  workflow_run:
+    workflows: ["Build and Release Binaries"]
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  publish-formula:
+    name: Publish prebuilt formula to tap
+    # Only after a *release*-triggered binary build succeeds — a manual
+    # workflow_dispatch build produces `gori-main-*` assets, not
+    # `gori-v<version>-*`, so there would be nothing to checksum.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        # Pass event data via env (never interpolate ${{ }} straight into the
+        # script body) so a crafted input can't inject shell. On workflow_run
+        # the release tag arrives as head_branch (e.g. "v0.1.0").
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          # Strip a leading 'v' if present.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${DISPATCH_VERSION#v}"
+          else
+            VERSION="${RUN_TAG#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::version input is empty"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Checkout source (formula template)
+        # Use the template from the branch this workflow runs on (not the release
+        # tag): the template is build tooling and must reflect the current release
+        # asset layout, while the `version` input drives which binaries to fetch.
+        uses: actions/checkout@v6
+
+      - name: Download release binaries and compute checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          # macOS assets are self-contained .tar.gz bundles (binary + bundled
+          # dylibs, see scripts/package-macos.sh); Linux assets are bare static
+          # musl binaries. Homebrew downloads and checksums exactly these files,
+          # so compute sha256 over the same artifact it will fetch.
+          for asset in \
+            "gori-v$V-osx-arm64.tar.gz" \
+            "gori-v$V-osx-x86_64.tar.gz" \
+            "gori-v$V-linux-arm64" \
+            "gori-v$V-linux-x86_64"; do
+            gh release download "v$V" --repo hahwul/gori \
+              --pattern "$asset" --output "$asset"
+          done
+          {
+            echo "SHA_OSX_ARM64=$(sha256sum "gori-v$V-osx-arm64.tar.gz" | awk '{print $1}')"
+            echo "SHA_OSX_X86_64=$(sha256sum "gori-v$V-osx-x86_64.tar.gz" | awk '{print $1}')"
+            echo "SHA_LINUX_ARM64=$(sha256sum "gori-v$V-linux-arm64" | awk '{print $1}')"
+            echo "SHA_LINUX_X86_64=$(sha256sum "gori-v$V-linux-x86_64" | awk '{print $1}')"
+          } >> "$GITHUB_ENV"
+
+      - name: Render formula
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p out
+          sed \
+            -e "s|__VERSION__|$V|g" \
+            -e "s|__SHA_OSX_ARM64__|$SHA_OSX_ARM64|g" \
+            -e "s|__SHA_OSX_X86_64__|$SHA_OSX_X86_64|g" \
+            -e "s|__SHA_LINUX_ARM64__|$SHA_LINUX_ARM64|g" \
+            -e "s|__SHA_LINUX_X86_64__|$SHA_LINUX_X86_64|g" \
+            .github/homebrew/gori.rb.tmpl > out/gori.rb
+          echo "----- rendered formula -----"
+          cat out/gori.rb
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v6
+        with:
+          repository: hahwul/homebrew-gori
+          token: ${{ secrets.GORI_PUBLISH_TOKEN }}
+          path: tap
+
+      - name: Commit and push formula
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p tap/Formula
+          cp out/gori.rb tap/Formula/gori.rb
+          cd tap
+          git config user.name "hahwul"
+          git config user.email "hahwul@gmail.com"
+          git add Formula/gori.rb
+          if git diff --cached --quiet; then
+            echo "Formula unchanged; nothing to publish."
+            exit 0
+          fi
+          git commit -m "gori $V"
+          git push

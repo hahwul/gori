@@ -1,0 +1,39 @@
+# Build artifacts
+bin/
+lib/
+.shards/
+**/*.o
+**/*.dwarf
+
+# Git & VCS
+.git/
+.gitignore
+
+# Dev tooling
+.github/
+.claude/
+.ameba.yml
+.editorconfig
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+CHANGELOG.md
+justfile
+
+# Packaging
+aur/
+scripts/package-macos.sh
+
+# Local state written by gori itself (see .gitignore)
+ca2/
+home*/
+*.key.pem
+
+# Tests, benchmarks & docs
+spec/
+bench/
+docs/
+
+# Docker itself
+docker/
+.dockerignore
