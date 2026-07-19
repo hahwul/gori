@@ -1,5 +1,6 @@
 require "json"
 require "./rule"
+require "../../ascii_bytes"
 require "../../proxy/h2/grpc"
 require "../../sse"
 
@@ -10,6 +11,13 @@ module Gori
       # project's "representative technologies" summary. Runs on every flow (not response-gated):
       # several signals live on the request side or on a 101 upgrade.
       class Tech < Rule
+        # Lowercase needles for the allocation-free byte gates in graphql? (AsciiBytes.contains_ci?
+        # requires an already-lowercase needle). Held as constants so the slices are built once
+        # for the process, not per flow.
+        private GRAPHQL_PATH = "/graphql".to_slice
+        private JSON_CT      = "json".to_slice
+        private QUERY_KEY    = %("query").to_slice
+
         def info : RuleInfo
           RuleInfo.new("tech", "Technology fingerprints",
             "Identifies server software, frameworks, and protocols (WebSocket, gRPC, GraphQL, SSE, HTTP/2) from headers and bodies.",
@@ -42,7 +50,11 @@ module Gori
             acc << tech(ctx, "tech_grpc", "gRPC service")
           end
           acc << tech(ctx, "tech_graphql", "GraphQL endpoint") if graphql?(ctx, req_ct)
-          acc << tech(ctx, "tech_sse", "Server-Sent Events stream") if Sse.event_stream?(detail.response_head)
+          # `resp_ct` is the response Content-Type the capture already parsed out of the head
+          # (the same value grpc? consumes above), so ask Sse directly instead of re-parsing the
+          # raw head bytes: event_stream? would copy the whole head to a String and split it into
+          # per-header Strings on EVERY flow just to read a header we are already holding.
+          acc << tech(ctx, "tech_sse", "Server-Sent Events stream") if Sse.sse?(resp_ct)
           if detail.http_version.starts_with?("HTTP/2") || !detail.h2_conn_id.nil?
             acc << tech(ctx, "tech_http2", "HTTP/2")
           end
@@ -101,18 +113,30 @@ module Gori
         # STRING holding a GraphQL document. Requiring a string value keeps Elasticsearch /
         # OpenSearch query DSL bodies (where `query` is an OBJECT) out of the match.
         private def graphql?(ctx : Context, req_ct : String?) : Bool
-          return true if ctx.req.target.downcase.includes?("/graphql")
-          return false unless req_ct.try(&.downcase.includes?("json"))
+          # Byte scans over the borrowed slices (String#to_slice is a view): the target can carry
+          # a multi-KB query string, and downcasing it — plus the Content-Type — allocated a full
+          # copy of each on every flow just to run two case-insensitive substring tests.
+          return true if AsciiBytes.contains_ci?(ctx.req.target.to_slice, GRAPHQL_PATH)
+          return false unless req_ct && AsciiBytes.contains_ci?(req_ct.to_slice, JSON_CT)
           body = ctx.detail.request_body
           return false unless body
           # 8 KB truncated mid-JSON on real GraphQL requests (a sizeable `variables` object),
           # which then fails JSON.parse and mis-classified them as non-GraphQL; allow up to 256 KB.
-          text = String.new(body[0, {body.size, 256 * 1024}.min]).scrub
+          capped = body[0, {body.size, 256 * 1024}.min]
           # A GraphQL request body always carries a top-level `"query"` key; a cheap substring
           # check lets the overwhelming majority of non-GraphQL JSON POSTs skip the full
           # JSON.parse (a tree build over ≤256 KB) on the shared passive-scan fiber. Conservative:
           # a `"query"` appearing only inside a value still parses, then the as_h?/as_s? guards reject.
-          return false unless text.includes?(%("query"))
+          #
+          # Scan the RAW BYTES, before materialising `text`. The gate was already here, but it ran
+          # against a String that had just been copied+scrubbed out of those same ≤256 KB — so an
+          # ordinary JSON API POST still paid a full-body copy and a UTF-8 validation pass to be
+          # told "not GraphQL". Gating first makes the common case allocation-free. Byte-scanning
+          # is case-insensitive where `includes?` was exact, which only ever opens the gate wider
+          # (scrub cannot create or destroy an ASCII `"query"`), and the as_h?/as_s? guards below
+          # still decide the outcome — so no detection is lost.
+          return false unless AsciiBytes.contains_ci?(capped, QUERY_KEY)
+          text = String.new(capped).scrub
           q = begin
             JSON.parse(text).as_h?.try(&.["query"]?).try(&.as_s?)
           rescue JSON::ParseException

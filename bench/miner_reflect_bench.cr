@@ -39,9 +39,9 @@ INV = begin
   h
 end
 
-# A minimal Replay::Result stand-in via Fingerprint.probe's input shape.
-def make_result : Gori::Replay::Result
-  Gori::Replay::Result.new(HEAD, BODY, nil, 1000_i64)
+# A minimal Repeater::Result stand-in via Fingerprint.probe's input shape.
+def make_result : Gori::Repeater::Result
+  Gori::Repeater::Result.new(HEAD, BODY, nil, 1000_i64)
 end
 
 puts "Miner reflection over a 128-canary bucket, 100KB body (3 reflected):"

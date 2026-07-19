@@ -32,6 +32,10 @@ module Gori
         @client_scripts : Array(String)?
         @client_scripts_nocomment : Array(String)?
         @client_code : Array(String)?
+        @ct_low : String?
+        @ct_low_done = false
+        @html : Bool?
+        @js : Bool?
 
         def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
         end
@@ -73,17 +77,31 @@ module Gori
           row.content_type
         end
 
+        # The response Content-Type, downcased ONCE per flow. html?/js? are each called from
+        # several rules plus the body getters (~12 calls per flow between them), and every call
+        # used to allocate its own throwaway downcased copy of the same header value. Rules that
+        # need to run their own substring tests should read this rather than downcase again.
+        def ct_low : String?
+          return @ct_low if @ct_low_done
+          @ct_low_done = true
+          @ct_low = content_type.try(&.downcase)
+        end
+
+        # Memoised: the answer cannot change for a given flow, and both getters sit on the
+        # per-flow path that the passive fiber shares with the proxy.
         def html? : Bool
-          !!content_type.try(&.downcase.includes?("text/html"))
+          h = @html
+          return h unless h.nil?
+          @html = !!ct_low.try(&.includes?("text/html"))
         end
 
         # A JavaScript response (external bundle / module), distinct from an HTML document with
         # inline scripts. Used to gate the client-side rules alongside html?.
         def js? : Bool
-          ct = content_type
-          return false if ct.nil?
-          low = ct.downcase
-          low.includes?("javascript") || low.includes?("ecmascript")
+          j = @js
+          return j unless j.nil?
+          low = ct_low
+          @js = low.nil? ? false : (low.includes?("javascript") || low.includes?("ecmascript"))
         end
 
         def request_origin : String?

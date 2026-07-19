@@ -29,11 +29,15 @@ module Gori
           return unless resp = ctx.response
           if ctx.scheme == "https"
             hsts = resp.headers.get_all("Strict-Transport-Security").first? # RFC 6797 §8.1: UA honours the FIRST STS header
-            if hsts.nil? || hsts_disabled?(hsts)
+            # Parse max-age ONCE and branch on the Int64? — the disabled/short/evidence path used
+            # to call hsts_max_age up to three times for the same value, and each call scrubs,
+            # downcases, and runs a PCRE match. Every HTTPS response with HSTS reaches this.
+            age = hsts.try { |v| hsts_max_age(v) }
+            if hsts.nil? || age.nil? || age == 0
               acc << hdr(ctx, "missing_hsts", "Missing or disabled HSTS header", Store::Severity::Medium)
-            elsif short_hsts?(hsts)
+            elsif age < SHORT_HSTS_MAX_AGE
               acc << hdr(ctx, "short_hsts", "HSTS max-age is under 1 day", Store::Severity::Low,
-                "max-age=#{hsts_max_age(hsts)}")
+                "max-age=#{age}")
             end
           end
           check_doc_headers(ctx, resp.headers, acc) if ctx.html? && rendered_document?(resp.status)
@@ -50,17 +54,8 @@ module Gori
         end
 
         # HSTS with no max-age, or max-age=0 (RFC 6797: instructs the UA to DROP the policy), is
-        # effectively disabled even though the header is present.
-        private def hsts_disabled?(value : String) : Bool
-          age = hsts_max_age(value)
-          age.nil? || age == 0
-        end
-
-        private def short_hsts?(value : String) : Bool
-          age = hsts_max_age(value)
-          !age.nil? && age > 0 && age < SHORT_HSTS_MAX_AGE
-        end
-
+        # effectively disabled even though the header is present — `check` treats a nil/0 age as
+        # disabled and anything under SHORT_HSTS_MAX_AGE as short, off this single parse.
         private def hsts_max_age(value : String) : Int64?
           m = value.scrub.downcase.match(/max-age\s*=\s*"?(\d+)/) # scrub: a non-UTF-8 byte makes the PCRE match raise (cf. cors.cr)
           return nil if m.nil?

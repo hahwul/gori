@@ -490,6 +490,10 @@ module Gori
       end
 
       private def suppressed?(code : String, host : String) : Bool
+        # Called per Detection (a typical flow yields 8-15), so build the composite key only when
+        # there is something to look it up in. The set is empty unless the operator hard-deleted
+        # an issue this session, i.e. empty on the overwhelmingly common path.
+        return false if @suppressed.empty?
         @suppressed.includes?("#{code}|#{host}")
       end
 

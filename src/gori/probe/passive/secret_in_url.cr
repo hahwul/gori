@@ -42,9 +42,13 @@ module Gori
             return emit(acc, ctx, hit[0], Store::Severity::High)
           end
           # Otherwise rank by the name tier (High > Medium > Low); the highest present wins.
+          # Normalize each name ONCE up front: the tier loop used to re-normalize every param
+          # for every tier, so a URL with no sensitive name (the common case) ran `normalize` —
+          # a decode + downcase + character strip — three times per parameter.
+          norms = pairs.map { |(n, _)| normalize(n) }
           TIERS.each do |(sev, names)|
-            if hit = pairs.find { |(n, _)| names.includes?(normalize(n)) }
-              return emit(acc, ctx, hit[0], sev)
+            if idx = norms.index { |nm| names.includes?(nm) }
+              return emit(acc, ctx, pairs[idx][0], sev)
             end
           end
         end
@@ -55,8 +59,10 @@ module Gori
         end
 
         # Lowercase + strip '-'/'_' so hyphen/underscore/case variants collapse to one form.
+        # `delete` takes a char SET and is exactly equivalent to the old `gsub(/[-_]/, "")`,
+        # without spinning up a PCRE match per parameter name.
         private def normalize(name : String) : String
-          decode(name).downcase.gsub(/[-_]/, "")
+          decode(name).downcase.delete("-_")
         end
 
         private def display_name(name : String) : String

@@ -129,8 +129,11 @@ module Gori::Fuzz
         num_pass?(@match_size_c, length, default: true) &&
         num_pass?(@match_words_c, words.to_i64, default: true) &&
         num_pass?(@match_lines_c, lines.to_i64, default: true) &&
-        regex_pass?(@match_regex, text, default: true) &&
-        header_pass?(raw)
+        # header_pass? (an allocation-free byte scan over the short head) before regex_pass?
+        # (a PCRE match over the whole body): both are pure predicates, so `&&` short-circuits
+        # identically either way, but this order lets a failing --mh skip the body match.
+        header_pass?(raw) &&
+        regex_pass?(@match_regex, text, default: true)
     end
 
     # Any filter dimension that passes removes the result.
