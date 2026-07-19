@@ -20,11 +20,17 @@ license: Apache-2.0
 
 dependencies:
   termisu:
-    github: omarluq/termisu
-    version: ~> 0.5
-    # Back on upstream: the input/preedit fixes we forked for (double-English +
-    # jamo-separation: protocol_active dup-guard + Preedit for key=0 text events)
-    # are merged upstream as of v0.5.0.
+    github: hahwul/termisu
+    branch: main
+    # Temporarily on the fork again. Upstream 0.5.0/0.5.1 still `require`s
+    # `crystal/thread_local_value`, which Crystal 1.21 removed from the stdlib, so
+    # upstream does not compile on 1.21 at all. The fork carries only that fix
+    # (thread-keyed Hash in Termisu::FFI::ErrorState, no API change); it is queued
+    # for upstream. Go back to `omarluq/termisu` once it lands in a release.
+    #
+    # The earlier fork — input/preedit (double-English + jamo-separation:
+    # protocol_active dup-guard + Preedit for key=0 text events) — is upstream as of
+    # v0.5.0 and is included here via the fork's synced main.
 
   db:
     github: crystal-lang/crystal-db
