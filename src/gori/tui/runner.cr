@@ -6,6 +6,7 @@ require "./screen"
 require "./theme"
 require "./layout"
 require "./chrome"
+require "./preferences_view"
 require "./tab_controller"
 require "./controllers/help_controller"
 require "./controllers/target_controller"
@@ -24,7 +25,6 @@ require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/jwt_controller"
 require "./controllers/rewriter_controller"
-require "./controllers/settings_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
 require "./repeater_view"
@@ -206,6 +206,7 @@ module Gori::Tui
       @link_add_ref_kind = nil.as(Store::LinkRefKind?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
+      @preferences = PreferencesView.new # the unified grouped settings modal (Ctrl+, / ⚙ / palette)
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
       # from @tabs (the controller registry built below).
       @tabs_overlay = TabsOverlay.new
@@ -305,7 +306,6 @@ module Gori::Tui
         DecoderController.new(self),
         JwtController.new(self),
         RewriterController.new(self),
-        SettingsController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -934,6 +934,7 @@ module Gori::Tui
       when :repeater_subtab  then @subtab_picker.try(&.set_preedit(text))
       when :issue_pick       then @issue_picker.try(&.set_preedit(text))
       when :note_pick        then @note_picker.try(&.set_preedit(text))
+      when :preferences      then @preferences.set_preedit(text)
       when :settings         then @settings_view.set_preedit(text)
       when :hosts            then @hosts_overlay.set_preedit(text)
       when :env              then @env_overlay.set_preedit(text)
@@ -1024,6 +1025,7 @@ module Gori::Tui
       return handle_links_key(ev) if @overlay == :links
       return handle_issue_picker_key(ev) if @overlay == :issue_pick
       return handle_note_picker_key(ev) if @overlay == :note_pick
+      return handle_preferences_key(ev) if @overlay == :preferences
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
       return handle_hosts_key(ev) if @overlay == :hosts
@@ -1116,6 +1118,13 @@ module Gori::Tui
       if @overlay == :none && (ev.key.tab? || ev.key.back_tab?) &&
          !(@active_tab == :project && @focus == :body && project_controller.scope_adding?)
         focus_advance(ev.key.back_tab? || ev.shift? ? -1 : 1)
+        return
+      end
+
+      # Ctrl+, opens the unified Preferences modal from anywhere in-app (mirrors the
+      # picker's Ctrl+,). Claimed before the keymap so the chord always reaches settings.
+      if @overlay == :none && ev.ctrl? && ev.key.comma?
+        open_preferences
         return
       end
 
@@ -1290,7 +1299,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import then true
+      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import then true
       else                                                                                                                                                                                                                                                                                                                                                                        false
       end
     end
@@ -1388,6 +1397,7 @@ module Gori::Tui
       when :issue_pick       then click_issue_picker(area, mx, my)
       when :note_pick        then click_note_picker(area, mx, my)
       when :confirm          then click_confirm(area, mx, my)
+      when :preferences      then apply_preferences_outcome(@preferences.click(area, mx, my))
       when :settings         then click_settings(area, mx, my)
       when :tabs             then click_tabs(area, mx, my)
       when :hosts            then click_hosts(area, mx, my)
@@ -1412,9 +1422,9 @@ module Gori::Tui
 
     # Click a top-bar chip: the notification badge (`notify:N`, left of scope) opens
     # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
-    # action as the global `s` chord; the far-right `⌘` glyph opens the command
-    # palette (same as Ctrl/Cmd-P). Returns true when consumed. Each rect is
-    # rebuilt from the same tagged source render uses, so a click can't drift.
+    # action as the global `s` chord; the far-right `⌘`/`⚙` glyphs open the command
+    # palette (Ctrl/Cmd-P) / the Preferences modal (Ctrl+,). Returns true when consumed.
+    # Each rect is rebuilt from the same tagged source render uses, so a click can't drift.
     private def click_top_bar(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless rect.contains?(mx, my)
       unread = @notifications.unread
@@ -1443,6 +1453,14 @@ module Gori::Tui
         unread: unread, capturing: capturing, write_failures: write_failures)
       if prect && prect.contains?(mx, my)
         open_palette
+        return true
+      end
+
+      grect = Chrome.top_bar_chip_rect(rect, :settings, scope: scope_label, rules: rules_label,
+        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
+        unread: unread, capturing: capturing, write_failures: write_failures)
+      if grect && grect.contains?(mx, my)
+        open_preferences
         return true
       end
 
@@ -1688,6 +1706,7 @@ module Gori::Tui
       when :links           then @links_overlay.try(&.move(step))
       when :issue_pick      then @issue_picker.try(&.move(step))
       when :note_pick       then @note_picker.try(&.move(step))
+      when :preferences     then @preferences.wheel(step)
       when :settings        then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs            then @tabs_overlay.select_move(step)
       when :hosts           then @hosts_overlay.select_move(step)
@@ -3812,6 +3831,7 @@ module Gori::Tui
       @links_overlay.try(&.render(screen, layout.body)) if @overlay == :links
       @issue_picker.try(&.render(screen, layout.body)) if @overlay == :issue_pick
       @note_picker.try(&.render(screen, layout.body)) if @overlay == :note_pick
+      @preferences.render(screen, layout.body) if @overlay == :preferences
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       @hosts_overlay.render(screen, layout.body) if @overlay == :hosts
@@ -3926,6 +3946,7 @@ module Gori::Tui
       when :links            then @links_overlay.try(&.title) || "LINKS"
       when :issue_pick       then "PICK ISSUE"
       when :note_pick        then "PICK NOTE"
+      when :preferences      then "PREFERENCES"
       when :settings         then "SETTINGS"
       when :tabs             then "TAB BAR"
       when :hosts            then "HOSTNAME OVERRIDES"
@@ -3980,6 +4001,7 @@ module Gori::Tui
       when :links            then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
       when :issue_pick       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
       when :note_pick        then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when :preferences      then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
       when :settings         then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs             then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hosts            then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
@@ -4600,9 +4622,6 @@ module Gori::Tui
     def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
       flush_active_tab_edits
       @active_tab = tab
-      # A tab whose sub-tabs are the natural entry point (Settings: pick a group first)
-      # lands on the strip instead of drilling into the body on a "Go to …" jump.
-      focus = :subtabs if focus == :body && subtabs_shown? && @tabs[tab]?.try(&.enter_on_subtabs?)
       @focus = focus
       @menu_more = false
       @overlay = :none
@@ -5402,11 +5421,13 @@ module Gori::Tui
 
     def open_settings(section : Symbol) : Nil
       case section
-      when :network, :editor, :theme, :layout, :statusline, :display, :notifications, :general
-        @settings_view.reload(section)       # :theme reloads custom themes — may reconcile the live palette
-        @resized = true if section == :theme # so force a full repaint (an edited/removed active theme just changed)
+      when :network, :editor, :layout, :statusline, :display, :notifications, :general
+        open_preferences(section) # the unified grouped modal, positioned at this section
+      when :theme
+        @settings_view.reload(:theme)   # theme keeps its dedicated swatch-list card
+        @resized = true                 # an edited/removed active theme just changed → full repaint
         @overlay = :settings
-        @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
+        @theme_restore = Settings.theme # baseline for live-preview revert
       when :tabs
         @tabs_overlay.reset # rebuild the working copy from persisted config
         @overlay = :tabs
@@ -5421,6 +5442,29 @@ module Gori::Tui
         @overlay = :hotkeys
       else
         @toast = "#{section} settings — coming soon (TODO)"
+      end
+    end
+
+    # Open the unified Preferences modal — at a specific section (the "Settings: …" palette
+    # entries) or, with no section, at the group strip (Ctrl+, / the ⚙ top-bar chip). The
+    # project picker shares the SAME PreferencesView; only in-app can reach the dedicated
+    # editors from opener rows, so the picker builds its view with allow_openers: false.
+    def open_preferences(section : Symbol? = nil) : Nil
+      section ? @preferences.open(section) : @preferences.open_default
+      @overlay = :preferences
+    end
+
+    private def handle_preferences_key(ev : Termisu::Event::Key) : Nil
+      apply_preferences_outcome(@preferences.handle_key(ev))
+    end
+
+    # Act on what the modal asked for: close, live-apply a save (via the shared
+    # apply_settings_saved seam), or open a dedicated editor (theme/tabs/hosts/env/hotkeys).
+    private def apply_preferences_outcome(outcome : PreferencesView::Outcome) : Nil
+      case outcome.kind
+      when :close then @overlay = :none
+      when :saved then @toast = apply_settings_saved(outcome.section.not_nil!, outcome.message || "")
+      when :open  then open_settings(outcome.section.not_nil!)
       end
     end
 

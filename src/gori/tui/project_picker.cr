@@ -10,6 +10,7 @@ require "./theme"
 require "./frame"
 require "./confirm_dialog"
 require "./settings_view"
+require "./preferences_view"
 require "./compact_overlay"
 
 module Gori::Tui
@@ -72,7 +73,10 @@ module Gori::Tui
       # Rename prompt (display name only — directory slug stays put).
       @pending_rename = nil.as(Project?)
       @rename_name = ""
-      @settings = SettingsView.new # the config editor (ctrl-, → :settings mode)
+      # The SAME unified Preferences modal used in-app (Ctrl+,), so pre-project settings
+      # aren't a separate surface. allow_openers: false — the picker has none of the
+      # dedicated editors (theme/tabs/env/hotkeys), so those rows are hidden here.
+      @preferences = PreferencesView.new(allow_openers: false)
       @running_cache = {} of String => RunningProbe
       @art_frame = 0  # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
       @star_frame = 0 # starfield twinkle clock; unlike @art_frame it never freezes (wraps via &+)
@@ -96,7 +100,7 @@ module Gori::Tui
           result = case @mode
                    when :new      then handle_new(ev)
                    when :confirm  then handle_confirm(ev)
-                   when :settings then handle_settings(ev)
+                   when :settings then handle_preferences(ev)
                    when :space    then handle_space(ev)
                    when :rename   then handle_rename(ev)
                    when :compress then handle_compress(ev)
@@ -116,7 +120,7 @@ module Gori::Tui
           # Live IME composition for whichever field is active; the committed
           # syllable arrives afterwards as a normal Key and clears this.
           if @mode == :settings
-            @settings.set_preedit(ev.text)
+            @preferences.set_preedit(ev.text)
           else
             @preedit = ev.text
           end
@@ -199,37 +203,18 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_d?
         request_delete
       elsif ev.ctrl? && key.comma?
-        @settings.reload
+        @preferences.open_default
         @mode = :settings
       end
       nil
     end
 
-    # Settings (config) editor: ↑/↓ pick a field, type to edit, ↵ save, esc back.
-    private def handle_settings(ev : Termisu::Event::Key) : Project | Symbol | Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      @preedit = ""
-      if key.escape?
-        @mode = :list
-      elsif key.enter?
-        @settings.save # the view shows its own saved/invalid status
-      elsif key.up?
-        @settings.move_field(-1)
-      elsif key.down?
-        @settings.move_field(1)
-      elsif key.left?
-        @settings.move_cursor(-1)
-      elsif key.right?
-        @settings.move_cursor(1)
-      elsif key.backspace?
-        @settings.backspace
-      elsif ev.ctrl_c?
-        return :quit
-      elsif c && !ev.ctrl? && !ev.alt?
-        @settings.insert(c)
-        @settings.set_preedit("")
-      end
+    # The unified Preferences modal (Ctrl+,). The view handles editing/navigation itself;
+    # we only act on its Outcome — :close pops back to the list, a save just persists (no
+    # live proxy to re-apply pre-project). ^C still quits the picker.
+    private def handle_preferences(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      return :quit if ev.ctrl_c?
+      @mode = :list if @preferences.handle_key(ev).kind == :close
       nil
     end
 
@@ -644,7 +629,7 @@ module Gori::Tui
       end
       case @mode
       when :confirm  then handle_confirm_mouse(w, h, mx, my)
-      when :settings then handle_settings_mouse(w, h, mx, my)
+      when :settings then handle_preferences_mouse(w, h, mx, my)
       when :space    then handle_space_mouse(w, h, mx, my)
       when :compress then handle_compress_mouse(w, h, mx, my)
       when :compressing  then nil # blocking VACUUM in progress — ignore clicks
@@ -685,7 +670,7 @@ module Gori::Tui
 
     private def picker_wheel(delta : Int32) : Nil
       case @mode
-      when :settings                then @settings.move_field(delta)
+      when :settings                then @preferences.wheel(delta)
       when :space                   then @space_selected = (@space_selected + delta.sign).clamp(0, SPACE_ENTRIES.size - 1)
       when :compress                then @compact.try(&.move(delta.sign))
       when :new, :confirm, :rename, :compressing then nil # nothing to scroll
@@ -704,16 +689,9 @@ module Gori::Tui
       end
     end
 
-    private def handle_settings_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
-      area = Rect.new(0, 0, w, h)
-      box = @settings.overlay_box(area)
-      if box.contains?(mx, my)
-        if idx = @settings.field_at(box, mx, my)
-          @settings.set_field(idx)
-        end
-      else
-        @mode = :list # click outside the settings card → back to the list
-      end
+    private def handle_preferences_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      # click outside the card → the view returns :close, which pops back to the list
+      @mode = :list if @preferences.click(Rect.new(0, 0, w, h), mx, my).kind == :close
     end
 
     private def handle_space_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Project | Symbol | Nil
@@ -864,7 +842,7 @@ module Gori::Tui
       else
         render_list(screen, cx, cw, w, h)
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
-        @settings.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
+        @preferences.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
         render_space_menu(screen, w, h) if @mode == :space
         @compact.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :compress
         render_compressing(screen, w, h) if @mode == :compressing || @mode == :measuring

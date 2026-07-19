@@ -24,13 +24,12 @@ module Gori::Tui
       {:issues, "Issues"},
       {:notes, "Notes"},
       {:help, "Help"},
-      {:prefs, "Settings"},
     ]
 
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Only
     # affects reconcile's append path — once the user saves, tab_prefs is explicit and
     # this no longer applies.
-    DEFAULT_HIDDEN = [:miner, :sequencer, :jwt, :rewriter, :prefs]
+    DEFAULT_HIDDEN = [:miner, :sequencer, :jwt, :rewriter]
 
     # The human sidebar label for a tab symbol (the catalog name), used off the render
     # path too — e.g. the terminal-window title. Falls back to a capitalized symbol for
@@ -211,9 +210,11 @@ module Gori::Tui
       label, color = listen_chip(listen, capturing, write_failures)
       chips << {:listen, label, color}
       chips << {:time, time, Theme.muted}
-      # Far-right command-palette affordance — same action as Ctrl/Cmd-P. Always
-      # present so a mouse user can open the palette without knowing the chord.
+      # Far-right affordances — same actions as their chords, always present so a mouse
+      # user can reach them without knowing the keys: ⌘ opens the command palette
+      # (Ctrl/Cmd-P), ⚙ opens the unified Preferences modal (Ctrl+,).
       chips << {:palette, "⌘", Theme.text}
+      chips << {:settings, "⚙", Theme.text}
       chips
     end
 
