@@ -88,6 +88,30 @@ module Gori::Tui
     getter scroll : Int32
     getter? gutter : Bool
 
+    # The exact LF form `set_text` would store for `text` — the single source of truth for
+    # "does this incoming string already match what the buffer holds?".
+    #
+    # Every poll-driven reconcile path (RepeaterView#request_side_matches? /
+    # #apply_peer_request, FuzzerView#session_side_matches? / #apply_peer_session,
+    # NotesView#soft_merge_from) compares an incoming store string against `#text` BEFORE
+    # calling set_text, because set_text zeroes the caret + scroll and CLEARS THE UNDO STACK.
+    # The buffer is always LF (set_text below splits on \n and rstrips \r) while the store can
+    # hold wire CRLF — MCP create_repeater/create_note + update_note, `gori run notes create`
+    # piping a raw request or a CRLF file, import, or a peer session all write the body
+    # verbatim. So a raw `==` is falsely unequal on EVERY poll, the guard never fires, and the
+    # caret is slammed back to 0,0 (and undo wiped) on every data_version tick (~1.3×/s while
+    # capturing). Lives here, next to set_text, because set_text is what defines the answer:
+    # the two cannot drift.
+    #
+    # Mirrors set_text's split/rstrip rather than a blanket \r→\n gsub deliberately: a LONE \r
+    # mid-line is data set_text KEEPS on the line, whereas a gsub would split it into a second
+    # line and report a spurious mismatch — the very false-negative this exists to kill.
+    def self.normalize_lf(text : String) : String
+      return text unless text.includes?('\r') # the overwhelmingly common case — no allocation
+      text.split('\n').map(&.rstrip('\r')).join('\n')
+    end
+
+    # NOTE: `self.normalize_lf` above mirrors this line — keep them in step.
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
       @lines = [""] if @lines.empty?

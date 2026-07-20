@@ -413,4 +413,20 @@ describe Gori::Tui::TextArea do
       (0...8).count { |y| off.grid[y][col] == '┃' }.should eq(0)
     end
   end
+
+  describe ".normalize_lf" do
+    # The contract is exactly "what set_text would store", since every reconcile guard uses it
+    # to decide whether set_text (caret/scroll/undo destroying) can be skipped.
+    it "returns the text set_text would store, for CRLF, bare LF and lone CR" do
+      {"a\r\nb\r\n\r\n", "a\nb\n\n", "plain", "", "a\rb", "tail\r"}.each do |s|
+        TextArea.normalize_lf(s).should eq(TextArea.new(s).text)
+      end
+    end
+
+    # A blanket \r→\n gsub would split "a\rb" into two lines and report a spurious mismatch;
+    # set_text keeps the lone \r on the line, so normalize_lf must too.
+    it "keeps a lone mid-line CR instead of splitting it into a new line" do
+      TextArea.normalize_lf("a\rb").should eq("a\rb")
+    end
+  end
 end

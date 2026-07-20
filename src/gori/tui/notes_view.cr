@@ -106,8 +106,16 @@ module Gori::Tui
       merged = [] of Note
       doc.notes.each do |e|
         if existing = by_id[e.id]?
-          if existing.area.text != e.text
-            # Peer (or our own saved) content changed — replace body; caret resets with set_text.
+          # Compare on a CRLF-normalized basis: the TextArea buffer is ALWAYS LF (set_text
+          # strips \r) while NoteEntry#text is whatever was written into the JSON KV verbatim,
+          # and several writers store wire CRLF — MCP create_note/update_note pass the caller's
+          # string straight through, and `gori run notes create` takes its body from --text /
+          # positional args / STDIN (piping a CRLF file, or `gori run flow N --raw`, stores
+          # CRLF). Without normalizing, a CRLF note compares unequal on EVERY poll, so set_text
+          # re-ran ~1.3×/s during capture and zeroed the caret + scroll and cleared undo.
+          if existing.area.text != TextArea.normalize_lf(e.text)
+            # Peer (or our own saved) content genuinely changed — replace body; caret resets
+            # with set_text, which is correct here: the text under it is no longer the same.
             existing.area.set_text(e.text)
           end
           # Same text → keep the TextArea object (caret/scroll/undo stack intact).
