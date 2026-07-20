@@ -801,6 +801,18 @@ module Gori::Tui
       # column_width (not display_width) to match the actual draw: a raw control char
       # occupies one drawn cell, so measuring it as width 0 here would let the caret render
       # outside the window (cursor detaches / no scroll-into-view).
+      #
+      # KNOWN LIMITATION (grapheme clusters). These columns are per-CODEPOINT because the
+      # caret is: @cx is a char index and `move` steps it raw, so the caret genuinely can
+      # park inside a ZWJ/skin-tone cluster. But Highlight.slice_left consumes @xscroll in
+      # per-CLUSTER (drawn) columns. On a line holding a multi-codepoint cluster the two
+      # disagree by the cluster's "inflation" (codepoint columns minus drawn columns: 1 for
+      # a skin tone, 3 for a ZWJ pair, 9 for a 4-person family), so the view can over-scroll
+      # by up to that many columns and show trailing blanks. It can only blank the row
+      # entirely when the pane is narrower than 1 + inflation (< 10 cols for the worst
+      # case), which no real pane is. Not fixable here: making this per-cluster would
+      # desync it from `cxs`/`prefix_w` below, which are per-codepoint to track the caret —
+      # reconciling the two IS the caret-model change, so it belongs in its own PR.
       full = concealed ? concealed_col(line, cr.not_nil!, line.size) : Screen.column_width(line)
       if full + pw <= cw
         @xscroll = 0

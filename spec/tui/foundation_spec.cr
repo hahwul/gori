@@ -56,6 +56,68 @@ describe Gori::Tui::Screen do
     Screen.column_width_upto("a\tb", 2).should eq(2)
   end
 
+  # The three measures, pinned side by side. They are NOT interchangeable, and picking the
+  # wrong one is exactly how the draw-alignment sites drifted: display_width under-counts a
+  # C0 control (Unicode width 0, but `cell` still paints a space there), column_width
+  # over-counts a multi-codepoint cluster (it floors every CODEPOINT to ≥1, right for the
+  # per-codepoint caret, wrong for a draw), and draw_width matches the cells actually
+  # painted because it floors per CLUSTER — the same walk `#text` / `Highlight.draw` do.
+  describe "display_width vs column_width vs draw_width" do
+    skin = "\u{1F44D}\u{1F3FD}"                                             # 👍🏽 thumbs-up + skin-tone modifier (2 cps)
+    zwj = "\u{1F468}\u{200D}\u{1F4BB}"                                      # 👨‍💻 man + ZWJ + laptop (3 cps)
+    family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}" # 👨‍👩‍👧‍👦 4 people + 3 ZWJ (7 cps)
+
+    # {label, string, display_width, column_width, draw_width}
+    cases = [
+      {"tab", "a\tb", 2, 3, 3},            # control: display under-counts; the tab owns a cell
+      {"ZWSP", "a\u{200B}b", 2, 3, 3},     # zero-width space: same, it still gets a cell
+      {"skin tone", skin, 2, 3, 2},        # 1 cluster, 1 glyph → 2 cols drawn, not 3
+      {"ZWJ", zwj, 2, 5, 2},               # column_width drifts 3
+      {"family", family, 2, 11, 2},        # column_width drifts 9 — the worst case
+      {"CJK", "한글", 4, 4, 4},              # wide but single-codepoint: all three agree
+      {"combining", "e\u{0301}", 1, 2, 1}, # é as e + U+0301: cluster is 1 col, not 2
+    ]
+
+    cases.each do |(label, str, dw, cw, gw)|
+      it "measures #{label} as display=#{dw} column=#{cw} draw=#{gw}" do
+        Screen.display_width(str).should eq(dw)
+        Screen.column_width(str).should eq(cw)
+        Screen.draw_width(str).should eq(gw)
+      end
+    end
+
+    it "draw_width equals the columns Screen#text actually advances" do
+      # The authoritative check: whatever `text` returns as its end-x IS the drawn width.
+      cases.each do |(label, str, _, _, gw)|
+        b = MemoryBackend.new(40, 1)
+        Screen.new(b).text(0, 0, str, Theme.text).should eq(gw) # (#{label})
+      end
+    end
+
+    it "draw_width_upto early-exits without walking the rest of the line" do
+      # Same contract as display_width_upto / column_width_upto: returns a value >= limit
+      # once reached, exact below it. The h-scroll clamps run per frame, so a minified
+      # multi-MB line must never be measured in full.
+      Screen.draw_width_upto(zwj + "abcdefgh", 100).should eq(10) # exact under the limit
+      Screen.draw_width_upto(zwj + "abcdefgh", 4).should be >= 4  # stopped early
+      Screen.draw_width_upto("", 5).should eq(0)
+      Screen.draw_width_upto("abc", 0).should eq(0)
+      # ASCII fast path stays exact and capped
+      Screen.draw_width_upto("abcdef", 3).should eq(3)
+      Screen.draw_width_upto("abcdef", 99).should eq(6)
+    end
+
+    it "draw_width keeps the ASCII fast path exact (1 char == 1 cluster per line)" do
+      # The fast path returns str.size. That is EXACT rather than approximate because the
+      # only multi-char ASCII grapheme cluster is CRLF, and no rendered line can hold one
+      # (every caller splits on '\n' first). Tabs and lone CRs still count as one cell.
+      Screen.draw_width("hello").should eq(5)
+      Screen.draw_width("a\tb").should eq(3)
+      Screen.draw_width("ab\rc").should eq(4)
+      Screen.draw_width("").should eq(0)
+    end
+  end
+
   it "text draws a tab as a one-column space (ASCII and mixed paths)" do
     # ASCII fast path
     b1 = MemoryBackend.new(10, 1)

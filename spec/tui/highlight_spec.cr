@@ -390,6 +390,102 @@ describe Gori::Tui::Highlight do
     end
   end
 
+  # Grapheme-cluster alignment. `column_width` floors every CODEPOINT to ≥1, so a ZWJ /
+  # skin-tone cluster measured that way is 3-9 columns wider than the single glyph `draw`
+  # paints. Measuring the h-scroll clamp and the slice per CLUSTER (Screen.draw_width) is
+  # what keeps them lined up with the cells — and stops the slicer cutting a cluster in half.
+  describe "grapheme clusters (draw alignment)" do
+    zwj = "\u{1F468}\u{200D}\u{1F4BB}"                                      # 👨‍💻 (3 cps, 2 cols)
+    family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}" # 👨‍👩‍👧‍👦 (7 cps, 2 cols)
+
+    it "line_width measures a cluster as its DRAWN columns, not its codepoint count" do
+      # Under column_width these were 5 and 11, letting the h-scroll clamp run the view
+      # 3 (resp. 9) columns past the end of the content.
+      Highlight.line_width([Highlight::Span.new(zwj, Theme.text)]).should eq(2)
+      Highlight.line_width([Highlight::Span.new(family, Theme.text)]).should eq(2)
+      line = [Highlight::Span.new(zwj, Theme.text), Highlight::Span.new("abc", Theme.text)]
+      Highlight.line_width(line).should eq(5)
+      Highlight.line_width_upto(line, 99).should eq(5)
+      Highlight.line_width_upto(line, 3).should be >= 3 # early exit still honoured
+    end
+
+    it "line_width agrees with what draw actually advances" do
+      line = [Highlight::Span.new(zwj, Theme.text), Highlight::Span.new("abc", Theme.text)]
+      b = MemoryBackend.new(40, 1)
+      Highlight.draw(Screen.new(b), 0, 0, line, width: 40).should eq(Highlight.line_width(line))
+    end
+
+    it "slice_left never emits a partial cluster (no bare ZWJ / orphan modifier)" do
+      # The bug: a per-codepoint cut could stop between 👨 and 💻 and emit the ZWJ (or the
+      # tail half) as its own "glyph". A cluster must be all-or-nothing — kept whole, or
+      # replaced by spaces when the cut straddles it.
+      # An INTACT cluster of course still contains its ZWJ, so the assertion is on the
+      # RESIDUE: delete every whole cluster from the output and nothing cluster-internal
+      # (ZWJ, skin-tone modifier, either half of the pair) may be left behind.
+      {zwj, family, "\u{1F44D}\u{1F3FD}"}.each do |emoji|
+        line = [Highlight::Span.new(emoji + "abcdef", Theme.text)]
+        (0..8).each do |col|
+          sliced = Highlight.slice_left(line, col).map(&.text).join
+          # Only the padding spaces and "abcdef" may remain — any leaked ZWJ, skin-tone
+          # modifier or half-cluster would be non-ASCII and trip this. (col=#{col})
+          sliced.gsub(emoji, "").ascii_only?.should be_true
+          # And the cluster is either wholly present or wholly gone — never split.
+          sliced.count(emoji[0]).should eq(sliced.includes?(emoji) ? 1 : 0)
+        end
+      end
+    end
+
+    it "slice_left_text never emits a partial cluster either" do
+      (0..8).each do |col|
+        sliced = Highlight.slice_left_text(family + "abcdef", col)
+        sliced.gsub(family, "").ascii_only?.should be_true
+      end
+    end
+
+    it "slice_left cuts in DRAWN columns so the remainder lines up with the cells" do
+      # zwj is 2 drawn columns, so cutting 2 leaves exactly "abc" — under the old
+      # per-codepoint math this needed a cut of 5 and any smaller cut leaked cluster parts.
+      Highlight.slice_left([Highlight::Span.new(zwj + "abc", Theme.text)], 2)
+        .map(&.text).join.should eq("abc")
+      Highlight.slice_left_text(zwj + "abc", 2).should eq("abc")
+      # Cutting INTO the cluster replaces it with blanks (it cannot be half-drawn).
+      Highlight.slice_left_text(zwj + "abc", 1).should eq(" abc")
+      # Identity below the cut, and tabs still count as their one cell.
+      Highlight.slice_left_text(zwj + "abc", 0).should eq(zwj + "abc")
+      Highlight.slice_left_text("a\tbc", 2).should eq("bc")
+    end
+  end
+
+  # The search overlay repaints cells the base draw already painted, using screen.text
+  # (grapheme-walked). Its column must therefore be grapheme-summed too, or the yellow
+  # band lands right of the match and covers unrelated glyphs.
+  describe "SearchHi column alignment" do
+    it "highlights the match columns after a ZWJ emoji, not 3 columns right of them" do
+      zwj = "\u{1F468}\u{200D}\u{1F4BB}"
+      text = zwj + "needle"
+      b = MemoryBackend.new(40, 1)
+      screen = Screen.new(b)
+      screen.text(0, 0, text, Theme.text)
+      SearchHi.mark(screen, 0, 0, text, "needle", 40)
+      # The emoji occupies cols 0-1, so "needle" is drawn at cols 2..7 and that is exactly
+      # where the yellow band must sit. Under column_width it started at col 5.
+      (2...8).each { |x| b.bg_at(x, 0).should eq(Theme.yellow) }
+      b.bg_at(1, 0).should_not eq(Theme.yellow) # emoji untouched
+      b.bg_at(8, 0).should_not eq(Theme.yellow) # nothing past the match
+      b.row(0)[2, 6].should eq("needle")
+    end
+
+    it "still lands correctly after a tab (issue #278 case, ASCII path)" do
+      text = "a\tneedle"
+      b = MemoryBackend.new(40, 1)
+      screen = Screen.new(b)
+      screen.text(0, 0, text, Theme.text)
+      SearchHi.mark(screen, 0, 0, text, "needle", 40)
+      (2...8).each { |x| b.bg_at(x, 0).should eq(Theme.yellow) }
+      b.bg_at(1, 0).should_not eq(Theme.yellow)
+    end
+  end
+
   # The body tokenizers were rewritten from `raw.chars` + `.join` to a byte-scan. These
   # reference impls are the ORIGINAL char-based tokenizers, kept here to fuzz-verify the byte
   # version is span-for-span identical (text + colour) across ASCII + multibyte inputs.
