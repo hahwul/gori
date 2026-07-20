@@ -680,6 +680,124 @@ kbd {
   background: rgb(var(--accent-rgb) / 0.12);
 }
 
+/* Install one-liner under the CTAs: pick a channel, the line updates, one
+   click copies it. The docker command is long and scrolls inside the code
+   element instead of wrapping the widget. */
+.hero-install {
+  max-width: 35rem;
+  margin-top: 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(var(--ink-rgb) / 0.03);
+}
+
+.install-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.install-tab {
+  padding: 0.24rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.install-tab:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+
+.install-tab[aria-pressed="true"] {
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent-strong);
+}
+
+.install-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.62rem 0.6rem 0.62rem 0.95rem;
+}
+
+/* Undo the inline-code chip styling: in here the command is the content, not
+   a token inside prose. */
+.install-line code {
+  flex: 1 1 auto;
+  /* A flex item's min-width:auto would refuse to shrink below the command's
+     full width, blowing the hero grid past narrow viewports. */
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* The prompt glyph lives outside the copied text (pseudo-element text never
+   lands in a selection or the clipboard). */
+.install-line code::before {
+  content: "$ ";
+  color: var(--accent);
+}
+
+.install-copy {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.install-copy:hover {
+  color: var(--heading);
+  border-color: var(--line-strong);
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+
+.install-copy svg {
+  width: 15px;
+  height: 15px;
+}
+
+.install-copy svg:last-child {
+  display: none;
+}
+
+.install-copy.copied {
+  color: var(--accent-strong);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.install-copy.copied svg:first-child {
+  display: none;
+}
+
+.install-copy.copied svg:last-child {
+  display: block;
+}
+
 /* The disc lives in its own element so it can clip the drifting image, while
    .hero-art stays unclipped and carries the two orbits around it. The width
    stays under 100% of the column so those orbits never reach the page edge. */
@@ -1508,22 +1626,22 @@ kbd {
 }
 
 .sidebar-section {
-  margin-bottom: 0.9rem;
+  margin-bottom: 1.05rem;
 }
 
+/* Section titles are bold sans in natural case so they read as a different
+   level from the mono-caps group labels (CORE, WORKBENCHES) inside them. */
 .sidebar-title {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.3rem 0.75rem;
-  margin-bottom: 0.35rem;
+  padding: 0.34rem 0.75rem;
+  margin-bottom: 0.3rem;
   border-radius: var(--radius-sm);
-  color: var(--quiet);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
+  color: var(--muted);
+  font-size: 0.88rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   cursor: pointer;
   list-style: none;
   transition: color var(--transition), background var(--transition);
@@ -1534,8 +1652,14 @@ kbd {
   display: none;
 }
 
+/* The open section is the one being read: its title steps forward while the
+   collapsed ones stay recessed. */
+.sidebar-section[open] > .sidebar-title {
+  color: var(--heading);
+}
+
 .sidebar-title:hover {
-  color: var(--muted);
+  color: var(--heading);
   background: rgb(var(--ink-rgb) / 0.05);
 }
 
@@ -1560,49 +1684,71 @@ kbd {
   opacity: 1;
 }
 
+/* A hairline rail turns the flat link pile into a tree: pages hang off their
+   section, and the active page pins a gold marker onto the rail itself. */
 .sidebar-links {
   list-style: none;
+  margin-left: 1.05rem;
+  border-left: 1px solid var(--line);
 }
 
 .sidebar-subhead {
-  margin: 0.7rem 0 0.2rem;
-  padding: 0 0.78rem;
+  margin: 0.75rem 0 0.2rem;
+  padding: 0 0.8rem;
   color: var(--quiet);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
 .sidebar-links li {
-  margin-bottom: 0.12rem;
+  margin-bottom: 0.1rem;
 }
 
 .sidebar-links a {
   position: relative;
   display: block;
-  padding: 0.42rem 0.72rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.35;
+  padding: 0.38rem 0.7rem 0.38rem 0.8rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.4;
   text-decoration: none;
-  transition: color var(--transition), background var(--transition), border-color var(--transition);
+  transition: color var(--transition), background var(--transition);
+}
+
+/* The marker sits on the rail (the ul border), not inside the link box. */
+.sidebar-links a::before {
+  content: "";
+  position: absolute;
+  top: 0.3rem;
+  bottom: 0.3rem;
+  left: -1px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background var(--transition);
 }
 
 .sidebar-links a:hover {
-  border-color: var(--line);
-  background: rgb(var(--ink-rgb) / 0.06);
+  background: rgb(var(--ink-rgb) / 0.05);
   color: var(--heading);
 }
 
+.sidebar-links a:hover::before {
+  background: var(--line-strong);
+}
+
 .sidebar-links a.active {
-  border-color: rgb(var(--accent-rgb) / 0.35);
-  background: rgb(var(--accent-rgb) / 0.12);
+  background: rgb(var(--accent-rgb) / 0.1);
   color: var(--accent-strong);
   font-weight: 600;
+}
+
+.sidebar-links a.active::before {
+  background: var(--accent);
 }
 
 .docs-main {
