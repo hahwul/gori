@@ -323,6 +323,34 @@ describe Gori::Tui::RepeaterView do
     view.request_text.includes?("Content-Length: 99").should be_false
   end
 
+  # Reconcile fires on every capture-driven data_version tick. The editor holds LF (set_text
+  # strips \r) but the store may hold wire CRLF (MCP create_repeater / import / a peer), so a
+  # naive request_text == row.request compare was LF-vs-CRLF false EVERY poll → apply_peer_request
+  # → set_text → request caret slammed to the top of the pane (only visible in READ mode; INS
+  # locks the tab out of reconcile). request_side_matches? must normalize CRLF so reconcile skips.
+  it "request_side_matches? treats a CRLF-stored request as equal to the LF editor buffer" do
+    view = RepeaterView.new
+    view.restore("https://h.test", "GET /a HTTP/1.1\nHost: h.test\n\n", false, false)
+    crlf_row = "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n"
+    view.request_side_matches?("https://h.test", crlf_row, false, false, nil).should be_true
+  end
+
+  # A soft reconcile sync that only touched a non-text field (here: the http2 flag) must not
+  # rewrite the editor — set_text zeroes the caret + scroll and clears undo. Guarded like
+  # FuzzerView#apply_peer_session / NotesView#soft_merge_from.
+  it "apply_peer_request keeps the request caret when only a non-text field changed" do
+    view = RepeaterView.new
+    view.restore("https://h.test", "GET /aaa HTTP/1.1\nHost: h.test\nX-A: 1\nX-B: 2\n\n", false, false)
+    view.pane_advance(1)      # :target → :request
+    view.goto_request_line(3) # caret at "X-A: 1", col 0
+    # Same request (as wire CRLF), only http2 flipped → text unchanged → set_text skipped.
+    view.apply_peer_request("https://h.test",
+      "GET /aaa HTTP/1.1\r\nHost: h.test\r\nX-A: 1\r\nX-B: 2\r\n\r\n", true, false)
+    view.edit_insert('Z')
+    view.request_text.includes?("ZX-A: 1").should be_true # caret preserved mid-buffer
+    view.request_text.includes?("ZGET").should be_false   # NOT reset to the top
+  end
+
   it "sends a lone § (no complete §…§ region) verbatim — byte-identical to today" do
     view = RepeaterView.new
     # a single § doesn't form a §…§ region, so there's nothing to render — sent as typed.
