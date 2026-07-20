@@ -360,7 +360,7 @@ module Gori::Tui
     # --- rendering ------------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
-               listen : String? = nil, capturing : Bool = true) : Nil
+               listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       if @detail
         render_detail(screen, rect, focused)
@@ -376,7 +376,7 @@ module Gori::Tui
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool, *,
-                            listen : String? = nil, capturing : Bool = true) : Nil
+                            listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_mode_band(screen, rect)
       render_filter_bar(screen, rect, rect.y + 1)
       screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
@@ -480,7 +480,7 @@ module Gori::Tui
     end
 
     private def render_empty(screen : Screen, rect : Rect, top : Int32, *,
-                             listen : String? = nil, capturing : Bool = true) : Nil
+                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty set
       # is caused by the triage lens or the scope lens, where "esc clears the filter"
       # would mislead. Mirrors HistoryView/SitemapView's ordering.
@@ -493,8 +493,7 @@ module Gori::Tui
       elsif scope_active?
         screen.text(rect.x + 1, top, "no issues in scope · ⇧S clears the scope lens", Theme.muted)
       else
-        addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
-        TrafficEmptyState.render(screen, list_rect, variant: :probe, listen: addr,
+        TrafficEmptyState.render(screen, list_rect, variant: :probe, listen: listen,
           capturing: capturing, scan_on: !@mode.off?,
           title: @mode.off? ? "scanning is OFF" : "no issues yet")
       end

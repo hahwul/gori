@@ -57,7 +57,7 @@ describe Gori::Tui::InterceptView do
       view.reload(ic)
       backend = MemoryBackend.new(80, 14)
       view.render(Screen.new(backend), Rect.new(0, 0, 80, 14),
-        listen: "127.0.0.1:8070", capturing: true)
+        listen: {"127.0.0.1", 8070}, capturing: true)
       backend.contains?("no held messages").should be_true
       backend.contains?("INTERCEPT").should be_true
       backend.contains?("i:CATCH").should be_true

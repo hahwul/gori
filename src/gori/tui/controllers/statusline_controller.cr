@@ -1,5 +1,6 @@
 require "json"
 require "../ansi"
+require "../../bind_address"
 require "../../settings"
 
 module Gori::Tui
@@ -217,7 +218,12 @@ module Gori::Tui
             j.object do
               j.field "host", host
               j.field "port", port
-              j.field "addr", "#{host}:#{port}"
+              # `authority`, NOT `display`: this is a machine contract a user's script
+              # parses, so it keeps the RAW bind semantics (no wildcard→loopback collapse,
+              # which would hide a fact the script may want) and only gains the IPv6
+              # bracketing an authority string requires — bare interpolation rendered a
+              # `::1` bind as the unparseable "::1:8070".
+              j.field "addr", BindAddress.authority(host, port)
             end
           end
           j.field "upstream", Settings.effective_upstream_proxy

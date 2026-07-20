@@ -1,4 +1,5 @@
 require "termisu"
+require "../bind_address"
 require "../verb"
 require "../store"
 require "../session"
@@ -1434,7 +1435,7 @@ module Gori::Tui
     private def click_top_bar(rect : Rect, mx : Int32, my : Int32) : Bool
       tag = Chrome.top_bar_chip_at(rect, mx, my, scope: scope_label, probe: probe_label,
         rules: rules_label, intercept: intercept_label, sandbox: sandbox_label,
-        listen: "#{@session.proxy.host}:#{@session.proxy.port}",
+        listen: listen_chip_label,
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures)
       return false unless tag
@@ -3794,7 +3795,7 @@ module Gori::Tui
 
       layout = Layout.compute(w, h, statusline_active?)
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
-        listen: "#{@session.proxy.host}:#{@session.proxy.port}",
+        listen: listen_chip_label,
         scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
         sandbox: sandbox_label,
         unread: @notifications.unread, capturing: @session.capturing?,
@@ -3887,6 +3888,15 @@ module Gori::Tui
 
     private def scope_label : String
       @scope.active? ? "scope:#{@scope.size}" : "scope:off"
+    end
+
+    # The address on the top-bar listen chip. TERSE: the bar is a dense right-aligned chip
+    # row that already floors the project name to fit, so the "(all interfaces)" note a
+    # wildcard bind gets elsewhere has no budget here. The address itself is the same
+    # BindAddress render every other surface shows, so a wildcard still reads as a
+    # dialable "localhost:8070" rather than the unusable "0.0.0.0:8070".
+    private def listen_chip_label : String
+      BindAddress.display(@session.proxy.host, @session.proxy.port, terse: true)
     end
 
     # The probe chip, always present like scope: passive scanning is on by default, so an
@@ -5331,14 +5341,17 @@ module Gori::Tui
       begin
         proxy.rebind(eff_host, eff_port)
         @session.sync_capture_status!
+        # These toasts tell the user where to REPOINT a client, so they carry the full
+        # BindAddress render — a wildcard bind must not tell them to type "0.0.0.0:8070".
+        addr = BindAddress.display(proxy.host, proxy.port)
         if @session.capturing?
-          "settings saved — now listening on #{proxy.host}:#{proxy.port} (repoint your client)"
+          "settings saved — now listening on #{addr} (repoint your client)"
         else
           # capture is off: rebind only records the new address; the user starts it.
-          "settings saved — bind set to #{proxy.host}:#{proxy.port}; press c to start capture"
+          "settings saved — bind set to #{addr}; press c to start capture"
         end
       rescue ex
-        "settings saved, but rebind failed: #{ex.message} (kept #{proxy.host}:#{proxy.port})"
+        "settings saved, but rebind failed: #{ex.message} (kept #{BindAddress.display(proxy.host, proxy.port)})"
       end
     end
 

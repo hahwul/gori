@@ -571,7 +571,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
-               listen : String? = nil, capturing : Bool = true) : Nil
+               listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
@@ -596,8 +596,7 @@ module Gori::Tui
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no endpoints in scope", nil}
           else
-            addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
-            TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: addr, capturing: capturing)
+            TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: listen, capturing: capturing)
             return
           end
         screen.text(tree.x + 1, tree.y, msg, Theme.muted)

@@ -1,4 +1,5 @@
 require "json"
+require "./bind_address"
 
 module Gori
   # Per-project capture sidecar written by the session that holds the capture lock.
@@ -53,13 +54,11 @@ module Gori
       File.delete?(path(dir))
     end
 
-    # Human-friendly bind label for the picker (127.0.0.1 → localhost).
+    # Human-friendly bind label for the picker. Terse: this rides inside a project row's
+    # chip, so it takes the address without BindAddress's "(all interfaces)" note — the
+    # address itself is identical to every other surface's.
     def self.format_endpoint(host : String, port : Int32) : String
-      display_host = case host
-                     when "127.0.0.1", "::1" then "localhost"
-                     else                         host
-                     end
-      "#{display_host}:#{port}"
+      BindAddress.display(host, port, terse: true)
     end
   end
 end

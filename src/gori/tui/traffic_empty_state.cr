@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "../bind_address"
 require "../settings"
 
 module Gori::Tui
@@ -24,9 +25,13 @@ module Gori::Tui
     # a "how to start" hint, and a dialog means the user already has.
     class_property? suppressed : Bool = false
 
+    # `listen` is the live bind as (host, port), NOT a pre-joined string: the card renders
+    # the address at full width but the medium/minimal fallbacks inline it into a longer
+    # hint, so this has to pick the verbose or terse form per branch — which needs the
+    # parts. Nil falls back to the configured bind.
     def render(screen : Screen, rect : Rect, *,
                variant : Symbol,
-               listen : String? = nil,
+               listen : {String, Int32}? = nil,
                capturing : Bool = true,
                catch_on : Bool = false,
                running : Bool = false,
@@ -35,15 +40,23 @@ module Gori::Tui
       return if suppressed?
       return if rect.empty?
 
-      addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
+      host, port = listen || {Settings.effective_bind_host, Settings.effective_bind_port}
       headline = title || default_title(variant, running: running, scan_on: scan_on)
       min_h = variant == :fuzzer_results ? 5 : FULL_MIN_H
 
+      # This card is the onboarding surface — the address on it is the one the user is
+      # meant to TYPE into a client, so a wildcard bind must not render as "0.0.0.0:8070".
+      # Only the FULL card has room for the "(all interfaces)" note; the narrower fallbacks
+      # inline the address into a longer hint line and take the terse form. Same address
+      # either way, so a resize can never appear to move the proxy.
       if rect.h >= min_h && rect.w >= FULL_MIN_W
+        addr = BindAddress.display(host, port)
         render_full(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on)
       elsif rect.h >= MED_MIN_H && rect.w >= MED_MIN_W
+        addr = BindAddress.display(host, port, terse: true)
         render_medium(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on)
       else
+        addr = BindAddress.display(host, port, terse: true)
         render_minimal(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on)
       end
     end

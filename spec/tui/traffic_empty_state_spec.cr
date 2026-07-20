@@ -8,10 +8,10 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :history, listen: "127.0.0.1:8070", capturing: true)
+      variant: :history, listen: {"127.0.0.1", 8070}, capturing: true)
     backend.contains?("waiting for traffic").should be_true
     backend.contains?("FLOW LOG").should be_true
-    backend.contains?("127.0.0.1:8070").should be_true
+    backend.contains?("localhost:8070").should be_true
     backend.contains?("Open browser").should be_true
     backend.contains?("──►").should be_true
     backend.contains?("SITE MAP").should be_false
@@ -21,10 +21,14 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :sitemap, listen: "0.0.0.0:9090", capturing: true)
+      variant: :sitemap, listen: {"0.0.0.0", 9090}, capturing: true)
     backend.contains?("no traffic captured").should be_true
     backend.contains?("SITE MAP").should be_true
-    backend.contains?("0.0.0.0:9090").should be_true
+    # A wildcard bind must NOT be shown as "0.0.0.0:9090" here — this card is the
+    # onboarding surface and that address is the one the user is told to type. The full
+    # card has room for the note that LAN devices can reach the listener too.
+    backend.contains?("0.0.0.0").should be_false
+    backend.contains?("localhost:9090 (all interfaces)").should be_true
     backend.contains?("hosts group traffic").should be_true
     backend.contains?("paths nest").should be_true
     backend.contains?("FLOW LOG").should be_false
@@ -34,7 +38,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :history, listen: "127.0.0.1:8070", capturing: false)
+      variant: :history, listen: {"127.0.0.1", 8070}, capturing: false)
     backend.contains?("capture is OFF").should be_true
     backend.contains?("press c").should be_true
   end
@@ -43,7 +47,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(34, 6)
     rect = Rect.new(0, 0, 34, 6)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :history, listen: "10.0.0.5:3128", capturing: true)
+      variant: :history, listen: {"10.0.0.5", 3128}, capturing: true)
     backend.contains?("waiting for traffic").should be_true
     backend.contains?("10.0.0.5:3128").should be_true
     backend.contains?("──►").should be_true
@@ -54,17 +58,30 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(34, 6)
     rect = Rect.new(0, 0, 34, 6)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :sitemap, listen: "10.0.0.5:3128", capturing: true)
+      variant: :sitemap, listen: {"10.0.0.5", 3128}, capturing: true)
     backend.contains?("no traffic captured").should be_true
     backend.contains?("◆ proxy").should be_true
     backend.contains?("host tr").should be_true # truncated on narrow panes
+  end
+
+  it "drops only the wildcard note on a narrow pane, never the address" do
+    # The compact fallbacks inline the address into a longer hint line, so they take the
+    # terse render. The ADDRESS still matches the full card's — a resize must not look
+    # like the proxy moved, and must never fall back to the undialable "0.0.0.0".
+    backend = MemoryBackend.new(34, 6)
+    rect = Rect.new(0, 0, 34, 6)
+    TrafficEmptyState.render(Screen.new(backend), rect,
+      variant: :history, listen: {"0.0.0.0", 9090}, capturing: true)
+    backend.contains?("localhost:9090").should be_true
+    backend.contains?("0.0.0.0").should be_false
+    backend.contains?("all interfaces").should be_false
   end
 
   it "renders the intercept hold-queue card" do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :intercept, listen: "127.0.0.1:8070", capturing: true, catch_on: false)
+      variant: :intercept, listen: {"127.0.0.1", 8070}, capturing: true, catch_on: false)
     backend.contains?("no held messages").should be_true
     backend.contains?("INTERCEPT").should be_true
     backend.contains?("press i").should be_true
@@ -104,7 +121,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :probe, listen: "127.0.0.1:8070", capturing: true, scan_on: true)
+      variant: :probe, listen: {"127.0.0.1", 8070}, capturing: true, scan_on: true)
     backend.contains?("no issues yet").should be_true
     backend.contains?("PROBE").should be_true
     backend.contains?("scan").should be_true
@@ -145,7 +162,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend = MemoryBackend.new(38, 3)
     rect = Rect.new(0, 0, 38, 3)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :sitemap, listen: "127.0.0.1:8070", capturing: false)
+      variant: :sitemap, listen: {"127.0.0.1", 8070}, capturing: false)
     backend.contains?("no traffic captured").should be_true
     backend.contains?("◆ proxy").should be_true
     backend.contains?("^P Open br").should be_true # truncated on narrow panes

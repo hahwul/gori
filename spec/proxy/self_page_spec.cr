@@ -93,10 +93,22 @@ describe Gori::Proxy::SelfPage do
       head.should contain("text/html")
       text = String.new(body)
       text.should contain("gori")
-      text.should contain("127.0.0.1:8070")
+      text.should contain("localhost:8070")
       text.should contain("9.9.9")
       text.should contain("/ca.der")
       text.should contain("/ca.pem")
+    end
+
+    it "brackets an IPv6 reached-address on the Listening line" do
+      # Since 5b956ee `listen[0]` is the CONCRETE address the device reached us on, which
+      # under a `::` bind is a bare IPv6 literal — "fe80::1:8070" is ambiguous and not
+      # copy-pasteable, which matters most here since this page exists to be read off a
+      # phone screen.
+      resp = Gori::Proxy::SelfPage.respond("/", pem: pem, der: der, spki: "SPKI==",
+        ca_path: "/home/u/.gori/ca/root.crt.pem", listen: {"fe80::1", 8070},
+        version: "9.9.9", head_only: false)
+      _, body = split_response(resp)
+      String.new(body).should contain("[fe80::1]:8070")
     end
 
     it "serves the PEM with an attachment disposition" do

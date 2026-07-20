@@ -1,3 +1,5 @@
+require "./bind_address"
+
 module Gori
   # Detect installed browsers and launch one pre-configured to trust gori's CA
   # and route through gori's proxy — the "open browser" feature Burp/Caido ship.
@@ -18,12 +20,29 @@ module Gori
     record Found, id : String, name : String, kind : Kind, path : String
 
     # Everything launch() needs, resolved by the caller from the live session.
+    # `proxy_host` is the RAW bind, exactly as the session holds it — the resolution to
+    # something a browser can dial happens here (see `dial_host`) so every launch path
+    # gets it, rather than in each caller.
     record LaunchSpec,
       proxy_host : String,
       proxy_port : Int32,
       ca_cert_path : String,
       spki_sha256 : String,
-      profile_root : String
+      profile_root : String do
+      # The proxy host to actually WRITE INTO the browser's config. Under a wildcard bind
+      # the raw value is "0.0.0.0", and a browser pointed at http://0.0.0.0:port proxies
+      # nothing — it opens, captures no traffic, and looks like gori is broken. Bare, so
+      # Firefox's host-only pref gets no brackets.
+      def dial_host : String
+        BindAddress.dial_host(proxy_host)
+      end
+
+      # "host:port" for the places that need one string, with an IPv6 literal bracketed —
+      # a `::1` bind interpolated bare yields the unparseable "::1:8070".
+      def dial_authority : String
+        BindAddress.authority(dial_host, proxy_port)
+      end
+    end
 
     # A candidate browser + where to look for it: absolute app binaries on macOS
     # (checked with File.exists?), bare command names on Linux (looked up on PATH).
@@ -78,7 +97,7 @@ module Gori
       case found.kind
       in Kind::Chromium
         spawn_detached(found.path, chromium_args(profile, spec))
-        "opened #{found.name} — CA trusted, proxy → #{spec.proxy_host}:#{spec.proxy_port}"
+        "opened #{found.name} — CA trusted, proxy → #{spec.dial_authority}"
       in Kind::Firefox
         note = setup_firefox_profile(profile, spec)
         spawn_detached(found.path, firefox_args(profile))
@@ -98,7 +117,7 @@ module Gori
     def self.chromium_args(profile : String, spec : LaunchSpec) : Array(String)
       [
         "--user-data-dir=#{profile}",
-        "--proxy-server=http://#{spec.proxy_host}:#{spec.proxy_port}",
+        "--proxy-server=http://#{spec.dial_authority}",
         "--proxy-bypass-list=<-loopback>",
         "--ignore-certificate-errors-spki-list=#{spec.spki_sha256}",
         "--test-type",
@@ -118,12 +137,15 @@ module Gori
 
     # The proxy prefs Firefox reads from its profile's user.js (it ignores Chrome
     # flags). share_proxy_settings routes https through the same host:port.
+    # These prefs take a BARE host (the port is its own pref), so they get `dial_host`
+    # rather than `dial_authority` — brackets here would be parsed as part of the name.
     def self.firefox_user_js(spec : LaunchSpec) : String
+      host = spec.dial_host
       String.build do |s|
         s << %(user_pref("network.proxy.type", 1);\n)
-        s << %(user_pref("network.proxy.http", "#{spec.proxy_host}");\n)
+        s << %(user_pref("network.proxy.http", "#{host}");\n)
         s << %(user_pref("network.proxy.http_port", #{spec.proxy_port});\n)
-        s << %(user_pref("network.proxy.ssl", "#{spec.proxy_host}");\n)
+        s << %(user_pref("network.proxy.ssl", "#{host}");\n)
         s << %(user_pref("network.proxy.ssl_port", #{spec.proxy_port});\n)
         s << %(user_pref("network.proxy.share_proxy_settings", true);\n)
         s << %(user_pref("network.proxy.no_proxies_on", "");\n)
