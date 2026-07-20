@@ -139,12 +139,12 @@ module Gori::Tui
     # is the unit @caret and @value[start..] are indexed in.
     private def window_start(width : Int32) : Int32
       c = @caret.clamp(0, @value.size)
-      used = Screen.column_width(@value[0, c]) + Screen.column_width(@preedit) + 1
+      used = Screen.draw_width(@value[0, c]) + Screen.draw_width(@preedit) + 1
       return 0 if used <= width
-      used = Screen.column_width(@preedit) + 1 # the caret cell always stays visible
+      used = Screen.draw_width(@preedit) + 1 # the caret cell always stays visible
       start = c
       while start > 0
-        w = Screen.column_width(@value[start - 1].to_s)
+        w = Screen.draw_width(@value[start - 1].to_s)
         break if used + w > width
         used += w
         start -= 1

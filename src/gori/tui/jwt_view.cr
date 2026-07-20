@@ -199,7 +199,7 @@ module Gori::Tui
       cy, cx = read.cursor.cy, read.cursor.cx
       return unless cy >= scr && cy < scr + rect.h
       line = lines[cy]
-      px = rect.x + Screen.column_width(line[0, cx.clamp(0, line.size)])
+      px = rect.x + Screen.draw_width(line[0, cx.clamp(0, line.size)])
       return if px >= rect.x + rect.w
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, rect.y + (cy - scr), ch, Theme.bg, Theme.accent_bg)
@@ -209,11 +209,11 @@ module Gori::Tui
     private def paint_span_bg(screen : Screen, x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32) : Nil
       return if x0 >= x1
       px = x
-      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) if i < line.size }
+      (0...x0).each { |i| px += Screen.draw_width(line[i].to_s) if i < line.size }
       (x0...x1).each do |i|
         break if i >= line.size
         screen.text(px, y, line[i].to_s, Theme.text, Theme.accent_bg)
-        px += Screen.column_width(line[i].to_s)
+        px += Screen.draw_width(line[i].to_s)
       end
     end
 

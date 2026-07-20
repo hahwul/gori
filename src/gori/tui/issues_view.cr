@@ -711,7 +711,7 @@ module Gori::Tui
       return unless cy >= scr && cy < scr + rect.h
       row = cy - scr
       line = lines[cy]
-      px = rect.x + Screen.column_width(line[0, cx])
+      px = rect.x + Screen.draw_width(line[0, cx])
       if px < rect.x + rect.w
         ch = cx < line.size ? line[cx] : ' '
         screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
@@ -723,10 +723,10 @@ module Gori::Tui
                                    x0 : Int32, x1 : Int32, bg : Color) : Nil
       return if x0 >= x1
       px = x
-      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (0...x0).each { |i| px += Screen.draw_width(line[i].to_s) } if x0 > 0
       (x0...x1).each do |i|
         break if i >= line.size
-        w = Screen.column_width(line[i].to_s)
+        w = Screen.draw_width(line[i].to_s)
         screen.text(px, y, line[i].to_s, Theme.text, bg)
         px += w
       end

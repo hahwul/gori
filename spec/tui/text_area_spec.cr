@@ -81,6 +81,121 @@ describe Gori::Tui::TextArea do
     end
   end
 
+  # Multi-codepoint grapheme clusters. The caret column was computed per CODEPOINT
+  # (Screen.column_width) while the glyphs were drawn per CLUSTER (Highlight.draw /
+  # Screen#text), so on any decomposed or combined text the caret landed N columns
+  # right of its glyph — N being the cluster's "inflation", codepoints minus clusters —
+  # and painted a DUPLICATE of value[@cx] there. Longstanding (reproduces at fe11895),
+  # not a regression from #278/#285/#289.
+  describe "multi-codepoint grapheme clusters (decomposed / ZWJ / skin tone)" do
+    nfc = "\u{d55c}\u{ae00}"          # 한글, 2 precomposed syllables
+    han = "\u{1112}\u{1161}\u{11ab}"  # 한, 3 conjoining jamo — ONE cluster, 2 columns
+    geul = "\u{1100}\u{1173}\u{11af}" # 글, likewise
+    nfd = han + geul                  # 한글, 6 codepoints / 2 clusters
+    cafe = "cafe\u{301}"              # café, e + combining acute (5 codepoints / 4 clusters)
+
+    it "keeps the caret on its own glyph for precomposed Hangul (the case that already worked)" do
+      # 1 codepoint per cluster, so per-codepoint and per-cluster columns agree.
+      render_req_tab(nfc + "X", nfc.size).row(0).rstrip.should eq("한 글 X")
+    end
+
+    it "does not paint a duplicate glyph past decomposed Hangul" do
+      # 6 jamo collapse to 2 drawn syllables: the old per-codepoint caret column was 8 while
+      # the draw advanced 4, so the caret stamped a second 'X' four cells right of the real
+      # one ("ᄒ ᄀ X   X"). Each syllable is one wide cluster → glyph + pad cell.
+      b = render_req_tab(nfd + "X", nfd.size)
+      b.row(0).rstrip.should eq("ᄒ ᄀ X")
+      # Built from the same codepoints, not an NFC literal: the two forms print identically
+      # but are different strings, so a literal here would fail while looking correct.
+      b.cluster_row(0).rstrip.should eq("#{han} #{geul} X") # wide cluster + its pad cell
+    end
+
+    it "does not paint a duplicate glyph past a combining acute" do
+      # Caret column was 5 against a 4-column draw → the caret's 'X' landed one cell right
+      # of the real one ("cafeXX"). cluster_row proves the acute is still on its base 'e'.
+      b = render_req_tab(cafe + "X", cafe.size)
+      b.row(0).rstrip.should eq("cafeX") # @grid is Array(Char): the acute can't show here
+      b.cluster_row(0).rstrip.should eq(cafe + "X") # every codepoint intact, none doubled
+    end
+
+    it "steps the caret over whole clusters, visiting only boundaries" do
+      # @cx stays a CHARACTER index, so the boundaries are 0,3,6 for two 3-jamo syllables —
+      # it just never RESTS between them. One → per syllable, no dead presses.
+      ta = TextArea.new(nfd)
+      ta.cx.should eq(0)
+      ta.move(0, 1)
+      ta.cx.should eq(han.size) # 3 — cleared the whole syllable, not one jamo
+      ta.move(0, 1)
+      ta.cx.should eq(nfd.size) # 6
+      ta.move(0, -1)
+      ta.cx.should eq(han.size)
+      ta.move(0, -1)
+      ta.cx.should eq(0)
+    end
+
+    it "renders no duplicate glyph at any caret position while stepping through" do
+      # The bug appeared only at certain caret columns, so walk them all.
+      text = "#{cafe}#{nfd}X"
+      ta = TextArea.new(text)
+      (0..text.size).each do |_|
+        b = MemoryBackend.new(40, 3)
+        ta.render(Screen.new(b), Rect.new(0, 0, 40, 3), cursor: true, highlight: :request)
+        # Strip the caret's own cell by comparing against the no-caret render: the drawn
+        # text must be identical either way — the caret may INVERT a cell, never add one.
+        plain = MemoryBackend.new(40, 3)
+        TextArea.new(text).render(Screen.new(plain), Rect.new(0, 0, 40, 3),
+          cursor: false, highlight: :request)
+        b.cluster_row(0).should eq(plain.cluster_row(0)) # (cx=#{ta.cx})
+        ta.move(0, 1)
+      end
+    end
+
+    it "backspaces a whole cluster rather than stranding a combining mark" do
+      ta = TextArea.new(cafe)
+      ta.move(0, 999) # end of line
+      ta.cx.should eq(cafe.size)
+      ta.backspace
+      ta.text.should eq("caf") # NOT "cafe" with the acute silently dropped
+      ta.cx.should eq(3)
+    end
+
+    it "backspaces a ZWJ family without leaving a dangling joiner" do
+      family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}"
+      ta = TextArea.new("a#{family}b")
+      ta.move(0, 999)
+      ta.backspace # the 'b'
+      ta.backspace # the whole family
+      ta.text.should eq("a")
+    end
+
+    it "forward-deletes a whole cluster too" do
+      ta = TextArea.new(nfd + "X")
+      ta.delete
+      ta.text.should eq(geul + "X") # the first syllable went as a unit
+      ta.delete
+      ta.text.should eq("X")
+    end
+
+    it "keeps the caret on a boundary after inserting in front of a combining mark" do
+      # Typing `e` before a lone U+0301 MERGES them into one cluster; the caret must end
+      # past the whole thing rather than inside it.
+      ta = TextArea.new("\u{0301}")
+      ta.insert('e')
+      ta.text.should eq("e\u{0301}")
+      ta.cx.should eq(2) # past the merged cluster, not between its two codepoints
+    end
+
+    it "lands a click on a cluster start, agreeing with where the caret paints" do
+      rect = Rect.new(0, 0, 40, 3)
+      ta = TextArea.new(cafe + "X")
+      # Column 3 is the `é` cluster (c,a,f each 1 column).
+      ta.click_to_cursor(rect, 3, 0)
+      ta.cx.should eq(3) # the cluster START — never 4, between the e and the acute
+      ta.click_to_cursor(rect, 4, 0)
+      ta.cx.should eq(cafe.size) # past the cluster, on the X
+    end
+  end
+
   describe "display concealment (@conceal_spans)" do
     # "q=§data¦base64-encode§ x": open § at 2, ¦ at 7, closing § at 21.
     text = "q=§data¦base64-encode§ x"

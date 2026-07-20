@@ -75,7 +75,7 @@ describe Gori::Tui::TextField do
     # together, and the assertion below is on the caret EXISTING and being in-field.)
     value = "#{"a" * 6}#{"\u{200B}" * 5}b" # 12 chars: display_width 7, column_width 12
     Screen.display_width(value).should eq(7)
-    Screen.column_width(value).should eq(12)
+    Screen.draw_width(value).should eq(12)
     f = TextField.new(value) # TextField.new parks the caret at the end
     f.caret.should eq(12)
     backend = MemoryBackend.new(40, 3)

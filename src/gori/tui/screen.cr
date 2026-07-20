@@ -234,79 +234,125 @@ module Gori::Tui
       w
     end
 
-    # As `column_width`, but stops once the running width reaches `limit`. Used by the
-    # editor h-scroll clamp so a multi-MB line with embedded tabs isn't fully walked
-    # every frame, while still counting each control char as one cell.
-    def self.column_width_upto(str : String, limit : Int32) : Int32
-      return 0 if str.empty? || limit <= 0
-      # ASCII: every char is exactly 1 column under column_width (controls floored).
-      return {str.size, limit}.min if str.ascii_only?
-      w = 0
-      str.each_char do |ch|
-        w += grapheme_cols(ch.to_s)
-        return w if w >= limit
-      end
-      w
-    end
-
-    # The codepoint index in `str` whose display cell the column `target` lands on,
-    # clamped to [0, str.size]. Inverts a left-to-right display-width advance (the
-    # same one `display_width` / `text` use), so click-to-cursor maps a click x to
-    # the right index even past CJK/emoji (width-2) cells. Each codepoint counts as
-    # at least one clickable cell to match the editor's codepoint cursor model.
+    # The CHARACTER index in `str` whose drawn cell the column `target` lands on, clamped
+    # to [0, str.size] and always at a grapheme-CLUSTER START. The exact inverse of
+    # `draw_width`: both walk clusters and floor each to ≥1, so `draw_width(str[0, i])`
+    # and `column_for` round-trip at every boundary. Caret and click therefore agree BY
+    # CONSTRUCTION rather than by two hand-matched measures happening to coincide — which
+    # is the whole point of the collapse (see draw_width).
+    #
+    # Still a CHARACTER index, not a cluster ordinal: every caller slices with it
+    # (`chain[0, chain_cx]`, `line[cx]`, `@target[0, @tcx]`) and Crystal's `String#[]` is
+    # char-indexed. The collapse only narrows the REACHABLE set to cluster starts, so a
+    # click can no longer drop a caret between the `e` and the combining acute of `é`.
     def self.column_for(str : String, target : Int32) : Int32
       return 0 if target <= 0
+      # ASCII fast path: 1 char == 1 cluster == 1 column (see draw_width), so the column IS
+      # the index. Keeps every click off the grapheme walk + its per-glyph `to_s` String.
+      return {target, str.size}.min if str.ascii_only?
       acc = 0
-      str.each_char_with_index do |ch, j|
-        w = grapheme_cols(ch.to_s)
-        return j if target < acc + w
+      i = 0
+      str.each_grapheme do |g|
+        w = grapheme_cols(g.to_s)
+        return i if target < acc + w
         acc += w
+        i += g.size # Grapheme#size is the cluster's CHARACTER count — allocates nothing
       end
       str.size
     end
 
-    # Column span of `str` where EVERY char counts at least 1 column — the exact
-    # inverse of `column_for`. `display_width` alone reports 0 for a raw control char
-    # (e.g. a lone \r), but each such char still occupies a drawn cell and click-to-
-    # cursor / Reveal count it as ≥1, so cursor placement must too or it lands one
-    # column short and overwrites a glyph.
-    def self.column_width(str : String) : Int32
-      # ASCII fast path: every ASCII char counts as exactly 1 column here — a printable is
-      # width 1, and a control char (width 0) is floored to 1 by the max below — so the span
-      # is just the char count. Skips the per-char `display_width(ch.to_s)` grapheme walk +
-      # String on the common case (all-ASCII fields). Non-ASCII keeps the exact per-char loop
-      # (wide glyphs via display_width, combining marks floored to 1).
-      return str.size if str.ascii_only?
-      w = 0
-      str.each_char { |ch| w += grapheme_cols(ch.to_s) }
-      w
+    # Snap a character index to the START of the grapheme cluster holding it (the caret's
+    # "round down"); an index already on a boundary is returned unchanged. Paired with
+    # `cluster_end` this is how TextArea keeps `@cx` — which stays a CHARACTER index — off
+    # the interior of a cluster, so `draw_width(line[0, @cx])` is single-valued and
+    # `column_for` inverts it. Without the snap `draw_width` is not strictly monotone in
+    # `@cx` (all 7 char indices inside a 4-person ZWJ family share one column).
+    def self.cluster_start(str : String, i : Int32) : Int32
+      return 0 if i <= 0
+      return i if i >= str.size || boundary?(str, i)
+      pos = 0
+      str.each_grapheme do |g|
+        nxt = pos + g.size
+        return pos if i < nxt
+        pos = nxt
+      end
+      str.size
+    end
+
+    # Cheap sufficient test for "index `i` already starts a cluster", so the snap helpers
+    # can skip their O(prefix) grapheme walk on the overwhelmingly common case — every
+    # keystroke in a line that merely CONTAINS a glyph would otherwise re-walk the prefix.
+    # An ASCII char always starts a cluster: Extend / ZWJ / Prepend / Regional-Indicator
+    # are all non-ASCII, so nothing can bind an ASCII char to what precedes it. The lone
+    # exception is the `\n` of a CRLF pair, which cannot occur here — every caller splits
+    # on '\n' first (TextArea#set_text also rstrips the '\r'), so no line holds one.
+    # Conservative by design: false means "walk to be sure", never a wrong answer.
+    private def self.boundary?(str : String, i : Int32) : Bool
+      str.ascii_only? || str[i].ascii?
+    end
+
+    # Snap a character index to the END (exclusive) of the grapheme cluster holding it —
+    # the caret's "round up", used when travel is rightwards so a → never parks inside a
+    # cluster. See `cluster_start`.
+    def self.cluster_end(str : String, i : Int32) : Int32
+      return 0 if i <= 0
+      return {i, str.size}.min if i >= str.size || boundary?(str, i)
+      pos = 0
+      str.each_grapheme do |g|
+        return i if i == pos # already on a boundary
+        nxt = pos + g.size
+        return nxt if i < nxt # interior → the cluster's far edge
+        pos = nxt
+      end
+      str.size
+    end
+
+    # The glyph a block caret at character index `i` must invert. Returns a plain `Char`
+    # when the cluster there is a single codepoint — so `cell` keeps its interned ASCII /
+    # glyph-cache path and the caret allocates nothing on the common case — and the full
+    # cluster String only when it is not. Parking on `é` (e + U+0301) or a ZWJ family has
+    # to invert the WHOLE glyph; `str[i]` alone inverted its first codepoint, showing a
+    # bare `e` or a lone 👨 under the caret. A space past the end (nothing to invert).
+    def self.caret_glyph(str : String, i : Int32) : Char | String
+      return ' ' if i < 0 || i >= str.size
+      e = cluster_end(str, i + 1)
+      e == i + 1 ? str[i] : str[i, e - i]
     end
 
     # Columns one grapheme occupies when drawn by `#text` / `Highlight.draw` and when the
     # editor caret / click-to-cursor advance over it. Unicode width floored to ≥1 so a C0
-    # control (`\t`, `\r`, …) keeps the space cell that Char-path `cell` substitutes —
-    # matching `column_width` and preventing the styled draw path from collapsing a tab
-    # to zero columns while the caret still steps across it (issue #278).
+    # control (`\t`, `\r`, …) keeps the space cell that Char-path `cell` substitutes,
+    # preventing the styled draw path from collapsing a tab to zero columns while the
+    # caret still steps across it (issue #278).
     def self.grapheme_cols(g : String) : Int32
       {display_width(g), 1}.max
     end
 
     # Columns `str` occupies when DRAWN: `grapheme_cols` summed over grapheme CLUSTERS,
-    # which is exactly how `#text` and `Highlight.draw` advance. This is a THIRD measure,
-    # equal to neither sibling, and the only one that matches the cells on screen:
+    # which is exactly how `#text` and `Highlight.draw` advance. THE column measure — the
+    # caret, click-to-cursor, h-scroll clamps and tint bands all use this one, and
+    # `column_for` inverts it.
     #
-    #   "a\tb"     display_width 2   column_width 3    draw_width 3   (tab: a drawn cell)
-    #   "👍🏽"       display_width 2   column_width 3    draw_width 2   (skin tone: 2 cps)
-    #   "👨‍👩‍👧‍👦"    display_width 2   column_width 11   draw_width 2   (3 ZWJ: 9 cols of drift)
+    # There used to be a second floored measure, `column_width`, which walked CODEPOINTS
+    # instead of clusters to serve a per-codepoint caret. The two agreed on ASCII, tabs and
+    # precomposed CJK and diverged only on a multi-codepoint cluster, where `column_width`
+    # over-counted every codepoint past the first:
     #
-    # `display_width` UNDER-counts: a C0 control is Unicode width 0, but `cell` still
-    # substitutes a space for it, so it owns a cell. `column_width` OVER-counts: it floors
-    # every CODEPOINT to ≥1, which is right for the per-codepoint caret model it exists to
-    # serve (TextArea's char-index `@cx`, `column_for`) but wrong for a draw, where a
-    # multi-codepoint cluster — skin-tone modifier, ZWJ sequence, combining mark — is ONE
-    # glyph drawn into ONE cell run. Rule of thumb: measure with `draw_width` when the
-    # result is compared against drawn cells (search overlay, h-scroll clamp, slice), with
-    # `column_width` when it is compared against the caret.
+    #   "a\tb"     display_width 2   (was column_width 3)    draw_width 3
+    #   "👍🏽"       display_width 2   (was column_width 3)    draw_width 2   (skin tone)
+    #   "👨‍👩‍👧‍👦"    display_width 2   (was column_width 11)   draw_width 2   (3 ZWJ)
+    #   "한글" NFD  display_width 4   (was column_width 8)    draw_width 4   (6 jamo)
+    #
+    # Keeping both is what made #278 (tabs) and #285 (emoji) trade off against each other,
+    # and it painted a DUPLICATE glyph past any decomposed text: the caret advanced 8
+    # columns over NFD "한글" while the draw advanced 4, so `value[@cx]` was stamped four
+    # cells right of where the glyph ended. `draw_width` SUBSUMES the old measure — every
+    # property `column_width` existed for survives, because `grapheme_cols` still floors to
+    # ≥1 and a control char, a tab and a zero-width `U+200B`/`U+FEFF` are each their own
+    # cluster — so the caret model moved onto clusters (see `column_for`, `cluster_start`)
+    # and the codepoint measure is gone. `display_width` remains, and remains DIFFERENT: it
+    # is raw Unicode width, scoring a C0 control 0 even though `cell` substitutes a space
+    # and so gives it a real cell. Use it only for text with no control chars.
     def self.draw_width(str : String) : Int32
       # ASCII fast path, and it is EXACT rather than an approximation: the only multi-char
       # ASCII grapheme cluster is CRLF, which cannot appear inside a rendered line because
@@ -321,7 +367,7 @@ module Gori::Tui
 
     # As `draw_width`, but stops once the running width reaches `limit` (returning a value
     # ≥ limit without walking the rest). Same early-exit contract, and the same reason, as
-    # `display_width_upto` / `column_width_upto`: the h-scroll clamps run EVERY frame and
+    # `display_width_upto`: the h-scroll clamps run EVERY frame and
     # only need to know whether a line reaches the view's right edge, so a minified
     # multi-MB single line must never be measured in full. Exact for lines under `limit`.
     def self.draw_width_upto(str : String, limit : Int32) : Int32
@@ -487,19 +533,23 @@ module Gori::Tui
       styled_run(px, y, suffix, cx, colors, fg, bg, right) unless suffix.empty?
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
-      # column_width, NOT display_width and NOT draw_width. `cx` is a CHARACTER index into
-      # `value` (see the clamp above and `value[cx]` below), and this caret's inverse is
-      # Screen.column_for — the per-codepoint, floored-to-≥1 mapping used by every click
-      # handler that drives a field (read_cursor, repeater/fuzzer target, decoder chain).
-      # column_width is that function's exact inverse, so caret and click agree by
-      # construction; display_width scored a zero-width char (U+200B, U+FEFF, a combining
+      # draw_width, NOT display_width. `cx` is a CHARACTER index into `value` (see the
+      # clamp above), and this caret's inverse is Screen.column_for, which every click
+      # handler driving a field runs (read_cursor, repeater/fuzzer target, decoder chain).
+      # draw_width is that function's exact inverse, so caret and click agree by
+      # construction. display_width scored a zero-width char (U+200B, U+FEFF, a combining
       # mark — all of which parse_printable accepts unfiltered) as 0 columns, leaving the
-      # block caret one column left of its glyph, painting over the neighbour, and landing
-      # a click one character off. draw_width would match the DRAW but not `column_for`,
-      # re-breaking the click; reconciling those two is the caret-model change documented
-      # at TextArea#ensure_visible_x and deliberately not attempted here.
-      caret_x = x + Screen.column_width(prefix) + Screen.column_width(preedit)
-      caret_ch = preedit.empty? ? (cx < value.size ? value[cx] : ' ') : ' '
+      # block caret one column left of its glyph and painting over the neighbour; the
+      # per-codepoint column_width that replaced it then over-counted the other way on any
+      # cluster, which is the duplicate-glyph bug the collapse to draw_width fixes.
+      #
+      # `cx` here is NOT guaranteed to sit on a cluster boundary: the single-line cursors
+      # (TextField#@caret, ReadCursor#@cx, the views' own @tcx/@scx) still step per
+      # codepoint, unlike TextArea#@cx which now snaps. Landing mid-cluster costs at most a
+      # dead keypress — draw_width returns the same column for every index inside a cluster
+      # — and can no longer misplace the caret onto a neighbouring glyph.
+      caret_x = x + Screen.draw_width(prefix) + Screen.draw_width(preedit)
+      caret_ch = preedit.empty? ? Screen.caret_glyph(value, cx) : ' '
       if caret_x < right
         cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)
         cursor(caret_x, y)

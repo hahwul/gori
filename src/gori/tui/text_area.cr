@@ -165,7 +165,10 @@ module Gori::Tui
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{ch}#{line[cx..]}"
+      # Forward-snap: the typed char can MERGE with what follows (typing `e` in front of a
+      # lone U+0301 makes one `é` cluster), which would leave the caret inside it.
       @cx = cx + 1
+      snap_cx_to_cluster(1)
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -181,6 +184,7 @@ module Gori::Tui
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{str}#{line[cx..]}"
       @cx = cx + str.size
+      snap_cx_to_cluster(1) # the paste's last char can merge with the text it landed before
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -195,6 +199,7 @@ module Gori::Tui
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{ch}#{ch}#{line[cx..]}"
       @cx = cx + 2
+      snap_cx_to_cluster(1) # `§`/`¦` are their own clusters, but the char after may combine
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -233,8 +238,16 @@ module Gori::Tui
         push_undo
         line = @lines[@cy]
         cx = @cx.clamp(0, line.size)
-        @lines[@cy] = "#{line[0, cx - 1]}#{line[cx..]}"
-        @cx = cx - 1
+        # Delete the whole grapheme CLUSTER before the caret, not one codepoint. Backspacing
+        # `café` gives `caf`, never `cafe` with the acute silently dropped; backspacing a ZWJ
+        # family removes the family rather than leaving `👨‍👩‍👧‍` with a trailing joiner that the
+        # terminal renders as a broken sequence. The cluster is the user-perceived character,
+        # so this is what one press should undo — and it keeps @cx on a boundary for free.
+        # (Composing a cluster codepoint-by-codepoint is the IME's job, via preedit; once it
+        # has COMMITTED a glyph, taking it apart is not something a backspace should do.)
+        st = Screen.cluster_start(line, cx - 1)
+        @lines[@cy] = "#{line[0, st]}#{line[cx..]}"
+        @cx = st
       elsif @cy > 0
         push_undo
         prev = @lines[@cy - 1]
@@ -267,7 +280,8 @@ module Gori::Tui
       cx = @cx.clamp(0, line.size)
       if cx < line.size
         push_undo
-        @lines[@cy] = "#{line[0, cx]}#{line[cx + 1..]}"
+        # Whole-cluster forward delete, mirroring backspace — see the note there.
+        @lines[@cy] = "#{line[0, cx]}#{line[Screen.cluster_end(line, cx + 1)..]}"
       elsif @cy < @lines.size - 1
         push_undo
         @lines[@cy] = line + @lines[@cy + 1]
@@ -285,6 +299,7 @@ module Gori::Tui
       if dr != 0
         @cy = (@cy + dr).clamp(0, @lines.size - 1)
         @cx = @cx.clamp(0, @lines[@cy].size)
+        snap_cx_to_cluster(0) # the column carried across rows can land mid-cluster
       end
       if dc != 0
         @cx += dc
@@ -303,6 +318,11 @@ module Gori::Tui
             @cx = @lines[@cy].size
           end
         end
+        # `@cx += dc` steps CODEPOINTS; the caret column and the draw step CLUSTERS. Snap
+        # in the direction of travel so → clears a whole cluster and ← lands on its start,
+        # rather than resting between the `e` and the combining acute of `é` (where the
+        # caret would be column-ambiguous and a delete would strand the mark).
+        snap_cx_to_cluster(dc)
       end
       snap_cx_out_of_conceal(dc) unless @conceal_spans.empty? # never rest on a hidden ¦chain char
       refresh_env_complete
@@ -329,7 +349,8 @@ module Gori::Tui
 
     # Place the cursor at the click (mx,my), inverting render's layout: the visible
     # row maps to @scroll + offset; the display-x (after the optional gutter) maps to
-    # a codepoint index via Screen.column_for. `rect` is the SAME rect render gets.
+    # a character index (at a cluster start) via Screen.column_for. `rect` is the SAME
+    # rect render gets.
     # Coords are 0-based; a click below the text lands on the last line, left of the
     # text on column 0. render's ensure_visible reconciles @scroll next frame.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
@@ -345,6 +366,9 @@ module Gori::Tui
       cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
       # On a concealed line the click column is in concealed space; map it back through
       # the hidden runs so a click never lands the caret on an unseen ¦chain char.
+      # No cluster snap needed: BOTH inverses already return a cluster start by construction
+      # (Screen.column_for walks clusters; concealed_col_to_raw does too, and its conceal
+      # edges are ASCII `¦`/`§`, each its own cluster).
       @cx = (cr && !cr.empty?) ? concealed_col_to_raw(line, cr, target) : Screen.column_for(line, target)
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       env_complete_close
@@ -361,6 +385,7 @@ module Gori::Tui
       @scroll = (@scroll + step).clamp(0, max)
       @cy = @cy.clamp(@scroll, {@scroll + @last_h - 1, @lines.size - 1}.min)
       @cx = @cx.clamp(0, @lines[@cy].size)
+      snap_cx_to_cluster(0) # the row changed under the caret; its column may re-cluster
       env_complete_close
     end
 
@@ -382,6 +407,7 @@ module Gori::Tui
     def place_cursor(cy : Int32, cx : Int32) : Nil
       @cy = cy.clamp(0, @lines.size - 1)
       @cx = cx.clamp(0, @lines[@cy].size)
+      snap_cx_to_cluster(0) # caller-supplied index — unconstrained, may land mid-cluster
       env_complete_close
     end
 
@@ -396,7 +422,10 @@ module Gori::Tui
       return if @lines[idx] == content
       push_undo
       @lines[idx] = content
-      @cx = @cx.clamp(0, content.size) if @cy == idx
+      if @cy == idx
+        @cx = @cx.clamp(0, content.size)
+        snap_cx_to_cluster(0) # the replacement line re-clusters under the old index
+      end
       @styled = nil
       @edits += 1
     end
@@ -421,6 +450,7 @@ module Gori::Tui
       end
       @cy = cy
       @cx = off.clamp(0, @lines[cy].size)
+      snap_cx_to_cluster(0) # a flat buffer offset carries no cluster guarantee
       env_complete_close
     end
 
@@ -522,11 +552,16 @@ module Gori::Tui
             px = cx0
             if !prefix.empty?
               screen.text(px, rect.y + i, prefix, Theme.text, width: cw)
-              px += Screen.column_width(prefix) # ≥1/char, matching the drawn cells + caret math
+              px += Screen.draw_width(prefix) # ≥1/cluster, matching the drawn cells + caret math
             end
             if !@preedit.empty?
               screen.text(px, rect.y + i, @preedit, Theme.text, attr: Attribute::Underline, width: cw - (px - cx0))
-              px += Screen.display_width(@preedit)
+              # draw_width, not display_width (#289): `screen.text` just drew the preedit by
+              # CLUSTER with a ≥1 floor, so the advance has to be measured the same way or
+              # the suffix is laid down on top of the composing text. The two differ when a
+              # preedit carries a control or zero-width codepoint — see ensure_visible_x for
+              # what the IME actually sends.
+              px += Screen.draw_width(@preedit)
             end
             if !suffix.empty?
               screen.text(px, rect.y + i, suffix, Theme.text, width: cw - (px - cx0))
@@ -550,11 +585,13 @@ module Gori::Tui
         # is drawn (cursor=false in NORMAL) — the value peek anchors to it in read mode too.
         # The block-cursor GLYPH itself still paints only when `cursor` (insert mode).
         next unless li == @cy
-        # column_width (not display_width): a raw control char in the prefix occupies a
-        # cell and click-to-cursor counts it, so the caret must too — else it sits one
-        # column left of the real position and paints over a glyph.
-        prefix_w = (cr && !cr.empty?) ? concealed_col(line, cr, @cx) : Screen.column_width(line[0, @cx])
-        preedit_w = Screen.display_width(@preedit)
+        # draw_width (not display_width): a raw control char in the prefix occupies a cell
+        # and click-to-cursor counts it, so the caret must too — else it sits one column
+        # left of the real position and paints over a glyph. Per CLUSTER, matching the draw
+        # exactly: `@cx` rests only on cluster boundaries (snap_cx_to_cluster), so this is
+        # single-valued and Screen.column_for inverts it.
+        prefix_w = (cr && !cr.empty?) ? concealed_col(line, cr, @cx) : Screen.draw_width(line[0, @cx])
+        preedit_w = Screen.draw_width(@preedit)
         cxs = cx0 + prefix_w + preedit_w - @xscroll
         if cxs >= cx0 && cxs < cx0 + cw
           caret_cell = {cxs, rect.y + i}
@@ -565,7 +602,9 @@ module Gori::Tui
             # any concealed run to the glyph the user actually sees (the closing §).
             r = @cx
             cr.each { |(a, b)| r = b if r >= a && r < b } if cr && !cr.empty?
-            ch = @preedit.empty? ? (r < line.size ? line[r] : ' ') : @preedit[0]
+            # The whole CLUSTER at `r`, not `line[r]`: parking on `é` (e + U+0301) or a ZWJ
+            # family has to invert the glyph the user sees, not its leading codepoint.
+            ch = @preedit.empty? ? Screen.caret_glyph(line, r) : Screen.caret_glyph(@preedit, 0)
             cgw = Screen.grapheme_cols(ch.to_s)
             (0...cgw).each do |off|
               break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
@@ -629,7 +668,7 @@ module Gori::Tui
 
     # Overlay the bg_regions intersecting THIS line. `off0` is the line's start offset
     # in the full LF-joined buffer. Column math mirrors the base draw + caret
-    # (Screen.column_width / grapheme_cols ≥1 per char, so a tab in a marker band can't
+    # (Screen.draw_width / grapheme_cols ≥1 per cluster, so a tab in a marker band can't
     # drift the tint left of the cells). Multi-line regions clamp to [0, line.size): first
     # line tints col→EOL, fully-covered lines 0→size, last line BOL→col; the '\n' offset
     # has no cell. Region columns are computed against the FULL (unscrolled) line, then
@@ -646,8 +685,8 @@ module Gori::Tui
         la = (a - off0).clamp(0, line.size)
         lb = (b - off0).clamp(0, line.size)
         next if la >= lb
-        start_col = Screen.column_width(line[0, la]) - @xscroll
-        end_col = Screen.column_width(line[0, lb]) - @xscroll
+        start_col = Screen.draw_width(line[0, la]) - @xscroll
+        end_col = Screen.draw_width(line[0, lb]) - @xscroll
         draw_from = {start_col, 0}.max
         draw_to = {end_col, cw}.min
         next if draw_from >= draw_to
@@ -715,7 +754,7 @@ module Gori::Tui
       off
     end
 
-    # Display column (column_width semantics, matching the caret) of raw caret index `cx`
+    # Display column (draw_width semantics, matching the caret) of raw caret index `cx`
     # on a concealed line: the width of the surviving chars in [0, cx). A cx inside a
     # concealed run collapses to that run's start column (both edges share the cell).
     private def concealed_col(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
@@ -724,25 +763,25 @@ module Gori::Tui
       pos = 0
       ranges.each do |(a, b)|
         break if a >= cx
-        w += Screen.column_width(line[pos...a]) if a > pos
+        w += Screen.draw_width(line[pos...a]) if a > pos
         return w if b >= cx # cx lands inside/at this run → column at the run's start
         pos = b
       end
-      w + Screen.column_width(line[pos...cx])
+      w + Screen.draw_width(line[pos...cx])
     end
 
-    # As `concealed_col` — column_width / grapheme_cols semantics matching Highlight.draw's
+    # As `concealed_col` — draw_width / grapheme_cols semantics matching Highlight.draw's
     # ≥1 floor, used by the band over-paint so tint columns line up with drawn cells.
     private def concealed_display_prefix(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
       w = 0
       pos = 0
       ranges.each do |(a, b)|
         break if a >= cx
-        w += Screen.column_width(line[pos...a]) if a > pos
+        w += Screen.draw_width(line[pos...a]) if a > pos
         return w if b >= cx
         pos = b
       end
-      w + Screen.column_width(line[pos...cx])
+      w + Screen.draw_width(line[pos...cx])
     end
 
     # Inverse of `concealed_col` for click-to-cursor: the raw char index whose concealed
@@ -759,12 +798,37 @@ module Gori::Tui
           i = hit[1]
           next
         end
-        w = Screen.grapheme_cols(line[i].to_s)
+        # Step by CLUSTER, matching `concealed_col`'s draw_width and the cells actually
+        # drawn, so this stays that function's exact inverse and a click lands where the
+        # caret paints. A conceal run always opens on a `¦` and closes before a `§` — both
+        # ASCII, both their own cluster — so no cluster straddles a run boundary.
+        e = Screen.cluster_end(line, i + 1)
+        w = Screen.draw_width(line[i...e])
         return i if target < col + w
         col += w
-        i += 1
+        i = e
       end
       n
+    end
+
+    # Pull @cx onto a grapheme-CLUSTER boundary. `@cx` stays a CHARACTER index — conceal
+    # ranges, bg_regions, marker spans and the search / find-replace offsets are all char-
+    # or byte-indexed and come from string operations rather than caret motion, so
+    # renumbering it would break every one of them — but it may only ever REST on a
+    # boundary. That is what makes `Screen.draw_width(line[0, @cx])` single-valued (it
+    # returns the same column for all 7 char indices inside a ZWJ family) and therefore
+    # exactly invertible by `Screen.column_for`, so caret and click agree by construction.
+    #
+    # `dir` is the travel sign: > 0 rounds up to the cluster's far edge (→ crosses the
+    # whole glyph), < 0 rounds down to its start, 0 rounds down (vertical move, click,
+    # clamp after an external edit). Called at EVERY @cx mutation point, not just `move` —
+    # an insert can merge the caret's char into the preceding cluster, and a caller-
+    # supplied index (place_cursor / place_at_offset / undo) is unconstrained.
+    # Both helpers no-op cheaply when @cx is already on a boundary (Screen.boundary?), so
+    # ordinary typing never pays for the grapheme walk.
+    private def snap_cx_to_cluster(dir : Int32) : Nil
+      line = @lines[@cy]
+      @cx = dir > 0 ? Screen.cluster_end(line, @cx) : Screen.cluster_start(line, @cx)
     end
 
     # Pull @cx out of the "no-rest zone" `(a, b]` of a concealed run so the caret can't
@@ -817,33 +881,40 @@ module Gori::Tui
       return unless @follow_x
       return if cw <= 0
       line = @lines[@cy]
-      pw = Screen.display_width(@preedit)
+      # draw_width, not display_width (#289): the preedit is drawn by `screen.text` /
+      # Highlight.draw, both per-cluster with a ≥1 floor, so the window has to be sized the
+      # same way. What the IME actually puts here is whatever the terminal forwards in the
+      # kitty keyboard protocol's text codepoints — termisu passes it through verbatim
+      # (input/parser.cr emits Event::Preedit with the raw text, no normalisation), so gori
+      # cannot assume a form. A Hangul IME composing 한 may send the precomposed syllable
+      # U+D55C, a compatibility jamo U+314E, or conjoining jamo U+1112 U+1161 U+11AB; the
+      # first two are one cluster and one codepoint, the third is one cluster of THREE. Only
+      # a cluster measure is right for all of them, which is the collapse this file now
+      # relies on everywhere else.
+      pw = Screen.draw_width(@preedit)
       # On a concealed line, measure in CONCEALED columns — the hidden ¦chain doesn't take
       # cells, so the caret window must be sized/positioned against what's actually drawn.
       cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
       concealed = cr && !cr.empty?
-      # column_width (not display_width) to match the actual draw: a raw control char
+      # draw_width (not display_width) to match the actual draw: a raw control char
       # occupies one drawn cell, so measuring it as width 0 here would let the caret render
       # outside the window (cursor detaches / no scroll-into-view).
       #
-      # KNOWN LIMITATION (grapheme clusters). These columns are per-CODEPOINT because the
-      # caret is: @cx is a char index and `move` steps it raw, so the caret genuinely can
-      # park inside a ZWJ/skin-tone cluster. But Highlight.slice_left consumes @xscroll in
-      # per-CLUSTER (drawn) columns. On a line holding a multi-codepoint cluster the two
-      # disagree by the cluster's "inflation" (codepoint columns minus drawn columns: 1 for
-      # a skin tone, 3 for a ZWJ pair, 9 for a 4-person family), so the view can over-scroll
-      # by up to that many columns and show trailing blanks. It can only blank the row
-      # entirely when the pane is narrower than 1 + inflation (< 10 cols for the worst
-      # case), which no real pane is. Not fixable here: making this per-cluster would
-      # desync it from `cxs`/`prefix_w` below, which are per-codepoint to track the caret —
-      # reconciling the two IS the caret-model change, so it belongs in its own PR.
-      full = concealed ? concealed_col(line, cr.not_nil!, line.size) : Screen.column_width(line)
+      # These columns used to be per-CODEPOINT, because the caret was: @cx is a char index
+      # and `move` stepped it raw, so the caret could park inside a ZWJ/skin-tone cluster
+      # while Highlight.slice_left consumed @xscroll in per-CLUSTER (drawn) columns. The two
+      # disagreed by the cluster's "inflation" (1 column for a skin tone, 9 for a 4-person
+      # family) and the view over-scrolled by that much. @cx now snaps to cluster boundaries
+      # (snap_cx_to_cluster) and every measure here, in `cxs`/`prefix_w`, and in
+      # Highlight.slice_left is draw_width, so the window, the slice and the caret finally
+      # agree — that reconciliation was the caret-model change this comment used to defer.
+      full = concealed ? concealed_col(line, cr.not_nil!, line.size) : Screen.draw_width(line)
       if full + pw <= cw
         @xscroll = 0
         return
       end
       cx = @cx.clamp(0, line.size)
-      curx = (concealed ? concealed_col(line, cr.not_nil!, cx) : Screen.column_width(line[0, cx])) + pw
+      curx = (concealed ? concealed_col(line, cr.not_nil!, cx) : Screen.draw_width(line[0, cx])) + pw
       @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
       @xscroll = 0 if @xscroll < 0
@@ -903,6 +974,7 @@ module Gori::Tui
       @lines = [""] if @lines.empty?
       @cy = state.cy.clamp(0, @lines.size - 1)
       @cx = state.cx.clamp(0, @lines[@cy].size)
+      snap_cx_to_cluster(0) # the snapshot's line may differ from the one we clamp against
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -958,6 +1030,7 @@ module Gori::Tui
       newline, ncx = ec.accept(line, @cx.clamp(0, line.size))
       @lines[@cy] = newline
       @cx = ncx.clamp(0, newline.size)
+      snap_cx_to_cluster(1) # the expansion's tail can merge with the text it was spliced into
       ec.close
       @styled = nil
       @edits += 1

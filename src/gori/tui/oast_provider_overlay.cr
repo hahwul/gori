@@ -203,7 +203,7 @@ module Gori::Tui
       screen.text(vx, py, shown, fg, bg, width: vw)
       if sel && pre.empty?
         cx = field.caret.clamp(0, val.size)
-        px = vx + Screen.column_width(val[0, cx])
+        px = vx + Screen.draw_width(val[0, cx])
         if px < box.right - 2
           ch = cx < val.size ? val[cx] : ' '
           screen.cell(px, py, ch, Theme.bg, Theme.accent_bg)

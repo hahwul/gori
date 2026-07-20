@@ -2427,7 +2427,7 @@ module Gori::Tui
         # covered one span, the caret sat a column left of its glyph, and a click landed a
         # character off. A URL carrying U+200B is ordinary traffic for this tool (it is a
         # stock filter-bypass payload), so this is reachable, not theoretical.
-        cursor_x = base + Screen.column_width(value[0, cx])
+        cursor_x = base + Screen.draw_width(value[0, cx])
         if cursor_x < rect.right - 1
           ch = cx < value.size ? value[cx] : ' '
           screen.cell(cursor_x, row, ch, Theme.bg, insert ? Theme.accent : Theme.accent_bg)
@@ -2530,7 +2530,7 @@ module Gori::Tui
       row = cy - scr
       gw = ed.gutter? ? Gutter.width(lines.size) : 0
       line = lines[cy]
-      px = rect.x + gw + Screen.column_width(line[0, cx])
+      px = rect.x + gw + Screen.draw_width(line[0, cx])
       if px < rect.x + rect.w
         ch = cx < line.size ? line[cx] : ' '
         screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
@@ -2542,10 +2542,10 @@ module Gori::Tui
                                    x0 : Int32, x1 : Int32, bg : Color) : Nil
       return if x0 >= x1
       px = x
-      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (0...x0).each { |i| px += Screen.draw_width(line[i].to_s) } if x0 > 0
       (x0...x1).each do |i|
         break if i >= line.size
-        w = Screen.column_width(line[i].to_s)
+        w = Screen.draw_width(line[i].to_s)
         screen.text(px, y, line[i].to_s, Theme.text, bg)
         px += w
       end
@@ -2893,7 +2893,7 @@ module Gori::Tui
       end
       return unless li == @resp_cursor.cy
       cx = @resp_cursor.cx.clamp(0, line.size)
-      px = x + Screen.column_width(line[0, cx])
+      px = x + Screen.draw_width(line[0, cx])
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
       screen.cursor(px, y)

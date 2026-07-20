@@ -1518,7 +1518,7 @@ module Gori::Tui
         # paint_char_span_bg (the selection tint, just above) and inverts the
         # Screen.column_for in target_click_to_cursor. display_width put the caret a column
         # left of its glyph on a target holding a zero-width char.
-        cx = base + Screen.column_width(@target[0, @tcx])
+        cx = base + Screen.draw_width(@target[0, @tcx])
         if cx < rect.right - 1
           ch = @tcx < @target.size ? @target[@tcx] : ' '
           screen.cell(cx, rect.y + 1, ch, Theme.bg, ins ? Theme.accent : Theme.accent_bg)
@@ -1584,7 +1584,7 @@ module Gori::Tui
       row = cy - scr
       gw = @editor.gutter? ? Gutter.width(lines.size) : 0
       line = lines[cy]
-      px = rect.x + gw + Screen.column_width(line[0, cx])
+      px = rect.x + gw + Screen.draw_width(line[0, cx])
       if px < rect.x + rect.w
         ch = cx < line.size ? line[cx] : ' '
         screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
@@ -1596,10 +1596,10 @@ module Gori::Tui
                                    x0 : Int32, x1 : Int32, bg : Color) : Nil
       return if x0 >= x1
       px = x
-      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (0...x0).each { |i| px += Screen.draw_width(line[i].to_s) } if x0 > 0
       (x0...x1).each do |i|
         break if i >= line.size
-        w = Screen.column_width(line[i].to_s)
+        w = Screen.draw_width(line[i].to_s)
         screen.text(px, y, line[i].to_s, Theme.text, bg)
         px += w
       end
@@ -2023,7 +2023,7 @@ module Gori::Tui
       end
       return unless li == @detail_cursor.cy
       cx = @detail_cursor.cx.clamp(0, line.size)
-      px = x + Screen.column_width(line[0, cx])
+      px = x + Screen.draw_width(line[0, cx])
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
       screen.cursor(px, y)
