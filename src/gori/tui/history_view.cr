@@ -1501,7 +1501,12 @@ module Gori::Tui
       gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
       @detail_last_cw = cw # remember for horizontal caret-follow (ensure_detail_visible_x)
-      widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0
+      # draw_width, not display_width — as RepeaterView#render_reveal. Reveal.styled gives
+      # every control char a 1-column marker, so a tab is a drawn cell the raw measure calls
+      # 0. Here it also FOUGHT the caret: ensure_detail_visible_x sets @detail_xscroll with
+      # column_width (tab ≥1), then this clamp immediately clawed it back with the smaller
+      # raw measure, so on a tabbed line the caret could never scroll into view at all.
+      widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.draw_width_upto(l, @detail_xscroll + cw + 1) } || 0
       @detail_xscroll = @detail_xscroll.clamp(0, {widest - cw, 0}.max)
       ensure_detail_visible(body.h) if detail_navigable? && focused
       (0...body.h).each do |i|

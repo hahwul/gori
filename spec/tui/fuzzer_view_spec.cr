@@ -515,6 +515,47 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
     view.target_insert('X')
     view.target.should eq("httXps://h")
   end
+
+  # The TARGET caret was measured with display_width while BOTH of its counterparts —
+  # paint_char_span_bg (the selection tint, in the same render) and Screen.column_for (the
+  # click inverse, in target_click_to_cursor) — floor each codepoint to ≥1. On a target
+  # holding a zero-width char the three disagreed: the caret sat a column left of its
+  # glyph and a click came back one character off. A URL carrying U+200B is not exotic
+  # here; it is a stock filter-bypass payload, i.e. exactly what gets pasted into a fuzz
+  # target. Pin the round trip: caret column → click at that column → the same index.
+  it "keeps the target caret and click-to-cursor agreeing across a zero-width char" do
+    target = "https://h/a\u{200B}b" # ZWSP: display_width 0, column_width 1, one drawn cell
+    view = FuzzerView.new
+    view.load_request(target, "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    rect = Rect.new(0, 0, 100, 30)
+    base = rect.x + 4 # render_target draws the value here (the "›" marker sits at rect.x+2)
+
+    view.focus_pane(:target)
+    (0..target.size).each do |cx|
+      col = base + Screen.column_width(target[0, cx])
+      view.target_click_to_cursor(rect, col, rect.y + 1)
+      b = MemoryBackend.new(100, 30)
+      view.render(Screen.new(b), rect)
+      # The caret is the single cell painted on an accent background in the field.
+      caret = (base...(base + 24)).select do |x|
+        bg = b.bg_at(x, rect.y + 1)
+        bg == Theme.accent || bg == Theme.accent_bg
+      end
+      caret.should eq([col]) # click column → caret column, with nothing left over
+    end
+
+    # …and the click lands on the right CHARACTER, not merely the right column: index 12
+    # is the 'b' that sits AFTER the ZWSP, the first index the old measure got wrong.
+    fresh = FuzzerView.new
+    fresh.load_request(target, "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    fresh.target_click_to_cursor(rect, base + Screen.column_width(target[0, 12]), rect.y + 1)
+    fresh.target_insert('X')
+    fresh.target.should eq("#{target[0, 12]}X#{target[12..]}")
+
+    # Concretely: past the ZWSP the old measure was one column short of the drawn glyph.
+    Screen.display_width(target).should eq(12)
+    Screen.column_width(target).should eq(13)
+  end
 end
 
 describe "FuzzerView result-detail decode panes" do

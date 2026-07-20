@@ -118,6 +118,32 @@ describe Gori::Tui::Screen do
     end
   end
 
+  # Screen#input_line is the shared single-line field renderer (~30 call sites: Scope,
+  # Rules, Palette, the History query bar, every TextField overlay). Its caret and its
+  # click inverse have to be exact inverses of each other, or the block caret paints over
+  # the neighbouring glyph and a click lands off by the same amount. They drifted: the
+  # caret was measured with display_width (a zero-width char = 0 columns) while every
+  # field's click-to-cursor goes through Screen.column_for, which floors each CODEPOINT to
+  # ≥1. `parse_printable` accepts U+200B / U+FEFF / a combining mark unfiltered, and a URL
+  # carrying a zero-width char is a stock filter-bypass payload — reachable input here.
+  it "input_line puts the caret exactly where column_for maps that column back" do
+    value = "ab\u{200B}cd" # ZWSP at index 2: display_width 0, column_width 1, drawn 1 cell
+    (0..value.size).each do |cx|
+      b = MemoryBackend.new(40, 3)
+      Screen.new(b).input_line(0, 1, value, cx, "", Theme.text)
+      # The caret is the single cell painted on the ACCENT background.
+      col = (0...40).select { |x| b.bg_at(x, 1) == Theme.accent }
+      col.size.should eq(1) # exactly one caret cell (cx=#{cx})
+      col[0].should eq(Screen.column_width(value[0, cx]))  # sits on its own glyph
+      Screen.column_for(value, col[0]).should eq(cx)       # a click there returns the same cx
+      Screen.display_width(value[0, cx]).should be <= cx   # (the old measure could only under-count)
+    end
+    # Concretely: past the ZWSP the two measures disagree by one, which is exactly the
+    # column the caret used to be short by.
+    Screen.display_width(value[0, 3]).should eq(2)
+    Screen.column_width(value[0, 3]).should eq(3)
+  end
+
   it "text draws a tab as a one-column space (ASCII and mixed paths)" do
     # ASCII fast path
     b1 = MemoryBackend.new(10, 1)

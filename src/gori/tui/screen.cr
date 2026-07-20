@@ -487,7 +487,18 @@ module Gori::Tui
       styled_run(px, y, suffix, cx, colors, fg, bg, right) unless suffix.empty?
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
-      caret_x = x + Screen.display_width(prefix) + Screen.display_width(preedit)
+      # column_width, NOT display_width and NOT draw_width. `cx` is a CHARACTER index into
+      # `value` (see the clamp above and `value[cx]` below), and this caret's inverse is
+      # Screen.column_for — the per-codepoint, floored-to-≥1 mapping used by every click
+      # handler that drives a field (read_cursor, repeater/fuzzer target, decoder chain).
+      # column_width is that function's exact inverse, so caret and click agree by
+      # construction; display_width scored a zero-width char (U+200B, U+FEFF, a combining
+      # mark — all of which parse_printable accepts unfiltered) as 0 columns, leaving the
+      # block caret one column left of its glyph, painting over the neighbour, and landing
+      # a click one character off. draw_width would match the DRAW but not `column_for`,
+      # re-breaking the click; reconciling those two is the caret-model change documented
+      # at TextArea#ensure_visible_x and deliberately not attempted here.
+      caret_x = x + Screen.column_width(prefix) + Screen.column_width(preedit)
       caret_ch = preedit.empty? ? (cx < value.size ? value[cx] : ' ') : ' '
       if caret_x < right
         cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)

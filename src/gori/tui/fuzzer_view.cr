@@ -1514,7 +1514,11 @@ module Gori::Tui
       end
       Highlight.draw(screen, base, rect.y + 1, Highlight.env_line(@target, Theme.text_bright), width: tw)
       if focused
-        cx = base + Screen.display_width(@target[0, @tcx])
+        # column_width — same three-way agreement as RepeaterView#render_target: it matches
+        # paint_char_span_bg (the selection tint, just above) and inverts the
+        # Screen.column_for in target_click_to_cursor. display_width put the caret a column
+        # left of its glyph on a target holding a zero-width char.
+        cx = base + Screen.column_width(@target[0, @tcx])
         if cx < rect.right - 1
           ch = @tcx < @target.size ? @target[@tcx] : ' '
           screen.cell(cx, rect.y + 1, ch, Theme.bg, ins ? Theme.accent : Theme.accent_bg)
@@ -1987,7 +1991,12 @@ module Gori::Tui
       gw = {Gutter.width(lines.size), inner.w}.min
       cw = {inner.w - gw, 0}.max
       rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
-      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
+      # draw_width, not display_width: these rows are drawn per grapheme (Highlight.draw on
+      # the styled overlay, `screen.text` on the plain fallback), so a control char in a
+      # fuzz response holds a cell the raw measure scores 0 and the clamp stopped short of
+      # the content. _upto keeps the early exit — this runs every frame over response lines
+      # that are attacker-shaped and can be arbitrarily long.
+      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.draw_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
       # Selection spans for the WHOLE buffer, built once per frame. This used to sit inside
       # paint_detail_line_chrome, i.e. rebuilt and thrown away once per drawn row — O(rows ×
       # selection length) tuple appends, plus a fresh Array per row even with nothing selected.
