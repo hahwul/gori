@@ -185,6 +185,115 @@ describe Gori::Tui::TextArea do
       ta.cx.should eq(2) # past the merged cluster, not between its two codepoints
     end
 
+    # A line JOIN re-clusters across the seam: `@cx = prev.size` / `@cx = cx` are assigned
+    # against a string concatenation just built, so if the joined-on line opens with a
+    # combining mark the seam is now cluster INTERIOR. Every other @cx mutation snapped;
+    # these two did not, and no existing spec crossed them (the join specs join ASCII lines,
+    # the cluster specs stay within one line).
+    describe "line joins re-cluster across the seam" do
+      # line 0 "cafe", line 1 U+0301 + "x" — the join fuses the acute onto the `e`.
+      split = "cafe\n\u{0301}x"
+
+      it "leaves the caret on a boundary after a backspace join" do
+        ta = TextArea.new(split)
+        ta.place_cursor(1, 0)
+        ta.backspace
+        ta.text.should eq("cafe\u{0301}x")
+        ta.cx.should eq(5) # past the fused `é`, NOT 4 (between the e and its acute)
+        line = ta.lines_snapshot[0]
+        # The defining invariant: caret column and click invert each other.
+        Screen.column_for(line, Screen.draw_width(line[0, ta.cx])).should eq(ta.cx)
+      end
+
+      it "leaves the caret on a boundary after a forward-delete join" do
+        ta = TextArea.new(split)
+        ta.place_cursor(0, 4)
+        ta.delete
+        ta.text.should eq("cafe\u{0301}x")
+        ta.cx.should eq(5)
+        line = ta.lines_snapshot[0]
+        Screen.column_for(line, Screen.draw_width(line[0, ta.cx])).should eq(ta.cx)
+      end
+
+      it "does not lose the following glyph when rendering after a join" do
+        ta = TextArea.new(split)
+        ta.place_cursor(1, 0)
+        ta.backspace
+        b = MemoryBackend.new(20, 2)
+        ta.render(Screen.new(b), Rect.new(0, 0, 20, 2), cursor: true, highlight: :request)
+        b.cluster_row(0).rstrip.should eq("cafe\u{0301}x") # was "café" with the x painted over
+      end
+
+      it "inserts after the fused cluster rather than splicing into it" do
+        ta = TextArea.new(split)
+        ta.place_cursor(1, 0)
+        ta.backspace
+        ta.insert('Z')
+        ta.text.should eq("cafe\u{0301}Zx") # was "cafeZ\u{0301}x" — Z between the e and its acute
+      end
+
+      it "does not strand the combining mark on the wrong base after a join" do
+        ta = TextArea.new(split)
+        ta.place_cursor(1, 0)
+        ta.backspace
+        ta.backspace  # removes the fused `é` as one cluster
+        ta.text.should eq("cafx") # was "caf\u{0301}x" — the acute stranded on the `f`
+      end
+    end
+
+    # The block caret used to paint its glyph and then a pad space at +1. For a WIDE glyph
+    # that pad landed on the continuation cell the glyph itself had just claimed, and a
+    # write there orphans the lead — which termisu (and TermisuBackend, mirroring it)
+    # clears. So the caret erased the very glyph it was highlighting. Invisible to the
+    # whole suite until MemoryBackend learned continuation cells.
+    describe "wide-glyph caret (CJK / Hangul)" do
+      it "does not erase the glyph it highlights" do
+        ta = TextArea.new("한글")
+        b = MemoryBackend.new(20, 2)
+        ta.render(Screen.new(b), Rect.new(0, 0, 20, 2), cursor: true, highlight: :request)
+        b.cluster_row(0).rstrip.should eq("한 글") # lead intact; " " is its continuation cell
+        b.cont_grid[0][1].should be_true          # the caret's glyph still owns column 1
+      end
+
+      it "keeps the accent background on the caret's own cell" do
+        ta = TextArea.new("한글")
+        b = MemoryBackend.new(20, 2)
+        ta.render(Screen.new(b), Rect.new(0, 0, 20, 2), cursor: true, highlight: :request)
+        b.bg_at(0, 0).should eq(Theme.accent)
+      end
+
+      it "does not spill its continuation cell outside the pane" do
+        # Caret on the wide glyph at the pane's LAST column: the continuation is claimed
+        # during the glyph's own write, so a `break` afterwards was too late. Draw a space.
+        ta = TextArea.new("ab한")
+        ta.move(0, 2) # caret on the 한, which sits at column 2 = the pane's last column
+        b = MemoryBackend.new(20, 2)
+        ta.render(Screen.new(b), Rect.new(0, 0, 3, 2), cursor: true, highlight: :request)
+        b.cont_grid[0][3].should be_false # column 3 is outside the 3-wide pane
+      end
+    end
+
+    it "leaves the caret on a boundary when stepping out of a concealed run" do
+      # snap_cx_out_of_conceal runs LAST (resting on a hidden byte corrupts the buffer,
+      # which beats a mispaint) and lands on `b + 1`, just past the closing `§`. The
+      # delimiters `¦` U+00A6 / `§` U+00A7 are NOT ASCII, but both are
+      # Grapheme_Cluster_Break=Other so they always start a cluster — `a` is safe. `b + 1`
+      # is not: a combining mark typed straight after the `§` binds to it, so the "legal
+      # rest" was cluster interior until that edge got rounded up.
+      text = "q=§data¦b64§\u{0301}x"
+      ta = TextArea.new(text)
+      ta.conceal_spans = [{7, 11}] # ¦b64, closing § at 11
+      ta.move(0, 7)                # the run's left edge
+      ta.cx.should eq(7)
+      ta.move(0, 1) # cross the run: past the §, and past the mark bound to it
+      line = ta.lines_snapshot[0]
+      starts = [] of Int32
+      i = 0
+      line.each_grapheme { |g| starts << i; i += g.size }
+      starts << line.size
+      starts.should contain(ta.cx) # was 12, interior of the "§ + acute" cluster
+    end
+
     it "lands a click on a cluster start, agreeing with where the caret paints" do
       rect = Rect.new(0, 0, 40, 3)
       ta = TextArea.new(cafe + "X")

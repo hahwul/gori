@@ -282,13 +282,18 @@ module Gori::Tui
     # Cheap sufficient test for "index `i` already starts a cluster", so the snap helpers
     # can skip their O(prefix) grapheme walk on the overwhelmingly common case — every
     # keystroke in a line that merely CONTAINS a glyph would otherwise re-walk the prefix.
-    # An ASCII char always starts a cluster: Extend / ZWJ / Prepend / Regional-Indicator
-    # are all non-ASCII, so nothing can bind an ASCII char to what precedes it. The lone
-    # exception is the `\n` of a CRLF pair, which cannot occur here — every caller splits
-    # on '\n' first (TextArea#set_text also rstrips the '\r'), so no line holds one.
-    # Conservative by design: false means "walk to be sure", never a wrong answer.
+    # An ASCII char normally starts a cluster: Extend / ZWJ / Prepend / Regional-Indicator
+    # are all non-ASCII, so nothing can bind one to what precedes it.
+    #
+    # The lone exception is the `\n` of a CRLF pair (UAX #29 GB3), and it is tested
+    # explicitly rather than assumed away. No line reaching here can hold one — every
+    # caller splits on '\n' first — but an `ascii_only?` short-circuit would answer TRUE
+    # for it, which is the UNSAFE direction: a wrong "already a boundary" skips the snap
+    # and strands the caret mid-cluster, while a wrong "not a boundary" only costs a walk
+    # that returns the same index. Conservative for real, not by assertion.
     private def self.boundary?(str : String, i : Int32) : Bool
-      str.ascii_only? || str[i].ascii?
+      c = str[i]
+      c.ascii? && !(c == '\n' && i > 0 && str[i - 1] == '\r')
     end
 
     # Snap a character index to the END (exclusive) of the grapheme cluster holding it —
@@ -544,13 +549,27 @@ module Gori::Tui
       # cluster, which is the duplicate-glyph bug the collapse to draw_width fixes.
       #
       # `cx` here is NOT guaranteed to sit on a cluster boundary: the single-line cursors
-      # (TextField#@caret, ReadCursor#@cx, the views' own @tcx/@scx) still step per
-      # codepoint, unlike TextArea#@cx which now snaps. Landing mid-cluster costs at most a
-      # dead keypress — draw_width returns the same column for every index inside a cluster
-      # — and can no longer misplace the caret onto a neighbouring glyph.
+      # (TextField#@caret, ReadCursor#@cx, the views' own @tcx/@scx/@qcx, the decoder's
+      # chain_cx) still step per codepoint, unlike TextArea#@cx which now snaps. The
+      # residual on those, stated honestly: for "caféx", cx 4 and cx 5 both resolve
+      # to column 4, so one → is a dead keypress — but at cx 4 `caret_glyph` returns the
+      # bare combining mark and paints it at column 4, i.e. ON the cell where the `x`
+      # lives. So it is a misplaced glyph, not merely a dead press. It is still strictly
+      # better than before the collapse, where the caret ran off the end of the drawn text
+      # and stamped a DUPLICATE character past it; and it is unreachable by click, since
+      # column_for only ever returns cluster starts.
+      #
+      # Relatedly, TextField#backspace still deletes one codepoint ("café" → "cafe"),
+      # inconsistent with TextArea's whole-cluster delete. Converting these cursors is
+      # three more edit-path audits and is deliberately out of scope here.
       caret_x = x + Screen.draw_width(prefix) + Screen.draw_width(preedit)
       caret_ch = preedit.empty? ? Screen.caret_glyph(value, cx) : ' '
       if caret_x < right
+        # A wide caret glyph CLAIMS caret_x + 1 as a continuation cell during its own
+        # write, so one landing on the field's last column would cross the right edge onto
+        # whatever borders it. Draw a space there instead — same guard, and same reason, as
+        # the TextArea block caret.
+        caret_ch = ' ' if Screen.grapheme_cols(caret_ch.to_s) == 2 && caret_x + 1 >= right
         cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)
         cursor(caret_x, y)
       end

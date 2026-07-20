@@ -255,6 +255,14 @@ module Gori::Tui
         @lines[@cy - 1] = prev + @lines[@cy]
         @lines.delete_at(@cy)
         @cy -= 1
+        # The JOIN re-clusters across the seam: if the next line opened with a combining
+        # mark it has just fused onto `prev`'s last glyph, so `prev.size` — the seam — is
+        # now cluster INTERIOR. Snap forward, past the fused glyph, which is where the seam
+        # visually is ("café|x", not "caf|éx"). Without this the caret paints over the
+        # following glyph, an insert splices INTO the cluster ("cafe" + "́x" then
+        # typing Z gave "cafeŹx"), and the next backspace strands the mark on the wrong
+        # base ("caf́x") — the exact outcome the whole-cluster delete above exists to avoid.
+        snap_cx_to_cluster(1)
       end
       @styled = nil
       @edits += 1
@@ -290,6 +298,12 @@ module Gori::Tui
         return # end of buffer — nothing to delete, don't dirty
       end
       @cx = cx
+      # The line-join branch re-clusters across the seam exactly as backspace's does (see
+      # the note there), so the caret has to be re-snapped. Forward rather than back:
+      # snapping back would leave the caret before a glyph the join FUSED, so the next
+      # Delete would take the pre-existing base char with it ("cafe" → "cafx"). A no-op on
+      # the common in-line branch, where `cx` was already a boundary.
+      snap_cx_to_cluster(1)
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -368,7 +382,7 @@ module Gori::Tui
       # the hidden runs so a click never lands the caret on an unseen ¦chain char.
       # No cluster snap needed: BOTH inverses already return a cluster start by construction
       # (Screen.column_for walks clusters; concealed_col_to_raw does too, and its conceal
-      # edges are ASCII `¦`/`§`, each its own cluster).
+      # edges `¦`/`§` always begin a cluster — see snap_cx_out_of_conceal).
       @cx = (cr && !cr.empty?) ? concealed_col_to_raw(line, cr, target) : Screen.column_for(line, target)
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       env_complete_close
@@ -605,12 +619,23 @@ module Gori::Tui
             # The whole CLUSTER at `r`, not `line[r]`: parking on `é` (e + U+0301) or a ZWJ
             # family has to invert the glyph the user sees, not its leading codepoint.
             ch = @preedit.empty? ? Screen.caret_glyph(line, r) : Screen.caret_glyph(@preedit, 0)
-            cgw = Screen.grapheme_cols(ch.to_s)
-            (0...cgw).each do |off|
-              break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
-              cch = (off == 0 ? ch : ' ')
-              screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
-            end
+            # ONE write, never two. A width-2 glyph already claims its trailing column as a
+            # continuation cell carrying this same fg/bg/attr — termisu materialises that
+            # cell from its lead — so the accent spans both columns without a second write.
+            # The second write was not merely redundant but destructive: it landed ON the
+            # continuation, and a write there orphans the lead, which the backend blanks
+            # (mirroring termisu's clear_continuation_owner). The caret therefore ERASED
+            # the very glyph it was highlighting — the long-standing "caret blanks a
+            # Hangul/CJK glyph" bug. MemoryBackend models continuation cells now, so this
+            # is covered rather than invisible to every spec in the suite.
+            #
+            # A wide glyph whose continuation would land outside the pane is drawn as a
+            # space instead. The claim happens during the glyph's OWN write, so the `break`
+            # this loop used to do on its second iteration was already too late to keep the
+            # caret off the pane border.
+            wide = Screen.grapheme_cols(ch.to_s) == 2
+            cch = (wide && cxs + 1 >= cx0 + cw) ? ' ' : ch
+            screen.cell(cxs, rect.y + i, cch, Theme.bg, Theme.accent)
           end
         end
       end
@@ -800,8 +825,9 @@ module Gori::Tui
         end
         # Step by CLUSTER, matching `concealed_col`'s draw_width and the cells actually
         # drawn, so this stays that function's exact inverse and a click lands where the
-        # caret paints. A conceal run always opens on a `¦` and closes before a `§` — both
-        # ASCII, both their own cluster — so no cluster straddles a run boundary.
+        # caret paints. A conceal run opens on a `¦` and closes before a `§`: neither is
+        # ASCII, but both are Grapheme_Cluster_Break=Other and so always BEGIN a cluster,
+        # which is what guarantees no cluster straddles a run boundary.
         e = Screen.cluster_end(line, i + 1)
         w = Screen.draw_width(line[i...e])
         return i if target < col + w
@@ -838,11 +864,23 @@ module Gori::Tui
     # left edge, on visible bytes) and `b + 1` (past the closing glyph) are legal rests —
     # and they sit at the same column / the next column, so crossing the whole run is one
     # keypress in each direction (no dead press). `dir` is the travel sign.
+    #
+    # Runs LAST, after snap_cx_to_cluster, because resting on a hidden byte corrupts the
+    # buffer while resting mid-cluster only mispaints — so this one gets the final word.
+    # Both landing sites stay cluster-legal, but not for the reason one might guess: the
+    # delimiters are `¦` U+00A6 and `§` U+00A7, which are NOT ASCII. What matters is that
+    # both are Grapheme_Cluster_Break=Other, so each always BEGINS a cluster no matter what
+    # precedes it — hence `a` (the `¦`) is provably a boundary and needs no snap. `b + 1`
+    # is not: it is the index AFTER the closing `§`, and a combining mark typed right there
+    # binds to that `§`, making b + 1 cluster interior. So round it up. Forward is the only
+    # safe direction — it can only increase, staying clear of the `(a, b]` no-rest zone,
+    # whereas rounding down would land on `b` itself, the one index this exists to avoid.
     private def snap_cx_out_of_conceal(dir : Int32) : Nil
       return if @conceal_spans.empty?
-      line_conceal(line_start_offset(@cy), @lines[@cy].size).each do |(a, b)|
+      line = @lines[@cy]
+      line_conceal(line_start_offset(@cy), line.size).each do |(a, b)|
         next unless @cx > a && @cx <= b
-        right = {b + 1, @lines[@cy].size}.min
+        right = {Screen.cluster_end(line, b + 1), line.size}.min
         @cx = if dir > 0
                 right
               elsif dir < 0

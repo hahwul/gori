@@ -150,6 +150,33 @@ describe Gori::Tui::Screen do
       end
     end
 
+    it "cannot be summed per CHARACTER — that re-creates the retired measure" do
+      # The trap eight duplicated selection-tint helpers fell into. draw_width of a SINGLE
+      # char is identical to the old per-codepoint measure (one char is always one
+      # cluster), so summing it char-by-char silently rebuilds column_width and drifts
+      # right by each cluster's inflation — while the caret and base draw in the same view
+      # measure per cluster. Drawing char-by-char is worse still: it shreds a cluster
+      # across cells. Any new copy of that helper must iterate CLUSTERS.
+      [{"cafe\u{0301}xyz", 7, 8}, {family, 2, 11}, {nfd_han, 2, 4}].each do |(s, whole, per_char)|
+        Screen.draw_width(s).should eq(whole)
+        s.each_char.sum { |c| Screen.draw_width(c.to_s) }.should eq(per_char)
+      end
+    end
+
+    it "treats the LF of a CRLF pair as cluster interior, not a boundary" do
+      # boundary?, the O(1) fast path in front of the grapheme walk, must not answer "yes"
+      # here. An `ascii_only?` short-circuit did: "a\r\nb" is all-ASCII, so index 2 (the
+      # \n, which UAX #29 GB3 binds to the \r) looked like a fresh cluster. That is the
+      # UNSAFE direction — a false "already a boundary" skips the snap and strands the
+      # caret mid-cluster. No caller can reach it today (every line producer splits on
+      # '\n' first) but the predicate must be right on its own terms.
+      s = "a\r\nb"
+      s.ascii_only?.should be_true # the trap: the short-circuit used to stop here
+      s.graphemes.size.should eq(3)
+      Screen.cluster_start(s, 2).should eq(1) # into the \r\n cluster, not 2
+      Screen.cluster_end(s, 2).should eq(3)
+    end
+
     it "cluster_start / cluster_end snap to boundaries and are identity on them" do
       s = "a#{skin}e\u{0301}z"
       starts = [] of Int32
