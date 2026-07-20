@@ -92,7 +92,12 @@ The binary is written to `bin/gori`.
 
 ## Usage
 
-Start the proxy and open the TUI — no subcommand needed:
+gori runs one engine and one project behind three entry points. Drive it yourself, hand it to an
+AI agent, or script it, and pick the one that fits who is at the controls.
+
+### For humans: `gori` (TUI)
+
+Start the proxy and open the interactive terminal UI. No subcommand needed:
 
 ```bash
 gori
@@ -100,17 +105,45 @@ gori
 
 The proxy listens on `127.0.0.1:8070` by default, and a short first-run wizard picks the
 **global default** bind and theme (projects can pin their own later). To intercept HTTPS, trust
-gori's root CA — the quickest path is the palette's **Open browser** (`Ctrl-P`), which launches a
+gori's root CA. The quickest path is the palette's **Open browser** (`Ctrl-P`), which launches a
 browser already trusted and proxied. Captured traffic lands in **History**; press `Ctrl-P` for the
 command palette or `Space` for context actions.
 
 ```bash
 gori --listen 0.0.0.0 --port 8080   # global bind for this run only (not persisted)
-gori run --help                     # non-interactive subcommands over the same project
-gori mcp                            # Model Context Protocol server (stdio)
 ```
 
-See the [documentation](docs/) for the full guide, or open the **Help** tab in the app.
+### For AI agents: `gori mcp` (MCP server)
+
+`gori mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server. An AI client
+spawns it over stdio, reads your traffic, and drives the same tools you do. Let gori write the
+config for your agent, then restart the client:
+
+```bash
+gori mcp --install-claude-code   # Claude Code   (~/.claude.json)
+gori mcp --install-claude        # Claude Desktop
+gori mcp --install-codex         # OpenAI Codex
+gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-grok          # Grok
+```
+
+Add `--read-only` to hand a project to an untrusted agent (read tools only, no live requests). The
+[AI Setup guide](docs/content/getting-started/ai-setup.md) walks through connecting an agent and
+running your first request.
+
+### For scripts: `gori run` (headless CLI)
+
+`gori run` mirrors every TUI action for non-interactive use. It is built for scripting and CI, but
+works just as well by hand or from an agent's shell:
+
+```bash
+gori run history --format json      # dump captured flows as JSON
+gori run sitemap                    # endpoints seen so far
+gori run --help                     # every subcommand
+```
+
+All three entry points share the same project database. See the [documentation](docs/) for the
+full guide, or open the **Help** tab in the app.
 
 ## Development
 

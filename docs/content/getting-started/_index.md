@@ -13,6 +13,7 @@ Welcome to gori. This section takes you from a clean machine to a live proxy ses
 4. The two discovery surfaces: command palette (`Ctrl-P`) and space menu (`Space`)
 5. Sending a flow to Repeater / Fuzzer and running one send
 6. Where gori stores its data and how to configure it
+7. Connecting an AI agent to the same project over MCP
 
 ## What Is gori?
 
@@ -24,4 +25,5 @@ It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, an
 
 - [Installation](/getting-started/installation/): Homebrew, the AUR, Docker, a binary, or from source
 - [Quick Start](/getting-started/quick-start/): capture, keys, and your first Repeater
+- [AI Setup](/getting-started/ai-setup/): connect an AI agent to the project over MCP
 - [Configuration](/getting-started/configuration/): settings, storage, and the CA

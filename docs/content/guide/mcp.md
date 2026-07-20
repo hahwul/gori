@@ -137,5 +137,6 @@ gori deliberately has no in-tool AI chat. The intelligence lives outside the too
 
 ## Next Steps
 
+- [AI Setup](/getting-started/ai-setup/): a step-by-step walkthrough to connect an agent and drive its first request
 - [CLI Reference](/reference/cli/): full `gori mcp` flags
 - [Query Language](/reference/query-language/): the syntax agents use to filter
