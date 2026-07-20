@@ -1,0 +1,70 @@
+name: gori
+base: core24
+version: 0.1.0
+summary: gori (고리) is a free/open-source TUI web proxy (MITM) written in Crystal.
+description: |
+  gori (고리 — Korean for ring, link, loop) sits in the loop between your client
+  and its target, capturing every request and response as a flow you can
+  intercept, replay, fuzz, and scan across HTTP/1.1, HTTP/2, WebSocket, gRPC and
+  SSE. Every action is also a `gori run` subcommand and an MCP tool, so scripts
+  and AI agents can drive the same engagement.
+
+grade: stable # must be 'stable' to release into candidate/stable channels
+confinement: strict # use 'strict' once you have the right plugs and slots
+license: Apache-2.0
+
+apps:
+  gori:
+    command: gori
+    # `home` blocks hidden dirs, so the default ~/.gori is unreachable under
+    # strict confinement; point GORI_HOME at the snap's own writable data dir
+    # (~/snap/gori/common) instead. The root CA and per-project SQLite DBs live
+    # there — same idea as the Docker image's GORI_HOME=/data.
+    environment:
+      GORI_HOME: $SNAP_USER_COMMON
+    plugs:
+      - home
+      - removable-media
+      - network
+      - network-bind
+
+parts:
+  gori:
+    source: ./
+    plugin: nil
+    # Build dynamically inside the core24 (Ubuntu 24.04) environment and let
+    # stage-packages bundle the runtime .so's — unlike the release/Docker musl
+    # build, which links `--static` on Alpine. Deliberately NO `-Dpreview_mt`:
+    # Store, Fuzz::Engine, Miner::Engine and Store::SafeRegexp rely on the
+    # single-threaded fiber scheduler (see the comments in those files).
+    override-build: |
+      curl -fsSL https://crystal-lang.org/install.sh | bash
+      shards install --production
+      crystal build src/main.cr -o $CRAFT_PART_INSTALL/gori --release --no-debug
+    # Ubuntu -dev packages for the libraries gori links (mirrors the Dockerfile's
+    # apk list): brotli/zstd -> proxy codecs, sqlite3 -> store, yaml -> OAS
+    # import, openssl -> TLS, gmp -> `require "big"`, plus zlib/pcre2/gc for the
+    # Crystal runtime. No libevent (Crystal 1.21 uses epoll) and no libxml2.
+    build-packages:
+      - git
+      - curl
+      - pkg-config
+      - libssl-dev
+      - libyaml-dev
+      - zlib1g-dev
+      - libpcre2-dev
+      - libgc-dev
+      - libgmp-dev
+      - libbrotli-dev
+      - libzstd-dev
+      - libsqlite3-dev
+    # Runtime shared libraries to bundle into the strict snap. libssl/pcre2/gc
+    # are provided by the core24 base (per the working hwaro snap); gmp is added
+    # here because gori pulls it in via `big` where hwaro does not.
+    stage-packages:
+      - libbrotli1
+      - libzstd1
+      - libsqlite3-0
+      - libyaml-0-2
+      - zlib1g
+      - libgmp10
