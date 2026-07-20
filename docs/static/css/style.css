@@ -536,17 +536,26 @@ kbd {
   transition: transform var(--transition), border-color var(--transition), background var(--transition), color var(--transition);
 }
 
+/* Flat gold, no leaf gradient: the brushed metal look stays on the artwork
+   and the mark, while the CTA reads as a plain, confident surface. */
 .button-primary {
-  border: 1px solid var(--accent-strong);
-  background: var(--grad-gold-leaf);
+  border: 1px solid transparent;
+  background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), var(--shadow-soft);
 }
 
 .button-primary:hover {
-  border-color: var(--accent-strong);
-  color: var(--accent-ink);
-  filter: brightness(1.06);
+  background: var(--accent-strong);
+}
+
+/* On paper the mid gold leaves the cream label short of AA, so the flat fill
+   deepens and hover lightens instead. */
+:root[data-theme="light"] .button-primary {
+  background: var(--accent-strong);
+}
+
+:root[data-theme="light"] .button-primary:hover {
+  background: var(--accent);
 }
 
 .button-secondary {
