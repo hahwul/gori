@@ -1,20 +1,32 @@
 +++
 title = "가이드"
 description = "gori 워크벤치 심화 가이드: 프록시, 리피터, 퍼징, 스캐닝, MCP."
+weight = 20
 +++
 
 gori를 다루는 심화 가이드입니다. TUI의 각 탭은 하나의 목적에 집중한 도구이며, 이들을 합치면 캡처부터 리포트까지 전체 평가 과정을 아우릅니다.
 
 ## 주제 {#topics}
 
+**핵심** — 캡처부터 트리아지까지의 작업 흐름:
+
 - **[Proxy & History](/ko/guide/proxy/)**: 캡처, 인터셉트, 스코프, 임포트, Match & Replace, 호스트 오버라이드.
 - **[Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/)**: 요청 워크벤치, 환경 변수 토큰, Intruder 스타일 Fuzzer.
+- **[Scanning & Issues](/ko/guide/scanning/)**: Probe, Param Miner, Discover(스파이더 & 브루트포스), Issues, Notes, Comparer.
+
+**워크벤치** — 하나의 목적에 집중한 분석 도구:
+
 - **[Decoder](/ko/guide/decoder/)**: TUI 안에서 동작하는 인코드 / 디코드 / 해시 파이프라인.
 - **[JWT](/ko/guide/jwt/)**: JSON Web Token을 디코드, 재서명, 공격합니다.
 - **[Sequencer](/ko/guide/sequencer/)**: 세션·CSRF 토큰의 무작위성을 평가합니다.
 - **[OAST](/ko/guide/oast/)**: 아웃오브밴드 콜백을 잡아 블라인드 취약점을 확인합니다.
-- **[Scanning & Issues](/ko/guide/scanning/)**: Probe, Param Miner, Discover(스파이더 & 브루트포스), Issues, Notes, Comparer.
+
+**자동화**:
+
 - **[MCP Server](/ko/guide/mcp/)**: AI 에이전트나 스크립트로 gori를 구동합니다.
+
+**커스터마이즈**:
+
 - **[Settings](/ko/guide/settings/)**: Preferences 모달과 그 안의 모든 섹션.
 - **[Themes](/ko/guide/themes/)**: 내장 컬러 테마를 전환하거나 직접 만듭니다.
 - **[Hotkeys](/ko/guide/hotkeys/)**: gori의 단축키를 재지정합니다.

@@ -1,6 +1,10 @@
 +++
 title = "Proxy & History"
 description = "Capture traffic, intercept requests, scope your target, and inspect every protocol."
+weight = 10
+
+[extra]
+group = "Core"
 +++
 
 The proxy sits between your client and the upstream server, records each exchange as a *flow*, and stores it in the current project. **History** is where you read those flows back.

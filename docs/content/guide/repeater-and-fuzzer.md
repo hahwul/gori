@@ -1,6 +1,10 @@
 +++
 title = "Repeater & Fuzzer"
 description = "The request workbench and the Intruder-style fuzzer, in the TUI and headless."
+weight = 20
+
+[extra]
+group = "Core"
 +++
 
 Once you've captured an interesting flow, **Repeater** and the **Fuzzer** are where you test it.

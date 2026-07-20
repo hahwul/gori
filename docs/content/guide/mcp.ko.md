@@ -1,6 +1,10 @@
 +++
 title = "MCP 서버"
 description = "Model Context Protocol을 통해 AI 에이전트나 스크립트로 gori를 구동합니다."
+weight = 80
+
+[extra]
+group = "자동화"
 +++
 
 gori는 내장 **MCP(Model Context Protocol) 서버**를 제공합니다. TUI에 채팅 창을 넣는 대신, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 덕분에 MCP를 지원하는 어떤 에이전트든(Claude, Codex, Grok 등) 트래픽을 읽고 도구를 구동할 수 있습니다.

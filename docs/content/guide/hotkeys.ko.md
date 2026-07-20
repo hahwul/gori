@@ -1,6 +1,10 @@
 +++
 title = "단축키"
 description = "Preferences 모달에서 gori의 단축키를 재지정합니다."
+weight = 110
+
+[extra]
+group = "커스터마이즈"
 +++
 
 gori의 단축키는 **Hotkeys** 편집기에서 재지정합니다. Preferences(`Ctrl-,` → **Editor & Keys** → **Hotkeys**에서 `↵`)로 들어가거나, 커맨드 팔레트(`Ctrl-P`)의 **`settings:hotkeys`**로 바로 갈 수 있습니다. 에디터는 재지정 가능한 모든 동작을 발생 위치별(GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …)로 묶어 나열합니다. 행을 고르고, 새 키를 누르면, 끝입니다.

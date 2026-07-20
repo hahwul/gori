@@ -1,24 +1,14 @@
 +++
 title = "Configuration"
 description = "Where gori stores data, how to configure the network, and the root CA."
+weight = 40
 +++
 
-gori keeps global preferences in a JSON settings file and stores each project as its own SQLite database. This page covers where everything lives and how to change the essentials.
+gori keeps global preferences in a JSON settings file and stores each project as its own SQLite database. This page covers the essentials you need on day one: where things live, how the proxy binds, and how clients trust gori's CA. For the full, key-by-key breakdown, see the [Configuration Reference](/reference/config/).
 
 ## The gori Home Directory
 
-Everything gori writes lives under a single tree, `GORI_HOME`. It resolves to `$GORI_HOME` when that environment variable is set and non-empty, otherwise `~/.gori`:
-
-```
-~/.gori/
-├── settings.json       # Global preferences
-├── gori.db             # Default database
-├── projects/           # One subdirectory per project, each with its own DB
-├── ca/                 # Root CA (root.crt.pem + root.key.pem)
-├── themes/             # User themes
-├── wordlists/          # Fuzzer / miner wordlists
-└── active_project      # Marker for the most-recently-used project
-```
+Everything gori writes lives under a single tree, `GORI_HOME` — `$GORI_HOME` when that variable is set and non-empty, otherwise `~/.gori`. It holds `settings.json` (global preferences), your project databases under `projects/`, the root CA in `ca/`, plus `themes/` and `wordlists/`. See [Storage Layout](/reference/config/#storage-layout) for the full tree.
 
 Point gori at an isolated home for a session:
 
@@ -35,10 +25,6 @@ gori settings          # print the settings.json path
 gori settings --edit   # open it in your editor
 ```
 
-Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `editor`, `tabs`, `layout`, `statusline`, `hostname_overrides`, `env`, `hotkeys`, `decoder`, and `mine`. See the [Configuration Reference](/reference/config/) for the full list of keys.
-
-### The Preferences Modal
-
 You rarely need to edit the file by hand. Everything in it is editable in-app from one surface, the **Preferences** modal, grouped into four sub-tabs (General, Appearance, Editor & Keys, Network & Tabs):
 
 | Open it with | Lands on |
@@ -47,52 +33,17 @@ You rarely need to edit the file by hand. Everything in it is editable in-app fr
 | The `⚙` chip in the top bar | Same as `Ctrl-,` |
 | `Ctrl-P` → any **Settings: …** entry | That section's fields directly |
 
-`Ctrl-,` also works in the project picker, before any project is open, so you can set your theme on first launch. Saved changes apply live, no restart. See the [Settings guide](/guide/settings/) for every section and field.
+`Ctrl-,` also works in the project picker, before any project is open, so you can set your theme on first launch. Saved changes apply live, no restart. See the [Settings guide](/guide/settings/) for every section and field, and the [Configuration Reference](/reference/config/) for the underlying keys.
 
-### Network
+## Network
 
-The `network` section is the global default for how the proxy binds and whether traffic is forwarded through an upstream proxy. Projects without their own network overrides inherit these values:
+By default the proxy listens on `127.0.0.1:8070` and connects directly to targets. You can change that in three places, highest priority first:
 
-```json
-{
-  "network": {
-    "bind_host": "127.0.0.1",
-    "bind_port": 8070,
-    "upstream_proxy": ""
-  }
-}
-```
+1. **Per-project** — pin a bind address, port, and upstream for one project from the **Project** tab; these win for that project only.
+2. **CLI flags** — `--listen` / `--port` override the global default for the current process, without writing to disk.
+3. **`settings.json` `network`** — the shared default, edited by the first-run wizard and Preferences → **Network**.
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `bind_host` | `127.0.0.1` | Global default listen address |
-| `bind_port` | `8070` | Global default listen port |
-| `upstream_proxy` | `""` | Global default upstream (`host:port`); empty = direct |
-
-**Precedence** (highest first):
-
-1. **Per-project overrides** (`net.bind_*` in the project DB): when set, they win for that project only.
-2. **CLI flags** (`--listen` / `--port`): override `settings.json` for the current process only; not written to disk.
-3. **`settings.json` `network`**: the shared default (what the first-run wizard and Preferences → **Network** edit).
-4. **Factory defaults**: `127.0.0.1:8070` when nothing else is set.
-
-### Theme
-
-gori ships twenty-six built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from Preferences (`Ctrl-,` → **Appearance** → **Theme**), from the palette (`Ctrl-P` → `settings:theme`), or set `theme` in `settings.json`. See the [Themes guide](/guide/themes/).
-
-### Hotkeys
-
-Every keyboard shortcut is rebindable from Preferences (`Ctrl-,` → **Editor & Keys** → **Hotkeys**) or the palette (`Ctrl-P` → `settings:hotkeys`), and persisted under the `hotkeys` key. See the [Hotkeys guide](/guide/hotkeys/).
-
-### Statusline
-
-An opt-in extra row at the bottom of the TUI (Preferences → **General** → **Statusline**, or the `statusline` key). When enabled, gori runs a shell command on an interval and shows its (ANSI-coloured) stdout, a customizable status bar inspired by Claude Code's status line. The command receives a JSON snapshot of the live session (project, capture state, flow count, proxy address) on stdin. Disabled by default; see the [Configuration Reference](/reference/config/#statusline) for the keys and the stdin contract.
-
-## Per-Project Network Overrides
-
-A project can pin its own bind address, port, and upstream without touching the global file. These live in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and are edited from the **Project** tab's settings pane, useful when different engagements need different ports or upstream proxies.
-
-When a field matches the current global value, gori drops that override so the project keeps inheriting later global changes. Clearing a pin therefore means “use Settings / CLI again,” not “leave the last value frozen forever.”
+When nothing is set, the factory default is `127.0.0.1:8070`, direct. See [network](/reference/config/#network) for every key and [Per-Project Overrides](/reference/config/#per-project-overrides) for the exact precedence.
 
 ## The Root CA
 

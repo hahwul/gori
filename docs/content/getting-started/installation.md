@@ -1,6 +1,7 @@
 +++
 title = "Installation"
 description = "Install gori via curl, Homebrew, the AUR, Docker, a pre-built binary, or from source."
+weight = 10
 +++
 
 gori is written in [Crystal](https://crystal-lang.org/). Pick a pre-built channel below, or [build from source](#build-from-source) if none fits your platform. Every channel installs the same `gori` binary. Once it's on your `PATH`, jump to [Verify the Installation](#verify-the-installation).

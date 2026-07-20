@@ -1,6 +1,10 @@
 +++
 title = "설정"
 description = "Preferences 모달: gori의 모든 설정을 한곳에서, 어디서나."
+weight = 90
+
+[extra]
+group = "커스터마이즈"
 +++
 
 gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** 모달에서 편집합니다. 앱 안에서든 프로젝트 선택기에서든 같은 모달이므로 익힐 곳은 한 군데뿐입니다.

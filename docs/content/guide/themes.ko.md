@@ -1,6 +1,10 @@
 +++
 title = "테마"
 description = "gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다."
+weight = 100
+
+[extra]
+group = "커스터마이즈"
 +++
 
 gori는 26개의 내장 컬러 테마를 제공합니다: `goridark`(기본값), `goriday`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`.

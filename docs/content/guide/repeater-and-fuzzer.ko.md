@@ -1,6 +1,10 @@
 +++
 title = "Repeater & Fuzzer"
 description = "요청 워크벤치와 Intruder 스타일 Fuzzer를, TUI와 헤드리스에서 다룹니다."
+weight = 20
+
+[extra]
+group = "핵심"
 +++
 
 흥미로운 플로우를 캡처했다면, **Repeater**와 **Fuzzer**가 그 플로우를 테스트하는 곳입니다.

@@ -1,6 +1,7 @@
 +++
 title = "Getting Started"
 description = "Install gori, trust its CA, and capture your first request."
+weight = 10
 +++
 
 Welcome to gori. This section takes you from a clean machine to a live proxy session: traffic in History, a few Day-1 keys under your fingers, and a first Repeater.

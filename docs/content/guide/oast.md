@@ -1,6 +1,10 @@
 +++
 title = "OAST"
 description = "Catch out-of-band callbacks (interactsh & friends) to confirm blind SSRF, XXE, and injection."
+weight = 70
+
+[extra]
+group = "Workbenches"
 +++
 
 Some bugs never show up in the response. A blind SSRF, a blind XXE, an out-of-band SQL injection, or a stored payload that only fires in a back-office browser all reach out to *some other server* instead of answering you. **OAST** (Out-of-band Application Security Testing) gives you that server: gori registers a payload URL with an interaction listener, you plant the payload in a request, and any DNS, HTTP, or SMTP callback the target makes to it shows up as a hit.

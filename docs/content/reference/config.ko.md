@@ -1,6 +1,7 @@
 +++
 title = "설정"
 description = "settings.json 키와 GORI_HOME 저장소 레이아웃."
+weight = 20
 +++
 
 gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQLite 데이터베이스로 저장합니다. 전체 흐름은 [설정 가이드](/ko/getting-started/configuration/)를 참고하세요. 이 페이지는 키 단위 레퍼런스입니다.

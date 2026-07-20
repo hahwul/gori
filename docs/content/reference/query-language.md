@@ -1,6 +1,7 @@
 +++
 title = "Query Language"
 description = "The filter syntax used across History, Sitemap, Probe, Issues, Intercept, and the MCP tools."
+weight = 30
 +++
 
 gori has a small query language (QL) for filtering flows. The same syntax works in the TUI filter bars, in `gori run` (`-q`/`--query`, or positionally), and through the MCP tools. The built-in reference is also available as `gori run history --help` and the `ql_reference` MCP tool.

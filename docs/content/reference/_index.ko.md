@@ -1,6 +1,7 @@
 +++
 title = "레퍼런스"
 description = "CLI 명령, 설정 키, 쿼리 언어."
+weight = 30
 +++
 
 gori의 기술 레퍼런스입니다.

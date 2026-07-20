@@ -1,6 +1,7 @@
 +++
 title = "쿼리 언어"
 description = "History, Sitemap, Probe, Issues, Intercept, MCP 도구 전반에서 쓰는 필터 문법."
+weight = 30
 +++
 
 gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. 같은 문법이 TUI 필터 바, `gori run`(`-q`/`--query` 또는 위치 인자), 그리고 MCP 도구에서 동일하게 동작합니다. 내장 레퍼런스는 `gori run history --help`와 `ql_reference` MCP 도구로도 볼 수 있습니다.

@@ -1508,22 +1508,71 @@ kbd {
 }
 
 .sidebar-section {
-  margin-bottom: 1.35rem;
+  margin-bottom: 0.9rem;
 }
 
 .sidebar-title {
-  padding: 0 0.75rem;
-  margin-bottom: 0.45rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.75rem;
+  margin-bottom: 0.35rem;
+  border-radius: var(--radius-sm);
   color: var(--quiet);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--transition), background var(--transition);
+}
+
+/* Suppress the native <summary> disclosure triangle across engines. */
+.sidebar-title::-webkit-details-marker {
+  display: none;
+}
+
+.sidebar-title:hover {
+  color: var(--muted);
+  background: rgb(var(--ink-rgb) / 0.05);
+}
+
+.sidebar-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-caret {
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  opacity: 0.6;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.sidebar-section[open] > .sidebar-title .sidebar-caret {
+  transform: rotate(180deg);
+}
+
+.sidebar-title:hover .sidebar-caret {
+  opacity: 1;
 }
 
 .sidebar-links {
   list-style: none;
+}
+
+.sidebar-subhead {
+  margin: 0.7rem 0 0.2rem;
+  padding: 0 0.78rem;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
 }
 
 .sidebar-links li {

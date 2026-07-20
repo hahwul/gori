@@ -1,6 +1,10 @@
 +++
 title = "스캐닝 & Issues"
 description = "Probe 스캐너, Param Miner, 그리고 결과를 Issues로 트리아지하기."
+weight = 30
+
+[extra]
+group = "핵심"
 +++
 
 gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 있습니다. **Probe**는 트래픽에서 이슈를 감시하고, **Param Miner**는 숨은 입력을 발견하며, **Issues**는 결과를 트리아지하는 곳입니다.
