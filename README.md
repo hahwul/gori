@@ -88,7 +88,7 @@ shards build --release
 The binary is written to `bin/gori`.
 
 > For system libraries (Brotli / Zstd), offline builds, and other options, see the
-> [Installation guide](docs/content/getting-started/installation.md).
+> [Installation guide](https://gori.hahwul.com/getting-started/installation/).
 
 ## Usage
 
