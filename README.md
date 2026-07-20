@@ -128,7 +128,7 @@ gori mcp --install-grok          # Grok
 ```
 
 Add `--read-only` to hand a project to an untrusted agent (read tools only, no live requests). The
-[AI Setup guide](docs/content/getting-started/ai-setup.md) walks through connecting an agent and
+[AI Setup guide](https://gori.hahwul.com/getting-started/ai-setup/) walks through connecting an agent and
 running your first request.
 
 ### For scripts: `gori run` (headless CLI)
@@ -142,7 +142,7 @@ gori run sitemap                    # endpoints seen so far
 gori run --help                     # every subcommand
 ```
 
-All three entry points share the same project database. See the [documentation](docs/) for the
+All three entry points share the same project database. See the [documentation](https://gori.hahwul.com) for the
 full guide, or open the **Help** tab in the app.
 
 ## Development
@@ -154,7 +154,7 @@ shards run gori       # run without installing
 
 If linking fails with undefined `BrotliDecoder*` symbols, `libbrotlidec` is missing or
 `pkg-config` cannot find it — see the
-[Installation guide](docs/content/getting-started/installation.md) for the system libraries and the
+[Installation guide](https://gori.hahwul.com/getting-started/installation/) for the system libraries and the
 `-Dwithout_native_codecs` offline build.
 
 ## Contributing
