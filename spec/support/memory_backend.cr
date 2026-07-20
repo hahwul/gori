@@ -52,9 +52,16 @@ class MemoryBackend < Gori::Tui::Backend
     end
   end
 
+  # Colors too, not just the glyph: termisu's clear_continuation_owner assigns a whole
+  # Cell.default, so an orphaned lead loses its fg/bg as well. Leaving them behind made
+  # every `bg_at(x, y) == Theme.accent` caret assertion in the suite VACUOUS — it passed
+  # on a caret that had just erased the wide glyph under it, which is exactly the bug the
+  # caret specs exist to catch.
   private def blank_cell(y : Int32, x : Int32) : Nil
     @grid[y][x] = ' '
     @cluster_grid[y][x] = " "
+    @fg_grid[y][x] = Gori::Tui::Color.default
+    @bg_grid[y][x] = Gori::Tui::Color.default
   end
 
   def size : {Int32, Int32}

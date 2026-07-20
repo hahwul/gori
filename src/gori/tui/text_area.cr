@@ -619,9 +619,12 @@ module Gori::Tui
             # The whole CLUSTER at `r`, not `line[r]`: parking on `é` (e + U+0301) or a ZWJ
             # family has to invert the glyph the user sees, not its leading codepoint.
             ch = @preedit.empty? ? Screen.caret_glyph(line, r) : Screen.caret_glyph(@preedit, 0)
-            # ONE write, never two. A width-2 glyph already claims its trailing column as a
-            # continuation cell carrying this same fg/bg/attr — termisu materialises that
-            # cell from its lead — so the accent spans both columns without a second write.
+            # ONE write, never two. The accent still spans both columns of a width-2 glyph,
+            # though NOT because the continuation carries the lead's colors — it doesn't;
+            # Cell.continuation is a default-colored singleton. It works because termisu's
+            # render_row_batch SKIPS continuation cells without breaking the SGR batch and
+            # advances by the lead's width, so the lead's accent is still in effect across
+            # the pair (verified against the real backend for both CJK and a ZWJ family).
             # The second write was not merely redundant but destructive: it landed ON the
             # continuation, and a write there orphans the lead, which the backend blanks
             # (mirroring termisu's clear_continuation_owner). The caret therefore ERASED
