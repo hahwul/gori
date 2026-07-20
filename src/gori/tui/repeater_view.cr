@@ -1024,9 +1024,15 @@ module Gori::Tui
     # True when the live view's request-side fields match a store row (reconcile skip).
     # Normalizes empty SNI: view.sni_override is nil when blank, but older/peer rows
     # may store "" — those must compare equal or every poll re-applies needlessly.
+    # Normalizes CRLF→LF on the request: the TextArea holds LF (set_text strips \r) but
+    # the store may hold wire CRLF (MCP create_repeater / import / a peer). Without this
+    # the compare is LF-vs-CRLF false EVERY poll, so reconcile re-applies apply_peer_request
+    # → set_text on every capture tick — which slams the request caret back to the top of
+    # the pane in READ mode (INS locks the tab out of reconcile, so it looked NOR-only).
+    # Mirrors FuzzerView#session_side_matches?.
     def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
                               sni : String?) : Bool
-      @target == target && request_text == request &&
+      @target == target && request_text == normalize_lf(request) &&
         @http2 == http2 && @auto_content_length == auto_cl &&
         (sni_override || "") == (sni || "")
     end
@@ -1046,18 +1052,30 @@ module Gori::Tui
       if is_ws
         @ws_mode = true
         @ws_upgrade = request.to_slice
-        @editor.set_text(request)
-        msgs = ws_messages || [] of String
-        @decoded.set_text(msgs.join('\n'))
+        # Only rewrite the editor when the text ACTUALLY changed: set_text resets the caret
+        # + scroll and clears the undo stack, so a soft reconcile poll (apply_peer_request)
+        # that only touched a non-text field must not disturb the pane. Compare on a
+        # CRLF-normalized basis (the editor is LF; the store may be CRLF). Mirrors
+        # FuzzerView#apply_peer_session / NotesView#soft_merge_from.
+        @editor.set_text(request) if @editor.text != normalize_lf(request)
+        joined = (ws_messages || [] of String).join('\n')
+        @decoded.set_text(joined) if @decoded.text != normalize_lf(joined)
         @req_pane = :decoded
       else
         @ws_mode = false
-        @editor.set_text(request)
+        @editor.set_text(request) if @editor.text != normalize_lf(request)
       end
 
       @auto_content_length = auto_cl
       @loaded = true
       @dirty = false
+    end
+
+    # Wire CRLF → editor LF. The TextArea always stores LF (set_text strips \r), so a
+    # request/message that arrives CRLF (store, MCP, import, peer) must be normalized
+    # before comparing against editor text — else the compare is falsely unequal.
+    private def normalize_lf(s : String) : String
+      s.gsub("\r\n", "\n").gsub('\r', '\n')
     end
 
     # Re-seed the captured-original diff baseline for a ^R-from-History tab that was
