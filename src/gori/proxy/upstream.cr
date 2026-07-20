@@ -41,8 +41,9 @@ module Gori::Proxy
     # to gori's own listener `self_addr` — an unbounded self-proxy loop (gori dials
     # itself, its accept loop treats that as a new client, re-resolves the same
     # target, dials itself again…). Triggered when a hostname override — or a request
-    # Host — points at the proxy's own bind. Only a matching port on a loopback/self
-    # address counts, so proxying a real external host on the same port is unaffected.
+    # Host — points at the proxy's own bind. Only a matching port on a loopback/wildcard/
+    # self address counts (see reaches_self?), so proxying a real external host on the
+    # same port is unaffected.
     #
     # `local_host` is the concrete address the client actually reached us on
     # (the accepted socket's local address). Under a wildcard bind (0.0.0.0 / ::)
@@ -57,7 +58,7 @@ module Gori::Proxy
       bind = normalize_host(self_addr[0])
       return true if target == bind
       return true if local_host && target == normalize_host(local_host)
-      loopback?(target) && (loopback?(bind) || wildcard?(bind))
+      reaches_self?(target, bind)
     end
 
     # True when the request LITERALLY targets gori's own listener `self_addr` — the
@@ -75,7 +76,28 @@ module Gori::Proxy
       bind = normalize_host(self_addr[0])
       return true if target == bind
       return true if local_host && target == normalize_host(local_host)
-      loopback?(target) && (loopback?(bind) || wildcard?(bind))
+      reaches_self?(target, bind)
+    end
+
+    # The shared "would dialing `target` land back on our own listener?" test, reached
+    # only after the port gate and the literal bind/local_host matches above.
+    #
+    # A LOOPBACK target reaches us when we are bound to loopback or to a wildcard. An
+    # UNSPECIFIED target (0.0.0.0 / ::) is loopback-EQUIVALENT and must ride the SAME
+    # gate: the OS routes a connect() to the all-zero address onto loopback, so dialing
+    # 0.0.0.0:<our port> lands on our own listener exactly as 127.0.0.1:<our port> does.
+    # Without this, one `GET http://0.0.0.0:<port>/` against the default 127.0.0.1 bind
+    # made gori dial itself, accept that as a fresh client, re-resolve the same target
+    # and dial itself again — 2048 connections (the MAX_CONNECTIONS cap) in 3 seconds,
+    # after which accept() stalls and the proxy is wedged.
+    #
+    # The `(loopback?(bind) || wildcard?(bind))` half is NOT redundant for the wildcard
+    # target, it is the false-positive guard: a listener on a concrete LAN address is
+    # genuinely NOT reachable by dialing 0.0.0.0 (measured — the connect is refused), so
+    # matching a wildcard target unconditionally would 502 legitimate traffic for anyone
+    # proxying a real host on gori's port, which is a worse failure than the loop.
+    private def self.reaches_self?(target : String, bind : String) : Bool
+      (loopback?(target) || unspecified?(target)) && (loopback?(bind) || wildcard?(bind))
     end
 
     private def self.normalize_host(h : String) : String
@@ -83,12 +105,45 @@ module Gori::Proxy
       h.downcase
     end
 
-    private def self.loopback?(h : String) : Bool
-      h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h.starts_with?("127.")
+    # `h` parsed as an IP literal, or nil when it is a hostname ("localhost",
+    # "a.example.com") — those never parse, and we deliberately do NOT resolve them (a
+    # DNS lookup on this path would be a blocking side effect on every request). Parsing
+    # is what makes the classifiers below spelling-proof: Socket::IPAddress canonicalises
+    # ::0, 0:0:0:0:0:0:0:0 and 0000:…:0000 to one address, so they test the ADDRESS rather
+    # than a hand-kept list of strings that a new spelling silently escapes. The parse cost
+    # is irrelevant: both callers sit behind `port == self_addr[1]`, so this only runs for
+    # a request already aimed at gori's own listener port.
+    private def self.parse_ip(h : String) : Socket::IPAddress?
+      Socket::IPAddress.new(h, 0)
+    rescue Socket::Error
+      nil
     end
 
+    # Address-level classification, with the original string tests kept as a FALLBACK
+    # rather than replaced by it: several spellings that genuinely reach a 127.0.0.1
+    # listener are rejected by inet_pton ("127.1" dials fine but is not a parseable
+    # literal), so dropping the prefix test would regress the exact case it guards.
+    # Parsing additionally buys the v4-mapped forms (::ffff:127.0.0.1) for free.
+    private def self.loopback?(h : String) : Bool
+      if ip = parse_ip(h)
+        return ip.loopback?
+      end
+      h == "localhost" || h.starts_with?("127.")
+    end
+
+    # The all-zero address in ANY spelling (0.0.0.0, ::, ::0, 0:0:0:0:0:0:0:0, 0000:…).
+    # Settings.bind_host_error accepts every one of these and they all bind as a full
+    # wildcard, but a literal-string test only knew "0.0.0.0"/"::" — so under a `::0`
+    # bind the loopback/wildcard conjunct collapsed to false for every loopback target
+    # and BOTH the self-page (CA download) and the self-loop refusal disappeared.
+    private def self.unspecified?(h : String) : Bool
+      !!parse_ip(h).try(&.unspecified?)
+    end
+
+    # A BIND that answers on every interface: the all-zero address, plus the empty string
+    # (an unset bind is caller-defaulted, and reading it as a wildcard is the safe side).
     private def self.wildcard?(h : String) : Bool
-      h.empty? || h == "0.0.0.0" || h == "::"
+      h.empty? || unspecified?(h)
     end
 
     private def self.direct_dial(host : String, port : Int32,
