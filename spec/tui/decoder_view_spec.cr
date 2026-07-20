@@ -173,3 +173,48 @@ describe Gori::Tui::ChainComplete do
     c.open?.should be_true
   end
 end
+
+describe "DecoderView OUTPUT h-scroll" do
+  # Decoding is precisely where raw control bytes surface — an unhex/base64 of a binary
+  # blob is the whole point of the tab. The OUTPUT rows draw through `screen.text`, which
+  # gives every control char a cell, but the h-scroll clamp measured them with
+  # display_width, where those chars are 0 columns. The clamp's ceiling therefore fell
+  # short of the real content and the tail of a decoded line could not be scrolled to.
+  it "scrolls a decoded line containing control bytes to its end" do
+    line = "STARTTOK#{"\t" * 100}ENDTOK"
+    Screen.display_width(line).should eq(14) # the raw measure: 60 tabs count for nothing
+    Screen.draw_width(line).should eq(114)   # what `text` paints: one cell per tab
+    input = line.to_slice.hexstring
+    result = Gori::Decoder.run(REG, input.to_slice, "unhex")
+    String.new(result.output.not_nil!).should eq(line) # the decode really produced the tabs
+
+    view = DecoderView.new
+    ta = TextArea.new(input)
+    rect = Rect.new(0, 0, 80, 30)
+    render = ->(b : MemoryBackend) do
+      view.render(Screen.new(b), rect, input: ta, chain: "unhex", chain_cx: 5, chain_pre: "",
+        result: result, pane: :output, focused: true, popup: ChainComplete.new,
+        prompt: nil, prompt_buf: "")
+    end
+
+    # Assert on the OUTPUT card ALONE: the PIPELINE card above it echoes the same decoded
+    # bytes as the unhex step's intermediate and does NOT scroll, so a whole-grid match
+    # would report the unscrolled copy (cf. the hscroll_output spec above, which keeps
+    # INPUT unrelated for the same reason).
+    out_card = ->(b : MemoryBackend) do
+      top = (0...30).index { |y| b.row(y).includes?("OUTPUT") }.not_nil!
+      (top...30).map { |y| b.row(y) }.join("\n")
+    end
+
+    at0 = MemoryBackend.new(80, 30)
+    render.call(at0)
+    out_card.call(at0).should contain("STARTTOK")
+    out_card.call(at0).should_not contain("ENDTOK") # tail off to the right
+
+    15.times { view.hscroll_output(4) }
+    scrolled = MemoryBackend.new(80, 30)
+    render.call(scrolled)
+    out_card.call(scrolled).should contain("ENDTOK")       # reachable
+    out_card.call(scrolled).should_not contain("STARTTOK") # head genuinely scrolled off
+  end
+end

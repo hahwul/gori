@@ -466,6 +466,46 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # Same clamp bug as RepeaterView#render_reveal, but here it also FOUGHT the caret:
+  # ensure_detail_visible_x slides @detail_xscroll using column_width (a tab counts 1),
+  # then this clamp immediately clawed it back with display_width (a tab counts 0). The
+  # caret-follow and the clamp were pulling in opposite directions every frame, so on a
+  # tab-indented body the caret could never scroll into view at the end of a line.
+  it "scrolls a tab-filled response line to its end in reveal mode" do
+    tmp_store do |store|
+      line = "STARTTOK#{"\t" * 100}ENDTOK"
+      Screen.display_width(line).should eq(14) # the raw measure the clamp used to trust
+      Screen.draw_width(line).should eq(114)   # what reveal actually paints (tab → '→')
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/t", http_version: "HTTP/1.1",
+        head: "GET /t HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n#{line}".to_slice,
+        body: line.to_slice, content_type: "text/plain"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request → response
+      view.reveal = true
+
+      rect = Rect.new(0, 0, 80, 16)
+      at0 = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(at0), rect)
+      at0.contains?("STARTTOK").should be_true
+      at0.contains?("ENDTOK").should be_false # tail off to the right
+      at0.contains?("→").should be_true       # reveal is drawing tab markers
+
+      20.times { view.hscroll_detail(4) }
+      scrolled = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(scrolled), rect)
+      scrolled.contains?("ENDTOK").should be_true    # reachable now
+      scrolled.contains?("STARTTOK").should be_false # head genuinely scrolled off
+    end
+  end
+
   it "refresh_detail picks up a Pending flow's response but skips a stable Complete one" do
     tmp_store do |store|
       pid = store.insert_flow(Gori::Store::CapturedRequest.new(

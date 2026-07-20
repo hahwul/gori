@@ -143,6 +143,37 @@ describe Gori::Tui::RepeaterView do
     back.contains?("ALPHATOKEN").should be_true # cached Line uncorrupted by the intervening slice
   end
 
+  # Reveal mode is the surface built to inspect whitespace, and it was the one surface a
+  # tabbed line could not be scrolled across. Reveal.styled gives every control char a
+  # 1-column marker (tab → '→'), so the row DRAWS one cell per tab, but the h-scroll clamp
+  # measured the raw string with display_width, where a tab is 0 columns. On a tab-heavy
+  # line the clamp's ceiling collapsed to 0 and @xscroll was pinned there every frame, so
+  # the tail of the line was permanently unreachable no matter how far right you scrolled.
+  it "scrolls a tab-filled line all the way to its end in reveal mode" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+    line = "STARTTOK#{"\t" * 60}ENDTOK"
+    # The two measures disagree by the tab count — that gap IS the unreachable tail.
+    Screen.display_width(line).should eq(14)
+    Screen.draw_width(line).should eq(74)
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, line.to_slice, nil, 1000_i64))
+    view.reveal = true
+
+    at0 = MemoryBackend.new(120, 20)
+    view.render(Screen.new(at0), Rect.new(0, 0, 120, 20))
+    at0.contains?("STARTTOK").should be_true # left edge
+    at0.contains?("ENDTOK").should be_false  # tail is off to the right
+    at0.contains?("→").should be_true        # reveal really is drawing tab markers
+
+    30.times { view.hscroll(4) } # slide right, well past the line's drawn width
+    scrolled = MemoryBackend.new(120, 20)
+    view.render(Screen.new(scrolled), Rect.new(0, 0, 120, 20))
+    scrolled.contains?("ENDTOK").should be_true    # the tail is reachable
+    scrolled.contains?("STARTTOK").should be_false # …and the head has genuinely scrolled off
+  end
+
   it "duplicate_from copies request content, flags, and last response (no source flow)" do
     src = RepeaterView.new
     src.load_blank

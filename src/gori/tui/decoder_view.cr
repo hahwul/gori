@@ -218,7 +218,12 @@ module Gori::Tui
       gw = {Gutter.width(lines.size), rect.w}.min
       cw = {rect.w - gw, 0}.max
       rows = (0...rect.h).compact_map { |i| lines[@out_scroll + i]? }
-      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @out_xscroll + cw + 1) } || 0) - cw, 0}.max)
+      # draw_width, not display_width: the rows go out through `screen.text` below, which
+      # advances ≥1 per grapheme. Decoder output is exactly where raw control bytes surface
+      # (a base64/hex decode of binary), and the raw measure scores every one of them 0 —
+      # so the clamp pinned @out_xscroll short and the tail of a decoded line was
+      # unreachable. _upto preserves the per-frame early exit on a huge single-line decode.
+      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.draw_width_upto(l, @out_xscroll + cw + 1) } || 0) - cw, 0}.max)
       ensure_out_visible(rect.h) if focused
       rows.each_with_index do |line, i|
         li = @out_scroll + i

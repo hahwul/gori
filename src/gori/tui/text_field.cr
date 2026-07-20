@@ -130,15 +130,21 @@ module Gori::Tui
 
     # First visible character index: 0 until the caret (plus any preedit, plus the caret
     # cell itself) would overflow `width`, then far enough right to keep it on screen.
-    # Walks by DISPLAY width so a CJK path scrolls by columns, not by characters.
+    # Walks by COLUMN width so a CJK path scrolls by columns, not by characters — and,
+    # specifically, the same measure Screen#input_line places the caret with. This window
+    # exists to keep the caret on screen, so it has to agree with the caret: under
+    # display_width a zero-width char cost 0 here but ≥1 there, so the window under-counted,
+    # decided the value still fit, and let the caret run off the right edge. Per-CODEPOINT
+    # is also what the loop below is: it steps `start` back one CHARACTER at a time, which
+    # is the unit @caret and @value[start..] are indexed in.
     private def window_start(width : Int32) : Int32
       c = @caret.clamp(0, @value.size)
-      used = Screen.display_width(@value[0, c]) + Screen.display_width(@preedit) + 1
+      used = Screen.column_width(@value[0, c]) + Screen.column_width(@preedit) + 1
       return 0 if used <= width
-      used = Screen.display_width(@preedit) + 1 # the caret cell always stays visible
+      used = Screen.column_width(@preedit) + 1 # the caret cell always stays visible
       start = c
       while start > 0
-        w = Screen.display_width(@value[start - 1].to_s)
+        w = Screen.column_width(@value[start - 1].to_s)
         break if used + w > width
         used += w
         start -= 1

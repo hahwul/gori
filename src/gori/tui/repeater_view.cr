@@ -2420,7 +2420,14 @@ module Gori::Tui
       end
       Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
       if active
-        cursor_x = base + Screen.display_width(value[0, cx])
+        # column_width — the measure paint_char_span_bg (the selection tint, a few lines up)
+        # already uses on this same value in this same render, and the exact inverse of the
+        # Screen.column_for that target_click_to_cursor uses to turn a click back into `cx`.
+        # display_width scored a zero-width char as 0, so the three disagreed: the tint
+        # covered one span, the caret sat a column left of its glyph, and a click landed a
+        # character off. A URL carrying U+200B is ordinary traffic for this tool (it is a
+        # stock filter-bypass payload), so this is reachable, not theoretical.
+        cursor_x = base + Screen.column_width(value[0, cx])
         if cursor_x < rect.right - 1
           ch = cx < value.size ? value[cx] : ' '
           screen.cell(cursor_x, row, ch, Theme.bg, insert ? Theme.accent : Theme.accent_bg)
@@ -2644,7 +2651,12 @@ module Gori::Tui
       end
       gw = Settings.show_gutter ? {Gutter.width(lines.size), body.w}.min : 0
       cw = {body.w - gw, 0}.max
-      widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.display_width(t) } || 0
+      # draw_width, not display_width: the rows are drawn with `screen.text` (below), which
+      # advances ≥1 per grapheme, so a control byte inside a WS text frame owns a cell the
+      # raw measure scores 0 — the clamp then stopped short of the real content. Switching
+      # to the _upto variant also gives this site the early exit its siblings have: it runs
+      # every frame, and one WS frame can carry a multi-MB single-line payload.
+      widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.draw_width_upto(t, @xscroll + cw + 1) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       @resp_last_h = body.h
       sel_spans = resp_sel_spans_if(focused)
@@ -2797,7 +2809,13 @@ module Gori::Tui
       @resp_last_h = rect.h
       gw = Settings.show_gutter ? {Gutter.width(total), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
-      widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @xscroll + cw + 1) } || 0
+      # draw_width, not display_width: the rows below are drawn through Reveal.styled, which
+      # maps EVERY control char to a 1-column marker (tab → '→', CR → '␍'). display_width
+      # calls a tab 0 columns, so the clamp under-counted by one per tab and pinned @xscroll
+      # short of the content — on a tab-indented body it pinned it at 0 outright, leaving the
+      # tail of the line permanently unreachable on the very surface built to inspect tabs.
+      # _upto keeps the early exit: this runs every frame and a minified line can be MBs.
+      widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.draw_width_upto(l, @xscroll + cw + 1) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       sel_spans = resp_sel_spans_if(focused)
       (0...rect.h).each do |i|
@@ -2903,7 +2921,11 @@ module Gori::Tui
                         end
         {di, "#{prefix} #{d.text}", color, d.text}
       end
-      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |(_, full, _, _)| Screen.display_width(full) } || 0) - cw, 0}.max)
+      # draw_width, not display_width — `full` (the "+ "/"- " prefix plus the diff line) is
+      # drawn by `screen.text` below, so a control char in either side of the diff holds a
+      # cell the raw measure scores 0 and the clamp cut the line short. _upto for the early
+      # exit, as everywhere else this clamp shape appears: it runs every frame.
+      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |(_, full, _, _)| Screen.draw_width_upto(full, @xscroll + cw + 1) } || 0) - cw, 0}.max)
       @resp_last_h = rect.h
       sel_spans = resp_sel_spans_if(focused)
       rows.each_with_index do |(di, full, color, text), i|
