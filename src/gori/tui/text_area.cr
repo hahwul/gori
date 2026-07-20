@@ -542,7 +542,7 @@ module Gori::Tui
             r = @cx
             cr.each { |(a, b)| r = b if r >= a && r < b } if cr && !cr.empty?
             ch = @preedit.empty? ? (r < line.size ? line[r] : ' ') : @preedit[0]
-            cgw = [Screen.display_width(ch.to_s), 1].max
+            cgw = Screen.grapheme_cols(ch.to_s)
             (0...cgw).each do |off|
               break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
               cch = (off == 0 ? ch : ' ')
@@ -604,13 +604,14 @@ module Gori::Tui
     end
 
     # Overlay the bg_regions intersecting THIS line. `off0` is the line's start offset
-    # in the full LF-joined buffer. Column math mirrors SearchHi.mark (same
-    # Screen.display_width as the base draw, so an ambiguous-width glyph can't drift the
-    # tint off the cells). Multi-line regions clamp to [0, line.size): first line tints
-    # col→EOL, fully-covered lines 0→size, last line BOL→col; the '\n' offset has no cell.
-    # Region columns are computed against the FULL (unscrolled) line, then shifted left by
-    # @xscroll and clipped to the visible window — a no-op when @xscroll == 0 (the common
-    # case, since only the Fuzzer template sets bg_regions and it doesn't enable follow_x).
+    # in the full LF-joined buffer. Column math mirrors the base draw + caret
+    # (Screen.column_width / grapheme_cols ≥1 per char, so a tab in a marker band can't
+    # drift the tint left of the cells). Multi-line regions clamp to [0, line.size): first
+    # line tints col→EOL, fully-covered lines 0→size, last line BOL→col; the '\n' offset
+    # has no cell. Region columns are computed against the FULL (unscrolled) line, then
+    # shifted left by @xscroll and clipped to the visible window — a no-op when
+    # @xscroll == 0 (the common case, since only the Fuzzer template sets bg_regions and
+    # it doesn't enable follow_x).
     private def paint_bg_regions(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
                                  line : String, cw : Int32, cr : Array({Int32, Int32})? = nil) : Nil
       return if @bg_regions.empty? || @reveal # opt-in; reveal rewrites the glyphs
@@ -621,8 +622,8 @@ module Gori::Tui
         la = (a - off0).clamp(0, line.size)
         lb = (b - off0).clamp(0, line.size)
         next if la >= lb
-        start_col = Screen.display_width(line[0, la]) - @xscroll
-        end_col = Screen.display_width(line[0, lb]) - @xscroll
+        start_col = Screen.column_width(line[0, la]) - @xscroll
+        end_col = Screen.column_width(line[0, lb]) - @xscroll
         draw_from = {start_col, 0}.max
         draw_to = {end_col, cw}.min
         next if draw_from >= draw_to
@@ -652,7 +653,7 @@ module Gori::Tui
             i = hit[1] # skip the hidden run in one hop
             next
           end
-          w = Screen.display_width(line[i].to_s)
+          w = Screen.grapheme_cols(line[i].to_s)
           sx = cx0 + col - @xscroll
           if sx >= cx0 && sx < cx0 + cw
             accent = cr.any? { |(_, rb)| rb == i } # char immediately after a concealed run = closing §
@@ -706,18 +707,18 @@ module Gori::Tui
       w + Screen.column_width(line[pos...cx])
     end
 
-    # As `concealed_col` but in display_width columns (no ≥1 floor) — used by the band
-    # over-paint so its glyph columns line up with Highlight.draw's advance.
+    # As `concealed_col` — column_width / grapheme_cols semantics matching Highlight.draw's
+    # ≥1 floor, used by the band over-paint so tint columns line up with drawn cells.
     private def concealed_display_prefix(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
       w = 0
       pos = 0
       ranges.each do |(a, b)|
         break if a >= cx
-        w += Screen.display_width(line[pos...a]) if a > pos
+        w += Screen.column_width(line[pos...a]) if a > pos
         return w if b >= cx
         pos = b
       end
-      w + Screen.display_width(line[pos...cx])
+      w + Screen.column_width(line[pos...cx])
     end
 
     # Inverse of `concealed_col` for click-to-cursor: the raw char index whose concealed
@@ -734,7 +735,7 @@ module Gori::Tui
           i = hit[1]
           next
         end
-        w = {Screen.display_width(line[i].to_s), 1}.max
+        w = Screen.grapheme_cols(line[i].to_s)
         return i if target < col + w
         col += w
         i += 1

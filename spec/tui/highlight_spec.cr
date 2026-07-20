@@ -364,6 +364,30 @@ describe Gori::Tui::Highlight do
       Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("hi", Theme.text)], width: 0)
       b.row(0).strip.should eq("")
     end
+
+    it "keeps a tab as one space cell so it matches Screen#text (issue #278)" do
+      # A span with an embedded tab is NOT printable_ascii?, so draw takes the grapheme
+      # path. That path must floor width-0 controls to 1 and substitute a space — same
+      # as Screen#text's Char path — or the styled editor collapses "x,\ty" to "x,y"
+      # while the caret still steps across the missing cell.
+      {"x,\ty", "a\tb", "{\"a\":1,\t\"b\":2}"}.each do |str|
+        plain = MemoryBackend.new(24, 1)
+        px = Screen.new(plain).text(0, 0, str, Theme.text)
+        hl = MemoryBackend.new(24, 1)
+        hx = Highlight.draw(Screen.new(hl), 0, 0, [Highlight::Span.new(str, Theme.text)], width: 24)
+        hl.row(0).should eq(plain.row(0)) # same glyphs (str=#{str.inspect})
+        hx.should eq(px)                  # same advance
+        # Explicit layout: tab → space, neighbours unmoved
+        expected = str.gsub('\t', ' ')
+        hl.row(0).rstrip.should eq(expected)
+      end
+    end
+
+    it "line_width counts a tab as one column" do
+      line = [Highlight::Span.new("a\tb", Theme.text)]
+      Highlight.line_width(line).should eq(3)
+      Highlight.line_width_upto(line, 10).should eq(3)
+    end
   end
 
   # The body tokenizers were rewritten from `raw.chars` + `.join` to a byte-scan. These
