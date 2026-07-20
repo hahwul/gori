@@ -245,7 +245,11 @@ module Gori::Tui
       @tcx = @target.size
       @http2 = rec.http2?
       @sni = rec.sni || ""
-      @editor.set_text(rec.template) if @editor.text != rec.template
+      # Normalized compare for the same reason as session_side_matches? below: set_text zeroes
+      # the caret/scroll and clears undo, so it must only run on a REAL text change. No writer
+      # puts CRLF in fuzz_sessions.template today (only the fuzzer controller writes it, always
+      # from @editor.text, already LF) — kept consistent so it can't rot if one ever does.
+      @editor.set_text(rec.template) if @editor.text != TextArea.normalize_lf(rec.template)
       @name = rec.name
       apply_config_json(rec.config)
       @last_synced_config = rec.config
@@ -257,15 +261,11 @@ module Gori::Tui
     # Template compare normalizes CRLF→LF (TextArea stores LF; the store may hold wire CRLF).
     def session_side_matches?(rec : Store::FuzzSessionRecord) : Bool
       @target == rec.target &&
-        template_text == normalize_lf(rec.template) &&
+        template_text == TextArea.normalize_lf(rec.template) &&
         @http2 == rec.http2? &&
         (sni_override || "") == (rec.sni || "") &&
         (@name || "") == (rec.name || "") &&
         @last_synced_config == rec.config
-    end
-
-    private def normalize_lf(s : String) : String
-      s.gsub("\r\n", "\n").gsub('\r', '\n')
     end
 
     # Content-only clone for sub-tab Duplicate: template + target + config/sets.

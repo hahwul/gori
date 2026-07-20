@@ -114,6 +114,67 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  # Regression: NoteEntry#text is whatever was written into the JSON KV, verbatim, and several
+  # writers store wire CRLF — MCP create_note/update_note pass the caller's string straight
+  # through, and `gori run notes create` takes its body from --text / positional args / STDIN
+  # (piping a CRLF file, or `gori run flow N --raw`, stores CRLF). The TextArea buffer is always
+  # LF (set_text strips \r), so the old `existing.area.text != e.text` compare was false on EVERY
+  # data_version poll (~1.3×/s while capturing) → set_text re-ran → caret + scroll zeroed and the
+  # undo stack cleared. Hit whenever Notes was open without body focus (notes_locked? only covers
+  # active_tab == :notes && focus == :body), and on every tab-away-and-back.
+  it "soft-merge keeps caret, scroll and undo when a CRLF-stored note matches the LF buffer" do
+    tmp_store do |store|
+      body = (1..8).map { |i| "line #{i}" }.join('\n')
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      type(view, body)
+      view.save(store) # the poll path is only reached on a clean buffer (reload bails when dirty)
+      id = view.current_note_id
+
+      # A peer (MCP update_note) rewrote the SAME content in wire CRLF form.
+      store.set_setting("notes.docs",
+        %({"cur":0,"next_id":#{id + 1},"notes":[{"id":#{id},"text":#{body.gsub('\n', "\r\n").to_json}}]}))
+
+      area = view.@notes[0].area
+      render_text(view, 40, 3) # a rendered viewport height is what scroll_view clamps against
+      area.scroll_view(2)
+      area.place_cursor(5, 3)
+      undo_depth = area.@undo_stack.size
+      undo_depth.should be > 0
+      cy, cx, scroll = area.cy, area.cx, area.scroll
+
+      view.reload(store) # the data_version poll
+
+      view.@notes[0].area.should be(area) # same TextArea object — never rebuilt
+      area.cy.should eq(cy)
+      area.cx.should eq(cx)
+      area.scroll.should eq(scroll)
+      area.@undo_stack.size.should eq(undo_depth) # set_text would have cleared it
+      view.current_text.should eq(body)
+    end
+  end
+
+  # The guard must not swallow a REAL peer edit: normalizing line endings only makes the compare
+  # ignore \r, not content. A CRLF peer body with different text still replaces the buffer (and
+  # lands as LF, since set_text strips \r).
+  it "soft-merge still applies a CRLF-stored peer edit whose content actually changed" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "alpha\nbravo")
+      view.save(store)
+      id = view.current_note_id
+
+      store.set_setting("notes.docs",
+        %({"cur":0,"next_id":#{id + 1},"notes":[{"id":#{id},"text":"alpha\\r\\nCHANGED"}]}))
+      view.reload(store)
+
+      view.current_text.should eq("alpha\nCHANGED")
+      view.dirty?.should be_false
+    end
+  end
+
   it "projects sub-tab filter rows (title + body) per note in chip order" do
     view = NotesView.new
     type(view, "Alpha title\nbody about idor")

@@ -1032,7 +1032,7 @@ module Gori::Tui
     # Mirrors FuzzerView#session_side_matches?.
     def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
                               sni : String?) : Bool
-      @target == target && request_text == normalize_lf(request) &&
+      @target == target && request_text == TextArea.normalize_lf(request) &&
         @http2 == http2 && @auto_content_length == auto_cl &&
         (sni_override || "") == (sni || "")
     end
@@ -1057,25 +1057,18 @@ module Gori::Tui
         # that only touched a non-text field must not disturb the pane. Compare on a
         # CRLF-normalized basis (the editor is LF; the store may be CRLF). Mirrors
         # FuzzerView#apply_peer_session / NotesView#soft_merge_from.
-        @editor.set_text(request) if @editor.text != normalize_lf(request)
+        @editor.set_text(request) if @editor.text != TextArea.normalize_lf(request)
         joined = (ws_messages || [] of String).join('\n')
-        @decoded.set_text(joined) if @decoded.text != normalize_lf(joined)
+        @decoded.set_text(joined) if @decoded.text != TextArea.normalize_lf(joined)
         @req_pane = :decoded
       else
         @ws_mode = false
-        @editor.set_text(request) if @editor.text != normalize_lf(request)
+        @editor.set_text(request) if @editor.text != TextArea.normalize_lf(request)
       end
 
       @auto_content_length = auto_cl
       @loaded = true
       @dirty = false
-    end
-
-    # Wire CRLF → editor LF. The TextArea always stores LF (set_text strips \r), so a
-    # request/message that arrives CRLF (store, MCP, import, peer) must be normalized
-    # before comparing against editor text — else the compare is falsely unequal.
-    private def normalize_lf(s : String) : String
-      s.gsub("\r\n", "\n").gsub('\r', '\n')
     end
 
     # Re-seed the captured-original diff baseline for a ^R-from-History tab that was
