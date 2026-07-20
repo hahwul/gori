@@ -234,6 +234,21 @@ module Gori::Tui
       w
     end
 
+    # As `column_width`, but stops once the running width reaches `limit`. Used by the
+    # editor h-scroll clamp so a multi-MB line with embedded tabs isn't fully walked
+    # every frame, while still counting each control char as one cell.
+    def self.column_width_upto(str : String, limit : Int32) : Int32
+      return 0 if str.empty? || limit <= 0
+      # ASCII: every char is exactly 1 column under column_width (controls floored).
+      return {str.size, limit}.min if str.ascii_only?
+      w = 0
+      str.each_char do |ch|
+        w += grapheme_cols(ch.to_s)
+        return w if w >= limit
+      end
+      w
+    end
+
     # The codepoint index in `str` whose display cell the column `target` lands on,
     # clamped to [0, str.size]. Inverts a left-to-right display-width advance (the
     # same one `display_width` / `text` use), so click-to-cursor maps a click x to
@@ -243,7 +258,7 @@ module Gori::Tui
       return 0 if target <= 0
       acc = 0
       str.each_char_with_index do |ch, j|
-        w = {display_width(ch.to_s), 1}.max
+        w = grapheme_cols(ch.to_s)
         return j if target < acc + w
         acc += w
       end
@@ -263,8 +278,17 @@ module Gori::Tui
       # (wide glyphs via display_width, combining marks floored to 1).
       return str.size if str.ascii_only?
       w = 0
-      str.each_char { |ch| w += {display_width(ch.to_s), 1}.max }
+      str.each_char { |ch| w += grapheme_cols(ch.to_s) }
       w
+    end
+
+    # Columns one grapheme occupies when drawn by `#text` / `Highlight.draw` and when the
+    # editor caret / click-to-cursor advance over it. Unicode width floored to ≥1 so a C0
+    # control (`\t`, `\r`, …) keeps the space cell that Char-path `cell` substitutes —
+    # matching `column_width` and preventing the styled draw path from collapsing a tab
+    # to zero columns while the caret still steps across it (issue #278).
+    def self.grapheme_cols(g : String) : Int32
+      {display_width(g), 1}.max
     end
 
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
@@ -317,12 +341,21 @@ module Gori::Tui
         return x + i
       end
       # Non-ASCII (CJK/emoji/combining): grapheme-aware truncation + draw.
+      # `grapheme_cols` floors width-0 controls to 1 so a mixed line with an embedded
+      # tab advances the same way the ASCII fast path does (1 cell, space glyph).
       s = fit(str, limit)
       cur_x = x
       s.each_grapheme do |g|
-        gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+        gs = g.to_s
+        gw = Screen.grapheme_cols(gs)
         break if cur_x + gw > @width
-        cell(cur_x, y, g.to_s, fg, bg, attr)
+        # Single-codepoint → Char path (C0 → space via ASCII_CELL); multi-codepoint
+        # clusters (emoji ZWJ, …) stay on the String path.
+        if gs.size == 1
+          cell(cur_x, y, gs[0], fg, bg, attr)
+        else
+          cell(cur_x, y, gs, fg, bg, attr)
+        end
         cur_x += gw
       end
       cur_x
@@ -358,14 +391,15 @@ module Gori::Tui
       overflow = false
       head = String.build do |io|
         str.each_grapheme do |g|
-          gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+          gs = g.to_s
+          gw = Screen.grapheme_cols(gs) # ≥1 so a control byte keeps its cell under truncation too
           total += gw
           if total > w
             overflow = true
             break
           end
           if cur + gw <= w - 1
-            io << g.to_s
+            io << gs
             cur += gw
           end
         end

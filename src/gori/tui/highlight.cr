@@ -414,8 +414,13 @@ module Gori::Tui
       if limit == 1
         if line.any? && !line[0].text.empty?
           first = line[0].text.each_grapheme.first.to_s
-          screen.cell(x, y, first, line[0].fg, bg, line[0].attr)
-          return x + Screen.display_width(first)
+          # Char path so a leading C0 control becomes the space cell (not rejected).
+          if first.size == 1
+            screen.cell(x, y, first[0], line[0].fg, bg, line[0].attr)
+          else
+            screen.cell(x, y, first, line[0].fg, bg, line[0].attr)
+          end
+          return x + Screen.grapheme_cols(first)
         end
         return x
       end
@@ -426,6 +431,8 @@ module Gori::Tui
       # glyphs, so its width is its char count: skip the grapheme walk (and its per-glyph
       # `g.to_s` String) entirely, mirroring Screen#text's ASCII fast path. Mixed lines
       # stay correct — width accumulates across spans regardless of which branch each takes.
+      # Non-printable spans use `grapheme_cols` (≥1) so an embedded tab still counts as a
+      # cell — same floor as Screen#text / the editor caret (issue #278).
       overflow = false
       acc = 0
       line.each do |span|
@@ -438,7 +445,7 @@ module Gori::Tui
           acc += t.size
         else
           t.each_grapheme do |g|
-            acc += Termisu::UnicodeWidth.grapheme_width(g.to_s)
+            acc += Screen.grapheme_cols(g.to_s)
             if acc > limit
               overflow = true
               break
@@ -468,7 +475,8 @@ module Gori::Tui
           end
         else
           t.each_grapheme do |g|
-            gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+            gs = g.to_s
+            gw = Screen.grapheme_cols(gs)
             # The FIRST grapheme that doesn't fit terminates ALL rendering — a single
             # continuous walk, so a later span can't resume into the leftover room and draw
             # a narrower glyph in place of the skipped wide one (Screen#fit glyph parity).
@@ -476,7 +484,14 @@ module Gori::Tui
               done = true
               break
             end
-            screen.cell(x + visual_col, y, g.to_s, span.fg, bg, span.attr)
+            # Single codepoint → Char path (C0 control → space via ASCII_CELL). Multi-
+            # codepoint clusters stay on the String path. Floor-to-1 above means a tab
+            # advances one column instead of collapsing the rest of the line leftward.
+            if gs.size == 1
+              screen.cell(x + visual_col, y, gs[0], span.fg, bg, span.attr)
+            else
+              screen.cell(x + visual_col, y, gs, span.fg, bg, span.attr)
+            end
             visual_col += gw
           end
         end
@@ -505,7 +520,10 @@ module Gori::Tui
           out << span
           next
         end
-        sw = Screen.display_width(span.text)
+        # column_width / grapheme_cols (not raw display_width): a control char still
+        # occupies a drawn cell after Highlight.draw's ≥1 floor, so h-scroll cuts must
+        # count it the same way or the styled slice drifts left of the caret.
+        sw = Screen.column_width(span.text)
         if acc + sw <= start_col # whole span is left of the cut
           acc += sw
           next
@@ -513,7 +531,7 @@ module Gori::Tui
         kept = String.build do |io|
           span.text.each_char do |ch|
             if cutting
-              w = Screen.display_width(ch.to_s)
+              w = Screen.grapheme_cols(ch.to_s)
               if acc + w <= start_col
                 acc += w
                 next
@@ -542,7 +560,7 @@ module Gori::Tui
       String.build do |io|
         s.each_char do |ch|
           if cutting
-            w = Screen.display_width(ch.to_s)
+            w = Screen.grapheme_cols(ch.to_s)
             if acc + w <= start_col
               acc += w
               next
@@ -589,21 +607,22 @@ module Gori::Tui
       out
     end
 
-    # Total display width of a styled line (sum of its spans) — used to clamp a
-    # horizontal scroll offset against the widest currently-visible row.
+    # Total column span of a styled line (sum of its spans, ≥1 per char) — used to
+    # clamp a horizontal scroll offset against the widest currently-visible row. Uses
+    # column_width so embedded tabs/controls match Highlight.draw's cell advance.
     def self.line_width(line : Line) : Int32
-      line.sum { |span| Screen.display_width(span.text) }
+      line.sum { |span| Screen.column_width(span.text) }
     end
 
     # As `line_width`, but stops summing once the running width reaches `limit` — and
     # caps WITHIN a span too (a huge minified body is one plain span > MAX_HL_LINE), so
     # the per-frame h-scroll clamp never fully measures a multi-MB line. See
-    # Screen.display_width_upto. Exact for lines narrower than limit.
+    # Screen.column_width_upto. Exact for lines narrower than limit.
     def self.line_width_upto(line : Line, limit : Int32) : Int32
       w = 0
       line.each do |span|
         break if w >= limit
-        w += Screen.display_width_upto(span.text, limit - w)
+        w += Screen.column_width_upto(span.text, limit - w)
       end
       w
     end

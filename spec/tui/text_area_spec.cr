@@ -30,7 +30,57 @@ private def render_concealed(text : String, conceal : Array({Int32, Int32}), cx 
   backend
 end
 
+# Issue #278 helpers: request-highlighted TextArea (Repeater-style) at a given caret col.
+private def render_req_tab(text : String, cx : Int32, cursor : Bool = true) : MemoryBackend
+  ta = Gori::Tui::TextArea.new(text)
+  ta.move(0, cx)
+  b = MemoryBackend.new(40, 3)
+  ta.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 40, 3),
+    cursor: cursor, highlight: :request)
+  b
+end
+
 describe Gori::Tui::TextArea do
+  # Issue #278: syntax-highlighted editors (Repeater request) used to collapse `\t` to
+  # zero columns in Highlight.draw while the caret advanced by column_width (≥1), so
+  # parking the caret on a tab overwrote the next glyph ("pushed characters together").
+  describe "tab / zero-width control cells (issue #278)" do
+    it "draws an embedded tab as a space without collapsing neighbours" do
+      b = render_req_tab("x,\ty", 0, cursor: false)
+      b.row(0).rstrip.should eq("x, y")
+    end
+
+    it "keeps the next glyph visible when the caret sits on the tab" do
+      # Before the fix: Highlight collapsed the tab, caret painted a space at col 2 → "x,"
+      # (the 'y' was overwritten). After: "x, y" with the space under the caret.
+      b = render_req_tab("x,\ty", 2, cursor: true) # cx on '\t'
+      b.row(0).rstrip.should eq("x, y")
+      b.row(0)[2].should eq(' ') # tab cell
+      b.row(0)[3].should eq('y') # neighbour intact
+    end
+
+    it "does not double-paint the next glyph when the caret is just past the tab" do
+      # Before: caret at cx=3 used column_width prefix=3 on a 2-col collapsed draw → "x,yy"
+      b = render_req_tab("x,\ty", 3, cursor: true) # cx on 'y'
+      b.row(0).rstrip.should eq("x, y")
+      b.row(0)[0, 4].should eq("x, y")
+    end
+
+    it "handles a JSON body with a tab after a comma (the issue screenshot case)" do
+      body = "{\"a\":1,\t\"b\":2}"
+      tab_i = body.index('\t').not_nil!
+      # No caret: tab is a space cell, not deleted
+      render_req_tab(body, 0, cursor: false).row(0).rstrip.should eq("{\"a\":1, \"b\":2}")
+      # Caret on the tab: does not swallow the following quote
+      on_tab = render_req_tab(body, tab_i, cursor: true)
+      on_tab.row(0).rstrip.should eq("{\"a\":1, \"b\":2}")
+      on_tab.row(0)[tab_i + 1].should eq('"')
+      # Caret after the tab: no doubled quote
+      after = render_req_tab(body, tab_i + 1, cursor: true)
+      after.row(0).rstrip.should eq("{\"a\":1, \"b\":2}")
+    end
+  end
+
   describe "display concealment (@conceal_spans)" do
     # "q=§data¦base64-encode§ x": open § at 2, ¦ at 7, closing § at 21.
     text = "q=§data¦base64-encode§ x"

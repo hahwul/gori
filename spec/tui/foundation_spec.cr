@@ -46,6 +46,27 @@ describe Gori::Tui::Screen do
     Screen.column_width("日本").should eq(4) # CJK: 2 columns each, same as display_width
   end
 
+  it "grapheme_cols floors a tab to 1 so draw advance matches the caret model" do
+    # display_width is pure Unicode (tab = 0); grapheme_cols / column_width keep the
+    # space cell Screen#cell substitutes for C0 controls (issue #278).
+    Screen.display_width("\t").should eq(0)
+    Screen.grapheme_cols("\t").should eq(1)
+    Screen.column_width("a\tb").should eq(3)
+    Screen.column_width_upto("a\tb", 10).should eq(3)
+    Screen.column_width_upto("a\tb", 2).should eq(2)
+  end
+
+  it "text draws a tab as a one-column space (ASCII and mixed paths)" do
+    # ASCII fast path
+    b1 = MemoryBackend.new(10, 1)
+    Screen.new(b1).text(0, 0, "a\tb", Theme.text)
+    b1.row(0).rstrip.should eq("a b")
+    # Non-ASCII path (any multibyte glyph forces grapheme walk) still keeps the tab cell
+    b2 = MemoryBackend.new(10, 1)
+    Screen.new(b2).text(0, 0, "a\t가", Theme.text)
+    b2.row(0).rstrip.should eq("a 가")
+  end
+
   it "fit truncates a too-wide string with an ellipsis and returns a fitting one whole" do
     screen = Screen.new(MemoryBackend.new(10, 1))
     screen.fit("hello", 10).should eq("hello")   # fits → unchanged
