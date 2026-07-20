@@ -872,18 +872,19 @@ module Gori::Tui
 
     # Horizontal companion to ensure_detail_visible: slide @detail_xscroll so the caret
     # column stays inside the visible content width [xscroll, xscroll + cw). Mirrors
-    # TextArea#ensure_visible_x; uses Screen.column_width (the caret painter's measure).
+    # TextArea#ensure_visible_x; uses Screen.draw_width (the caret painter's measure, and
+    # the one Highlight.slice_left consumes @detail_xscroll in — they used to disagree).
     private def ensure_detail_visible_x(cw : Int32) : Nil
       return if cw <= 0
       size, line_at = detail_line_source
       return if size <= 0 || @detail_read.cy >= size
       line = line_at.call(@detail_read.cy)
-      if Screen.column_width(line) <= cw
+      if Screen.draw_width(line) <= cw
         @detail_xscroll = 0
         return
       end
       cx = @detail_read.cx.clamp(0, line.size)
-      curx = Screen.column_width(line[0, cx])
+      curx = Screen.draw_width(line[0, cx])
       @detail_xscroll = curx if curx < @detail_xscroll
       @detail_xscroll = curx - cw + 1 if curx >= @detail_xscroll + cw
       @detail_xscroll = 0 if @detail_xscroll < 0
@@ -1535,7 +1536,7 @@ module Gori::Tui
       end
       return unless li == @detail_read.cy
       cx = @detail_read.cx.clamp(0, line.size)
-      px = x + Screen.column_width(line[0, cx]) - @detail_xscroll
+      px = x + Screen.draw_width(line[0, cx]) - @detail_xscroll
       return if px < x || px >= x + cw # caret scrolled outside the visible content
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
@@ -1545,13 +1546,23 @@ module Gori::Tui
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
                                    x0 : Int32, x1 : Int32, cw : Int32, bg : Color) : Nil
       return if x0 >= x1 || cw <= 0
-      # Start at the span's on-screen column: display width up to x0, shifted by xscroll.
-      px = x + Screen.column_width(line[0, {x0, line.size}.min]) - @detail_xscroll
-      (x0...x1).each do |i|
-        break if i >= line.size
-        w = Screen.column_width(line[i].to_s)
-        screen.text(px, y, line[i].to_s, Theme.text, bg) if px >= x && px + w <= x + cw
+      # Start at the span's on-screen column: drawn width up to x0, shifted by xscroll.
+      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
+      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
+      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
+      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
+      # one of its own. Span edges snap outward so the tint covers whole glyphs.
+      a = Screen.cluster_start(line, {x0, line.size}.min)
+      b = Screen.cluster_end(line, {x1, line.size}.min)
+      px = x + Screen.draw_width(line[0, a]) - @detail_xscroll
+      i = a
+      while i < b
+        e = Screen.cluster_end(line, i + 1)
+        seg = line[i...e]
+        w = Screen.draw_width(seg)
+        screen.text(px, y, seg, Theme.text, bg) if px >= x && px + w <= x + cw
         px += w
+        i = e
       end
     end
 

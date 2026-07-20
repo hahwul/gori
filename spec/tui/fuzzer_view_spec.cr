@@ -532,7 +532,7 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
 
     view.focus_pane(:target)
     (0..target.size).each do |cx|
-      col = base + Screen.column_width(target[0, cx])
+      col = base + Screen.draw_width(target[0, cx])
       view.target_click_to_cursor(rect, col, rect.y + 1)
       b = MemoryBackend.new(100, 30)
       view.render(Screen.new(b), rect)
@@ -548,13 +548,46 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
     # is the 'b' that sits AFTER the ZWSP, the first index the old measure got wrong.
     fresh = FuzzerView.new
     fresh.load_request(target, "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
-    fresh.target_click_to_cursor(rect, base + Screen.column_width(target[0, 12]), rect.y + 1)
+    fresh.target_click_to_cursor(rect, base + Screen.draw_width(target[0, 12]), rect.y + 1)
     fresh.target_insert('X')
     fresh.target.should eq("#{target[0, 12]}X#{target[12..]}")
 
     # Concretely: past the ZWSP the old measure was one column short of the drawn glyph.
     Screen.display_width(target).should eq(12)
-    Screen.column_width(target).should eq(13)
+    Screen.draw_width(target).should eq(13)
+  end
+
+  # Same round trip over a MULTI-CODEPOINT cluster, where the retired per-codepoint
+  # measure drifted the other way — right, past the end of the drawn text. Only the
+  # cluster boundaries are checked: a mid-cluster index is not a caret position a click
+  # can produce, since column_for only ever returns cluster starts.
+  it "keeps the target caret and click agreeing across a decomposed cluster" do
+    target = "https://h/cafe\u{0301}b" # café as e + combining acute
+    view = FuzzerView.new
+    view.load_request(target, "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    rect = Rect.new(0, 0, 100, 30)
+    base = rect.x + 4
+
+    view.focus_pane(:target)
+    i = 0
+    bounds = [] of Int32
+    target.each_grapheme { |g| bounds << i; i += g.size }
+    bounds << target.size
+    bounds.each do |cx|
+      col = base + Screen.draw_width(target[0, cx])
+      view.target_click_to_cursor(rect, col, rect.y + 1)
+      b = MemoryBackend.new(100, 30)
+      view.render(Screen.new(b), rect)
+      caret = (base...(base + 24)).select do |x|
+        bg = b.bg_at(x, rect.y + 1)
+        bg == Theme.accent || bg == Theme.accent_bg
+      end
+      caret.should eq([col]) # (cx=#{cx})
+    end
+
+    # The per-codepoint measure over-counted by one for every combining mark.
+    Screen.draw_width(target).should eq(15)
+    target.each_char.sum { |c| Screen.draw_width(c.to_s) }.should eq(16)
   end
 end
 
