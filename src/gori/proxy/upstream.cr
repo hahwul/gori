@@ -43,12 +43,20 @@ module Gori::Proxy
     # target, dials itself again…). Triggered when a hostname override — or a request
     # Host — points at the proxy's own bind. Only a matching port on a loopback/self
     # address counts, so proxying a real external host on the same port is unaffected.
+    #
+    # `local_host` is the concrete address the client actually reached us on
+    # (the accepted socket's local address). Under a wildcard bind (0.0.0.0 / ::)
+    # the proxy answers on EVERY interface, so a Host that matches the LAN/interface
+    # IP the client connected through is just as much "self" as loopback is —
+    # `self_addr[0]` alone ("0.0.0.0") can't see that. Nothing else can be bound on
+    # that IP:port, so matching it never refuses legitimate traffic.
     def self.loops_to_self?(host : String, port : Int32, overrides : Gori::HostOverrides?,
-                            self_addr : {String, Int32}) : Bool
+                            self_addr : {String, Int32}, local_host : String? = nil) : Bool
       return false unless port == self_addr[1]
       target = normalize_host(connect_target(host, overrides))
       bind = normalize_host(self_addr[0])
       return true if target == bind
+      return true if local_host && target == normalize_host(local_host)
       loopback?(target) && (loopback?(bind) || wildcard?(bind))
     end
 
@@ -57,12 +65,16 @@ module Gori::Proxy
     # Same loopback/wildcard/port-scoped test as loops_to_self? but WITHOUT the hostname-
     # override step, so an override that happens to point a real domain at the bind still
     # falls through to the 502 self-loop refusal (the user meant that mapped host, not the
-    # welcome page) rather than getting the landing page.
-    def self.addresses_self?(host : String, port : Int32, self_addr : {String, Int32}) : Bool
+    # welcome page) rather than getting the landing page. `local_host` — see loops_to_self?:
+    # the concrete IP the client reached us on, which is what makes the landing page work
+    # for a device hitting `http://<LAN-IP>:port/` against a 0.0.0.0 listener.
+    def self.addresses_self?(host : String, port : Int32, self_addr : {String, Int32},
+                             local_host : String? = nil) : Bool
       return false unless port == self_addr[1]
       target = normalize_host(host)
       bind = normalize_host(self_addr[0])
       return true if target == bind
+      return true if local_host && target == normalize_host(local_host)
       loopback?(target) && (loopback?(bind) || wildcard?(bind))
     end
 

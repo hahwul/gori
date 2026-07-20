@@ -36,7 +36,8 @@ module Gori::Proxy
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
-                   @self_addr : {String, Int32}? = nil)
+                   @self_addr : {String, Int32}? = nil,
+                   @local_host : String? = nil)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -134,7 +135,7 @@ module Gori::Proxy
       # proxy-configured browser) that targets self is a genuine loop and still 502s.
       # Not recorded as a flow — it's a local UI hit, not proxied traffic.
       if (sa = @self_addr) && (tls = @tls) && tls.serve_landing? &&
-         origin_form?(req) && get_or_head?(req) && Upstream.addresses_self?(host, port, sa)
+         origin_form?(req) && get_or_head?(req) && Upstream.addresses_self?(host, port, sa, @local_host)
         serve_self_page(req, tls, sa)
         return false
       end
@@ -142,7 +143,7 @@ module Gori::Proxy
       # Refuse to forward a request whose (override-resolved) target is gori's own
       # listener — otherwise gori dials itself, accepts that as a new client, and
       # loops forever. Record it as a visible error instead.
-      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa)
+      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa, @local_host)
         record_error(req, scheme, host, port, created_at, "refusing to proxy to self (loop): #{host}:#{port}")
         write_gateway_error
         return false
@@ -772,7 +773,7 @@ module Gori::Proxy
 
       # A CONNECT whose (override-resolved) authority is gori's own listener would
       # loop the proxy into itself — refuse before answering 200 / starting MITM.
-      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa)
+      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa, @local_host)
         write_gateway_error
         return false
       end
@@ -1062,9 +1063,12 @@ module Gori::Proxy
     # just drops the connection like every other canned response here.
     private def serve_self_page(req : Codec::RawRequest, tls : TlsMitm, self_addr : {String, Int32}) : Nil
       head_only = req.method.compare("HEAD", case_insensitive: true) == 0
+      # Show the concrete address the device actually reached us on rather than a
+      # wildcard "0.0.0.0" — under a wildcard bind that's the friendlier, truthful value.
+      listen = (lh = @local_host) ? {lh, self_addr[1]} : self_addr
       resp = SelfPage.respond(req.target,
         pem: tls.ca_cert_pem, der: tls.ca_cert_der, spki: tls.ca_spki_sha256,
-        ca_path: tls.ca_cert_path, listen: self_addr, version: Gori::VERSION, head_only: head_only)
+        ca_path: tls.ca_cert_path, listen: listen, version: Gori::VERSION, head_only: head_only)
       @io.write(resp)
       @io.flush
     rescue

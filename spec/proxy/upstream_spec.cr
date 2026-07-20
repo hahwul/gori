@@ -94,4 +94,63 @@ describe Gori::Proxy::Upstream do
       Gori::Proxy::Upstream.split_host_port("::1", 443).should eq({"::1", 443})
     end
   end
+
+  # The self-page / self-loop detection. The interesting case is a WILDCARD bind
+  # (0.0.0.0 / ::): the proxy answers on every interface, so a request whose Host
+  # names the LAN/interface IP the client connected through is the proxy itself —
+  # but "0.0.0.0" alone can't see that. `local_host` (the accepted socket's local
+  # address) supplies the concrete IP that makes the match work.
+  describe ".addresses_self?" do
+    it "recognises the LAN IP a device reached a 0.0.0.0 listener on (via local_host)" do
+      Gori::Proxy::Upstream.addresses_self?(
+        "192.168.1.5", 8080, {"0.0.0.0", 8080}, local_host: "192.168.1.5").should be_true
+    end
+
+    it "does NOT recognise that LAN IP without local_host (pins the pre-fix behaviour)" do
+      # This is the bug: a mobile device hitting http://<LAN-IP>:port/ against a
+      # 0.0.0.0 bind was neither served the self-page nor refused — it looped.
+      Gori::Proxy::Upstream.addresses_self?(
+        "192.168.1.5", 8080, {"0.0.0.0", 8080}).should be_false
+    end
+
+    it "still treats loopback as self under a wildcard bind (regression guard)" do
+      Gori::Proxy::Upstream.addresses_self?("127.0.0.1", 8080, {"0.0.0.0", 8080}).should be_true
+      Gori::Proxy::Upstream.addresses_self?("localhost", 8080, {"0.0.0.0", 8080}).should be_true
+    end
+
+    it "matches an IPv6 interface address under a :: bind, stripping Host brackets" do
+      Gori::Proxy::Upstream.addresses_self?(
+        "[fe80::1]", 8080, {"::", 8080}, local_host: "fe80::1").should be_true
+    end
+
+    it "is scoped to the listener port" do
+      Gori::Proxy::Upstream.addresses_self?(
+        "192.168.1.5", 9999, {"0.0.0.0", 8080}, local_host: "192.168.1.5").should be_false
+    end
+
+    it "does not match an unrelated host even when local_host is known" do
+      Gori::Proxy::Upstream.addresses_self?(
+        "example.com", 8080, {"0.0.0.0", 8080}, local_host: "192.168.1.5").should be_false
+    end
+
+    it "matches a concrete (non-wildcard) bind by literal host, local_host irrelevant" do
+      Gori::Proxy::Upstream.addresses_self?("127.0.0.1", 8080, {"127.0.0.1", 8080}).should be_true
+    end
+  end
+
+  describe ".loops_to_self?" do
+    it "refuses a forward to the LAN IP of a 0.0.0.0 listener (via local_host)" do
+      Gori::Proxy::Upstream.loops_to_self?(
+        "192.168.1.5", 8080, nil, {"0.0.0.0", 8080}, local_host: "192.168.1.5").should be_true
+    end
+
+    it "still catches a loopback self-loop under a wildcard bind" do
+      Gori::Proxy::Upstream.loops_to_self?("127.0.0.1", 8080, nil, {"0.0.0.0", 8080}).should be_true
+    end
+
+    it "leaves a real external host on the same port alone" do
+      Gori::Proxy::Upstream.loops_to_self?(
+        "example.com", 8080, nil, {"0.0.0.0", 8080}, local_host: "192.168.1.5").should be_false
+    end
+  end
 end
