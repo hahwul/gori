@@ -291,6 +291,50 @@ module Gori::Tui
       {display_width(g), 1}.max
     end
 
+    # Columns `str` occupies when DRAWN: `grapheme_cols` summed over grapheme CLUSTERS,
+    # which is exactly how `#text` and `Highlight.draw` advance. This is a THIRD measure,
+    # equal to neither sibling, and the only one that matches the cells on screen:
+    #
+    #   "a\tb"     display_width 2   column_width 3    draw_width 3   (tab: a drawn cell)
+    #   "👍🏽"       display_width 2   column_width 3    draw_width 2   (skin tone: 2 cps)
+    #   "👨‍👩‍👧‍👦"    display_width 2   column_width 11   draw_width 2   (3 ZWJ: 9 cols of drift)
+    #
+    # `display_width` UNDER-counts: a C0 control is Unicode width 0, but `cell` still
+    # substitutes a space for it, so it owns a cell. `column_width` OVER-counts: it floors
+    # every CODEPOINT to ≥1, which is right for the per-codepoint caret model it exists to
+    # serve (TextArea's char-index `@cx`, `column_for`) but wrong for a draw, where a
+    # multi-codepoint cluster — skin-tone modifier, ZWJ sequence, combining mark — is ONE
+    # glyph drawn into ONE cell run. Rule of thumb: measure with `draw_width` when the
+    # result is compared against drawn cells (search overlay, h-scroll clamp, slice), with
+    # `column_width` when it is compared against the caret.
+    def self.draw_width(str : String) : Int32
+      # ASCII fast path, and it is EXACT rather than an approximation: the only multi-char
+      # ASCII grapheme cluster is CRLF, which cannot appear inside a rendered line because
+      # every caller splits on '\n' first (TextArea#text= also rstrips the '\r'). So each
+      # ASCII char is its own cluster and the cluster sum IS the char count. Keeps the hot
+      # path off the grapheme walk + its per-glyph `g.to_s` String, as the siblings do.
+      return str.size if str.ascii_only?
+      w = 0
+      str.each_grapheme { |g| w += grapheme_cols(g.to_s) }
+      w
+    end
+
+    # As `draw_width`, but stops once the running width reaches `limit` (returning a value
+    # ≥ limit without walking the rest). Same early-exit contract, and the same reason, as
+    # `display_width_upto` / `column_width_upto`: the h-scroll clamps run EVERY frame and
+    # only need to know whether a line reaches the view's right edge, so a minified
+    # multi-MB single line must never be measured in full. Exact for lines under `limit`.
+    def self.draw_width_upto(str : String, limit : Int32) : Int32
+      return 0 if str.empty? || limit <= 0
+      return {str.size, limit}.min if str.ascii_only? # see draw_width: 1 char == 1 cluster
+      w = 0
+      str.each_grapheme do |g|
+        w += grapheme_cols(g.to_s)
+        return w if w >= limit
+      end
+      w
+    end
+
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None) : Nil
       return unless x >= 0 && y >= 0 && x < @width && y < @height

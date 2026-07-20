@@ -520,28 +520,31 @@ module Gori::Tui
           out << span
           next
         end
-        # column_width / grapheme_cols (not raw display_width): a control char still
-        # occupies a drawn cell after Highlight.draw's ≥1 floor, so h-scroll cuts must
-        # count it the same way or the styled slice drifts left of the caret.
-        sw = Screen.column_width(span.text)
+        # draw_width / a GRAPHEME walk, matching `draw`'s advance. Two reasons this cannot
+        # be the per-codepoint column_width: it over-counts a cluster (so the cut lands
+        # left of where the glyphs really are), and worse, cutting per codepoint can slice
+        # a ZWJ sequence in half and emit a bare ZWJ or a dangling skin-tone modifier as
+        # its own "glyph". Walking clusters keeps a cluster atomic: it is either kept
+        # whole or replaced by spaces, never split.
+        sw = Screen.draw_width(span.text)
         if acc + sw <= start_col # whole span is left of the cut
           acc += sw
           next
         end
         kept = String.build do |io|
-          span.text.each_char do |ch|
+          span.text.each_grapheme do |g|
             if cutting
-              w = Screen.grapheme_cols(ch.to_s)
+              w = Screen.grapheme_cols(g.to_s)
               if acc + w <= start_col
                 acc += w
                 next
               end
-              io << " " * (acc + w - start_col) if acc < start_col # straddling glyph → visible cells as spaces
-              io << ch if acc >= start_col                         # clean boundary keeps the glyph
+              io << " " * (acc + w - start_col) if acc < start_col # straddling cluster → visible cells as spaces
+              io << g if acc >= start_col                          # clean boundary keeps the cluster whole
               acc += w
               cutting = false
             else
-              io << ch
+              io << g # past the cut: append the cluster directly (no `to_s` allocation)
             end
           end
         end
@@ -558,19 +561,19 @@ module Gori::Tui
       acc = 0
       cutting = true
       String.build do |io|
-        s.each_char do |ch|
+        s.each_grapheme do |g| # cluster-wise, same reason as slice_left: never split a ZWJ sequence
           if cutting
-            w = Screen.grapheme_cols(ch.to_s)
+            w = Screen.grapheme_cols(g.to_s)
             if acc + w <= start_col
               acc += w
               next
             end
-            io << " " * (acc + w - start_col) if acc < start_col # straddling glyph → visible cells as spaces
-            io << ch if acc >= start_col                         # clean boundary keeps the glyph
+            io << " " * (acc + w - start_col) if acc < start_col # straddling cluster → visible cells as spaces
+            io << g if acc >= start_col                          # clean boundary keeps the cluster whole
             acc += w
             cutting = false
           else
-            io << ch
+            io << g
           end
         end
       end
@@ -607,22 +610,24 @@ module Gori::Tui
       out
     end
 
-    # Total column span of a styled line (sum of its spans, ≥1 per char) — used to
-    # clamp a horizontal scroll offset against the widest currently-visible row. Uses
-    # column_width so embedded tabs/controls match Highlight.draw's cell advance.
+    # Total drawn column span of a styled line (sum of its spans) — used to clamp a
+    # horizontal scroll offset against the widest currently-visible row. Uses draw_width,
+    # which is what `draw` below actually advances by: ≥1 per cluster so an embedded tab
+    # keeps its cell, but ONE cluster per glyph so a ZWJ emoji doesn't inflate the line by
+    # its codepoint count and let the view scroll past the end of the content.
     def self.line_width(line : Line) : Int32
-      line.sum { |span| Screen.column_width(span.text) }
+      line.sum { |span| Screen.draw_width(span.text) }
     end
 
     # As `line_width`, but stops summing once the running width reaches `limit` — and
     # caps WITHIN a span too (a huge minified body is one plain span > MAX_HL_LINE), so
     # the per-frame h-scroll clamp never fully measures a multi-MB line. See
-    # Screen.column_width_upto. Exact for lines narrower than limit.
+    # Screen.draw_width_upto. Exact for lines narrower than limit.
     def self.line_width_upto(line : Line, limit : Int32) : Int32
       w = 0
       line.each do |span|
         break if w >= limit
-        w += Screen.column_width_upto(span.text, limit - w)
+        w += Screen.draw_width_upto(span.text, limit - w)
       end
       w
     end

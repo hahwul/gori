@@ -22,13 +22,17 @@ module Gori::Tui
       # src[0, i] per match (was O(line²) on token-dense lines during a search).
       acc = 0
       while (i = dt.index(q, pos))
-        # column_width (not display_width): match the base draw / caret so a match after
-        # a tab or other zero-width control still lands on the right cell.
-        acc += Screen.column_width(src[pos, i - pos])
+        # draw_width, not display_width (under-counts a tab) and not column_width
+        # (over-counts a multi-codepoint cluster). The overlay is positioned against cells
+        # the BASE DRAW already painted, and it repaints them with `screen.text`, which
+        # advances per grapheme — so the column must be summed per grapheme too. Under
+        # column_width a match after a ZWJ emoji landed 3-9 columns right of itself and
+        # painted yellow over unrelated glyphs.
+        acc += Screen.draw_width(src[pos, i - pos])
         col = x + acc
         seg = src[i, q.size]
         screen.text(col, y, seg, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) if col < max_x
-        acc += Screen.column_width(seg)
+        acc += Screen.draw_width(seg)
         pos = i + q.size
       end
     end
