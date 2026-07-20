@@ -136,6 +136,52 @@ describe Gori::Proxy::Upstream do
     it "matches a concrete (non-wildcard) bind by literal host, local_host irrelevant" do
       Gori::Proxy::Upstream.addresses_self?("127.0.0.1", 8080, {"127.0.0.1", 8080}).should be_true
     end
+
+    # Gap 1: the OS routes a connect() to the all-zero address onto loopback, so a
+    # wildcard TARGET reaches us wherever a loopback target would.
+    it "treats a 0.0.0.0 target as self against a loopback bind" do
+      Gori::Proxy::Upstream.addresses_self?("0.0.0.0", 8080, {"127.0.0.1", 8080}).should be_true
+      Gori::Proxy::Upstream.addresses_self?("::", 8080, {"127.0.0.1", 8080}).should be_true
+      Gori::Proxy::Upstream.addresses_self?("0.0.0.0", 8080, {"0.0.0.0", 8080}).should be_true
+    end
+
+    # Gap 2: ::0 / 0:0:0:0:0:0:0:0 bind as full wildcards and Settings.bind_host_error
+    # accepts them, but the old literal test only knew "0.0.0.0"/"::" — so the self-page
+    # vanished under such a bind.
+    it "recognises loopback under the expanded all-zero IPv6 binds" do
+      {"::0", "0:0:0:0:0:0:0:0", "0000:0000:0000:0000:0000:0000:0000:0000"}.each do |bind|
+        Gori::Proxy::Upstream.addresses_self?("localhost", 8080, {bind, 8080}).should be_true
+        Gori::Proxy::Upstream.addresses_self?("::1", 8080, {bind, 8080}).should be_true
+        Gori::Proxy::Upstream.addresses_self?("127.0.0.1", 8080, {bind, 8080}).should be_true
+      end
+    end
+
+    it "classifies loopback by ADDRESS, not spelling (expanded v6 and v4-mapped)" do
+      Gori::Proxy::Upstream.addresses_self?("0:0:0:0:0:0:0:1", 8080, {"127.0.0.1", 8080}).should be_true
+      Gori::Proxy::Upstream.addresses_self?("::ffff:127.0.0.1", 8080, {"127.0.0.1", 8080}).should be_true
+      # Not a parseable IP literal, but it dials to 127.0.0.1 — the string fallback
+      # must survive the move to address-level classification.
+      Gori::Proxy::Upstream.addresses_self?("127.1", 8080, {"127.0.0.1", 8080}).should be_true
+    end
+
+    # The false-positive boundary. A match here serves the landing page (or, in
+    # loops_to_self?, 502s) instead of proxying, so these MUST stay false.
+    it "leaves a real external host on gori's own port alone" do
+      Gori::Proxy::Upstream.addresses_self?("example.com", 8080, {"::0", 8080}).should be_false
+      Gori::Proxy::Upstream.addresses_self?("93.184.216.34", 8080, {"0.0.0.0", 8080}).should be_false
+    end
+
+    it "does not let a concrete non-loopback bind swallow loopback or wildcard targets" do
+      # Measured: a listener on a concrete LAN address is NOT reachable by dialing
+      # 0.0.0.0, so neither of these is self and both must proxy normally.
+      Gori::Proxy::Upstream.addresses_self?("0.0.0.0", 8080, {"192.168.1.5", 8080}).should be_false
+      Gori::Proxy::Upstream.addresses_self?("127.0.0.1", 8080, {"192.168.1.5", 8080}).should be_false
+      Gori::Proxy::Upstream.addresses_self?("localhost", 8080, {"192.168.1.5", 8080}).should be_false
+    end
+
+    it "keeps the wildcard-target match scoped to the listener port" do
+      Gori::Proxy::Upstream.addresses_self?("0.0.0.0", 9999, {"127.0.0.1", 8080}).should be_false
+    end
   end
 
   describe ".loops_to_self?" do
@@ -151,6 +197,47 @@ describe Gori::Proxy::Upstream do
     it "leaves a real external host on the same port alone" do
       Gori::Proxy::Upstream.loops_to_self?(
         "example.com", 8080, nil, {"0.0.0.0", 8080}, local_host: "192.168.1.5").should be_false
+    end
+
+    # Gap 1, the wedge case: one such request cost 2048 connections (the MAX_CONNECTIONS
+    # cap) in 3 seconds against the shipping 127.0.0.1 default bind, after which accept()
+    # stalls and the proxy is unusable.
+    it "refuses a forward to a 0.0.0.0 target that would land back on a loopback bind" do
+      Gori::Proxy::Upstream.loops_to_self?("0.0.0.0", 8080, nil, {"127.0.0.1", 8080}).should be_true
+      Gori::Proxy::Upstream.loops_to_self?("::", 8080, nil, {"127.0.0.1", 8080}).should be_true
+      Gori::Proxy::Upstream.loops_to_self?("0.0.0.0", 8080, nil, {"0.0.0.0", 8080}).should be_true
+    end
+
+    # Gap 2: under an expanded all-zero bind the refusal disappeared entirely, so an
+    # absolute-form GET http://localhost:<port>/ wedged the proxy the same way.
+    it "still refuses a loopback self-loop under the expanded all-zero IPv6 binds" do
+      {"::0", "0:0:0:0:0:0:0:0"}.each do |bind|
+        Gori::Proxy::Upstream.loops_to_self?("localhost", 8080, nil, {bind, 8080}).should be_true
+        Gori::Proxy::Upstream.loops_to_self?("127.0.0.1", 8080, nil, {bind, 8080}).should be_true
+        Gori::Proxy::Upstream.loops_to_self?("0.0.0.0", 8080, nil, {bind, 8080}).should be_true
+      end
+    end
+
+    it "refuses a hostname override that resolves onto the wildcard address" do
+      Gori::Settings.hostname_overrides = [{"api.example.com", "0.0.0.0"}]
+      begin
+        Gori::Proxy::Upstream.loops_to_self?(
+          "api.example.com", 8080, nil, {"127.0.0.1", 8080}).should be_true
+      ensure
+        Gori::Settings.hostname_overrides = [] of {String, String}
+      end
+    end
+
+    # The false-positive boundary: refusing here is a 502 on traffic that would have
+    # proxied fine, which is worse than the loop it guards against.
+    it "does not refuse anything a concrete non-loopback bind cannot possibly serve" do
+      Gori::Proxy::Upstream.loops_to_self?("0.0.0.0", 8080, nil, {"192.168.1.5", 8080}).should be_false
+      Gori::Proxy::Upstream.loops_to_self?("localhost", 8080, nil, {"192.168.1.5", 8080}).should be_false
+      Gori::Proxy::Upstream.loops_to_self?("example.com", 8080, nil, {"::0", 8080}).should be_false
+    end
+
+    it "keeps the wildcard-target refusal scoped to the listener port" do
+      Gori::Proxy::Upstream.loops_to_self?("0.0.0.0", 9999, nil, {"127.0.0.1", 8080}).should be_false
     end
   end
 end
