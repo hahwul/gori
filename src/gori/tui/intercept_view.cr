@@ -465,7 +465,7 @@ module Gori::Tui
     # --- rendering -----------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
-               listen : String? = nil, capturing : Bool = true) : Nil
+               listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
       render_suggestions(screen, rect, rect.y + FILTER_BAR_H) if @querying
@@ -473,8 +473,7 @@ module Gori::Tui
       return if body.empty?
 
       if @items.empty?
-        addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
-        TrafficEmptyState.render(screen, body, variant: :intercept, listen: addr,
+        TrafficEmptyState.render(screen, body, variant: :intercept, listen: listen,
           capturing: capturing, catch_on: @enabled)
         return
       end

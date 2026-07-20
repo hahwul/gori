@@ -60,7 +60,7 @@ module Gori::Tui
       shell = BodyChrome.shell_focused(focus, multi_pane: !@intercept.empty?)
       BodyChrome.framed(screen, rect, shell) do |inner|
         @intercept.render(screen, inner, focused: body_focused,
-          listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+          listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
       end
     end
 

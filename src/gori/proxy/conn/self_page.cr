@@ -1,4 +1,5 @@
 require "html"
+require "../../bind_address"
 
 module Gori::Proxy
   # The self-serve landing page ClientConn returns when a browser hits the proxy
@@ -119,7 +120,12 @@ module Gori::Proxy
 
     private def self.index_html(*, ca_available : Bool, spki : String?, ca_path : String?,
                                 listen : {String, Int32}, version : String) : String
-      listen_s = HTML.escape("#{listen[0]}:#{listen[1]}")
+      # `listen[0]` is normally the CONCRETE address this device reached us on (ClientConn
+      # threads the accepted socket's local address in), which under a `::` bind is a bare
+      # IPv6 literal — "fe80::1:8080" is ambiguous and not copy-pasteable. BindAddress
+      # brackets it, and covers the fallback where local_host was unavailable and this is
+      # still the raw wildcard.
+      listen_s = HTML.escape(Gori::BindAddress.display(listen[0], listen[1]))
       ver = HTML.escape(version)
       path = HTML.escape(ca_path || "unknown")
       fp = spki ? HTML.escape(spki) : nil

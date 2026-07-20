@@ -1087,7 +1087,7 @@ module Gori::Tui
     # --- rendering -----------------------------------------------------------
 
     def render_list(screen : Screen, rect : Rect, focused : Bool = true, *,
-                    listen : String? = nil, capturing : Bool = true) : Nil
+                    listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       list_rect, preview_rect = list_split(rect)
       render_list_body(screen, list_rect, focused, listen: listen, capturing: capturing)
@@ -1095,7 +1095,7 @@ module Gori::Tui
     end
 
     private def render_list_body(screen : Screen, rect : Rect, focused : Bool, *,
-                                 listen : String? = nil, capturing : Bool = true) : Nil
+                                 listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
@@ -1165,9 +1165,8 @@ module Gori::Tui
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no flows in scope", "⇧S clears the scope lens"}
           else
-            addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
             list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
-            TrafficEmptyState.render(screen, list_rect, variant: :history, listen: addr, capturing: capturing)
+            TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
             return
           end
         screen.text(time_x, list_top, msg, Theme.muted)

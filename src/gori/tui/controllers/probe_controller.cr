@@ -116,7 +116,7 @@ module Gori::Tui
         else
           proxy = @host.session.proxy
           @probe.render(screen, content, focused: focused,
-            listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+            listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
         end
       end
     end

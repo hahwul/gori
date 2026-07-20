@@ -54,7 +54,7 @@ module Gori::Tui
         @history.refresh_preview(@host.session.store) if @history.preview_enabled?
         BodyChrome.framed(screen, rect, body_focused) do |inner|
           @history.render_list(screen, inner, focused: body_focused,
-            listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+            listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
         end
       end
     end

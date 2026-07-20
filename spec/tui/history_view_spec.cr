@@ -745,9 +745,9 @@ describe Gori::Tui::HistoryView do
       view.reload(store)
       backend = MemoryBackend.new(80, 14)
       view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 14),
-        listen: "127.0.0.1:8070", capturing: true)
+        listen: {"127.0.0.1", 8070}, capturing: true)
       backend.contains?("waiting for traffic").should be_true
-      backend.contains?("127.0.0.1:8070").should be_true
+      backend.contains?("localhost:8070").should be_true
       backend.contains?("Open browser").should be_true
       backend.contains?("FLOW LOG").should be_true
     end

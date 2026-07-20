@@ -34,7 +34,17 @@ describe Gori::CaptureStatus do
   it "formats loopback hosts as localhost" do
     Gori::CaptureStatus.format_endpoint("127.0.0.1", 8070).should eq("localhost:8070")
     Gori::CaptureStatus.format_endpoint("::1", 9000).should eq("localhost:9000")
-    Gori::CaptureStatus.format_endpoint("0.0.0.0", 8070).should eq("0.0.0.0:8070")
+  end
+
+  it "shows a wildcard bind as the dialable address, not '0.0.0.0'" do
+    # The picker row used to read "● 0.0.0.0:8070" — an address no client can connect to.
+    # Terse (no "(all interfaces)" note): this rides inside a chip in a project row.
+    Gori::CaptureStatus.format_endpoint("0.0.0.0", 8070).should eq("localhost:8070")
+    Gori::CaptureStatus.format_endpoint("::", 8070).should eq("localhost:8070")
+  end
+
+  it "brackets an IPv6 bind so the chip stays copy-pasteable" do
+    Gori::CaptureStatus.format_endpoint("fe80::1", 8070).should eq("[fe80::1]:8070")
   end
 end
 

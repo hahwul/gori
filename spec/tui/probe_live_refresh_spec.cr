@@ -47,7 +47,7 @@ describe "Probe live list refresh (generation poll)" do
       backend = MemoryBackend.new(100, 30)
       screen = Gori::Tui::Screen.new(backend)
       rect = Gori::Tui::Rect.new(0, 0, 100, 30)
-      view.render(screen, rect, focused: true, listen: "127.0.0.1:8080", capturing: true)
+      view.render(screen, rect, focused: true, listen: {"127.0.0.1", 8080}, capturing: true)
       backend.contains?("Reflected parameter").should be_true
       backend.contains?("xss.test").should be_true
     ensure
