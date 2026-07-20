@@ -47,17 +47,13 @@
     syncTuiShots();
   })();
 
-  /* Language dropdown: close on outside click or Escape (it closes on its own
-     when a language is chosen, since that navigates away). */
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
   (function () {
-    var ls = document.getElementById("langSwitcher");
-    if (!ls) return;
-    document.addEventListener("click", function (e) {
-      if (ls.open && !ls.contains(e.target)) ls.removeAttribute("open");
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && ls.open) ls.removeAttribute("open");
-    });
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
   })();
 
   /* Hero install picker: swap the one-liner for the chosen channel, copy it

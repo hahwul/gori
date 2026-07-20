@@ -10,30 +10,17 @@
     <a href="{{ base_url }}{{ lang_prefix }}/reference/"{% if page.section == "reference" %} class="active" aria-current="true"{% endif %}>{{ "nav.reference" | t }}</a>
   </nav>
   <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="{{ "a11y.search_docs" | t }}" title="{{ "a11y.search_docs" | t }} (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
     {% if page.translations | length > 0 %}
     {% set lang_names = {"en": "English", "ko": "한국어"} %}
-    <details class="lang-switcher" id="langSwitcher">
-      <summary class="lang-trigger" aria-label="{{ "a11y.language" | t }}" title="{{ "a11y.language" | t }}">
-        <svg class="lang-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z"/></svg>
-        <span class="lang-trigger-label">{{ lang_names[page_language] | default(page_language, true) }}</span>
-        <svg class="lang-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-      </summary>
-      <ul class="lang-menu" role="menu">
-        {% for t in page.translations %}
-        <li role="none">
-          <a role="menuitem" href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}" lang="{{ t.code }}"{% if t.is_current %} class="is-current" aria-current="true"{% endif %}>
-            <span class="lang-menu-name">{{ lang_names[t.code] | default(t.code, true) }}</span>
-            {% if t.is_current %}<svg class="lang-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-11"/></svg>{% else %}<span class="lang-menu-code">{{ t.code | upper }}</span>{% endif %}
-          </a>
-        </li>
-        {% endfor %}
-      </ul>
-    </details>
+    <nav class="lang-switch" aria-label="{{ "a11y.language" | t }}">
+      {% for t in page.translations %}
+      <a href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}" lang="{{ t.code }}" aria-label="{{ lang_names[t.code] | default(t.code, true) }}" title="{{ lang_names[t.code] | default(t.code, true) }}"{% if t.is_current %} class="is-current" aria-current="true"{% endif %}>{{ t.code | upper }}</a>
+      {% endfor %}
+    </nav>
     {% endif %}
-    <button class="search-trigger" onclick="openSearch()" title="{{ "a11y.search_docs" | t }}">
-      <span>{{ "nav.search" | t }}</span>
-      <kbd>&#8984;K</kbd>
-    </button>
     <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="{{ "nav.github" | t }}" title="{{ "nav.github" | t }}">
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
     </a>
