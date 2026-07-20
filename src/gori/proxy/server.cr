@@ -134,8 +134,15 @@ module Gori::Proxy
         # and relaxes both on entering a WS/SSE/CONNECT/h2 tunnel.
         SocketTuning.enable_keepalive(client)
         SocketTuning.arm(client, SocketTuning::CLIENT_IO_TIMEOUT)
+        # The concrete address this client reached us on. Under a wildcard bind
+        # (0.0.0.0 / ::) it's the LAN/interface IP the device connected through —
+        # the signal that lets addresses_self?/loops_to_self? recognise a Host that
+        # names that IP as the proxy itself (self-page + loop refusal). Best-effort:
+        # a peer that RST'd between accept and here makes local_address raise, which
+        # the rescue below turns into a clean close.
+        local_host = (client.local_address.address rescue nil)
         ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor,
-          host_overrides: @host_overrides, self_addr: {@host, @port}).run
+          host_overrides: @host_overrides, self_addr: {@host, @port}, local_host: local_host).run
       rescue
         # Setup (setsockopt) can raise if the peer RST'd between accept and here;
         # ClientConn never took ownership, so close the accepted fd ourselves or
