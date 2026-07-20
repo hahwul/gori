@@ -4,6 +4,7 @@
 
 [nav]
 start = "시작하기"
+install = "설치"
 guide = "가이드"
 reference = "레퍼런스"
 search = "검색"

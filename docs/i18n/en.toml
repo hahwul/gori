@@ -4,6 +4,7 @@
 
 [nav]
 start = "Start"
+install = "Install"
 guide = "Guide"
 reference = "Reference"
 search = "Search"

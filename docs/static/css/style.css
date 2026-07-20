@@ -488,6 +488,7 @@ img {
   background: rgb(var(--ink-rgb) / 0.09);
 }
 
+.github-link,
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -500,15 +501,18 @@ img {
   background: rgb(var(--ink-rgb) / 0.055);
   color: var(--muted);
   cursor: pointer;
+  text-decoration: none;
   transition: transform var(--transition), border-color var(--transition), background var(--transition), color var(--transition);
 }
 
+.github-link:hover,
 .theme-toggle:hover {
   border-color: var(--line-strong);
   background: rgb(var(--ink-rgb) / 0.09);
   color: var(--accent-strong);
 }
 
+.github-link svg,
 .theme-toggle svg {
   width: 1.05rem;
   height: 1.05rem;
@@ -534,6 +538,7 @@ img {
    against its neighbours, so they answer a press with fill, not movement. */
 .search-trigger:active,
 .theme-toggle:active,
+.github-link:active,
 .button:active {
   transform: translateY(1px) scale(0.99);
 }
@@ -1030,6 +1035,13 @@ kbd {
   border-bottom: 1px solid var(--line);
 }
 
+/* Even rows mirror the layout (screenshot on the left). The columns are swapped
+   too so the screenshot keeps the wide 1.18fr track — otherwise `order` would
+   drop it into the narrow track and it would render smaller than its neighbours. */
+.flow-list > div:nth-child(even) {
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+}
+
 .flow-list > div:nth-child(even) .flow-shot {
   order: -1;
 }
@@ -1044,14 +1056,24 @@ kbd {
   max-width: 34ch;
 }
 
+/* Every shot is framed to the same 1206:520 box so the three steps read as one
+   uniform set. The Fuzzer capture is taller (34 rows vs 26), so it is cropped
+   from the top — the marked request and payload config stay in view, only the
+   empty results/hint strip at the bottom is trimmed. */
 .flow-shot {
   margin: 0;
+  aspect-ratio: 1206 / 520;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.42);
 }
 
 .flow-shot img {
+  display: block;
   width: 100%;
-  height: auto;
-  filter: drop-shadow(0 18px 44px rgb(0 0 0 / 0.42));
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
 }
 
 /* --- Hand it to an agent (the MCP seam) ------------------------------- */
@@ -2556,7 +2578,8 @@ html.search-lock body {
     grid-template-columns: 1fr;
   }
 
-  .flow-list > div {
+  .flow-list > div,
+  .flow-list > div:nth-child(even) {
     grid-template-columns: 1fr;
     gap: 1.1rem;
   }
