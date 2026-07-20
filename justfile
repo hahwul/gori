@@ -83,36 +83,17 @@ fix:
     crystal tool format
     lib/ameba/bin/ameba.cr --fix
 
-# Check that the version in shard.yml and src/gori.cr agree.
+# Check that every version-bearing file agrees: shard.yml, src/gori.cr,
+# snap/snapcraft.yaml, aur/PKGBUILD and the spec assertion.
 [group('version')]
 version-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shard_ver=$(grep '^version:' shard.yml | head -1 | sed 's/version:[[:space:]]*//')
-    code_ver=$(grep 'VERSION = ' src/gori.cr | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    echo "shard.yml:   $shard_ver"
-    echo "src/gori.cr: $code_ver"
-    if [ "$shard_ver" != "$code_ver" ]; then
-        echo "✗ version mismatch" >&2
-        exit 1
-    fi
-    echo "✓ versions match"
+    crystal run scripts/version_check.cr
 
 # Show the current version, then prompt for a new one (blank keeps it).
+# Writes every version-bearing file and resets the PKGBUILD pkgrel to 1.
 [group('version')]
 version-update:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    current=$(grep '^version:' shard.yml | head -1 | sed 's/version:[[:space:]]*//')
-    echo "Current version: $current"
-    read -r -p "New version (blank to keep): " target
-    if [ -z "$target" ]; then
-        echo "No change."
-        exit 0
-    fi
-    perl -i -pe 's/^version:\s*\S+/version: '"$target"'/' shard.yml
-    perl -i -pe 's/(VERSION = ")[^"]*(")/${1}'"$target"'${2}/' src/gori.cr
-    echo "✓ version: $current -> $target"
+    crystal run scripts/version_update.cr
 
 # Build (release) and run the end-to-end proxy benchmark harness.
 [group('benchmark')]
