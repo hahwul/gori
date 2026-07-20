@@ -1,6 +1,10 @@
 +++
 title = "Scanning & Issues"
 description = "The Probe scanner, the Param Miner, and triaging results into Issues."
+weight = 30
+
+[extra]
+group = "Core"
 +++
 
 gori includes automated analysis that runs alongside your manual testing. **Probe** watches traffic for issues, the **Param Miner** discovers hidden inputs, and **Issues** is where results get triaged.

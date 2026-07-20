@@ -1,6 +1,7 @@
 +++
 title = "Reference"
 description = "CLI commands, configuration keys, and the query language."
+weight = 30
 +++
 
 Technical reference for gori.

@@ -1,6 +1,7 @@
 +++
 title = "설치"
 description = "curl, Homebrew, AUR, Docker, 사전 빌드 바이너리, 또는 소스에서 gori를 설치합니다."
+weight = 10
 +++
 
 gori는 [Crystal](https://crystal-lang.org/)로 작성되었습니다. 아래에서 사전 빌드된 채널을 고르거나, 플랫폼에 맞는 것이 없으면 [소스에서 빌드](#build-from-source)하세요. 모든 채널은 동일한 `gori` 바이너리를 설치합니다. 바이너리가 `PATH`에 올라가면 [설치 확인](#verify-the-installation)으로 넘어가세요.

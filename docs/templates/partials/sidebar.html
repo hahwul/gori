@@ -1,13 +1,20 @@
 <aside class="docs-sidebar">
   {% for sec in site.sections | sort(attribute="path") %}{% if sec.name != "" and sec.language == page_language %}
-  <div class="sidebar-section">
-    <div class="sidebar-title">{{ sec.title | e }}</div>
+  <details class="sidebar-section"{% if page.section == sec.name %} open{% endif %}>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">{{ sec.title | e }}</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
     <ul class="sidebar-links">
       <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>{{ "sidebar.overview" | t }}</a></li>
-      {% for p in sec.pages | sort(attribute="path") %}{% if not p.is_index %}
+      {% set ordered = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
+      {% for p in ordered %}
+      {% if p.extra.group and (loop.first or p.extra.group != ordered[loop.index0 - 1].extra.group) %}
+      <li class="sidebar-subhead">{{ p.extra.group | e }}</li>
+      {% endif %}
       <li><a href="{{ base_url }}{{ p.url }}"{% if page.url == p.url %} class="active" aria-current="page"{% endif %}>{{ p.title | e }}</a></li>
-      {% endif %}{% endfor %}
+      {% endfor %}
     </ul>
-  </div>
+  </details>
   {% endif %}{% endfor %}
 </aside>

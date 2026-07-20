@@ -1,6 +1,7 @@
 +++
 title = "CLI 레퍼런스"
 description = "모든 gori 서브커맨드와 커맨드라인 플래그."
+weight = 10
 +++
 
 `gori` 커맨드라인 레퍼런스입니다. 서브커맨드 없이 `gori`를 실행하면 TUI가 시작됩니다.

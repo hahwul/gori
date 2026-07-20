@@ -1,6 +1,7 @@
 +++
 title = "Configuration"
 description = "The settings.json keys and the GORI_HOME storage layout."
+weight = 20
 +++
 
 gori stores global preferences in `settings.json` and each project as its own SQLite database. See the [Configuration guide](/getting-started/configuration/) for a walkthrough; this page is the key-by-key reference.

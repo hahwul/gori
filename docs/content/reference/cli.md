@@ -1,6 +1,7 @@
 +++
 title = "CLI Reference"
 description = "Every gori subcommand and command-line flag."
+weight = 10
 +++
 
 Reference for the `gori` command line. Running `gori` with no subcommand starts the TUI.

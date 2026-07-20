@@ -1,6 +1,10 @@
 +++
 title = "Decoder"
 description = "Encode, decode, hash, and transform data in a multi-step pipeline inside the TUI."
+weight = 40
+
+[extra]
+group = "Workbenches"
 +++
 
 The **Decoder** tab is a scratch workbench for encoding, decoding, hashing, and transforming data. Paste input, build a chain of converters, and read the intermediate and final results.

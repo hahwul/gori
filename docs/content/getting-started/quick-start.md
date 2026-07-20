@@ -1,6 +1,7 @@
 +++
 title = "Quick Start"
 description = "A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater."
+weight = 20
 +++
 
 This is a follow-along tutorial. Work through it top to bottom and you'll go from a fresh install to a captured HTTPS request that you have inspected, sent to **Repeater**, edited, and re-sent, all without leaving the terminal. Set aside about ten minutes.

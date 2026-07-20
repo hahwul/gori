@@ -1,6 +1,10 @@
 +++
 title = "MCP Server"
 description = "Drive gori from an AI agent or script over the Model Context Protocol."
+weight = 80
+
+[extra]
+group = "Automation"
 +++
 
 gori ships a built-in **MCP (Model Context Protocol) server**. Instead of embedding a chat window in the TUI, gori exposes its project over a clean tool interface so any MCP-capable agent (Claude, Codex, Grok, and others) can read your traffic and drive the tools.

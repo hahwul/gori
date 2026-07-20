@@ -1,20 +1,32 @@
 +++
 title = "Guide"
 description = "In-depth guides to the gori workbench: proxy, repeater, fuzzing, scanning, and MCP."
+weight = 20
 +++
 
 In-depth guides to working with gori. Each tab in the TUI is a focused tool; together they cover a full assessment from capture to report.
 
 ## Topics
 
+**Core** — the capture-to-triage workflow:
+
 - **[Proxy & History](/guide/proxy/)**: capture, intercept, scope, import, match & replace, host overrides.
 - **[Repeater & Fuzzer](/guide/repeater-and-fuzzer/)**: the request workbench, env tokens, and the Intruder-style fuzzer.
+- **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Discover (spider & brute-force), Issues, Notes, Comparer.
+
+**Workbenches** — focused, single-purpose analysis tools:
+
 - **[Decoder](/guide/decoder/)**: encode / decode / hash pipeline in the TUI.
 - **[JWT](/guide/jwt/)**: decode, re-sign, and attack JSON Web Tokens.
 - **[Sequencer](/guide/sequencer/)**: grade the randomness of session and CSRF tokens.
 - **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
-- **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Discover (spider & brute-force), Issues, Notes, Comparer.
+
+**Automation**:
+
 - **[MCP Server](/guide/mcp/)**: drive gori from an AI agent or script.
+
+**Customize**:
+
 - **[Settings](/guide/settings/)**: the Preferences modal and every section in it.
 - **[Themes](/guide/themes/)**: switch between built-in colour themes or create your own.
 - **[Hotkeys](/guide/hotkeys/)**: rebind gori's keyboard shortcuts.

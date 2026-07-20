@@ -1,6 +1,7 @@
 +++
 title = "AI Setup"
 description = "Connect an AI agent to gori over MCP: install the server into your client, pin the project, and drive your first request."
+weight = 30
 +++
 
 gori has three entry points over one project and one engine: `gori` (the TUI, for you), `gori run` (the headless CLI, for scripts), and `gori mcp` (the [MCP server](/guide/mcp/), for AI agents). This page is the AI path. It gets an agent connected to a gori project and running its first request.

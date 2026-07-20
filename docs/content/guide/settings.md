@@ -1,6 +1,10 @@
 +++
 title = "Settings"
 description = "The Preferences modal: one place for every gori setting, reachable from anywhere."
+weight = 90
+
+[extra]
+group = "Customize"
 +++
 
 Every persisted preference in gori is edited from one surface, the **Preferences** modal. It is the same modal in the app and in the project picker, so there is a single place to learn.
