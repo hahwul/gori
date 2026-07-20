@@ -4,7 +4,7 @@
 # `Gori::CLI.run` (added in a later build step); for now this file only
 # establishes the module, version, and the single base error type.
 module Gori
-  VERSION = "0.1.0"
+  VERSION = "0.1.1"
 
   # Canonical project home — surfaced in the TUI Help → About page (and reusable
   # by the CLI/about screens). Kept beside VERSION as the project's identity.
