@@ -241,7 +241,7 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  margin-right: 2rem;
+  margin-right: 1.4rem;
   color: var(--heading);
   font-weight: 760;
   line-height: 1;
@@ -286,236 +286,116 @@ img {
   background-clip: text;
 }
 
+/* Section links sit as quiet pills: a soft ink wash on hover, and the active
+   section carries the gold thread as a tinted pill instead of an underline. */
 .top-nav {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.2rem;
   min-width: 0;
 }
 
 .top-nav a {
-  position: relative;
+  padding: 0.38rem 0.8rem;
+  border-radius: var(--radius-pill);
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   text-decoration: none;
   white-space: nowrap;
+  transition: color var(--transition), background var(--transition);
 }
 
 .top-nav a:hover {
   color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.06);
 }
 
 .top-nav a.active {
   color: var(--accent-strong);
+  background: rgb(var(--accent-rgb) / 0.12);
+  font-weight: 500;
 }
 
-.top-nav a.active::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -0.55rem;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-
+/* The right cluster keeps one drawn control (the segmented language pill) and
+   quiet borderless icons for search, GitHub, and the theme. One level of
+   chrome per level of importance, instead of four outlined blobs competing at
+   equal weight. */
 .header-right {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.45rem;
   margin-left: auto;
 }
 
-/* Language switcher — a compact dropdown that names the current language
-   (in its own script) and scales to more locales without crowding the header. */
-.lang-switcher {
-  position: relative;
-}
-
-.lang-trigger {
+/* Language switcher — a segmented pill of locale codes. Every language is one
+   click away and the control stays narrower than the old named dropdown. */
+.lang-switch {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  min-height: 2.3rem;
-  padding: 0.35rem 0.58rem;
+  gap: 0.1rem;
+  padding: 0.2rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: rgb(var(--ink-rgb) / 0.055);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.84rem;
-  line-height: 1;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  transition: transform var(--transition), border-color var(--transition),
-    background var(--transition), color var(--transition);
+  background: rgb(var(--ink-rgb) / 0.045);
 }
 
-.lang-trigger::-webkit-details-marker {
-  display: none;
-}
-
-.lang-trigger:hover {
-  border-color: var(--line-strong);
-  background: rgb(var(--ink-rgb) / 0.09);
-}
-
-.lang-switcher[open] > .lang-trigger {
-  border-color: var(--line-strong);
-  color: var(--heading);
-}
-
-.lang-trigger:active {
-  transform: translateY(1px) scale(0.99);
-}
-
-.lang-globe {
-  width: 1rem;
-  height: 1rem;
-  flex: none;
-  color: var(--muted);
-}
-
-.lang-trigger:hover .lang-globe,
-.lang-switcher[open] .lang-globe {
-  color: var(--accent-strong);
-}
-
-.lang-trigger-label {
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.lang-caret {
-  width: 0.82rem;
-  height: 0.82rem;
-  flex: none;
-  color: var(--muted);
-  transition: transform var(--transition);
-}
-
-.lang-switcher[open] .lang-caret {
-  transform: rotate(180deg);
-}
-
-.lang-menu {
-  position: absolute;
-  top: calc(100% + 0.5rem);
-  right: 0;
-  min-width: 11rem;
-  margin: 0;
-  padding: 0.3rem;
-  list-style: none;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  box-shadow: var(--shadow-soft), 0 0 0 1px rgb(var(--accent-rgb) / 0.06);
-  z-index: 120;
-  animation: langMenuIn 0.14s ease;
-}
-
-@keyframes langMenuIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.lang-menu a {
-  display: flex;
+.lang-switch a {
+  display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0.55rem;
-  border-radius: 7px;
-  color: var(--text);
-  font-size: 0.86rem;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.lang-menu a:hover {
-  background: rgb(var(--ink-rgb) / 0.06);
-  color: var(--heading);
-}
-
-.lang-menu-name {
-  flex: 1 1 auto;
-}
-
-.lang-menu-code {
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.26rem 0.5rem;
+  border-radius: var(--radius-pill);
   color: var(--muted);
-}
-
-.lang-menu a.is-current {
-  color: var(--accent-strong);
-  background: rgb(var(--accent-rgb) / 0.1);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
   font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-decoration: none;
+  transition: color var(--transition), background var(--transition);
 }
 
-.lang-check {
-  width: 0.95rem;
-  height: 0.95rem;
-  flex: none;
+.lang-switch a:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.07);
+}
+
+.lang-switch a.is-current {
   color: var(--accent-strong);
+  background: rgb(var(--accent-rgb) / 0.16);
 }
 
-.search-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  min-height: 2.3rem;
-  padding: 0.35rem 0.45rem 0.35rem 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: rgb(var(--ink-rgb) / 0.055);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.86rem;
-  cursor: pointer;
-  transition: transform var(--transition), border-color var(--transition), background var(--transition);
-}
-
-.search-trigger:hover {
-  border-color: var(--line-strong);
-  background: rgb(var(--ink-rgb) / 0.09);
-}
-
+.search-trigger,
 .github-link,
 .theme-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.3rem;
-  height: 2.3rem;
+  width: 2.25rem;
+  height: 2.25rem;
   padding: 0;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-pill);
-  background: rgb(var(--ink-rgb) / 0.055);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   text-decoration: none;
-  transition: transform var(--transition), border-color var(--transition), background var(--transition), color var(--transition);
+  transition: transform var(--transition), background var(--transition), color var(--transition);
 }
 
+.search-trigger:hover,
 .github-link:hover,
 .theme-toggle:hover {
-  border-color: var(--line-strong);
-  background: rgb(var(--ink-rgb) / 0.09);
+  background: rgb(var(--ink-rgb) / 0.08);
   color: var(--accent-strong);
 }
 
+.search-trigger svg,
 .github-link svg,
 .theme-toggle svg {
-  width: 1.05rem;
-  height: 1.05rem;
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .theme-toggle .icon-sun {
@@ -2659,7 +2539,10 @@ html.search-lock body {
 
 @media (max-width: 1100px) {
   .home-hero {
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr), not bare 1fr: 1fr's auto minimum inherits the install
+       one-liner's nowrap width and shoves the whole column past narrow
+       viewports. A zero minimum lets the widget shrink and scroll inside. */
+    grid-template-columns: minmax(0, 1fr);
     padding-top: 3rem;
   }
 
@@ -2832,8 +2715,8 @@ html.search-lock body {
     margin-right: 0.75rem;
   }
 
-  .search-trigger span {
-    display: none;
+  .header-right {
+    gap: 0.3rem;
   }
 
   .home-hero h1,
