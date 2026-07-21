@@ -10,10 +10,20 @@ module Gori
       def self.parse_file(path : String) : ParseResult
         raw = File.read(path)
         json_raw = case File.extname(path).downcase
-                   when ".yaml", ".yml" then YAML.parse(raw).to_json
-                   else                      raw
+                   when ".yaml", ".yml"
+                     begin
+                       YAML.parse(raw).to_json
+                     rescue ex : YAML::ParseException
+                       raise Gori::Error.new("OpenAPI spec is not valid YAML: #{ex.message}")
+                     end
+                   else
+                     raw
                    end
-        spec = JSON.parse(json_raw)
+        spec = begin
+          JSON.parse(json_raw)
+        rescue ex : JSON::ParseException
+          raise Gori::Error.new("OpenAPI spec is not valid JSON: #{ex.message}")
+        end
         paths = spec["paths"]?
         raise Gori::Error.new("OpenAPI spec missing paths") unless paths
         # A `paths` that isn't an object (null / string / array) is a malformed spec, not

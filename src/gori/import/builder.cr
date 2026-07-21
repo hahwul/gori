@@ -27,8 +27,19 @@ module Gori
       LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//i
       HTTP_SCHEME    = /\Ahttps?:\/\//i
 
+      # A raw CR/LF (or other C0 control / DEL) in a URL is never legitimate — a
+      # PERCENT-ENCODED `%0d%0a` stays encoded text through URI.parse (harmless), but a
+      # LITERAL control byte does not: URI.parse copies it verbatim into host/path with
+      # no rejection, so left unchecked it flows straight into request_head/response_head
+      # and forges a second, fabricated HTTP message inside one stored request/status line
+      # (e.g. `GET /path\r\nX-Injected: pwn\r\n\r\nGET /second HTTP/1.1 HTTP/1.0\r\n...`).
+      # Reject the entry here, at the same point the scheme/shape checks below do, so every
+      # caller's existing skip-a-bad-entry rescue handles it identically to those checks.
+      CONTROL_CHAR = /[\x00-\x1f\x7f]/
+
       def self.normalize_url(url : String) : String
         u = url.strip
+        raise Gori::Error.new("invalid URL (control character): #{url.inspect}") if u.matches?(CONTROL_CHAR)
         return u if u.starts_with?(HTTP_SCHEME)
         raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.matches?(LEADING_SCHEME)
         "https://#{u}"
