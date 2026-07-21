@@ -2,9 +2,14 @@
 {% include "partials/nav.html" %}
 {% include "partials/search.html" %}
 {% if page.section == "" %}
+<script>
+  /* Flag JS before the sections parse: the scroll-reveal styles hide content
+     only under html.js, so a no-script visit renders everything visible. */
+  document.documentElement.classList.add("js");
+</script>
 <main id="main" class="home-main">
   <section class="home-hero" aria-labelledby="home-title">
-    <div class="hero-copy reveal">
+    <div class="hero-copy">
       <p class="home-kicker">{{ "home.kicker" | t }}</p>
       <h1 id="home-title">{{ "home.title" | t }}</h1>
       <p class="hero-lede">{{ "home.lede" | t }}</p>
@@ -28,21 +33,23 @@
         </div>
       </div>
     </div>
-    <figure class="hero-art reveal">
+    <figure class="hero-art">
+      <i class="hero-orbit" aria-hidden="true"></i>
+      <i class="hero-orbit hero-orbit-out" aria-hidden="true"></i>
       <span class="hero-disc">
         <img src="{{ base_url }}/images/wallpaper.jpg" alt="{{ "home.hero_art_alt" | t }}">
       </span>
     </figure>
   </section>
 
-  <section class="home-showcase reveal" aria-label="gori running in the terminal">
+  <section class="home-showcase rv" aria-label="gori running in the terminal">
     <figure class="showcase-frame">
       <img src="{{ base_url }}/images/tui/history.svg" alt="{{ "home.showcase_alt" | t }}">
     </figure>
     <p class="showcase-note">{{ "home.showcase_note" | t }}</p>
   </section>
 
-  <section class="home-paths" aria-label="Documentation paths">
+  <section class="home-paths rv" aria-label="Documentation paths">
     <div class="path-chain">
       <a class="path-ring path-ring-lead" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
         <span>{{ "home.path_start_kicker" | t }}</span>
@@ -62,7 +69,7 @@
     </div>
   </section>
 
-  <section class="home-structure" aria-labelledby="structure-title">
+  <section class="home-structure rv" aria-labelledby="structure-title">
     <figure class="structure-art">
       <img src="{{ base_url }}/images/tui/space-menu.svg" alt="{{ "home.structure_alt" | t }}">
     </figure>
@@ -86,10 +93,10 @@
     </div>
   </section>
 
-  <section class="home-flow" aria-labelledby="flow-title">
+  <section class="home-flow rv" aria-labelledby="flow-title">
     <h2 id="flow-title">{{ "home.flow_title" | t }}</h2>
     <div class="flow-list">
-      <div>
+      <div class="rv">
         <div class="flow-copy">
           <span>{{ "home.flow_1_label" | t }}</span>
           <p>{{ "home.flow_1_desc" | t }}</p>
@@ -98,7 +105,7 @@
           <img src="{{ base_url }}/images/tui/response-detail.svg" alt="{{ "home.flow_1_alt" | t }}">
         </figure>
       </div>
-      <div>
+      <div class="rv">
         <div class="flow-copy">
           <span>{{ "home.flow_2_label" | t }}</span>
           <p>{{ "home.flow_2_desc" | t }}</p>
@@ -107,7 +114,7 @@
           <img src="{{ base_url }}/images/tui/fuzzer.svg" alt="{{ "home.flow_2_alt" | t }}">
         </figure>
       </div>
-      <div>
+      <div class="rv">
         <div class="flow-copy">
           <span>{{ "home.flow_3_label" | t }}</span>
           <p>{{ "home.flow_3_desc" | t }}</p>
@@ -119,7 +126,7 @@
     </div>
   </section>
 
-  <section class="home-agent" aria-labelledby="agent-title">
+  <section class="home-agent rv" aria-labelledby="agent-title">
     <h2 id="agent-title">{{ "home.agent_title" | t }}</h2>
     <p class="agent-intro">{{ "home.agent_intro" | t }}</p>
     <figure class="agent-seam" aria-label="{{ "home.agent_seam_aria" | t }}">
@@ -130,7 +137,7 @@
       </div>
       <div class="seam-link" aria-hidden="true">
         <span class="seam-link-label">{{ "home.agent_seam_link" | t }}</span>
-        <span class="seam-wire"></span>
+        <span class="seam-wire"><i class="seam-pulse" aria-hidden="true"></i></span>
         <span class="seam-mcp">{{ "home.agent_seam_mcp" | t }}</span>
       </div>
       <div class="seam-node">
@@ -142,7 +149,7 @@
     <a class="agent-link" href="{{ base_url }}{{ lang_prefix }}/guide/mcp/">{{ "home.agent_link" | t }}</a>
   </section>
 
-  <section class="home-meaning" aria-labelledby="meaning-title">
+  <section class="home-meaning rv" aria-labelledby="meaning-title">
     <div class="meaning-entry">
       <h2 class="meaning-word" id="meaning-title" lang="ko">{{ "home.meaning_word" | t }}</h2>
       <p class="meaning-pron">{{ "home.meaning_pron" | t }}</p>
@@ -156,6 +163,7 @@
     </div>
   </section>
 </main>
+<script src="{{ base_url }}/js/home.js" defer></script>
 {% else %}
 <div class="docs-container">
 {% include "partials/sidebar.html" %}
