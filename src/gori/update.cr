@@ -423,7 +423,11 @@ module Gori
     end
 
     def self.parse_release(json_body : String) : Release
-      data = JSON.parse(json_body)
+      data = begin
+        JSON.parse(json_body)
+      rescue ex : JSON::ParseException
+        raise Error.new("could not parse release information (server did not return valid JSON): #{ex.message}")
+      end
       tag = data["tag_name"]?.try(&.as_s?)
       raise Error.new("release JSON missing tag_name") unless tag
 
@@ -685,6 +689,17 @@ module Gori
             progress_io: progress_io,
             on_progress: on_progress,
             force_progress: force_progress)
+          # Verify against the ACTUAL HTTP Content-Length header, not just whatever
+          # size the (unauthenticated) release JSON claims. A truncated/interrupted
+          # transfer must never be silently accepted just because the JSON's `size`
+          # field is 0 or wrong — this is the one completeness signal the server
+          # can't lie about without also lying to every other HTTP client.
+          if cl > 0 && result != cl
+            File.delete?(dest)
+            raise Error.new(
+              "download truncated for #{url}: expected #{cl} bytes (Content-Length) but received #{result}"
+            )
+          end
         end
         if next_url = redirect_url
           return download_to(next_url, dest, redirects_left - 1,

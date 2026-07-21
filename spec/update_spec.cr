@@ -533,6 +533,68 @@ describe Gori::Update do
         rel.assets.size.should be > 0
       end
     end
+
+    it "rejects a truncated download even when the release JSON reports size: 0 (Bug A)" do
+      # Mirrors the confirmed exploit: the release JSON's `size` field is
+      # unauthenticated and wrong (0), but the real HTTP Content-Length header
+      # promises the full asset — and the server only ever delivers half of it
+      # before hanging up (simulating a killed-mid-transfer process). The fix
+      # must catch this from the real Content-Length, not the JSON size.
+      payload = "x" * 40_000
+      with_mock_release_server(tag: "v99.0.0", body: payload, reported_size: 0_i64, truncate_at: 20_000) do |server|
+        name = server.asset_names.find { |n| n.includes?("linux-x86_64") }.not_nil!
+        dest = File.tempname("gori-dl-")
+        begin
+          expect_raises(Gori::Error, /truncated/) do
+            Gori::Update.download_to(server.download_url(name), dest, expected_size: 0_i64)
+          end
+        ensure
+          File.delete?(dest)
+        end
+      end
+    end
+
+    it "update_binary refuses to install a truncated download and leaves the target untouched (Bug A)" do
+      payload = "y" * 40_000
+      root = File.tempname("gori-trunc-")
+      Dir.mkdir_p(root)
+      begin
+        want = Gori::Update.asset_name("99.0.0", Gori::Update.current_os, Gori::Update.current_arch)
+        with_mock_release_server(tag: "v99.0.0", body: payload, asset_names: [want],
+          reported_size: 0_i64, truncate_at: 20_000) do |srv|
+          target_dir = File.join(root, "opt", "gori")
+          Dir.mkdir_p(target_dir)
+          target = File.join(target_dir, "gori")
+          original = "#!/bin/sh\necho old\n"
+          File.write(target, original)
+          File.chmod(target, 0o755)
+
+          io = IO::Memory.new
+          expect_raises(Gori::Error, /truncated/) do
+            Gori::Update.update_binary(target, io, release_json: srv.release_json)
+          end
+
+          File.read(target).should eq(original)
+        end
+      ensure
+        FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+  end
+
+  describe ".parse_release non-JSON handling (Bug B)" do
+    it "raises a clean Gori::Error instead of an unhandled JSON::ParseException" do
+      expect_raises(Gori::Error, /could not parse release information/) do
+        Gori::Update.parse_release("<html><body>captive portal</body></html>")
+      end
+    end
+
+    it "update_binary surfaces the same clean error for a non-JSON release response" do
+      io = IO::Memory.new
+      expect_raises(Gori::Error, /could not parse release information/) do
+        Gori::Update.update_binary("/tmp/does-not-matter", io, release_json: "not json at all")
+      end
+    end
   end
 
   describe ".install_from_download (plain binary)" do
