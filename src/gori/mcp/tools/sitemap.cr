@@ -11,7 +11,7 @@ module Gori
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
         return collapsed_sitemap(filter, limit) if bool(h, "collapse_transport") || false
-        entries = @store.sitemap_entries_detailed(filter, limit)
+        entries = store.sitemap_entries_detailed(filter, limit)
         Result.new(JSON.build do |j|
           j.array do
             entries.each do |e|
@@ -39,7 +39,7 @@ module Gori
       # The legacy collapsed sitemap (distinct host/method/target only), for
       # collapse_transport:true.
       private def collapsed_sitemap(filter : QL::Filter, limit : Int32) : Result
-        entries = @store.sitemap_entries(filter, limit)
+        entries = store.sitemap_entries(filter, limit)
         Result.new(JSON.build do |j|
           j.array do
             entries.each do |(host, method, target)|

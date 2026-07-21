@@ -176,7 +176,7 @@ module Gori
           return {Env.expand_wire(t), nil, false} unless t.strip.empty?
         end
         if id = int(h, "flow_id")
-          detail = @store.get_flow(id)
+          detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
           return {Env.expand_wire(String.new(built.bytes)), Env.expand(built.target), built.http2}

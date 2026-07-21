@@ -11,7 +11,7 @@ module Gori
       # Parse the bridge blob the capturing TUI publishes (nil when no capturing instance is
       # live / has ever published). See Runner#publish_intercept_bridge.
       private def intercept_bridge_state : Hash(String, JSON::Any)?
-        raw = @store.intercept_bridge
+        raw = store.intercept_bridge
         return nil unless raw
         JSON.parse(raw).as_h?
       rescue
@@ -32,10 +32,10 @@ module Gori
         token = bridge["session_token"]?.try(&.as_s?) || ""
         hb = bridge["heartbeat_ms"]?.try(&.as_i64?) || 0_i64
         now_ms = Time.utc.to_unix_ms
-        items = token.empty? ? [] of Store::HeldRow : @store.intercept_held(token)
+        items = token.empty? ? [] of Store::HeldRow : store.intercept_held(token)
         # Stamp viewed_ms so the capturing instance's auto-forward reaper sees the agent is
         # watching (only meaningful when we can actually act; skip in read-only mode).
-        @store.touch_intercept_held(token, items.map(&.item_id), now_ms) if @allow_actions && !items.empty?
+        store.touch_intercept_held(token, items.map(&.item_id), now_ms) if @allow_actions && !items.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field "available", true
@@ -61,9 +61,9 @@ module Gori
         bridge = intercept_bridge_state
         return not_found("no capturing gori instance is publishing intercept state") unless bridge
         token = bridge["session_token"]?.try(&.as_s?) || ""
-        row = token.empty? ? nil : @store.intercept_held(token).find { |r| r.item_id == item_id }
+        row = token.empty? ? nil : store.intercept_held(token).find { |r| r.item_id == item_id }
         return not_found("held item #{item_id} is not currently held (already forwarded/dropped, or never held)") unless row
-        @store.touch_intercept_held(token, [row.item_id], Time.utc.to_unix_ms) if @allow_actions
+        store.touch_intercept_held(token, [row.item_id], Time.utc.to_unix_ms) if @allow_actions
         Result.new(JSON.build { |j| Serialize.intercept_item_detail(j, row, include_sensitive, Time.utc.to_unix_ms) })
       end
 
@@ -138,14 +138,14 @@ module Gori
           return busy("no live capturing gori instance is draining intercept commands (open the project's TUI with intercept on)")
         end
         token = bridge["session_token"]?.try(&.as_s?)
-        id = @store.enqueue_intercept_command(token, verb, item_id: item_id, bytes: bytes, arg: arg)
+        id = store.enqueue_intercept_command(token, verb, item_id: item_id, bytes: bytes, arg: arg)
         return busy("could not enqueue intercept command (store write dropped); retry") if id == 0
         await_intercept_ack(id)
       end
 
       private def await_intercept_ack(id : Int64) : Result
         INTERCEPT_ACK_POLLS.times do
-          if st = @store.command_status(id)
+          if st = store.command_status(id)
             return intercept_ack_result(st[0], st[1]) unless st[0] == "pending"
           end
           sleep INTERCEPT_ACK_SLEEP

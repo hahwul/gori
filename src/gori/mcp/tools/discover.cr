@@ -66,7 +66,7 @@ module Gori
           extensions: extensions, containment: containment,
           headers: Discover::Headers.parse_lines(header_lines))
         words = Discover::Wordlist.load(str(h, "wordlist").presence)
-        scope = Scope.load(@store)
+        scope = Scope.load(store)
         policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
         sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h),
           headers: config.headers)
@@ -110,7 +110,7 @@ module Gori
           djob.truncated = true
         end
         pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size)
-        @store.insert_import_batch([{pair.request, pair.response}])
+        store.insert_import_batch([{pair.request, pair.response}])
       rescue
       end
 

@@ -84,7 +84,7 @@ module Gori
         return err(id_error(h, "issue_id"), "INVALID_ARGUMENT", field: "issue_id") if issue_id.nil? && present?(h, "issue_id")
         if issue_id
           return err("issue_id requires save_as_repeater=true", "INVALID_ARGUMENT", field: "issue_id") unless save
-          return not_found("no issue with id #{issue_id}") unless @store.get_issue(issue_id)
+          return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         end
         issue_id
       end
@@ -135,26 +135,26 @@ module Gori
         flow_id = int(h, "flow_id") || recorded_flow_id
         masked_target = Env.mask_secrets(target_url)
         masked_req = Env.mask_secrets(String.new(built.bytes))
-        repeater_id = @store.insert_repeater(
+        repeater_id = store.insert_repeater(
           target: masked_target,
           request: masked_req,
           http2: http2,
           auto_cl: true,
           flow_id: flow_id,
-          position: @store.repeaters_meta.size.to_i32,
+          position: store.repeaters_meta.size.to_i32,
           sni: nil
         )
         return nil unless repeater_id > 0
 
-        @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
+        store.add_link(Store::LinkOwnerKind::Issue, issue_id,
           Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
-          @store.set_repeater_name(repeater_id, Env.mask_secrets(name))
+          store.set_repeater_name(repeater_id, Env.mask_secrets(name))
         end
 
         # Persist whatever was received even when framing failed after the
         # response head. This keeps partial evidence and enables paged reads.
-        @store.update_repeater_response(repeater_id, result.head, result.body,
+        store.update_repeater_response(repeater_id, result.head, result.body,
           result.error, result.duration_us)
         if result.response
           probe_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
@@ -178,7 +178,7 @@ module Gori
           body: body,
           body_size: body.try(&.size.to_i64),
         )
-        id = @store.insert_flow(captured)
+        id = store.insert_flow(captured)
         if id <= 0
           raise Gori::Error.new("could not record outbound request in History; pass record_history=false only if an unaudited send is intentional")
         end
@@ -190,7 +190,7 @@ module Gori
           error = result.error
           error ||= "upstream response body was incomplete" if result.incomplete?
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
-          @store.update_response(FlowMapper.response(response,
+          store.update_response(FlowMapper.response(response,
             flow_id: flow_id,
             body: result.body,
             duration_us: result.duration_us,
@@ -198,7 +198,7 @@ module Gori
             error: error,
             body_size: result.body.try(&.size.to_i64)))
         else
-          @store.update_response(FlowMapper.error_response(flow_id,
+          store.update_response(FlowMapper.error_response(flow_id,
             result.error || "request failed before a response was received", result.duration_us))
         end
       rescue ex
@@ -268,7 +268,7 @@ module Gori
       private def send_websocket(h) : Result
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
-        repeater = @store.get_repeater(repeater_id)
+        repeater = store.get_repeater(repeater_id)
         return not_found("no repeater with id #{repeater_id}") unless repeater
         unless Repeater::WsEngine.upgrade_request?(repeater.request)
           return Result.new("repeater #{repeater_id} is not a WebSocket upgrade request", is_error: true)
@@ -278,7 +278,7 @@ module Gori
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
         # Validate the issue now, but DON'T create the link yet — it must not persist
         # if the scope gate below refuses the send. The link is created after the gate.
-        return not_found("no issue with id #{issue_id}") if issue_id && !@store.get_issue(issue_id)
+        return not_found("no issue with id #{issue_id}") if issue_id && !store.get_issue(issue_id)
 
         idle_ms = int(h, "idle_ms")
         return Result.new(id_error(h, "idle_ms"), is_error: true) if idle_ms.nil? && present?(h, "idle_ms")
@@ -295,7 +295,7 @@ module Gori
                          end
                          parsed
                        else
-                         @store.ws_messages_for_repeater(repeater_id).compact_map do |m|
+                         store.ws_messages_for_repeater(repeater_id).compact_map do |m|
                            next unless m.direction == "out"
                            payload = m.text? ? Env.expand(String.new(m.payload).scrub).to_slice : m.payload
                            Repeater::WsEngine::OutMsg.new(m.opcode, payload)
@@ -310,7 +310,7 @@ module Gori
         return scope_blocked(sc) if sc.blocked
         # Scope passed — now it's safe to persist the issue link.
         if issue_id
-          @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
+          store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
         verify = @verify_upstream && !(bool(h, "insecure") || false)
@@ -319,7 +319,7 @@ module Gori
         result = Repeater::WsEngine.send(request, out_messages,
           scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle)
 
-        @store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
+        store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
           result.error, result.duration_us)
         Log.info { "send_websocket #{scheme}://#{host}:#{port} repeater_id=#{repeater_id} -> #{result.ok? ? "ok" : result.error}" }
 
@@ -379,7 +379,7 @@ module Gori
         if present?(h, "repeater_id")
           id = int(h, "repeater_id")
           raise Gori::Error.new(id_error(h, "repeater_id")) unless id
-          rec = @store.get_repeater(id)
+          rec = store.get_repeater(id)
           raise Gori::Error.new("no repeater with id #{id}") unless rec
           if Repeater::WsEngine.upgrade_request?(rec.request)
             raise Gori::Error.new("repeater #{id} is a WebSocket upgrade — use send_websocket")
@@ -398,7 +398,7 @@ module Gori
         if present?(h, "flow_id")
           id = int(h, "flow_id")
           raise Gori::Error.new(id_error(h, "flow_id")) unless id
-          detail = @store.get_flow(id)
+          detail = store.get_flow(id)
           raise Gori::Error.new("no flow with id #{id}") unless detail
           flow = Repeater::FlowRequest.build(detail)
           # Re-sync Content-Length after expansion (a body `$KEY` changes its length).
@@ -429,7 +429,7 @@ module Gori
       #     guardrail at all), so an active request needs an explicit opt-in.
       # in_scope requests always proceed and carry the matched rule id.
       private def scope_check(url : String, host : String, allow_unscoped : Bool) : ScopeCheck
-        scope = Scope.load(@store)
+        scope = Scope.load(store)
         return ScopeCheck.new("unscoped", host, nil, !allow_unscoped) unless scope.configured?
         if scope.matches_url?(url, host)
           rid = scope.rules.find { |r| r.include? && r.matches?(url, host) }.try(&.id)
@@ -460,14 +460,14 @@ module Gori
       private def probe_scan_saved_repeater(repeater_id : Int64, target : String, request : String,
                                             http2 : Bool, flow_id : Int64?, head : Bytes, body : Bytes?,
                                             duration_us : Int64) : Nil
-        return unless @store.probe_mode.scanning?
+        return unless store.probe_mode.scanning?
         return if head.empty?
         rec = Store::RepeaterRecord.new(
           repeater_id, target, request, http2, true, flow_id, 0,
           head, body, nil, duration_us, nil, nil)
         return unless detail = Probe.detail_from_repeater(rec)
         Probe::Passive.analyze(detail).each do |d|
-          @store.upsert_probe_issue(Probe.with_source(d, flow_id: flow_id, repeater_id: repeater_id))
+          store.upsert_probe_issue(Probe.with_source(d, flow_id: flow_id, repeater_id: repeater_id))
         end
       rescue
         # Probe must never break send_request

@@ -139,11 +139,15 @@ module Gori
       # the JSON-RPC channel, so truncate the display string and flag it.
       DECODER_MAX_OUTPUT = 256 * 1024
 
-      def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
+      # Tools may start *unbound* (`store` nil): project lifecycle + pure-compute tools
+      # work immediately; traffic/action tools return NO_PROJECT until switch/create binds a DB.
+      def initialize(@store : Store?, @allow_actions : Bool, @verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil)
-        Env.load_project(@store)
+        if s = @store
+          Env.load_project(s)
+        end
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
         @sequence_jobs = {} of String => SequenceJob
@@ -153,10 +157,36 @@ module Gori
         # switch_project reopens @store; @owns_store tracks whether WE opened the
         # current one (and must close it on the next switch). The initial store is
         # owned by the caller (the `gori mcp` command), so it starts false.
+        # When started unbound, every store Tools opens is owned by Tools.
         @owns_store = false
         # Short-lived confirmation tokens issued by delete_project(dry_run) →
         # {db_path, issued_at_ms}. A real delete must present a matching, unexpired one.
         @delete_tokens = {} of String => {String, Int64}
+      end
+
+      # Bound-only helpers call this after the unbound gate; raises only on internal misuse.
+      private def store : Store
+        s = @store
+        raise "internal: tool invoked without a bound project" unless s
+        s
+      end
+
+      private def unbound? : Bool
+        @store.nil?
+      end
+
+      # Tools that work with no project store open.
+      UNBOUND_SAFE = Set{
+        "list_projects", "create_project", "switch_project", "delete_project",
+        "project_info",
+        "decode", "jwt_decode", "jwt_encode", "jwt_attacks",
+        "sequence_analyze", "ql_reference", "ql_explain",
+        "oast_presets", "oast_start", "oast_poll", "oast_payload", "oast_stop",
+      }
+
+      private def no_project : Result
+        err("no project bound; call list_projects, create_project, or switch_project first",
+          "NO_PROJECT")
       end
 
       # Ceiling (seconds) a delete_project dry-run confirmation token stays valid.
@@ -424,8 +454,9 @@ module Gori
 
           tool j, "project_info",
             "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
-            "plus which project/db is being served and how it was selected. Always verify this " \
-            "before reading or mutating security-test data." { }
+            "plus which project/db is being served and how it was selected. When unbound " \
+            "(bound:false), call list_projects / create_project / switch_project first. " \
+            "Always verify this before reading or mutating security-test data." { }
 
           tool j, "get_current_context",
             "What the user is currently viewing in the gori TUI: active tab, focused pane, the " \
@@ -510,7 +541,29 @@ module Gori
           tool j, "list_projects",
             "List gori projects on this host (name, slug, db_path, db_size, last_modified, " \
             "workspace binding) and which one this server is currently serving (current:true). " \
-            "Use switch_project to change the active project." { }
+            "Use switch_project to change the active project. When the server started unbound " \
+            "(no project), call list_projects then create_project or switch_project before " \
+            "traffic tools." { }
+
+          # Project selection is always listed so install-and-use works (and under --read-only
+          # an agent can still pick a project to inspect). create_project is callable when
+          # unbound even under --read-only; once bound it requires allow_actions.
+          if @allow_actions || unbound?
+            tool j, "create_project",
+              "Create a new gori project (or reopen an existing one with the same name). " \
+              "When the server is unbound, create auto-binds to the new project; when already " \
+              "bound, call switch_project to make it active." do |s|
+              s.field "name", strprop("project display name (slugified for its directory)"), required: true
+              s.field "description", strprop("optional description stored in the project settings")
+            end
+          end
+
+          tool j, "switch_project",
+            "Point this server at a different project for all subsequent tools. Always available " \
+            "(including --read-only and when the server started unbound). Refused while a " \
+            "fuzz/mine job is running. Verify with project_info afterwards." do |s|
+            s.field "project", strprop("target project display name or directory slug"), required: true
+          end
 
           tool j, "oast_presets",
             "List built-in public OAST providers (interactsh servers, BOAST, webhook.site, postbin)." { }
@@ -638,19 +691,6 @@ module Gori
 
             tool j, "delete_rule", "Delete a Match & Replace rule by id." do |s|
               s.field "id", intprop("rule id from list_rules"), required: true
-            end
-
-            tool j, "create_project",
-              "Create a new gori project (or reopen an existing one with the same name). " \
-              "Does NOT switch to it — call switch_project to make it active." do |s|
-              s.field "name", strprop("project display name (slugified for its directory)"), required: true
-              s.field "description", strprop("optional description stored in the project settings")
-            end
-
-            tool j, "switch_project",
-              "Point this server at a different project for all subsequent tools. Refused " \
-              "while a fuzz/mine job is running. Verify with project_info afterwards." do |s|
-              s.field "project", strprop("target project display name or directory slug"), required: true
             end
 
             tool j, "delete_project",
@@ -964,6 +1004,9 @@ module Gori
       # an is_error Result so one bad call never tears down the server loop.
       def call(name : String, args : JSON::Any) : Result
         h = args.as_h? || EMPTY_HASH
+        if unbound? && !UNBOUND_SAFE.includes?(name)
+          return no_project
+        end
         result = read_tool(name, h) || action_tool(name, h) ||
                  err("unknown tool: #{name}", "UNKNOWN_TOOL")
         result = classify(result)
@@ -981,9 +1024,10 @@ module Gori
       # Best-effort: feed logging never breaks the tool call it describes.
       private def log_agent_action(name : String, result : Result) : Nil
         return if result.error_code == "TOOL_DISABLED"
+        return unless s = @store
         level = result.is_error ? "warn" : "info"
         outcome = result.is_error ? "failed (#{result.error_code || "error"})" : "ok"
-        @store.insert_event("agent", "agent_action", level, "#{name} #{outcome}", payload: name)
+        s.insert_event("agent", "agent_action", level, "#{name} #{outcome}", payload: name)
       rescue ex
         Log.warn(exception: ex) { "event feed: failed to log agent action #{name}" }
       end
@@ -1087,8 +1131,9 @@ module Gori
         end
       end
 
-      # Action + write tools, each gated behind allow_actions. nil when `name`
-      # isn't one of them.
+      # Action + write tools. Project selection (switch always; create when unbound
+      # or when actions allowed) is not fully blocked by --read-only so install-and-use
+      # works on a fresh machine. nil when `name` isn't one of them.
       private def action_tool(name : String, h) : Result?
         case name
         when "send_request"            then gated { send_request(h) }
@@ -1133,10 +1178,17 @@ module Gori
         when "preview_rule"            then gated { preview_rule(h) }
         when "set_rule_enabled"        then gated { set_rule_enabled(h) }
         when "delete_rule"             then gated { delete_rule(h) }
-        when "create_project"          then gated { create_project(h) }
-        when "switch_project"          then gated { switch_project(h) }
+        # switch is always available (selecting a DB is not a data mutation).
+        when "switch_project"          then switch_project(h)
+        # create when unbound even under --read-only; once bound, actions-gated.
+        when "create_project"          then create_project_entry(h)
         when "delete_project"          then gated { delete_project(h) }
         end
+      end
+
+      private def create_project_entry(h) : Result
+        return create_project(h) if unbound? || @allow_actions
+        err("tool disabled (gori mcp --read-only)", "TOOL_DISABLED")
       end
 
       # Resolve body_mode (none|preview|full) + max_body_bytes into an inlined-body

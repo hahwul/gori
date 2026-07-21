@@ -36,16 +36,26 @@ Wiring it up by hand instead? The server is just the `gori mcp` command over std
 
 **Checkpoint.** Your client lists gori's tools (`list_history`, `send_request`, `project_info`, and the rest). If they do not appear, confirm the client was restarted and that `gori` is on the `PATH` the client uses.
 
-## 2. Pin the right project
+## 2. Bind a project (or let the agent pick one)
 
-Each gori project is its own database, so the agent has to serve the right one. With no selector, gori path-binds the nearest Git workspace to its own project; started outside a Git workspace it fails closed rather than serving an unrelated project. If your client launches MCP servers from a fixed directory, pin the project when you install:
+Each gori project is its own database. After install, `gori mcp` always connects:
+
+| How the client starts MCP | What happens |
+|---------------------------|--------------|
+| Inside a Git repository | Path-binds that workspace to its own gori project |
+| Outside a Git repository (common for Desktop / global agents) | Starts **unbound** — handshake succeeds; the agent calls `list_projects` / `create_project` / `switch_project` before traffic tools |
+| Installed with `--project` / `--db` | Serves that project from the first tool call |
+
+Have the agent call `project_info` first. When `bound` is false, it should list or create a project (create auto-binds when unbound), then switch if needed. When bound, confirm the name, database path, and selection source before mutating data.
+
+To pin a fixed engagement at install time:
 
 ```bash
 gori mcp --project my-engagement --install-codex     # a named project's database
 gori mcp --db /path/to/project.db --install-claude-code   # a specific database file
 ```
 
-Then have the agent call `project_info` first. It reports the selected project, the database path, the workspace root, and how the selection was made, so the agent confirms it is looking at the right data before touching anything. The full selection rules live in [Choosing a Project](/guide/mcp/#choosing-a-project).
+The full selection rules live in [Choosing a Project](/guide/mcp/#choosing-a-project).
 
 ## 3. Hand off safely with read-only
 

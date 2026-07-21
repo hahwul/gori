@@ -5,7 +5,7 @@ module Gori
   module MCP
     class Tools
       private def list_rules : Result
-        rules = @store.match_rules
+        rules = store.match_rules
         Result.new(JSON.build do |j|
           j.object do
             j.field "count", rules.size
@@ -63,7 +63,7 @@ module Gori
         # Atomic disabled creation: insert already-disabled so there is no window
         # where a just-created rule is live before a follow-up disable call.
         enabled = bool_arg(h, "enabled", true)
-        id = @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled)
+        id = store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled)
         return busy("failed to persist rule (store busy or unwritable)") if id == 0
         Result.new(JSON.build do |j|
           j.object do
@@ -82,7 +82,7 @@ module Gori
       private def update_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
-        existing = @store.match_rules.find { |r| r.id == id }
+        existing = store.match_rules.find { |r| r.id == id }
         return not_found("no rule with id #{id}") unless existing
         tp = rule_target_part(h, existing.target, existing.part)
         return tp if tp.is_a?(Result)
@@ -99,10 +99,10 @@ module Gori
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host
-        @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
+        store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
         if present?(h, "enabled")
           en = bool_arg(h, "enabled", existing.enabled?)
-          @store.set_rule_enabled(id, en)
+          store.set_rule_enabled(id, en)
         end
         Result.new(JSON.build do |j|
           j.object do
@@ -135,7 +135,7 @@ module Gori
         host = str(h, "host") || ""
         candidate = Store::MatchRule.new(0_i64, true, target, part, pattern, replacement, op, match_kind, "", host)
         # Reuse the engine's preview over a throwaway Rules bound only to the store.
-        pv = Gori::Rules.new(@store, [] of Store::MatchRule).preview(candidate)
+        pv = Gori::Rules.new(store, [] of Store::MatchRule).preview(candidate)
         Result.new(JSON.build do |j|
           j.object do
             j.field "target", target.label
@@ -204,7 +204,7 @@ module Gori
         enabled = bool(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
         return not_found("no rule with id #{id}") unless rule_exists?(id)
-        @store.set_rule_enabled(id, enabled)
+        store.set_rule_enabled(id, enabled)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
 
@@ -212,7 +212,7 @@ module Gori
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
         return not_found("no rule with id #{id}") unless rule_exists?(id)
-        @store.delete_rule(id)
+        store.delete_rule(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
 
@@ -220,7 +220,7 @@ module Gori
       # single-row rule fetch), but the rule set is tiny and enable/disable/delete
       # are low-frequency actions.
       private def rule_exists?(id : Int64) : Bool
-        @store.match_rules.any? { |r| r.id == id }
+        store.match_rules.any? { |r| r.id == id }
       end
     end
   end

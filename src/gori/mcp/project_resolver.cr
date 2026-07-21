@@ -5,19 +5,24 @@ module Gori
   module MCP
     # Resolves the database an MCP process serves. Explicit CLI/env selectors win;
     # otherwise a process started inside a Git workspace gets a path-bound gori
-    # project. Non-workspace launches fail closed unless the active-TUI fallback
-    # was explicitly requested.
+    # project. Non-workspace launches start *unbound* (no store) so the agent can
+    # list/create/switch projects over MCP — unless the active-TUI fallback was
+    # explicitly requested via --use-active-project.
     # This fail-safe prevents an agent in repository A from silently reading or
     # writing repository B's most-recently-used capture database.
     module ProjectResolver
       record Selection,
-        db_path : String,
+        db_path : String?,
         project_name : String?,
         project_slug : String?,
         source : String,
         workspace_root : String? = nil,
         auto_created : Bool = false,
-        project_id : String? = nil
+        project_id : String? = nil do
+        def bound? : Bool
+          !db_path.nil?
+        end
+      end
 
       class Error < Exception
       end
@@ -57,8 +62,9 @@ module Gori
 
         return active_fallback(registry) if allow_active_fallback
 
-        raise Error.new("cannot infer a project outside a Git workspace; pass --project/--db, " \
-                        "set GORI_MCP_PROJECT/GORI_MCP_DB, or explicitly opt into --use-active-project")
+        # Unbound: MCP handshake succeeds; traffic tools refuse until switch/create.
+        # Never silently adopt the active TUI / MRU project without an explicit opt-in.
+        Selection.new(nil, nil, nil, "unbound")
       end
 
       # Nearest Git worktree root. `.git` may be a directory or a worktree file.

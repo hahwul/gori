@@ -19,7 +19,7 @@ module Gori
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
-        rows = (query && !query.strip.empty?) ? @store.search(filter, limit, before_id, since_id) : @store.recent_flows(limit, before_id, since_id)
+        rows = (query && !query.strip.empty?) ? store.search(filter, limit, before_id, since_id) : store.recent_flows(limit, before_id, since_id)
         Result.new(JSON.build { |j| j.array { rows.each { |r| Serialize.flow_row(j, r) } } })
       end
 
@@ -32,7 +32,7 @@ module Gori
         limit = clamp(int(h, "limit"), 100, 500)
         source = str(h, "source")
         kind = str(h, "kind")
-        scanned = @store.events_after(since, limit)
+        scanned = store.events_after(since, limit)
         next_cursor = scanned.empty? ? since : scanned.last.id
         rows = scanned
         rows = rows.select { |r| r.source == source } if source && !source.empty?
@@ -48,11 +48,11 @@ module Gori
       private def get_flow(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        detail = @store.get_flow(id)
+        detail = store.get_flow(id)
         return not_found("no flow with id #{id}") unless detail
         # A WebSocket flow (101) carries a separate message log; fetch it so get_flow
         # surfaces the frames (parity with `gori run show`). Non-WS flows skip the query.
-        ws_msgs = detail.row.status == 101 ? @store.ws_messages(id) : [] of Store::WsMessage
+        ws_msgs = detail.row.status == 101 ? store.ws_messages(id) : [] of Store::WsMessage
         include_sensitive = bool(h, "include_sensitive") || false
         cap, omit = body_return_opts(h)
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit))
@@ -120,11 +120,11 @@ module Gori
 
       private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : {Bytes?, Bytes?} | Result
         if id = flow_id
-          detail = @store.get_flow(id)
+          detail = store.get_flow(id)
           return not_found("no flow with id #{id}") unless detail
           {detail.response_head, detail.response_body}
         elsif id = repeater_id
-          repeater = @store.get_repeater_full(id)
+          repeater = store.get_repeater_full(id)
           return not_found("no repeater with id #{id}") unless repeater
           {repeater.response_head, repeater.response_body}
         else

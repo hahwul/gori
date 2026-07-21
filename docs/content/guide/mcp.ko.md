@@ -38,11 +38,14 @@ cd /path/to/my-repository && gori mcp # path-binds this Git workspace to its own
 gori mcp --project my-engagement   # serve a named project's database
 gori mcp --db /path/to/project.db  # serve a specific database file
 gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
+gori mcp --no-project              # force unbound even inside a Git workspace
 ```
 
-명시적 선택자가 없으면, gori는 가장 가까운 Git 루트를 찾아 그 정규 경로를 격리된 프로젝트에 바인딩합니다. 이 바인딩은 디렉터리 이름이 같은 두 리포지토리가 하나의 데이터베이스를 공유하는 것을 막습니다. 프로세스가 Git 워크스페이스 밖에 있으면, gori는 무관한 활성 프로젝트를 슬그머니 제공하지 않고 오류를 내며 멈춥니다. `--project`, `--db`, `GORI_MCP_PROJECT`, `GORI_MCP_DB`, 또는 명시적 옵트인인 `--use-active-project`를 전달하세요.
+명시적 선택자가 없으면, gori는 가장 가까운 Git 루트를 찾아 그 정규 경로를 격리된 프로젝트에 바인딩합니다. 이 바인딩은 디렉터리 이름이 같은 두 리포지토리가 하나의 데이터베이스를 공유하는 것을 막습니다.
 
-데이터를 사용하기 전에 `project_info`를 호출하세요. 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처를 보고합니다.
+**Git 워크스페이스 밖**에서 뜨면(AI 클라이언트가 홈·앱 디렉터리에서 MCP를 띄우는 흔한 경우) 서버는 **unbound**로 시작합니다. MCP 핸드셰이크와 도구 목록은 바로 성공하지만, 트래픽 도구(`list_history`, `send_request` 등)는 에이전트가 `list_projects`, `create_project`(unbound일 때 자동 바인딩), 또는 `switch_project`를 호출하기 전까지 `NO_PROJECT`를 반환합니다. unbound는 활성 TUI/MRU 프로젝트를 슬그머니 열지 않습니다 — 그건 명시적 `--use-active-project` 옵트인(또는 `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`)이 필요합니다.
+
+데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처를 보고합니다.
 
 ## 읽기 전용 모드 {#read-only-mode}
 
@@ -72,7 +75,7 @@ gori mcp --install-grok
 
 Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML을 사용합니다. 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
 
-클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작한다면, 설치를 프로젝트에 고정하세요. 예: `gori mcp --project my-engagement --install-codex`.
+클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 고정 engagement를 박아 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
 ## 도구 {#tools}
 

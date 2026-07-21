@@ -423,17 +423,20 @@ module Gori
       insecure_upstream = false
       read_only = false
       use_active_project = false
+      no_project = false
       install_target = nil.as(String?)
 
       parser = OptionParser.new do |p|
         p.banner = "Usage: gori mcp [options]\n\n" \
                    "Start an MCP (Model Context Protocol) server over stdio. An AI client\n" \
                    "spawns this and talks JSON-RPC on stdin/stdout. With no --db/--project,\n" \
-                   "a Git workspace is path-bound to its own project. Outside a workspace,\n" \
-                   "choose --project/--db or explicitly pass --use-active-project."
+                   "a Git workspace is path-bound to its own project. Outside a workspace\n" \
+                   "the server starts unbound so the agent can list/create/switch projects.\n" \
+                   "Pass --use-active-project to serve the active TUI/MRU project instead."
         p.on("--db=PATH", "Serve this SQLite db (overrides --project)") { |v| db_path = v }
         p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
         p.on("--use-active-project", "Ignore the current Git workspace and serve the active TUI/MRU project") { use_active_project = true }
+        p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
         p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
         p.on("--read-only", "Disable action tools (send_request, create/update_issue)") { read_only = true }
         p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_target = "agy" }
@@ -450,6 +453,9 @@ module Gori
       if use_active_project && (db_path.try(&.presence) || project.try(&.presence))
         abort "gori mcp: --use-active-project cannot be combined with --db/--project"
       end
+      if no_project && (db_path.try(&.presence) || project.try(&.presence) || use_active_project)
+        abort "gori mcp: --no-project cannot be combined with --db/--project/--use-active-project"
+      end
 
       if target = install_target
         install_mcp_config(target, db_path, project, read_only, insecure_upstream, use_active_project)
@@ -460,12 +466,27 @@ module Gori
       Log.setup(:info, Log::IOBackend.new(STDERR))
       Settings.load # send_request's repeater engines read the upstream-proxy setting from here
 
-      selection = resolve_mcp_project(db_path, project, workspace_project: !use_active_project,
-        allow_active_fallback: use_active_project)
-      resolved = selection.db_path
+      selection = if no_project
+                    MCP::ProjectResolver::Selection.new(nil, nil, nil, "unbound")
+                  else
+                    resolve_mcp_project(db_path, project,
+                      workspace_project: !use_active_project,
+                      allow_active_fallback: use_active_project)
+                  end
       project_name = selection.project_name
       project_slug = selection.project_slug
       project_id = selection.project_id
+
+      unless selection.bound?
+        Log.info { "mcp: unbound (no project); use list_projects / create_project / switch_project (actions=#{!read_only})" }
+        server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
+          project_name: nil, project_slug: nil, db_path: nil,
+          selection_source: selection.source, workspace_root: nil, project_id: nil)
+        server.run
+        return
+      end
+
+      resolved = selection.db_path.not_nil!
       Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} source=#{selection.source} (actions=#{!read_only})" }
       if selection.auto_created
         Log.warn { "mcp: created an isolated project for workspace #{selection.workspace_root}; use --project/--db to override" }
