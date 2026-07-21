@@ -1,5 +1,5 @@
 +++
-title = "gori"
+title = "Gori - Hack from the terminal"
 description = "고리 안에 머무르세요. 터미널을 위한 빠르고 키보드 중심의 HTTP 인터셉트 프록시이자 웹 해킹 툴킷."
 +++
 
