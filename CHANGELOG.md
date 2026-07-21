@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.1.2
 
-- MCP: start **unbound** outside a Git workspace instead of aborting before the handshake, so `gori mcp --install-*` always connects; agents bind via `list_projects` / `create_project` (auto-binds when unbound) / `switch_project`. Traffic tools return `NO_PROJECT` until bound. Add `--no-project` to force unbound inside a workspace. Unbound never silently opens the active TUI/MRU project (still requires `--use-active-project`).
+- MCP: start **unbound** outside a Git workspace so `gori mcp --install-*` always connects; agents bind via `list_projects` / `create_project` / `switch_project`. Traffic tools return `NO_PROJECT` until bound, and `--no-project` forces unbound inside a workspace (#295)
+- TUI: show a startup update-available notice on the project picker (#293)
+- TUI: make the NOR/INS editor mode badge more discoverable with click-to-toggle (#294)
+- TUI: fix clickable OAST callbacks, pane navigation, and Rewriter preview (#296)
+- Tests: expand spec coverage across pure and harness-testable modules (#297)
 
 ## v0.1.1
 
