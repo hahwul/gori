@@ -48,7 +48,7 @@ module Gori
           p.on("--interval=SEC", "Poll interval seconds (default 5)") { |v| interval = parse_count(v, "--interval") }
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--json", "Emit each callback as a JSON line (same shape as MCP)") { json = true }
-          p.on("-h", "--help") { puts p; exit 0 }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         end
         parser.parse(args)
 
