@@ -536,6 +536,12 @@ kbd {
   transition: transform var(--transition), border-color var(--transition), background var(--transition), color var(--transition);
 }
 
+/* Hover lifts, press pushes. :not(:active) keeps the shared :active rule
+   (earlier in the file, same specificity) in charge while the button is down. */
+.button:hover:not(:active) {
+  transform: translateY(-1px);
+}
+
 /* Flat gold, no leaf gradient: the brushed metal look stays on the artwork
    and the mark, while the CTA reads as a plain, confident surface. */
 .button-primary {
@@ -713,6 +719,41 @@ kbd {
   pointer-events: none;
 }
 
+/* Two request nodes riding the orbits, one per circle, opposite directions:
+   traffic circling the loop. The spin lives in the motion block below; with
+   motion off they park at the base rotations here, two nodes at rest. */
+.hero-orbit {
+  position: absolute;
+  inset: -1.7rem;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: rotate(230deg);
+}
+
+.hero-orbit-out {
+  inset: -3.3rem;
+  transform: rotate(115deg);
+}
+
+.hero-orbit::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.9), 0 0 0 3px rgb(var(--accent-rgb) / 0.16);
+}
+
+.hero-orbit-out::before {
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+}
+
 .hero-disc {
   position: absolute;
   inset: 0;
@@ -748,6 +789,8 @@ kbd {
   flex-direction: column;
   align-items: center;
   padding: 0 0 3.5rem;
+  /* Depth for the frame's reveal tilt (motion block); inert when static. */
+  perspective: 1100px;
 }
 
 .showcase-frame {
@@ -827,6 +870,27 @@ kbd {
 
 .path-ring:focus-visible {
   outline-offset: 8px;
+}
+
+/* On hover a signal runs just inside the ring: an arc cut from a conic wash
+   with a thin radial mask, spun in the motion block. Inset past --cut so it
+   clears the opaque weave bands the ::after halves draw over the border. */
+.path-ring::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: conic-gradient(transparent 0 70%, rgb(var(--accent-rgb) / 0.9) 88%, transparent 97%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+}
+
+.path-ring:hover::before,
+.path-ring:focus-visible::before {
+  opacity: 1;
 }
 
 .path-ring:hover,
@@ -1080,6 +1144,14 @@ kbd {
   height: 100%;
   object-fit: cover;
   object-position: top;
+  transform-origin: top center;
+  transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The whole row is the hover surface, so reading the copy also leans the
+   capture in. Origin stays at the top: the crop keeps its upper edge. */
+.flow-list > div:hover .flow-shot img {
+  transform: scale(1.02);
 }
 
 /* --- Hand it to an agent (the MCP seam) ------------------------------- */
@@ -1181,6 +1253,29 @@ kbd {
   border-radius: 2px;
 }
 
+/* A light runs the wire, out and back: the call going over, the answer
+   coming home. The <i> clips the streak to the wire's box (the wire's own
+   pseudo-elements are spent on the arrowheads, and overflow must stay
+   visible for them). Kept at opacity 0 until the motion block animates it,
+   so a static page shows a clean wire. */
+.seam-pulse {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.seam-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  right: auto;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, var(--accent-strong), transparent);
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
 /* Arrowheads at both ends: the agent calls, gori answers. */
 .seam-wire::before,
 .seam-wire::after {
@@ -1258,6 +1353,17 @@ kbd {
     bottom: -1px;
     border-left: 0;
     border-top: 7px solid var(--accent);
+  }
+
+  /* The wire stands on end here, so the streak becomes a band that travels
+     vertically; the motion block swaps its keyframes to match. */
+  .seam-pulse::before {
+    inset: 0;
+    bottom: auto;
+    width: auto;
+    height: 34%;
+    background: linear-gradient(180deg, transparent, var(--accent-strong), transparent);
+    transform: translateY(-100%);
   }
 }
 
@@ -2494,45 +2600,281 @@ html.search-lock body {
   font-size: 0.68rem;
 }
 
+/* --- Motion ------------------------------------------------------------ */
+/* Everything that moves sits behind two gates: this reduced-motion query,
+   and html.js around the scroll reveals. A no-script visit, or motion off,
+   renders the page static and complete. home.js flips .in on each .rv as it
+   scrolls up; only the hero animates on load, because it is the only part
+   guaranteed to be on screen while a load animation runs. */
 @media (prefers-reduced-motion: no-preference) {
-  .reveal,
-  .path-chain,
-  .structure-art,
-  .structure-copy,
-  .flow-list > div {
-    animation: rise-in 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* Load: the hero copy steps in top to bottom, the disc follows, and the
+     orbit traffic fades in with it. */
+  .hero-copy > * {
+    animation: hero-rise 620ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
-  /* The chain rises as one piece: staggering the rings would pull the weave
-     apart mid-animation. */
-  .path-chain,
-  .structure-copy {
-    animation-delay: 90ms;
+  .hero-copy > :nth-child(2) {
+    animation-delay: 80ms;
   }
 
-  .hero-art {
-    animation-delay: 120ms;
-  }
-
-  .flow-list > div:nth-child(2) {
+  .hero-copy > :nth-child(3) {
     animation-delay: 160ms;
   }
 
-  .flow-list > div:nth-child(3) {
-    animation-delay: 230ms;
+  .hero-copy > :nth-child(4) {
+    animation-delay: 240ms;
+  }
+
+  .hero-copy > :nth-child(5) {
+    animation-delay: 320ms;
+  }
+
+  .hero-art {
+    animation: hero-rise 760ms cubic-bezier(0.16, 1, 0.3, 1) 160ms backwards;
   }
 
   .hero-disc img {
     animation: quiet-drift 16s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
     transform-origin: 74% 45%;
   }
+
+  /* The negative delay puts the outer node mid-lap from the first frame, so
+     the two never read as starting from the same spot. */
+  .hero-orbit {
+    animation: orbit-spin 34s linear infinite;
+  }
+
+  .hero-orbit-out {
+    animation-duration: 56s;
+    animation-direction: reverse;
+    animation-delay: -21s;
+  }
+
+  .path-ring:hover::before,
+  .path-ring:focus-visible::before {
+    animation: ring-run 2.2s linear infinite;
+  }
+
+  .seam-pulse::before {
+    opacity: 1;
+    animation: seam-run 2.6s ease-in-out infinite alternate;
+  }
+
+  /* Scroll reveals. Base: fade and rise as one piece. Sections whose parts
+     carry the movement instead pin their own transform to none below, so
+     the choreography reads from the parts, not the whole. */
+  html.js .rv {
+    opacity: 0;
+    transform: translateY(26px);
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .rv.in {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Showcase: the capture tips flat as it arrives, a screen turned to face
+     you. The perspective lives on .home-showcase. */
+  html.js .home-showcase.rv .showcase-frame {
+    transform: rotateX(9deg) scale(0.97);
+    transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-showcase.rv.in .showcase-frame {
+    transform: none;
+  }
+
+  /* Structure: art and copy close in from opposite sides, then the three
+     hairline entries step in. The chain in .home-paths above stays on the
+     base reveal: it rises as one piece, staggering the rings would pull the
+     weave apart mid-animation. */
+  html.js .home-structure.rv {
+    transform: none;
+  }
+
+  html.js .home-structure.rv .structure-art,
+  html.js .home-structure.rv .structure-copy,
+  html.js .home-structure.rv .structure-grid > div {
+    opacity: 0;
+    transition: opacity 750ms cubic-bezier(0.16, 1, 0.3, 1), transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-structure.rv .structure-art {
+    transform: translateX(-26px) scale(0.98);
+  }
+
+  html.js .home-structure.rv .structure-copy {
+    transform: translateX(24px);
+    transition-delay: 90ms;
+  }
+
+  html.js .home-structure.rv .structure-grid > div {
+    transform: translateY(14px);
+  }
+
+  html.js .home-structure.rv .structure-grid > div:nth-child(1) {
+    transition-delay: 260ms;
+  }
+
+  html.js .home-structure.rv .structure-grid > div:nth-child(2) {
+    transition-delay: 350ms;
+  }
+
+  html.js .home-structure.rv .structure-grid > div:nth-child(3) {
+    transition-delay: 440ms;
+  }
+
+  html.js .home-structure.rv.in .structure-art,
+  html.js .home-structure.rv.in .structure-copy,
+  html.js .home-structure.rv.in .structure-grid > div {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Flow: the section reveal carries only the title; each row then fades in
+     on its own, copy and capture sliding from the sides they occupy (the
+     even rows mirror, matching their swapped columns). */
+  html.js .home-flow.rv {
+    opacity: 1;
+    transform: none;
+  }
+
+  html.js .home-flow.rv h2 {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-flow.rv.in h2 {
+    opacity: 1;
+    transform: none;
+  }
+
+  html.js .flow-list > .rv {
+    transform: none;
+  }
+
+  html.js .flow-list > .rv .flow-copy,
+  html.js .flow-list > .rv .flow-shot {
+    transition: transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .flow-list > .rv .flow-copy {
+    transform: translateX(-24px);
+  }
+
+  html.js .flow-list > .rv .flow-shot {
+    transform: translateX(30px);
+    transition-delay: 90ms;
+  }
+
+  html.js .flow-list > .rv:nth-child(even) .flow-copy {
+    transform: translateX(24px);
+  }
+
+  html.js .flow-list > .rv:nth-child(even) .flow-shot {
+    transform: translateX(-30px);
+  }
+
+  html.js .flow-list > .rv.in .flow-copy,
+  html.js .flow-list > .rv.in .flow-shot {
+    transform: none;
+  }
+
+  /* Agent: the nodes arrive from both ends and the wire closes the seam,
+     growing outward from the MCP chip at its middle. */
+  html.js .home-agent.rv {
+    transform: none;
+  }
+
+  html.js .home-agent.rv .seam-node,
+  html.js .home-agent.rv .seam-wire,
+  html.js .home-agent.rv .seam-mcp,
+  html.js .home-agent.rv .agent-link {
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-agent.rv .seam-node:first-child {
+    transform: translateX(-26px);
+  }
+
+  html.js .home-agent.rv .seam-node:last-child {
+    transform: translateX(26px);
+  }
+
+  html.js .home-agent.rv .seam-wire {
+    transform: scaleX(0);
+    transition-delay: 220ms;
+  }
+
+  html.js .home-agent.rv .seam-mcp {
+    transform: scale(0.85);
+    transition-delay: 220ms;
+  }
+
+  html.js .home-agent.rv .agent-link {
+    opacity: 0;
+    transform: translateY(10px);
+    transition-delay: 420ms;
+  }
+
+  html.js .home-agent.rv.in .seam-node,
+  html.js .home-agent.rv.in .seam-wire,
+  html.js .home-agent.rv.in .seam-mcp {
+    transform: none;
+  }
+
+  html.js .home-agent.rv.in .agent-link {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* The name: the entry settles up while the mark breathes in from slightly
+     small, one piece each, for the weave. */
+  html.js .home-meaning.rv {
+    transform: none;
+  }
+
+  html.js .home-meaning.rv .meaning-entry,
+  html.js .home-meaning.rv .meaning-chain {
+    transition: transform 800ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-meaning.rv .meaning-entry {
+    transform: translateY(20px);
+  }
+
+  html.js .home-meaning.rv .meaning-chain {
+    transform: scale(0.94);
+    transition-delay: 140ms;
+  }
+
+  html.js .home-meaning.rv.in .meaning-entry,
+  html.js .home-meaning.rv.in .meaning-chain {
+    transform: none;
+  }
 }
 
-@keyframes rise-in {
+/* The stacked seam (narrow layout) turns the wire on its end: the closing
+   scale and the running light swap to the vertical axis. */
+@media (max-width: 720px) and (prefers-reduced-motion: no-preference) {
+  html.js .home-agent.rv .seam-wire {
+    transform: scaleY(0);
+  }
+
+  .seam-pulse::before {
+    animation-name: seam-run-y;
+  }
+}
+
+@keyframes hero-rise {
   from {
-    transform: translateY(22px);
+    opacity: 0;
+    transform: translateY(24px);
   }
   to {
+    opacity: 1;
     transform: translateY(0);
   }
 }
@@ -2543,6 +2885,43 @@ html.search-lock body {
   }
   to {
     transform: scale(1.035) translateX(-0.8rem);
+  }
+}
+
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ring-run {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The streak is 34% of the wire; 320% of its own width clears the far end. */
+@keyframes seam-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes seam-run-y {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(320%);
   }
 }
 
@@ -2609,6 +2988,15 @@ html.search-lock body {
   .hero-art::before {
     inset: -1.1rem;
     outline-offset: 1rem;
+  }
+
+  /* The orbit nodes track the tightened circles above. */
+  .hero-orbit {
+    inset: -1.1rem;
+  }
+
+  .hero-orbit-out {
+    inset: -2.1rem;
   }
 
   .structure-art {
