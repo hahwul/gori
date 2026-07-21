@@ -468,8 +468,15 @@ module Gori::Tui
         input_c, dec_c, atk_c = s.view.decode_layout(body)
         if input_c.contains?(mx, my)
           enter_pane(s, :input)
-          s.input.click_to_cursor(input_c.inset(1, 1), mx, my)
-          s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
+          # NOR/INS border chip toggles insert (same as ↵ / esc); don't move caret.
+          if Frame.mode_badge_hit(mx, my, input_c.y, input_c.right - 1, input_c.x + 8,
+               s.input_mode == InputMode::Insert)
+            s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
+            s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
+          else
+            s.input.click_to_cursor(input_c.inset(1, 1), mx, my)
+            s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
+          end
         elsif dec_c.contains?(mx, my)
           enter_pane(s, :decoded)
         elsif atk_c.contains?(mx, my)

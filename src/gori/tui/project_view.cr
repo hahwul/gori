@@ -375,6 +375,11 @@ module Gori::Tui
       @ov_sel = idx.clamp(0, n - 1)
     end
 
+    # DESCRIPTION card outer rect (for border chrome hit-tests). Nil when layout is empty.
+    def desc_card_rect(rect : Rect) : Rect?
+      body_panes(rect).try &.[3]
+    end
+
     # Mouse: place the description-editor cursor at a click. `rect` is the body rect
     # render() receives; re-derive the DESCRIPTION card + its 1-cell inset via body_panes
     # (the same geometry render uses), then map into the @desc_area editor.
@@ -1259,7 +1264,7 @@ module Gori::Tui
       border = desc_pane_border(focused, ins)
       Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: border)
       if focused
-        render_desc_mode_badge(screen, rect.right - 1, rect.y, rect.x + 14, ins)
+        Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 14, ins)
       end
       inner = rect.inset(1, 1)
       @desc_area.render(screen, inner, cursor: ins,
@@ -1270,15 +1275,6 @@ module Gori::Tui
     private def desc_pane_border(focused : Bool, insert : Bool) : Color
       return Frame.pane_border(false) unless focused
       insert ? Theme.accent : Frame.pane_border(true)
-    end
-
-    private def render_desc_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
-      if insert
-        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
-      else
-        bx = right_edge - " NOR ".size
-        screen.text(bx, y, " NOR ", Theme.muted, Theme.bg) if bx >= min_x
-      end
     end
 
     private def paint_desc_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil

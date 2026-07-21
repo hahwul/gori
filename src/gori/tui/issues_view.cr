@@ -662,9 +662,10 @@ module Gori::Tui
       ins = focused && notes_insert_mode?
       Frame.card(screen, card, "NOTES", bg: Theme.bg, border: Frame.pane_border(notes_active || ins))
       if notes_active || ins
-        render_notes_mode_badge(screen, card.right - 1, card.y, card.x + 7, ins)
+        Frame.mode_badge(screen, card.right - 1, card.y, card.x + 7, ins)
       elsif !notes_insert_mode?
-        edit_hint = " i/↵ "
+        # Unfocused NOTES still hints how to enter insert (same ↵ cue as the mode badge).
+        edit_hint = " ↵ "
         bx = card.right - edit_hint.size - 1
         screen.text(bx, card.y, edit_hint, Theme.muted, Theme.bg) if bx >= card.x + 7
       end
@@ -685,15 +686,6 @@ module Gori::Tui
     # Interior of the NOTES card (where TextArea draws) — matches Frame.card inset.
     def notes_body_rect(rect : Rect) : Rect
       notes_card_rect(rect).inset(1, 1)
-    end
-
-    private def render_notes_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
-      if insert
-        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
-      else
-        bx = right_edge - " NOR ".size
-        screen.text(bx, y, " NOR ", Theme.muted, Theme.bg) if bx >= min_x
-      end
     end
 
     private def paint_notes_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil

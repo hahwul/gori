@@ -316,8 +316,15 @@ module Gori::Tui
       if regions.input.contains?(mx, my)
         s.pane = :input
         @popup.close
-        s.input.click_to_cursor(regions.input.inset(1, 1), mx, my)
-        s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
+        # NOR/INS border chip toggles insert (same as ↵ / esc); don't move caret.
+        if Frame.mode_badge_hit(mx, my, regions.input.y, regions.input.right - 1,
+             regions.input.x + 6, s.input_mode == InputMode::Insert)
+          s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
+          s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
+        else
+          s.input.click_to_cursor(regions.input.inset(1, 1), mx, my)
+          s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
+        end
       elsif regions.chain.contains?(mx, my)
         s.pane = :chain
         field = regions.chain.inset(1, 1)

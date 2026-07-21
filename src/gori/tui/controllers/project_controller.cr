@@ -126,6 +126,18 @@ module Gori::Tui
         end
       when :desc
         @project_view.focus_pane(:desc)
+        # NOR/INS chip on the DESCRIPTION card border toggles insert (same as ↵ / esc).
+        if desc = @project_view.desc_card_rect(rect)
+          if Frame.mode_badge_hit(mx, my, desc.y, desc.right - 1, desc.x + 14,
+               @project_view.desc_insert_mode?)
+            if @project_view.desc_insert_mode?
+              @project_view.exit_desc_insert!
+            else
+              @project_view.enter_desc_insert!
+            end
+            return true
+          end
+        end
         @project_view.desc_click_to_cursor(rect, mx, my)
       when :settings
         @project_view.focus_pane(:settings)

@@ -108,7 +108,7 @@ module Gori::Tui
                              mode : InputMode, read : TextReadState?, reading : Bool) : Nil
       Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active || reading))
       if active || reading
-        render_mode_badge(screen, card.right - 1, card.y, card.x + 6, mode == InputMode::Insert)
+        Frame.mode_badge(screen, card.right - 1, card.y, card.x + 6, mode == InputMode::Insert)
       end
       body = card.inset(1, 1)
       input.render(screen, body, cursor: active, gauge: true, gauge_focused: active)
@@ -136,15 +136,6 @@ module Gori::Tui
         ch = cx < line.size ? line[cx] : ' '
         screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
         screen.cursor(px, rect.y + row)
-      end
-    end
-
-    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
-      if insert
-        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
-      else
-        x = right_edge - " NOR ".size
-        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
       end
     end
 

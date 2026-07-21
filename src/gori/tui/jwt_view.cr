@@ -101,7 +101,7 @@ module Gori::Tui
       insert = active && mode == InputMode::Insert
       Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active))
       if active
-        Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 8, "i", insert ? "INS" : "NOR", insert)
+        Frame.mode_badge(screen, card.right - 1, card.y, card.x + 8, insert)
       end
       body = card.inset(1, 1)
       input.render(screen, body, cursor: insert, gauge: true, gauge_focused: active)
