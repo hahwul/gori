@@ -9,6 +9,8 @@ guide = "Guide"
 reference = "Reference"
 search = "Search"
 github = "View on GitHub"
+x = "View on X"
+
 
 [a11y]
 skip_to_content = "Skip to content"

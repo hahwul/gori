@@ -9,6 +9,8 @@ guide = "가이드"
 reference = "레퍼런스"
 search = "검색"
 github = "GitHub에서 보기"
+x = "X에서 보기"
+
 
 [a11y]
 skip_to_content = "본문으로 건너뛰기"
