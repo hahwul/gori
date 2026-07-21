@@ -1,6 +1,6 @@
 name: gori
 base: core24
-version: 0.1.2
+version: 0.1.3
 summary: gori (고리) is a free/open-source TUI web proxy (MITM) written in Crystal.
 description: |
   gori (고리 — Korean for ring, link, loop) sits in the loop between your client
