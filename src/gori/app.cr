@@ -36,13 +36,17 @@ module Gori
     getter ca : Proxy::Tls::CertAuthority
     getter registry : Verb::Registry
 
-    # How often headless `gori run capture` re-reads Rewriter rules from the store, so
-    # `gori run rewriter add/rm/enable/disable` against the SAME running project take
-    # effect without a restart (docs/content/guide/proxy.md promises "no restart"). The
-    # TUI gets this on demand via the `r` key (Rewriter::rewriter_reload); headless has no
-    # keyboard to press, so it polls instead. A couple of seconds keeps external edits
-    # feeling live without hammering the store — matching the OAST poller's interval scale.
-    REWRITER_RELOAD_INTERVAL = 2.seconds
+    # How often headless `gori run capture` re-reads Rewriter rules AND Scope from the
+    # store, so `gori run rewriter add/rm/enable/disable` / `gori run project scope
+    # add/rm` against the SAME running project take effect without a restart
+    # (docs/content/guide/proxy.md promises "no restart" for Rewriter; Scope has the
+    # same expectation — its Sandbox gate is enforced off this SAME live object). The TUI
+    # gets Rewriter on demand via the `r` key (Rewriter::rewriter_reload) and Scope via its
+    # own store data_version poll (Runner#apply_external_change); headless has neither a
+    # keyboard nor that poll, so it re-reads both on a timer instead. A couple of seconds
+    # keeps external edits feeling live without hammering the store — matching the OAST
+    # poller's interval scale.
+    RELOAD_POLL_INTERVAL = 2.seconds
 
     def initialize(@config : Config)
       Paths.ensure_dirs
@@ -59,7 +63,8 @@ module Gori
     # falls through to the normal picker below, so navigating elsewhere afterward
     # still works.
     def run_tui(open_db_path : String? = nil) : Nil
-      setup_logging(File.open(File.join(Paths.home_dir, "gori.log"), "a"))
+      log_io = File.open(File.join(Paths.home_dir, "gori.log"), "a")
+      setup_logging(log_io)
       Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
       projects = ProjectRegistry.new(Paths.projects_dir)
@@ -67,6 +72,15 @@ module Gori
       # first-run wizard auto-launched below, so a no-tty run (CI/detached) gets a clean
       # message instead of a raw backtrace.
       term = Tui.open_terminal("run it directly, not under CI or a detached/background job, or use 'gori run capture' for non-interactive capture")
+      # Termisu.new (just above) unconditionally runs its OWN `Log.setup("*", ...)`, aimed at
+      # TERMISU_LOG_FILE (default /tmp/termisu.log, a shared, unbounded, non-project-scoped
+      # file). Crystal's `Log.setup` always fully reconfigures the root logger (clears prior
+      # bindings first), so whichever call runs LAST wins process-wide — Termisu's call would
+      # otherwise silently swallow every subsequent `Log.*` call gori itself makes, including
+      # the "failed to open session" error this TUI depends on landing in gori.log. Re-assert
+      # gori's binding now that Termisu has had its say, so it's the one left standing
+      # regardless of what Termisu does internally (same io — no new fd, no duplicate lines).
+      setup_logging(log_io)
 
       begin
         # enable_* run INSIDE the begin so `ensure term.close` restores the tty if either
@@ -126,7 +140,7 @@ module Gori
       end
       print_banner(session)
       spawn { capture_printer(session, format, max) }
-      reload_stop = spawn_rewriter_reload_loop(session)
+      reload_stop = spawn_reload_loop(session)
       install_signal_traps
       if span = every
         # Wall-clock terminator: nudge the same shutdown channel the signal traps use.
@@ -208,26 +222,35 @@ module Gori
       @shutdown.send(nil) rescue nil
     end
 
-    # Periodically re-reads Rewriter rules from the store for the lifetime of a headless
-    # capture session — same effect as the TUI's manual `r` key
-    # (Rules#reload / rewriter_controller#rewriter_reload), just on a timer instead of a
-    # keypress. Returns an unbuffered stop channel: sending to it blocks until the loop is
-    # parked back at `select` (i.e. not mid-reload), so the caller can safely close the
-    # session right after — no fiber left querying a closed store handle.
-    private def spawn_rewriter_reload_loop(session : Session) : Channel(Nil)
+    # Periodically re-reads Rewriter rules AND Scope from the store for the lifetime of a
+    # headless capture session. Rewriter mirrors the TUI's manual `r` key (Rules#reload /
+    # rewriter_controller#rewriter_reload); Scope mirrors the TUI's own data_version poll
+    # (Runner#apply_external_change → Scope#reload) — headless has neither a keypress nor
+    # that poll, so both ride the SAME timer/fiber here instead. One fiber, one stop
+    # channel, both reloads per tick — no need to duplicate the fiber-management
+    # boilerplate per object. Returns an unbuffered stop channel: sending to it blocks
+    # until the loop is parked back at `select` (i.e. not mid-reload), so the caller can
+    # safely close the session right after — no fiber left querying a closed store handle.
+    private def spawn_reload_loop(session : Session) : Channel(Nil)
       stop = Channel(Nil).new
-      spawn(name: "gori-capture-rewriter-reload") do
+      spawn(name: "gori-capture-reload") do
         loop do
           select
           when stop.receive
             break
-          when timeout(REWRITER_RELOAD_INTERVAL)
+          when timeout(RELOAD_POLL_INTERVAL)
+            # Each reload is guarded independently so a transient store hiccup on one
+            # (or a bad regex/glob resurfacing as an exception) can't skip the other —
+            # log and try both again next tick.
             begin
               session.rules.reload
             rescue ex
-              # A transient store hiccup must not kill the reload loop for the rest of
-              # the capture session — log and try again next tick.
               Log.error(exception: ex) { "rewriter rule reload failed" }
+            end
+            begin
+              session.scope.reload
+            rescue ex
+              Log.error(exception: ex) { "scope rule reload failed" }
             end
           end
         end

@@ -856,6 +856,12 @@ module Gori::Tui
     # store-backed views. Active-tab reloads use id/path soft-anchors; Repeater/Notes
     # soft-merge and skip dirty buffers so session UI is not clobbered.
     private def apply_external_change : Nil
+      # Scope has no dirty-edit-buffer concept to protect (add/remove/toggle write straight
+      # through to the store), so it's always safe to refresh in place here — unlike a
+      # controller with an open, unsaved editor. This is what keeps the Sitemap's in-scope
+      # markers (and Sandbox enforcement, which reads the SAME live object) from going stale
+      # after an external `gori run project scope add/rm` against this project's db.
+      @session.scope.reload
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
       # while the user is elsewhere. Own-session captures also arrive via flow_events.
@@ -5393,8 +5399,8 @@ module Gori::Tui
       when :network, :editor, :layout, :statusline, :display, :notifications, :general
         open_preferences(section) # the unified grouped modal, positioned at this section
       when :theme
-        @settings_view.reload(:theme)   # theme keeps its dedicated swatch-list card
-        @resized = true                 # an edited/removed active theme just changed → full repaint
+        @settings_view.reload(:theme) # theme keeps its dedicated swatch-list card
+        @resized = true               # an edited/removed active theme just changed → full repaint
         @overlay = :settings
         @theme_restore = Settings.theme # baseline for live-preview revert
       when :tabs

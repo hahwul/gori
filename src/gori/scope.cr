@@ -360,6 +360,22 @@ module Gori
       @mutex.synchronize { set_enabled_unlocked(false) }
     end
 
+    # Re-read rules + the enabled/sandbox flags from the store after an EXTERNAL change —
+    # another process (`gori run project scope add/rm`) or another instance's TUI writing
+    # to the SAME db. Mirrors Rules#reload: every other piece of code already holds a
+    # reference to THIS object (Sitemap, Interceptor, Probe, the Sandbox gate…), so
+    # refreshing it in place is enough — no additional wiring needed. Pulled by the TUI's
+    # data_version poll (Runner#apply_external_change) and headless capture's periodic
+    # reload fiber (App#spawn_reload_loop), the same two call sites Rules#reload already
+    # has.
+    def reload : Nil
+      @mutex.synchronize do
+        reload_rules_unlocked
+        @enabled = @store.setting(SETTING_ENABLED) == "1"
+        @sandbox = @store.setting(SETTING_SANDBOX) == "1"
+      end
+    end
+
     # A regex pattern must compile — the SQLite REGEXP callback and the proxy hot path
     # both call `Regex.new` and would otherwise raise. host/string patterns always valid.
     def self.valid?(match_type : String, pattern : String) : Bool
