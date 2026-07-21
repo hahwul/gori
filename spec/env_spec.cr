@@ -103,6 +103,70 @@ describe Gori::Env do
     Gori::Settings.env_prefix = "$"
   end
 
+  # Regression: normalize_crlf used to run over the WHOLE buffer (head + body), so a bare
+  # 0x0A byte inside a binary/compressed BODY — not a line ending — got a spurious 0x0D
+  # inserted in front of it. Silent corruption: Content-Length gets resynced to the
+  # already-corrupted body afterward, so nothing downstream notices the mismatch. Only the
+  # HEAD (through the blank-line separator) may be CRLF-normalized; the body must round-trip
+  # byte-exact regardless of what bytes it contains.
+  it "expand_wire leaves a bare LF byte in the BODY untouched (head-only CRLF normalization)" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [] of {String, String}
+    # LF-joined head (editor storage form) + a body with a bare LF, a lone CR, and an
+    # already-CRLF pair — none of these body bytes are line endings and must survive as-is.
+    text = "POST / HTTP/1.1\nHost: x\nContent-Length: 6\n\n" + String.new(Bytes[0x41, 0x0A, 0x42, 0x0D, 0x0A, 0x43])
+    result = Gori::Env.expand_wire(text)
+    expected_head = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 6\r\n\r\n".to_slice
+    expected_body = Bytes[0x41, 0x0A, 0x42, 0x0D, 0x0A, 0x43] # unchanged: A LF B CR LF C
+    result[0, expected_head.size].should eq(expected_head)
+    result[expected_head.size, expected_body.size].should eq(expected_body)
+    result.size.should eq(expected_head.size + expected_body.size)
+  ensure
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "expand_wire normalizes an already-CRLF head and leaves a bare-LF body untouched" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [] of {String, String}
+    # Already-CRLF head (e.g. captured flow bytes) — must not double to \r\r\n — followed
+    # by a bare-LF body that must stay untouched.
+    text = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n" + String.new(Bytes[0x41, 0x0A, 0x42])
+    result = Gori::Env.expand_wire(text)
+    expected_head = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n".to_slice
+    expected_body = Bytes[0x41, 0x0A, 0x42]
+    result[0, expected_head.size].should eq(expected_head)
+    result[expected_head.size, expected_body.size].should eq(expected_body)
+    result.size.should eq(expected_head.size + expected_body.size)
+  ensure
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "expand_wire substitutes a $KEY in the head while a bare-LF body stays untouched" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [{"TOKEN", "secret"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    text = "POST / HTTP/1.1\nHost: x\nAuth: $TOKEN\nContent-Length: 3\n\n" + String.new(Bytes[0x41, 0x0A, 0x42])
+    result = Gori::Env.expand_wire(text)
+    expected_head = "POST / HTTP/1.1\r\nHost: x\r\nAuth: secret\r\nContent-Length: 3\r\n\r\n".to_slice
+    expected_body = Bytes[0x41, 0x0A, 0x42]
+    result[0, expected_head.size].should eq(expected_head)
+    result[expected_head.size, expected_body.size].should eq(expected_body)
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "expand_wire normalizes the whole buffer when there is no blank-line separator (all-head, no body)" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [] of {String, String}
+    Gori::Env.expand_wire("GET / HTTP/1.1\nHost: x").should eq("GET / HTTP/1.1\r\nHost: x".to_slice)
+  ensure
+    Gori::Settings.env_prefix = "$"
+  end
+
   it "mask_secrets passes invalid UTF-8 bytes through unchanged when nothing matches" do
     vars = {"TOKEN" => "s3cr3tXY"}
     bad = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43]

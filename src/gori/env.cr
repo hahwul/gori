@@ -40,9 +40,29 @@ module Gori
     # `Regex` (gsub) *requires* valid UTF-8 and raises `ArgumentError` on a subject
     # string that isn't — which a captured flow's binary body routinely isn't. See
     # `expand` below for why the text reaching this point may carry invalid UTF-8.
+    #
+    # CRLF normalization is HEAD-ONLY: a raw `0x0A` inside the BODY is just a byte
+    # (binary/compressed data, or a bare LF a client legitimately sent) — not a line
+    # ending — and must never be rewritten to `0x0D 0x0A`. Only HTTP header lines
+    # require CRLF termination on the wire; the editors that feed this (Repeater,
+    # Miner) store the whole head+body blob as one LF-joined buffer, so naively
+    # normalizing the entire buffer corrupted every bare-LF byte in the body
+    # (silently, since Content-Length gets resynced to the corrupted body
+    # afterward). `head_body_boundary` locates the blank-line separator first;
+    # only the head (through and including that separator) is normalized, and the
+    # body is copied through byte-for-byte untouched.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
                          prefix : String = Settings.env_prefix) : Bytes
-      normalize_crlf(expand(text, vars, prefix).to_slice)
+      bytes = expand(text, vars, prefix).to_slice
+      boundary = head_body_boundary(bytes)
+      head = normalize_crlf(bytes[0...boundary])
+      return head if boundary >= bytes.size
+
+      body = bytes[boundary..]
+      buf = IO::Memory.new(head.size + body.size)
+      buf.write(head)
+      buf.write(body)
+      buf.to_slice
     end
 
     # Substitute registered `prefix+KEY` tokens; unknown keys stay literal.
@@ -89,6 +109,29 @@ module Gori
         end
       end
       String.new(buf.to_slice)
+    end
+
+    # Finds the head/body boundary in wire-form text: the byte offset where the
+    # body starts, right after the first blank line. Checks for both a bare
+    # `\n\n` (how the Repeater/Miner editors store the blob internally) and,
+    # defensively, an already-CRLF `\r\n\r\n` (e.g. captured flow bytes loaded
+    # verbatim). Returns `bytes.size` when no blank line is found — an all-head
+    # buffer (no body), which `expand_wire` then normalizes in full, matching the
+    # pre-existing behavior for header-only text.
+    private def self.head_body_boundary(bytes : Bytes) : Int32
+      n = bytes.size
+      i = 0
+      while i < n
+        if bytes[i] == 0x0A_u8 && i + 1 < n && bytes[i + 1] == 0x0A_u8
+          return i + 2
+        end
+        if bytes[i] == 0x0D_u8 && i + 3 < n &&
+           bytes[i + 1] == 0x0A_u8 && bytes[i + 2] == 0x0D_u8 && bytes[i + 3] == 0x0A_u8
+          return i + 4
+        end
+        i += 1
+      end
+      n
     end
 
     # Byte-level equivalent of `gsub(/\r?\n/, "\r\n")`: inserts `\r` before any
