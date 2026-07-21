@@ -24,8 +24,10 @@ module Gori::Tui
 
     @dec_scroll : Int32 = 0
     @dec_h : Int32 = 0
+    @dec_lines : Int32 = 0
     @out_scroll : Int32 = 0
     @out_h : Int32 = 0
+    @out_lines : Int32 = 0
     @atk_sel : Int32 = 0
     @atk_scroll : Int32 = 0
     @atk_h : Int32 = 0
@@ -71,6 +73,7 @@ module Gori::Tui
       render_input(screen, input_c, input, focused && pane == :input, input_mode, input_read) unless input_c.empty?
       unless dec_c.empty?
         lines = decoded_lines(decoded)
+        @dec_lines = lines.size
         @dec_h, @dec_scroll = draw_text_card(screen, dec_c, "DECODED", lines, @dec_scroll, focused && pane == :decoded)
       end
       render_attacks(screen, atk_c, attacks, focused && pane == :attacks) unless atk_c.empty?
@@ -88,6 +91,7 @@ module Gori::Tui
       render_secret(screen, sec_c, secret, secret_cx, secret_pre, alg, focused && pane == :secret) unless sec_c.empty?
       unless out_c.empty?
         out_lines = output_ok ? output.split('\n') : ["✗ #{output}"]
+        @out_lines = out_lines.size
         title = "OUTPUT#{output_ok ? "" : "  ✗ invalid JSON"}"
         @out_h, @out_scroll = draw_text_card(screen, out_c, title, out_lines, @out_scroll,
           focused && pane == :output, fg: output_ok ? Theme.text : Theme.red)
@@ -247,8 +251,20 @@ module Gori::Tui
       @dec_scroll <= 0
     end
 
+    # True when the DECODED card has no more lines below the viewport (or content fits).
+    # A short decode uses this so ↓ leaves to ATTACKS instead of a no-op scroll.
+    def decoded_at_bottom? : Bool
+      return true if @dec_h <= 0
+      @dec_scroll >= {@dec_lines - @dec_h, 0}.max
+    end
+
     def output_at_top? : Bool
       @out_scroll <= 0
+    end
+
+    def output_at_bottom? : Bool
+      return true if @out_h <= 0
+      @out_scroll >= {@out_lines - @out_h, 0}.max
     end
 
     def attacks_at_top? : Bool

@@ -80,8 +80,8 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · send a request here (space → Send to Sequencer) or a selection" unless v
       case v.focus
-      when :samples  then "↑/↓ select · ↵ detail · ^X stop · c config · space cmds · ↹ pane · esc tabs"
-      when :analysis then "↑/↓ scroll · ^R run · c config · ↹ pane · esc tabs"
+      when :samples  then "↑/↓ select · → analysis · ↵ detail · ^X stop · c config · space cmds · ↹ pane · esc tabs"
+      when :analysis then "↑/↓ scroll · ← samples · ^R run · c config · ↹ pane · esc tabs"
       when :detail   then "↑/↓ scroll · esc back"
       else                "^R run · c config · space cmds · ↹ pane · esc tabs"
       end
@@ -190,17 +190,33 @@ module Gori::Tui
     private def handle_samples(ev : Termisu::Event::Key, v : SequencerView) : Nil
       key = ev.key
       case
-      when key.enter?              then v.open_detail
-      when key.down?, key.lower_j? then v.samples_move(1)
-      when key.up?, key.lower_k?   then v.samples_at_top? ? v.focus_pane(:config) : v.samples_move(-1)
+      when key.enter? then v.open_detail
+      when key.right?
+        v.focus_pane(:analysis) # side-by-side: cross to Analysis; stacked: still the next pane
+      when key.down?, key.lower_j?
+        # Stacked layout: ↓ past the last sample drops into Analysis below.
+        if !v.side_by_side? && v.samples_at_bottom?
+          v.focus_pane(:analysis)
+        else
+          v.samples_move(1)
+        end
+      when key.up?, key.lower_k? then v.samples_at_top? ? v.focus_pane(:config) : v.samples_move(-1)
       end
     end
 
     private def handle_analysis(ev : Termisu::Event::Key, v : SequencerView) : Nil
       key = ev.key
-      if key.up? || key.lower_k?
-        v.analysis_scroll(-1)
-      elsif key.down? || key.lower_j?
+      case
+      when key.left?
+        v.focus_pane(:samples)
+      when key.up?, key.lower_k?
+        if v.analysis_at_top?
+          # Side-by-side: up leaves to Config; stacked: Analysis sits under Samples.
+          v.focus_pane(v.side_by_side? ? :config : :samples)
+        else
+          v.analysis_scroll(-1)
+        end
+      when key.down?, key.lower_j?
         v.analysis_scroll(1)
       end
     end

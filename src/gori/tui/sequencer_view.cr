@@ -50,6 +50,9 @@ module Gori::Tui
       @sel = 0
       @scroll = 0
       @analysis_scroll = 0
+      @analysis_line_count = 0
+      @analysis_h = 0
+      @side_by_side = true # last render layout (Samples | Analysis vs stacked)
       @detail_scroll = 0
       @job_id = 0
     end
@@ -199,6 +202,20 @@ module Gori::Tui
       @sel == 0
     end
 
+    def samples_at_bottom? : Bool
+      return true if @samples.empty?
+      @sel >= @samples.size - 1
+    end
+
+    def analysis_at_top? : Bool
+      @analysis_scroll <= 0
+    end
+
+    # Last render put Samples and Analysis side-by-side (wide) vs stacked (narrow).
+    def side_by_side? : Bool
+      @side_by_side
+    end
+
     def pane_advance(dir : Int32) : Bool
       idx = PANE_ORDER.index(@focus) || 0
       nidx = idx + dir
@@ -214,7 +231,8 @@ module Gori::Tui
     end
 
     def analysis_scroll(d : Int32) : Nil
-      @analysis_scroll = {@analysis_scroll + d, 0}.max
+      max = {@analysis_line_count - @analysis_h, 0}.max
+      @analysis_scroll = (@analysis_scroll + d).clamp(0, max)
     end
 
     def open_detail : Nil
@@ -363,7 +381,8 @@ module Gori::Tui
       lower = Rect.new(rect.x, rect.y + cfg_h, rect.w, {rect.h - cfg_h, 2}.max)
       render_config(screen, cfg_rect, focused && @focus == :config)
 
-      if lower.w >= 84
+      @side_by_side = lower.w >= 84
+      if @side_by_side
         sw = {lower.w * 42 // 100, 30}.max
         s_rect = Rect.new(lower.x, lower.y, sw, lower.h)
         a_rect = Rect.new(lower.x + sw, lower.y, lower.w - sw, lower.h)
@@ -483,13 +502,17 @@ module Gori::Tui
     private def render_analysis(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "ANALYSIS", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
+      @analysis_h = {inner.h, 0}.max
       return if inner.h <= 0 || inner.w <= 2
       rep = report
       if rep.usable_count == 0
+        @analysis_line_count = 1
+        @analysis_scroll = 0
         screen.text(inner.x + 1, inner.y, @running ? "collecting…" : "no tokens yet", Theme.muted, Theme.bg)
         return
       end
       lines = analysis_lines(rep, inner.w)
+      @analysis_line_count = lines.size
       max_scroll = {lines.size - inner.h, 0}.max
       @analysis_scroll = @analysis_scroll.clamp(0, max_scroll)
       inner.h.times do |i|
