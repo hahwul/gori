@@ -23,6 +23,10 @@
   --accent-ink: #120f06;
   /* Brushed gold-leaf gradient for accent surfaces (mark, primary CTA, rules). */
   --grad-gold-leaf: linear-gradient(135deg, #a67f36 0%, #e6cf92 24%, #c8a860 48%, #8c6a2c 72%, #ddc084 100%);
+  /* Wordmark/brand-mark gold, color-picked from the official gori artwork
+     (docs/static/images/gori-wallpaper.jpg) so the nav matches the real logo
+     instead of the deeper, more saturated --grad-gold-leaf. */
+  --grad-logo: linear-gradient(135deg, #f0dfae 0%, #e6cf92 45%, #c8a860 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
   --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
   --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
@@ -71,6 +75,7 @@
   --accent-strong: #8a5d0a;
   --accent-ink: #fbf7ee;
   --grad-gold-leaf: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 52%, #6f4e12 76%, #cba43e 100%);
+  --grad-logo: linear-gradient(135deg, #cba43e 0%, #a8791f 55%, #8a5d0a 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
@@ -249,21 +254,22 @@ img {
   white-space: nowrap;
 }
 
-/* The loop mark is the PNG used as a mask, filled with the brushed gold-leaf
-   gradient so it reads as a gilded silhouette. The gradient is redefined per
-   theme (warmer leaf on dark, deepened gold on light), so the mark stays legible
-   in both. --logo-src is set inline in the template to carry base_url. */
+/* The loop mark is the PNG used as a mask, filled with --grad-logo so it reads
+   as a gilded silhouette. --grad-logo is redefined per theme (light gold leaf
+   on dark, deepened gold on light) and is color-picked from the official gori
+   artwork, so the mark matches the real logo instead of the deeper
+   --grad-gold-leaf used elsewhere. --logo-src is set inline in the template to
+   carry base_url. */
 .logo-mark {
   width: 2.75rem;
   height: 2.5rem;
-  background: var(--grad-gold-leaf);
+  background: var(--grad-logo);
   -webkit-mask: var(--logo-src) center / contain no-repeat;
   mask: var(--logo-src) center / contain no-repeat;
 }
 
-/* Gilded wordmark: a softer gold-leaf gradient clipped to the glyphs. It runs
-   its own gradient (gentler than --grad-gold-leaf, which was too high-contrast
-   here) rather than the shared token. --accent is the flat fallback where
+/* Gilded wordmark: shares --grad-logo with the mark so both pieces of the
+   brand read as the same gold. --accent is the flat fallback where
    background-clip text is unsupported. */
 .logo-word {
   font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", "Apple Symbols", Georgia, serif;
@@ -272,18 +278,10 @@ img {
   letter-spacing: 0;
   transform: translateY(-0.04em);
   color: var(--accent);
-  background: linear-gradient(135deg, #a67f36 0%, #e6cf92 24%, #c8a860 98%, #8c6a2c 72%, #ddc084 100%);
+  background: var(--grad-logo);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-}
-
-/* On the light canvas the light-gold set keeps the wordmark legible, softened
-   the same way (mid stop stretched long, deep golds compressed into the tail). */
-:root[data-theme="light"] .logo-word {
-  background: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 98%, #6f4e12 76%, #cba43e 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
 }
 
 /* Section links sit as quiet pills: a soft ink wash on hover, and the active
