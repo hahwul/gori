@@ -141,7 +141,21 @@ module Gori::Sequencer
             break if @state.stopped?
             park_if_paused
             break if @state.stopped?
-            break if @collected >= @config.goal
+            # Stop handing out jobs once enough are already IN FLIGHT to reach the
+            # goal, not only once they've fully round-tripped. `@dispatched - @sent`
+            # is the outstanding (dispatched-but-not-yet-completed) count — @sent
+            # increments in process_one right after the send returns, success or
+            # not — so this sum is an optimistic projection of the final collected
+            # count if every outstanding job extracts a token. It only grows via a
+            # dispatch here (+1) and only shrinks via an extraction MISS in
+            # process_one (-1), so it steps by exactly ±1 and lands on @config.goal
+            # exactly (no overshoot) whenever the goal is reachable, while still
+            # letting the loop keep dispatching past a run of misses (bounded by
+            # max_sends below) — unlike the old `@collected >= @config.goal` check,
+            # which only reacted after a full round-trip and let the channel's
+            # buffer slot plus one already-in-flight worker job race the goal by up
+            # to 2 extra live requests.
+            break if @collected + (@dispatched - @sent) >= @config.goal
             break if @dispatched >= @config.max_sends
             break if @backend.cap_reached?
             pace(interval)

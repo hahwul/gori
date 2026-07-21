@@ -137,6 +137,7 @@ module Gori
         pending = [] of {Store::CapturedRequest, Store::CapturedResponse?}
         base_ts = Time.utc.to_unix * 1_000_000
         had_error = false
+        interrupted = install_discover_interrupt_trap(engine)
         engine.run do |ev|
           case ev
           when Discover::FindingEvent
@@ -154,10 +155,44 @@ module Gori
           end
         end
         # Flush after the loop (not in the Done branch): an error terminates with an ErrorEvent
-        # and no DoneEvent, but findings discovered before it should still reach the Sitemap.
+        # and no DoneEvent, but findings discovered before it should still reach the Sitemap. A
+        # SIGINT/SIGTERM lands here too (see the trap above) since Engine#stop makes the run end
+        # like any other — so this one flush covers the normal, error, AND interrupted paths.
         flush_discover(store, pending) unless no_store
+        report_discover_interrupt(findings, no_store) if interrupted.call
         puts CLI::Output.discover_array_json(findings) if format == :json
         exit 1 if had_error
+      end
+
+      private def self.report_discover_interrupt(findings : Array(Discover::Finding), no_store : Bool) : Nil
+        verb = no_store ? "collected" : "saved"
+        plural = findings.size == 1 ? "" : "s"
+        STDERR.puts "interrupted — #{findings.size} finding#{plural} #{verb}"
+      end
+
+      # A raw SIGINT/SIGTERM used to just kill the process here: `pending` (and everything
+      # printed to the terminal since the last 200-item flush) was garbage-collected with it,
+      # and the DB never saw a row. The trap itself does the minimal/safe thing only — a
+      # buffered channel send, matching Gori::App#install_signal_traps — and hands the actual
+      # stop off to a fiber. Engine#stop makes the orchestrator drain in-flight work and close
+      # @events exactly like a normal finish, so the caller's `engine.run` returns on its own
+      # and the SAME flush every other exit path already uses covers "interrupted mid-run" too,
+      # instead of needing a separate DB write in the trap or the watcher fiber. The returned
+      # proc reads the `interrupted` local the watcher fiber sets — same shared-closure trick,
+      # just returned instead of read further down the SAME method, to keep run_discover_stream
+      # itself simple enough for the complexity linter.
+      private def self.install_discover_interrupt_trap(engine : Discover::Engine) : -> Bool
+        interrupted = false
+        shutdown = Channel(Nil).new(1)
+        Signal::INT.trap { shutdown.send(nil) rescue nil }
+        Signal::TERM.trap { shutdown.send(nil) rescue nil }
+        spawn(name: "discover-interrupt") do
+          shutdown.receive
+          interrupted = true
+          STDERR.puts "\ninterrupted — stopping and flushing findings…"
+          engine.stop
+        end
+        -> { interrupted }
       end
 
       private def self.flush_discover(store : Store,

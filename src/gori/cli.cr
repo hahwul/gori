@@ -89,6 +89,7 @@ module Gori
       listen = Settings.bind_host
       port = Settings.bind_port
       db_path = Paths.default_db
+      db_explicit = false
       ca_dir = Paths.default_ca_dir
       insecure = false
 
@@ -100,7 +101,7 @@ module Gori
           abort "gori: invalid --port '#{v}' (expected 0-65535)" unless parsed && 0 <= parsed <= 65535
           port = parsed
         end
-        p.on("--db=PATH", "SQLite database path") { |v| db_path = v }
+        p.on("--db=PATH", "SQLite database path (opens it directly, skipping the project picker)") { |v| db_path = v; db_explicit = true }
         p.on("--ca-dir=PATH", "Directory for the root CA") { |v| ca_dir = v }
         p.on("--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -121,7 +122,7 @@ module Gori
       # reflects the active state; toggling it there re-syncs the live proxy + persists.
       Settings.verify_upstream = false if insecure
       config = Config.new(listen, port, db_path, ca_dir, !Settings.verify_upstream?)
-      App.new(config).run_tui
+      App.new(config).run_tui(open_db_path: db_explicit ? db_path : nil)
     end
 
     # `gori settings` prints the path to the persisted settings file (settings.json

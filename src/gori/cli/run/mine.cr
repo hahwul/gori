@@ -58,8 +58,14 @@ module Gori
         http2 = force_h2 || src_h2
 
         config = Miner::Config.new
-        config.locations = locations.empty? ? Miner::Detect.detect(bytes).default : locations
+        detected = Miner::Detect.detect(bytes)
+        config.locations = locations.empty? ? detected.default : locations
         abort "gori run mine: no applicable locations for this request" if config.locations.empty?
+        unless locations.empty?
+          (config.locations - detected.applicable).each do |loc|
+            STDERR.puts "gori run mine: #{loc.label}: not applicable to this request (no matching existing body), skipping"
+          end
+        end
         config.concurrency = concurrency
         config.rps = rate
         config.throttle_ms = throttle

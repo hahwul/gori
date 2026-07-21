@@ -904,6 +904,45 @@ describe Gori::Proxy::Server do
     got.receive.should eq("3:SMU")
   end
 
+  it "rejects a garbage h2 client preface instead of queueing it in Intercept forever" do
+    # RFC 7540 §3.4's client preface start-line ("PRI * HTTP/2.0") happens to be a
+    # well-formed-SHAPE HTTP/1.1 request-line. When ALPN doesn't negotiate h2 (the
+    # deliberate Tunnel#intercept downgrade while catch mode is on), the h2/gRPC client's
+    # preface bytes land on this HTTP/1.1 path and — without the fix — would sail into the
+    # Intercept hold queue as a confusing fake "PRI *" request with no way out. It must
+    # instead be rejected cleanly: recorded as an error flow, connection closed, never held.
+    done = Channel(Nil).new(1)
+    store_path = File.tempname("gori-icp-h2", ".db")
+    store = Gori::Store.open(store_path)
+    interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
+    interceptor.toggle # enable catch mode
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "PRI * HTTP/2.0\r\n\r\n"
+    client.flush
+
+    done.receive # record_error's on_response fires — the connection was rejected, not held
+    # The proxy must not have written an HTTP/1.1 response back (a real h2/gRPC client can't
+    # parse one) — it just closes. Confirms the client sees a clean EOF, not a hang.
+    client.gets_to_end.should eq("")
+    client.close
+
+    interceptor.pending.should be_empty # never reached the hold queue
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    sink.requests.last.method.should eq("PRI")
+    sink.responses.last.state.error?.should be_true
+    sink.responses.last.error.try(&.includes?("h2/gRPC")).should be_true
+  end
+
   it "sandbox blocks an out-of-scope request before it reaches upstream (403 + recorded abort)" do
     done = Channel(Nil).new(1)
     store_path = File.tempname("gori-sbx", ".db")

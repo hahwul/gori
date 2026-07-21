@@ -45,6 +45,42 @@ describe Gori::Proxy::Codec::Http1 do
       req.malformed?.should be_true
       req.raw_head.should eq(raw) # truth preserved regardless
     end
+
+    it "flags the RFC 7540 h2 client preface as malformed despite its well-formed 3-token shape" do
+      # "PRI * HTTP/2.0" splits into exactly 3 tokens like a normal request-line, so the
+      # generic `parts.size != 3` rule alone would accept it. This is the exact literal an
+      # h2/gRPC client sends first — forced onto this HTTP/1.1 parser by the deliberate
+      # ALPN downgrade while Intercept/Sandbox/Match&Replace is active (Tunnel#intercept) —
+      # and must be recognized so the caller can reject the connection instead of treating
+      # it as a real "PRI *" request.
+      raw = bytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+      req = Http1.parse_request_head(raw)
+
+      req.method.should eq("PRI")
+      req.target.should eq("*")
+      req.version.should eq("HTTP/2.0")
+      req.malformed?.should be_true
+      Http1.h2_preface?(req).should be_true
+    end
+
+    it "does not flag an ordinary request as the h2 preface" do
+      raw = bytes("GET / HTTP/2.0\r\nHost: a\r\n\r\n")
+      req = Http1.parse_request_head(raw)
+
+      req.malformed?.should be_false
+      Http1.h2_preface?(req).should be_false
+    end
+  end
+
+  describe ".parse_request_line" do
+    it "mirrors parse_request_head's malformed verdict for the h2 preface" do
+      raw = bytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+      method, target, malformed = Http1.parse_request_line(raw)
+
+      method.should eq("PRI")
+      target.should eq("*")
+      malformed.should be_true
+    end
   end
 
   describe ".parse_response_head" do

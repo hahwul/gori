@@ -118,8 +118,17 @@ module Gori::Miner
 
     # ── form (application/x-www-form-urlencoded) ─────────────────────────────────────
 
+    # Applicable only when there's an existing urlencoded-form body to append params to —
+    # the same test Detect uses to decide whether Form is offered at all (see detect.cr).
+    # A bodyless (or non-form) request has no Content-Type to splice params under and no
+    # body shape to preserve, so injecting here would fabricate a framing-broken request:
+    # a body with no Content-Length and no Content-Type header at all. Bail out unmodified
+    # instead, same as inject_multipart/inject_json do when their location doesn't apply.
     private def self.inject_form(request : Bytes, params : Array({String, String})) : Bytes
       head, body, eol = split(request)
+      return request if body.empty?
+      ct = (header_value(request, "content-type") || "").downcase
+      return request unless ct.includes?("x-www-form-urlencoded")
       extra = encode_pairs(params)
       # The body is spliced through as bytes. It used to be copied into a String, then again by
       # the interpolation that joined it to `extra`, then a third time into the IO — and the

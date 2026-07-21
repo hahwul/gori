@@ -279,6 +279,52 @@ describe Gori::Proxy::WS do
       sink.messages.should contain({"in", 1, "abc"})
       sink.messages.any? { |(_, _, s)| s.includes?("too large to capture") }.should be_true
     end
+
+    it "waits for the peer's replying CLOSE frame instead of tearing the tunnel down the instant one side forwards one (RFC 6455 closing handshake)" do
+      cs_r, cs_w = IO.pipe # client → server
+      ts_r, ts_w = IO.pipe # relay → server
+      ss_r, ss_w = IO.pipe # server → client
+      tc_r, tc_w = IO.pipe # relay → client
+      # sync_close: true so `run`'s internal `client.close`/`upstream.close` propagate to the
+      # real underlying pipe fds (as they do for the real sockets `run` is normally handed) —
+      # without it, the OLD code's early close only flips IO::Stapled's own closed flag and
+      # this spec hangs (tc_r never sees EOF) instead of failing fast.
+      client = IO::Stapled.new(cs_r, tc_w, sync_close: true)
+      upstream = IO::Stapled.new(ss_r, ts_w, sync_close: true)
+
+      client_close = Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_CLOSE, "bye".to_slice, mask: true)
+      server_close = Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_CLOSE, "bye".to_slice, mask: false)
+
+      # The client sends its CLOSE and has nothing more to say — like a real client, it
+      # doesn't hold the connection open waiting on its own reply.
+      cs_w.write(client_close)
+      cs_w.close
+
+      # Stands in for the real peer: reads the forwarded CLOSE, then deliberately waits a
+      # beat (standing in for the real network round trip a genuine reply needs) before
+      # replying. Without the fix, `run` tears down BOTH sockets the instant the
+      # client→upstream pump forwards the CLOSE and returns — a near-instant local op, long
+      # before this reply is sent — dropping it exactly like the real bug (client saw "EOF
+      # while reading 2, got 0" instead of the peer's closing-handshake reply).
+      spawn do
+        got = Bytes.new(client_close.size)
+        ts_r.read_fully(got)
+        sleep 0.05.seconds
+        ss_w.write(server_close)
+        ss_w.close
+      rescue
+        # broken pipe: the old bug already closed our write end before we got here
+      end
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 13_i64, sink)
+
+      # read_fully raises on short read/EOF — the old, buggy behavior (reply dropped, tc_r
+      # closes with 0 bytes available).
+      forwarded_reply = Bytes.new(server_close.size)
+      tc_r.read_fully(forwarded_reply)
+      forwarded_reply.should eq(server_close)
+    end
   end
 end
 
