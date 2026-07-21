@@ -166,6 +166,36 @@ describe Gori::Rules do
     end
   end
 
+  it "reload picks up an external edit on the SAME live instance (TUI 'r' key / headless capture's periodic reload)" do
+    with_store do |store|
+      # `live` stands in for the Rules object a Session hands to the proxy pipeline —
+      # held for a while, never re-`load`ed. `editor` stands in for a separate `gori run
+      # rewriter add` process (or the TUI's own editor) writing to the SAME store.
+      live = Gori::Rules.load(store)
+      live.active?.should be_false
+
+      editor = Gori::Rules.load(store)
+      editor.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head, "Server: nginx", "Server: gori")
+
+      resp = "HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n".to_slice
+      # the external add is invisible to `live` until it reloads
+      live.active?.should be_false
+      live.rewrite_response(resp, "").should eq(resp)
+
+      live.reload
+      live.active?.should be_true
+      String.new(live.rewrite_response(resp, "")).should contain("Server: gori")
+
+      # disabling externally is picked up the same way
+      id = live.rules.first.id
+      editor.toggle(id)
+      live.active?.should be_true # still stale
+      live.reload
+      live.active?.should be_false
+      live.rewrite_response(resp, "").should eq(resp)
+    end
+  end
+
   it "transforms a full HTTP message for the live preview (head + body seams)" do
     with_store do |store|
       rules = Gori::Rules.load(store)

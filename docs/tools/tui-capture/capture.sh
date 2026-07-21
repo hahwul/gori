@@ -117,9 +117,10 @@ PY
 }
 
 # run_scene <name> <rows> <title> <tmux-keys...> — the full TUI over the seeded DB.
+# `--db` opens it directly (no project-picker preamble needed).
 run_scene() {
   local name="$1" rows="$2" title="$3"; shift 3
-  _shoot "$name" "$rows" "$title" "tui --port $PORT --db '$DB'" 1 "$@"
+  _shoot "$name" "$rows" "$title" "tui --port $PORT --db '$DB'" 0 "$@"
 }
 
 # run_tour <name> <rows> <title> <tmux-keys...> — `gori tutorial` (no picker).

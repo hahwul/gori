@@ -36,6 +36,14 @@ module Gori
     getter ca : Proxy::Tls::CertAuthority
     getter registry : Verb::Registry
 
+    # How often headless `gori run capture` re-reads Rewriter rules from the store, so
+    # `gori run rewriter add/rm/enable/disable` against the SAME running project take
+    # effect without a restart (docs/content/guide/proxy.md promises "no restart"). The
+    # TUI gets this on demand via the `r` key (Rewriter::rewriter_reload); headless has no
+    # keyboard to press, so it polls instead. A couple of seconds keeps external edits
+    # feeling live without hammering the store — matching the OAST poller's interval scale.
+    REWRITER_RELOAD_INTERVAL = 2.seconds
+
     def initialize(@config : Config)
       Paths.ensure_dirs
       @ca = Proxy::Tls::CertAuthority.load_or_create(@config.ca_dir)
@@ -45,7 +53,12 @@ module Gori
 
     # Interactive TUI: pick a project, run its shell, return to the picker on
     # `q`, exit on quit. Logs go to a file (never STDOUT — that's the screen).
-    def run_tui : Nil
+    #
+    # `open_db_path`, when given (CLI `--db=PATH`), opens that database directly —
+    # skipping the picker — before ever showing it; `q` from that session still
+    # falls through to the normal picker below, so navigating elsewhere afterward
+    # still works.
+    def run_tui(open_db_path : String? = nil) : Nil
       setup_logging(File.open(File.join(Paths.home_dir, "gori.log"), "a"))
       Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
@@ -66,6 +79,9 @@ module Gori
         # the terminal if it raises. The wizard persists settings.json (even on skip),
         # so it never auto-launches again.
         Tui::SetupWizard.new(term).run unless File.exists?(Settings.path)
+        if open_db_path
+          return if open_and_run(project_for_db_path(open_db_path), term) == :quit
+        end
         loop do
           project = Tui::ProjectPicker.new(term, projects).run
           break unless project # nil => quit gori
@@ -74,6 +90,18 @@ module Gori
       ensure
         term.close # restore the terminal even on error
       end
+    end
+
+    # Wraps an explicit `--db` path as a one-off Project, bypassing the registry
+    # entirely. Never ephemeral — Project#cleanup deletes ephemeral projects' dirs
+    # on close, which must never happen to a file the user pointed us at directly.
+    # Named after the containing directory for the conventional `gori.db` filename
+    # (mirrors how registry projects are named after their dir), else after the
+    # file's own basename.
+    private def project_for_db_path(db_path : String) : Project
+      base = File.basename(db_path)
+      name = base == Project::DB_FILE ? File.basename(File.dirname(db_path)) : File.basename(db_path, File.extname(db_path))
+      Project.new(name.presence || db_path, db_path)
     end
 
     # Non-interactive capture into `project`. Binds the proxy (fatal on failure, as
@@ -98,6 +126,7 @@ module Gori
       end
       print_banner(session)
       spawn { capture_printer(session, format, max) }
+      reload_stop = spawn_rewriter_reload_loop(session)
       install_signal_traps
       if span = every
         # Wall-clock terminator: nudge the same shutdown channel the signal traps use.
@@ -107,6 +136,10 @@ module Gori
         end
       end
       @shutdown.receive
+      # Unbuffered: this rendezvous only completes once the reload fiber is parked back
+      # at `select` (never mid-reload), so by the time it returns the fiber is guaranteed
+      # to make no further store calls — safe to close the store right after.
+      reload_stop.send(nil) rescue nil
       session.close
     end
 
@@ -173,6 +206,33 @@ module Gori
       # so there's nothing left to stream — wind the session down gracefully
       # instead of letting the unhandled error take down the whole process.
       @shutdown.send(nil) rescue nil
+    end
+
+    # Periodically re-reads Rewriter rules from the store for the lifetime of a headless
+    # capture session — same effect as the TUI's manual `r` key
+    # (Rules#reload / rewriter_controller#rewriter_reload), just on a timer instead of a
+    # keypress. Returns an unbuffered stop channel: sending to it blocks until the loop is
+    # parked back at `select` (i.e. not mid-reload), so the caller can safely close the
+    # session right after — no fiber left querying a closed store handle.
+    private def spawn_rewriter_reload_loop(session : Session) : Channel(Nil)
+      stop = Channel(Nil).new
+      spawn(name: "gori-capture-rewriter-reload") do
+        loop do
+          select
+          when stop.receive
+            break
+          when timeout(REWRITER_RELOAD_INTERVAL)
+            begin
+              session.rules.reload
+            rescue ex
+              # A transient store hiccup must not kill the reload loop for the rest of
+              # the capture session — log and try again next tick.
+              Log.error(exception: ex) { "rewriter rule reload failed" }
+            end
+          end
+        end
+      end
+      stop
     end
 
     private def print_banner(session : Session) : Nil
