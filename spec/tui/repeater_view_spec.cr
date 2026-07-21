@@ -985,12 +985,13 @@ describe Gori::Tui::RepeaterView do
     view.enter_request_insert!
     backend = MemoryBackend.new(120, 24)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 24))
-    backend.contains?("i:INS").should be_true
+    backend.contains?("INS").should be_true
+    backend.contains?("i:INS").should be_false
     view.exit_request_insert!
     view.request_insert?.should be_false
     backend2 = MemoryBackend.new(120, 24)
     view.render(Screen.new(backend2), Rect.new(0, 0, 120, 24))
-    backend2.contains?("NOR").should be_true
+    backend2.contains?("↵:NOR").should be_true
   end
 
   it "resp_move + selection returns plain text for copy" do

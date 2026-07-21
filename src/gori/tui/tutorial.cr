@@ -1182,13 +1182,7 @@ module Gori::Tui
       return if rect.w < 8 || rect.h < 3
       Frame.card(screen, rect, "REQUEST", border: Frame.pane_border(focused))
       badge_min = rect.x + 10
-      if insert
-        Frame.toggle_badge(screen, rect.right - 1, rect.y, badge_min, "i", "INS", true)
-      else
-        lbl = " NOR "
-        bx = rect.right - 1 - lbl.size
-        screen.text(bx, rect.y, lbl, Theme.muted, Theme.bg) if bx >= badge_min
-      end
+      Frame.mode_badge(screen, rect.right - 1, rect.y, badge_min, insert)
 
       ix = rect.x + 2
       iw = {rect.w - 4, 1}.max

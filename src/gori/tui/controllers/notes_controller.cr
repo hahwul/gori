@@ -153,6 +153,15 @@ module Gori::Tui
       @host.focus_body
       body = body_rect_below_filter(rect)
       body = carve_links_row(body)[1] unless @notes.link_preview.empty?
+      # NOR/INS chip on the editor top border toggles insert (same as ↵ / esc).
+      if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
+        if @notes.insert_mode?
+          @notes.exit_insert!
+        else
+          @notes.enter_insert!
+        end
+        return true
+      end
       @notes.click_to_cursor(body, mx, my)
       true
     end

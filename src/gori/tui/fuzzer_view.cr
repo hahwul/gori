@@ -1485,20 +1485,11 @@ module Gori::Tui
       insert ? Theme.accent : Theme.focus_gold
     end
 
-    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
-      if insert
-        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
-      else
-        x = right_edge - " NOR ".size
-        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
-      end
-    end
-
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
       ins = focused && target_insert?
       Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
-      render_mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
+      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
       unless @sni.strip.empty?
         badge = " SNI "
         bx = {rect.right - badge.size - 1, rect.x + 9}.max
@@ -1542,7 +1533,7 @@ module Gori::Tui
       # estimate stays there as a passive summary (render_run_summary).
       run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x, "^R", "RUN", !running?)
       pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x, "^U", "PRETTY", false)
-      render_mode_badge(screen, pretty_x, rect.y, min_x, ins)
+      Frame.mode_badge(screen, pretty_x, rect.y, min_x, ins)
       screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
       # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a
@@ -2257,10 +2248,8 @@ module Gori::Tui
       ] of {Symbol, String, String})
     end
 
-    # Hit-test the TEMPLATE border's ^R:RUN badge (rightmost, drawn by render_template).
-    # Returns :run when the click lands on it, else nil (caller falls through to caret/focus).
-    # Geometry mirrors render → render_top's left-column top border; the CHAIN split hangs
-    # below, so the border row is unaffected by whether the strip is shown.
+    # Hit-test the TEMPLATE border chrome (^R:RUN, ^U:PRETTY, NOR/INS). Geometry mirrors
+    # render_template. Miss → nil (caller falls through to caret/focus).
     def template_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded
       target_h = {rect.h, 3}.min
@@ -2273,9 +2262,21 @@ module Gori::Tui
       return nil if left.w < 2 || my != left.y
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
       min_x = left.x + label.size + 4
-      Frame.right_badge_hit(mx, my, left.y, left.right - 1, min_x, [
-        {:run, "^R", "RUN"},
-      ] of {Symbol, String, String})
+      right_edge = left.right - 1
+      badges = [{:run, "^R", "RUN"}, {:pretty, "^U", "PRETTY"}] of {Symbol, String, String}
+      if hit = Frame.right_badge_hit(mx, my, left.y, right_edge, min_x, badges)
+        return hit
+      end
+      mode_edge = Frame.right_badge_edge(right_edge, min_x, badges)
+      Frame.mode_badge_hit(mx, my, left.y, mode_edge, min_x, template_insert? || @chain_focused) ? :mode : nil
+    end
+
+    # Hit-test the TARGET border NOR/INS chip. Geometry matches render_target.
+    def target_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil unless @loaded
+      target_h = {rect.h, 3}.min
+      return nil if target_h < 2 || my != rect.y
+      Frame.mode_badge_hit(mx, my, rect.y, rect.right - 1, rect.x + 8, target_insert?) ? :mode : nil
     end
 
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?

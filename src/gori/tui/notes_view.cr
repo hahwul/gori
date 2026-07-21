@@ -371,21 +371,12 @@ module Gori::Tui
       TrafficEmptyState.render(screen, area, variant: :notes) if current_blank?
       ins = focused && insert_mode?
       if focused
-        render_mode_badge(screen, rect.right - 1, rect.y, rect.x + 1, ins)
+        Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 1, ins)
       end
       ed = current.area
       ed.render(screen, area, cursor: ins,
         highlight: Settings.editor_markdown ? :markdown : nil)
       paint_read_chrome(screen, area, ed, focused && !insert_mode?) if !insert_mode?
-    end
-
-    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
-      if insert
-        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
-      else
-        x = right_edge - " NOR ".size
-        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
-      end
     end
 
     private def paint_read_chrome(screen : Screen, rect : Rect, ed : TextArea, focused : Bool) : Nil

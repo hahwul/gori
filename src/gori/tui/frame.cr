@@ -140,6 +140,53 @@ module Gori::Tui
       x
     end
 
+    # READ/INS mode chip on an editor pane's top border (Repeater REQUEST, Decoder INPUT,
+    # Notes, …). NOR advertises ↵ (and i) as the way into insert; INS is a plain lit label
+    # (esc exits — already in the status strip). Clickable via `mode_badge_hit`. Returns
+    # the badge's left x for chaining, or `right_edge` when it doesn't fit.
+    def self.mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
+                        insert : Bool) : Int32
+      text = mode_badge_label(insert)
+      x = right_edge - text.size
+      return right_edge if x < min_x
+      if insert
+        screen.text(x, y, text, Theme.text_bright, Theme.accent_bg)
+      else
+        screen.text(x, y, text, Theme.muted, Theme.bg)
+      end
+      x
+    end
+
+    # Label drawn by `mode_badge` / measured by `mode_badge_hit`. Keep geometry in one place.
+    def self.mode_badge_label(insert : Bool) : String
+      insert ? " INS " : " ↵:NOR "
+    end
+
+    # Hit-test for a single `mode_badge` at the same geometry as draw. Miss → false.
+    def self.mode_badge_hit(mx : Int32, my : Int32, y : Int32, right_edge : Int32,
+                            min_x : Int32, insert : Bool) : Bool
+      return false if my != y
+      text = mode_badge_label(insert)
+      x = right_edge - text.size
+      return false if x < min_x
+      mx >= x && mx < x + text.size
+    end
+
+    # Left edge after a right-chained `toggle_badge`/`action_badge` run — the right_edge
+    # to pass the next (leftward) badge, including `mode_badge`. Same skip-past-min_x rule
+    # as draw/hit. Pure geometry for chrome hit-tests that need to chain mode after others.
+    def self.right_badge_edge(right_edge : Int32, min_x : Int32,
+                              badges : Array({Symbol, String, String})) : Int32
+      edge = right_edge
+      badges.each do |(_, chord, name)|
+        text = " #{chord}:#{name} "
+        x = edge - text.size
+        break if x < min_x
+        edge = x
+      end
+      edge
+    end
+
     # The one PRIMARY-action badge on a pane's top border — the button that actually fires
     # the request: Repeater's ` ^R:SEND `, Fuzzer's ` ^R:RUN `. Geometry + text are identical
     # to `toggle_badge` (same " chord:NAME " string), so a click still hit-tests through

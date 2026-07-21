@@ -521,13 +521,32 @@ module Gori::Tui
         end
         return true
       end
-      # The TEMPLATE border's ^R:RUN badge — the primary action, clickable like a button
-      # (mirrors the Repeater's ^R:SEND). Consumes the click (no caret move / focus race).
-      if v.template_chrome_hit(body, mx, my) == :run
+      # TEMPLATE border chrome (^R:RUN / PRETTY / NOR·INS) and TARGET NOR/INS.
+      if chip = v.template_chrome_hit(body, mx, my)
         save_current
         @host.focus_body
         v.focus_pane(:template)
-        fuzz_run
+        case chip
+        when :run    then fuzz_run
+        when :pretty then fuzz_pretty_template
+        when :mode
+          if v.template_insert?
+            v.exit_template_insert!
+          else
+            v.enter_template_insert!
+          end
+        end
+        return true
+      end
+      if v.target_chrome_hit(body, mx, my) == :mode
+        save_current
+        @host.focus_body
+        v.focus_pane(:target)
+        if v.target_insert?
+          v.exit_target_insert!
+        else
+          v.enter_target_insert!
+        end
         return true
       end
       return true unless pane = v.pane_at(body, mx, my)

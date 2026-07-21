@@ -555,6 +555,20 @@ module Gori::Tui
       when :send
         view.focus_pane(:request)
         repeater_send
+      when :mode
+        view.focus_pane(:request)
+        if view.request_insert?
+          view.exit_request_insert!
+        else
+          view.enter_request_insert!
+        end
+      when :target_mode
+        view.focus_pane(:target)
+        if view.target_insert?
+          view.exit_target_insert!
+        else
+          view.enter_target_insert!
+        end
       end
     end
 

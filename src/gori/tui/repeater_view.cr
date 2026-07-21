@@ -1570,6 +1570,12 @@ module Gori::Tui
     def chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded && rect.contains?(mx, my)
       target_h = {rect.h, target_card_h}.min
+      # TARGET NOR/INS chip (top band) — click toggles insert like ↵/esc.
+      if my == rect.y && target_h >= 2
+        if Frame.mode_badge_hit(mx, my, rect.y, rect.right - 1, rect.x + 8, target_insert?)
+          return :target_mode
+        end
+      end
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
       return nil if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
@@ -1590,7 +1596,8 @@ module Gori::Tui
       end
 
       # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/PRETTY (or
-      # HEX) when drawn. Decode / CHAIN splits keep chrome on the top card.
+      # HEX) when drawn; NOR/INS mode chip chains left of those. Decode / CHAIN splits
+      # keep chrome on the top card. WS/gRPC skip the mode chip (no render_mode_badge).
       req_card = (@decode_kind || @ws_mode) ? decode_split(left)[0] : left
       if req_card.w >= 2 && my == req_card.y
         label = render_request_label
@@ -1613,6 +1620,13 @@ module Gori::Tui
         end
         if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
           return hit
+        end
+        # Mode chip only drawn for plain HTTP request (not WS / gRPC / hex-edit).
+        unless @ws_mode || @grpc_mode || @req_hex_edit
+          mode_edge = Frame.right_badge_edge(right_edge, min_x, badges)
+          if Frame.mode_badge_hit(mx, my, req_card.y, mode_edge, min_x, request_insert?)
+            return :mode
+          end
         end
       end
       nil
@@ -2379,20 +2393,11 @@ module Gori::Tui
       insert ? Theme.accent : Theme.focus_gold
     end
 
-    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
-      if insert
-        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
-      else
-        x = right_edge - " NOR ".size
-        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
-      end
-    end
-
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
       ins = focused && target_insert?
       Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
-      render_mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
+      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
       # An at-a-glance SNI marker on the top border (right of the title) whenever an
       # override is set, so a custom SNI is visible even before the row is reached.
       unless @sni.strip.empty?
@@ -2504,7 +2509,7 @@ module Gori::Tui
       end
       cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
       mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^U", "PRETTY", false)
-      render_mode_badge(screen, mode_x, rect.y, min_x, ins)
+      Frame.mode_badge(screen, mode_x, rect.y, min_x, ins)
       update_request_marker_tint
       inner = rect.inset(1, 1)
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)

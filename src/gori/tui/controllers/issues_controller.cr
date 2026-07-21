@@ -75,6 +75,17 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1)
       if @issues.detail_open?
+        card = @issues.notes_card_rect(inner)
+        # NOR/INS chip on the NOTES card border toggles insert (same as ↵ / esc).
+        if !card.empty? && Frame.mode_badge_hit(mx, my, card.y, card.right - 1, card.x + 7,
+             @issues.notes_insert_mode?)
+          if @issues.notes_insert_mode?
+            @issues.exit_notes_insert!
+          else
+            @issues.enter_notes_insert!
+          end
+          return true
+        end
         notes_rect = @issues.notes_body_rect(inner)
         if !notes_rect.empty? && mx >= notes_rect.x && mx < notes_rect.right &&
            my >= notes_rect.y && my < notes_rect.bottom
