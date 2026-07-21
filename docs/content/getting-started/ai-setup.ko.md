@@ -36,16 +36,26 @@ gori mcp --install-grok          # Grok
 
 **체크포인트.** 클라이언트가 gori의 도구들(`list_history`, `send_request`, `project_info` 등)을 나열합니다. 나타나지 않으면 클라이언트를 재시작했는지, 그리고 `gori`가 클라이언트가 사용하는 `PATH`에 있는지 확인하세요.
 
-## 2. 올바른 프로젝트 고정하기 {#2-pin-the-right-project}
+## 2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-pin-the-right-project}
 
-각 gori 프로젝트는 별도의 데이터베이스이므로, 에이전트가 올바른 것을 제공해야 합니다. 선택자가 없으면 gori는 가장 가까운 Git 워크스페이스를 격리된 프로젝트에 path-bind 합니다. Git 워크스페이스 밖에서 시작하면 무관한 프로젝트를 제공하는 대신 오류를 내며 멈춥니다. 클라이언트가 고정된 디렉터리에서 MCP 서버를 시작한다면, 설치할 때 프로젝트를 고정하세요.
+각 gori 프로젝트는 별도의 데이터베이스입니다. 설치 후 `gori mcp`는 항상 연결됩니다.
+
+| 클라이언트가 MCP를 띄우는 방식 | 동작 |
+|-------------------------------|------|
+| Git 리포지토리 안 | 그 워크스페이스를 자체 gori 프로젝트에 path-bind |
+| Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작 — 핸드셰이크 성공; 에이전트가 트래픽 도구 전에 `list_projects` / `create_project` / `switch_project` 호출 |
+| `--project` / `--db`로 설치 | 첫 도구 호출부터 그 프로젝트 제공 |
+
+에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열·생성(unbound일 때 create는 자동 바인딩)하거나 switch 한 뒤, bound일 때 이름·DB 경로·선택 출처를 확인한 다음 데이터를 건드리게 합니다.
+
+설치 시점에 고정 engagement를 박아 두려면:
 
 ```bash
 gori mcp --project my-engagement --install-codex     # 이름 붙은 프로젝트의 데이터베이스
 gori mcp --db /path/to/project.db --install-claude-code   # 특정 데이터베이스 파일
 ```
 
-그런 다음 에이전트가 먼저 `project_info`를 호출하게 하세요. 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 그리고 선택이 이루어진 방식을 보고하므로, 에이전트가 무언가를 건드리기 전에 올바른 데이터를 보고 있는지 확인합니다. 전체 선택 규칙은 [프로젝트 선택](/ko/guide/mcp/#choosing-a-project)에 있습니다.
+전체 선택 규칙은 [프로젝트 선택](/ko/guide/mcp/#choosing-a-project)에 있습니다.
 
 ## 3. 읽기 전용으로 안전하게 넘기기 {#3-hand-off-safely-with-read-only}
 

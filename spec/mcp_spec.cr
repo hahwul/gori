@@ -1086,6 +1086,7 @@ describe Gori::MCP::Server do
         info = tool_payload(response)
         info["flows"].as_i.should eq(0)
         info["read_only"].as_bool.should be_false
+        info["bound"].as_bool.should be_true
         # Modern MCP clients get parsed data directly; content[0].text remains
         # for backward compatibility.
         response["result"]["structuredContent"]["project"].as_s.should eq("demo")
@@ -1738,9 +1739,10 @@ describe "Gori::MCP::Tools project lifecycle" do
     store = Gori::Store.open(cur_db)
     tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: cur_db)
     begin
-      # create two projects
+      # create two projects (already bound → create does NOT auto-switch)
       doomed = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Doomed","description":"scratch"}))).text)
       doomed["created"].as_bool.should be_true
+      doomed["switched"]?.try(&.as_bool?).should be_false
       doomed_slug = doomed["slug"].as_s
       alt = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Alt"}))).text)["slug"].as_s
 
@@ -1783,5 +1785,100 @@ describe "Gori::MCP::Tools project lifecycle" do
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(root)
     end
+  end
+end
+
+describe "Gori::MCP::Tools unbound mode" do
+  it "connects without a store, refuses traffic tools, and binds on create" do
+    root = File.tempname("gori-unbound")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
+      selection_source: "unbound")
+    begin
+      info = JSON.parse(tools.call("project_info", JSON.parse("{}")).text)
+      info["bound"].as_bool.should be_false
+      info["selection_source"].as_s.should eq("unbound")
+      info["note"]?.try(&.as_s?).should_not be_nil
+
+      hist = tools.call("list_history", JSON.parse("{}"))
+      hist.is_error.should be_true
+      hist.error_code.should eq("NO_PROJECT")
+
+      # pure tools work unbound
+      dec = tools.call("decode", JSON.parse(%({"input":"aGVsbG8=","spec":"base64-decode"})))
+      dec.is_error.should be_false
+
+      # create auto-binds when unbound
+      created = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"First"}))).text)
+      created["created"].as_bool.should be_true
+      created["switched"].as_bool.should be_true
+
+      info2 = JSON.parse(tools.call("project_info", JSON.parse("{}")).text)
+      info2["bound"].as_bool.should be_true
+      info2["project"].as_s.should eq("First")
+
+      hist2 = tools.call("list_history", JSON.parse("{}"))
+      hist2.is_error.should be_false
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "allows switch_project and create_project under read-only when unbound" do
+    root = File.tempname("gori-unbound-ro")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    # Seed a project via registry so switch has a target without using create.
+    reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+    seeded = reg.create("Seeded")
+    Gori::Store.open(seeded.db_path).close
+
+    tools = Gori::MCP::Tools.new(nil, allow_actions: false, verify_upstream: false,
+      selection_source: "unbound")
+    begin
+      send = tools.call("send_request", JSON.parse(%({"url":"http://example.test/"})))
+      send.is_error.should be_true
+      # unbound gate fires first for traffic tools that need a project
+      send.error_code.should eq("NO_PROJECT")
+
+      sw = JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"Seeded"}))).text)
+      sw["switched"].as_bool.should be_true
+
+      # after bind, send is still disabled by read-only
+      send2 = tools.call("send_request", JSON.parse(%({"url":"http://example.test/"})))
+      send2.is_error.should be_true
+      send2.error_code.should eq("TOOL_DISABLED")
+
+      # create under read-only is refused once bound
+      cr = tools.call("create_project", JSON.parse(%({"name":"Nope"})))
+      cr.is_error.should be_true
+      cr.error_code.should eq("TOOL_DISABLED")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "handshakes an unbound Server over stdio" do
+    input = IO::Memory.new(%({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+))
+    output = IO::Memory.new
+    Gori::MCP::Server.new(nil, allow_actions: true, verify_upstream: false,
+      selection_source: "unbound", input: input, output: output).run
+    lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
+    lines.size.should eq(2)
+    init = lines[0]["result"]
+    init["serverInfo"]["name"].as_s.should eq("gori")
+    init["instructions"].as_s.should match(/No project is bound/i)
+    names = lines[1]["result"]["tools"].as_a.map { |t| t["name"].as_s }
+    names.should contain("list_projects")
+    names.should contain("create_project")
+    names.should contain("switch_project")
+    names.should contain("list_history")
   end
 end

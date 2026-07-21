@@ -26,9 +26,11 @@ module Gori
       private def list_projects : Result
         reg = registry
         projects = reg.list
+        current = @db_path
         Result.new(JSON.build do |j|
           j.object do
-            j.field "current_db_path", @db_path
+            j.field "bound", !unbound?
+            j.field "current_db_path", current
             j.field "projects_root", Paths.projects_dir
             j.field("projects") do
               j.array do
@@ -39,7 +41,7 @@ module Gori
                     j.field "slug", reg.slug_of(p)
                     j.field "db_path", p.db_path
                     j.field "db_size", p.db_size
-                    j.field "current", p.db_path == @db_path
+                    j.field "current", !current.nil? && p.db_path == current
                     j.field "workspace", reg.workspace_of(p)
                     if lm = p.last_modified
                       j.field "last_modified", lm.to_unix
@@ -63,6 +65,16 @@ module Gori
         # Materialize the DB (create+migrate) so the project is immediately visible
         # to list_projects/switch_project even when no description was supplied.
         Store.open(proj.db_path).close unless File.exists?(proj.db_path)
+
+        # First-run UX: when the server has no project yet, bind immediately so the
+        # agent can use traffic tools without a separate switch_project call.
+        auto_bound = false
+        if unbound?
+          bind = bind_project(proj, reg, source: "create_project")
+          return bind if bind.is_error
+          auto_bound = true
+        end
+
         Result.new(JSON.build do |j|
           j.object do
             j.field "name", proj.name
@@ -70,6 +82,7 @@ module Gori
             j.field "slug", reg.slug_of(proj)
             j.field "db_path", proj.db_path
             j.field "created", !existed # false = reopened an existing same-name project
+            j.field "switched", auto_bound
           end
         end)
       rescue ex : Gori::Error
@@ -84,12 +97,21 @@ module Gori
         return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
         return busy("cannot switch project while a fuzz/mine job is running; stop it first") if jobs_running?
 
+        bind_project(proj, reg, source: "switch_project")
+      end
+
+      # Open *proj* as the server's store and update selection metadata.
+      # Closes a Tools-owned previous store; never closes a CLI-owned initial store
+      # unless Tools already took ownership via a prior switch.
+      private def bind_project(proj : Project, reg : ProjectRegistry, *, source : String) : Result
         new_store = begin
           Store.open(proj.db_path)
         rescue ex
           return err("could not open project database: #{ex.message}", "INTERNAL")
         end
-        @store.close if @owns_store # never close the caller-owned initial store
+        if @owns_store
+          @store.try(&.close)
+        end
         @store = new_store
         @owns_store = true
         @project_name = proj.name
@@ -97,8 +119,8 @@ module Gori
         @project_id = reg.id_of(proj)
         @db_path = proj.db_path
         @workspace_root = reg.workspace_of(proj)
-        @selection_source = "switch_project"
-        Env.load_project(@store)
+        @selection_source = source
+        Env.load_project(new_store)
         Result.new(JSON.build do |j|
           j.object do
             j.field "switched", true
@@ -106,8 +128,9 @@ module Gori
             j.field "project_slug", @project_slug
             j.field "project_id", @project_id
             j.field "db_path", @db_path
-            j.field "flows", @store.count
-            j.field "issues", @store.count_issues
+            j.field "flows", new_store.count
+            j.field "issues", new_store.count_issues
+            j.field "selection_source", source
           end
         end)
       end

@@ -55,7 +55,7 @@ describe Gori::MCP::ProjectResolver do
       before_open = Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: workspace,
         env_db: nil, env_project: nil)
       before_open.db_path.should eq(first.db_path)
-      store = Gori::Store.open(first.db_path)
+      store = Gori::Store.open(first.db_path.not_nil!)
       store.close
 
       second = Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: workspace,
@@ -90,7 +90,7 @@ describe Gori::MCP::ProjectResolver do
 
       first = Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: first_root,
         env_db: nil, env_project: nil)
-      store = Gori::Store.open(first.db_path)
+      store = Gori::Store.open(first.db_path.not_nil!)
       store.close
       second = Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: second_root,
         env_db: nil, env_project: nil)
@@ -131,14 +131,43 @@ describe Gori::MCP::ProjectResolver do
     end
   end
 
-  it "fails closed outside a workspace instead of leaking the MRU project" do
+  it "starts unbound outside a workspace instead of leaking the MRU project" do
     with_isolated_gori_home do |base|
+      Gori::Paths.ensure_dirs
+      registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      mru = registry.create("mru engagement")
+      store = Gori::Store.open(mru.db_path)
+      store.close
+      Gori::Paths.write_active_project(mru.db_path)
+
       plain_dir = File.join(base, "not-a-repository")
       Dir.mkdir_p(plain_dir)
-      expect_raises(Gori::MCP::ProjectResolver::Error, /cannot infer a project/) do
-        Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: plain_dir,
-          env_db: nil, env_project: nil)
-      end
+      selected = Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: plain_dir,
+        env_db: nil, env_project: nil)
+      selected.bound?.should be_false
+      selected.db_path.should be_nil
+      selected.source.should eq("unbound")
+      selected.db_path.should_not eq(mru.db_path)
+    end
+  end
+
+  it "still serves the active TUI project when --use-active-project is opted in" do
+    with_isolated_gori_home do |base|
+      Gori::Paths.ensure_dirs
+      registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      active = registry.create("active engagement")
+      store = Gori::Store.open(active.db_path)
+      store.close
+      Gori::Paths.write_active_project(active.db_path)
+      plain_dir = File.join(base, "not-a-repository")
+      Dir.mkdir_p(plain_dir)
+
+      selected = Gori::MCP::ProjectResolver.resolve(nil, nil, cwd: plain_dir,
+        workspace_project: false, allow_active_fallback: true,
+        env_db: nil, env_project: nil)
+      selected.bound?.should be_true
+      selected.db_path.should eq(active.db_path)
+      selected.source.should eq("active-tui")
     end
   end
 end

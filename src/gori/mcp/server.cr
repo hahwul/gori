@@ -27,7 +27,7 @@ module Gori
 
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
-      def initialize(@store : Store, *, allow_actions : Bool, verify_upstream : Bool,
+      def initialize(@store : Store? = nil, *, allow_actions : Bool, verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
@@ -130,7 +130,12 @@ module Gori
       # exposes — in particular whether the (otherwise simply absent) action tools are
       # disabled by read-only mode, rather than discovering it only on a rejected call.
       private def instructions_text : String
-        selected = if @project_name || @project_slug
+        selected = if @store.nil?
+                     " No project is bound yet. Call list_projects to see available projects, " \
+                     "create_project to make one (auto-binds when unbound), or switch_project " \
+                     "before using traffic tools (list_history, send_request, …). Pure tools " \
+                     "(decode, jwt_*, ql_reference) work immediately."
+                   elsif @project_name || @project_slug
                      " This server is pinned to project #{@project_name || @project_slug}#{" [#{@project_slug}]" if @project_slug}" \
                      " via #{@selection_source || "an explicit database"}#{" for workspace #{@workspace_root}" if @workspace_root}."
                    else
@@ -151,7 +156,8 @@ module Gori
           "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
         else
           "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, " \
-          "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them."
+          "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
+          "switch_project (and create_project when unbound) remain available so you can still pick a project to inspect."
         end
       end
 

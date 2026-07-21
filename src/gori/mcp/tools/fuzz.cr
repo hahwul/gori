@@ -101,7 +101,7 @@ module Gori
       private def record_fuzz_flow(request : Bytes, origin : Fuzz::Origin, http2 : Bool, r : Fuzz::Result) : Int64?
         head, body = split_wire_request(request)
         parsed = Proxy::Codec::Http1.parse_request_head(head)
-        fid = @store.insert_flow(Store::CapturedRequest.new(
+        fid = store.insert_flow(Store::CapturedRequest.new(
           created_at: Time.utc.to_unix_ms * 1000_i64,
           scheme: origin.scheme, host: origin.host, port: origin.port,
           method: parsed.method, target: parsed.target,
@@ -110,12 +110,12 @@ module Gori
         return nil if fid <= 0
         rhead = r.head
         if rhead && !rhead.empty? && (resp = (Proxy::Codec::Http1.parse_response_head(rhead) rescue nil))
-          @store.update_response(FlowMapper.response(resp, flow_id: fid, body: r.body,
+          store.update_response(FlowMapper.response(resp, flow_id: fid, body: r.body,
             duration_us: r.duration_us,
             state: r.error ? Store::FlowState::Error : Store::FlowState::Complete,
             error: r.error, body_size: r.body.try(&.size.to_i64)))
         else
-          @store.update_response(FlowMapper.error_response(fid, r.error || "no response recorded"))
+          store.update_response(FlowMapper.error_response(fid, r.error || "no response recorded"))
         end
         fid
       rescue ex
@@ -259,7 +259,7 @@ module Gori
           return {t, nil, false} unless t.strip.empty?
         end
         if id = int(h, "flow_id")
-          detail = @store.get_flow(id)
+          detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
           return {String.new(built.bytes).scrub, built.target, built.http2}

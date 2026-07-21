@@ -36,9 +36,10 @@ module Gori
     end
 
     # A tiny global marker holding the DB PATH of the project the interactive TUI last
-    # opened. Headless integrations use this only after an explicit opt-in (for MCP,
-    # `--use-active-project`); a source workspace must never silently inherit another
-    # repository's active project. Path (not name) avoids display-name/slug ambiguity.
+    # opened. Headless MCP uses this only after an explicit opt-in (`--use-active-project`);
+    # otherwise MCP outside a Git workspace starts unbound so the agent can list/create/
+    # switch. A source workspace must never silently inherit another repository's active
+    # project. Path (not name) avoids display-name/slug ambiguity.
     def self.active_project_file : String
       File.join(home_dir, "active_project")
     end

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- MCP: start **unbound** outside a Git workspace instead of aborting before the handshake, so `gori mcp --install-*` always connects; agents bind via `list_projects` / `create_project` (auto-binds when unbound) / `switch_project`. Traffic tools return `NO_PROJECT` until bound. Add `--no-project` to force unbound inside a workspace. Unbound never silently opens the active TUI/MRU project (still requires `--use-active-project`).
+
 ## v0.1.1
 
 - Fix wide-character/emoji rendering and caret placement in the TUI editors with a per-grapheme width model (#281, #285, #289, #291)

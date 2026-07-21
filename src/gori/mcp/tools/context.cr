@@ -10,7 +10,7 @@ module Gori
       private def list_scope : Result
         Result.new(JSON.build do |j|
           j.array do
-            @store.scope_rules.each do |(id, kind, match_type, pattern)|
+            store.scope_rules.each do |(id, kind, match_type, pattern)|
               j.object do
                 j.field "id", id
                 j.field "kind", kind
@@ -25,6 +25,7 @@ module Gori
       private def project_info : Result
         Result.new(JSON.build do |j|
           j.object do
+            j.field "bound", !unbound?
             j.field "project", @project_name
             j.field "project_slug", @project_slug
             j.field "project_id", @project_id
@@ -33,12 +34,16 @@ module Gori
             j.field "workspace_root", @workspace_root
             j.field "workspace_bound", !@workspace_root.nil?
             j.field "read_only", !@allow_actions
-            j.field "flows", @store.count
-            j.field "issues", @store.count_issues
-            j.field "total_bytes", @store.total_size
-            j.field "earliest_created_at", @store.earliest_created_at
-            if ea = @store.earliest_created_at
-              j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+            if s = @store
+              j.field "flows", s.count
+              j.field "issues", s.count_issues
+              j.field "total_bytes", s.total_size
+              j.field "earliest_created_at", s.earliest_created_at
+              if ea = s.earliest_created_at
+                j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+              end
+            else
+              j.field "note", "No project bound. Call list_projects, create_project, or switch_project before traffic tools."
             end
           end
         end)
@@ -50,7 +55,7 @@ module Gori
       # age_seconds (there is no live-TUI heartbeat), not a name comparison that would skew on
       # display-name-vs-slug.
       private def get_current_context : Result
-        raw = @store.setting(Store::UI_STATE_KEY)
+        raw = store.setting(Store::UI_STATE_KEY)
         parsed = raw.try do |r|
           begin
             obj = JSON.parse(r)
@@ -117,7 +122,7 @@ module Gori
         query_str = str(h, "query").try(&.strip)
         query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
 
-        all_repeaters = @store.repeaters_mcp
+        all_repeaters = store.repeaters_mcp
         if repeater_id && !all_repeaters.any? { |r| r.id == repeater_id }
           return not_found("no repeater with id #{repeater_id}")
         end
@@ -193,7 +198,7 @@ module Gori
 
       private def emit_repeater_sessions(j : JSON::Builder, include_content : Bool = false,
                                          include_sensitive : Bool = false) : Nil
-        @store.repeaters_mcp.each do |r|
+        store.repeaters_mcp.each do |r|
           emit_repeater_session(j, r, include_content, include_sensitive)
         end
       end
@@ -213,7 +218,7 @@ module Gori
           emit_capped_text(j, "request", Serialize.redact_head(r.request, include_sensitive)) if include_content
 
           if Repeater::WsEngine.upgrade_request?(r.request)
-            ws_msgs = @store.ws_messages_for_repeater(r.id)
+            ws_msgs = store.ws_messages_for_repeater(r.id)
             j.field "ws_mode", true
             j.field "ws_message_count", ws_msgs.size
             j.field "ws_messages" do
@@ -276,7 +281,7 @@ module Gori
       end
 
       private def parse_ui_state : JSON::Any?
-        @store.setting(Store::UI_STATE_KEY).try do |r|
+        store.setting(Store::UI_STATE_KEY).try do |r|
           begin
             obj = JSON.parse(r)
             obj if obj.as_h?

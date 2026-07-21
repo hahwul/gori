@@ -11,11 +11,11 @@ module Gori
         req_lim = int(h, "limit")
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, 100, 500)
-        all = @store.issues
+        all = store.issues
         page = all[offset, limit]? || [] of Store::Issue
         Result.new(JSON.build do |j|
           j.object do
-            j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, @store) } } }
+            j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, store) } } }
             j.field "returned", page.size
             j.field "offset", offset
             j.field "limit", limit
@@ -29,9 +29,9 @@ module Gori
       private def get_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        f = @store.get_issue(id)
+        f = store.get_issue(id)
         return not_found("no issue with id #{id}") unless f
-        Result.new(JSON.build { |j| Serialize.issue(j, f, @store) })
+        Result.new(JSON.build { |j| Serialize.issue(j, f, store) })
       end
 
       private def create_issue(h) : Result
@@ -55,18 +55,18 @@ module Gori
         return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) if repeater_id.nil? && present?(h, "repeater_id")
-        if repeater_id && !@store.get_repeater(repeater_id)
+        if repeater_id && !store.get_repeater(repeater_id)
           return not_found("no repeater with id #{repeater_id}")
         end
 
         host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
-        id = @store.insert_issue(masked_title, severity, host, flow_id)
+        id = store.insert_issue(masked_title, severity, host, flow_id)
         # insert_issue returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
         return busy("failed to persist issue (store busy or unwritable)") if id == 0
         if repeater_id
-          @store.add_link(Store::LinkOwnerKind::Issue, id,
+          store.add_link(Store::LinkOwnerKind::Issue, id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
         Result.new(JSON.build do |j|
@@ -80,7 +80,7 @@ module Gori
       private def update_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        return not_found("no issue with id #{id}") unless @store.get_issue(id)
+        return not_found("no issue with id #{id}") unless store.get_issue(id)
         # A blank severity/status means "leave unchanged"; only a present,
         # non-blank, unrecognised value is an error.
         sev_s = str(h, "severity")
@@ -99,7 +99,7 @@ module Gori
         status = status_from(stat_s)
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) if repeater_id.nil? && present?(h, "repeater_id")
-        if repeater_id && !@store.get_repeater(repeater_id)
+        if repeater_id && !store.get_repeater(repeater_id)
           return not_found("no repeater with id #{repeater_id}")
         end
 
@@ -111,10 +111,10 @@ module Gori
         end
 
         unless title.nil? && severity.nil? && notes.nil? && status.nil?
-          @store.update_issue(id, title: title, severity: severity, notes: notes, status: status)
+          store.update_issue(id, title: title, severity: severity, notes: notes, status: status)
         end
         if repeater_id
-          @store.add_link(Store::LinkOwnerKind::Issue, id,
+          store.add_link(Store::LinkOwnerKind::Issue, id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
         Result.new(JSON.build do |j|

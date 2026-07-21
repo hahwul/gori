@@ -433,8 +433,9 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--db=PATH` | Serve this database (overrides `--project`) |
 | `--project=NAME` | Serve a named project's database |
 | `--use-active-project` | Ignore Git-workspace selection and explicitly serve the active TUI/MRU project |
+| `--no-project` | Start unbound even inside a Git workspace (agent picks via list/create/switch) |
 | `--insecure-upstream` | `send_request`: skip upstream TLS verification |
-| `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine) |
+| `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine); `switch_project` (and `create_project` when unbound) stay available |
 | `--install-claude` | Write Claude Desktop `mcpServers` config |
 | `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry |
 | `--install-codex` | Write OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` |

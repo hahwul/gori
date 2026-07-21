@@ -433,8 +433,9 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--db=PATH` | 이 데이터베이스를 제공 (`--project`보다 우선) |
 | `--project=NAME` | 이름이 지정된 프로젝트의 데이터베이스 제공 |
 | `--use-active-project` | Git 워크스페이스 선택을 무시하고 활성 TUI/MRU 프로젝트를 명시적으로 제공 |
+| `--no-project` | Git 워크스페이스 안에서도 unbound로 시작 (에이전트가 list/create/switch로 선택) |
 | `--insecure-upstream` | `send_request`: 업스트림 TLS 검증 생략 |
-| `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine) |
+| `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine); `switch_project`(및 unbound 시 `create_project`)는 유지 |
 | `--install-claude` | Claude Desktop `mcpServers` 설정 기록 |
 | `--install-claude-code` | Claude Code `~/.claude.json` `mcpServers` 항목 기록 |
 | `--install-codex` | OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` 기록 |

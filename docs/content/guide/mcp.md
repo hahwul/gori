@@ -38,11 +38,14 @@ cd /path/to/my-repository && gori mcp # path-binds this Git workspace to its own
 gori mcp --project my-engagement   # serve a named project's database
 gori mcp --db /path/to/project.db  # serve a specific database file
 gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
+gori mcp --no-project              # force unbound even inside a Git workspace
 ```
 
-With no explicit selector, gori discovers the nearest Git root and binds its canonical path to an isolated project. The binding prevents two repositories with the same directory name from sharing a database. If the process is outside a Git workspace, gori fails closed instead of silently serving an unrelated active project; pass `--project`, `--db`, `GORI_MCP_PROJECT`, `GORI_MCP_DB`, or the explicit `--use-active-project` opt-in.
+With no explicit selector, gori discovers the nearest Git root and binds its canonical path to an isolated project. The binding prevents two repositories with the same directory name from sharing a database.
 
-Call `project_info` before using data. It reports the selected project, database path, workspace root, and selection source.
+**Outside a Git workspace** (the common case when an AI client spawns MCP from a home or app directory), the server starts **unbound**: the MCP handshake and tool list succeed immediately, but traffic tools (`list_history`, `send_request`, …) return `NO_PROJECT` until the agent calls `list_projects`, `create_project` (auto-binds when unbound), or `switch_project`. Unbound mode never silently opens the active TUI or MRU project — that requires the explicit `--use-active-project` opt-in (or `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`).
+
+Call `project_info` before using data. It reports `bound`, the selected project, database path, workspace root, and selection source.
 
 ## Read-Only Mode
 
@@ -72,7 +75,7 @@ gori mcp --install-grok
 
 Codex and Grok use TOML with an `[mcp_servers.gori]` table (not JSON). Restart the client (or re-open the session) after installing so it reloads MCP servers.
 
-If a client starts MCP outside your repository directory, pin the installation to a project, for example `gori mcp --project my-engagement --install-codex`.
+If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 
 ## Tools
 

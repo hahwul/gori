@@ -5,7 +5,7 @@ module Gori
   module MCP
     class Tools
       private def list_notes : Result
-        doc = Notes.load(@store)
+        doc = Notes.load(store)
         Result.new(JSON.build do |j|
           j.object do
             j.field "cur", doc.cur
@@ -28,7 +28,7 @@ module Gori
       private def get_note(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        doc = Notes.load(@store)
+        doc = Notes.load(store)
         entry = doc.notes.find { |n| n.id == id }
         return not_found("no note with id #{id}") unless entry
         idx = doc.notes.index(entry).not_nil!
@@ -44,7 +44,7 @@ module Gori
 
       private def create_note(h) : Result
         text = str(h, "text") || ""
-        doc = Notes.load(@store)
+        doc = Notes.load(store)
         new_id = doc.next_id
         new_entry = Notes::NoteEntry.new(new_id, text)
         new_notes = doc.notes + [new_entry]
@@ -52,7 +52,7 @@ module Gori
         new_next_id = new_id + 1
 
         serialized = Notes.serialize(new_cur, new_notes, new_next_id)
-        @store.set_setting(Notes::DOCS_KEY, serialized)
+        store.set_setting(Notes::DOCS_KEY, serialized)
 
         Result.new(JSON.build do |j|
           j.object do
@@ -68,7 +68,7 @@ module Gori
         text = str(h, "text")
         return Result.new("missing 'text' parameter", is_error: true) unless text
 
-        doc = Notes.load(@store)
+        doc = Notes.load(store)
         entry_idx = doc.notes.index { |n| n.id == id }
         return not_found("no note with id #{id}") unless entry_idx
 
@@ -77,7 +77,7 @@ module Gori
         new_notes[entry_idx] = updated_entry
 
         serialized = Notes.serialize(doc.cur, new_notes, doc.next_id)
-        @store.set_setting(Notes::DOCS_KEY, serialized)
+        store.set_setting(Notes::DOCS_KEY, serialized)
 
         Result.new(JSON.build do |j|
           j.object do
@@ -91,7 +91,7 @@ module Gori
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
 
-        doc = Notes.load(@store)
+        doc = Notes.load(store)
         entry_idx = doc.notes.index { |n| n.id == id }
         return not_found("no note with id #{id}") unless entry_idx
 
@@ -100,7 +100,7 @@ module Gori
         new_cur = doc.cur.clamp(0, {new_notes.size - 1, 0}.max)
 
         serialized = Notes.serialize(new_cur, new_notes, doc.next_id)
-        @store.set_setting(Notes::DOCS_KEY, serialized)
+        store.set_setting(Notes::DOCS_KEY, serialized)
 
         Result.new(JSON.build do |j|
           j.object do

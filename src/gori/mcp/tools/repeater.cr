@@ -15,7 +15,7 @@ module Gori
         request = str(h, "request")
 
         if issue_id
-          issue = @store.get_issue(issue_id)
+          issue = store.get_issue(issue_id)
           return not_found("no issue with id #{issue_id}") unless issue
           if fid = issue.flow_id
             flow_id = fid
@@ -31,7 +31,7 @@ module Gori
         ws_messages_override = nil.as(Array(String)?)
 
         if flow_id
-          flow = @store.get_flow(flow_id)
+          flow = store.get_flow(flow_id)
           return not_found("no flow with id #{flow_id}") unless flow
 
           if target.nil? || target.empty?
@@ -55,7 +55,7 @@ module Gori
           end
 
           if flow.row.status == 101 && !present?(h, "ws_out_messages")
-            ws_messages_override = @store.ws_messages(flow_id).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }
+            ws_messages_override = store.ws_messages(flow_id).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }
           end
         end
 
@@ -67,7 +67,7 @@ module Gori
         position = int(h, "position")
         if position.nil?
           return Result.new(id_error(h, "position"), is_error: true) if present?(h, "position") # present but non-integer
-          position = @store.repeaters_meta.size.to_i64
+          position = store.repeaters_meta.size.to_i64
         elsif position < Int32::MIN || position > Int32::MAX
           return Result.new("'position' out of range", is_error: true)
         end
@@ -81,7 +81,7 @@ module Gori
         # WebSocket mode check
         is_ws = Repeater::WsEngine.upgrade_request?(masked_request)
 
-        id = @store.insert_repeater(
+        id = store.insert_repeater(
           target: masked_target,
           request: masked_request,
           http2: http2,
@@ -94,12 +94,12 @@ module Gori
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
 
         if issue_id
-          @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
+          store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, id)
         end
 
         if name && !name.empty?
-          @store.set_repeater_name(id, name)
+          store.set_repeater_name(id, name)
         end
 
         # WebSocket messages handling
@@ -116,7 +116,7 @@ module Gori
           end
 
           unless messages.empty?
-            @store.update_repeater_ws_messages(id, messages)
+            store.update_repeater_ws_messages(id, messages)
           end
         end
 
@@ -143,7 +143,7 @@ module Gori
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
 
-        existing = @store.get_repeater(id)
+        existing = store.get_repeater(id)
         return not_found("no repeater with id #{id}") unless existing
 
         target = str(h, "target") || existing.target
@@ -172,7 +172,7 @@ module Gori
         masked_sni = sni.try { |s| Env.mask_secrets(s) }
         name = present?(h, "name") ? str(h, "name").try { |n| Env.mask_secrets(n) } : existing.name
 
-        @store.update_repeater(
+        store.update_repeater(
           id: id,
           target: masked_target,
           request: masked_request,
@@ -182,7 +182,7 @@ module Gori
         )
 
         if present?(h, "name")
-          @store.set_repeater_name(id, name)
+          store.set_repeater_name(id, name)
         end
 
         # WebSocket messages handling
@@ -194,7 +194,7 @@ module Gori
             messages = str_val.split('\n').compact_map { |l| l.strip.empty? ? nil : l }
           end
 
-          @store.update_repeater_ws_messages(id, messages)
+          store.update_repeater_ws_messages(id, messages)
         end
 
         # Derive summary
@@ -219,10 +219,10 @@ module Gori
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
 
-        existing = @store.get_repeater(id)
+        existing = store.get_repeater(id)
         return not_found("no repeater with id #{id}") unless existing
 
-        @store.delete_repeater(id)
+        store.delete_repeater(id)
         Result.new(JSON.build { |j| j.object { j.field "success", true } })
       end
     end
