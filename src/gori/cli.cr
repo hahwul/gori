@@ -24,7 +24,7 @@ module Gori
   module CLI
     def self.run(argv : Array(String) = ARGV) : Nil
       # Global version (works before/after any subcommand or alone)
-      if argv.any? { |a| a == "-v" || a == "--version" }
+      if argv.any? { |a| a == "-v" || a == "-V" || a == "--version" }
         puts "gori #{VERSION}"
         return
       end
@@ -105,6 +105,7 @@ module Gori
         p.on("--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.on("-v", "--version", "Show version") { puts "gori #{VERSION}"; exit 0 }
+        p.on("-V", "Show version") { puts "gori #{VERSION}"; exit 0 }
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
         p.missing_option { |flag| abort "missing value for #{flag}" }
       end
