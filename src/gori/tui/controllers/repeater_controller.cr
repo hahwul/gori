@@ -40,12 +40,13 @@ module Gori::Tui
       @host.session.store.repeaters.each do |r|
         view = RepeaterView.new
         ws_msgs = nil.as(Array(String)?)
-        if Repeater::WsEngine.upgrade_request?(r.request)
+        request_text = String.new(r.request)
+        if Repeater::WsEngine.upgrade_request?(request_text)
           ws_msgs = @host.session.store.ws_messages_for_repeater(r.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
         end
-        view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
+        view.restore(r.target, request_text, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
           sni: r.sni || "", ws_messages: ws_msgs)
         view.name = r.name                       # custom sub-tab label survives reopen
@@ -875,7 +876,7 @@ module Gori::Tui
     private def persist_repeater_tab(tab : RepeaterTab) : Nil
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_repeater(id, v.target, v.request_text, v.http2?, v.auto_content_length?, v.sni_override)
+      @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?, v.sni_override)
       v.clear_dirty
     end
 
@@ -889,7 +890,7 @@ module Gori::Tui
       return unless resp = view.last_http_response
       head, body = resp
       rec = Store::RepeaterRecord.new(
-        tab.db_id || 0_i64, view.target, view.request_text, view.http2?, view.auto_content_length?,
+        tab.db_id || 0_i64, view.target, view.request_text.to_slice, view.http2?, view.auto_content_length?,
         tab.flow_id, 0, head, body, nil, 0_i64, view.name, view.sni_override)
       Probe.detail_from_repeater(rec)
     rescue
@@ -901,7 +902,7 @@ module Gori::Tui
                                     duration_us : Int64, flow_id : Int64?, view : RepeaterView) : Nil
       return if head.empty?
       rec = Store::RepeaterRecord.new(
-        repeater_id, view.target, view.request_text, view.http2?, view.auto_content_length?,
+        repeater_id, view.target, view.request_text.to_slice, view.http2?, view.auto_content_length?,
         flow_id, 0, head, body, nil, duration_us, view.name, view.sni_override)
       return unless detail = Probe.detail_from_repeater(rec)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id)
@@ -917,7 +918,7 @@ module Gori::Tui
       upgrade = view.ws_upgrade_bytes
       req_text = upgrade.empty? ? view.request_text : String.new(upgrade).scrub
       rec = Store::RepeaterRecord.new(
-        repeater_id, view.target, req_text, false, false,
+        repeater_id, view.target, req_text.to_slice, false, false,
         flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override)
       return unless detail = Probe.detail_from_repeater(rec)
       # Synthetic WsMessage rows (id unused by the rule; opcode 1 = text).
@@ -990,18 +991,19 @@ module Gori::Tui
         v = tab.view
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
-        next if v.request_side_matches?(row.target, row.request, row.http2?,
+        next if v.request_side_matches?(row.target, String.new(row.request), row.http2?,
                   row.auto_content_length?, row.sni)
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
         ws_msgs = nil.as(Array(String)?)
-        if Repeater::WsEngine.upgrade_request?(row.request)
+        row_request_text = String.new(row.request)
+        if Repeater::WsEngine.upgrade_request?(row_request_text)
           ws_msgs = @host.session.store.ws_messages_for_repeater(row.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
         end
-        v.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
+        v.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs)
         seed_repeater_original(v, row.flow_id) # baseline may need re-seed if it was empty
       end
@@ -1011,12 +1013,13 @@ module Gori::Tui
         next if local_ids.includes?(row.id)
         view = RepeaterView.new
         ws_msgs = nil.as(Array(String)?)
-        if Repeater::WsEngine.upgrade_request?(row.request)
+        row_request_text = String.new(row.request)
+        if Repeater::WsEngine.upgrade_request?(row_request_text)
           ws_msgs = @host.session.store.ws_messages_for_repeater(row.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
         end
-        view.restore(row.target, row.request, row.http2?, row.auto_content_length?,
+        view.restore(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs)
         seed_repeater_original(view, row.flow_id)
         @repeaters << RepeaterTab.new(view, row.flow_id, row.id)
@@ -1144,7 +1147,7 @@ module Gori::Tui
     # Insert a freshly-opened repeater tab into the store so it has a stable row id (the
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_repeater(view : RepeaterView, flow_id : Int64?) : Int64?
-      id = @host.session.store.insert_repeater(view.target, view.request_text, view.http2?,
+      id = @host.session.store.insert_repeater(view.target, view.request_text.to_slice, view.http2?,
         view.auto_content_length?, flow_id, @repeaters.size, view.sni_override)
       id == 0 ? nil : id
     end
@@ -1376,12 +1379,12 @@ module Gori::Tui
         # Persist the RAW handshake text (request_text = the editor's `$KEY` tokens, LF),
         # NOT ws_upgrade_bytes (env-expanded + CRLF): baking the expanded form in would
         # write secrets to the DB and defeat the reconcile guard (which compares LF text).
-        @host.session.store.update_repeater(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
+        @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
           v.sni_override)
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
         @host.session.store.update_repeater_ws_messages(id, v.ws_out_texts_raw)
       else
-        @host.session.store.update_repeater(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
+        @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
           v.sni_override)
       end
       v.clear_dirty

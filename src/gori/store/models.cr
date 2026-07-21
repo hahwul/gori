@@ -417,7 +417,7 @@ module Gori
     struct RepeaterRecord
       getter id : Int64
       getter target : String
-      getter request : String
+      getter request : Bytes
       getter? http2 : Bool
       getter? auto_content_length : Bool
       getter flow_id : Int64?

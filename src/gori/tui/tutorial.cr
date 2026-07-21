@@ -41,8 +41,8 @@ module Gori::Tui
     CONTENT_ROWS = 15
     MIN_CARD_H   = 12 # below this the card can't hold a legible mock → "too small"
     CARD_W       = 78
-    HEADER_ROWS  = 2  # brand + progress rail
-    FOOTER_ROWS  = 2  # hint + Prev/Next buttons
+    HEADER_ROWS  =  2 # brand + progress rail
+    FOOTER_ROWS  =  2 # hint + Prev/Next buttons
 
     # Fake palette rows used by the palette lesson + practice overlay.
     PALETTE_ROWS = [
@@ -253,7 +253,14 @@ module Gori::Tui
         @tried_nav = true if @step.navigate?
         return
       end
-      @running = false
+      # Esc only fully exits the tour on the two steps whose footer hint actually
+      # documents it ("esc leave" — Welcome / Done). On every other step esc isn't
+      # (yet) the lesson's move: either the live mock has nothing to pop (not yet
+      # live, or already back at the tab bar), or the passive lesson never claimed
+      # esc at all — silently ending the WHOLE tour there would be a trap, so treat
+      # it as a safe no-op instead (n/b and the Prev/Next buttons remain the only
+      # way to move; progression is never blocked by this).
+      @running = false if @step.welcome? || @step.done?
     end
 
     private def live_shell? : Bool
@@ -457,9 +464,9 @@ module Gori::Tui
         if (row = rows[@pal_sel]?)
           # Mirror a couple of real "Go to …" actions so the palette feels alive.
           case row[1]
-          when "Go to Repeater"  then @p_tab = 1; mark_switch
-          when "Go to History" then @p_tab = 0; mark_switch
-          when "Open Help"     then @p_tab = 4; mark_switch
+          when "Go to Repeater" then @p_tab = 1; mark_switch
+          when "Go to History"  then @p_tab = 0; mark_switch
+          when "Open Help"      then @p_tab = 4; mark_switch
           end
         end
       end
@@ -798,8 +805,8 @@ module Gori::Tui
 
     private def next_btn_label : String
       case @step
-      when Step::Welcome              then " Start "
-      when Step::Done                 then " Finish "
+      when Step::Welcome then " Start "
+      when Step::Done    then " Finish "
       when Step::Practice
         practice_done? ? " Next " : " Skip "
       else " Next "

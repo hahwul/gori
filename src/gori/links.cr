@@ -49,7 +49,7 @@ module Gori
 
     private def self.resolve_repeater(store : Store, link : Store::EntityLink) : Resolved
       if rec = store.get_repeater(link.ref_id)
-        label = rec.name || first_line(rec.request) || "repeater ##{rec.id}"
+        label = rec.name || first_line(String.new(rec.request).scrub) || "repeater ##{rec.id}"
         Resolved.new(link, link.ref_kind.tag, label, rec.target)
       else
         Resolved.new(link, link.ref_kind.tag, "repeater ##{link.ref_id} (gone)", "repeater ##{link.ref_id}", stale: true)

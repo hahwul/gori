@@ -28,6 +28,15 @@ describe Gori::Env do
     Gori::Env.parse_line("bad-key x").should be_nil
   end
 
+  it "parse_line picks the space form when whitespace precedes the first '=' (value contains '=')" do
+    # e.g. `gori run project env set APIKEY dGVzdA==` — the space form's value may
+    # itself contain '=' (base64 padding); the FIRST separator to appear (the
+    # space) decides the syntax, not whether '=' appears anywhere in the string.
+    Gori::Env.parse_line("APIKEY dGVzdA==").should eq({"APIKEY", "dGVzdA=="})
+    # '=' still wins when it comes first (unchanged KEY=value behavior).
+    Gori::Env.parse_line("TOKEN=a=b c=d").should eq({"TOKEN", "a=b c=d"})
+  end
+
   it "token_regions marks known vs unknown" do
     Gori::Settings.env_vars = [{"HOST", "h"}]
     Gori::Settings.project_env_vars = [] of {String, String}
@@ -49,6 +58,55 @@ describe Gori::Env do
     String.new(Gori::Env.expand_wire(lf)).should eq(crlf)
   ensure
     Gori::Settings.env_prefix = "$"
+  end
+
+  it "expand passes invalid UTF-8 bytes through unchanged when there is no $ prefix at all" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [] of {String, String}
+    # 0x80 is a lone continuation byte; 0xE2 0x28 is a truncated/invalid 3-byte
+    # lead — neither is valid UTF-8. Old `expand` rebuilt via `String#chars` and
+    # silently replaced both with U+FFFD, growing the byte count.
+    bad = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43]
+    text = String.new(bad)
+    Gori::Env.expand(text).to_slice.should eq(bad)
+  ensure
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "expand substitutes a known $KEY while leaving invalid UTF-8 bytes elsewhere untouched" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [{"TOKEN", "secret"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    bad_body = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43]
+    raw = IO::Memory.new
+    raw << "Auth: $TOKEN\r\n"
+    raw.write(bad_body)
+    text = String.new(raw.to_slice)
+
+    result = Gori::Env.expand(text).to_slice
+    result[0, "Auth: secret\r\n".bytesize].should eq("Auth: secret\r\n".to_slice)
+    result[-bad_body.size, bad_body.size].should eq(bad_body)
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "expand_wire does not raise and still normalizes CRLF when the text has invalid UTF-8" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [] of {String, String}
+    bad = Bytes[0x47, 0x45, 0x54, 0x0A, 0x80, 0x0A] # "GET" LF <invalid> LF
+    text = String.new(bad)
+    Gori::Env.expand_wire(text).should eq(Bytes[0x47, 0x45, 0x54, 0x0D, 0x0A, 0x80, 0x0D, 0x0A])
+  ensure
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "mask_secrets passes invalid UTF-8 bytes through unchanged when nothing matches" do
+    vars = {"TOKEN" => "s3cr3tXY"}
+    bad = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43]
+    Gori::Env.mask_secrets(String.new(bad), vars, "$").to_slice.should eq(bad)
   end
 
   it "mask_secrets does not corrupt a token an earlier replacement inserted" do

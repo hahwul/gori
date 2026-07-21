@@ -1780,7 +1780,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
     with_store do |store|
       req = "GET /api HTTP/1.1\r\nHost: repeater.test\r\n\r\n"
       resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx/1.25\r\n\r\n"
-      id = store.insert_repeater("https://repeater.test", req, false, true, nil, 0)
+      id = store.insert_repeater("https://repeater.test", req.to_slice, false, true, nil, 0)
       store.update_repeater_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64)
       rec = store.get_repeater(id).not_nil!
       # get_repeater may not load response blobs — use full repeaters list
@@ -1810,7 +1810,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
             "Origin: https://evil.example\n"
       resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.example\r\n" \
              "Access-Control-Allow-Credentials: true\r\n\r\n"
-      id = store.insert_repeater("http://acme.test", req, false, false, nil, 0)
+      id = store.insert_repeater("http://acme.test", req.to_slice, false, false, nil, 0)
       store.update_repeater_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64)
       rec = store.repeaters.find!(&.id.== id)
       detail = Gori::Probe.detail_from_repeater(rec).not_nil!
@@ -1823,7 +1823,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
 
   it "skips Repeater tabs with no response head" do
     with_store do |store|
-      id = store.insert_repeater("https://empty.test", "GET / HTTP/1.1\r\nHost: empty.test\r\n\r\n",
+      id = store.insert_repeater("https://empty.test", "GET / HTTP/1.1\r\nHost: empty.test\r\n\r\n".to_slice,
         false, true, nil, 0)
       rec = store.repeaters_meta.find!(&.id.== id)
       Gori::Probe.detail_from_repeater(rec).should be_nil

@@ -7,7 +7,7 @@ module Gori
     # baseline schema; every later change to a released schema arrives as a NEW
     # entry appended to MIGRATIONS (never an edit to an existing one).
     module Schema
-      VERSION = 1
+      VERSION = MIGRATIONS.size
 
       V1 = [
         # ── Capture ──────────────────────────────────────────────────────────────
@@ -537,7 +537,27 @@ module Gori
         "CREATE INDEX idx_oast_callbacks_session ON oast_callbacks (session_id, id)",
       ]
 
-      MIGRATIONS = [V1]
+      # V2: `repeaters.request` was always written as a bound Crystal String — SQLite
+      # stores the exact bytes (sqlite3_bind_text takes an explicit byte count, not a
+      # NUL-terminated length), so no data was ever lost on write. But the crystal-sqlite3
+      # driver reads a TEXT-storage-class column via sqlite3_column_text + a single-arg
+      # `String.new(ptr)`, which stops at the first embedded NUL — so any repeater request
+      # containing a raw 0x00 byte (a binary body, or a hex-edited byte) silently truncated
+      # on every read after the one write, corrupting/emptying the request in Repeater.
+      #
+      # `CAST(x AS BLOB)` reinterprets a TEXT value's existing bytes as-is (no reparse, no
+      # NUL truncation — verified against the actual crystal-sqlite3 driver: a 31-byte value
+      # with two embedded NULs round-trips byte-for-byte after this UPDATE, vs. truncating to
+      # 5 bytes before it). This is a data-only migration — no column type change, since
+      # SQLite's TEXT affinity never coerces a BLOB-storage-class value back to TEXT, so the
+      # fix holds permanently once `insert_repeater`/`update_repeater` bind `Bytes` instead
+      # of `String` (see Store#insert_repeater). Recovers EXISTING users' truncation-prone
+      # rows losslessly; a no-op for rows that never contained a NUL.
+      V2 = [
+        "UPDATE repeaters SET request = CAST(request AS BLOB)",
+      ]
+
+      MIGRATIONS = [V1, V2]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

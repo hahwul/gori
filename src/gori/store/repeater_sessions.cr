@@ -18,7 +18,7 @@ module Gori
       @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
             tags: rs.read(String?))
@@ -35,7 +35,7 @@ module Gori
         "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, name FROM repeaters WHERE id = ?",
         id) do |rs|
         return RepeaterRecord.new(
-          rs.read(Int64), rs.read(String), rs.read(String),
+          rs.read(Int64), rs.read(String), rs.read(Bytes),
           rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
           sni: rs.read(String?), name: rs.read(String?)) if rs.move_next
       end
@@ -52,7 +52,7 @@ module Gori
         "FROM repeaters WHERE id = ?", id) do |rs|
         if rs.move_next
           return RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
             tags: rs.read(String?))
@@ -66,7 +66,7 @@ module Gori
       @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             sni: rs.read(String?))
         end
@@ -83,7 +83,7 @@ module Gori
         "name, response_head, response_error, response_duration_us FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             sni: rs.read(String?), name: rs.read(String?),
             response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?))
@@ -94,7 +94,7 @@ module Gori
 
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
-    def insert_repeater(target : String, request : String, http2 : Bool,
+    def insert_repeater(target : String, request : Bytes, http2 : Bool,
                         auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil) : Int64
       ts = now_us
       exec_task ->(c : DB::Connection) {
@@ -104,7 +104,7 @@ module Gori
       }
     end
 
-    def update_repeater(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool,
+    def update_repeater(id : Int64, target : String, request : Bytes, http2 : Bool, auto_cl : Bool,
                         sni : String? = nil) : Nil
       exec_task ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, updated_at = ? WHERE id = ?",

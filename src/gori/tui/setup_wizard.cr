@@ -536,17 +536,18 @@ module Gori::Tui
       y = box.y + 2
       screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
       y += 2
-      recap(screen, box, ix, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
-      recap(screen, box, ix, y, "Theme", @theme_name); y += 2
+      recap_labels = ["Proxy (global)", "Theme"]
+      vx = ix + recap_labels.max_of(&.size) + 2 # +2 = min visible gap before the value column
+      recap(screen, box, ix, vx, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
+      recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 2
       screen.text(ix, y, "New to gori? Take a quick tour of the TUI:", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
       y += 1
       render_offer_row(screen, box, y, "Take the guided tour", @offer == :tour); y += 1
       render_offer_row(screen, box, y, "Skip — finish setup", @offer == :skip)
     end
 
-    private def recap(screen : Screen, box : Rect, ix : Int32, y : Int32, key : String, value : String) : Nil
+    private def recap(screen : Screen, box : Rect, ix : Int32, vx : Int32, y : Int32, key : String, value : String) : Nil
       screen.text(ix, y, key, Theme.muted, Theme.panel)
-      vx = ix + 14
       screen.text(vx, y, value, Theme.text_bright, Theme.panel, width: {box.right - vx - 1, 1}.max)
     end
 

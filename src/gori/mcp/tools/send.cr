@@ -137,7 +137,7 @@ module Gori
         masked_req = Env.mask_secrets(String.new(built.bytes))
         repeater_id = store.insert_repeater(
           target: masked_target,
-          request: masked_req,
+          request: masked_req.to_slice,
           http2: http2,
           auto_cl: true,
           flow_id: flow_id,
@@ -270,7 +270,8 @@ module Gori
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
         repeater = store.get_repeater(repeater_id)
         return not_found("no repeater with id #{repeater_id}") unless repeater
-        unless Repeater::WsEngine.upgrade_request?(repeater.request)
+        repeater_request_text = String.new(repeater.request)
+        unless Repeater::WsEngine.upgrade_request?(repeater_request_text)
           return Result.new("repeater #{repeater_id} is not a WebSocket upgrade request", is_error: true)
         end
 
@@ -314,7 +315,7 @@ module Gori
             Store::LinkRefKind::Repeater, repeater_id)
         end
         verify = @verify_upstream && !(bool(h, "insecure") || false)
-        request = Env.expand_wire(repeater.request)
+        request = Env.expand_wire(repeater_request_text)
         sni = repeater.sni.try { |value| Env.expand(value) }
         result = Repeater::WsEngine.send(request, out_messages,
           scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle)
@@ -381,10 +382,11 @@ module Gori
           raise Gori::Error.new(id_error(h, "repeater_id")) unless id
           rec = store.get_repeater(id)
           raise Gori::Error.new("no repeater with id #{id}") unless rec
-          if Repeater::WsEngine.upgrade_request?(rec.request)
+          rec_request_text = String.new(rec.request)
+          if Repeater::WsEngine.upgrade_request?(rec_request_text)
             raise Gori::Error.new("repeater #{id} is a WebSocket upgrade — use send_websocket")
           end
-          expanded = Env.expand_wire(rec.request)
+          expanded = Env.expand_wire(rec_request_text)
           # Respect the repeater's auto-Content-Length setting (the TUI Repeater does):
           # only recompute CL when it's on, so a deliberately hand-set CL is preserved.
           bytes = rec.auto_content_length? ? Repeater::FlowRequest.resync_content_length(expanded) : expanded
@@ -463,7 +465,7 @@ module Gori
         return unless store.probe_mode.scanning?
         return if head.empty?
         rec = Store::RepeaterRecord.new(
-          repeater_id, target, request, http2, true, flow_id, 0,
+          repeater_id, target, request.to_slice, http2, true, flow_id, 0,
           head, body, nil, duration_us, nil, nil)
         return unless detail = Probe.detail_from_repeater(rec)
         Probe::Passive.analyze(detail).each do |d|

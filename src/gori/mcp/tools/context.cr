@@ -136,7 +136,7 @@ module Gori
                                  # meets any such repeater. Scrub is lossless for a filter match.
                                  r.target.scrub.matches?(rx) ||
                                    r.name.try(&.scrub.matches?(rx)) ||
-                                   r.request.scrub.matches?(rx)
+                                   String.new(r.request).scrub.matches?(rx)
                                end
                              else
                                all_repeaters
@@ -215,9 +215,10 @@ module Gori
           j.field "flow_id", r.flow_id if r.flow_id
           j.field "name", r.name if r.name
           j.field "sni", r.sni if r.sni
-          emit_capped_text(j, "request", Serialize.redact_head(r.request, include_sensitive)) if include_content
+          r_request_text = String.new(r.request).scrub
+          emit_capped_text(j, "request", Serialize.redact_head(r_request_text, include_sensitive)) if include_content
 
-          if Repeater::WsEngine.upgrade_request?(r.request)
+          if Repeater::WsEngine.upgrade_request?(r_request_text)
             ws_msgs = store.ws_messages_for_repeater(r.id)
             j.field "ws_mode", true
             j.field "ws_message_count", ws_msgs.size

@@ -13,11 +13,21 @@ class MockReleaseServer
   @server : HTTP::Server
   @closed = false
 
+  # `reported_size`: override the release JSON's `size` field independent of the
+  # real asset body (defaults to the true body size). Lets specs simulate the
+  # unauthenticated/wrong-JSON-size scenario (Bug A) without touching the real
+  # HTTP Content-Length, which is always derived from the actual body.
+  #
+  # `truncate_at`: when set, the download handler writes only this many bytes
+  # of `body` (Content-Length still advertises the full size), sets
+  # `Connection: close`, and hangs up — simulating a server killed mid-transfer.
   def initialize(*,
                  tag : String = "v99.0.0",
                  body : String | Bytes = "mock-gori-binary\n",
                  asset_names : Array(String)? = nil,
-                 throttle_bps : Int32 = 0)
+                 throttle_bps : Int32 = 0,
+                 reported_size : Int64? = nil,
+                 truncate_at : Int32? = nil)
     @tag = tag
     @body = body.is_a?(Bytes) ? body : body.to_slice
     ver = tag.lchop('v').lchop('V')
@@ -28,6 +38,8 @@ class MockReleaseServer
       "gori-v#{ver}-osx-x86_64.tar.gz",
     ]
     @throttle_bps = throttle_bps
+    @reported_size = reported_size || @body.size.to_i64
+    @truncate_at = truncate_at
 
     # Bind first so we know the ephemeral port before building asset URLs.
     @server = HTTP::Server.new do |context|
@@ -54,7 +66,7 @@ class MockReleaseServer
       {
         "name"                 => name,
         "browser_download_url" => download_url(name),
-        "size"                 => @body.size,
+        "size"                 => @reported_size,
       }
     end
     {
@@ -86,7 +98,14 @@ class MockReleaseServer
       end
       context.response.content_type = "application/octet-stream"
       context.response.content_length = @body.size
-      if @throttle_bps > 0
+      if trunc = @truncate_at
+        # Promise the full Content-Length but only ever send `trunc` bytes, then
+        # force the socket closed — simulates a server/process killed mid-transfer.
+        context.response.headers["Connection"] = "close"
+        context.response.write(@body[0, Math.min(trunc, @body.size)])
+        context.response.flush
+        context.response.close
+      elsif @throttle_bps > 0
         write_throttled(context.response, @body, @throttle_bps)
       else
         context.response.write(@body)

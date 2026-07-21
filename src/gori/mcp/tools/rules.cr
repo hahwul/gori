@@ -131,6 +131,13 @@ module Gori
         return ok if ok.is_a?(Result)
         op, match_kind = ok
         part = Store::RulePart::Head if op.header?
+        # Reject an uncompilable regex up front, same as create/update_rule — otherwise
+        # Rules#apply_rule's own rescue (a deliberate passthrough so a bad LIVE rule
+        # can't corrupt traffic) silently reports a fake "0 matches" instead of the
+        # compile error preview_rule exists to catch before create_rule.
+        unless valid_rule_regex?(op, match_kind, pattern)
+          return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
+        end
         replacement = str(h, "replacement") || ""
         host = str(h, "host") || ""
         candidate = Store::MatchRule.new(0_i64, true, target, part, pattern, replacement, op, match_kind, "", host)

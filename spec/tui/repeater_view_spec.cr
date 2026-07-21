@@ -321,6 +321,58 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # Regression for the "Repeater silently corrupts binary/non-UTF-8 request bodies on
+  # every default-path send" bug: a History-loaded flow whose body has genuinely
+  # invalid UTF-8 (a lone continuation byte, a truncated multi-byte lead — NOT just an
+  # embedded NUL, which is valid single-byte UTF-8) used to come out of `request_bytes`
+  # with those bytes rewritten to U+FFFD by `Env.expand`'s old `String#chars` rebuild,
+  # even though the request has no `$KEY` token anywhere — silently changing the
+  # Content-Length and garbling the body on a plain ^R send.
+  it "resends an invalid-UTF-8 body byte-exact via the default (no $KEY) send path" do
+    repeater_tmp_store do |store|
+      body = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43] # 6 bytes; 0x80 and 0xE2,0x28 are invalid UTF-8
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/x", http_version: "HTTP/1.1",
+        head: "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: 6\r\n\r\n".to_slice,
+        body: body))
+      detail = store.get_flow(id).not_nil!
+
+      view = RepeaterView.new
+      view.load(detail)
+
+      sent = view.request_bytes
+      String.new(sent).includes?("Content-Length: 6").should be_true # size did NOT balloon (was corrupted to a larger CL)
+      sent[-body.size, body.size].should eq(body)                    # body bytes preserved exactly
+    end
+  end
+
+  # Same corruption class, but with a `$KEY` token present elsewhere in the request:
+  # substitution must still work for the token while invalid-UTF-8 bytes in the body
+  # (unrelated to the token) pass through unchanged.
+  it "substitutes a known $KEY while leaving an invalid-UTF-8 body untouched" do
+    Gori::Settings.env_vars = [{"TOKEN", "secret"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    repeater_tmp_store do |store|
+      body = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43]
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/x", http_version: "HTTP/1.1",
+        head: "POST /x HTTP/1.1\r\nHost: h.test\r\nAuthorization: $TOKEN\r\nContent-Length: 6\r\n\r\n".to_slice,
+        body: body))
+      detail = store.get_flow(id).not_nil!
+
+      view = RepeaterView.new
+      view.load(detail)
+
+      sent = view.request_bytes
+      String.new(sent).includes?("Authorization: secret").should be_true # $TOKEN substituted
+      sent[-body.size, body.size].should eq(body)                        # body bytes still preserved exactly
+    end
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
+
   it "reflects auto Content-Length in the visible REQUEST editor (^L on)" do
     view = RepeaterView.new
     view.restore("https://h.test",
@@ -861,7 +913,7 @@ describe Gori::Tui::RepeaterView do
 
   it "persists a repeater tab's custom name (set / clear)" do
     repeater_tmp_store do |store|
-      id = store.insert_repeater("http://h/x", "GET /x HTTP/1.1", false, true, nil, 0)
+      id = store.insert_repeater("http://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil, 0)
       store.set_repeater_name(id, "my-tab")
       store.repeaters.first.name.should eq("my-tab")
       store.set_repeater_name(id, nil) # blank clears the custom name
@@ -943,10 +995,10 @@ describe Gori::Tui::RepeaterView do
 
   it "persists a repeater tab's SNI override (set / clear)" do
     repeater_tmp_store do |store|
-      id = store.insert_repeater("https://h/x", "GET /x HTTP/1.1", false, true, nil, 0, "evil.com")
+      id = store.insert_repeater("https://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil, 0, "evil.com")
       store.repeaters.first.sni.should eq("evil.com")
-      store.repeaters_meta.first.sni.should eq("evil.com")                          # syncs via the fast reconcile poll too
-      store.update_repeater(id, "https://h/x", "GET /x HTTP/1.1", false, true, nil) # clear
+      store.repeaters_meta.first.sni.should eq("evil.com")                                     # syncs via the fast reconcile poll too
+      store.update_repeater(id, "https://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil) # clear
       store.repeaters.first.sni.should be_nil
     end
   end
@@ -1069,7 +1121,7 @@ describe Gori::Tui::RepeaterView do
     begin
       view = RepeaterView.new
       view.load_blank
-      rid = store.insert_repeater(view.target, view.request_text, view.http2?, view.auto_content_length?,
+      rid = store.insert_repeater(view.target, view.request_text.to_slice, view.http2?, view.auto_content_length?,
         nil, 0, view.sni_override)
       view.clear_dirty
       ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
@@ -1080,14 +1132,15 @@ describe Gori::Tui::RepeaterView do
 
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
       # Own row still matches → reconcile would skip. Force a peer-like request edit.
-      store.update_repeater(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n",
+      store.update_repeater(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n".to_slice,
         false, true, nil)
       store.flush
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
-      view.request_side_matches?(row.target, row.request, row.http2?,
+      row_request_text = String.new(row.request)
+      view.request_side_matches?(row.target, row_request_text, row.http2?,
         row.auto_content_length?, row.sni).should be_false
 
-      view.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
+      view.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
         sni: row.sni || "")
       view.focus.should eq(:response)
       view.target.should eq("https://peer.test")

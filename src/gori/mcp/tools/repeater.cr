@@ -83,7 +83,7 @@ module Gori
 
         id = store.insert_repeater(
           target: masked_target,
-          request: masked_request,
+          request: masked_request.to_slice,
           http2: http2,
           auto_cl: auto_cl,
           flow_id: flow_id,
@@ -147,7 +147,7 @@ module Gori
         return not_found("no repeater with id #{id}") unless existing
 
         target = str(h, "target") || existing.target
-        request = str(h, "request") || existing.request
+        request = str(h, "request") || String.new(existing.request)
         # An explicitly-passed empty string is truthy in Crystal, so guard it here to
         # mirror create_repeater's invariant — a blank target/request can't be sent.
         return Result.new("target must not be empty", is_error: true) if target.empty?
@@ -175,7 +175,7 @@ module Gori
         store.update_repeater(
           id: id,
           target: masked_target,
-          request: masked_request,
+          request: masked_request.to_slice,
           http2: http2,
           auto_cl: auto_cl,
           sni: masked_sni
