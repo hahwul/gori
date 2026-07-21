@@ -22,6 +22,21 @@ search = "Search"
 toggle_theme_aria = "Toggle color theme"
 toggle_theme_title = "Toggle theme"
 
+[logo]
+hint = "Right-click to download logo"
+menu_aria = "Download logo"
+download_png = "Mark"
+download_png_dark = "Dark"
+download_png_color = "Color"
+download_webp = "Mark"
+download_webp_dark = "Dark"
+download_webp_color = "Color"
+download_svg = "Mark"
+download_svg_dark = "Dark"
+download_svg_color = "Color"
+copy_url = "Copy SVG URL"
+copied = "Copied"
+
 [search]
 placeholder = "Search the docs…"
 

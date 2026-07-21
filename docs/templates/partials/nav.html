@@ -1,6 +1,6 @@
 <header class="docs-header">
   <a href="{{ base_url }}{{ lang_prefix }}/" class="logo" aria-label="{{ site.title | e }} {{ "a11y.home" | t }}">
-    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('{{ base_url }}/images/gori.png')"></span>
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('{{ base_url }}/images/gori.png')" title="{{ "logo.hint" | t }}"></span>
     <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
   </a>
   <nav class="top-nav" aria-label="{{ "a11y.primary_nav" | t }}">
@@ -39,3 +39,23 @@
     </button>
   </div>
 </header>
+{# Right-click the logo mark for brand assets (herdr.dev-style). Outside the
+   header flex so the fixed menu never participates in the nav layout.
+   PNG/WebP are the source raster variants; SVG is a potrace silhouette of the
+   same mark with matching fills. #}
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="{{ "logo.menu_aria" | t }}">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="{{ base_url }}/images/gori.png" download="gori-logo.png">{{ "logo.download_png" | t }}</a>
+  <a role="menuitem" href="{{ base_url }}/images/gori_dark.png" download="gori-logo-dark.png">{{ "logo.download_png_dark" | t }}</a>
+  <a role="menuitem" href="{{ base_url }}/images/gori_white.png" download="gori-logo-color.png">{{ "logo.download_png_color" | t }}</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="{{ base_url }}/images/gori.webp" download="gori-logo.webp">{{ "logo.download_webp" | t }}</a>
+  <a role="menuitem" href="{{ base_url }}/images/gori_dark.webp" download="gori-logo-dark.webp">{{ "logo.download_webp_dark" | t }}</a>
+  <a role="menuitem" href="{{ base_url }}/images/gori_white.webp" download="gori-logo-color.webp">{{ "logo.download_webp_color" | t }}</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="{{ base_url }}/images/gori.svg" download="gori-logo.svg">{{ "logo.download_svg" | t }}</a>
+  <a role="menuitem" href="{{ base_url }}/images/gori_dark.svg" download="gori-logo-dark.svg">{{ "logo.download_svg_dark" | t }}</a>
+  <a role="menuitem" href="{{ base_url }}/images/gori_white.svg" download="gori-logo-color.svg">{{ "logo.download_svg_color" | t }}</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="{{ base_url }}/images/gori.svg" data-label="{{ "logo.copy_url" | t }}" data-copied="{{ "logo.copied" | t }}">{{ "logo.copy_url" | t }}</button>
+</div>

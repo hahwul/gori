@@ -23,10 +23,9 @@
   --accent-ink: #120f06;
   /* Brushed gold-leaf gradient for accent surfaces (mark, primary CTA, rules). */
   --grad-gold-leaf: linear-gradient(135deg, #a67f36 0%, #e6cf92 24%, #c8a860 48%, #8c6a2c 72%, #ddc084 100%);
-  /* Wordmark/brand-mark gold, color-picked from the official gori artwork
-     (docs/static/images/gori-wallpaper.jpg) so the nav matches the real logo
-     instead of the deeper, more saturated --grad-gold-leaf. */
-  --grad-logo: linear-gradient(135deg, #f0dfae 0%, #e6cf92 45%, #c8a860 100%);
+  /* Wordmark/brand-mark gold, sampled from the logo in gori-wallpaper.jpg
+     (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
+  --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
   --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
   --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
@@ -75,7 +74,7 @@
   --accent-strong: #8a5d0a;
   --accent-ink: #fbf7ee;
   --grad-gold-leaf: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 52%, #6f4e12 76%, #cba43e 100%);
-  --grad-logo: linear-gradient(135deg, #cba43e 0%, #a8791f 55%, #8a5d0a 100%);
+  --grad-logo: linear-gradient(135deg, #c5a45a 0%, #b08d3f 55%, #8a6a28 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
@@ -266,6 +265,72 @@ img {
   background: var(--grad-logo);
   -webkit-mask: var(--logo-src) center / contain no-repeat;
   mask: var(--logo-src) center / contain no-repeat;
+  /* Hint that the mark owns a custom context menu (logo downloads). */
+  cursor: context-menu;
+}
+
+/* Brand asset picker: right-click the logo mark (herdr.dev-style). Fixed so it
+   floats above the sticky header without disturbing the header flex row. */
+.logo-menu {
+  position: fixed;
+  z-index: 1100;
+  min-width: 10.5rem;
+  max-height: min(28rem, calc(100vh - 24px));
+  overflow-y: auto;
+  padding: 0.3rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow-soft);
+}
+
+.logo-menu[hidden] {
+  display: none;
+}
+
+.logo-menu-sep {
+  padding: 0.45rem 0.7rem 0.2rem;
+  color: var(--quiet);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.logo-menu-sep--rule {
+  height: 0;
+  margin: 0.3rem 0.45rem;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.logo-menu a,
+.logo-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--heading);
+  padding: 0.42rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.logo-menu a:hover,
+.logo-menu a:focus-visible,
+.logo-menu button:hover,
+.logo-menu button:focus-visible {
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent-strong);
+  outline: none;
 }
 
 /* Gilded wordmark: shares --grad-logo with the mark so both pieces of the

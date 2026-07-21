@@ -22,6 +22,21 @@ search = "검색"
 toggle_theme_aria = "색상 테마 전환"
 toggle_theme_title = "테마 전환"
 
+[logo]
+hint = "우클릭하여 로고 다운로드"
+menu_aria = "로고 다운로드"
+download_png = "마크"
+download_png_dark = "다크"
+download_png_color = "컬러"
+download_webp = "마크"
+download_webp_dark = "다크"
+download_webp_color = "컬러"
+download_svg = "마크"
+download_svg_dark = "다크"
+download_svg_color = "컬러"
+copy_url = "SVG URL 복사"
+copied = "복사됨"
+
 [search]
 placeholder = "문서 검색…"
 
