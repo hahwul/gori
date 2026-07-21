@@ -537,8 +537,8 @@ describe Gori::MCP::Server do
 
     it "links a repeater on create and on a link-only update" do
       with_store do |store|
-        repeater_a = store.insert_repeater("https://ex.test", "GET /a HTTP/1.1\r\n\r\n", false, true, nil, 0)
-        repeater_b = store.insert_repeater("https://ex.test", "GET /b HTTP/1.1\r\n\r\n", false, true, nil, 1)
+        repeater_a = store.insert_repeater("https://ex.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+        repeater_b = store.insert_repeater("https://ex.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 1)
         create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"linked","repeater_id":#{repeater_a}}}})
         issue_id = tool_payload(drive(store, create)[0])["id"].as_i64
         links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
@@ -975,7 +975,7 @@ describe Gori::MCP::Server do
   describe "get_repeater_context" do
     it "lists persisted repeater sessions with last response status" do
       with_store do |store|
-        store.insert_repeater("https://ex.test", "GET /x HTTP/1.1\nHost: ex.test\n\n", false, true, nil, 0)
+        store.insert_repeater("https://ex.test", "GET /x HTTP/1.1\nHost: ex.test\n\n".to_slice, false, true, nil, 0)
         id = store.repeaters_meta.last.id
         store.update_repeater_response(id, "HTTP/1.1 400 Bad\r\n\r\n".to_slice, "nope".to_slice, nil, 99_i64)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{}}})
@@ -999,7 +999,7 @@ describe Gori::MCP::Server do
     it "base64-encodes a binary WebSocket frame (keeps the JSON-RPC stream valid UTF-8)" do
       with_store do |store|
         store.insert_repeater("wss://ex.test/ws",
-          "GET /ws HTTP/1.1\r\nHost: ex.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
+          "GET /ws HTTP/1.1\r\nHost: ex.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice, false, true, nil, 0)
         id = store.repeaters_meta.last.id
         store.insert_ws_message(0_i64, "out", 1, "ping".to_slice, repeater_id: id)        # text frame
         store.insert_ws_message(0_i64, "in", 2, Bytes[0x00, 0xff, 0x80], repeater_id: id) # binary (invalid UTF-8)
@@ -1259,7 +1259,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         port = start_mcp_http_origin("repeater-ok")
         rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
-          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice,
           http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
         p = tool_payload(drive(store, call, verify_upstream: false)[0])
@@ -1272,7 +1272,7 @@ describe Gori::MCP::Server do
     it "rejects send_request on a WebSocket repeater and points to send_websocket" do
       with_store do |store|
         rid = store.insert_repeater(target: "http://127.0.0.1:9",
-          request: "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n",
+          request: "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n".to_slice,
           http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
         resp = drive(store, call)[0]["result"]
@@ -1342,7 +1342,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         port = start_mcp_ws_origin
         request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
-        repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request, false, true, nil, 0)
+        repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request.to_slice, false, true, nil, 0)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_false
@@ -1358,7 +1358,7 @@ describe Gori::MCP::Server do
 
     it "rejects a non-WebSocket repeater before making a connection" do
       with_store do |store|
-        repeater_id = store.insert_repeater("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n", false, true, nil, 0)
+        repeater_id = store.insert_repeater("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_slice, false, true, nil, 0)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"allow_unscoped":true}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
@@ -1368,7 +1368,7 @@ describe Gori::MCP::Server do
 
     it "uses the WebSocket engine and returns a clean connection error" do
       with_store do |store|
-        repeater_id = store.insert_repeater("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
+        repeater_id = store.insert_repeater("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice, false, true, nil, 0)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_true
@@ -1384,7 +1384,7 @@ describe Gori::MCP::Server do
         store.add_scope_rule("include", "host", "example.com") # blocks 127.0.0.1
         issue_id = store.insert_issue("ev", Gori::Store::Severity::Low, nil, nil)
         rid = store.insert_repeater("ws://127.0.0.1:1",
-          "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+          "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
           false, true, nil, 0)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"issue_id":#{issue_id}}}})
         resp = drive(store, call)[0]["result"]
@@ -1536,7 +1536,7 @@ describe Gori::MCP::Server do
     it "redacts auth headers in get_repeater_context content" do
       with_store do |store|
         rid = store.insert_repeater(target: "https://h.test",
-          request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer topsecret\r\n\r\n",
+          request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer topsecret\r\n\r\n".to_slice,
           http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"id":#{rid},"include_content":true}}})
         p = tool_payload(drive(store, call)[0])

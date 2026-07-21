@@ -124,7 +124,7 @@ describe Gori::Links do
 
     it "prefers the custom name for a present repeater" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "GET /a HTTP/1.1\r\n\r\n", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, false, nil, 0)
         store.set_repeater_name(id, "my tab")
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("my tab")
@@ -135,7 +135,7 @@ describe Gori::Links do
 
     it "falls back to the request's first line when unnamed" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("GET /a HTTP/1.1")
         r.stale?.should be_false
@@ -144,7 +144,7 @@ describe Gori::Links do
 
     it "falls back to 'repeater #N' when unnamed and the request is all-blank" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "\r\n   \r\n\r\n", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "\r\n   \r\n\r\n".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("repeater ##{id}")
       end
@@ -152,7 +152,7 @@ describe Gori::Links do
 
     it "falls back to 'repeater #N' when unnamed and the request is empty" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("repeater ##{id}")
       end
@@ -219,7 +219,7 @@ describe Gori::Links do
   describe "first_line (via label fallback)" do
     it "skips leading blank lines and returns the first non-blank line" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "\r\n\r\n   \r\nGET /deep HTTP/1.1\r\n\r\n", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "\r\n\r\n   \r\nGET /deep HTTP/1.1\r\n\r\n".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("GET /deep HTTP/1.1")
       end
@@ -228,7 +228,7 @@ describe Gori::Links do
     it "strips a trailing CR from the returned line" do
       with_store do |store|
         # No trailing LF on the first line; rstrip('\r') must drop the CR.
-        id = store.insert_repeater("https://t.test", "GET /x HTTP/1.1\r", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "GET /x HTTP/1.1\r".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("GET /x HTTP/1.1")
       end
@@ -236,7 +236,7 @@ describe Gori::Links do
 
     it "preserves a multibyte/CJK first line intact" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "GET /검색 HTTP/1.1\r\nHost: t.test\r\n\r\n", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "GET /검색 HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("GET /검색 HTTP/1.1")
       end
@@ -244,7 +244,7 @@ describe Gori::Links do
 
     it "returns an all-emoji first line intact" do
       with_store do |store|
-        id = store.insert_repeater("https://t.test", "GET /🔥/世界 HTTP/1.1\r\n\r\n", false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", "GET /🔥/世界 HTTP/1.1\r\n\r\n".to_slice, false, false, nil, 0)
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
         r.label.should eq("GET /🔥/世界 HTTP/1.1")
       end
@@ -253,7 +253,7 @@ describe Gori::Links do
     it "handles a huge run of blank lines quickly (linear robustness)" do
       with_store do |store|
         req = ("\r\n" * 100_000) + "GET /late HTTP/1.1\r\n"
-        id = store.insert_repeater("https://t.test", req, false, false, nil, 0)
+        id = store.insert_repeater("https://t.test", req.to_slice, false, false, nil, 0)
         elapsed = Time.measure do
           r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Repeater, id))
           r.label.should eq("GET /late HTTP/1.1")
@@ -292,7 +292,7 @@ describe Gori::Links do
     it "preserves order and per-element stale flags over a mixed present/stale array" do
       with_store do |store|
         fid = insert_flow_row(store, host: "a.test", target: "/x")
-        rid = store.insert_repeater("https://t.test", "GET /a HTTP/1.1\r\n\r\n", false, false, nil, 0)
+        rid = store.insert_repeater("https://t.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, false, nil, 0)
 
         links = [
           link_for(Gori::Store::LinkRefKind::Flow, fid),      # present

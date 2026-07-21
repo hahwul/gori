@@ -147,7 +147,7 @@ module Gori
 
           id = store.insert_repeater(
             target: Env.mask_secrets(tgt_str),
-            request: Env.mask_secrets(req_content),
+            request: Env.mask_secrets(req_content).to_slice,
             http2: http2,
             auto_cl: auto_cl,
             flow_id: flow_id,

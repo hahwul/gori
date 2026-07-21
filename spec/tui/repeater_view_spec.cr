@@ -861,7 +861,7 @@ describe Gori::Tui::RepeaterView do
 
   it "persists a repeater tab's custom name (set / clear)" do
     repeater_tmp_store do |store|
-      id = store.insert_repeater("http://h/x", "GET /x HTTP/1.1", false, true, nil, 0)
+      id = store.insert_repeater("http://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil, 0)
       store.set_repeater_name(id, "my-tab")
       store.repeaters.first.name.should eq("my-tab")
       store.set_repeater_name(id, nil) # blank clears the custom name
@@ -943,10 +943,10 @@ describe Gori::Tui::RepeaterView do
 
   it "persists a repeater tab's SNI override (set / clear)" do
     repeater_tmp_store do |store|
-      id = store.insert_repeater("https://h/x", "GET /x HTTP/1.1", false, true, nil, 0, "evil.com")
+      id = store.insert_repeater("https://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil, 0, "evil.com")
       store.repeaters.first.sni.should eq("evil.com")
-      store.repeaters_meta.first.sni.should eq("evil.com")                          # syncs via the fast reconcile poll too
-      store.update_repeater(id, "https://h/x", "GET /x HTTP/1.1", false, true, nil) # clear
+      store.repeaters_meta.first.sni.should eq("evil.com")                                     # syncs via the fast reconcile poll too
+      store.update_repeater(id, "https://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil) # clear
       store.repeaters.first.sni.should be_nil
     end
   end
@@ -1069,7 +1069,7 @@ describe Gori::Tui::RepeaterView do
     begin
       view = RepeaterView.new
       view.load_blank
-      rid = store.insert_repeater(view.target, view.request_text, view.http2?, view.auto_content_length?,
+      rid = store.insert_repeater(view.target, view.request_text.to_slice, view.http2?, view.auto_content_length?,
         nil, 0, view.sni_override)
       view.clear_dirty
       ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
@@ -1080,14 +1080,15 @@ describe Gori::Tui::RepeaterView do
 
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
       # Own row still matches → reconcile would skip. Force a peer-like request edit.
-      store.update_repeater(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n",
+      store.update_repeater(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n".to_slice,
         false, true, nil)
       store.flush
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
-      view.request_side_matches?(row.target, row.request, row.http2?,
+      row_request_text = String.new(row.request)
+      view.request_side_matches?(row.target, row_request_text, row.http2?,
         row.auto_content_length?, row.sni).should be_false
 
-      view.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
+      view.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
         sni: row.sni || "")
       view.focus.should eq(:response)
       view.target.should eq("https://peer.test")

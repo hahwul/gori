@@ -282,7 +282,7 @@ describe Gori::Store do
     Gori::Store::Schema.migrate!(db)
     store = Gori::Store.new(db, nil, retention_flows: 5, prune_interval: 10)
     begin
-      rid = store.insert_repeater("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
+      rid = store.insert_repeater("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n".to_slice, false, false, nil, 0)
       store.update_repeater_ws_messages(rid, ["client frame 1", "client frame 2"])
       # Churn flows well past retention so prune fires (cutoff = max_id - 5 > 0). The bug:
       # DELETE ... WHERE flow_id <= cutoff also matched the repeater rows (flow_id = 0), wiping them.
@@ -317,7 +317,7 @@ describe Gori::Store do
 
   it "update_repeater_ws_messages stores an empty frame text without aborting the batch" do
     with_store do |store|
-      rid = store.insert_repeater("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
+      rid = store.insert_repeater("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n".to_slice, false, false, nil, 0)
       store.update_repeater_ws_messages(rid, ["", "frame"])
       store.flush
       store.ws_messages_for_repeater(rid).size.should eq(2)
@@ -351,6 +351,50 @@ describe Gori::Store do
     ensure
       db1.close
       db2.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "V2 migration recovers a pre-existing repeaters.request value that the OLD read path truncated at an embedded NUL" do
+    # Recreates exactly what a pre-fix (V1-only) gori install left on disk: the V1
+    # CREATE TABLE only (no V2 UPDATE), with a `request` row inserted the OLD way — a bound
+    # Crystal String. sqlite3_bind_text takes an explicit byte count (not NUL-terminated),
+    # so the write already stored the full bytes; the bug was purely in the OLD read path
+    # (sqlite3_column_text + a NUL-terminated String.new), which the untyped Bytes read
+    # below does NOT use — this proves the migration recovers what was already on disk for
+    # any existing user, not just what a fresh insert produces going forward.
+    path = File.tempname("gori-repeater-migrate", ".db")
+    db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+    begin
+      Gori::Store::Schema::V1.each { |sql| db.exec(sql) }
+      db.exec("PRAGMA user_version = 1")
+
+      with_nul = "GET /x HTTP/1.1\r\nHost: h\r\n\r\n".to_slice + Bytes[0_u8] + "BINARYTAIL".to_slice
+      normal = "GET /y HTTP/1.1\r\n\r\n"
+      ts = 1_i64
+      db.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, position) VALUES (?,?,?,?,?,?,?)",
+        ts, ts, "https://a.test", String.new(with_nul), 0, 1, 0)
+      db.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, position) VALUES (?,?,?,?,?,?,?)",
+        ts, ts, "https://b.test", normal, 0, 1, 1)
+
+      # Pre-migration: the OLD read shape (untyped `read` dispatches TEXT-storage-class
+      # values through sqlite3_column_text) truncates at the embedded NUL, exactly
+      # reproducing the original bug.
+      db.query_one("SELECT request FROM repeaters WHERE target = 'https://a.test'", as: String)
+        .should eq("GET /x HTTP/1.1\r\nHost: h\r\n\r\n")
+
+      Gori::Store::Schema.migrate!(db)
+      db.scalar("PRAGMA user_version").as(Int64).should eq(2_i64)
+
+      recovered = db.query_one("SELECT request FROM repeaters WHERE target = 'https://a.test'", as: Bytes)
+      recovered.should eq(with_nul) # full byte-for-byte recovery, embedded NUL and all
+
+      unaffected = db.query_one("SELECT request FROM repeaters WHERE target = 'https://b.test'", as: Bytes)
+      String.new(unaffected).should eq(normal) # a normal (no-NUL) row is untouched
+    ensure
+      db.close
       File.delete?(path)
       File.delete?("#{path}-wal")
       File.delete?("#{path}-shm")
