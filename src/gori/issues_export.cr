@@ -1,6 +1,7 @@
 require "json"
 require "./store"
 require "./links"
+require "./proxy/codec/content_decode"
 
 module Gori
   module Issues
@@ -121,16 +122,23 @@ module Gori
           c << String.new(hslice).scrub.rstrip
           c << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
           if body && !body.empty?
+            # De-chunk + inflate Content-Encoding for display, mirroring `gori run show` and the
+            # TUI detail view — otherwise a chunked body embeds its wire-format chunk framing
+            # verbatim, and a gzip/br/deflate body (the common case for real HTTPS traffic) fails
+            # the valid-UTF-8 check below and gets dropped as "binary", silently discarding the
+            # evidence a shared report exists to preserve.
+            decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
+            display_body = decoded || body
             # Decide text-vs-binary on the readable PREFIX (≤ cap), not the whole body: a body
             # that is valid text up to the cap but has a stray byte deeper still shows its
             # readable prefix. But back the cut off to a UTF-8 codepoint boundary first, so a
             # multi-byte char split at exactly `cap` isn't misread as binary.
-            slice = body.size > cap ? trim_to_codepoint_boundary(body[0, cap]) : body
+            slice = display_body.size > cap ? trim_to_codepoint_boundary(display_body[0, cap]) : display_body
             if String.new(slice).valid_encoding?
               c << "\n\n" << String.new(slice)
-              c << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
+              c << "\n\n[… body truncated, #{display_body.size} bytes total …]" if display_body.size > cap
             else
-              c << "\n\n[binary body omitted, #{body.size} bytes]"
+              c << "\n\n[binary body omitted, #{display_body.size} bytes]"
             end
           end
         end

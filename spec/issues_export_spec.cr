@@ -1,5 +1,12 @@
 require "./spec_helper"
+require "compress/gzip"
 require "../src/gori/issues_export"
+
+private def gzip(data : String) : Bytes
+  io = IO::Memory.new
+  Compress::Gzip::Writer.open(io) { |w| w.print(data) }
+  io.to_slice
+end
 
 private def with_store(&)
   path = File.tempname("gori-fexport", ".db")
@@ -118,6 +125,45 @@ describe Gori::Issues::Export do
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should_not contain("binary body omitted")
         md.should contain("body truncated")
+      end
+    end
+
+    it "decodes a gzip Content-Encoding body instead of dropping it as binary" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/", http_version: "HTTP/1.1",
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
+          body: gzip("gzip-body-marker-XYZ123"), reason: "OK", content_type: "application/json", duration_us: 1_i64))
+        store.insert_issue("gzip evidence", Gori::Store::Severity::Low, "h.test", id)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("gzip-body-marker-XYZ123")
+        md.should_not contain("binary body omitted")
+      end
+    end
+
+    it "de-chunks a Transfer-Encoding: chunked body instead of embedding wire framing" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/", http_version: "HTTP/1.1",
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        # "5\r\nhello\r\n0\r\n\r\n" — a single 5-byte chunk, then the terminator.
+        chunked = "5\r\nhello\r\n0\r\n\r\n".to_slice
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice,
+          body: chunked, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
+        store.insert_issue("chunked evidence", Gori::Store::Severity::Low, "h.test", id)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("\nhello\n") # the decoded body, on its own line inside the fence
+        md.should_not contain("5\r\nhello")
+        md.should_not contain("0\r\n\r\n")
       end
     end
 
