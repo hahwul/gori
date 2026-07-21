@@ -9,35 +9,35 @@ private alias O = Gori::Oast
 #   key (bytes 0x00..0x1f) to PRIV_PEM's public key.
 # - MSG_B64: base64 of (IV ‖ AES-256-CFB ciphertext) of INTERACTION_JSON under that key.
 private PRIV_PEM = <<-PEM
------BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCYrErrK2qx8Pq5
-SZuN3rkUl9VL/X4I0O/aoq/ZvDYYKo2pf19V69B2MPkOz9LJBEQmk8sTy0Q5vehv
-69i8BApvlOC04QSTOfgjc7Cynx4kDUFXPkh24vePBK1fpkNuNoxQ8QsmLpGSSzfk
-DuDldtxoTPTjCu9G6Z0hVAVHlMh/uGH0twGyIv+i6R6ADFZDAgB1A6aaddRY4OOR
-Z/HLyvTIPVKGcWASlzN8Tsngp14RrZnNbwwp7OEvB8d6Idooi440R5wkx1FhuePs
-7aSXfAryxMKZuBHM3IkaHr7GGxV7Z/tWHNSYpjnfizvTuvwzh1fXdHAeQF695lTK
-MdAFnrp7AgMBAAECggEAA1UXZwL9v/zdPPgb91uQENaHyL+EZbyMtMGquXmQrwTF
-6x7UWKzeNy6iJvGc9fJiDL6QkRU/nzEh67rXBpgyuKQ/GQzg7vL/+IuZv80xNZjE
-QptlDJLXxnZhaOu+SBjGtNwarAl4SLB9nVeD5rycv7bnJQ1PriOQZzxNJgrHfBeg
-9t/FmSXHtBeRdAN/eLxDwS+zpev6y1Qa400objedxkN2ptx/M6fCDBP5ZcgMfPu8
-AhZcrBVcR7RB3BlON4Plz91HTHPflEqb92FcR475GNefGr4fQOeMOSW8JcYjeoHJ
-EP3nG+d7y5y8AbwH2k8ZbRbN7bw5HVHLMSU4fssOGQKBgQDVWhWxm/QBczOSP678
-aivxihzngQ4YeM1K2Rjx0JAFNNWj7eLE4Ee36j2aq5n6vuUmjC77WtR8fBASCloF
-ip+eWBawihT6bOMuJhTVnHdTmqGBOJWiotCUVFu4/H7i8KrMFDlJK1CQzpgifWeX
-cp7g+tpNP+3LhyfFs9GH0dVttQKBgQC3MRIzQo4MWOM+4ghGsawCPl3VLcxQZ8tt
-RcY6GuN9sWGCRLEMvnkS6q/gQOWcN9BrlP6ePajVzP2NHa7VGd/efw7tFYccKVqR
-cKHrMhWBjCv31htOASWqhTE/dqI8p85WcVj0J3sIS1s/XNsZ//Lmock6bE5kQczG
-YO3lR/UlbwKBgG+14oQDv2h+9HLQK4R45xdqlKXW2hWQMxXMxJXg+XfwaSiTZ1hk
-gsjWunjg/xfemkdrwTHVJksj/pojl20tX1RelUrMkh1ppC5GvEP40DYTUhtCEH9+
-tq3j2b7rXljfYN7IfBJGvsGDmv78IKCY4H22e1VVcuJNm1KWS9DM2u69AoGBAJvG
-pZRjRwlm2K6TZLhAw2URBZeOn0vMR2b/S0YDsWkj2if9I5UTrz8PxEjsxpNlvtyM
-0UtcYWKVMxK5p/7cRssbvmSKxt6Cp9o/LeEjMLh9qrHQJl3Zid8L7cnqpqDvjP1i
-22Ka4/s0oT4rRsFALZxC/SuqB6snbOtQZ1tuKh8PAoGBAIOcvhkavofj/oroiGcM
-ZPyZPo4tC4GLzcCzRznUox6qw7GpJhaRW1f4e5k2hmCJp/Sha4BPqblWoD3f84Ej
-AoYnPn6DAWVG5NOoazrfDDnYzWR0S6b9umD8W49e89Fgob56ZVgsJJy9euSuUZJ8
-WJsgaeppj/Vuf90EO0Z5M5v0
------END PRIVATE KEY-----
-PEM
+  -----BEGIN PRIVATE KEY-----
+  MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCYrErrK2qx8Pq5
+  SZuN3rkUl9VL/X4I0O/aoq/ZvDYYKo2pf19V69B2MPkOz9LJBEQmk8sTy0Q5vehv
+  69i8BApvlOC04QSTOfgjc7Cynx4kDUFXPkh24vePBK1fpkNuNoxQ8QsmLpGSSzfk
+  DuDldtxoTPTjCu9G6Z0hVAVHlMh/uGH0twGyIv+i6R6ADFZDAgB1A6aaddRY4OOR
+  Z/HLyvTIPVKGcWASlzN8Tsngp14RrZnNbwwp7OEvB8d6Idooi440R5wkx1FhuePs
+  7aSXfAryxMKZuBHM3IkaHr7GGxV7Z/tWHNSYpjnfizvTuvwzh1fXdHAeQF695lTK
+  MdAFnrp7AgMBAAECggEAA1UXZwL9v/zdPPgb91uQENaHyL+EZbyMtMGquXmQrwTF
+  6x7UWKzeNy6iJvGc9fJiDL6QkRU/nzEh67rXBpgyuKQ/GQzg7vL/+IuZv80xNZjE
+  QptlDJLXxnZhaOu+SBjGtNwarAl4SLB9nVeD5rycv7bnJQ1PriOQZzxNJgrHfBeg
+  9t/FmSXHtBeRdAN/eLxDwS+zpev6y1Qa400objedxkN2ptx/M6fCDBP5ZcgMfPu8
+  AhZcrBVcR7RB3BlON4Plz91HTHPflEqb92FcR475GNefGr4fQOeMOSW8JcYjeoHJ
+  EP3nG+d7y5y8AbwH2k8ZbRbN7bw5HVHLMSU4fssOGQKBgQDVWhWxm/QBczOSP678
+  aivxihzngQ4YeM1K2Rjx0JAFNNWj7eLE4Ee36j2aq5n6vuUmjC77WtR8fBASCloF
+  ip+eWBawihT6bOMuJhTVnHdTmqGBOJWiotCUVFu4/H7i8KrMFDlJK1CQzpgifWeX
+  cp7g+tpNP+3LhyfFs9GH0dVttQKBgQC3MRIzQo4MWOM+4ghGsawCPl3VLcxQZ8tt
+  RcY6GuN9sWGCRLEMvnkS6q/gQOWcN9BrlP6ePajVzP2NHa7VGd/efw7tFYccKVqR
+  cKHrMhWBjCv31htOASWqhTE/dqI8p85WcVj0J3sIS1s/XNsZ//Lmock6bE5kQczG
+  YO3lR/UlbwKBgG+14oQDv2h+9HLQK4R45xdqlKXW2hWQMxXMxJXg+XfwaSiTZ1hk
+  gsjWunjg/xfemkdrwTHVJksj/pojl20tX1RelUrMkh1ppC5GvEP40DYTUhtCEH9+
+  tq3j2b7rXljfYN7IfBJGvsGDmv78IKCY4H22e1VVcuJNm1KWS9DM2u69AoGBAJvG
+  pZRjRwlm2K6TZLhAw2URBZeOn0vMR2b/S0YDsWkj2if9I5UTrz8PxEjsxpNlvtyM
+  0UtcYWKVMxK5p/7cRssbvmSKxt6Cp9o/LeEjMLh9qrHQJl3Zid8L7cnqpqDvjP1i
+  22Ka4/s0oT4rRsFALZxC/SuqB6snbOtQZ1tuKh8PAoGBAIOcvhkavofj/oroiGcM
+  ZPyZPo4tC4GLzcCzRznUox6qw7GpJhaRW1f4e5k2hmCJp/Sha4BPqblWoD3f84Ej
+  AoYnPn6DAWVG5NOoazrfDDnYzWR0S6b9umD8W49e89Fgob56ZVgsJJy9euSuUZJ8
+  WJsgaeppj/Vuf90EO0Z5M5v0
+  -----END PRIVATE KEY-----
+  PEM
 
 private AESKEY_B64 = "i4CBi3bc+PYX6GqbkVqlF9NdghUyT9cJDPdJBDEfdxu2a2z1cLcrXCz0zISQplkWom1u622rnATmxmI7tH5x58T3m1mwW0+Fo8glhb4hZALcynWMacm6+nfDEKjVDP88pl9BzCezRkyrHl6FqGNvArssWb46YFGwhNCG4nFQWxPGEyBc5bI+0HlX3BibRv2K3YaJ6D267Ct5vgfYgo43yXOMqh09OUM3q7c5NGKtp+yCMd2hCL8A+wJxu/24ESbzIlx61S4isYDEGAGTpKq7zkubo2eg5nAc6slwblHQ4ghyeg1F4dUDAfb1NRVrnxJIG6kHrN0IQlIvepmeKjHaNA=="
 
@@ -83,7 +83,7 @@ describe Gori::Oast do
 
   describe O::Crypto do
     it "AES-256 round-trips through the decrypt helper (IV prefixed)" do
-      key = Bytes.new(32) { |i| i.to_u8 }
+      key = Bytes.new(32, &.to_u8)
       iv = Bytes.new(16) { |i| (0xa0 + i).to_u8 }
       plaintext = "the quick brown fox jumps over 13 lazy dogs"
       cipher = OpenSSL::Cipher.new("aes-256-cfb")
@@ -170,9 +170,156 @@ describe Gori::Oast do
   describe O::Presets do
     it "ships the public presets incl. 5 interactsh servers" do
       all = O::Presets.all
-      all.count { |p| p.kind.interactsh? }.should eq(5)
-      all.any? { |p| p.kind.boast? }.should be_true
-      all.any? { |p| p.kind.postbin? }.should be_true
+      all.count(&.kind.interactsh?).should eq(5)
+      all.any?(&.kind.boast?).should be_true
+      all.any?(&.kind.postbin?).should be_true
+    end
+  end
+
+  # --- APPENDED: pure boundary / error cases ----------------------------------
+
+  describe O::Crypto do
+    describe ".aes256_decrypt" do
+      it "raises Gori::Error when data is exactly 16 bytes (IV only, no ciphertext)" do
+        key = Bytes.new(32, &.to_u8)
+        expect_raises(Gori::Error) do
+          O::Crypto.aes256_decrypt(Bytes.new(16, &.to_u8), key, "aes-256-cfb")
+        end
+      end
+
+      it "does NOT raise at 17 bytes (16-byte IV + 1 ciphertext byte)" do
+        key = Bytes.new(32, &.to_u8)
+        out = O::Crypto.aes256_decrypt(Bytes.new(17, &.to_u8), key, "aes-256-cfb")
+        # CFB is a stream cipher: one ciphertext byte -> exactly one plaintext byte.
+        out.size.should eq(1)
+      end
+
+      it "round-trips aes-256-ctr (documented auto-detect fallback)" do
+        key = Bytes.new(32, &.to_u8)
+        iv = Bytes.new(16) { |i| (0x10 + i).to_u8 }
+        plaintext = "안녕 世界 — ctr fallback 🎯 payload"
+        cipher = OpenSSL::Cipher.new("aes-256-ctr")
+        cipher.encrypt
+        cipher.key = key
+        cipher.iv = iv
+        ct = IO::Memory.new
+        ct.write(cipher.update(plaintext))
+        ct.write(cipher.final)
+        msg = Bytes.new(16 + ct.bytesize)
+        iv.copy_to(msg)
+        ct.to_slice.copy_to(msg + 16)
+        String.new(O::Crypto.aes256_decrypt(msg, key, "aes-256-ctr")).should eq(plaintext)
+      end
+    end
+
+    describe ".random_id" do
+      it "returns the empty string for length 0" do
+        O::Crypto.random_id(0).should eq("")
+      end
+
+      it "returns a single DNS-safe char for length 1" do
+        id = O::Crypto.random_id(1)
+        id.size.should eq(1)
+        c = id[0]
+        (c.ascii_lowercase? || c.ascii_number?).should be_true
+      end
+
+      it "produces distinct ids across two length-20 calls" do
+        O::Crypto.random_id(20).should_not eq(O::Crypto.random_id(20))
+      end
+    end
+  end
+
+  describe O::RsaKeyPair do
+    describe ".from_private_pem" do
+      it "raises Gori::Error on non-PEM garbage" do
+        expect_raises(Gori::Error) { O::RsaKeyPair.from_private_pem("not a pem") }
+      end
+
+      it "raises Gori::Error on an empty string" do
+        expect_raises(Gori::Error) { O::RsaKeyPair.from_private_pem("") }
+      end
+    end
+
+    describe "#oaep_sha256_decrypt" do
+      it "raises Gori::Error on an undersized ciphertext (8 bytes)" do
+        kp = O::RsaKeyPair.from_private_pem(PRIV_PEM)
+        expect_raises(Gori::Error) { kp.oaep_sha256_decrypt(Bytes.new(8)) }
+      end
+
+      it "raises Gori::Error on a modulus-sized garbage buffer (OAEP unpad)" do
+        kp = O::RsaKeyPair.from_private_pem(PRIV_PEM)
+        garbage = Bytes.new(256) { |i| (i * 7 + 1).to_u8! }
+        expect_raises(Gori::Error) { kp.oaep_sha256_decrypt(garbage) }
+      end
+    end
+
+    describe ".generate_2048" do
+      it "mints two DISTINCT keypairs (different public SPKI PEMs)" do
+        a = O::RsaKeyPair.generate_2048
+        b = O::RsaKeyPair.generate_2048
+        a.public_spki_pem.should start_with("-----BEGIN PUBLIC KEY-----")
+        a.public_spki_pem.should_not eq(b.public_spki_pem)
+      end
+    end
+  end
+
+  describe O::Presets do
+    it "ships exactly 8 presets and no custom-http preset" do
+      all = O::Presets.all
+      all.size.should eq(8)
+      all.any?(&.kind.custom_http?).should be_false
+      # 5 interactsh + boast + webhook.site + postbin
+      all.count(&.kind.webhook_site?).should eq(1)
+    end
+
+    it "gives every preset a non-empty host and a nil token" do
+      O::Presets.all.each do |p|
+        p.host.empty?.should be_false
+        p.token.should be_nil
+      end
+    end
+
+    it "names each interactsh preset with the bare host while .host is the full url" do
+      interactsh = O::Presets.all.select(&.kind.interactsh?)
+      interactsh.size.should eq(5)
+      interactsh.each do |p|
+        p.host.should start_with("https://")
+        bare = URI.parse(p.host).host.not_nil!
+        p.name.should contain(bare)
+        p.name.should_not contain("https://")
+      end
+    end
+  end
+
+  describe O::ProviderKind do
+    it "renders #label for all five kinds" do
+      O::ProviderKind::Interactsh.label.should eq("interactsh")
+      O::ProviderKind::CustomHttp.label.should eq("custom-http")
+      O::ProviderKind::WebhookSite.label.should eq("webhook.site")
+      O::ProviderKind::Boast.label.should eq("BOAST")
+      O::ProviderKind::Postbin.label.should eq("postbin")
+    end
+
+    it "round-trips parse?(kind.label) == kind for every kind" do
+      O::ProviderKind.values.each do |kind|
+        O::ProviderKind.parse?(kind.label).should eq(kind)
+      end
+    end
+
+    it "parses tolerant tokens (case- and separator-insensitive)" do
+      O::ProviderKind.parse?("BOAST").should eq(O::ProviderKind::Boast)
+      O::ProviderKind.parse?("boast").should eq(O::ProviderKind::Boast)
+      O::ProviderKind.parse?("web_hook.site").should eq(O::ProviderKind::WebhookSite)
+      O::ProviderKind.parse?("webhook-site").should eq(O::ProviderKind::WebhookSite)
+    end
+
+    it "returns nil for the empty string" do
+      O::ProviderKind.parse?("").should be_nil
+    end
+
+    it "returns nil when a space separator is used (spaces are not normalized away)" do
+      O::ProviderKind.parse?("custom http").should be_nil
     end
   end
 end
