@@ -771,7 +771,89 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
+      content = BodyChrome.content_rect(rect, strip: true)
+      if callbacks_sub?
+        click_callbacks(content, mx, my)
+      else
+        click_providers(content, mx, my)
+      end
       true
+    end
+
+    # Callbacks list: filter bar starts `/` edit; rows use History/Probe select-first
+    # (first click selects, second click on the selected row opens detail — same as ↵).
+    # Detail view itself is key-driven (like Probe).
+    private def click_callbacks(content : Rect, mx : Int32, my : Int32) : Nil
+      return if @cb_detail
+      return if content.h < 2
+      # payload bar (2 rows) — no row action; body is the filter + table card below
+      body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
+      return if body.h < 1
+      table = if body.h >= 2
+        if my == body.y
+          start_cb_filter unless @filter_editing
+          return
+        end
+        Rect.new(body.x, body.y + 1, body.w, body.h - 1)
+      else
+        body
+      end
+      return unless idx = callback_row_at(table, mx, my)
+      @filter_editing = false # a row click commits the filter, like History's list click
+      if idx == @cb_sel
+        @cb_detail = true
+        @cb_detail_scroll = 0
+      else
+        @cb_sel = idx
+        sync_scroll
+      end
+    end
+
+    # Hit-test a click against the CALLBACKS table card (mirrors render_callback_table).
+    private def callback_row_at(table : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if table.empty? || !table.contains?(mx, my)
+      inner = table.inset(1, 1)
+      rows = Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
+      return nil if rows.empty? || my < rows.y || my >= rows.bottom
+      return nil if mx < rows.x || mx >= rows.right
+      visible = rows.h
+      return nil if visible <= 0
+      ordered = ordered_callbacks
+      scroll = @cb_scroll
+      scroll = @cb_sel if @cb_sel < scroll
+      scroll = @cb_sel - visible + 1 if @cb_sel >= scroll + visible
+      scroll = scroll.clamp(0, {ordered.size - visible, 0}.max)
+      abs = scroll + (my - rows.y)
+      abs >= 0 && abs < ordered.size ? abs : nil
+    end
+
+    # Providers list: select-first; a second click on the selected row opens the editor (↵/e).
+    private def click_providers(content : Rect, mx : Int32, my : Int32) : Nil
+      return unless idx = provider_row_at(content, mx, my)
+      if idx == @prov_sel
+        open_edit_provider
+      else
+        @prov_sel = idx
+      end
+    end
+
+    # Hit-test a click against the PROVIDERS table card (mirrors render_providers).
+    private def provider_row_at(content : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if content.empty? || !content.contains?(mx, my)
+      inner = content.inset(1, 1)
+      rows = Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
+      return nil if rows.empty? || my < rows.y || my >= rows.bottom
+      return nil if mx < rows.x || mx >= rows.right
+      visible = rows.h
+      return nil if visible <= 0
+      scroll = @prov_scroll
+      if visible > 0
+        scroll = @prov_sel if @prov_sel < scroll
+        scroll = @prov_sel - visible + 1 if @prov_sel >= scroll + visible
+      end
+      scroll = scroll.clamp(0, {@providers.size - visible, 0}.max)
+      abs = scroll + (my - rows.y)
+      abs >= 0 && abs < @providers.size ? abs : nil
     end
 
     def handle_wheel(step : Int32) : Bool

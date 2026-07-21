@@ -131,10 +131,10 @@ describe Gori::Rules do
 
       req = "GET / HTTP/1.1\r\nHost: a\r\nUser-Agent: curl/8\r\nCookie: sid=1\r\n\r\n".to_slice
       out = String.new(rules.rewrite_request(req, ""))
-      out.should contain("X-Trace: on")       # added before the blank line
-      out.should contain("User-Agent: gori")  # value replaced, original name casing kept
-      out.should_not contain("Cookie:")        # removed
-      out.should contain("Host: a")            # untouched
+      out.should contain("X-Trace: on")      # added before the blank line
+      out.should contain("User-Agent: gori") # value replaced, original name casing kept
+      out.should_not contain("Cookie:")      # removed
+      out.should contain("Host: a")          # untouched
     end
   end
 
@@ -163,6 +163,31 @@ describe Gori::Rules do
       String.new(rules.rewrite_request(req, "api.example.com")).should contain("X-Env: prod")
       # a non-matching host is byte-identical (same slice returned)
       rules.rewrite_request(req, "other.test").should eq(req)
+    end
+  end
+
+  it "transforms a full HTTP message for the live preview (head + body seams)" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "Host: example.com", "Host: evil.test")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body,
+        "hello", "hola")
+      sample = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\nhello world"
+      out = rules.transform_message(sample, Gori::Store::RuleTarget::Request, "example.com")
+      out.should contain("Host: evil.test")
+      out.should contain("hola world")
+      out.should_not contain("hello world")
+      # disabled rules are skipped
+      id = rules.rules.find(&.part.body?).not_nil!.id
+      rules.toggle(id)
+      out2 = rules.transform_message(sample, Gori::Store::RuleTarget::Request, "example.com")
+      out2.should contain("hello world")
+      # response rules do not touch a request preview
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "hello", "nope")
+      out3 = rules.transform_message(sample, Gori::Store::RuleTarget::Request, "example.com")
+      out3.should contain("hello world")
+      out3.should_not contain("nope")
     end
   end
 end

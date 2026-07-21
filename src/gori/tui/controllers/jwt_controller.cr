@@ -80,9 +80,9 @@ module Gori::Tui
     def body_badge : Symbol
       s = cur
       editing = case s.pane
-                when :input            then s.input_mode == InputMode::Insert
+                when :input                     then s.input_mode == InputMode::Insert
                 when :header, :payload, :secret then true
-                else                        false
+                else                                 false
                 end
       editing ? :editor : :body
     end
@@ -287,8 +287,8 @@ module Gori::Tui
       return handle_input_read(ev, c) unless s.input_mode == InputMode::Insert
       key = ev.key
       case
-      when ev.ctrl_z?    then s.input.undo; recompute_decode(s)
-      when key.enter?    then s.input.insert_newline; recompute_decode(s)
+      when ev.ctrl_z?     then s.input.undo; recompute_decode(s)
+      when key.enter?     then s.input.insert_newline; recompute_decode(s)
       when key.backspace? then s.input.backspace; recompute_decode(s)
       when key.up?
         s.input.at_top? ? cross_pane(s, -1) : s.input.move(-1, 0)
@@ -388,11 +388,14 @@ module Gori::Tui
       s = cur
       key = ev.key
       at_top = which == :decoded ? s.view.decoded_at_top? : s.view.output_at_top?
+      at_bottom = which == :decoded ? s.view.decoded_at_bottom? : s.view.output_at_bottom?
       case
       when key.up?, key.lower_k?
         at_top ? cross_pane(s, -1) : scroll_pane(s, which, -1)
       when key.down?, key.lower_j?
-        scroll_pane(s, which, 1)
+        # At bottom (or content fits): leave DECODED → ATTACKS. OUTPUT is last in ENCODE
+        # so cross_pane is a no-op past the end — same as ↑/↓ on a fully-visible card.
+        at_bottom ? cross_pane(s, 1) : scroll_pane(s, which, 1)
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false # y + Global breath → keymap
       end

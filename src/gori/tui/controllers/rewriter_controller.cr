@@ -1,20 +1,27 @@
 require "../tab_controller"
 require "../rewriter_view"
+require "../text_area"
 require "../../store"
 require "../../rules"
 
 module Gori::Tui
   # The Rewriter tab: manage the project's Match & Replace rules (the shared Rules engine
-  # the proxy reads live). A single global list — no sub-tabs. The body is a navigable
-  # list; add/edit opens the RewriterRuleOverlay (a modal, wired in the runner like the
-  # Probe custom-rule editor). Rules do far more than the old palette overlay: literal or
-  # regex replace on head/body, add/set/remove header by name, and an optional host scope.
+  # the proxy reads live). A global list on top + a Caido-style live preview pair below
+  # (editable sample HTTP | transformed by enabled rules). Add/edit opens the
+  # RewriterRuleOverlay (modal, wired in the runner like the Probe custom-rule editor).
   class RewriterController < TabController
+    # Default sample so a new project can demo head/body/header rules without pasting.
+    DEFAULT_SAMPLE = "GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: gori\r\nCookie: session=REPLACE_ME\r\n\r\nhello world\r\n"
+
     def initialize(host : Host)
       super(host)
       @view = RewriterView.new
       @sel = 0
       @scroll = 0
+      @focus = :list # :list | :preview_in | :preview_out
+      @preview_input = TextArea.new(DEFAULT_SAMPLE)
+      @out_scroll = 0
+      @last_body = Rect.new(0, 0, 0, 0) # last content rect — click/wheel geometry
     end
 
     def tab : Symbol
@@ -26,7 +33,7 @@ module Gori::Tui
     end
 
     def body_badge : Symbol
-      :body
+      @focus == :preview_in ? :editor : :body
     end
 
     private def rules_engine : Rules
@@ -54,24 +61,19 @@ module Gori::Tui
     # --- render ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      shell = BodyChrome.shell_focused(focus, multi_pane: false)
+      shell = BodyChrome.shell_focused(focus, multi_pane: true)
       BodyChrome.framed(screen, rect, shell) do |inner|
+        @last_body = inner
         list = rule_list
         @sel = @sel.clamp(0, {list.size - 1, 0}.max)
         ensure_visible(inner, list.size)
-        @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count, body_focused, rules_engine.active?)
+        @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
+          @focus, body_focused, rules_engine.active?, @preview_input, preview_output, @out_scroll)
       end
     end
 
-    # Rows visible in the list area (inner minus header, minus the live note row).
-    private def list_height(inner : Rect) : Int32
-      h = inner.h - RewriterView::HEADER_H
-      h -= 1 if rules_engine.active?
-      {h, 0}.max
-    end
-
     private def ensure_visible(inner : Rect, count : Int32) : Nil
-      lh = list_height(inner)
+      lh = @view.list_row_capacity(inner, rules_engine.active?)
       return if lh <= 0
       if @sel < @scroll
         @scroll = @sel
@@ -81,18 +83,53 @@ module Gori::Tui
       @scroll = @scroll.clamp(0, {count - lh, 0}.max)
     end
 
+    # Enabled rules applied to the sample (request side; host from Host: header).
+    private def preview_output : String
+      text = @preview_input.text
+      host = host_from_sample(text)
+      rules_engine.transform_message(text, Store::RuleTarget::Request, host)
+    end
+
+    private def host_from_sample(text : String) : String
+      text.each_line do |ln|
+        # Allow both "Host:" and "host:" (HTTP/2-style lowercasing in samples).
+        if ln.size >= 5 && ln[0, 5].downcase == "host:"
+          return ln[5..].strip
+        end
+      end
+      ""
+    end
+
     # --- keys ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
+      case @focus
+      when :preview_in  then handle_preview_in_key(ev)
+      when :preview_out then handle_preview_out_key(ev)
+      else                   handle_list_key(ev)
+      end
+    end
+
+    private def handle_list_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char
       case
       when key.space? && !ev.ctrl? && !ev.alt? then @host.open_space_menu
       when key.up?, c == 'k'                   then move_up
-      when key.down?, c == 'j'                 then move_sel(1)
+      when key.down?, c == 'j'                 then list_down
       when key.escape?                         then @host.request_focus(:menu)
       else                                          return handle_action_key(ev, c)
       end
       true
+    end
+
+    # ↓ past the last rule (or empty list) enters the preview input when shown.
+    private def list_down : Nil
+      n = rule_list.size
+      if n == 0 || @sel >= n - 1
+        enter_preview_in if preview_available?
+      else
+        move_sel(1)
+      end
     end
 
     # ↑/k at the top of the list releases focus back to the tab bar (like the Intercept
@@ -105,7 +142,6 @@ module Gori::Tui
       end
     end
 
-    # The rule-action keys, split out to keep handle_body_key's branching low.
     private def handle_action_key(ev : Termisu::Event::Key, c : Char?) : Bool
       key = ev.key
       case
@@ -120,23 +156,113 @@ module Gori::Tui
       true
     end
 
+    private def handle_preview_in_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      ed = @preview_input
+      case
+      when key.escape?
+        @focus = :list
+      when key.up?
+        ed.at_top? ? (@focus = :list) : ed.move(-1, 0)
+      when key.down?
+        ed.at_bottom? ? (@focus = :preview_out) : ed.move(1, 0)
+      when key.left?
+        ed.at_start? ? (@focus = :list) : ed.move(0, -1)
+      when key.right?
+        ed.move(0, 1)
+      when key.enter?
+        ed.insert_newline
+      when key.backspace?
+        ed.backspace
+      when key.delete?
+        ed.delete
+      when key.home?
+        ed.home
+      when key.end?
+        ed.end_of_line
+      when ev.ctrl_z?
+        ed.undo
+      else
+        if (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
+          ed.insert(c)
+          ed.set_preedit("")
+        elsif key.space? && !ev.ctrl? && !ev.alt?
+          @host.open_space_menu
+        else
+          return false
+        end
+      end
+      true
+    end
+
+    private def handle_preview_out_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.escape?, key.left? then @focus = :preview_in
+      when key.up?, key.lower_k?
+        if @out_scroll <= 0
+          @focus = :preview_in
+        else
+          @out_scroll = {@out_scroll - 1, 0}.max
+        end
+      when key.down?, key.lower_j?
+        @out_scroll += 1
+      when key.space? && !ev.ctrl? && !ev.alt?
+        @host.open_space_menu
+      else
+        return false
+      end
+      true
+    end
+
     private def move_sel(d : Int32) : Nil
       n = rule_list.size
       return if n == 0
       @sel = (@sel + d).clamp(0, n - 1)
     end
 
+    private def preview_available? : Bool
+      return false if @last_body.empty?
+      @view.preview_shown?(@last_body)
+    end
+
+    private def enter_preview_in : Nil
+      return unless preview_available?
+      @focus = :preview_in
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
       inner = BodyChrome.frame_inner(rect)
-      if idx = @view.row_at(inner, mx, my, @scroll, rule_list.size, rules_engine.active?)
-        @sel = idx
+      @last_body = inner
+      case @view.pane_at(inner, mx, my)
+      when :list
+        @focus = :list
+        if idx = @view.row_at(inner, mx, my, @scroll, rule_list.size, rules_engine.active?)
+          @sel = idx
+        end
+      when :preview_in
+        @focus = :preview_in
+        body = @view.preview_input_body(inner)
+        @preview_input.click_to_cursor(body, mx, my) unless body.empty?
+      when :preview_out
+        @focus = :preview_out
       end
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      move_sel(step)
+      case @focus
+      when :preview_in  then @preview_input.scroll_view(step)
+      when :preview_out then @out_scroll = {@out_scroll + step, 0}.max
+      else                   move_sel(step)
+      end
+      true
+    end
+
+    def set_preedit(text : String) : Bool
+      return false unless @focus == :preview_in
+      @preview_input.set_preedit(text)
       true
     end
 
@@ -204,7 +330,14 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "↑/↓ select · a add · ↵/e edit · x on/off · d delete · ⇧J/⇧K reorder · space cmds · esc tabs"
+      case @focus
+      when :preview_in
+        "type sample HTTP · ↑ list · ↓/→ output · esc list"
+      when :preview_out
+        "↑/↓ scroll · ← input · esc input"
+      else
+        "↑/↓ select · ↓ preview · a add · ↵/e edit · x on/off · d delete · ⇧J/⇧K reorder · space cmds · esc tabs"
+      end
     end
   end
 end

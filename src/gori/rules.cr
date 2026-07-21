@@ -125,6 +125,32 @@ module Gori
       apply(entity, Store::RuleTarget::Response, Store::RulePart::Body, @resp_body_count, host)
     end
 
+    # Live preview for the Rewriter tab: apply every enabled rule for `target` over a
+    # full HTTP message (head + body split on the first blank line). Host-scoped rules
+    # use `host` (typically parsed from the sample's Host header). Empty host → only
+    # unscoped rules match. Order matches the proxy path (head rules then body rules).
+    def transform_message(text : String, target : Store::RuleTarget, host : String = "") : String
+      head, body, sep = split_message(text)
+      new_head = String.new(apply(head.to_slice, target, Store::RulePart::Head,
+        target.request? ? @req_head_count : @resp_head_count, host))
+      new_body = String.new(apply(body.to_slice, target, Store::RulePart::Body,
+        target.request? ? @req_body_count : @resp_body_count, host))
+      "#{new_head}#{sep}#{new_body}"
+    end
+
+    # Split an HTTP message into {head, body, separator}. Separator is "\r\n\r\n" or
+    # "\n\n" when a blank line exists; otherwise the whole text is the head and sep/body
+    # are empty (so header-only samples still rewrite).
+    private def split_message(text : String) : {String, String, String}
+      if idx = text.index("\r\n\r\n")
+        {text[0, idx], text[idx + 4..], "\r\n\r\n"}
+      elsif idx = text.index("\n\n")
+        {text[0, idx], text[idx + 2..], "\n\n"}
+      else
+        {text, "", ""}
+      end
+    end
+
     # Apply every enabled rule for {target, part} that also matches `host` over the bytes.
     # Returns the SAME bytes when nothing is configured or nothing is in scope (byte-
     # fidelity, P7). A no-op replace re-serializes to an equal slice (as it always has for
