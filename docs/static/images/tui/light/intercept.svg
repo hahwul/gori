@@ -6,13 +6,13 @@
 <circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
 <circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
 <text x="603.0" y="22.0" text-anchor="middle" fill="#70706f" font-size="12.3px">gori · Intercept</text>
-<rect x="315.00" y="106.00" width="99.00" height="18.00" fill="#8f6410"/>
+<rect x="315.00" y="106.00" width="99.00" height="18.00" fill="#8a6a28"/>
 <rect x="423.00" y="322.00" width="81.00" height="18.00" fill="#dbd6ca"/>
 <rect x="423.00" y="340.00" width="63.00" height="18.00" fill="#dbd6ca"/>
 <rect x="423.00" y="376.00" width="36.00" height="18.00" fill="#dbd6ca"/>
 <rect x="36.00" y="484.00" width="54.00" height="18.00" fill="#e7e5de"/>
 <rect x="90.00" y="484.00" width="1098.00" height="18.00" fill="#f0efea"/>
-<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
+<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#8a6a28" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
 <text x="90.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">·</text>
 <text x="108.00" y="83.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">default</text>
 <text x="792.00" y="83.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">scope:off</text>

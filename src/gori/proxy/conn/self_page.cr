@@ -189,6 +189,8 @@ module Gori::Proxy
       color-scheme:dark;
       --bg:#0b0e16;--text:#c6c8d4;--heading:#f6f5f1;--muted:#8d90a2;--quiet:#6a6d7e;
       --accent:#c8a860;--accent-strong:#e6cf92;
+      /* Logo body gold (docs --grad-logo / gori.svg), not the yellower accent leaf. */
+      --logo:#d9c28b;
       --accent-rgb:200 168 96;--cloud-rgb:108 126 178;--hair:rgb(250 250 250 /.12);
     }
     @media (prefers-color-scheme:light){
@@ -196,6 +198,7 @@ module Gori::Proxy
         color-scheme:light;
         --bg:#faf9f7;--text:#33322f;--heading:#141210;--muted:#6b6454;--quiet:#8a8272;
         --accent:#a8791f;--accent-strong:#8a5d0a;
+        --logo:#8a6a28;
         --accent-rgb:168 121 31;--cloud-rgb:150 132 96;--hair:rgb(26 22 14 /.14);
       }
     }
@@ -211,7 +214,7 @@ module Gori::Proxy
         radial-gradient(52% 60% at 62% 52%,rgb(var(--cloud-rgb)/.11),transparent 72%)}
     .hero>*{position:relative;z-index:1}
     .mark{font-family:"STIX Two Math","Cambria Math","Noto Sans Math",Georgia,"Times New Roman",serif;
-      font-size:clamp(3.4rem,13vw,6rem);line-height:1;color:var(--accent-strong);letter-spacing:.02em;margin-bottom:1.05rem}
+      font-size:clamp(3.4rem,13vw,6rem);line-height:1;color:var(--logo);letter-spacing:.02em;margin-bottom:1.05rem}
     h1{color:var(--heading);font-size:clamp(1.55rem,4.5vw,2.15rem);line-height:1.16;font-weight:760;letter-spacing:-.015em;
       max-width:18ch;text-wrap:balance;margin-bottom:.7rem}
     .lead{color:var(--muted);font-size:1.06rem;max-width:44ch;margin-bottom:1.5rem}

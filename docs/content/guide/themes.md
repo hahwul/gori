@@ -75,7 +75,7 @@ Every field, all inheriting from `base` when omitted:
   "elevated":      "#1b1b1f",
   "border":        "#2a2a30",
   "border_focus":  "#3a3a42",
-  "focus_gold":    "#c2a05a",
+  "focus_gold":    "#d9c28b",
   "accent":        "#fafafa",
   "accent_bg":     "#26262c",
   "selection_dim": "#19191c",

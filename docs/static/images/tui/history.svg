@@ -10,7 +10,7 @@
 <rect x="45.00" y="196.00" width="1134.00" height="18.00" fill="#26262c"/>
 <rect x="36.00" y="484.00" width="54.00" height="18.00" fill="#1b1b1f"/>
 <rect x="90.00" y="484.00" width="1098.00" height="18.00" fill="#141417"/>
-<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
+<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
 <text x="90.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="108.00" y="83.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">default</text>
 <text x="792.00" y="83.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">scope:off</text>
@@ -37,8 +37,8 @@
 <text x="1026.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Help</text>
 <text x="1152.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">⋯</text>
 <text x="1170.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">1</text>
-<text x="36.00" y="137.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
-<text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="36.00" y="137.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+<text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">/</text>
 <text x="72.00" y="155.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">filter</text>
 <text x="144.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
@@ -54,8 +54,8 @@
 <text x="981.00" y="155.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">f:follow</text>
 <text x="1062.00" y="155.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">⇧S</text>
 <text x="1089.00" y="155.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">scope:off</text>
-<text x="1179.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="173.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="173.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="173.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">TIME</text>
 <text x="189.00" y="173.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">METHOD</text>
 <text x="261.00" y="173.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">PROTO</text>
@@ -65,9 +65,9 @@
 <text x="999.00" y="173.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">TYPE</text>
 <text x="1062.00" y="173.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">SIZE</text>
 <text x="1125.00" y="173.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">DUR</text>
-<text x="1179.00" y="173.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="191.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤</text>
-<text x="36.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="173.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="191.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤</text>
+<text x="36.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="45.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">▎</text>
 <text x="54.00" y="209.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="209.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:06</text>
@@ -79,8 +79,8 @@
 <text x="999.00" y="209.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">html</text>
 <text x="1062.00" y="209.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">804B</text>
 <text x="1125.00" y="209.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">20ms</text>
-<text x="1179.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="227.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="227.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:06</text>
 <text x="189.00" y="227.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -91,8 +91,8 @@
 <text x="999.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">721B</text>
 <text x="1125.00" y="227.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">143ms</text>
-<text x="1179.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="245.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="245.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:06</text>
 <text x="189.00" y="245.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -103,8 +103,8 @@
 <text x="999.00" y="245.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="245.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">758B</text>
 <text x="1125.00" y="245.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">182ms</text>
-<text x="1179.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="263.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="263.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:06</text>
 <text x="189.00" y="263.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -115,8 +115,8 @@
 <text x="999.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">332B</text>
 <text x="1125.00" y="263.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">151ms</text>
-<text x="1179.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="281.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="281.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:05</text>
 <text x="189.00" y="281.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">POST</text>
@@ -127,8 +127,8 @@
 <text x="999.00" y="281.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="281.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">1.1KB</text>
 <text x="1125.00" y="281.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">170ms</text>
-<text x="1179.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="299.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="299.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:05</text>
 <text x="189.00" y="299.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -139,8 +139,8 @@
 <text x="999.00" y="299.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">text</text>
 <text x="1062.00" y="299.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">292B</text>
 <text x="1125.00" y="299.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">144ms</text>
-<text x="1179.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="317.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="317.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:05</text>
 <text x="189.00" y="317.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -151,8 +151,8 @@
 <text x="999.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">—</text>
 <text x="1062.00" y="317.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">325B</text>
 <text x="1125.00" y="317.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">144ms</text>
-<text x="1179.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="335.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="335.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="335.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="335.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:05</text>
 <text x="189.00" y="335.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -163,8 +163,8 @@
 <text x="999.00" y="335.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">text</text>
 <text x="1062.00" y="335.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">1.1KB</text>
 <text x="1125.00" y="335.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">10ms</text>
-<text x="1179.00" y="335.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="335.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="353.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="353.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:05</text>
 <text x="189.00" y="353.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -175,8 +175,8 @@
 <text x="999.00" y="353.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="353.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">2.6KB</text>
 <text x="1125.00" y="353.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">241ms</text>
-<text x="1179.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="371.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="371.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:04</text>
 <text x="189.00" y="371.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -187,8 +187,8 @@
 <text x="999.00" y="371.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="371.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">994B</text>
 <text x="1125.00" y="371.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">142ms</text>
-<text x="1179.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="54.00" y="389.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07-16</text>
 <text x="108.00" y="389.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">23:33:04</text>
 <text x="189.00" y="389.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">GET</text>
@@ -199,16 +199,16 @@
 <text x="999.00" y="389.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">json</text>
 <text x="1062.00" y="389.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">1016B</text>
 <text x="1125.00" y="389.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">146ms</text>
-<text x="1179.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="1179.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="1179.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="1179.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="461.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="1179.00" y="461.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
-<text x="36.00" y="479.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="1179.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="1179.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="1179.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="1179.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="461.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="1179.00" y="461.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
+<text x="36.00" y="479.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
 <text x="45.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">BODY</text>
 <text x="99.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">↑/↓</text>
 <text x="135.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">move</text>
