@@ -32,45 +32,78 @@ module Gori
     end
 
     # Expand env tokens in wire-form HTTP text (LF or CRLF) and return CRLF bytes.
-    # Uses `gsub(/\r?\n/, "\r\n")` — NOT `split('\n').join("\r\n")` — so already-CRLF
-    # input (captured flow bytes) isn't doubled into `\r\r\n`, which would destroy the
-    # head/body separator and break framing on every CLI/MCP repeater+mine send path.
+    # Normalizes newlines with a byte-level scan (`normalize_crlf`) — NOT
+    # `gsub(/\r?\n/, "\r\n")` and NOT `split('\n').join("\r\n")` — for two reasons:
+    # the gsub-vs-split/join distinction avoids doubling already-CRLF input
+    # (captured flow bytes) into `\r\r\n`, which would destroy the head/body
+    # separator and break framing on every CLI/MCP repeater+mine send path; and a
+    # `Regex` (gsub) *requires* valid UTF-8 and raises `ArgumentError` on a subject
+    # string that isn't — which a captured flow's binary body routinely isn't. See
+    # `expand` below for why the text reaching this point may carry invalid UTF-8.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
                          prefix : String = Settings.env_prefix) : Bytes
-      expand(text, vars, prefix).gsub(/\r?\n/, "\r\n").to_slice
+      normalize_crlf(expand(text, vars, prefix).to_slice)
     end
 
     # Substitute registered `prefix+KEY` tokens; unknown keys stay literal.
+    #
+    # Operates on raw bytes, not `String#chars`. `prefix` and KEY names are always
+    # ASCII (`KEY_HEAD`/`KEY_TAIL`), so a token can be found/replaced by scanning
+    # bytes alone — never decoding to codepoints. That matters because the text
+    # here can be a captured flow's body loaded verbatim into the Repeater editor,
+    # which may contain byte sequences that are not valid UTF-8 (a raw binary
+    # body). `String#chars` (the previous implementation) decodes lossily: any
+    # invalid sequence is silently replaced by U+FFFD, corrupting the wire bytes
+    # on every send — even when the text has no `$KEY` token at all. Scanning
+    # bytes instead means every span that isn't part of a matched token — valid
+    # UTF-8 or not — is copied through byte-for-byte, unchanged.
     def self.expand(text : String, vars : Hash(String, String) = effective_vars,
                     prefix : String = Settings.env_prefix) : String
       return text if prefix.empty?
-      out = IO::Memory.new
-      chars = text.chars
-      n = chars.size
-      plen = prefix.size
-      prefix_chars = prefix.chars
+      return text unless text.byte_index(prefix) # fast, lossless no-op when the prefix never occurs
+
+      bytes = text.to_slice
+      prefix_bytes = prefix.to_slice
+      n = bytes.size
+      plen = prefix_bytes.size
+      buf = IO::Memory.new(n)
       i = 0
       while i < n
-        if i + plen <= n && prefix_chars.each_with_index.all? { |c, j| chars[i + j] == c }
-          if parsed = read_key(chars, i + plen, n)
+        if i + plen <= n && prefix_bytes.each_with_index.all? { |b, j| bytes[i + j] == b }
+          if parsed = read_key_bytes(bytes, i + plen, n)
             key, consumed = parsed
             if val = vars[key]?
-              out << val
+              buf << val
               i += plen + consumed
             else
-              out << prefix
+              buf << prefix
               i += plen
             end
           else
-            out << prefix
+            buf << prefix
             i += plen
           end
         else
-          out << chars[i]
+          buf.write_byte(bytes[i])
           i += 1
         end
       end
-      out.to_s
+      String.new(buf.to_slice)
+    end
+
+    # Byte-level equivalent of `gsub(/\r?\n/, "\r\n")`: inserts `\r` before any
+    # `\n` not already preceded by one, leaving everything else untouched. Used
+    # instead of a `Regex` because `bytes` (the expanded request text) may carry
+    # invalid UTF-8, which `Regex` cannot accept as a subject.
+    private def self.normalize_crlf(bytes : Bytes) : Bytes
+      buf = IO::Memory.new(bytes.size)
+      prev : UInt8 = 0
+      bytes.each do |b|
+        buf.write_byte(0x0D_u8) if b == 0x0A_u8 && prev != 0x0D_u8
+        buf.write_byte(b)
+        prev = b
+      end
+      buf.to_slice
     end
 
     # Scans the text for occurrences of any registered env var value and replaces
@@ -81,6 +114,15 @@ module Gori
     # can re-match a token an earlier replacement inserted — e.g. value "OKEN"
     # matching inside a just-inserted "$TOKEN" — silently corrupting the mask. The
     # pass never re-scans replaced spans, so inserted tokens stay intact.
+    #
+    # Byte-level, same reasoning as `expand`: callers pass raw request/response
+    # text (e.g. MCP `send`/`repeater` tools mask a captured flow's raw bytes for
+    # display), which may not be valid UTF-8. Scanning `text.chars` would silently
+    # replace any invalid byte sequence with U+FFFD even where no secret value
+    # matches nearby — corrupting the displayed/logged text on every call, not
+    # just the masked spans. Byte-level value matching is also strictly more
+    # precise than char matching: it finds a value's literal bytes regardless of
+    # whether the surrounding haystack happens to be well-formed UTF-8.
     def self.mask_secrets(text : String, vars : Hash(String, String) = effective_vars,
                           prefix : String = Settings.env_prefix) : String
       return text if prefix.empty? || vars.empty?
@@ -88,28 +130,28 @@ module Gori
       # Filter out empty values and short/common values that might lead to false positives (e.g., single characters)
       candidates = vars.to_a
         .reject { |(k, v)| v.strip.empty? || v.size < 4 }
-        .sort_by! { |(k, v)| -v.size }
-        .map { |(k, v)| {k, v.chars} }
+        .sort_by! { |(k, v)| -v.bytesize }
+        .map { |(k, v)| {k, v.to_slice} }
 
       return text if candidates.empty?
 
-      chars = text.chars
-      n = chars.size
-      String.build do |io|
-        i = 0
-        while i < n
-          hit = candidates.find do |(_, vchars)|
-            i + vchars.size <= n && vchars.each_with_index.all? { |c, j| chars[i + j] == c }
-          end
-          if hit
-            io << prefix << hit[0]
-            i += hit[1].size
-          else
-            io << chars[i]
-            i += 1
-          end
+      bytes = text.to_slice
+      n = bytes.size
+      buf = IO::Memory.new(n)
+      i = 0
+      while i < n
+        hit = candidates.find do |(_, vbytes)|
+          i + vbytes.size <= n && vbytes.each_with_index.all? { |b, j| bytes[i + j] == b }
+        end
+        if hit
+          buf << prefix << hit[0]
+          i += hit[1].size
+        else
+          buf.write_byte(bytes[i])
+          i += 1
         end
       end
+      String.new(buf.to_slice)
     end
 
     # Char offsets [start, end) of each env-shaped token in `text` (end exclusive).
@@ -142,11 +184,18 @@ module Gori
     end
 
     # Parse "KEY VALUE" or "KEY=value" (value may contain spaces when using the
-    # space form). Returns nil when KEY is invalid.
+    # space form). Which syntax was used is decided by whichever separator — `=`
+    # or whitespace — appears FIRST in the string, not by whether `=` appears
+    # anywhere at all: a space-form value that itself contains `=` (e.g. a
+    # base64-padded API key, `APIKEY dGVzdA==`) must still split on the leading
+    # whitespace, not on the `=` buried inside the value. Returns nil when KEY is
+    # invalid.
     def self.parse_line(text : String) : {String, String}?
       raw = text.strip
       return nil if raw.empty?
-      if eq = raw.index('=')
+      eq = raw.index('=')
+      ws = raw.index(/\s/)
+      if eq && (ws.nil? || eq < ws)
         key = raw[0...eq].strip
         val = raw[eq + 1..]
         return nil unless valid_key?(key)
@@ -217,6 +266,20 @@ module Gori
         j += 1
       end
       {chars[start...j].join, j - start}
+    end
+
+    # Byte-level counterpart to `read_key`, used by `expand`. KEY_HEAD/KEY_TAIL
+    # are pure-ASCII patterns, so matching a single byte at a time via `UInt8#chr`
+    # (never decoding a multi-byte sequence) is exact — and safe on invalid UTF-8,
+    # since a byte that's part of an invalid sequence simply won't match `[A-Za-z0-9_]`
+    # and gets left alone by the caller.
+    private def self.read_key_bytes(bytes : Bytes, start : Int32, n : Int32) : {String, Int32}?
+      return nil if start >= n || !KEY_HEAD.matches?(bytes[start].chr.to_s)
+      j = start + 1
+      while j < n && KEY_TAIL.matches?(bytes[j].chr.to_s)
+        j += 1
+      end
+      {String.new(bytes[start...j]), j - start}
     end
   end
 end

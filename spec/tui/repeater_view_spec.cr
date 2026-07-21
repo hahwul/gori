@@ -321,6 +321,58 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # Regression for the "Repeater silently corrupts binary/non-UTF-8 request bodies on
+  # every default-path send" bug: a History-loaded flow whose body has genuinely
+  # invalid UTF-8 (a lone continuation byte, a truncated multi-byte lead — NOT just an
+  # embedded NUL, which is valid single-byte UTF-8) used to come out of `request_bytes`
+  # with those bytes rewritten to U+FFFD by `Env.expand`'s old `String#chars` rebuild,
+  # even though the request has no `$KEY` token anywhere — silently changing the
+  # Content-Length and garbling the body on a plain ^R send.
+  it "resends an invalid-UTF-8 body byte-exact via the default (no $KEY) send path" do
+    repeater_tmp_store do |store|
+      body = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43] # 6 bytes; 0x80 and 0xE2,0x28 are invalid UTF-8
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/x", http_version: "HTTP/1.1",
+        head: "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: 6\r\n\r\n".to_slice,
+        body: body))
+      detail = store.get_flow(id).not_nil!
+
+      view = RepeaterView.new
+      view.load(detail)
+
+      sent = view.request_bytes
+      String.new(sent).includes?("Content-Length: 6").should be_true # size did NOT balloon (was corrupted to a larger CL)
+      sent[-body.size, body.size].should eq(body)                    # body bytes preserved exactly
+    end
+  end
+
+  # Same corruption class, but with a `$KEY` token present elsewhere in the request:
+  # substitution must still work for the token while invalid-UTF-8 bytes in the body
+  # (unrelated to the token) pass through unchanged.
+  it "substitutes a known $KEY while leaving an invalid-UTF-8 body untouched" do
+    Gori::Settings.env_vars = [{"TOKEN", "secret"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    repeater_tmp_store do |store|
+      body = Bytes[0x41, 0x80, 0x42, 0xE2, 0x28, 0x43]
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/x", http_version: "HTTP/1.1",
+        head: "POST /x HTTP/1.1\r\nHost: h.test\r\nAuthorization: $TOKEN\r\nContent-Length: 6\r\n\r\n".to_slice,
+        body: body))
+      detail = store.get_flow(id).not_nil!
+
+      view = RepeaterView.new
+      view.load(detail)
+
+      sent = view.request_bytes
+      String.new(sent).includes?("Authorization: secret").should be_true # $TOKEN substituted
+      sent[-body.size, body.size].should eq(body)                        # body bytes still preserved exactly
+    end
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
+
   it "reflects auto Content-Length in the visible REQUEST editor (^L on)" do
     view = RepeaterView.new
     view.restore("https://h.test",
