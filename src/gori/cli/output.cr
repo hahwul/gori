@@ -46,7 +46,15 @@ module Gori
       # sequences in its request line (method / host / target), which `puts` would
       # otherwise inject verbatim into the operator's terminal (and re-inject on every
       # later view). Replace every control char (incl. ESC, CR/LF, tab, C1) with '·'.
+      #
+      # Also scrubs invalid UTF-8 first: a captured host/path is raw bytes off the wire
+      # (see Sitemap.template_class's comment) and can be invalid UTF-8 without containing
+      # a single control byte, which JSON::Builder does NOT validate — the sitemap JSON/text/
+      # paths exports all route through this, so an unscrubbed value here reaches STDOUT as
+      # invalid UTF-8. `.scrub` is a no-op (returns self, no allocation) on the common
+      # valid-UTF-8 case, so this stays free when there's nothing to fix.
       def self.term_safe(s : String) : String
+        s = s.scrub
         return s unless s.each_char.any?(&.control?)
         String.build { |io| s.each_char { |c| io << (c.control? ? '·' : c) } }
       end
@@ -56,6 +64,7 @@ module Gori
       # for captured text written to a live terminal (the `show`/`repeater` text views).
       # `--format raw` stays the exact-bytes path for scripts/redirection.
       def self.term_safe_multiline(s : String) : String
+        s = s.scrub
         return s unless s.each_char.any? { |c| c.control? && c != '\n' && c != '\t' }
         String.build { |io| s.each_char { |c| io << ((c.control? && c != '\n' && c != '\t') ? '·' : c) } }
       end
@@ -394,10 +403,13 @@ module Gori
 
       private def self.sitemap_host_json(j : JSON::Builder, host : Sitemap::Node) : Nil
         j.object do
-          j.field "host", host.label
+          # host.label/tag are captured/user data and can be invalid UTF-8 (see
+          # Sitemap.template_class) — term_safe scrubs that (and strips control bytes),
+          # so this stays valid UTF-8 JSON like the text/paths formats already are.
+          j.field "host", term_safe(host.label)
           j.field "endpoints", host.endpoints
           if t = host.tag
-            j.field "tag", t
+            j.field "tag", term_safe(t)
           end
           sitemap_children_json(j, host)
         end
@@ -405,23 +417,23 @@ module Gori
 
       private def self.sitemap_node_json(j : JSON::Builder, node : Sitemap::Node) : Nil
         j.object do
-          j.field "label", node.label
+          j.field "label", term_safe(node.label)
           # A fold is synthetic — its `path` is always "" and carries no meaning, so it is
           # omitted rather than emitted as an empty string. `template` names the id class
           # so a consumer can tell an id fold from a numeric run without parsing labels.
           if node.grouped
             j.field "grouped", true
-            j.field "template", node.label if node.template?
+            j.field "template", node.label if node.template? # one of TEMPLATE_LABELS: always plain ASCII
           else
-            j.field "path", node.path
+            j.field "path", term_safe(node.path)
           end
           # On a fold these are the union of its children's verbs, not its own.
           verbs = node.grouped ? node.fold_methods : node.methods
           unless verbs.empty?
-            j.field("methods") { j.array { verbs.each { |m| j.string(m) } } }
+            j.field("methods") { j.array { verbs.each { |m| j.string(term_safe(m)) } } }
           end
           if t = node.tag
-            j.field "tag", t
+            j.field "tag", term_safe(t)
           end
           sitemap_children_json(j, node)
         end

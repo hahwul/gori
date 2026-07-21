@@ -339,12 +339,17 @@ module Gori
           j.field "created_at_iso", unix_micros_iso(f.created_at)
           j.field "updated_at", f.updated_at
           j.field "updated_at_iso", unix_micros_iso(f.updated_at)
-          j.field "title", f.title
+          # title/host/notes: same captured-data-can-be-invalid-UTF-8 gap `Issues::Export.json`
+          # has (this IS that same JSON shape, just wrapped in a JSON-RPC tool response) — an
+          # unscrubbed raw byte here breaks the whole response line's UTF-8 validity, a real
+          # protocol violation an MCP client could choke on, not merely a display glitch.
+          j.field "title", Issues::Export.one_line(f.title)
           j.field "severity", f.severity.label
           j.field "status", f.status.label
-          j.field "host", f.host
+          j.field "host", f.host.try { |h| Issues::Export.one_line(h) }
           j.field "flow_id", f.flow_id
-          j.field "notes", f.notes
+          # notes is multi-line by design — scrub only, don't collapse (mirrors Export.json).
+          j.field "notes", Issues::Export.scrub_only(f.notes)
           j.field "links" do
             j.array { Issues::Export.append_links_json(j, f, store) if store }
           end

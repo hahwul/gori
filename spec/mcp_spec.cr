@@ -1421,6 +1421,54 @@ describe Gori::MCP::Server do
         payload["total"].as_i.should eq(2)
       end
     end
+
+    it "keeps the JSON-RPC response line valid UTF-8 when title/host/notes carry a raw invalid byte" do
+      # Same captured-data-can-be-invalid-UTF-8 gap as Issues::Export.json (Serialize.issue
+      # wrote these fields unscrubbed) — but here an unscrubbed byte breaks the WIRE response
+      # line itself, a genuine JSON-RPC protocol violation a real client could choke on.
+      # JSON.parse in Crystal does NOT validate embedded string bytes (confirmed separately),
+      # so the meaningful assertion is `valid_encoding?` on the raw response, not just that
+      # parsing succeeds.
+      with_store do |store|
+        id = store.insert_issue(String.new(Bytes[0x62, 0x61, 0x64, 0xff, 0x74]), # "bad\xFFt"
+          Gori::Store::Severity::High, String.new(Bytes[0x68, 0xff, 0x6f]),      # "h\xFFo"
+          nil        )
+        store.update_issue(id, notes: String.new(Bytes[0x6e, 0x31, 0xff, 0x0a, 0x6e, 0x32])) # "n1\xFF\nn2"
+        store.flush
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_issues","arguments":{}}})
+        resp = drive(store, call)[0]
+        # the literal wire value a real client reads: content[0].text (the nested JSON text)
+        resp["result"]["content"][0]["text"].as_s.valid_encoding?.should be_true
+
+        issue = tool_payload(resp)["issues"].as_a.first
+        issue["title"].as_s.valid_encoding?.should be_true
+        issue["host"].as_s.valid_encoding?.should be_true
+        issue["notes"].as_s.valid_encoding?.should be_true
+        issue["notes"].as_s.lines.size.should eq(2) # notes keeps its newline
+      end
+    end
+  end
+
+  describe "get_issue" do
+    it "keeps the JSON-RPC response line valid UTF-8 when title/host/notes carry a raw invalid byte" do
+      with_store do |store|
+        id = store.insert_issue(String.new(Bytes[0x62, 0x61, 0x64, 0xff, 0x74]),
+          Gori::Store::Severity::High, String.new(Bytes[0x68, 0xff, 0x6f]), nil)
+        store.update_issue(id, notes: String.new(Bytes[0x6e, 0x31, 0xff, 0x0a, 0x6e, 0x32]))
+        store.flush
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_issue","arguments":{"id":#{id}}}})
+        resp = drive(store, call)[0]
+        # the literal wire value a real client reads: content[0].text (the nested JSON text)
+        resp["result"]["content"][0]["text"].as_s.valid_encoding?.should be_true
+
+        issue = tool_payload(resp)
+        issue["title"].as_s.valid_encoding?.should be_true
+        issue["host"].as_s.valid_encoding?.should be_true
+        issue["notes"].as_s.valid_encoding?.should be_true
+      end
+    end
   end
 
   describe "error channels" do

@@ -36,7 +36,10 @@ module Gori
               end
             end
             append_related_links(io, f, store)
-            io << "\n" << f.notes << "\n" unless f.notes.strip.empty?
+            # notes is multi-line by design (free text) — scrub_only fixes invalid UTF-8
+            # (the same captured-data class title/host carry) without collapsing its newlines,
+            # unlike one_line above, which would flatten it into a single unreadable line.
+            io << "\n" << scrub_only(f.notes) << "\n" unless f.notes.strip.empty?
             if flow
               append_evidence(io, "Request", flow.request_head, flow.request_body)
               append_evidence(io, "Response", flow.response_head, flow.response_body)
@@ -51,14 +54,20 @@ module Gori
             issues.each do |f|
               j.object do
                 j.field "id", f.id
-                j.field "title", f.title
+                # title/host: normalise with one_line (scrub + collapse control chars) — they're
+                # semantically single-line fields, so a raw newline is worth collapsing even though
+                # JSON itself would tolerate it verbatim (an MCP tool response IS this same JSON
+                # shape, and a client rendering "title" inline shouldn't see it split mid-string).
+                j.field "title", one_line(f.title)
                 j.field "severity", f.severity.label
                 j.field "status", f.status.label
-                j.field "host", f.host
+                j.field "host", f.host.try { |h| one_line(h) }
                 j.field "flow_id", f.flow_id
                 j.field "created_at", f.created_at
                 j.field "updated_at", f.updated_at
-                j.field "notes", f.notes
+                # notes is multi-line BY DESIGN (free-text) — only the encoding-safety half of
+                # one_line applies; collapsing its newlines would mangle a legitimate multi-line note.
+                j.field "notes", scrub_only(f.notes)
                 j.field "links" do
                   j.array { append_links_json(j, f, store) }
                 end
@@ -68,6 +77,17 @@ module Gori
         end
       end
 
+      # Fix invalid-UTF-8 bytes only, leaving control characters (incl. newlines) intact —
+      # the encoding-safety half of `one_line`, split out for a field that is multi-line BY
+      # DESIGN (e.g. an issue's free-text `notes`) and must not have its line breaks collapsed,
+      # but still needs the same guarantee `one_line` exists for: a captured value can carry a
+      # raw invalid byte (e.g. an h2 :path pseudo-header), and unscrubbed output either breaks
+      # the exporter's encoding contract (JSON/Markdown must stay valid UTF-8) or crashes a
+      # later PCRE gsub over it.
+      def self.scrub_only(s : String) : String
+        s.scrub
+      end
+
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with
       # embedded newlines can't break the single-line structure it sits in — a
       # Markdown heading here, a one-row line in the text export. Shared with
@@ -75,7 +95,7 @@ module Gori
       def self.one_line(s : String) : String
         # scrub: captured values (target/host/method/title, e.g. an h2 :path with a raw byte) can
         # be invalid UTF-8, which would make the PCRE gsub raise and crash the markdown/text export.
-        s.scrub.gsub(/[[:cntrl:]]+/, " ").strip
+        scrub_only(s).gsub(/[[:cntrl:]]+/, " ").strip
       end
 
       private def self.append_related_links(io : String::Builder, f : Store::Issue, store : Store) : Nil
