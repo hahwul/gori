@@ -114,6 +114,31 @@ describe Gori::Update do
     end
   end
 
+  describe ".notice_version" do
+    it "surfaces a strictly-newer release the user has not been notified about" do
+      Gori::Update.notice_version("0.1.1", "0.2.0", "").should eq("0.2.0")
+      Gori::Update.notice_version("0.1.1", "v0.2.0", "").should eq("0.2.0")
+    end
+
+    it "returns nil when up to date or on a newer local build" do
+      Gori::Update.notice_version("0.2.0", "0.2.0", "").should be_nil
+      Gori::Update.notice_version("0.3.0", "0.2.0", "").should be_nil
+    end
+
+    it "returns nil when the newer release was already notified (read-once)" do
+      Gori::Update.notice_version("0.1.1", "0.2.0", "0.2.0").should be_nil
+      Gori::Update.notice_version("0.1.1", "0.2.0", "v0.2.0").should be_nil
+    end
+
+    it "re-notifies when a release newer than the last-notified one appears" do
+      Gori::Update.notice_version("0.1.1", "0.3.0", "0.2.0").should eq("0.3.0")
+    end
+
+    it "returns nil for an empty latest (fetch failed / no cache)" do
+      Gori::Update.notice_version("0.1.1", "", "").should be_nil
+    end
+  end
+
   describe "lib destination safety" do
     it "forbids shared system library roots" do
       Gori::Update.forbidden_lib_destination?("/usr/local/lib").should be_true

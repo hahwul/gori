@@ -76,8 +76,8 @@ module Gori::Tui
         "how often to re-run the command — seconds (min 1)"),
     ]
     # Display: message-body + chrome prefs (three choice fields, two bools, a text cap).
-    DISPLAY_PANE_CHOICES  = ["request", "response"]
-    DISPLAY_TIME_CHOICES  = ["absolute", "relative"]
+    DISPLAY_PANE_CHOICES = ["request", "response"]
+    DISPLAY_TIME_CHOICES = ["absolute", "relative"]
     # Kept short: all three render inline on one row inside the settings box.
     DISPLAY_TITLE_CHOICES = ["project + tab", "tab", "off"]
     DISPLAY_FIELDS        = [
@@ -110,13 +110,16 @@ module Gori::Tui
       Field.new("Retention (count)",
         "how many notifications the ring buffer keeps — count (min 1)"),
     ]
-    # General: clipboard + quit-confirm toggles.
+    # General: clipboard + quit-confirm + update-check toggles.
     GENERAL_FIELDS = [
       Field.new("Clipboard (OSC 52)",
         "copy to the system clipboard via the OSC 52 terminal escape — off makes copies no-op — ←/→/space toggles",
         bool: true),
       Field.new("Confirm before quit",
         "require a confirm modal to quit (instead of double-press ^D) — ←/→/space toggles",
+        bool: true),
+      Field.new("Update check",
+        "on startup, check GitHub for a newer release and show a one-line notice on the project picker — off = no outbound check; ←/→/space toggles",
         bool: true),
     ]
     SECTIONS = {
@@ -164,7 +167,7 @@ module Gori::Tui
                 when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
                 when :display       then display_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
-                when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
+                when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off", Settings.update_check_enabled? ? "on" : "off"]
                 else                     [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
                 end
       @focused = 0
@@ -219,6 +222,7 @@ module Gori::Tui
                 when :general then [
                   Settings::DEFAULT_CLIPBOARD_OSC52 ? "on" : "off",
                   Settings::DEFAULT_CONFIRM_QUIT ? "on" : "off",
+                  Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, hostnames_summary]
                 end
@@ -467,7 +471,8 @@ module Gori::Tui
       if @section == :general
         Settings.clipboard_osc52 = @values[0] == "on"
         Settings.confirm_quit = @values[1] == "on"
-        @values = [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
+        Settings.update_check_enabled = @values[2] == "on"
+        @values = [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off", Settings.update_check_enabled? ? "on" : "off"]
         return persist
       end
       if err = Settings.bind_host_error(@values[0])

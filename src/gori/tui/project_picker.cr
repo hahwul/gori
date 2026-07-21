@@ -3,6 +3,7 @@ require "../capture_lock"
 require "../capture_status"
 require "../project"
 require "../project_registry"
+require "../update"
 require "../fuzzy"
 require "./geometry"
 require "./screen"
@@ -91,10 +92,27 @@ module Gori::Tui
       @running_cache = {} of String => RunningProbe
       @art_frame = 0  # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
       @star_frame = 0 # starfield twinkle clock; unlike @art_frame it never freezes (wraps via &+)
+      # Startup update check (see start_update_check / reconcile_update_check / the
+      # notice in render_list). The background fiber only writes @remote_latest +
+      # @remote_ready; every Settings mutation stays on the main fiber.
+      @update_started = false          # guard: kick the check off exactly once
+      @update_reconciled = false       # guard: fold the result in exactly once
+      @remote_latest = nil.as(String?) # fetched (or cached) latest version, normalized
+      @remote_ready = false            # set last by the producer so the reader sees a consistent pair
+      @fetched_live = false            # true when @remote_latest came from a live fetch (→ refresh the cache)
+      @update_notice = nil.as(String?) # the one-line notice text, once a fresh update is available
+      @update_notice_version = ""      # the version the notice is for (persisted as the read-once marker)
+      @notice_persisted = false        # guard: write the read-once marker after the notice's first real paint
     end
 
+    # Once-a-day cache window: skip the network probe when the last successful check
+    # is this recent (still surfaces a not-yet-notified update from the cached value).
+    UPDATE_CHECK_TTL = 24 * 60 * 60
+
     def run : Project?
+      start_update_check
       loop do
+        reconcile_update_check
         render
         # Drive the entrance animation off the idle poll cadence (~50 ms/frame):
         # the loop re-renders whenever poll_event times out, so bumping the clock
@@ -137,6 +155,56 @@ module Gori::Tui
             @preedit = ev.text
           end
         end
+      end
+    end
+
+    # --- update check --------------------------------------------------------
+
+    # Kick the startup update probe off exactly once (from `run`, not `initialize`,
+    # so a picker built in a spec never phones home). A fresh cache is used inline
+    # (no network); otherwise a background fiber fetches the latest release version
+    # and hands it back via @remote_latest/@remote_ready — no Settings I/O here.
+    private def start_update_check : Nil
+      return if @update_started
+      @update_started = true
+      return unless Settings.update_check_enabled?
+
+      now = Time.utc.to_unix
+      cached = Settings.update_latest_seen
+      if !cached.empty? && (now - Settings.update_checked_at) < UPDATE_CHECK_TTL
+        @remote_latest = cached
+        @remote_ready = true
+        return
+      end
+
+      spawn(name: "gori-update-check") do
+        latest = Update.latest_version # nil on any failure (offline, rate-limited, …)
+        @remote_latest = latest
+        @fetched_live = true
+        @remote_ready = true # set last so the reader never sees a half-written pair
+      end
+    end
+
+    # Fold a ready result in once, on the main fiber: refresh the day cache after a
+    # live fetch, then decide whether a fresh, not-yet-notified update should show.
+    # The marker itself is persisted only when the notice actually paints (render_list).
+    private def reconcile_update_check : Nil
+      return unless @remote_ready
+      return if @update_reconciled
+      @update_reconciled = true
+
+      latest = @remote_latest
+      return unless latest # failed fetch → nothing to show, cache untouched (retry next launch)
+
+      if @fetched_live
+        Settings.update_latest_seen = latest
+        Settings.update_checked_at = Time.utc.to_unix
+        Settings.save
+      end
+
+      if nv = Update.notice_version(Gori::VERSION, latest, Settings.update_notified_version)
+        @update_notice_version = nv
+        @update_notice = "update available: v#{Update.normalize_version(Gori::VERSION)} → v#{nv} · run: gori update"
       end
     end
 
@@ -1037,9 +1105,21 @@ module Gori::Tui
         end
       end
 
-      # Transient result of the last compaction, one row above the hint.
+      # Row above the hint (h-3): a transient compaction result when present, else
+      # the once-per-release "update available" notice. The compaction flash is a
+      # direct response to a keypress, so it takes the row; the notice returns when
+      # the flash clears on the next keystroke.
       if flash = @flash
         centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w)
+      elsif notice = @update_notice
+        centered(screen, h - 3, notice, Theme.yellow, w)
+        # Mark this release "read" only once it has actually reached the screen, so a
+        # fetch that lands as the user opens a project doesn't burn the one showing.
+        unless @notice_persisted
+          @notice_persisted = true
+          Settings.update_notified_version = @update_notice_version
+          Settings.save
+        end
       end
 
       if tokens = list_hint_tokens
