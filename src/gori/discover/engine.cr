@@ -104,7 +104,11 @@ module Gori::Discover
     depth : Int32,
     source : Source,
     dir : String? = nil,
-    baseline : Calibrate::DirBaseline? = nil
+    baseline : Calibrate::DirBaseline? = nil,
+    # A Calibrate task queued ONLY to gate robots.txt/sitemap.xml against a soft-404
+    # baseline (see enqueue_seed_only_calibration) — never feeds enqueue_probes, so it
+    # can't expand the brute-force wordlist onto a directory outside the run's own scope.
+    seed_only : Bool = false
 
   private record RawLink, href : String, source : Source
 
@@ -122,8 +126,8 @@ module Gori::Discover
   # with zero locks; N worker fibers only do network I/O + CPU (decode/extract/fingerprint)
   # and feed Outcomes back over a channel. Mirrors the Fuzz/Miner lifecycle shape.
   class Engine
-    EVENT_BUFFER    =  256
-    MAX_CONCURRENCY =  500
+    EVENT_BUFFER    = 256
+    MAX_CONCURRENCY = 500
     MAX_BODY        = 2 * 1024 * 1024 # decoded body cap (matches Extract::MAX_SCAN)
 
     enum State : UInt8
@@ -165,6 +169,9 @@ module Gori::Discover
     @conf_hist : Array(Int32)
     @last_dispatch : Time::Instant
     @phase : Phase
+    @seed_calibration_dir : String?
+    @seed_baseline : Calibrate::DirBaseline?
+    @pending_seed_fetches : Array({Task, Calibrate::Fetched})
 
     def initialize(seed_url : String, @words : Array(String), backend : Backend,
                    @config : Config, @scope : ScopePolicy = OpenScope.new)
@@ -201,6 +208,9 @@ module Gori::Discover
       @conf_hist = [0, 0, 0, 0]
       @last_dispatch = Time.instant
       @phase = Phase::Seeding
+      @seed_calibration_dir = nil
+      @seed_baseline = nil
+      @pending_seed_fetches = [] of {Task, Calibrate::Fetched}
     end
 
     def start : Nil
@@ -301,13 +311,38 @@ module Gori::Discover
         @frontier << Task.new(TaskKind::Fetch, "#{root}/robots.txt", 0, Source::Robots)
         @frontier << Task.new(TaskKind::Fetch, "#{root}/sitemap.xml", 0, Source::Sitemap)
       end
-      enqueue_dir(Url.dir_of(@seed_parts), 0) if @config.bruteforce?
+      bf_dir = Url.dir_of(@seed_parts)
+      enqueue_dir(bf_dir, 0) if @config.bruteforce?
+      # robots.txt/sitemap.xml are GUESSED well-known paths, not organically-linked ones — they
+      # deserve the same soft-404 gate a brute-forced wordlist hit gets, not the "exists by
+      # construction" trust record_page gives a crawled <a href>. Only wire this up when
+      # bruteforce is on: that's the only mode with a calibration baseline to gate against.
+      # Reuse the dir bf_dir just calibrated above when it IS the seed's own dir; otherwise
+      # calibrate the origin separately — robots.txt/sitemap.xml always live there even on a
+      # path-scoped run confined elsewhere.
+      if @config.spider? && @config.bruteforce?
+        root_dir = "#{Url.origin(@seed_parts)}/"
+        @seed_calibration_dir = root_dir
+        enqueue_seed_only_calibration(root_dir) unless root_dir == bf_dir
+      end
+    end
+
+    # A Calibrate task queued ONLY to gate robots.txt/sitemap.xml (see seed_frontier) — unlike
+    # enqueue_dir it never feeds enqueue_probes, so it can't brute-force the wordlist onto the
+    # origin on a run confined to a deeper subtree. Bypasses bounded_url/scope the same way the
+    # robots/sitemap Fetch tasks themselves already do (well-known paths are always checked at
+    # the origin, confine/scope notwithstanding).
+    private def enqueue_seed_only_calibration(dir : String) : Nil
+      return if @dirs.includes?(dir)
+      return unless Url.parse(dir)
+      @dirs << dir
+      @frontier << Task.new(TaskKind::Calibrate, dir, 0, Source::Bruteforced, dir: dir, seed_only: true)
     end
 
     private def handle(oc : Outcome) : Nil
       case oc.task.kind
-      in TaskKind::Calibrate         then handle_calibrate(oc)
-      in TaskKind::Probe             then handle_probe(oc)
+      in TaskKind::Calibrate              then handle_calibrate(oc)
+      in TaskKind::Probe                  then handle_probe(oc)
       in TaskKind::Crawl, TaskKind::Fetch then handle_crawl(oc)
       end
     end
@@ -321,7 +356,11 @@ module Gori::Discover
         @errors += 1
         return
       end
-      record_page(task, fetched)
+      if @seed_calibration_dir && (task.source.robots? || task.source.sitemap?)
+        resolve_seed_finding(task, fetched)
+      else
+        record_page(task, fetched)
+      end
       count = @clusters.observe(fetched.simhash, @config.simhash_distance)
       if count > @config.cluster_saturation
         @cluster_suppressed += oc.links.size # a template/listing trap — stop expanding it
@@ -345,7 +384,11 @@ module Gori::Discover
       return unless bl
       @uncalibratable += 1 if bl.kind.uncalibratable?
       @events.send(BaselineEvent.new(bl.dir, bl.kind.label, nil))
-      enqueue_probes(oc.task, bl)
+      if bl.dir == @seed_calibration_dir
+        @seed_baseline = bl
+        flush_pending_seed_fetches
+      end
+      enqueue_probes(oc.task, bl) unless oc.task.seed_only
     end
 
     private def handle_probe(oc : Outcome) : Nil
@@ -384,6 +427,39 @@ module Gori::Discover
         0.95
       else
         0.85
+      end
+    end
+
+    # robots.txt/sitemap.xml are well-known GUESSES, not links a real page pointed at — gate
+    # them through the same soft-404 baseline a brute-forced wordlist hit needs to clear,
+    # instead of record_page's raw-status trust (a wildcard-200 server would otherwise report
+    # both as "findings" even though it 200s literally everything). The baseline may not be
+    # ready yet — its Calibrate task races this Fetch task — so an early arrival buffers here
+    # until handle_calibrate delivers @seed_baseline; if the run stops before that ever
+    # happens, the buffered entry is simply never counted (fail safe: no baseline, no claim).
+    private def resolve_seed_finding(task : Task, fetched : Calibrate::Fetched) : Nil
+      if bl = @seed_baseline
+        record_seed_hit(task, fetched, bl)
+      else
+        @pending_seed_fetches << {task, fetched}
+      end
+    end
+
+    private def flush_pending_seed_fetches : Nil
+      return if @pending_seed_fetches.empty?
+      return unless bl = @seed_baseline
+      @pending_seed_fetches.each { |task, fetched| record_seed_hit(task, fetched, bl) }
+      @pending_seed_fetches.clear
+    end
+
+    # Same hit/confidence gate handle_probe applies to a brute-forced wordlist entry.
+    private def record_seed_hit(task : Task, fetched : Calibrate::Fetched, bl : Calibrate::DirBaseline) : Nil
+      hit, conf = Calibrate.hit?(bl, fetched)
+      if hit && conf >= @config.confidence_floor
+        record_finding(Finding.new(task.url, "GET", fetched.status, fetched.length, fetched.content_type,
+          task.source, task.depth, conf, nil))
+      else
+        @calibrated_out += 1
       end
     end
 

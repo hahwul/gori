@@ -176,18 +176,45 @@ describe Gori::Discover::Engine do
     cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 5, concurrency: 1, retries: 0)
     findings, _ = run_discover("http://t/", %w(), cfg) do |t|
       case t
-      when "/"           then html("home, no links")
-      when "/robots.txt" then make(200, "User-agent: *\nSitemap: http://t/custom/sm.xml\n", "text/plain")
+      when "/"            then html("home, no links")
+      when "/robots.txt"  then make(200, "User-agent: *\nSitemap: http://t/custom/sm.xml\n", "text/plain")
       when "/sitemap.xml" then notfound # the well-known path is absent; only robots knows the real one
       when "/custom/sm.xml"
         make(200, %(<?xml version="1.0"?><urlset><url><loc>http://t/only-in-sitemap</loc></url></urlset>), "application/xml")
       when "/only-in-sitemap" then html("the page only the sitemap knew about")
-      else                    notfound
+      else                         notfound
       end
     end
     # Under source-label parsing the custom sitemap was parsed as robots (no <loc>s) and this
     # URL was lost; content-aware parsing recovers it.
     findings.map(&.url).should contain("http://t/only-in-sitemap")
+  end
+
+  it "calibrates robots.txt/sitemap.xml against the origin's soft-404 baseline (no FP on a wildcard-200 server)" do
+    cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 3, concurrency: 2, retries: 0)
+    findings, stats = run_discover("http://t/", ["admin", "secret"], cfg) do |_t|
+      html("THE SAME SOFT-404 PAGE FOR EVERY SINGLE PATH ON THIS SERVER")
+    end
+    # robots.txt/sitemap.xml are guessed well-known paths, exactly like a brute-forced wordlist
+    # entry — a server that 200s everything must not get to report them as "findings".
+    findings.select { |f| f.source.robots? || f.source.sitemap? }.should be_empty
+    findings.select(&.source.bruteforced?).should be_empty
+    stats.calibrated_out.should be > 0
+  end
+
+  it "still records a genuine robots.txt/sitemap.xml on a server with a real 404 baseline" do
+    cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 2, concurrency: 2, retries: 0)
+    findings, _ = run_discover("http://t/", %w(), cfg) do |t|
+      case t
+      when "/robots.txt"  then make(200, "User-agent: *\nDisallow: /admin\n", "text/plain")
+      when "/sitemap.xml" then make(200, %(<?xml version="1.0"?><urlset><url><loc>http://t/x</loc></url></urlset>), "application/xml")
+      when "/"            then html("home")
+      else                     notfound
+      end
+    end
+    urls = findings.map(&.url)
+    urls.should contain("http://t/robots.txt")
+    urls.should contain("http://t/sitemap.xml")
   end
 
   it "confines a path-scoped run to the seed subtree" do
