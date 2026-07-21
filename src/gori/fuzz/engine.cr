@@ -75,6 +75,11 @@ module Gori::Fuzz
   class Engine
     EVENT_BUFFER    =  256
     MAX_CONCURRENCY = 1000 # hard ceiling on worker fibers / channel capacity
+    # Synthetic baseline requests sent before the sweep when auto-calibration is on (see
+    # calibrate_baseline). A single exact-match snapshot can't tell a target's ordinary
+    # per-request variability apart from a genuine anomaly; a handful of staggered,
+    # randomly-payloaded samples can, at the cost of this many extra sends up front.
+    CALIBRATION_SAMPLES = 6
 
     enum State : UInt8
       Running
@@ -135,11 +140,26 @@ module Gori::Fuzz
       @total
     end
 
-    # Seed the baseline metrics from the unmodified request (all-defaults), for
-    # anomaly diffing / auto-calibration. Optional; call before `start`.
+    # Seed the matcher's calibration set from CALIBRATION_SAMPLES synthetic,
+    # randomly-payloaded requests (see Generator#calibration_requests and
+    # Matcher.reflects_length?) — replaces the old single-snapshot baseline, which a
+    # target with ANY legitimate per-request variability (a nonce, rotating content, a
+    # reflected parameter) trivially defeated. Optional; call before `start`. Every
+    # send routes through @backend like any other, so calibration sends still count
+    # against a configured max_requests cap; under a tight cap, sample count is
+    # trimmed so at least one send is left for the sweep itself. A failed/empty
+    # calibration is non-fatal — auto_calibrate then simply suppresses nothing.
     def calibrate_baseline : Nil
-      raw = @backend.send(@generator.baseline_request)
-      @matcher.baseline = @matcher.metrics(raw) if raw.error.nil?
+      wanted = CALIBRATION_SAMPLES
+      if (cap = @config.max_requests) && cap > 0 && cap - 1 < wanted
+        wanted = Math.max(cap - 1, 1_i64).to_i32
+      end
+      samples = [] of BaselineSample
+      @generator.calibration_requests(wanted).each do |bytes, payload_len|
+        raw = @backend.send(bytes)
+        samples << BaselineSample.new(@matcher.metrics(raw), payload_len) if raw.error.nil?
+      end
+      @matcher.baseline = samples
     rescue
       # a failed baseline is non-fatal — just skip calibration
     end

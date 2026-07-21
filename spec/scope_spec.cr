@@ -264,6 +264,64 @@ describe Gori::Scope do
     end
   end
 
+  it "reload picks up an external scope edit on the SAME live instance (Sitemap's data_version " \
+     "poll / headless capture's periodic reload)" do
+    with_store do |store|
+      # `live` stands in for the Scope object a Session hands to the Sitemap/Interceptor/
+      # Sandbox gate — held for a while, never re-`load`ed. `editor` stands in for a
+      # separate `gori run project scope add/rm` process (or another instance's TUI)
+      # writing to the SAME store.
+      live = Gori::Scope.load(store)
+      live.host_in_scope?("acme.test").should be_false # no rules yet → nothing to mark
+
+      editor = Gori::Scope.load(store)
+      editor.add("include", "host", "acme.test")
+
+      # the external add is invisible to `live` until it reloads
+      live.host_in_scope?("acme.test").should be_false
+      live.configured?.should be_false
+
+      live.reload
+      live.configured?.should be_true
+      live.host_in_scope?("acme.test").should be_true
+
+      # removing externally is picked up the same way
+      id = live.rules.first.id
+      editor.remove(id)
+      live.host_in_scope?("acme.test").should be_true # still stale
+      live.reload
+      live.host_in_scope?("acme.test").should be_false
+      live.configured?.should be_false
+    end
+  end
+
+  it "reload picks up an external enabled/sandbox flag flip alongside rule edits" do
+    with_store do |store|
+      live = Gori::Scope.load(store)
+      live.enabled?.should be_false
+      live.sandbox?.should be_false
+
+      editor = Gori::Scope.load(store)
+      editor.add("include", "host", "acme.test")
+      editor.enable
+      editor.enable_sandbox
+
+      live.enabled?.should be_false # stale
+      live.sandbox?.should be_false
+      live.reload
+      live.enabled?.should be_true
+      live.sandbox?.should be_true
+      live.active?.should be_true
+
+      editor.disable_sandbox
+      editor.disable
+      live.sandbox?.should be_true # still stale
+      live.reload
+      live.enabled?.should be_false
+      live.sandbox?.should be_false
+    end
+  end
+
   it "migrates pre-V13 bare host patterns to include/host rows" do
     with_store do |store|
       store.add_scope_rule("include", "host", "legacy.test")
@@ -350,11 +408,11 @@ describe Gori::Scope do
         scope = Gori::Scope.load(store)
         scope.add("include", "host", "acme.test")
         scope.enable_sandbox
-        scope.sandbox_blocks_host?("acme.test").should be_false      # included
-        scope.sandbox_blocks_host?("api.acme.test").should be_false  # subdomain of an include
-        scope.sandbox_blocks_host?("evil.test").should be_true       # no include covers it
+        scope.sandbox_blocks_host?("acme.test").should be_false     # included
+        scope.sandbox_blocks_host?("api.acme.test").should be_false # subdomain of an include
+        scope.sandbox_blocks_host?("evil.test").should be_true      # no include covers it
         scope.add("exclude", "host", "cdn.acme.test")
-        scope.sandbox_blocks_host?("cdn.acme.test").should be_true   # host-level exclude
+        scope.sandbox_blocks_host?("cdn.acme.test").should be_true # host-level exclude
       end
     end
 

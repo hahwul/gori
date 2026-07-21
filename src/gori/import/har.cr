@@ -9,7 +9,11 @@ module Gori
     module Har
       def self.parse_file(path : String) : ParseResult
         raw = File.read(path)
-        doc = JSON.parse(raw)
+        doc = begin
+          JSON.parse(raw)
+        rescue ex : JSON::ParseException
+          raise Gori::Error.new("HAR file is not valid JSON: #{ex.message}")
+        end
         log = doc["log"]?
         raise Gori::Error.new("HAR file missing log object") unless log
         entries = log["entries"]?.try(&.as_a?)

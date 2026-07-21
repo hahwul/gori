@@ -297,7 +297,11 @@ module Gori
                 j.field "sse_events" do
                   j.object do
                     j.field "count", events.size
-                    j.field "truncated", false
+                    # Same cap/expression as the MCP serializer (mcp/serialize.cr
+                    # `emit_sse_events`) — was hardcoded `false` here, so a caller
+                    # reading only `sse_events` (the point of --format json) had no
+                    # signal the array was clipped.
+                    j.field "truncated", events.size > MCP::Serialize::SSE_EVENTS_MAX
                     j.field "events" do
                       j.array do
                         events.each do |e|

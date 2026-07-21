@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "compress/gzip"
+require "json"
 require "../src/gori/issues_export"
 
 private def gzip(data : String) : Bytes
@@ -55,6 +56,17 @@ describe Gori::Issues::Export do
       out = Gori::Issues::Export.one_line(String.new(Bytes[0x61, 0x80, 0x62]))
       out.should_not be_empty
       out.valid_encoding?.should be_true
+    end
+  end
+
+  describe ".scrub_only" do
+    it "fixes invalid UTF-8 but leaves newlines/control characters untouched" do
+      # notes is multi-line by design — the encoding-safety half of one_line, without its
+      # newline-collapsing half, since collapsing would mangle a legitimate multi-line note.
+      scrubbed = Gori::Issues::Export.scrub_only(String.new(Bytes[0x6c, 0x31, 0xff, 0x0a, 0x6c, 0x32])) # "l1\xFF\nl2"
+      scrubbed.valid_encoding?.should be_true
+      scrubbed.should eq("l1�\nl2")
+      scrubbed.lines.size.should eq(2) # the newline survived
     end
   end
 
@@ -177,6 +189,51 @@ describe Gori::Issues::Export do
         md.lines.count { |l| l.strip == "```" }.should eq(0)
         md.lines.any? { |l| l.starts_with?("## INJECTED") }.should be_false
         md.should contain("- **Host:** evil.test ``` ## INJECTED VIA HOST")
+      end
+    end
+
+    it "does not raise on a multi-line notes field with an invalid UTF-8 byte, and keeps its newlines" do
+      # Bug: title/host were routed through one_line (which scrubs), but the notes line
+      # (`io << f.notes` directly) was not — the ONE field markdown's own .scrub convention
+      # missed. notes is multi-line by design, so it needs scrub_only, not one_line.
+      with_store do |store|
+        id = store.insert_issue("clean title", Gori::Store::Severity::Low, "clean.host", nil)
+        store.update_issue(id, notes: String.new(Bytes[0x6c, 0x31, 0xff, 0x0a, 0x6c, 0x32])) # "l1\xFF\nl2"
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.valid_encoding?.should be_true
+        md.should contain("l1�\nl2") # newline preserved, invalid byte scrubbed to U+FFFD
+      end
+    end
+  end
+
+  describe ".json" do
+    it "does not raise and stays valid UTF-8 when title/host/notes carry a raw invalid byte" do
+      # Unlike .markdown's one_line() convention, .json wrote these fields straight into
+      # JSON::Builder, which performs NO UTF-8 validation — an invalid byte (e.g. a captured
+      # h2 :authority) passed straight through to `gori run issues --format json`.
+      with_store do |store|
+        id = store.insert_issue(String.new(Bytes[0x62, 0x61, 0x64, 0xff, 0x74]), # "bad\xFFt"
+          Gori::Store::Severity::High, String.new(Bytes[0x68, 0xff, 0x6f]),      # "h\xFFo"
+          nil        )
+        store.update_issue(id, notes: String.new(Bytes[0x6e, 0x31, 0xff, 0x0a, 0x6e, 0x32])) # "n1\xFF\nn2"
+
+        json_out = Gori::Issues::Export.json(store.issues, store)
+        json_out.valid_encoding?.should be_true
+        parsed = JSON.parse(json_out) # would raise on malformed JSON; also proves it's parseable
+        issue = parsed.as_a.first
+        issue["title"].as_s.valid_encoding?.should be_true
+        issue["host"].as_s.valid_encoding?.should be_true
+        issue["notes"].as_s.valid_encoding?.should be_true
+        issue["notes"].as_s.lines.size.should eq(2) # notes keeps its newline (scrub_only, not one_line)
+      end
+    end
+
+    it "emits null for a nil host, not the string 'null'" do
+      with_store do |store|
+        store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
+        parsed = JSON.parse(Gori::Issues::Export.json(store.issues, store))
+        parsed.as_a.first["host"].raw.should be_nil
       end
     end
   end

@@ -416,4 +416,86 @@ describe Gori::Import do
       File.delete?(urls)
     end
   end
+
+  it "skips a HAR entry whose URL carries a CRLF injection instead of importing a fabricated request" do
+    har = File.tempname("gori", ".har")
+    begin
+      # The malicious entry's URL smuggles a second fake request via literal CRLFs. Left
+      # unchecked this used to land straight in the stored request line/History row.
+      File.write(har, {log: {entries: [
+        {request: {method: "GET", url: "https://a.test/1"}, response: {status: 200, content: {text: "ok"}}},
+        {request:  {method: "GET", url: "https://evil.test/path\r\nX-Injected: pwn\r\n\r\nGET /second HTTP/1.1"},
+         response: {status: 200, content: {text: "ok"}}},
+        {request: {method: "GET", url: "https://a.test/2"}, response: {status: 200, content: {text: "ok"}}},
+      ]}}.to_json)
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        result.count.should eq(2)   # the two clean entries imported
+        result.skipped.should eq(1) # the CRLF-injected entry skipped, not fabricated
+        store.count.should eq(2)
+        rows = store.search(Gori::QL::EMPTY, 10)
+        rows.each { |r| r.target.should_not match(/[\r\n]/) }
+        rows.map(&.host).sort.should eq(["a.test", "a.test"])
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  it "skips a URL-list line with a raw control character in the path" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "https://a.test/1\nhttp://a.test/\x01\x02control\nhttps://a.test/2\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(2)   # the two clean lines imported
+        result.skipped.should eq(1) # the control-char line skipped
+        store.count.should eq(2)
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "raises a clean Gori::Error for a HAR file that is not valid JSON" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, "not json at all {{{")
+      with_store do |store|
+        expect_raises(Gori::Error, /not valid JSON/) do
+          Gori::Import.import_file(store, :har, har)
+        end
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  it "raises a clean Gori::Error for an OpenAPI .yaml file that is not valid YAML" do
+    oas = File.tempname("gori", ".yaml")
+    begin
+      File.write(oas, "paths: [unclosed")
+      with_store do |store|
+        expect_raises(Gori::Error, /not valid YAML/) do
+          Gori::Import.import_file(store, :oas, oas)
+        end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "raises a clean Gori::Error for a .json-named OpenAPI file with YAML-only (non-JSON) syntax" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, "paths:\n  /x:\n    get: {}\n")
+      with_store do |store|
+        expect_raises(Gori::Error, /not valid JSON/) do
+          Gori::Import.import_file(store, :oas, oas)
+        end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
 end

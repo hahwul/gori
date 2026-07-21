@@ -257,6 +257,18 @@ describe Gori::CLI::Output do
     Gori::CLI::Output.term_safe("a\tb\nc").should eq("a·b·c")
   end
 
+  it "term_safe also scrubs invalid UTF-8 (not just control bytes) so JSON output stays valid" do
+    # A captured host/path is raw bytes off the wire (see Sitemap.template_class's comment)
+    # and can be invalid UTF-8 with NO control bytes at all — the old short-circuit
+    # (`return s unless s.each_char.any?(&.control?)`) let such a value straight through
+    # unchanged, since a replacement char isn't itself "control".
+    bad = String.new(Bytes[0x68, 0x69, 0xff, 0x68, 0x69]) # "hi\xFFhi"
+    bad.valid_encoding?.should be_false
+    out = Gori::CLI::Output.term_safe(bad)
+    out.valid_encoding?.should be_true
+    out.should eq("hi�hi")
+  end
+
   it "emits a valid JSON object with the expected keys" do
     json = JSON.parse(Gori::CLI::Output.flow_row_json(flow_row(target: "/a", host: "h", status: 200, state: Gori::Store::FlowState::Complete)))
     json["id"].as_i.should eq(42)
@@ -463,6 +475,31 @@ describe Gori::CLI::Output do
       "GET  h/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00\n")
   end
 
+  it "emits valid UTF-8 in every sitemap format (text/json/paths) when a captured host/path is invalid UTF-8" do
+    # Sitemap.template_class's own comment documents that a captured target is raw bytes off
+    # the wire and can be invalid UTF-8 (a legacy-encoded or fuzzed path). Repro: no control
+    # chars, just a raw 0xFF byte in the host and in a path segment.
+    bad_host = String.new(Bytes[0x62, 0x61, 0x64, 0xff, 0x68, 0x6f, 0x73, 0x74]) # "bad\xFFhost"
+    bad_seg = String.new(Bytes[0x70, 0x61, 0x74, 0x68, 0xff, 0x73, 0x65, 0x67])  # "path\xFFseg"
+    hosts = Gori::Sitemap.build([{bad_host, "GET", "/#{bad_seg}"}])
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+
+    text = Gori::CLI::Output.sitemap_text(hosts)
+    text.valid_encoding?.should be_true
+    text.should contain("bad�host")
+    text.should contain("path�seg")
+
+    json_str = Gori::CLI::Output.sitemap_json(hosts)
+    json_str.valid_encoding?.should be_true
+    parsed = JSON.parse(json_str).as_a
+    parsed[0]["host"].as_s.valid_encoding?.should be_true
+    parsed[0]["children"].as_a[0]["label"].as_s.valid_encoding?.should be_true
+
+    paths = Gori::CLI::Output.sitemap_paths(hosts)
+    paths.valid_encoding?.should be_true
+    paths.should contain("bad�host")
+  end
+
   it "does not leak a host tag onto a fold" do
     # Host rows are taggable with path "" — the same value a synthetic fold carries.
     hosts = Gori::Sitemap.build([
@@ -583,5 +620,48 @@ describe "gori run jwt output" do
     text.should contain("[none]")
     text.should contain("alg=none")
     text.should contain(a.token)
+  end
+end
+
+# `show_json` is `private` (CLI-command glue, not a public API) — reopen the module to
+# expose a thin bare-call wrapper for testing, same trick Crystal allows for whitebox
+# specs of private `self.` methods (a bare call from within the same type is permitted;
+# only an explicit-receiver call from outside is not).
+module Gori::CLI::Run
+  def self.show_json_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                              ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : String
+    show_json(detail, req, resp, ws_msgs)
+  end
+end
+
+# Regression for the `sse_events.truncated` field: `gori run show --format json` used to
+# hardcode it to `false` regardless of how many events were parsed, while the MCP
+# `get_flow` serializer (mcp/serialize.cr) computed it correctly from `events.size >
+# SSE_EVENTS_MAX`. The two must agree — CLI now reuses the exact same constant.
+describe "gori run show --format json sse_events.truncated" do
+  it "is false when the event count is at or under the cap" do
+    body = String.build { |io| 3.times { |i| io << "data: e#{i}\n\n" } }
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
+      response_head: head, response_body: body)
+    json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
+    sse = json["sse_events"]
+    sse["count"].as_i.should eq(3)
+    sse["truncated"].as_bool.should be_false
+  end
+
+  it "is true once the event count exceeds SSE_EVENTS_MAX, matching the MCP serializer" do
+    n = Gori::MCP::Serialize::SSE_EVENTS_MAX + 1
+    body = String.build { |io| n.times { |i| io << "data: e#{i}\n\n" } }
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
+      response_head: head, response_body: body)
+    json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
+    sse = json["sse_events"]
+    sse["count"].as_i.should eq(n)
+    sse["truncated"].as_bool.should be_true
+    # the CLI path stays unclipped (a script can read whole values) — unlike MCP, it
+    # does NOT drop events past the cap; `truncated` is a signal, not a clip.
+    sse["events"].as_a.size.should eq(n)
   end
 end

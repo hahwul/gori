@@ -6,6 +6,14 @@ module Gori::Fuzz
   #   Pitchfork / ClusterBomb → one set per position (set[i] → position i).
   # (the frontend builds that mapping; out-of-range positions fall back to set 0.)
   class Generator
+    # calibration_requests: injected-payload length of the FIRST sample, and the
+    # per-sample increment — chosen small enough to stay a plausible query/body value,
+    # but distinct enough (multiples of CALIBRATION_STEP) that Matcher.reflects_length?'s
+    # byte-level correlation check isn't fooled by incidental ±1-byte noise.
+    CALIBRATION_BASE_LEN = 6
+    CALIBRATION_STEP     = 5
+    CALIBRATION_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
     @has_chains : Bool
 
     # `registry` (when given) applies each marked position's inline Decoder chain to
@@ -48,10 +56,30 @@ module Gori::Fuzz
     end
 
     # The unmodified base request (all positions = their defaults), CL-synced — used
-    # to seed the matcher baseline for anomaly diffing / auto-calibration.
+    # to seed the matcher baseline for anomaly diffing.
     def baseline_request : Bytes
       raw = @template.render(chained(@template.default_payloads))
       @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
+    end
+
+    # `n` synthetic requests for auto-calibration (Engine#calibrate_baseline): each
+    # substitutes EVERY marked position with a random, nonce-like value — never a real
+    # attack payload — so the target's ordinary per-request variability (a timestamp, a
+    # session nonce, a rotating banner, a reflected parameter) can be sampled as "noise"
+    # up front rather than compared against a single lucky/unlucky snapshot. Injected
+    # payload BYTE LENGTH is staggered across samples (see CALIBRATION_BASE_LEN/_STEP)
+    # so Matcher.reflects_length? can tell "this target echoes the payload" (length
+    # grows with payload length) apart from ordinary noise. Returns {request bytes,
+    # total injected payload length across all positions} per sample.
+    def calibration_requests(n : Int32) : Array({Bytes, Int32})
+      count = @template.position_count
+      (0...n).map do |i|
+        plen = CALIBRATION_BASE_LEN + i * CALIBRATION_STEP
+        payloads = Array.new(count) { random_nonce(plen) }
+        raw = @template.render(chained(payloads))
+        bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
+        {bytes, plen * count}
+      end
     end
 
     # ── modes ────────────────────────────────────────────────────────────────────
@@ -136,6 +164,13 @@ module Gori::Fuzz
       raw = @template.render(chained(payloads))
       bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
       Job.new(idx, payloads, pos, bytes) # keep the ORIGINAL payloads for reporting; only the wire bytes are transformed
+    end
+
+    # A random alphanumeric string with no whitespace — safe to drop into a query/body
+    # position without corrupting framing, and (deliberately) never a real payload, so a
+    # calibration send can't coincide with anything meaningful on the target.
+    private def random_nonce(len : Int32) : String
+      String.build(len) { |sb| len.times { sb << CALIBRATION_ALPHABET[Random.rand(CALIBRATION_ALPHABET.size)] } }
     end
 
     # Apply each position's inline Decoder chain to its payload (identity when no

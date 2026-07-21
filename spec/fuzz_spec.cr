@@ -445,6 +445,61 @@ describe F::Matcher do
     e.extract = /(a+)+$/
     e.build(job, ok_result(200, evil)).extracted.should be_nil
   end
+
+  it "auto-calibration (multi-sample) suppresses EVERY sampled baseline shape, not just one, " \
+     "and never suppresses a status-flip anomaly (the original single-snapshot bug: only " \
+     "whichever ONE shape the lone baseline call happened to catch got dropped)" do
+    m = F::Matcher.new(auto_calibrate: true)
+    job = F::Job.new(0_i64, ["x"], nil, "".to_slice)
+    # As if Engine#calibrate_baseline sampled a target that rotates between two distinct
+    # 200-status shapes ("a"*100 and "a"*250 have no whitespace → 1 word, 0 lines each).
+    m.baseline = [
+      F::BaselineSample.new(F::Metrics.new(200, 100_i64, 1, 0, 0_i64), 6),
+      F::BaselineSample.new(F::Metrics.new(200, 250_i64, 1, 0, 0_i64), 11),
+    ]
+    m.build(job, ok_result(200, "a" * 100)).matched?.should be_false # shape 1 — calibrated out
+    m.build(job, ok_result(200, "a" * 250)).matched?.should be_false # shape 2 — ALSO calibrated out
+    m.build(job, ok_result(200, "a" * 400)).matched?.should be_true  # neither sampled shape — reported
+    # Same size/words as a sampled shape, but status flips — never calibrated out.
+    m.build(job, ok_result(500, "a" * 100)).matched?.should be_true
+  end
+
+  it "Matcher.reflects_length? detects response length tracking payload length across the " \
+     "staggered calibration samples, and does not false-positive on merely-noisy (rotating, " \
+     "non-tracking) samples" do
+    reflecting = [
+      F::BaselineSample.new(F::Metrics.new(200, 120_i64, 5, 1, 0_i64), 6),
+      F::BaselineSample.new(F::Metrics.new(200, 125_i64, 5, 1, 0_i64), 11),
+      F::BaselineSample.new(F::Metrics.new(200, 130_i64, 5, 1, 0_i64), 16),
+    ]
+    F::Matcher.reflects_length?(reflecting).should be_true
+
+    rotating = [
+      F::BaselineSample.new(F::Metrics.new(200, 100_i64, 20, 1, 0_i64), 6),
+      F::BaselineSample.new(F::Metrics.new(200, 250_i64, 45, 1, 0_i64), 11),
+      F::BaselineSample.new(F::Metrics.new(200, 150_i64, 30, 1, 0_i64), 16),
+    ]
+    F::Matcher.reflects_length?(rotating).should be_false
+  end
+
+  it "auto-calibration falls back to word/line counts when response length reflects payload " \
+     "length (a target that echoes the fuzzed value back — the harder, continuously-varying " \
+     "proven-broken scenario, where no finite exact-length baseline SET could ever suffice)" do
+    m = F::Matcher.new(auto_calibrate: true)
+    m.baseline = [
+      F::BaselineSample.new(F::Metrics.new(200, 108_i64, 1, 0, 0_i64), 6),
+      F::BaselineSample.new(F::Metrics.new(200, 118_i64, 1, 0, 0_i64), 16),
+    ]
+    m.reflects_length?.should be_true
+    job = F::Job.new(0_i64, ["x"], nil, "".to_slice)
+    # A payload length NEVER sampled (30) whose reflected body is a new exact byte length —
+    # an exact-length-against-a-set match would never fire here; the word/line fallback still
+    # recognizes the same (1 word, 0 lines) noise shape.
+    m.build(job, ok_result(200, "R:" + "a" * 30)).matched?.should be_false
+    # A genuine anomaly (extra words/lines) still flags despite sharing the baseline's status.
+    m.build(job, ok_result(200, "totally different shape\nwith another line")).matched?.should be_true
+    m.build(job, ok_result(500, "R:" + "a" * 30)).matched?.should be_true
+  end
 end
 
 describe F::Engine do
@@ -462,6 +517,38 @@ describe F::Engine do
     backend.sent.should eq(4)
     done.as(F::DoneEvent).progress.matched.should eq(4)
     done.as(F::DoneEvent).stopped.should be_false
+  end
+
+  it "auto-calibration end-to-end: calibrate_baseline's synthetic sends capture EVERY shape " \
+     "of a rotating-noise target, so the whole sweep is suppressed except a seeded status " \
+     "anomaly planted mid-sweep (reproduces the reported bug: a single-snapshot baseline let " \
+     "75/100 rotating-noise responses through; multi-sample calibration must let through only " \
+     "the genuine anomaly)" do
+    shapes = [100, 150, 200, 250] # 4 fixed "normal" body shapes, keyed off a global counter
+    n = 0
+    backend = FakeBackend.new(F::Origin.new("http", "h", 80)) do |bytes|
+      if String.new(bytes).includes?("ANOMALY")
+        ok_result(500, "Z" * 4000) # the genuine, never-to-be-suppressed anomaly
+      else
+        n += 1
+        ok_result(200, "x" * shapes[n % shapes.size])
+      end
+    end
+    payloads = (1..16).map { |i| "noise#{i}" }
+    payloads.insert(8, "ANOMALY") # planted mid-sweep (17 payloads total)
+    set = F::PayloadSet.new(F::InlineList.new(payloads))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, auto_calibrate: true)
+    gen = F::Generator.new(base, [set], cfg)
+    matcher = F::Matcher.new(auto_calibrate: true)
+    engine = F::Engine.new(gen, matcher, backend, cfg)
+    engine.calibrate_baseline # CALIBRATION_SAMPLES (6) synthetic sends — ≥ the rotation's
+    # period of 4, so every shape gets captured regardless of which phase calibration starts on.
+    results, _ = drain(engine)
+
+    results.size.should eq(17)
+    matched = results.select(&.matched?)
+    matched.size.should eq(1) # only the anomaly — 0 false positives among the 16 noise rows
+    matched.first.status.should eq(500)
   end
 
   it "retries on a network error up to the configured count" do
