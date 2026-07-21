@@ -74,7 +74,7 @@ module Gori
           p.on("--mr=REGEX", "Match response-body regex") { |v| matcher.match_regex = parse_regex(v) }
           p.on("--fr=REGEX", "Filter out response-body regex") { |v| matcher.filter_regex = parse_regex(v) }
           p.on("--extract=REGEX", "Grep-extract a value from each response (capture group 1)") { |v| matcher.extract = parse_regex(v) }
-          p.on("--ac", "Auto-calibrate: drop responses identical to the baseline") { auto_cal = true }
+          p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
           p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true }

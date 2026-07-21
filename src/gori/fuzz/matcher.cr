@@ -12,6 +12,13 @@ module Gori::Fuzz
     lines : Int32,
     duration_us : Int64
 
+  # One auto-calibration sample: the metrics of a synthetic (nonce-payloaded) baseline
+  # response, tagged with how much payload text was injected across every marked
+  # position for THAT sample. `payload_len` is what lets Matcher.reflects_length?
+  # tell "this target's response length legitimately tracks payload length" (reflection)
+  # apart from "this target's response length is just noisy" (needs a wider sample set).
+  record BaselineSample, metrics : Metrics, payload_len : Int32
+
   # Decides whether a response is "interesting" and extracts a value from it.
   # ffuf/Burp semantics: a result is MATCHED when every active matcher dimension
   # passes AND no filter dimension passes. Each dimension is a comma-list spec
@@ -70,12 +77,65 @@ module Gori::Fuzz
     end
 
     property extract : Regex?
-    property baseline : Metrics?
+    # The active calibration set (see Engine#calibrate_baseline). Empty = "no
+    # calibration collected" (auto-calibration off, or the calibration sends all
+    # failed) — calibrated_out? treats that identically to auto_calibrate being off.
+    getter baseline : Array(BaselineSample)
+    # Cached alongside `baseline` (recomputed only when the set changes, never on the
+    # per-response hot path) — see Matcher.reflects_length? for what it detects.
+    getter? reflects_length : Bool = false
     property? auto_calibrate : Bool
     property keep_bodies : Symbol # :none | :matched | :all
 
     def initialize(@keep_bodies : Symbol = :matched, @auto_calibrate : Bool = false)
-      @baseline = nil
+      @baseline = [] of BaselineSample
+    end
+
+    def baseline=(samples : Array(BaselineSample)) : Nil
+      @baseline = samples
+      @reflects_length = Matcher.reflects_length?(samples)
+    end
+
+    # A generous per-pair slack (bytes) for the length-tracks-payload check below — covers
+    # HTML-entity re-encoding of a few nonce characters, off-by-one wrapper text, etc.
+    # without being wide enough to misclassify genuinely-noisy (non-reflecting) targets.
+    LENGTH_TOLERANCE = 4_i64
+
+    # Detects a target that reflects the substituted payload back into its response body:
+    # the calibration samples deliberately inject STAGGERED payload lengths (see
+    # Generator#calibration_requests), so if response byte length grows in lockstep with
+    # payload length across every pair of samples, comparing raw length can never repeat —
+    # every distinct real attack payload has its own length, so no finite baseline set
+    # would ever exact-match it (the second proven-broken scenario: 100/100 false
+    # positives with a single-sample baseline). `baseline_matches?` then substitutes
+    # word/line counts for length.
+    #
+    # Conservative by design: EVERY pair with a different payload length must show the
+    # tracking relationship, or this returns false and length stays in the (safe, if
+    # sometimes less effective) exact-match comparison — a target that just happens to be
+    # noisy must never be misread as "reflecting".
+    #
+    # What this does NOT catch: partial reflection (the target truncates, HTML-escapes, or
+    # otherwise transforms the payload before embedding it, so growth isn't ~1:1) reads as
+    # "not reflecting" and falls through to stricter exact-length matching — under-
+    # suppressing rather than over-suppressing, the safe failure direction for a security
+    # tool. A target whose word/line count ALSO happens to shift with an opaque nonce
+    # (e.g. it reflects the payload on its own line, adding a line each time) likewise
+    # isn't calibrated out — again a missed suppression, never a missed finding.
+    def self.reflects_length?(samples : Array(BaselineSample)) : Bool
+      pairs = 0
+      tracked = 0
+      samples.each_with_index do |a, i|
+        samples.each_with_index do |b, j|
+          next unless j > i
+          dp = (b.payload_len - a.payload_len).to_i64
+          next if dp == 0
+          dl = b.metrics.length - a.metrics.length
+          pairs += 1
+          tracked += 1 if (dl - dp).abs <= LENGTH_TOLERANCE
+        end
+      end
+      pairs > 0 && tracked == pairs
     end
 
     # Build the metrics for a raw send WITHOUT deciding match (used to seed the
@@ -110,16 +170,36 @@ module Gori::Fuzz
     private def decide(raw : Repeater::Result, status : Int32?, length : Int64,
                        words : Int32, lines : Int32, text : String) : Bool
       return false unless raw.error.nil?
-      return false if calibrated_out?(status, length, words)
+      return false if calibrated_out?(status, length, words, lines)
       matchers_pass?(raw, status, length, words, lines, text) &&
         !filtered?(status, length, words, lines, text)
     end
 
-    private def calibrated_out?(status : Int32?, length : Int64, words : Int32) : Bool
+    # A response is "noise" when it matches ANY collected baseline sample — not just a
+    # single exact snapshot. That's what lets a target that legitimately rotates between
+    # a handful of response shapes (a rotating banner, an A/B variant, …) get every
+    # sampled shape recognized as noise, instead of only whichever one shape a single
+    # lucky/unlucky baseline call happened to catch (the original bug: with one sample,
+    # 3 of 4 rotating shapes were reported as false-positive hits).
+    private def calibrated_out?(status : Int32?, length : Int64, words : Int32, lines : Int32) : Bool
       return false unless @auto_calibrate
-      b = @baseline
-      return false unless b
-      status == b.status && length == b.length && words == b.words
+      samples = @baseline
+      return false if samples.empty?
+      samples.any? { |b| baseline_matches?(b.metrics, status, length, words, lines) }
+    end
+
+    # Status is always compared exactly — a genuine anomaly that flips status (e.g. a
+    # seeded 500) must never calibrate out, regardless of body-size heuristics. When
+    # `reflects_length?` is set (see Matcher.reflects_length?), raw byte length is
+    # dropped from the comparison since it legitimately varies with EVERY distinct
+    # payload (no finite sample set would ever exact-match it); word/line counts are
+    # used instead, since an opaque alphanumeric nonce substitution — unlike its byte
+    # length — rarely changes how many whitespace-delimited words or lines a page has.
+    private def baseline_matches?(b : Metrics, status : Int32?, length : Int64,
+                                  words : Int32, lines : Int32) : Bool
+      return false unless status == b.status
+      return words == b.words && lines == b.lines if reflects_length?
+      length == b.length && words == b.words
     end
 
     # Every active matcher dimension must pass.
