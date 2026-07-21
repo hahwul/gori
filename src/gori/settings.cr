@@ -10,6 +10,7 @@ require "./settings/decoder"
 require "./settings/miner"
 require "./settings/probe"
 require "./settings/discover"
+require "./settings/update"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
@@ -83,6 +84,7 @@ module Gori
       parse_display(root["display"]?)
       parse_notifications(root["notifications"]?)
       parse_general(root["general"]?)
+      parse_update(root["update"]?)
       Env.bump_highlight_rev
     rescue
       # no file yet / unreadable / bad JSON — keep current values
@@ -167,6 +169,7 @@ module Gori
           serialize_display(j)
           serialize_notifications(j)
           serialize_general(j)
+          serialize_update(j)
           serialize_network(j)
           serialize_editor(j)
           serialize_tabs(j)

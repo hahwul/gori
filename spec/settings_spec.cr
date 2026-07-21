@@ -50,6 +50,56 @@ describe Gori::Settings do
     end
   end
 
+  it "persists and reloads the update-check settings as JSON" do
+    dir = File.tempname("gori-settings-update")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.update_check_enabled = false
+      Gori::Settings.update_notified_version = "0.2.0"
+      Gori::Settings.update_latest_seen = "0.2.0"
+      Gori::Settings.update_checked_at = 1_700_000_000_i64
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("update"))
+
+      Gori::Settings.update_check_enabled = true
+      Gori::Settings.update_notified_version = ""
+      Gori::Settings.update_latest_seen = ""
+      Gori::Settings.update_checked_at = 0_i64
+      Gori::Settings.load
+      Gori::Settings.update_check_enabled?.should be_false # a stored false survives the reload
+      Gori::Settings.update_notified_version.should eq("0.2.0")
+      Gori::Settings.update_latest_seen.should eq("0.2.0")
+      Gori::Settings.update_checked_at.should eq(1_700_000_000_i64)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.update_check_enabled = true
+      Gori::Settings.update_notified_version = ""
+      Gori::Settings.update_latest_seen = ""
+      Gori::Settings.update_checked_at = 0_i64
+    end
+  end
+
+  it "omits the update section from a default install" do
+    dir = File.tempname("gori-settings-update-default")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.update_check_enabled = true
+      Gori::Settings.update_notified_version = ""
+      Gori::Settings.update_latest_seen = ""
+      Gori::Settings.update_checked_at = 0_i64
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should_not contain(%("update"))
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "persists and reloads env settings as JSON" do
     dir = File.tempname("gori-settings-env")
     Dir.mkdir_p(dir)
@@ -719,7 +769,7 @@ describe Gori::Settings do
 
   describe ".bind_host_error" do
     it "accepts blank, IPv4/IPv6 literals, and plausible hostnames" do
-      Gori::Settings.bind_host_error("").should be_nil          # caller defaults blank
+      Gori::Settings.bind_host_error("").should be_nil # caller defaults blank
       Gori::Settings.bind_host_error("127.0.0.1").should be_nil
       Gori::Settings.bind_host_error("0.0.0.0").should be_nil
       Gori::Settings.bind_host_error("::").should be_nil

@@ -17,6 +17,10 @@ module Gori
     USER_AGENT    = "gori/#{VERSION} (+#{REPOSITORY_URL})"
     MAX_REDIRECTS = 10
     HTTP_TIMEOUT  = 60.seconds
+    # Short timeout for the TUI startup update check (background, best-effort) so a
+    # slow/hung GitHub never keeps a fiber alive for a full minute. The explicit
+    # `gori update` flow keeps HTTP_TIMEOUT.
+    UPDATE_CHECK_TIMEOUT = 8.seconds
     # Download progress meter
     PROGRESS_BAR_WIDTH    = 24
     PROGRESS_CHUNK        = 64 * 1024
@@ -299,6 +303,19 @@ module Gori
       0
     end
 
+    # The version the ProjectPicker should surface as "update available", or nil
+    # when nothing fresh should be shown. Pure (unit-tested): `latest` is offered
+    # only when it is strictly newer than `local` AND we have not already notified
+    # about it (read-once — `notified` is the last version we surfaced). Returns the
+    # normalized version so the caller can persist it as the new read-once marker.
+    def self.notice_version(local : String, latest : String, notified : String) : String?
+      return nil if latest.empty?
+      return nil unless version_cmp(local, latest) < 0
+      norm = normalize_version(latest)
+      return nil if norm == normalize_version(notified)
+      norm
+    end
+
     # Release asset basename for platform (matches PR #114 / hwaro parity).
     # Linux: plain binary `gori-v{ver}-linux-{x86_64|arm64}`
     # macOS: tarball `gori-v{ver}-osx-{arm64|x86_64}.tar.gz` (contains gori + lib/)
@@ -577,11 +594,22 @@ module Gori
       File.realpath(path)
     end
 
-    private def self.http_client(host : String, port : Int32, tls : Bool) : HTTP::Client
+    private def self.http_client(host : String, port : Int32, tls : Bool,
+                                 timeout : Time::Span = HTTP_TIMEOUT) : HTTP::Client
       client = HTTP::Client.new(host, port, tls)
-      client.connect_timeout = HTTP_TIMEOUT
-      client.read_timeout = HTTP_TIMEOUT
+      client.connect_timeout = timeout
+      client.read_timeout = timeout
       client
+    end
+
+    # Best-effort latest published release version (normalized, no leading `v`), or
+    # nil on ANY failure (offline, rate-limited, malformed). Used by the TUI startup
+    # update check — never raises into the caller, uses UPDATE_CHECK_TIMEOUT.
+    def self.latest_version(api_url : String? = nil,
+                            timeout : Time::Span = UPDATE_CHECK_TIMEOUT) : String?
+      parse_release(fetch_latest_release_json(api_url, timeout: timeout)).version
+    rescue
+      nil
     end
 
     # Resolves the releases API URL: explicit arg → env override → GitHub default.
@@ -589,7 +617,8 @@ module Gori
       api_url || ENV[UPDATE_API_ENV]? || API_LATEST
     end
 
-    def self.fetch_latest_release_json(api_url : String? = nil) : String
+    def self.fetch_latest_release_json(api_url : String? = nil, *,
+                                       timeout : Time::Span = HTTP_TIMEOUT) : String
       url = resolve_api_url(api_url)
       uri = URI.parse(url)
       headers = HTTP::Headers{
@@ -599,7 +628,7 @@ module Gori
       host = uri.host || raise Error.new("invalid API URL: #{url}")
       port = uri.port || (uri.scheme == "https" ? 443 : 80)
       tls = uri.scheme == "https"
-      client = http_client(host, port, tls)
+      client = http_client(host, port, tls, timeout)
       begin
         response = client.get(uri.request_target, headers: headers)
         case response.status_code

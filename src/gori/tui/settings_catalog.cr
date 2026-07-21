@@ -41,7 +41,7 @@ module Gori::Tui
     SECTIONS = [
       # General
       Section.new(:general, "settings.general", "General",
-        "Clipboard (OSC 52) integration and confirm-before-quit", :general, :form),
+        "Clipboard (OSC 52) integration, confirm-before-quit, and the startup update check", :general, :form),
       Section.new(:notifications, "settings.notifications", "Notifications",
         "Terminal bell + toast on background results, and how many notifications are kept", :general, :form),
       Section.new(:statusline, "settings.statusline", "Statusline",

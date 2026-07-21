@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 require "file_utils"
 
 include Gori::Tui
@@ -341,33 +342,47 @@ describe SettingsView do
     end
   end
 
-  it "saves and resets the GENERAL section (clipboard, confirm quit)" do
+  it "saves and resets the GENERAL section (clipboard, confirm quit, update check)" do
     dir = File.tempname("gori-settings-general-view")
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
-    prev = {Gori::Settings.clipboard_osc52?, Gori::Settings.confirm_quit?}
+    prev = {Gori::Settings.clipboard_osc52?, Gori::Settings.confirm_quit?, Gori::Settings.update_check_enabled?}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.clipboard_osc52 = true
       Gori::Settings.confirm_quit = false
+      Gori::Settings.update_check_enabled = true
       v = SettingsView.new
       v.reload(:general)
       v.section.should eq(:general)
       v.toggle_or_move(1) # clipboard: on → off (bool)
       v.move_field(1)
       v.toggle_or_move(1) # confirm quit: off → on (bool)
+      v.move_field(1)
+      v.toggle_or_move(1) # update check: on → off (bool)
       v.save
       Gori::Settings.clipboard_osc52?.should be_false
       Gori::Settings.confirm_quit?.should be_true
+      Gori::Settings.update_check_enabled?.should be_false
 
       v.reset_to_defaults
       v.save
       Gori::Settings.clipboard_osc52?.should eq(Gori::Settings::DEFAULT_CLIPBOARD_OSC52)
       Gori::Settings.confirm_quit?.should eq(Gori::Settings::DEFAULT_CONFIRM_QUIT)
+      Gori::Settings.update_check_enabled?.should eq(Gori::Settings::DEFAULT_UPDATE_CHECK_ENABLED)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.clipboard_osc52, Gori::Settings.confirm_quit = prev
+      Gori::Settings.clipboard_osc52, Gori::Settings.confirm_quit = prev[0], prev[1]
+      Gori::Settings.update_check_enabled = prev[2]
       FileUtils.rm_rf(dir)
     end
+  end
+
+  it "renders the Update check toggle in the GENERAL section" do
+    backend = MemoryBackend.new(100, 30)
+    v = SettingsView.new
+    v.reload(:general)
+    v.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("Update check").should be_true
   end
 end
