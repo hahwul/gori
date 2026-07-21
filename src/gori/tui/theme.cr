@@ -51,7 +51,7 @@ module Gori::Tui
       elevated: Color.from_hex("#1b1b1f"),      # one notch above PANEL: header band, active segment
       border: Color.from_hex("#2a2a30"),        # hairline dividers (resting)
       border_focus: Color.from_hex("#3a3a42"),  # brighter hairline for an active modal card
-      focus_gold: Color.from_hex("#c2a05a"),    # subtle gold: the focused body pane's outline/pane
+      focus_gold: Color.from_hex("#d9c28b"),    # logo body gold (gori-wallpaper.jpg / gori.svg) — brand mark + focus outline
       accent: Color.from_hex("#fafafa"),        # the white highlight (Grok signature)
       accent_bg: Color.from_hex("#26262c"),     # selection band (focused pane)
       selection_dim: Color.from_hex("#19191c"), # selection band (unfocused pane)
@@ -81,7 +81,7 @@ module Gori::Tui
       elevated: Color.from_hex("#e7e5de"),      # header band, active segment (one notch more)
       border: Color.from_hex("#a89a86"),        # hairline dividers (resting) — 2.6:1, a visible-but-subtle line
       border_focus: Color.from_hex("#9c9180"),  # brighter hairline for an active modal card (~3:1)
-      focus_gold: Color.from_hex("#8f6410"),    # focused body pane outline (deepened so it clearly reads on light, 5.0:1)
+      focus_gold: Color.from_hex("#8a6a28"),    # light-logo deep gold (--grad-logo tail); ~4.8:1 on paper for focus/brand
       accent: Color.from_hex("#1b1b1d"),        # the highlight ink (mirrors GORIDARK's white highlight)
       accent_bg: Color.from_hex("#dbd6ca"),     # selection band (focused pane) — deepened for a visible focus band on light (1.38:1)
       selection_dim: Color.from_hex("#eeece5"), # selection band (unfocused pane)

@@ -47,8 +47,9 @@ module Gori::Tui
 
     # Draw WORDMARK left-aligned at (x, y), or horizontally centred when `center_w`
     # is set. Returns the x just past the drawn wordmark. Defaults to the theme's
-    # gold (focus_gold) so the brand mark reads gold in every palette; `fg` exists
-    # for the picker's entrance fade (blends toward bg).
+    # gold (focus_gold — logo body on GORIDARK/GORIDAY) so the brand mark matches
+    # the real gori gold in every palette; `fg` exists for the picker's entrance
+    # fade (blends toward bg).
     def self.render_wordmark(screen : Screen, x : Int32, y : Int32, *, bg : Color = Theme.bg,
                              attr : Attribute = Attribute::Bold, center_w : Int32? = nil,
                              fg : Color = Theme.focus_gold) : Int32
