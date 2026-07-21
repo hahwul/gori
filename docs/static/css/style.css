@@ -349,18 +349,20 @@ img {
   -webkit-text-fill-color: transparent;
 }
 
-/* Section links sit as quiet pills: a soft ink wash on hover, and the active
-   section carries the gold thread as a tinted pill instead of an underline. */
+/* Header zones: brand | primary sections | tools.
+   Primary links are quiet pills; the right cluster is utilities only
+   (search, language, GitHub, theme). Install is not header chrome —
+   it lives under Start and on the home hero one-liner. */
+
 .top-nav {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.15rem;
   min-width: 0;
 }
 
-.top-nav a,
-.install-link {
-  padding: 0.38rem 0.8rem;
+.top-nav a {
+  padding: 0.38rem 0.78rem;
   border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: 0.88rem;
@@ -369,27 +371,96 @@ img {
   transition: color var(--transition), background var(--transition);
 }
 
-.top-nav a:hover,
-.install-link:hover {
+.top-nav a:hover {
   color: var(--heading);
   background: rgb(var(--ink-rgb) / 0.06);
 }
 
-.top-nav a.active,
-.install-link.active {
+.top-nav a.active {
   color: var(--accent-strong);
   background: rgb(var(--accent-rgb) / 0.12);
   font-weight: 500;
 }
 
-/* The right cluster keeps one drawn control (the segmented language pill) and
-   quiet borderless icons for search, GitHub, and the theme. One level of
-   chrome per level of importance, instead of four outlined blobs competing at
-   equal weight. */
+/* Mobile section picker: hidden on desktop; replaces .top-nav when it collapses. */
+.nav-compact {
+  display: none;
+  position: relative;
+  margin-right: 0.15rem;
+}
+
+.nav-compact-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  list-style: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.nav-compact-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.nav-compact-trigger:hover,
+.nav-compact[open] > .nav-compact-trigger {
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--accent-strong);
+}
+
+.nav-compact-trigger svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.nav-compact-panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-width: 10.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow-soft);
+}
+
+.nav-compact-panel a {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--heading);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.nav-compact-panel a:hover {
+  background: rgb(var(--ink-rgb) / 0.06);
+  color: var(--heading);
+}
+
+.nav-compact-panel a.active {
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent-strong);
+}
+
+/* Tools cluster: one drawn control (language pill) + quiet icon hits.
+   Search first (docs muscle memory), then locale, source, theme. */
 .header-right {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.3rem;
   margin-left: auto;
 }
 
@@ -434,8 +505,8 @@ img {
 
 .search-trigger,
 .github-link,
-.x-link,
-.theme-toggle {
+.theme-toggle,
+.nav-compact-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -453,7 +524,6 @@ img {
 
 .search-trigger:hover,
 .github-link:hover,
-.x-link:hover,
 .theme-toggle:hover {
   background: rgb(var(--ink-rgb) / 0.08);
   color: var(--accent-strong);
@@ -461,7 +531,6 @@ img {
 
 .search-trigger svg,
 .github-link svg,
-.x-link svg,
 .theme-toggle svg {
   width: 1.1rem;
   height: 1.1rem;
@@ -488,7 +557,6 @@ img {
 .search-trigger:active,
 .theme-toggle:active,
 .github-link:active,
-.x-link:active,
 .button:active {
   transform: translateY(1px) scale(0.99);
 }
@@ -3031,8 +3099,22 @@ html.search-lock body {
     padding: 0 1rem;
   }
 
+  /* Wordmark drops first; the mark alone is enough next to the tools. */
+  .logo-word {
+    display: none;
+  }
+
+  .logo {
+    margin-right: 0.55rem;
+  }
+
+  /* Primary section links stay available via the compact menu. */
   .top-nav {
     display: none;
+  }
+
+  .nav-compact {
+    display: block;
   }
 
   .home-main {
@@ -3179,11 +3261,24 @@ html.search-lock body {
 
 @media (max-width: 520px) {
   .logo {
-    margin-right: 0.75rem;
+    margin-right: 0.4rem;
   }
 
   .header-right {
-    gap: 0.3rem;
+    gap: 0.15rem;
+  }
+
+  .lang-switch a {
+    min-width: 1.85rem;
+    padding: 0.26rem 0.38rem;
+  }
+
+  .search-trigger,
+  .github-link,
+  .theme-toggle,
+  .nav-compact-trigger {
+    width: 2.1rem;
+    height: 2.1rem;
   }
 
   .home-hero h1,
