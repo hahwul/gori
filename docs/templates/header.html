@@ -15,7 +15,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="{{ page.description | default(site.description, true) | e }}">
-  <title>{% if page.title is present %}{{ page.title | e }} - {% endif %}{{ site.title | e }}</title>
+  <title>{% if page.section == "" %}{{ page.title | e }}{% else %}{% if page.title is present %}{{ page.title | e }} - {% endif %}{{ site.title | e }}{% endif %}</title>
   <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
   <link rel="shortcut icon" href="/icons/favicon.ico" />
