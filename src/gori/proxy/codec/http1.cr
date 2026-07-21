@@ -92,11 +92,23 @@ module Gori::Proxy::Codec::Http1
     s[n - 4] == 0x0d_u8 && s[n - 3] == 0x0a_u8 && s[n - 2] == 0x0d_u8 && s[n - 1] == 0x0a_u8
   end
 
+  # The RFC 7540 §3.4 HTTP/2 client connection preface's request-line. When ALPN doesn't
+  # negotiate h2 — e.g. Gori::Interceptor/Tunnel#intercept's deliberate h2→h1 ALPN downgrade
+  # while Intercept/Sandbox/Match&Replace is active — an h2/gRPC client's preface bytes land on
+  # this HTTP/1.1 parser instead of a real HTTP/2 stack. Its request-line happens to be
+  # well-formed HTTP/1.1 SHAPE (exactly 3 space-separated tokens), so without this check it
+  # parses cleanly as an ordinary (if odd-looking) request — method "PRI", target "*" — and
+  # sails straight through: forwarded to an origin, or (Intercept catch mode) HELD forever with
+  # nothing indicating it's actually an h2 client, not an HTTP/1.1 one. This exact literal is
+  # what every RFC 7540-conformant client sends first, unambiguously — treat it as malformed so
+  # callers can reject the connection cleanly instead of accepting a fake request.
+  H2_PREFACE_LINE = "PRI * HTTP/2.0"
+
   def self.parse_request_head(raw : Bytes) : RawRequest
     first_crlf = index_crlf(raw, 0)
     start = String.new(raw[0, first_crlf || raw.size])
     parts = start.split(' ')
-    malformed = parts.size != 3
+    malformed = parts.size != 3 || start == H2_PREFACE_LINE
     RawRequest.new(
       raw_head: raw,
       method: parts[0]? || "",
@@ -107,16 +119,24 @@ module Gori::Proxy::Codec::Http1
     )
   end
 
+  # True when `req`'s start-line is EXACTLY the HTTP/2 client preface (H2_PREFACE_LINE) — the
+  # well-known, unambiguous signal that this connection is an h2/gRPC client, not HTTP/1.1, so a
+  # caller (ClientConn) can reject it outright instead of treating it as a real request.
+  def self.h2_preface?(req : RawRequest) : Bool
+    req.method == "PRI" && req.target == "*" && req.version == "HTTP/2.0"
+  end
+
   # The request start-line's {method, target, malformed} WITHOUT parsing/allocating the header
   # block. Mirrors parse_request_head's start-line parse EXACTLY (same index_crlf + String.new
-  # over the first line + split(' ') + `parts.size != 3` malformed rule), so a caller that only
-  # needs method+target (the active-probe dedup_key gate) keys byte-identically to a full parse.
-  # The dedup_key ⇔ plan equivalence spec guards against any drift from parse_request_head.
+  # over the first line + split(' ') + `parts.size != 3 || start == H2_PREFACE_LINE` malformed
+  # rule), so a caller that only needs method+target (the active-probe dedup_key gate) keys
+  # byte-identically to a full parse. The dedup_key ⇔ plan equivalence spec guards against any
+  # drift from parse_request_head.
   def self.parse_request_line(raw : Bytes) : {String, String, Bool}
     first_crlf = index_crlf(raw, 0)
     start = String.new(raw[0, first_crlf || raw.size])
     parts = start.split(' ')
-    {parts[0]? || "", parts[1]? || "", parts.size != 3}
+    {parts[0]? || "", parts[1]? || "", parts.size != 3 || start == H2_PREFACE_LINE}
   end
 
   def self.parse_response_head(raw : Bytes) : RawResponse

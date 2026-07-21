@@ -117,6 +117,21 @@ module Gori::Proxy
 
       started = Time.instant
       created_at = now_us
+
+      # A garbage h2/gRPC client preface forced onto this HTTP/1.1 path by the (intentional)
+      # ALPN downgrade — see Tunnel#intercept — must NOT be treated as a real request: left
+      # alone it parses as an ordinary-looking "PRI * HTTP/2.0" request and either gets
+      # forwarded to an origin that can't make sense of it, or (Intercept catch mode) sits in
+      # the hold queue forever as a confusing fake entry with no indication it was an h2
+      # client. Reject the connection cleanly instead. No 502 is written back: a real h2/gRPC
+      # client isn't expecting (or able to parse) an HTTP/1.1 response here, and the existing
+      # "framing rejected" precedent below also just records + closes.
+      if Codec::Http1.h2_preface?(req)
+        record_error(req, @scheme, @fixed_host || req.host? || "", @fixed_port, created_at,
+          "rejected h2/gRPC client preface on the HTTP/1.1 path (ALPN downgrade, see Tunnel#intercept)")
+        return false
+      end
+
       # A client-supplied absolute-form target with a bad/oversized port makes URI.parse
       # raise; keep the malformed attempt visible in History instead of letting it unwind
       # to run's blanket rescue (which would silently drop the flow and kill the connection).

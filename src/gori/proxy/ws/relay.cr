@@ -17,17 +17,47 @@ module Gori::Proxy::WS
     # otherwise-idle long-lived connection.
     RESET_THRESHOLD = 256 * 1024
 
+    # Bounded wait for the peer's REPLYING close frame once we've relayed one direction's
+    # CLOSE (RFC 6455 §7.1.1 closing handshake), before tearing the tunnel down. This is a
+    # local channel wait (not a network read — the WS tunnel's socket timeouts are relaxed,
+    # see SocketTuning.relax in ClientConn), so it's kept well under the proxy's 30 s
+    # baseline IO timeout (SocketTuning::CLIENT_IO_TIMEOUT / Upstream::IO_TIMEOUT): a real
+    # peer replies near-instantly, and a dead one shouldn't pin the tunnel for 30 s.
+    CLOSE_TIMEOUT = 5.seconds
+
     def self.run(client : IO, upstream : IO, flow_id : Int64, sink : FlowSink) : Nil
-      done = Channel(Nil).new(2)
-      spawn { pump(client, upstream, "out", flow_id, sink); done.send(nil) }
-      spawn { pump(upstream, client, "in", flow_id, sink); done.send(nil) }
-      # When EITHER direction ends (EOF / close / reset), close both sockets so the
-      # other pump's blocked read unblocks (raises → rescued → sends done). Without
-      # this a half-open peer pins the surviving pump fiber + socket forever.
-      done.receive
+      done = Channel(Bool).new(2) # each pump's payload: did it end by relaying a CLOSE frame?
+      spawn { done.send(pump(client, upstream, "out", flow_id, sink)) }
+      spawn { done.send(pump(upstream, client, "in", flow_id, sink)) }
+
+      # The first direction to end tells us how to tear down:
+      #   - abnormal end (EOF / reset / truncated frame): the peer is gone — close both
+      #     sockets NOW so the other pump's blocked read unblocks (raises → rescued → sends
+      #     done). Without this a half-open peer pins the surviving pump fiber + socket
+      #     forever.
+      #   - clean end (it just forwarded a CLOSE frame): that's only HALF the RFC 6455
+      #     closing handshake — the peer's REPLYING close frame is very likely still in
+      #     flight on the OTHER direction. Closing immediately here is exactly the race that
+      #     used to drop it (the local "forward, then break" is near-instant; the peer's
+      #     reply needs a real round trip). Give the other pump a bounded window
+      #     (CLOSE_TIMEOUT) to relay that reply before tearing down.
+      first_clean = done.receive
+      second_pending = true
+      if first_clean
+        select
+        when done.receive
+          second_pending = false # other side finished within the window (reply relayed, or its own end)
+        when timeout(CLOSE_TIMEOUT)
+          # peer never replied — give up waiting; the pump below is reaped after closing.
+        end
+      end
       client.close rescue nil
       upstream.close rescue nil
-      done.receive
+      # Every path above consumes exactly one of the two `done` sends before this point
+      # except the "still waiting" case, so reap the outstanding one now (closing the
+      # sockets just unblocked its pending read) — `run` must never return with a pump
+      # fiber still alive.
+      done.receive if second_pending
     end
 
     # Chunk size for streaming an oversized frame's payload (see stream_payload).
@@ -37,10 +67,17 @@ module Gori::Proxy::WS
     # the reassembled message on FIN. A frame larger than MAX_FRAME is streamed
     # through (byte-exact, P7) rather than aborting the whole tunnel; its payload is
     # too large to buffer, so capture records a marker for that frame instead.
-    private def self.pump(src : IO, dst : IO, direction : String, flow_id : Int64, sink : FlowSink) : Nil
+    #
+    # Returns whether this direction ended by successfully relaying a CLOSE frame (the
+    # "clean" end of the RFC 6455 closing handshake) — as opposed to an abnormal end (EOF,
+    # reset, or a truncated frame, all `false`) — so `run` can tell the two cases apart and
+    # give the peer's replying CLOSE a bounded window instead of tearing the tunnel down
+    # the instant either direction stops.
+    private def self.pump(src : IO, dst : IO, direction : String, flow_id : Int64, sink : FlowSink) : Bool
       assembling = IO::Memory.new
       message_opcode = OP_TEXT
       scratch = Bytes.new(STREAM_CHUNK)
+      clean_close = false
       loop do
         h = WS.read_header(src) || break
         message_opcode = h.opcode if h.data? && h.opcode != OP_CONT
@@ -54,7 +91,10 @@ module Gori::Proxy::WS
             assembling = assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear)
           end
           break unless forward_oversized_frame(src, dst, h, direction, flow_id, sink, message_opcode, scratch)
-          break if h.close? # an oversized CLOSE still terminates the tunnel, like a normal one
+          if h.close? # an oversized CLOSE still terminates the tunnel, like a normal one
+            clean_close = true
+            break
+          end
           next
         end
 
@@ -62,10 +102,14 @@ module Gori::Proxy::WS
         dst.write(frame.raw)
         dst.flush
         assembling = capture_frame(frame, assembling, direction, flow_id, sink, message_opcode)
-        break if frame.close?
+        if frame.close?
+          clean_close = true
+          break
+        end
       end
+      clean_close
     rescue
-      # peer closed / reset: this direction ends
+      false # peer closed / reset: this direction ends
     end
 
     # Appends a data frame's payload to the reassembly buffer (up to the cap; the
