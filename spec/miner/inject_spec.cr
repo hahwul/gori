@@ -49,6 +49,23 @@ describe Gori::Miner::Inject do
     t.should contain("Content-Length: 7")
   end
 
+  # Regression for a CLI-only bug: `--locations=form` forced onto a request with no existing
+  # urlencoded-form body used to splice a bare body on with no Content-Length AND no
+  # Content-Type header at all — a framing-broken request the tool reported as "0 errors".
+  # inject_form must be a no-op (like inject_multipart/inject_json already are) when Form
+  # isn't applicable, matching Detect's own applicability test.
+  it "does not inject into a bodyless request (no framing-broken body)" do
+    base = "GET /a HTTP/1.1\r\nHost: h\r\n\r\n"
+    res = M::Inject.apply(req(base), M::Location::Form, [{"p", "v"}], add_cl_when_missing: false)
+    text(res).should eq(base)
+  end
+
+  it "does not inject form params into a body whose Content-Type isn't urlencoded" do
+    base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: 7\r\n\r\n{\"a\":1}"
+    res = M::Inject.apply(req(base), M::Location::Form, [{"p", "v"}], add_cl_when_missing: false)
+    text(res).should eq(base)
+  end
+
   it "merges keys into a JSON object body" do
     base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: 7\r\n\r\n{\"a\":1}"
     res = M::Inject.apply(req(base), M::Location::Json, [{"p", "v"}])
