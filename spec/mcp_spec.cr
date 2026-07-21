@@ -890,13 +890,24 @@ describe Gori::MCP::Server do
 
     it "previews a rule's match count without creating it" do
       with_store do |store|
-        seed_flow(store, "auth.test", "GET", "/x", 200)          # request head has "auth.test"
+        seed_flow(store, "auth.test", "GET", "/x", 200) # request head has "auth.test"
         seed_flow(store, "other.test", "GET", "/y", 200)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"preview_rule","arguments":{"pattern":"auth.test","target":"request","part":"head"}}})
         p = tool_payload(drive(store, call)[0])
         p["would_match"].as_i.should eq(1)
         p["scanned"].as_i.should eq(2)
         store.match_rules.should be_empty # preview creates nothing
+      end
+    end
+
+    it "rejects an uncompilable regex in preview_rule instead of a fake 0-match result" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"preview_rule","arguments":{"pattern":"[invalid\(regex","match":"regex"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        resp["structuredContent"]["field"].as_s.should eq("pattern")
+        store.match_rules.should be_empty
       end
     end
 
@@ -1194,7 +1205,7 @@ describe Gori::MCP::Server do
         resp["result"]["isError"].as_bool.should be_true
         payload = tool_payload(resp)
         payload["error"].as_s.downcase.should contain("fail")
-        payload["error_kind"].as_s.should eq("connect")     # classified network error
+        payload["error_kind"].as_s.should eq("connect")       # classified network error
         payload["error_code"].as_s.should eq("NETWORK_ERROR") # structured-error contract (criterion #4)
         payload["retryable"].as_bool.should be_true
         store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!.row.state.error?.should be_true

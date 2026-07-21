@@ -52,7 +52,7 @@ module Gori::Tui
       @registry = Decoder.default_registry
       @popup = ChainComplete.new
       @popup_engaged = false # false = passive full-list menu (Tab still navigates panes)
-      @prompt = nil # :save_as | :load inline mini-prompt (else nil)
+      @prompt = nil          # :save_as | :load inline mini-prompt (else nil)
       @prompt_buf = ""
       @chain_pre = "" # IME preedit for the focused CHAIN field
       @dirty = false  # session set changed since the last persist
@@ -655,6 +655,19 @@ module Gori::Tui
           s.pane = :output # down from CHAIN drops into the OUTPUT pane
           @popup.close
         end
+      when key.enter?
+        recompute # the pipeline is already live; just re-derive
+      else
+        edit_chain_caret(ev, s, c) # ←/→/Home/End/Delete/Backspace + literal insert
+      end
+    end
+
+    # The within-line caret keys + literal insert/delete for the CHAIN field (split
+    # out of edit_chain so its up/down pane-transition + popup logic stays under the
+    # complexity budget — mirrors edit_input_caret's split from edit_input).
+    private def edit_chain_caret(ev : Termisu::Event::Key, s, c : Char?) : Nil
+      key = ev.key
+      case
       when key.backspace?
         if s.chain_cx > 0
           s.chain = s.chain[0, s.chain_cx - 1] + s.chain[s.chain_cx..]
@@ -669,8 +682,19 @@ module Gori::Tui
       when key.right?
         s.chain_cx = {s.chain_cx + 1, s.chain.size}.min
         refilter_popup
-      when key.enter?
-        recompute # the pipeline is already live; just re-derive
+      when key.home?
+        s.chain_cx = 0
+        refilter_popup
+      when key.end?
+        s.chain_cx = s.chain.size
+        refilter_popup
+      when key.delete?
+        if s.chain_cx < s.chain.size
+          s.chain = s.chain[0, s.chain_cx] + s.chain[(s.chain_cx + 1)..]
+          @chain_pre = ""
+          touch
+          refilter_popup
+        end
       else
         if c && !ev.ctrl? && !ev.alt?
           s.chain = s.chain[0, s.chain_cx] + c.to_s + s.chain[s.chain_cx..]
