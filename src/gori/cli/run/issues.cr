@@ -81,7 +81,7 @@ module Gori
           p.on("-tTITLE", "--title=TITLE", "Issue title (required)") { |v| title = v }
           p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical (default: info)") { |v| sev_s = v }
           p.on("--host=HOST", "Host concerning the issue") { |v| host = v }
-          p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v) }
+          p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v, "gori run issues") }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run issues create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }

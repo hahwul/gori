@@ -243,7 +243,11 @@ module Gori
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
         abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1
-        rest[0].to_i64? || abort "gori run #{sub}: invalid flow id '#{rest[0]}'"
+        parse_flow_id(rest[0], "gori run #{sub}")
+      end
+
+      private def self.parse_flow_id(v : String, cmd : String = "gori run") : Int64
+        v.to_i64? || abort "#{cmd}: invalid flow id '#{v}'"
       end
 
       private def self.parse_port(v : String) : Int32
