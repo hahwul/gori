@@ -13,11 +13,25 @@ module Gori
         return QL::EMPTY if query.nil? || query.strip.empty?
         filter = QL.parse(query)
         return ql_error(query) if QL.reject_empty?(query, filter)
+        bad = QL.invalid_regex_terms(query)
+        return ql_invalid_regex_error(query, bad) unless bad.empty?
         if bool(h, "strict") || false
           analysis = QL.analyze(query)
           return ql_strict_error(analysis) unless analysis.clean?
         end
         filter
+      end
+
+      # A `~` term with an uncompilable regex degrades to a never-match clause —
+      # narrows the result to zero rather than dropping the term (which would
+      # broaden, like a bad numeric term does). Unlike that broaden case, this is
+      # ALWAYS an error, not gated behind strict: a silently-empty result set
+      # looks identical to "no matching flows" to an automated caller.
+      private def ql_invalid_regex_error(query : String, bad : Array(String)) : Result
+        err("invalid query #{query.inspect}: regex term(s) failed to compile and would " \
+            "silently match nothing: #{bad.join(", ")} (call ql_reference; fix the pattern or drop the term)",
+          "QUERY_SYNTAX", field: "query",
+          details: JSON.parse({"invalid_regex_terms" => bad}.to_json))
       end
 
       private def ql_strict_error(a : QL::TermAnalysis) : Result

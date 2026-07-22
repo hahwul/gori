@@ -166,7 +166,7 @@ module Gori::Fuzz
       # parse contract (segments.size == positions.size + 1) the sum is exact, and off-contract
       # it can only OVER-estimate (fewer segments written) — never under, so never a truncation.
       io = IO::Memory.new(@segments.sum(&.bytesize) + payloads.sum(&.bytesize))
-      io << @segments[0]
+      io << @segments[0]?
       payloads.each_with_index do |p, k|
         io << p
         io << @segments[k + 1]?

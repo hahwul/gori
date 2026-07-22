@@ -5,6 +5,7 @@ require "../clipboard"
 require "../../store"
 require "../../fuzz"
 require "../../hotkeys"
+require "../../probe"
 
 module Gori::Tui
   # One open Fuzzer session (a sub-tab under the Fuzzer tab). `flow_id` is the source
@@ -771,7 +772,9 @@ module Gori::Tui
           ev.progress.sent.clamp(0_i64, Int32::MAX.to_i64).to_i32,
           ev.progress.total.try(&.clamp(0_i64, Int32::MAX.to_i64).to_i32),
           "#{ev.progress.matched} hit")
-      when Fuzz::ResultEvent then v.append_result(ev.result)
+      when Fuzz::ResultEvent
+        v.append_result(ev.result)
+        probe_scan_fuzz_result(ev.result, v)
       when Fuzz::DoneEvent
         v.finish_run
         finish_job(v, ev)
@@ -786,6 +789,24 @@ module Gori::Tui
         log_event(v, :error, "Fuzzer: #{ev.message} on #{v.summary}")
         @host.status("fuzz error: #{ev.message}")
       end
+    end
+
+    # Passive-scan a fuzz result into Probe (mode-gated by the analyzer) — mirrors
+    # RepeaterController#probe_scan_repeater so URLs only ever visited through the
+    # Fuzzer still surface header/tech findings. Only fires when this result's
+    # head/body/request were retained (the run's keep_bodies policy — :all, or
+    # :matched plus this one matched); a :none run has nothing to scan, same limit
+    # the Repeater path doesn't face.
+    private def probe_scan_fuzz_result(result : Fuzz::Result, v : FuzzerView) : Nil
+      return unless head = result.head
+      return if head.empty?
+      rec = Store::RepeaterRecord.new(
+        0_i64, v.target_origin, result.request || Bytes.empty, v.http2?, false,
+        nil, 0, head, result.body, nil, result.duration_us, nil, nil)
+      return unless detail = Probe.detail_from_repeater(rec)
+      @host.session.probe.scan_detail(detail)
+    rescue
+      # Probe must never break the Fuzzer UX
     end
 
     private def finish_job(v : FuzzerView, ev : Fuzz::DoneEvent) : Nil
@@ -834,7 +855,7 @@ module Gori::Tui
       # would otherwise apply the stale event to the NEW run's job (premature/wrong
       # "done", orphaned bottom-bar spinner). Draining now settles the old job first.
       drain_events
-      engine, err = v.build_engine(!@host.session.config.insecure_upstream?)
+      engine, err = v.build_engine(!@host.session.config.insecure_upstream?, @host.session.scope)
       unless engine
         @host.status(err || "cannot run")
         return

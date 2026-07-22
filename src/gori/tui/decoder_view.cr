@@ -354,7 +354,7 @@ module Gori::Tui
     def output_text(result : Decoder::ChainResult) : String
       if bytes = result.output
         text, _ = Decoder.display(bytes, @prefer)
-        text
+        sanitize_display(text)
       elsif fa = result.failed_at
         s = result.steps[fa]
         "✗ #{s.name}: #{s.error}"
@@ -371,7 +371,15 @@ module Gori::Tui
     # A single-line, control-char-sanitized preview of one step's bytes.
     private def preview(bytes : Bytes) : String
       s, _ = Decoder.display(bytes)
-      String.build { |io| s.each_char { |ch| io << (ch.control? ? '·' : ch) } }
+      sanitize_display(s)
+    end
+
+    # Swap terminal-unsafe control chars for a visible placeholder. Without this,
+    # a control byte (e.g. from a base64/hex decode of binary) reaches `screen.cell`,
+    # which maps ASCII control bytes to a blank space — the byte is drawn but
+    # invisible, reading as truncated even though it isn't.
+    private def sanitize_display(text : String) : String
+      String.build { |io| text.each_char { |ch| io << (ch.control? ? '·' : ch) } }
     end
 
     private def render_prompt(screen : Screen, rect : Rect, prompt : Symbol, buf : String) : Nil

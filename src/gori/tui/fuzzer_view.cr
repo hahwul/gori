@@ -922,8 +922,10 @@ module Gori::Tui
     end
 
     # --- engine assembly -----------------------------------------------------
-    # Build an engine ready to run, or {nil, error}.
-    def build_engine(verify : Bool) : {Fuzz::Engine?, String?}
+    # Build an engine ready to run, or {nil, error}. `scope` gates every send
+    # against Sandbox/exclude rules (ScopedBackend) — the same protection
+    # Discover already applies per-request.
+    def build_engine(verify : Bool, scope : Gori::Scope) : {Fuzz::Engine?, String?}
       commit_buffers
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
@@ -939,10 +941,18 @@ module Gori::Tui
       generator = Fuzz::Generator.new(template, gen_sets, @config, registry: Decoder.shared_registry)
       sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
         http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
+      backend = Fuzz::ScopedBackend.new(sender, scope)
       @matcher.auto_calibrate = @config.auto_calibrate?
-      {Fuzz::Engine.new(generator, @matcher, sender, @config), nil}
+      {Fuzz::Engine.new(generator, @matcher, backend, @config), nil}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # Whether the run targets HTTP/2 — for Probe's synthetic RepeaterRecord (see
+    # FuzzerController#probe_scan_fuzz_result), which needs to know the protocol
+    # the same way RepeaterView#http2? already exposes it.
+    def http2? : Bool
+      @http2
     end
 
     def target_origin : String

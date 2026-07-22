@@ -237,7 +237,10 @@ module Gori
         generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
-        engine = Fuzz::Engine.new(generator, matcher, sender, config)
+        # Defense-in-depth alongside the job-start scope_check above: that check only
+        # covers the origin once, not a path a template mutates per-request.
+        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store))
+        engine = Fuzz::Engine.new(generator, matcher, backend, config)
         {engine, origin, engine.total, use_h2}
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")

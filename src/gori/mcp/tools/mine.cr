@@ -3,6 +3,7 @@ require "../../env"
 require "../../fuzz"
 require "../../miner"
 require "../../repeater/flow_request"
+require "../../scope"
 
 module Gori
   module MCP
@@ -150,6 +151,9 @@ module Gori
         origin = fuzz_origin(h, default_target)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
+        # Defense-in-depth alongside the job-start scope_check above: that check only
+        # covers the origin once, not a path mining mutates per-request.
+        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store))
         config = Miner::Config.new
         config.locations = mine_locations(h, bytes)
         raise FuzzArgError.new("no applicable locations for this request") if config.locations.empty?
@@ -165,7 +169,7 @@ module Gori
           config.locations.each { |loc| config.bucket_size[loc] = bucket }
         end
         names = Miner::Wordlist.load(config.user_wordlist)
-        engine = Miner::Engine.new(bytes, use_h2, names, sender, config)
+        engine = Miner::Engine.new(bytes, use_h2, names, backend, config)
         {engine, origin, engine.total_names}
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")
