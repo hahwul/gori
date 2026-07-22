@@ -415,16 +415,46 @@ module Gori::Sequencer
         inc = (1...vals.size).all? { |i| vals[i] > vals[i - 1] }
         dec = (1...vals.size).all? { |i| vals[i] < vals[i - 1] }
         if inc || dec
-          deltas = (1...vals.size).map { |i| vals[i] - vals[i - 1] }
-          return {true, deltas.uniq.size == 1 ? "constant step #{deltas.first}" : (inc ? "monotonic up" : "monotonic down")}
+          step = constant_step(vals)
+          return {true, step ? "constant step #{step}" : (inc ? "monotonic up" : "monotonic down")}
+        end
+        # Reached only when arrival order is NEITHER ascending nor descending — so
+        # "shuffled" below is an earned claim, not a guess. Collection order isn't
+        # issuance order once concurrency > 1 (sequence_start allows up to 20 in
+        # flight): two in-flight replays can complete swapped, so a textbook
+        # incrementing counter can arrive shuffled and the inc/dec check above misses
+        # it. Check the SORTED values for an even step — order-independent, so
+        # concurrent collection can't hide it. Gated behind SMALL_SAMPLE because a tiny
+        # sample "sorts evenly" by pure coincidence often enough to be noise (e.g.
+        # [1, 5, 3] sorts to a constant step of 2 despite being a genuinely
+        # non-monotonic 3-token run — see the up-then-down spec); at real sample sizes
+        # that coincidence is negligible.
+        if n >= SMALL_SAMPLE && (step = constant_step(vals.sort))
+          return {true, "constant step #{step} (sorted — arrival order was shuffled)"}
         end
         return {false, "non-monotonic"}
       end
-      # General path — correlation of arrival order with a leading-byte magnitude.
+      # General path — correlation of arrival order with a leading-byte magnitude. Shares
+      # the same order-dependency the numeric fast path had above (arrival order can be
+      # shuffled by concurrency), but isn't fixed here — a coordinate-only fix couldn't
+      # reuse the sort-then-diff trick since this path also weighs HOW closely order
+      # tracks magnitude, not just whether the values are evenly spaced.
       xs = Array(Float64).new(n, &.to_f)
       ys = tokens.map { |t| leading_value(t) }
       r = pearson(xs, ys)
       {r.abs > 0.9, "corr=#{fmt(r)}"}
+    end
+
+    # The constant gap between every consecutive pair in `values`, or nil if the gaps
+    # vary (or all values are identical). Short-circuits on the first mismatching pair
+    # rather than building a full delta array + `.uniq` just to read its size. Shared by
+    # detect_sequential's arrival-order and sorted-order checks so both express "is this
+    # an even arithmetic progression" the same way.
+    private def self.constant_step(values : Array(Int64)) : Int64?
+      return nil if values.size < 2
+      step = values[1] - values[0]
+      return nil if step == 0
+      (2...values.size).all? { |i| values[i] - values[i - 1] == step } ? step : nil
     end
 
     private def self.leading_value(t : String) : Float64

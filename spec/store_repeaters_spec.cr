@@ -4,7 +4,7 @@ private def with_store(&)
   path = File.tempname("gori-repeaters", ".db")
   store = Gori::Store.open(path)
   begin
-    yield store
+    yield store, path
   ensure
     store.close
     File.delete?(path)
@@ -118,6 +118,41 @@ describe "Gori::Store repeater tabs (v9)" do
       r = store.repeaters.find!(&.id.==(id))
       r.response_body.should be_nil
       r.response_error.should eq("connect failed: a.test:443")
+    end
+  end
+
+  it "reads a legacy row whose `request` was bound as a Crystal String (TEXT storage " \
+     "class), the way an out-of-date gori writer bound it before the V2 fix" do
+    with_store do |store, path|
+      # Bypass insert_repeater (always binds Bytes) to reproduce a row written by a
+      # mismatched-version writer still on the pre-V2 String bind — e.g. a long-lived
+      # `gori mcp`/TUI process running an out-of-date binary against an
+      # already-migrated project db. SQLite stores a String bind as TEXT storage class
+      # even in a column declared/affinity TEXT-or-BLOB; reading it back as Bytes used
+      # to raise an unhandled DB::ColumnTypeMismatchError. The body carries an embedded
+      # NUL byte — the exact historical failure mode the V2 migration's own comment
+      # describes (a single-arg `String.new(ptr)` read stops at the first 0x00) — so
+      # this also guards against a future regression to a String-based (not CAST'd)
+      # read silently truncating instead of raising.
+      raw = DB.open("sqlite3:#{path}")
+      begin
+        now = Time.utc.to_unix_ms.to_i64 * 1000
+        raw.exec(
+          "INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, position) " \
+          "VALUES (?,?,?,?,?,?,?)",
+          now, now, "https://legacy.test", "POST /legacy HTTP/1.1\r\nContent-Length: 3\r\n\r\nA\u0000B", 0, 1, 0)
+      ensure
+        raw.close
+      end
+
+      expected = "POST /legacy HTTP/1.1\r\nContent-Length: 3\r\n\r\nA\u0000B".to_slice
+      expected.includes?(0_u8).should be_true # sanity: the embedded NUL survives, not stripped by the literal itself
+      id = store.repeaters.first.id
+      store.repeaters.find!(&.id.==(id)).request.should eq(expected)
+      store.get_repeater(id).not_nil!.request.should eq(expected)
+      store.get_repeater_full(id).not_nil!.request.should eq(expected)
+      store.repeaters_meta.find!(&.id.==(id)).request.should eq(expected)
+      store.repeaters_mcp.find!(&.id.==(id)).request.should eq(expected)
     end
   end
 
