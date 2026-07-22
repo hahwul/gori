@@ -86,6 +86,16 @@ module Gori
                      @content_type = nil)
       end
 
+      # True when `target` already carries its own scheme+authority — an ABSOLUTE-FORM
+      # request line, the wire shape a plain-HTTP forward-proxy request arrives in (curl -x,
+      # a browser proxying a non-TLS site, a hand-written `raw` template, …). Case-insensitive
+      # (RFC 3986 §3.1: URI schemes are case-insensitive), so `HTTP://host/x` is caught too —
+      # a naive case-sensitive check would let it double into `http://hostHTTP://host/x`.
+      # Shared by #url below and Scope.request_url (scope.cr) so this check only lives once.
+      def self.absolute_form?(target : String) : Bool
+        target.starts_with?(/https?:\/\//i)
+      end
+
       # The full absolute URL of the request. Plaintext forward-proxy requests are captured
       # ABSOLUTE-form (`http://host:port/path` — the wire truth, P7), so `target` already
       # carries the scheme+authority; return it verbatim. Origin-form targets (the HTTPS /
@@ -93,7 +103,7 @@ module Gori
       # port and bracketing an IPv6 literal (mirrors FlowRequest.build_target). Prevents the
       # doubled "http://hosthttp://host/path" a naive "#{scheme}://#{host}#{target}" produced.
       def url : String
-        return target if target.starts_with?("http://") || target.starts_with?("https://")
+        return target if FlowRow.absolute_form?(target)
         h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
         default = scheme == "https" ? 443 : 80
         port == default ? "#{scheme}://#{h}#{target}" : "#{scheme}://#{h}:#{port}#{target}"

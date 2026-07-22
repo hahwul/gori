@@ -187,7 +187,7 @@ module Gori
     # — an off sandbox never inspects the URL — mirroring scope_allows?.
     def sandbox_blocks?(scheme : String, host : String, target : String) : Bool
       return false unless @scope.sandbox?
-      @scope.sandbox_blocks?("#{scheme}://#{host}#{target}", host)
+      @scope.sandbox_blocks?(Scope.request_url(scheme, host, target), host)
     end
 
     # Coarse HOST-level block for the CONNECT gate, made before any request exists.
@@ -232,7 +232,7 @@ module Gori
     # setup still skips the interpolation.
     private def scope_allows?(scheme : String, host : String, target : String) : Bool
       return true unless @scope.active?
-      @scope.in_scope_url?("#{scheme}://#{host}#{target}", host)
+      @scope.in_scope_url?(Scope.request_url(scheme, host, target), host)
     end
 
     # --- proxy fiber side (BLOCKS until a decision) --------------------------

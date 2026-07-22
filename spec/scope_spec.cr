@@ -212,6 +212,42 @@ describe Gori::Scope do
     end
   end
 
+  # A stored `target` that already starts with "http://"/"https://" is an ABSOLUTE-FORM
+  # capture — the wire shape a plain-HTTP forward-proxy request arrives in (curl -x
+  # http://proxy http://site/path, or any client proxying a non-TLS site). The SQL
+  # URL_EXPR must recognise it instead of re-prepending scheme://host (which would
+  # double it into "http://hosthttp://host/path" and break an anchored/exact-match rule).
+  it "SQL filter matches an absolute-form-captured target against an anchored regex include" do
+    with_store do |store|
+      capture(store, "acme.test", "http://acme.test/dashboard", "http") # absolute-form
+      capture(store, "acme.test", "/dashboard", "http")                 # origin-form, same logical endpoint
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "regex", "^http://acme\\.test/")
+      scope.enable
+
+      rows = store.search(scope.filter, 50).map { |r| r.target }
+      rows.should contain("http://acme.test/dashboard")
+      rows.should contain("/dashboard")
+    end
+  end
+
+  it "SQL filter recognises an UPPERCASE-scheme absolute-form target as absolute-form too" do
+    with_store do |store|
+      # RFC 3986 §3.1: URI schemes are case-insensitive. A case-SENSITIVE absolute-form
+      # check would fall through to the ELSE branch here and double this into
+      # "http://acme.testHTTP://acme.test/dashboard", which this anchored, case-sensitive
+      # regex (matching only the un-doubled exact string) would never match.
+      capture(store, "acme.test", "HTTP://acme.test/dashboard", "http")
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "regex", "^HTTP://acme\\.test/dashboard$")
+      scope.enable
+
+      store.search(scope.filter, 50).map(&.target).should contain("HTTP://acme.test/dashboard")
+    end
+  end
+
   it "may_match_host? is conservative for the Tunnel (host gate, pre-request)" do
     with_store do |store|
       scope = Gori::Scope.load(store)

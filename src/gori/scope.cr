@@ -403,7 +403,24 @@ module Gori
       @store.set_setting(SETTING_SANDBOX, value ? "1" : "0")
     end
 
-    private URL_EXPR = "(scheme || '://' || host || target)"
+    # The scope-matching URL for a live request: `scheme://host` + `target`, UNLESS
+    # `target` is already ABSOLUTE-FORM (`http://host[:port]/path`) — the wire shape
+    # every plain-HTTP forward-proxy request arrives in (curl -x, a browser proxying
+    # a non-TLS site, a hand-written `send_request` `raw` template, …). Concatenating
+    # scheme://host onto an already-absolute target doubles it into
+    # `http://hosthttp://host/path`, which silently breaks any anchored or exact-match
+    # string/regex scope rule for such requests (unanchored patterns still match — the
+    # real target survives as a suffix — which is how this went unnoticed). Shared by
+    # every caller that builds this URL from a live request's parts (Interceptor,
+    # send_request); the absolute-form check itself is Store::FlowRow.absolute_form?
+    # (models.cr), also used by QL::URL_EXPR below, so a case-sensitivity fix only
+    # needs to land in one place. Deliberately does NOT add the port the way FlowRow#url
+    # does, so an origin-form target still builds the exact same URL every existing
+    # Scope spec already agrees on.
+    def self.request_url(scheme : String, host : String, target : String) : String
+      return target if Store::FlowRow.absolute_form?(target)
+      "#{scheme}://#{host}#{target}"
+    end
 
     private def rule_cond(rule : Rule) : {String, Array(DB::Any)}
       case rule.match_type
@@ -412,10 +429,10 @@ module Gori
       when "string"
         # Case-insensitive substring of the URL; QL.like neutralises % / _ so a literal
         # %/_ in the pattern matches literally (paired with ESCAPE '\').
-        {"lower(#{URL_EXPR}) LIKE ? ESCAPE '\\'", [QL.like(rule.pattern)] of DB::Any}
+        {"lower(#{QL::URL_EXPR}) LIKE ? ESCAPE '\\'", [QL.like(rule.pattern)] of DB::Any}
       when "regex"
         # Case-SENSITIVE (no lower()) to match Rule#matches? + the shard's REGEXP.
-        {"#{URL_EXPR} REGEXP ?", [rule.pattern] of DB::Any}
+        {"#{QL::URL_EXPR} REGEXP ?", [rule.pattern] of DB::Any}
       else
         {"0", [] of DB::Any}
       end

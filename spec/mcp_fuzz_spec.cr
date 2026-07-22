@@ -122,6 +122,110 @@ describe "MCP fuzz tools" do
     end
   end
 
+  # Splicing is byte-exact by design (Burp/ffuf-style: what you type between §…§ is
+  # what's sent) — but unlike the CLI's `gori run fuzz --encode=url`, fuzz_start had NO
+  # way at all to opt in to encoding, so a payload with a space/quote (most SQLi/XSS)
+  # silently corrupted the request line instead of reaching the app. `processors`
+  # closes that gap; this pins it down at the wire level via the recorded flow's
+  # actual request_head, the same way the bug was originally found.
+  it "processors:[encode:url] percent-encodes a payload before it's spliced in" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a b"]}]),
+         "processors"     => %([{"type":"encode","kind":"url"}]),
+         "record_history" => "all",
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+
+      done = false
+      30.times do
+        sleep 0.02.seconds
+        status = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+        next if status["status"].as_s == "running"
+        done = true
+        break
+      end
+      done.should be_true
+
+      results = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))
+      fid = results["results"][0]["flow_id"].as_i64
+      flow = call_json(tools, "get_flow", %({"id":#{fid}}))
+      # Encoded: a well-formed request line the origin actually receives as one field.
+      flow["request_head"].as_s.should contain("GET /?q=a%20b HTTP/1.1")
+      flow["request_head"].as_s.should_not contain("GET /?q=a b HTTP/1.1")
+    end
+  end
+
+  it "rejects an unknown or malformed processor spec cleanly" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1",
+              "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
+
+      _, unknown_type = call_raw(tools, "fuzz_start", base.merge({"processors" => %([{"type":"gzip"}])}).to_json)
+      unknown_type.should be_true
+
+      _, bad_kind = call_raw(tools, "fuzz_start", base.merge({"processors" => %([{"type":"encode","kind":"rot13"}])}).to_json)
+      bad_kind.should be_true
+    end
+  end
+
+  it "rejects a processor's text/pattern given as JSON null or a non-string value" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1",
+              "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
+
+      # A JSON `null` must NOT silently become an empty-string prefix — `jstr`'s
+      # `v.to_s` fallback turns `nil` into `""`, which is truthy in Crystal and used to
+      # slip straight past a `jstr(...) || raise` guard.
+      _, null_text = call_raw(tools, "fuzz_start",
+        base.merge({"processors" => %([{"type":"prefix","text":null}])}).to_json)
+      null_text.should be_true
+
+      # A JSON array for `pattern` must NOT stringify into something that can itself
+      # compile as a regex (e.g. `["id","="]`.to_s is a non-empty, technically-valid
+      # regex source) and silently pass the emptiness guard.
+      _, array_pattern = call_raw(tools, "fuzz_start",
+        base.merge({"processors" => %([{"type":"regex_replace","pattern":["id","="]}])}).to_json)
+      array_pattern.should be_true
+    end
+  end
+
+  it "matches a processor's type case-insensitively, same as kind/algo" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a b"]}]),
+         "processors"     => %([{"type":"ENCODE","kind":"URL"}]),
+         "record_history" => "all",
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+
+      done = false
+      30.times do
+        sleep 0.02.seconds
+        status = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+        next if status["status"].as_s == "running"
+        done = true
+        break
+      end
+      done.should be_true
+
+      results = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))
+      fid = results["results"][0]["flow_id"].as_i64
+      flow = call_json(tools, "get_flow", %({"id":#{fid}}))
+      flow["request_head"].as_s.should contain("GET /?q=a%20b HTTP/1.1")
+    end
+  end
+
   it "rejects bad args, and gates the tool under --read-only" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
@@ -179,7 +283,7 @@ describe "MCP fuzz tools" do
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       start = call_json(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
-         "url"      => "http://127.0.0.1:#{port}",
+         "url" => "http://127.0.0.1:#{port}",
          "payloads" => %([{"numbers":"1-500"}]),
          "rate" => 50, "allow_unscoped" => true}.to_json)
       job_id = start["job_id"].as_s
@@ -269,9 +373,9 @@ describe "MCP fuzz tools" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       start = call_json(tools, "fuzz_start",
-        {"template"     => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
-         "url"          => "http://127.0.0.1:#{port}",
-         "payloads"     => %([{"list":["a","b","c","d","e"]}]),
+        {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url" => "http://127.0.0.1:#{port}",
+         "payloads" => %([{"list":["a","b","c","d","e"]}]),
          "max_requests" => 2, "allow_unscoped" => true}.to_json)
       start["total"].as_i.should eq(5)
       start["budget_warning"].as_s.should contain("below the 5 candidate total")

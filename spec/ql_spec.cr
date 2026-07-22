@@ -150,7 +150,9 @@ describe Gori::QL do
     Gori::QL.parse("host~^api\\.").sql.should eq("(host REGEXP ?)")
     Gori::QL.parse("host~^api\\.").args.should eq(["^api\\."])
     Gori::QL.parse("path~\\.json$").sql.should eq("(target REGEXP ?)")
-    Gori::QL.parse("url~^https").sql.should eq("((scheme || '://' || host || target) REGEXP ?)")
+    Gori::QL.parse("url~^https").sql.should eq(
+      "((CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
+      "THEN target ELSE (scheme || '://' || host || target) END) REGEXP ?)")
 
     body = Gori::QL.parse("body~secret\\d+")
     body.sql.should eq("(((request_body IS NOT NULL AND CAST(request_body AS TEXT) REGEXP ?) OR " \
@@ -226,6 +228,31 @@ describe "Gori::Store#search (QL)" do
       # which matches none of these flows' method/host/target.
       none = store.search(Gori::QL.parse("flag:reflected"), 50)
       none.should be_empty
+    end
+  end
+
+  it "url~ recognizes an ABSOLUTE-FORM target of any scheme case without doubling scheme://host" do
+    tmp_store do |store|
+      # Origin-form (the common case: HTTPS/CONNECT) and absolute-form (plain-HTTP
+      # forward-proxy wire shape) captures of the same logical endpoint, plus an
+      # upper-cased-scheme absolute-form capture (RFC 3986 §3.1: schemes are
+      # case-insensitive).
+      capture(store, "acme.test", "GET", "/dashboard")
+      capture(store, "acme.test", "GET", "http://acme.test/dashboard")
+      capture(store, "acme.test", "GET", "HTTP://acme.test/dashboard")
+
+      # Origin-form: scheme://host gets prefixed onto the bare target.
+      store.search(Gori::QL.parse("url~^http://acme\\.test/dashboard$"), 50)
+        .map(&.target).should contain("/dashboard")
+      # Absolute-form (lowercase scheme): target already IS the URL, used verbatim.
+      store.search(Gori::QL.parse("url~^http://acme\\.test/dashboard$"), 50)
+        .map(&.target).should contain("http://acme.test/dashboard")
+      # Absolute-form (uppercase scheme) must ALSO be recognized and left verbatim — a
+      # case-sensitive absolute-form check would instead double it into
+      # "http://acme.testHTTP://acme.test/dashboard", which this anchored,
+      # case-sensitive regex (matching only the un-doubled exact string) would never match.
+      store.search(Gori::QL.parse("url~^HTTP://acme\\.test/dashboard$"), 50)
+        .map(&.target).should contain("HTTP://acme.test/dashboard")
     end
   end
 

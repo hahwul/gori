@@ -27,7 +27,11 @@ module Gori
         built, http2, sni = build_send_request(h)
         # Scope gate BEFORE any outbound byte / History write: an out-of-scope
         # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
-        sc = scope_check("#{built.scheme}://#{built.host}#{request_target(built.bytes)}",
+        # request_target reads the target VERBATIM off the first line of `built.bytes` —
+        # ABSOLUTE-FORM when the caller hand-wrote a `raw` template with a full-URL
+        # request line, same as any plain-HTTP forward-proxy request — so this goes
+        # through Scope.request_url rather than a naive concat (see its doc comment).
+        sc = scope_check(Scope.request_url(built.scheme, built.host, request_target(built.bytes)),
           built.host, bool(h, "allow_unscoped") || false)
         return scope_blocked(sc) if sc.blocked
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil

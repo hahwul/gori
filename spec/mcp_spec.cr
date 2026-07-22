@@ -1346,6 +1346,23 @@ describe Gori::MCP::Server do
         p["scope_decision"].as_s.should eq("out_of_scope")
       end
     end
+
+    # A `raw` template's request line is taken VERBATIM (request_target in send.cr),
+    # so it can be ABSOLUTE-FORM (`GET http://host/path HTTP/1.1`) — same wire shape a
+    # plain-HTTP forward-proxy request arrives in. The scope check must not double it
+    # into `http://hosthttp://host/path` (which would break this anchored regex include
+    # and wrongly report the in-scope target as unscoped/out-of-scope).
+    it "reports in_scope for a raw request whose line is already ABSOLUTE-FORM" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        store.add_scope_rule("include", "regex", "^http://127\\.0\\.0\\.1:#{port}/$")
+        raw = "GET http://127.0.0.1:#{port}/ HTTP/1.1\\r\\nHost: 127.0.0.1:#{port}\\r\\n\\r\\n"
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","raw":"#{raw}"}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["scope_decision"].as_s.should eq("in_scope")
+        p["scope_rule_id"].as_i64.should be > 0
+      end
+    end
   end
 
   describe "send_websocket" do
