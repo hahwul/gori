@@ -30,12 +30,13 @@ Its **active** checks are deliberately *light-touch*: a handful of safe, low-vol
 | `client` | Client-side suspicions in page and bundle scripts: DOM-based XSS (source into sink), DOM clobbering, prototype pollution, and postMessage weaknesses. Heuristic, so treat as leads to confirm |
 | `active` | Confirmed by a light-touch probe (for example reflected parameters). TUI active scan only |
 
-Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run probe` runs **passive** checks only (categories except `active`).
+Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run probe` runs passive checks by default, and pass `--active` to also run active checks.
 
-Run passive analysis headless. It reads what's already captured (History + Repeater responses) and sends nothing:
+Run analysis headless. By default it reads what's already captured (History + Repeater responses) and sends nothing, or pass `--active` to send probe requests:
 
 ```bash
-gori run probe                       # all issues
+gori run probe                       # passive issues
+gori run probe --active              # include active checks (sends probe requests)
 gori run probe --severity high       # only high-severity
 gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)

@@ -198,9 +198,10 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 
 ```bash
 gori run probe --severity high --category cors
+gori run probe -a
 ```
 
-`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors` (passive only, `active` probes run in the TUI); `-q`/`--query` filters with QL.
+`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`; `-a`/`--active` includes light-touch active checks; `-q`/`--query` filters with QL.
 
 ### run discover
 

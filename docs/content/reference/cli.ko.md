@@ -198,9 +198,10 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 
 ```bash
 gori run probe --severity high --category cors
+gori run probe -a
 ```
 
-`--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`이며, 여기서는 패시브 검사만 다룹니다. `active` 프로브는 TUI에서 실행합니다. `-q`/`--query`로 QL 필터를 겁니다.
+`--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`입니다. 기본적으로 패시브 검사를 수행하며, `-a`/`--active` 옵션을 사용하여 액티브 프로브 검사를 포함할 수 있습니다. `-q`/`--query`로 QL 필터를 겁니다.
 
 ### run discover {#run-discover}
 

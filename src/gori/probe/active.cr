@@ -36,6 +36,28 @@ module Gori
       def self.estimate_label(rng : Range(Int32, Int32)) : String
         rng.begin == rng.end ? "#{rng.begin} req/flow" : "#{rng.begin}–#{rng.end} req/flow"
       end
+
+      # Synchronously execute enabled Active rules against a flow (for headless / CLI scans).
+      def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
+                       timeout : Time::Span = 10.seconds) : Array(Detection)
+        out = [] of Detection
+        row = detail.row
+        origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
+        http2 = detail.http_version.starts_with?("HTTP/2")
+        sender = Fuzz::Sender.new(origin, http2, verify_upstream, timeout: timeout)
+
+        RULES.each do |rule|
+          plan = rule.plan(detail)
+          next unless plan
+          result = sender.send(plan.request)
+          next unless result.ok?
+          results = [result]
+          plan.followups.each { |req| results << sender.send(req) }
+          dets = rule.detections_all(plan, results, detail)
+          out.concat(dets)
+        end
+        out
+      end
     end
   end
 end
