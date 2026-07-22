@@ -6,9 +6,10 @@ module Gori
       # `gori run oast` — headless out-of-band listener (interactsh & friends). Store-free
       # and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       private def self.cmd_oast(args : Array(String)) : Nil
-        case sub = args.first?
+        filtered = args.reject { |a| a.starts_with?("--project") || a.starts_with?("--db") }
+        case sub = filtered.first?
         when "presets"           then oast_presets
-        when "listen"            then oast_listen(args[1..])
+        when "listen"            then oast_listen(filtered[1..])
         when nil, "-h", "--help" then oast_help
         else
           STDERR.puts "gori run oast: unknown subcommand '#{sub}'"

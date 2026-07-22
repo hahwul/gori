@@ -199,6 +199,7 @@ module Gori
       return nil if value.empty?
       case field
       when "host"                        then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "url"                         then {"#{URL_EXPR} LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
       when "path"                        then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
       when "method"                      then {"upper(method) = ?", [value.upcase] of DB::Any}
       when "scheme"                      then {"scheme = ?", [value.downcase] of DB::Any}
@@ -313,9 +314,34 @@ module Gori
     # dropped, like a bad status:).
     private def self.numeric_cond(column : String, value : String) : {String, Array(DB::Any)}?
       op, rest = split_op(value)
-      n = rest.to_i64?
-      return nil unless n
-      {"#{column} #{op} ?", [n] of DB::Any}
+      scale = 1.0
+      lower_rest = rest.downcase
+      if lower_rest.ends_with?("kb")
+        rest = rest[0...-2]
+        scale = 1024.0
+      elsif lower_rest.ends_with?('k')
+        rest = rest[0...-1]
+        scale = 1024.0
+      elsif lower_rest.ends_with?("mb")
+        rest = rest[0...-2]
+        scale = 1024.0 * 1024.0
+      elsif lower_rest.ends_with?('m')
+        rest = rest[0...-1]
+        scale = 1024.0 * 1024.0
+      elsif lower_rest.ends_with?("gb")
+        rest = rest[0...-2]
+        scale = 1024.0 * 1024.0 * 1024.0
+      elsif lower_rest.ends_with?('g')
+        rest = rest[0...-1]
+        scale = 1024.0 * 1024.0 * 1024.0
+      elsif lower_rest.ends_with?('b')
+        rest = rest[0...-1]
+      end
+      n = rest.to_f?
+      return nil unless n && n.finite?
+      bytes = (n * scale).round
+      return nil unless bytes.abs < 9.0e18
+      {"#{column} #{op} ?", [bytes.to_i64] of DB::Any}
     end
 
     # dur: is milliseconds (how latency reads), compared against the microsecond

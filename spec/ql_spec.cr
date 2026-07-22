@@ -26,6 +26,17 @@ private def capture(store, host, method, target, status = nil)
 end
 
 describe Gori::QL do
+  it "compiles url: field filters" do
+    f = Gori::QL.parse("url:shop.demo.test")
+    f.sql.should contain("LIKE ? ESCAPE '\\'")
+    f.args.should eq(["%shop.demo.test%"])
+  end
+
+  it "compiles size: filters with byte unit suffixes (k, M, G)" do
+    Gori::QL.parse("size:>10k").args.should eq([10240_i64])
+    Gori::QL.parse("size:>=1M").args.should eq([1048576_i64])
+  end
+
   it "compiles AND-ed terms with parameterised values" do
     f = Gori::QL.parse("host:acme status:>=500")
     f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\' AND status >= ?)")
