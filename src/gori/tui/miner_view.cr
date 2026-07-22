@@ -281,7 +281,9 @@ module Gori::Tui
     end
 
     # --- engine ---
-    def build_engine(verify : Bool) : {Miner::Engine?, String?}
+    # `scope` gates every send against Sandbox/exclude rules (ScopedBackend) — the
+    # same protection Discover already applies per-request.
+    def build_engine(verify : Bool, scope : Gori::Scope) : {Miner::Engine?, String?}
       scheme, host, port = Repeater::FlowRequest.parse_target(@target)
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       return {nil, "no locations selected"} if @config.locations.empty?
@@ -289,7 +291,8 @@ module Gori::Tui
       return {nil, "wordlist is empty"} if names.empty?
       sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
         http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
-      {Miner::Engine.new(@request, @http2, names, sender, @config), nil}
+      backend = Fuzz::ScopedBackend.new(sender, scope)
+      {Miner::Engine.new(@request, @http2, names, backend, @config), nil}
     rescue ex
       {nil, "config error: #{ex.message}"}
     end

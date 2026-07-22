@@ -1,6 +1,7 @@
 require "uri"
 require "../repeater/engine"
 require "../repeater/h2_engine"
+require "../scope"
 
 module Gori::Fuzz
   # The origin a run targets (also the boundary for redirect following).
@@ -59,6 +60,45 @@ module Gori::Fuzz
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
       @sent += 1
       @inner.send(bytes)
+    end
+  end
+
+  # Refuses to send when the target falls outside the project's Scope (a sandbox
+  # block or an explicit exclude rule) — the same per-request gate Discover applies
+  # via `bounded_url` (discover/adapters.cr). Fuzz and Miner otherwise dial a
+  # Backend directly with no Scope awareness, so Sandbox mode's "blocks ALL
+  # out-of-scope traffic" promise didn't hold for either tool. Wrap OUTERMOST
+  # (around CappedBackend) so a blocked attempt never reaches the network — the
+  # request budget is still spent on it, same as CappedBackend already does for
+  # retries/redirects, rather than adding a second accounting path.
+  class ScopedBackend < Backend
+    SCOPE_ERROR = "blocked by scope"
+
+    getter blocked : Int64 = 0_i64
+
+    def initialize(@inner : Backend, @scope : Gori::Scope)
+    end
+
+    def origin : Origin
+      @inner.origin
+    end
+
+    def send(bytes : Bytes) : Repeater::Result
+      o = origin
+      url = "#{o.scheme}://#{o.host}#{request_target(bytes)}"
+      if @scope.sandbox_blocks?(url, o.host) || @scope.excluded?(url, o.host)
+        @blocked += 1
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_ERROR)
+      end
+      @inner.send(bytes)
+    end
+
+    # The request-target (path) from the first line of a raw request, mirroring
+    # mcp/tools/send.cr#request_target — builds the scheme://host/target URL the
+    # scope string/regex rules match against.
+    private def request_target(bytes : Bytes) : String
+      line = String.new(bytes).each_line.first? || ""
+      line.split(' ')[1]? || "/"
     end
   end
 

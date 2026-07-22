@@ -393,7 +393,7 @@ module Gori::Tui
     end
 
     private def start_run(view : MinerView) : Nil
-      engine, err = view.build_engine(!@host.session.config.insecure_upstream?)
+      engine, err = view.build_engine(!@host.session.config.insecure_upstream?, @host.session.scope)
       unless engine
         @host.status(err || "cannot mine")
         return
