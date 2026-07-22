@@ -12,6 +12,7 @@ require "./settings/miner"
 require "./settings/probe"
 require "./settings/discover"
 require "./settings/update"
+require "./settings/fuzzer"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
@@ -77,6 +78,7 @@ module Gori
         self.decoder_chains = parse_decoder_chains(cv["chains"]?)
       end
       parse_mine_prefs(root["mine"]?)
+      parse_fuzzer_prefs(root["fuzzer"]?)
       if pr = root["probe"]?.try(&.as_h?)
         pr["active_notify"]?.try(&.as_s?).try { |s| self.probe_active_notify = s }
       end
@@ -181,6 +183,7 @@ module Gori
           serialize_oast_providers(j)
           serialize_hotkeys(j)
           serialize_mine(j)
+          serialize_fuzzer(j)
           serialize_probe(j)
           serialize_discover(j)
           serialize_decoder(j)

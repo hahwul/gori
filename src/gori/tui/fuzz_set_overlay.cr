@@ -4,6 +4,7 @@ require "./frame"
 require "./text_area"
 require "./text_field"
 require "./path_complete"
+require "../settings"
 
 module Gori::Tui
   # One payload set: a source kind + a value string in the compact grammar the Fuzz
@@ -43,7 +44,7 @@ module Gori::Tui
       }
       @values = TextArea.new
       @values.follow_x = true # long list values scroll horizontally to keep the caret visible
-      @path_complete = PathComplete.new
+      @path_complete = PathComplete.new(wordlist_history: true)
     end
 
     # Open pre-seeded to List (the ^L / "Add a List payload set" verb).
@@ -196,6 +197,10 @@ module Gori::Tui
     private def handle_field(ev : Termisu::Event::Key, f : Symbol) : Symbol
       key = ev.key
       tf = @fields[f]? || return :stay
+      # ^D (browser-bookmark convention): toggle the CURRENTLY TYPED path in/out of
+      # favorites — checked before the TextField sees the keystroke so it never
+      # inserts a literal "d".
+      return toggle_favorite_path if f == :path && ev.ctrl_d?
       case
       when key.up?    then move_row(-1)
       when key.down?  then move_row(1)
@@ -204,6 +209,11 @@ module Gori::Tui
         tf.handle_edit_key(ev)
         refresh_path(f) # keep the wordlist dropdown in lockstep with the field
       end
+      :stay
+    end
+
+    private def toggle_favorite_path : Symbol
+      Gori::Settings.toggle_favorite_wordlist(@fields[:path].value)
       :stay
     end
 
@@ -364,7 +374,11 @@ module Gori::Tui
         bg = foc ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if foc
         screen.text(box.x + 2, y, field_label(f), foc ? Theme.text_bright : Theme.muted, bg)
-        @fields[f].render(screen, vx, y, vw, foc, foc ? Theme.text_bright : Theme.text, bg)
+        # overlay_box already refused to render below w=34 (see `render`), so vw - 2
+        # never underflows here.
+        favorited = f == :path && Gori::Settings.favorite_wordlist?(@fields[f].value)
+        screen.text(box.right - 3, y, "★", Theme.accent, bg) if favorited
+        @fields[f].render(screen, vx, y, favorited ? vw - 2 : vw, foc, foc ? Theme.text_bright : Theme.text, bg)
       end
     end
 
@@ -385,7 +399,7 @@ module Gori::Tui
       hint =
         case @ptype
         when :list     then "one value per line · ↵ new value · ⇥ field · esc applies"
-        when :wordlist then "type to filter · ↹/↵ complete · ⇥ field · esc applies"
+        when :wordlist then "filter · ↹/↵ complete · ^D favorite · ⇥ field · esc applies"
         else                "⇥/↑↓ field · ↵ next · esc applies & closes"
         end
       screen.text(box.x + 2, box.bottom - 2, hint, Theme.muted, Theme.bg, width: box.w - 4)
