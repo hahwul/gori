@@ -1943,8 +1943,7 @@ module Gori::Tui
     end
 
     private def commit_oast_provider_overlay(ov : OastProviderOverlay) : Nil
-      return unless ov.valid?
-      oast_controller.save_provider(ov.edit_id, ov.provider_name, ov.kind, ov.host, ov.token)
+      return unless oast_controller.save_provider(ov)
       close_oast_provider
     end
 
@@ -4036,7 +4035,7 @@ module Gori::Tui
       when :fuzz_advanced    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :scope_rule       then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
       when :rewriter_rule    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
-      when :oast_provider    then "↑/↓ field · ←/→ type · type name/host/token · ↵ save · esc cancel"
+      when :oast_provider    then "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
       when :ca_import        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
       when :import           then "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
       when :detail           then history_controller.body_hint(:body)
@@ -5124,15 +5123,9 @@ module Gori::Tui
       @overlay = :scope_rule
     end
 
-    # Host: open the OAST provider add/edit popup (nil edit_id = add a new provider).
-    def open_oast_provider_editor(edit_id : Int64?, name : String, kind : String, host : String, token : String) : Nil
-      k = Oast::ProviderKind.parse?(kind) || Oast::ProviderKind::Interactsh
-      @oast_provider_overlay =
-        if id = edit_id
-          OastProviderOverlay.editing(id, name, k, host, token)
-        else
-          OastProviderOverlay.adding
-        end
+    # Host: open the OAST provider add/edit popup (nil = add a new provider).
+    def open_oast_provider_editor(provider : Oast::ProviderConfig?) : Nil
+      @oast_provider_overlay = provider ? OastProviderOverlay.editing(provider) : OastProviderOverlay.adding
       @overlay = :oast_provider
     end
 

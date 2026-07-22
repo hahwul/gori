@@ -3,6 +3,7 @@ require "./paths"
 require "./settings/network"
 require "./settings/env"
 require "./settings/scan_rules"
+require "./settings/oast_providers"
 require "./settings/display"
 require "./settings/tabs"
 require "./settings/keymap"
@@ -69,6 +70,7 @@ module Gori
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_env(root["env"]?)
       self.scan_rules = parse_scan_rules(root["scan_rules"]?)
+      self.oast_providers = parse_oast_providers(root["oast_providers"]?)
       parse_hotkeys(root["hotkeys"]?)
       if cv = root["decoder"]?
         self.decoder_sessions = parse_decoder_sessions(cv["sessions"]?)
@@ -176,6 +178,7 @@ module Gori
           serialize_hostname_overrides(j)
           serialize_env(j)
           serialize_scan_rules(j)
+          serialize_oast_providers(j)
           serialize_hotkeys(j)
           serialize_mine(j)
           serialize_probe(j)
