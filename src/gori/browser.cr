@@ -153,6 +153,13 @@ module Gori
       end
     end
 
+    # Whether Firefox's CA auto-import path is available on this system — exposed
+    # so the picker can warn BEFORE launch rather than only via the post-launch
+    # toast (which is easy to miss once focus jumps to the new browser window).
+    def self.certutil_available? : Bool
+      !Process.find_executable("certutil").nil?
+    end
+
     # Writes proxy prefs and, when certutil exists, imports the CA into the
     # profile's NSS db (sql: creates cert9.db). Returns a status note.
     private def self.setup_firefox_profile(profile : String, spec : LaunchSpec) : String
@@ -161,8 +168,10 @@ module Gori
         import_firefox_ca(certutil, profile, spec.ca_cert_path) ? "CA imported, proxy set" : "proxy set (CA import failed)"
       else
         # No certutil → the CA can't be injected into Firefox's NSS store, so HTTPS sites
-        # will show SEC_ERROR/cert warnings. Say so, not just "install certutil".
-        "proxy set — HTTPS will show cert errors; install certutil (nss) to auto-trust the CA"
+        # will show SEC_ERROR/cert warnings. Say so, not just "install certutil" — the
+        # picker already warned before launch (see BrowserPicker), so repeat the concrete
+        # fallback here too since that's the toast the user is actually looking at now.
+        "proxy set — HTTPS will show cert errors; install certutil (nss), or in this Firefox window: about:preferences#privacy → View Certificates → Authorities → Import"
       end
     end
 

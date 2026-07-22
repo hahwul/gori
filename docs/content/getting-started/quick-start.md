@@ -42,6 +42,8 @@ Inside the TUI:
 
 gori launches it with a throwaway profile that already trusts the CA and routes HTTP/HTTPS through the proxy. In that browser, visit a site (try `https://example.com`, then a site you're testing).
 
+> **Firefox note.** Auto-trusting the CA needs `certutil` (NSS) on `PATH`. Without it, gori still sets the proxy but Firefox won't trust the CA, so HTTPS sites show a security warning. Either install it first (`brew install nss` on macOS, `apt install libnss3-tools` on Debian/Ubuntu, `dnf install nss-tools` on Fedora) and reopen the browser, or trust the CA by hand in that same window: open `about:preferences#privacy`, click **View Certificates**, go to **Authorities**, then **Import** the file `gori ca` prints.
+
 ### Option B: Point any client yourself
 
 Print the CA path and import that file into your system or browser trust store as a **trusted root CA**:
