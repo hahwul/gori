@@ -3,18 +3,33 @@ require "./theme"
 require "./frame"
 require "./text_field"
 require "../oast"
+require "../oast/provider_config"
 
 module Gori::Tui
   # Popup form for adding or editing ONE OAST provider — same interaction model as
-  # ScopeRuleOverlay:
-  #   ↑/↓  field (name → type → host → token → Save)
-  #   ←/→  cycle the provider type when that row is selected
+  # CustomRuleOverlay (which has the same global/project scope row):
+  #   ↑/↓  field (name → scope → type → host → token → Save)
+  #   ←/→  cycle the scope / provider type when that row is selected
   #   type into name/host/token when focused; ↵ on Save (or a text row) commits
   #   esc cancels
+  # The runner validates + persists on :commit (global → settings.json, project → project DB).
   class OastProviderOverlay
-    KINDS = Gori::Oast::ProviderKind.values
+    ROW_NAME  = 0
+    ROW_SCOPE = 1
+    ROW_TYPE  = 2
+    ROW_HOST  = 3
+    ROW_TOKEN = 4
+    ROW_SAVE  = 5
+    ROW_COUNT = 6
 
-    getter edit_id : Int64?
+    SCOPES = %w[project global]
+    KINDS  = Gori::Oast::ProviderKind.values
+
+    getter edit_id : String?
+    getter edit_scope : String?
+
+    @scope_i : Int32
+    @kind_idx : Int32
 
     # Default (public-preset) host per provider type, so cycling the type in an ADD form
     # prefills a working endpoint (the "quick add" convenience without a separate picker).
@@ -24,28 +39,41 @@ module Gori::Tui
       h
     end
 
-    def initialize(*, name : String = "", kind : Gori::Oast::ProviderKind = Gori::Oast::ProviderKind::Interactsh,
-                   host : String = "", token : String = "", @edit_id : Int64? = nil)
+    def initialize(*, name : String = "", scope : String = "project",
+                   kind : Gori::Oast::ProviderKind = Gori::Oast::ProviderKind::Interactsh,
+                   host : String = "", token : String = "",
+                   @edit_id : String? = nil, @edit_scope : String? = nil)
       @name = TextField.new(name)
+      @scope_i = idx(SCOPES, scope)
       @kind_idx = KINDS.index(kind) || 0
       # Adding with no host → prefill the type's default preset host.
       host = DEFAULT_HOSTS[kind]? || "" if host.empty? && @edit_id.nil?
       @host = TextField.new(host)
       @token = TextField.new(token)
       @host_dirty = !@edit_id.nil? # editing keeps its host; adding auto-syncs to the type default
-      @sel = 0                     # 0 name · 1 type · 2 host · 3 token · 4 save
+      @sel = 0                      # ROW_NAME · ROW_SCOPE · ROW_TYPE · ROW_HOST · ROW_TOKEN · ROW_SAVE
     end
 
     def self.adding : OastProviderOverlay
       new
     end
 
-    def self.editing(id : Int64, name : String, kind : Gori::Oast::ProviderKind, host : String, token : String) : OastProviderOverlay
-      new(name: name, kind: kind, host: host, token: token, edit_id: id)
+    def self.editing(config : Gori::Oast::ProviderConfig) : OastProviderOverlay
+      kind = Gori::Oast::ProviderKind.parse?(config.kind) || Gori::Oast::ProviderKind::Interactsh
+      new(name: config.name, scope: config.scope, kind: kind, host: config.host, token: config.token || "",
+        edit_id: config.id, edit_scope: config.scope)
+    end
+
+    private def idx(list : Array(String), v : String) : Int32
+      list.index(v) || 0
     end
 
     def provider_name : String
       @name.value.strip
+    end
+
+    def scope : String
+      SCOPES[@scope_i]
     end
 
     def kind : Gori::Oast::ProviderKind
@@ -70,11 +98,11 @@ module Gori::Tui
     end
 
     private def row_count : Int32
-      5
+      ROW_COUNT
     end
 
     def on_save_row? : Bool
-      @sel == 4
+      @sel == ROW_SAVE
     end
 
     def move(d : Int32) : Nil
@@ -85,11 +113,19 @@ module Gori::Tui
       @sel = idx.clamp(0, row_count - 1)
     end
 
+    private def cycler_row?(row : Int32) : Bool
+      row == ROW_SCOPE || row == ROW_TYPE
+    end
+
     def adjust(d : Int32) : Nil
-      return unless @sel == 1
-      @kind_idx = (@kind_idx + d) % KINDS.size
-      # Keep the host synced to the type's preset until the user edits it themselves.
-      @host = TextField.new(DEFAULT_HOSTS[kind]? || "") unless @host_dirty
+      case @sel
+      when ROW_SCOPE
+        @scope_i = (@scope_i + d) % SCOPES.size
+      when ROW_TYPE
+        @kind_idx = (@kind_idx + d) % KINDS.size
+        # Keep the host synced to the type's preset until the user edits it themselves.
+        @host = TextField.new(DEFAULT_HOSTS[kind]? || "") unless @host_dirty
+      end
     end
 
     # :stay | :commit | :cancel
@@ -104,23 +140,20 @@ module Gori::Tui
         return :stay
       end
 
-      case @sel
-      when 1 # type cycler
-        if key.left?
-          adjust(-1)
-        elsif key.right?
-          adjust(1)
-        elsif key.enter? || key.space?
-          move(1)
+      if cycler_row?(@sel)
+        case
+        when key.left?              then adjust(-1)
+        when key.right?             then adjust(1)
+        when key.enter?, key.space? then move(1)
         end
         :stay
-      when 4 # save row
+      elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else # name / host / token text fields
         if key.enter?
           move(1) # ↵ advances to the next field; only the Save row commits
         else
-          @host_dirty = true if @sel == 2 # user edited host → stop auto-syncing to the type
+          @host_dirty = true if @sel == ROW_HOST # user edited host → stop auto-syncing to the type
           active_field.handle_edit_key(ev)
         end
         :stay
@@ -129,22 +162,22 @@ module Gori::Tui
 
     private def active_field : TextField
       case @sel
-      when 0 then @name
-      when 2 then @host
-      else        @token
+      when ROW_NAME then @name
+      when ROW_HOST then @host
+      else               @token
       end
     end
 
     def set_preedit(text : String) : Nil
       case @sel
-      when 0, 2, 3 then active_field.set_preedit(text)
+      when ROW_NAME, ROW_HOST, ROW_TOKEN then active_field.set_preedit(text)
       end
     end
 
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 56}.min
-      h = {area.h - 2, 12}.min # title + 5 rows + padding
-      return nil if w < 30 || h < 9
+      h = {area.h - 2, ROW_COUNT + 6}.min # title + rows + padding
+      return nil if w < 30 || h < 10
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
@@ -164,7 +197,7 @@ module Gori::Tui
       end
       hint_y = box.bottom - 1
       if hint_y > first
-        screen.text(box.x + 2, hint_y, "↑/↓ field · ←/› type · ↵ save · esc cancel",
+        screen.text(box.x + 2, hint_y, "↑/↓ field · ←/› options · ↵ save · esc cancel",
           Theme.muted, Theme.panel, width: box.w - 4)
       end
     end
@@ -177,18 +210,25 @@ module Gori::Tui
       x = box.x + 3
       fg = sel ? Theme.text_bright : Theme.text
       case i
-      when 0 then draw_field(screen, box, py, "name:", @name, sel, bg, fg)
-      when 1
-        screen.text(x, py, "type:", Theme.muted, bg)
-        col = sel ? Theme.text_bright : Theme.accent
-        tx = screen.text(x + 6, py, kind.label, col, bg, Attribute::Bold)
-        screen.text(tx, py, "  ‹/›", Theme.muted, bg)
-      when 2 then draw_field(screen, box, py, "host:", @host, sel, bg, fg)
-      when 3 then draw_field(screen, box, py, "token:", @token, sel, bg, fg)
+      when ROW_NAME then draw_field(screen, box, py, "name:", @name, sel, bg, fg)
+      when ROW_SCOPE
+        draw_cycle(screen, x, py, bg, sel, "scope:", SCOPES, @scope_i)
+      when ROW_TYPE
+        draw_cycle(screen, x, py, bg, sel, "type:", KINDS.map(&.label), @kind_idx)
+      when ROW_HOST  then draw_field(screen, box, py, "host:", @host, sel, bg, fg)
+      when ROW_TOKEN then draw_field(screen, box, py, "token:", @token, sel, bg, fg)
       else
         label = valid? ? "[ Save provider ]" : "[ name + host required ]"
         screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       end
+    end
+
+    private def draw_cycle(screen : Screen, x : Int32, py : Int32, bg : Color, row_sel : Bool,
+                           label : String, opts : Array(String), sel_i : Int32) : Nil
+      screen.text(x, py, label, Theme.muted, bg)
+      col = row_sel ? Theme.text_bright : Theme.accent
+      tx = screen.text(x + label.size + 1, py, opts[sel_i], col, bg, Attribute::Bold)
+      screen.text(tx, py, "  ‹/›", Theme.muted, bg)
     end
 
     private def draw_field(screen : Screen, box : Rect, py : Int32, label : String,

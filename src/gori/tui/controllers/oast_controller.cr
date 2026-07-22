@@ -6,7 +6,10 @@ require "../highlight"
 require "../clipboard"
 require "../text_field"
 require "../../store"
+require "../../settings"
 require "../../oast"
+require "../../oast/provider_config"
+require "../oast_provider_overlay"
 
 module Gori::Tui
   # The OAST tab: register out-of-band payload URLs and watch the DNS/HTTP/SMTP callbacks
@@ -22,15 +25,17 @@ module Gori::Tui
     POLL_INTERVAL = 5.seconds
 
     # A live listening session: the engine Session + its provider + poll fiber.
+    # `provider_key` is the scope-qualified Oast::ProviderConfig#key (stable across both
+    # scopes; a global provider has no project-DB row id to key off).
     class Listener
       getter session : Oast::Session
       getter provider : Oast::Provider
-      getter provider_id : Int64?
+      getter provider_key : String
       getter provider_label : String
       property poller : Oast::Poller?
       property job_id : Int32 = 0
 
-      def initialize(@session, @provider, @provider_id, @provider_label)
+      def initialize(@session, @provider, @provider_key, @provider_label)
       end
 
       def active? : Bool
@@ -44,15 +49,18 @@ module Gori::Tui
       raw_request : String, raw_response : String?
 
     # register() outcomes carried back to the main fiber (register is a network call run off
-    # the main fiber; persistence + poller start happen here on drain).
-    record RegOk, session : Oast::Session, provider : Oast::Provider, provider_id : Int64?,
-      provider_label : String, want_payload : Bool
-    record RegErr, message : String, provider_label : String, provider_id : Int64?
+    # the main fiber; persistence + poller start happen here on drain). `db_provider_id` is
+    # the project-DB row id to persist on the session (nil for a global-scope provider — it
+    # has no row in this project's DB; the session just won't re-resolve to a provider NAME
+    # after restart, falling back to the kind label like an already-deleted provider does).
+    record RegOk, session : Oast::Session, provider : Oast::Provider, provider_key : String,
+      db_provider_id : Int64?, provider_label : String, want_payload : Bool
+    record RegErr, message : String, provider_label : String, provider_key : String
     alias RegResult = RegOk | RegErr
 
     def initialize(host : Host)
       super(host)
-      @providers = [] of Store::OastProviderRecord
+      @providers = [] of Oast::ProviderConfig
       @listeners = [] of Listener
       @callbacks = [] of CbRow
       @seen = Hash(Int64, Set(String)).new       # session_id → seen provider_uids (dedup)
@@ -70,7 +78,7 @@ module Gori::Tui
       @last_payload = nil.as(String?)
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
-      @registering = Set(Int64).new # provider ids with a register round-trip in flight (dedup g/^R)
+      @registering = Set(String).new # provider keys with a register round-trip in flight (dedup g/^R)
       @max_cb_id = 0_i64            # highest callback row id folded in (watermark for reconcile)
       @cb_version = 0               # bumped on any @callbacks mutation → invalidates the view caches
       @ordered_cache = nil.as(Array(CbRow)?)
@@ -152,7 +160,7 @@ module Gori::Tui
     # Also reflects any peer-process deletions. Live/soft-sync updates go through reconcile.
     def reload : Nil
       store = @host.session.store
-      @providers = store.oast_providers
+      @providers = Oast.provider_configs(store)
       @callbacks.clear
       @seen.clear
       @session_label.clear
@@ -172,7 +180,7 @@ module Gori::Tui
     # must stay incremental; the full-table reload lives in reload (init + on_enter).
     def reconcile : Nil
       store = @host.session.store
-      @providers = store.oast_providers
+      @providers = Oast.provider_configs(store)
       store.oast_sessions.each do |s|
         @session_label[s.id] = provider_label_for(s)
         @seen[s.id] ||= Set(String).new
@@ -201,7 +209,7 @@ module Gori::Tui
     end
 
     private def provider_label_for(s : Store::OastSessionRecord) : String
-      if (pid = s.provider_id) && (p = @providers.find { |pr| pr.id == pid })
+      if (pid = s.provider_id) && (p = @providers.find { |pr| pr.project_id == pid })
         p.name
       else
         Oast::ProviderKind.parse?(s.kind).try(&.label) || s.kind
@@ -215,11 +223,11 @@ module Gori::Tui
     end
 
     # --- enabled providers (payload bar picks among these) ---
-    private def enabled_providers : Array(Store::OastProviderRecord)
-      @providers.select(&.enabled?)
+    private def enabled_providers : Array(Oast::ProviderConfig)
+      @providers.select(&.enabled)
     end
 
-    private def picked_provider : Store::OastProviderRecord?
+    private def picked_provider : Oast::ProviderConfig?
       ep = enabled_providers
       return nil if ep.empty? || @payload_pick == 0
       ep[(@payload_pick - 1).clamp(0, ep.size - 1)]?
@@ -237,7 +245,7 @@ module Gori::Tui
       end
       prov = picked_provider
       return @host.status("no enabled provider — add one in the Providers tab") unless prov
-      if listener = listener_for(prov.id)
+      if listener = listener_for(prov.key)
         url = listener.provider.generate_payload(listener.session)
         deliver_payload(url)
       else
@@ -260,7 +268,7 @@ module Gori::Tui
       end
       prov = picked_provider
       return @host.status("no enabled provider to listen with") unless prov
-      if listener_for(prov.id)
+      if listener_for(prov.key)
         @host.status("already listening with #{prov.name}")
       else
         start_listening(prov, want_payload: false)
@@ -273,40 +281,41 @@ module Gori::Tui
       end
       prov = picked_provider
       return @host.status("no provider selected") unless prov
-      listener = listener_for(prov.id)
+      listener = listener_for(prov.key)
       return @host.status("not listening with #{prov.name}") unless listener
       stop_listener(listener)
       @host.status("stopped listening with #{prov.name}")
     end
 
-    private def start_listening(prov : Store::OastProviderRecord, want_payload : Bool) : Nil
+    private def start_listening(prov : Oast::ProviderConfig, want_payload : Bool) : Nil
       # A register round-trip takes a few seconds and only appends the Listener on the
       # drain tick AFTER it returns, so listener_for is nil the whole time. Without an
       # in-flight guard a second g/^R spawns a duplicate register → two sessions, two
-      # Listeners and two poller fibers for one provider. Dedup on the provider id.
-      pid = prov.id
-      return @host.status("already registering with #{prov.name}…") if pid && @registering.includes?(pid)
+      # Listeners and two poller fibers for one provider. Dedup on the provider key.
+      key = prov.key
+      return @host.status("already registering with #{prov.name}…") if @registering.includes?(key)
       kind = Oast::ProviderKind.parse?(prov.kind)
       return @host.status("unknown provider type #{prov.kind}") unless kind
       provider = Oast::Provider.build(kind, prov.host, prov.token)
       http = Oast::HttpClient.new(verify_tls: !@host.session.config.insecure_upstream?)
       reg = @reg_events
       label = prov.name
-      @registering << pid if pid
+      db_id = prov.project_id
+      @registering << key
       spawn(name: "gori-oast-register") do
         begin
           session = provider.register(http)
-          reg.send(RegOk.new(session, provider, pid, label, want_payload))
+          reg.send(RegOk.new(session, provider, key, db_id, label, want_payload))
         rescue ex
-          reg.send(RegErr.new(ex.message || "register failed", label, pid))
+          reg.send(RegErr.new(ex.message || "register failed", label, key))
         end
       end
       @host.status("registering with #{label}…")
     end
 
-    private def listener_for(provider_id : Int64?) : Listener?
-      return nil unless provider_id
-      @listeners.find { |l| l.provider_id == provider_id && l.active? }
+    private def listener_for(provider_key : String?) : Listener?
+      return nil unless provider_key
+      @listeners.find { |l| l.provider_key == provider_key && l.active? }
     end
 
     private def stop_listener(listener : Listener) : Nil
@@ -345,17 +354,18 @@ module Gori::Tui
     # =========================================================================
 
     def open_add_provider : Nil
-      @host.open_oast_provider_editor(nil, "", "interactsh", "", "")
+      @host.open_oast_provider_editor(nil)
     end
 
     def open_edit_provider : Nil
       return @host.status("no provider selected") unless p = selected_provider
-      @host.open_oast_provider_editor(p.id, p.name, p.kind, p.host, p.token || "")
+      @host.open_oast_provider_editor(p)
     end
 
     def toggle_provider : Nil
       return unless p = selected_provider
-      @host.session.store.set_oast_provider_enabled(p.id, !p.enabled?)
+      on = !p.enabled
+      p.global? ? Settings.set_oast_provider_enabled(p.id, on) : @host.session.store.set_oast_provider_enabled(p.project_id.not_nil!, on)
       reload
     end
 
@@ -363,27 +373,59 @@ module Gori::Tui
       return unless p = selected_provider
       @host.confirm("DELETE PROVIDER", "Delete OAST provider \"#{p.name}\"?\nIts callback history is kept.",
         confirm_label: "delete", danger: true) do
-        if l = @listeners.find { |ls| ls.provider_id == p.id }
+        if l = @listeners.find { |ls| ls.provider_key == p.key }
           stop_listener(l)
         end
-        @host.session.store.delete_oast_provider(p.id)
+        p.global? ? Settings.delete_oast_provider(p.id) : @host.session.store.delete_oast_provider(p.project_id.not_nil!)
         reload
       end
     end
 
-    # Called back by the runner when the provider overlay commits.
-    def save_provider(edit_id : Int64?, name : String, kind : Oast::ProviderKind, host : String, token : String?) : Nil
+    # Called back by the runner when the provider overlay commits. Returns false (keep the
+    # form open) when invalid. A scope change on edit moves the provider between the global
+    # library and the project DB (mirrors ProbeController#apply_custom_rule) — its prior
+    # enabled state is carried over (not reset to on), and any listener still keyed to the
+    # OLD scope/id is stopped first (mirrors delete_provider), since the move mints a fresh
+    # key that nothing could ever reach it under again otherwise.
+    def save_provider(ov : OastProviderOverlay) : Bool
+      return false unless ov.valid?
       store = @host.session.store
-      if id = edit_id
-        store.update_oast_provider(id, name, kind.label, host, token, true)
+      if id = ov.edit_id
+        old = @providers.find { |p| p.scope == ov.edit_scope && p.id == id }
+        prev_enabled = old.try(&.enabled)
+        prev_enabled = true if prev_enabled.nil?
+        if ov.scope == ov.edit_scope
+          if ov.scope == "global"
+            Settings.update_oast_provider(id, ov.provider_name, ov.kind.label, ov.host, ov.token)
+          else
+            store.update_oast_provider(id.to_i64, ov.provider_name, ov.kind.label, ov.host, ov.token, prev_enabled)
+          end
+        else
+          if old && (l = @listeners.find { |ls| ls.provider_key == old.key })
+            stop_listener(l)
+          end
+          ov.edit_scope == "global" ? Settings.delete_oast_provider(id) : store.delete_oast_provider(id.to_i64)
+          insert_provider(store, ov, prev_enabled)
+        end
+        @host.status("updated provider #{ov.provider_name}")
       else
-        store.insert_oast_provider(name, kind.label, host, token, true, @providers.size)
+        insert_provider(store, ov, true)
+        @host.status("added provider #{ov.provider_name}")
       end
       reload
-      @host.status("saved provider #{name}")
+      true
     end
 
-    private def selected_provider : Store::OastProviderRecord?
+    private def insert_provider(store : Store, ov : OastProviderOverlay, enabled : Bool) : Nil
+      if ov.scope == "global"
+        Settings.add_oast_provider(ov.provider_name, ov.kind.label, ov.host, ov.token, enabled)
+      else
+        project_count = @providers.count { |p| !p.global? }
+        store.insert_oast_provider(ov.provider_name, ov.kind.label, ov.host, ov.token, enabled, project_count)
+      end
+    end
+
+    private def selected_provider : Oast::ProviderConfig?
       @providers[@prov_sel]?
     end
 
@@ -458,7 +500,7 @@ module Gori::Tui
         @listeners.any?(&.active?) ? "  ●listening" : ""
       else
         prov = ep[@payload_pick - 1]?
-        prov && listener_for(prov.id) ? "  ●listening" : ""
+        prov && listener_for(prov.key) ? "  ●listening" : ""
       end
       x = screen.text(x, rect.y, name, Theme.accent, Theme.panel)
       screen.text(x, rect.y, listening, Theme.green, Theme.panel) unless listening.empty?
@@ -546,8 +588,9 @@ module Gori::Tui
         return
       end
       screen.text(inner.x + 2, inner.y, "NAME", Theme.muted, Theme.bg)
-      screen.text(inner.x + 24, inner.y, "TYPE", Theme.muted, Theme.bg)
-      screen.text(inner.x + 38, inner.y, "HOST", Theme.muted, Theme.bg)
+      screen.text(inner.x + 19, inner.y, "SCOPE", Theme.muted, Theme.bg)
+      screen.text(inner.x + 27, inner.y, "TYPE", Theme.muted, Theme.bg)
+      screen.text(inner.x + 41, inner.y, "HOST", Theme.muted, Theme.bg)
       screen.text(inner.right - 8, inner.y, "ENABLED", Theme.muted, Theme.bg)
       rows = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       return if rows.h <= 0 # collapsed pane (tiny terminal): a negative slice count would raise
@@ -559,14 +602,15 @@ module Gori::Tui
         bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         screen.fill(Rect.new(rows.x, py, rows.w, 1), bg)
         screen.cell(rows.x, py, sel ? '▎' : ' ', Theme.accent, bg)
-        screen.text(rows.x + 2, py, p.name, sel ? Theme.text_bright : Theme.text, bg, width: 21)
+        screen.text(rows.x + 2, py, p.name, sel ? Theme.text_bright : Theme.text, bg, width: 16)
+        screen.text(rows.x + 19, py, p.global? ? "GLOBAL" : "PROJECT", p.global? ? Theme.yellow : Theme.muted, bg, width: 7)
         kind_label = Oast::ProviderKind.parse?(p.kind).try(&.label) || p.kind
-        screen.text(rows.x + 24, py, kind_label, Theme.accent, bg, width: 13)
-        hw = {rows.right - 10 - (rows.x + 38), 6}.max
-        screen.text(rows.x + 38, py, p.host, Theme.text, bg, width: hw)
-        listening = @listeners.any? { |l| l.provider_id == p.id && l.active? }
-        badge = p.enabled? ? (listening ? "● live" : "on") : "off"
-        screen.text(rows.right - 8, py, badge, p.enabled? ? Theme.green : Theme.muted, bg)
+        screen.text(rows.x + 27, py, kind_label, Theme.accent, bg, width: 13)
+        hw = {rows.right - 10 - (rows.x + 41), 6}.max
+        screen.text(rows.x + 41, py, p.host, Theme.text, bg, width: hw)
+        listening = @listeners.any? { |l| l.provider_key == p.key && l.active? }
+        badge = p.enabled ? (listening ? "● live" : "on") : "off"
+        screen.text(rows.right - 8, py, badge, p.enabled ? Theme.green : Theme.muted, bg)
       end
     end
 
@@ -929,18 +973,27 @@ module Gori::Tui
     end
 
     private def apply_registration(reg : RegResult) : Nil
-      if pid = reg.provider_id
-        @registering.delete(pid) # registration resolved (ok or err) — clear the in-flight guard
-      end
+      @registering.delete(reg.provider_key) # registration resolved (ok or err) — clear the in-flight guard
       case reg
       when RegErr
         @host.status("OAST register failed (#{reg.provider_label}): #{reg.message}")
       when RegOk
+        unless @providers.any? { |p| p.key == reg.provider_key }
+          # The provider was deleted or scope-migrated while register() was in flight — its
+          # key no longer resolves to anything in @providers, so a Listener built from it
+          # could never be found/stopped again. Deregister best-effort and drop the result
+          # instead of leaking an unreachable poller (mirrors stop_listener's deregister).
+          http = poll_http
+          provider = reg.provider
+          session = reg.session
+          spawn(name: "gori-oast-deregister") { provider.deregister(http, session) rescue nil }
+          return @host.status("OAST register for #{reg.provider_label} finished after its provider was removed — discarded")
+        end
         store = @host.session.store
-        id = store.insert_oast_session(reg.provider_id, reg.session.kind.label, reg.session.server_url,
+        id = store.insert_oast_session(reg.db_provider_id, reg.session.kind.label, reg.session.server_url,
           reg.session.correlation_id, reg.session.secret, reg.session.private_key_pem, reg.session.token)
         reg.session.id = id
-        listener = Listener.new(reg.session, reg.provider, reg.provider_id, reg.provider_label)
+        listener = Listener.new(reg.session, reg.provider, reg.provider_key, reg.provider_label)
         listener.job_id = @host.jobs.start(:oast, "OAST #{reg.provider_label}", goto: Jobs::Goto.new(:oast))
         poller = Oast::Poller.new(reg.provider, reg.session, poll_http, POLL_INTERVAL, @oast_events)
         listener.poller = poller
