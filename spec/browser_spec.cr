@@ -99,6 +99,12 @@ describe Gori::Browser do
     end
   end
 
+  describe ".certutil_available?" do
+    it "matches whether certutil resolves on PATH (env-dependent)" do
+      Gori::Browser.certutil_available?.should eq(!Process.find_executable("certutil").nil?)
+    end
+  end
+
   describe ".detect" do
     it "only returns browsers of a known kind (env-dependent, may be empty)" do
       Gori::Browser.detect.each do |f|

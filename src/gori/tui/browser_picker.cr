@@ -11,7 +11,9 @@ module Gori::Tui
   class BrowserPicker
     getter selected : Int32
 
-    def initialize(@browsers : Array(Browser::Found))
+    # `certutil_available` is resolved once by the caller (Runner) rather than probed
+    # here on every render — detection belongs to the Runner, per this class's doc.
+    def initialize(@browsers : Array(Browser::Found), @certutil_available : Bool = true)
       @selected = 0
       @scroll = 0
     end
@@ -86,7 +88,12 @@ module Gori::Tui
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
         screen.text(box.x + 3, ry, b.name, active ? Theme.text_bright : Theme.text, bg, width: w - 16)
         kind = b.kind.to_s.downcase
-        screen.text(box.right - kind.size - 2, ry, kind, Theme.muted, bg)
+        if b.kind.firefox? && !@certutil_available
+          kind = "#{kind} ⚠"
+          screen.text(box.right - Screen.display_width(kind) - 2, ry, kind, Theme.yellow, bg)
+        else
+          screen.text(box.right - kind.size - 2, ry, kind, Theme.muted, bg)
+        end
       end
     end
   end

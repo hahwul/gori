@@ -32,4 +32,21 @@ describe Gori::Tui::BrowserPicker do
     backend.contains?("Google Chrome").should be_true
     backend.contains?("Firefox").should be_true
   end
+
+  # Firefox trusts the CA via a `certutil` NSS import (see Browser.setup_firefox_profile);
+  # without it the profile only gets proxy prefs and HTTPS shows cert errors. Warn on the
+  # row BEFORE launch — the post-launch toast is easy to miss once focus jumps to the
+  # freshly opened browser window (see issue #311).
+  it "warns on the Firefox row when certutil is unavailable" do
+    backend = MemoryBackend.new(80, 14)
+    BrowserPicker.new(BROWSERS, false).render(Screen.new(backend), Rect.new(0, 0, 80, 14))
+    backend.contains?("firefox ⚠").should be_true
+  end
+
+  it "doesn't warn when certutil is available" do
+    backend = MemoryBackend.new(80, 14)
+    BrowserPicker.new(BROWSERS, true).render(Screen.new(backend), Rect.new(0, 0, 80, 14))
+    backend.contains?("firefox ⚠").should be_false
+    backend.contains?("firefox").should be_true
+  end
 end

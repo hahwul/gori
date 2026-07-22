@@ -5213,7 +5213,7 @@ module Gori::Tui
         @toast = "no supported browser found (Chrome/Chromium/Brave/Edge/Vivaldi/Firefox)"
         return
       end
-      @browser_picker = BrowserPicker.new(found)
+      @browser_picker = BrowserPicker.new(found, Browser.certutil_available?)
       @overlay = :browser
     end
 

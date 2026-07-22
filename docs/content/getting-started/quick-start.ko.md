@@ -42,6 +42,8 @@ TUI 안에서:
 
 gori는 이미 CA를 신뢰하고 HTTP/HTTPS를 프록시로 경유하는 일회용 프로파일로 브라우저를 실행합니다. 그 브라우저에서 사이트를 방문하세요(`https://example.com`을 먼저, 그다음 테스트 중인 사이트를).
 
+> **Firefox 참고.** CA 자동 신뢰에는 `PATH`에 있는 `certutil`(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(`brew install nss` macOS, `apt install libnss3-tools` Debian/Ubuntu, `dnf install nss-tools` Fedora) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요: `about:preferences#privacy`를 열고 **인증서 보기**, **인증기관** 탭으로 가서 `gori ca`가 출력한 파일을 **가져오기** 하면 됩니다.
+
 ### Option B: 클라이언트를 직접 지정하기 {#option-b-point-any-client-yourself}
 
 CA 경로를 출력하고 그 파일을 시스템 또는 브라우저 신뢰 저장소에 **신뢰된 루트 CA**로 가져오세요:
