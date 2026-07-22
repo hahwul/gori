@@ -122,6 +122,44 @@ describe Gori::Sequencer::Stats do
     seq_detail(["1", "5", "3"]).should eq("non-monotonic")
   end
 
+  # ── detect_sequential: order-independent (concurrency-reordering) detection ─────
+
+  it "detects a shuffled-order sequential counter once the sample is large enough" do
+    # sequence_start allows concurrency up to 20 — same-cause responses routinely
+    # complete out of issuance order, so a real incrementing counter can be COLLECTED
+    # in shuffled order. Regression for a bug where this made "Sequential" report
+    # "non-monotonic"/PASS on a token set that was, in fact, a step-1 counter.
+    ordered = (100000..100199).map(&.to_s)
+    shuffled = ordered.shuffle(Random.new(42_u64))
+    report = S.analyze(shuffled)
+    report.sequential.should be_true
+    seq_detail(shuffled).should eq("constant step 1 (sorted — arrival order was shuffled)")
+  end
+
+  it "does not flag a shuffled sample of genuinely random numeric tokens as sequential" do
+    rng = Random.new(99_u64)
+    random_ints = Array.new(200) { rng.rand(1_000_000).to_s }
+    S.analyze(random_ints).sequential.should be_false
+  end
+
+  it "does not claim shuffling for a large sample that truly arrived in ascending order" do
+    # Regression: the sorted-order check must only run once the arrival-order (inc/dec)
+    # check has already failed, or it falsely claims "arrival order was shuffled" for a
+    # counter that was, in fact, observed directly in sequence (n=200 >= SMALL_SAMPLE).
+    ordered = (100000..100199).map(&.to_s)
+    seq_detail(ordered).should eq("constant step 1")
+  end
+
+  it "keeps the correct (negative) step and label for a large descending run, unshuffled" do
+    # Regression: sorting-first would flip a genuine descending run's reported sign
+    # (ascending "constant step 1" instead of "constant step -1") and falsely claim
+    # shuffling. The arrival-order check must win here since dec is true.
+    descending = (100000..100199).to_a.reverse.map(&.to_s)
+    report = S.analyze(descending)
+    report.sequential.should be_true
+    seq_detail(descending).should eq("constant step -1")
+  end
+
   # ── detect_sequential: 18-digit boundary guard against Int64 overflow ────────────
 
   it "keeps exactly-18-digit tokens on the numeric fast path" do

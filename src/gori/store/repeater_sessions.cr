@@ -9,13 +9,30 @@ module Gori
     # / reconcile must soft-sync and skip unchanged rows, not assume "own writes are
     # invisible". Callers that full-restore on every poll self-clobber.
 
+    # `repeaters.request` is declared TEXT (schema.cr) but every CURRENT insert/update
+    # binds it as `Bytes`, which SQLite stores as BLOB regardless of the column's
+    # declared affinity — see the V2 migration's `CAST(request AS BLOB)` comment for the
+    # history (an older gori bound it as a Crystal `String`, producing TEXT-storage-class
+    # rows that silently truncated at an embedded NUL on read). That migration fixed data
+    # existing at upgrade time, but it can't protect a row written LATER by a mismatched
+    # writer — e.g. a `gori mcp`/TUI process still running an out-of-date binary against
+    # an already-migrated project db, which is exactly how gori is meant to be run
+    # long-lived alongside a dev rebuild. Every read below casts defensively so a
+    # TEXT-storage-class value coerces to Bytes instead of `rs.read(Bytes)` raising an
+    # unhandled DB::ColumnTypeMismatchError — which, left unhandled, doesn't just fail
+    # that one row: `repeaters`/`repeaters_meta`/`repeaters_mcp` read ALL rows in a single
+    # query, so one bad row crashed the entire CLI/TUI/MCP process and blocked every
+    # Repeater operation for the project. CAST is a documented no-op on an
+    # already-BLOB-storage value, so this never changes behavior for the common case.
+    REQUEST_COL = "CAST(request AS BLOB) AS request"
+
     # Full repeater rows INCLUDING the persisted response BLOBs. Used once at project
     # open to seed each tab's last response (V11). NOT for the recurring reconcile
     # poll — use `repeaters_meta` there to avoid re-materializing every tab's
     # (potentially multi-MB) response on each cross-session commit.
     def repeaters : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
@@ -32,7 +49,7 @@ module Gori
     # response (responses are personal per session). Response fields stay nil.
     def get_repeater(id : Int64) : RepeaterRecord?
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, name FROM repeaters WHERE id = ?",
+        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, name FROM repeaters WHERE id = ?",
         id) do |rs|
         return RepeaterRecord.new(
           rs.read(Int64), rs.read(String), rs.read(Bytes),
@@ -47,7 +64,7 @@ module Gori
     # repeater response BLOBs just to retrieve one continuation chunk.
     def get_repeater_full(id : Int64) : RepeaterRecord?
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, " \
+        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, " \
         "response_head, response_body, response_error, response_duration_us, name, sni, tags " \
         "FROM repeaters WHERE id = ?", id) do |rs|
         if rs.move_next
@@ -63,7 +80,7 @@ module Gori
 
     def repeaters_meta : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
@@ -79,7 +96,7 @@ module Gori
     def repeaters_mcp : Array(RepeaterRecord)
       list = [] of RepeaterRecord
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, " \
+        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, " \
         "name, response_head, response_error, response_duration_us FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
