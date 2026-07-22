@@ -240,8 +240,8 @@ describe "ProjectView AT A GLANCE severity" do
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: false)
 
       b.contains?("AT A GLANCE").should be_true
-      b.contains?("CRIT").should be_true # Issues Critical
-      b.contains?("LOW").should be_true  # Issues Low
+      b.contains?("CRIT").should be_true  # Issues Critical
+      b.contains?("LOW").should be_true   # Issues Low
       b.contains?("HIGH").should be_false # Probe-only High must not appear
       b.contains?("MED").should be_false  # Probe-only Medium must not appear
     end

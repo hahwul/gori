@@ -68,8 +68,8 @@ describe Gori::Jwt do
 
   describe ".attacks" do
     it "returns an empty list for a non-JWT string" do
-      Gori::Jwt.attacks("plainstring").should be_empty          # 1 segment
-      Gori::Jwt.attacks("notbase64.alsonot").should be_empty    # 2 segments, header not a JSON object
+      Gori::Jwt.attacks("plainstring").should be_empty       # 1 segment
+      Gori::Jwt.attacks("notbase64.alsonot").should be_empty # 2 segments, header not a JSON object
     end
 
     it "generates the alg:none case variants with an empty signature" do

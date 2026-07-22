@@ -82,7 +82,7 @@ describe Gori::ProjectRegistry do
       # Pin colliding ids so the prefix is deterministically shared.
       File.write(File.join(a.dir, Gori::ProjectRegistry::ID_FILE), "abcd1111")
       File.write(File.join(b.dir, Gori::ProjectRegistry::ID_FILE), "abcd2222")
-      reg.find("abcd").should be_nil                  # shared prefix → ambiguous → nil
+      reg.find("abcd").should be_nil                   # shared prefix → ambiguous → nil
       reg.find("abcd1").try(&.dir).should eq(a.dir)    # now unique
       reg.find("abcd2222").try(&.dir).should eq(b.dir) # exact id
     end

@@ -117,9 +117,9 @@ describe Gori::Sitemap do
       # arrives as invalid UTF-8, and PCRE2 RAISES on such a subject instead of returning
       # false. Unguarded, one such request crashed the whole TUI from the sitemap poll.
       # Each of these is sized to clear a different regex's length gate.
-      Gori::Sitemap.template_class(String.new(Bytes.new(10) { 0xFF_u8 })).should be_nil  # {date}
-      Gori::Sitemap.template_class(String.new(Bytes.new(36) { 0xFF_u8 })).should be_nil  # {uuid}
-      Gori::Sitemap.template_class(String.new(Bytes.new(12) { 0xFF_u8 })).should be_nil  # {hex}
+      Gori::Sitemap.template_class(String.new(Bytes.new(10) { 0xFF_u8 })).should be_nil # {date}
+      Gori::Sitemap.template_class(String.new(Bytes.new(36) { 0xFF_u8 })).should be_nil # {uuid}
+      Gori::Sitemap.template_class(String.new(Bytes.new(12) { 0xFF_u8 })).should be_nil # {hex}
       latin1 = Bytes[0x63, 0x61, 0x66, 0xE9, 0x63, 0x61, 0x66, 0xE9, 0x63, 0x61, 0x66, 0xE9]
       Gori::Sitemap.template_class(String.new(latin1)).should be_nil # "café" ×3, latin-1
     end

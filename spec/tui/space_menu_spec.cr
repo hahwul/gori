@@ -12,10 +12,10 @@ describe Gori::Tui::SpaceMenu do
     menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     menu.entries.size.should be > 0
-    menu.entries.all?(&.scope.body?).should be_true         # strictly scope-local
-    menu.entries.all?(&.menu_key).should be_true            # every shown entry has a key
+    menu.entries.all?(&.scope.body?).should be_true           # strictly scope-local
+    menu.entries.all?(&.menu_key).should be_true              # every shown entry has a key
     menu.entries.map(&.id).should contain("history.repeater") # an area action
-    menu.entries.map(&.id).should_not contain("app.quit")   # NOT the app-control (palette) surface
+    menu.entries.map(&.id).should_not contain("app.quit")     # NOT the app-control (palette) surface
   end
 
   it "resolves a mnemonic key to its verb (and nil for an unmapped key)" do
@@ -53,7 +53,7 @@ describe Gori::Tui::SpaceMenu do
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.history_detail?).should be_true # strictly scope-local
     ids = menu.entries.map(&.id)
-    ids.should contain("detail.repeater")     # flow action carried over from the list
+    ids.should contain("detail.repeater")   # flow action carried over from the list
     ids.should contain("detail.toggle-hex") # a detail-only view toggle
     ids.should contain("detail.delete")     # destructive parity with the list menu
     menu.verb_for('r').try(&.id).should eq("detail.repeater")

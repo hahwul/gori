@@ -91,7 +91,7 @@ describe Gori::Interceptor do
       Fiber.yield
       item = ic.pending.first
       ic.get(item.id).not_nil!.host.should eq("acme.test")
-      item.held_at_ms.should be > 0                       # wall-clock captured once at hold
+      item.held_at_ms.should be > 0                                  # wall-clock captured once at hold
       ic.get(item.id).not_nil!.held_at_ms.should eq(item.held_at_ms) # never re-stamped
       ic.forward(item.id)
       result.receive

@@ -80,7 +80,7 @@ module Gori::Proxy::Tls
       # UTF-8 byte would make this PCRE match raise on the proxy path. Scrubbed bytes (U+FFFD)
       # fall outside the charset → SAN skipped (the designed graceful outcome), never a raise.
       return true if (host.scrub =~ /\A[A-Za-z0-9.\-*]+\z/) != nil # hostname / IPv4 / wildcard labels
-      ipv6?(host) # IPv6 literals contain ':' (rejected by the DNS charset above)
+      ipv6?(host)                                                  # IPv6 literals contain ':' (rejected by the DNS charset above)
     end
 
     # An IP-literal CONNECT/SNI target must get an iPAddress SAN, not a dNSName:

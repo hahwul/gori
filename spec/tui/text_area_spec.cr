@@ -114,7 +114,7 @@ describe Gori::Tui::TextArea do
       # Caret column was 5 against a 4-column draw → the caret's 'X' landed one cell right
       # of the real one ("cafeXX"). cluster_row proves the acute is still on its base 'e'.
       b = render_req_tab(cafe + "X", cafe.size)
-      b.row(0).rstrip.should eq("cafeX") # @grid is Array(Char): the acute can't show here
+      b.row(0).rstrip.should eq("cafeX")            # @grid is Array(Char): the acute can't show here
       b.cluster_row(0).rstrip.should eq(cafe + "X") # every codepoint intact, none doubled
     end
 
@@ -236,7 +236,7 @@ describe Gori::Tui::TextArea do
         ta = TextArea.new(split)
         ta.place_cursor(1, 0)
         ta.backspace
-        ta.backspace  # removes the fused `é` as one cluster
+        ta.backspace              # removes the fused `é` as one cluster
         ta.text.should eq("cafx") # was "caf\u{0301}x" — the acute stranded on the `f`
       end
     end
@@ -252,7 +252,7 @@ describe Gori::Tui::TextArea do
         b = MemoryBackend.new(20, 2)
         ta.render(Screen.new(b), Rect.new(0, 0, 20, 2), cursor: true, highlight: :request)
         b.cluster_row(0).rstrip.should eq("한 글") # lead intact; " " is its continuation cell
-        b.cont_grid[0][1].should be_true          # the caret's glyph still owns column 1
+        b.cont_grid[0][1].should be_true         # the caret's glyph still owns column 1
       end
 
       it "keeps the accent background on the caret's own cell" do

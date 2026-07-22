@@ -21,10 +21,10 @@ module Gori
 
     def self.resolve(store : Store, link : Store::EntityLink) : Resolved
       case link.ref_kind
-      when .flow?   then resolve_flow(store, link)
+      when .flow?     then resolve_flow(store, link)
       when .repeater? then resolve_repeater(store, link)
-      when .fuzz?   then resolve_fuzz(store, link)
-      else               resolve_miner(store, link)
+      when .fuzz?     then resolve_fuzz(store, link)
+      else                 resolve_miner(store, link)
       end
     end
 

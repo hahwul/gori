@@ -39,10 +39,10 @@ def chunked_wire(n : Int32, chunk : Int32) : Bytes
   io.to_slice.dup
 end
 
-BODY_64K   = len_body(64 * 1024)
-BODY_1M    = len_body(1024 * 1024)
-CHUNK_64K  = chunked_wire(64 * 1024, 16 * 1024)
-CHUNK_1M   = chunked_wire(1024 * 1024, 16 * 1024)
+BODY_64K  = len_body(64 * 1024)
+BODY_1M   = len_body(1024 * 1024)
+CHUNK_64K = chunked_wire(64 * 1024, 16 * 1024)
+CHUNK_1M  = chunked_wire(1024 * 1024, 16 * 1024)
 
 # Drive one Content-Length body through Body.stream, teeing into a fresh
 # CaptureBuffer sized by `hint`, and return the captured slice (so DCE can't
@@ -74,11 +74,11 @@ end
 puts "CaptureBuffer / Body.stream isolated (ips):"
 puts "(hint) = presized to Content-Length; (nohint) = old default-growth path"
 Benchmark.ips do |x|
-  x.report("none (bodyless GET)")    { run_none }
-  x.report("length 64K (hint)")      { run_length(BODY_64K, BODY_64K.size.to_i64) }
-  x.report("length 64K (nohint)")    { run_length(BODY_64K, 0_i64) }
-  x.report("length 1M  (hint)")      { run_length(BODY_1M, BODY_1M.size.to_i64) }
-  x.report("length 1M  (nohint)")    { run_length(BODY_1M, 0_i64) }
-  x.report("chunked 64K")            { run_chunked(CHUNK_64K) }
-  x.report("chunked 1M")             { run_chunked(CHUNK_1M) }
+  x.report("none (bodyless GET)") { run_none }
+  x.report("length 64K (hint)") { run_length(BODY_64K, BODY_64K.size.to_i64) }
+  x.report("length 64K (nohint)") { run_length(BODY_64K, 0_i64) }
+  x.report("length 1M  (hint)") { run_length(BODY_1M, BODY_1M.size.to_i64) }
+  x.report("length 1M  (nohint)") { run_length(BODY_1M, 0_i64) }
+  x.report("chunked 64K") { run_chunked(CHUNK_64K) }
+  x.report("chunked 1M") { run_chunked(CHUNK_1M) }
 end

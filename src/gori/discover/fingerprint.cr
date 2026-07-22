@@ -63,7 +63,7 @@ module Gori::Discover
     end
 
     private def self.alnum?(b : UInt8) : Bool
-      (b >= 0x30_u8 && b <= 0x39_u8) || # 0-9
+      (b >= 0x30_u8 && b <= 0x39_u8) ||   # 0-9
         (b >= 0x41_u8 && b <= 0x5a_u8) || # A-Z
         (b >= 0x61_u8 && b <= 0x7a_u8)    # a-z
     end

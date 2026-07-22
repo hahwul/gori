@@ -162,6 +162,12 @@ describe Gori::Decoder do
       a.should eq(b) # same input → identical bytes (no wall-clock mtime)
       String.new(conv_bytes("gzip-decompress", a)).should eq "hello world"
     end
+
+    it "handles invalid decompression data cleanly as DecoderError" do
+      expect_raises(Gori::Decoder::DecoderError) { conv_bytes("gzip-decompress", "invalid".to_slice) }
+      expect_raises(Gori::Decoder::DecoderError) { conv_bytes("zlib-decompress", "invalid".to_slice) }
+      expect_raises(Gori::Decoder::DecoderError) { conv_bytes("raw-inflate", "invalid".to_slice) }
+    end
   end
 
   describe "number bases (byte-oriented, space-separated)" do

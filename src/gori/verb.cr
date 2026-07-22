@@ -8,33 +8,33 @@ module Gori
     # Where a verb may fire. The active surface (focused tab / open overlay)
     # selects which scope's keymap is consulted; Global verbs fire everywhere.
     enum Scope
-      Global         # fires anywhere
-      Sidebar        # the tab list has focus
-      Body           # the content pane has focus (e.g. the History list)
-      HistoryDetail  # a flow's detail view is open
-      Repeater         # the Repeater tab has focus
-      Fuzzer         # the Fuzzer tab has focus
-      Miner          # the Miner (param-mining) tab has focus
-      OastCallbacks  # the OAST tab's Callbacks sub-tab has focus
-      OastProviders  # the OAST tab's Providers sub-tab has focus
-      Sequencer      # the Sequencer (token-randomness) tab has focus
-      Sitemap        # the Sitemap sub-tab (under Target) has focus
-      Discover       # the Discover sub-tab (under Target) has focus
-      Issues       # the Issues list has focus
-      IssuesDetail # an issue's detail is open
-      Probe          # the Probe scan-issue list has focus
-      ProbeDetail    # a Probe issue's detail is open
-      ProbeRules     # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)
-      Intercept      # the Intercept queue tab has focus
-      Rewriter       # the Rewriter (Match & Replace rules) tab has focus
-      Comparer       # the Comparer tab has focus
-      Decoder        # the Decoder tab has focus
-      Jwt            # the JWT workbench tab has focus
-      Notes          # the Notes tab has focus (sub-tab strip space menu)
-      Project        # the Project tab's SCOPE rule list has focus
-      HostOverrides  # the Project tab's HOST OVERRIDES list has focus
-      Env            # the Project tab's ENVIRONMENT var list has focus
-      PaletteOpen    # the command palette overlay is up
+      Global        # fires anywhere
+      Sidebar       # the tab list has focus
+      Body          # the content pane has focus (e.g. the History list)
+      HistoryDetail # a flow's detail view is open
+      Repeater      # the Repeater tab has focus
+      Fuzzer        # the Fuzzer tab has focus
+      Miner         # the Miner (param-mining) tab has focus
+      OastCallbacks # the OAST tab's Callbacks sub-tab has focus
+      OastProviders # the OAST tab's Providers sub-tab has focus
+      Sequencer     # the Sequencer (token-randomness) tab has focus
+      Sitemap       # the Sitemap sub-tab (under Target) has focus
+      Discover      # the Discover sub-tab (under Target) has focus
+      Issues        # the Issues list has focus
+      IssuesDetail  # an issue's detail is open
+      Probe         # the Probe scan-issue list has focus
+      ProbeDetail   # a Probe issue's detail is open
+      ProbeRules    # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)
+      Intercept     # the Intercept queue tab has focus
+      Rewriter      # the Rewriter (Match & Replace rules) tab has focus
+      Comparer      # the Comparer tab has focus
+      Decoder       # the Decoder tab has focus
+      Jwt           # the JWT workbench tab has focus
+      Notes         # the Notes tab has focus (sub-tab strip space menu)
+      Project       # the Project tab's SCOPE rule list has focus
+      HostOverrides # the Project tab's HOST OVERRIDES list has focus
+      Env           # the Project tab's ENVIRONMENT var list has focus
+      PaletteOpen   # the command palette overlay is up
     end
 
     # The KIND of action, orthogonal to Scope (where it fires). Drives the

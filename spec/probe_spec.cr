@@ -1553,7 +1553,7 @@ describe "Gori::Probe::Active::NginxAliasTraversal" do
   it "dedup_key equals plan.dedup_key across eligible/ineligible flows" do
     with_store do |store|
       cases = [
-        {target: "/static/main.css", method: "GET", status: 200, ct: "text/css"},       # eligible
+        {target: "/static/main.css", method: "GET", status: 200, ct: "text/css"},        # eligible
         {target: "/static/main.css?v=1", method: "GET", status: 200, ct: "text/css"},    # query stripped in key
         {target: "/a/b/c.js", method: "GET", status: 200, ct: "application/javascript"}, # deep path
         {target: "/static/main.css", method: "GET", status: 200, ct: "text/html"},       # HTML → nil
@@ -1951,7 +1951,7 @@ describe "Gori::Probe::Passive (shared body decode)" do
         resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
         content_type: "text/html", body: String.new(gz.to_slice))
       codes_of(dets).should contain("secret_in_body") # body_text path
-      codes_of(dets).should contain("dom_xss")         # client_body_text path
+      codes_of(dets).should contain("dom_xss")        # client_body_text path
     end
   end
 end
@@ -2224,7 +2224,7 @@ describe "Gori::Probe::Active::BackslashPowered" do
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2&c=3&d=4")
       plan = probe.plan(detail).not_nil!
       plan.params.map(&.name).should eq(["a", "b", "c"])
-      plan.followups.size.should eq(6)                            # 2 per probed param
+      plan.followups.size.should eq(6)                               # 2 per probed param
       String.new(plan.request).should contain("/s?a=1&b=2&c=3&d=4 ") # every param kept in the baseline
     end
   end

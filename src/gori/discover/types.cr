@@ -28,9 +28,9 @@ module Gori
       # Lenient CLI/MCP token decode (case + separators ignored).
       def self.parse?(token : String) : Containment?
         case token.downcase.strip.gsub(/[\s_]+/, "-")
-        when "same-origin", "origin", "strict"                        then SameOrigin
+        when "same-origin", "origin", "strict"                                                 then SameOrigin
         when "host", "subdomains", "host+subdomains", "host-and-subdomains", "host-subdomains" then HostAndSubdomains
-        when "scope", "scope-aware", "scoped"                         then ScopeAware
+        when "scope", "scope-aware", "scoped"                                                  then ScopeAware
         end
       end
     end

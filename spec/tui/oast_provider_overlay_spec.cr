@@ -24,8 +24,8 @@ describe Gori::Tui::OastProviderOverlay do
     ov.scope.should eq("project")
     ov.editing?.should be_false
 
-    ov.handle_key(skey(Termisu::Input::Key::Down)).should eq(:stay) # scope row
-    ov.handle_key(skey(Termisu::Input::Key::Down)).should eq(:stay) # type row
+    ov.handle_key(skey(Termisu::Input::Key::Down)).should eq(:stay)  # scope row
+    ov.handle_key(skey(Termisu::Input::Key::Down)).should eq(:stay)  # type row
     ov.handle_key(skey(Termisu::Input::Key::Right)).should eq(:stay) # Interactsh -> CustomHttp
     ov.kind.should eq(Gori::Oast::ProviderKind::CustomHttp)
     ov.handle_key(skey(Termisu::Input::Key::Right)).should eq(:stay) # CustomHttp -> WebhookSite

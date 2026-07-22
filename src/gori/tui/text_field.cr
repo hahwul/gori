@@ -86,12 +86,12 @@ module Gori::Tui
     def handle_edit_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
-      when key.left?      then move(-1)
-      when key.right?     then move(1)
-      when key.home?      then home
-      when key.end?       then end_of_line
-      when key.backspace? then backspace
-      when key.delete?    then delete
+      when key.left?                then move(-1)
+      when key.right?               then move(1)
+      when key.home?                then home
+      when key.end?                 then end_of_line
+      when key.backspace?           then backspace
+      when key.delete?              then delete
       when ev.ctrl? && key.lower_z? then undo
       else
         ch = ev.char || key.to_char

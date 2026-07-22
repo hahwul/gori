@@ -189,9 +189,9 @@ module Gori
         # it only STRENGTHENS the differential (severity/evidence) — the rule fires on the `\` vs
         # `\\` asymmetry whether or not a signature matched (e.g. a bare 200→500 flip).
         ERROR_SIGNATURES = {
-          "SQL"    => ["you have an error in your sql syntax", "sqlstate", "unclosed quotation mark",
-                       "quoted string not properly terminated", "unterminated quoted string",
-                       "warning: mysql", "mysqli", "pg::", "psql", "ora-0", "odbc", "sqlite"],
+          "SQL" => ["you have an error in your sql syntax", "sqlstate", "unclosed quotation mark",
+                    "quoted string not properly terminated", "unterminated quoted string",
+                    "warning: mysql", "mysqli", "pg::", "psql", "ora-0", "odbc", "sqlite"],
           "syntax" => ["unterminated string", "unexpected end of", "unexpected token",
                        "syntaxerror", "parse error", "invalid escape", "eol while scanning"],
         }

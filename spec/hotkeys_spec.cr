@@ -8,7 +8,7 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.rebindable?(reg["rules.edit"]).should be_true      # keyless but assignable
       Gori::Hotkeys.rebindable?(reg["view.reveal-ws"]).should be_false # guard-shadowed (^B)
       Gori::Hotkeys.rebindable?(reg["app.palette"]).should be_false    # ^P hardcoded in controllers
-      Gori::Hotkeys.rebindable?(reg["repeater.new"]).should be_false     # ^N hardcoded in the runner
+      Gori::Hotkeys.rebindable?(reg["repeater.new"]).should be_false   # ^N hardcoded in the runner
       Gori::Hotkeys.rebindable?(reg["app.quit"]).should be_false       # deliberately keyless FIXED
       Gori::Hotkeys.rebindable?(reg["body.down"]).should be_false      # hidden nav primitive
       Gori::Hotkeys.rebindable?(reg["body.open"]).should be_false      # multi-chord nav alias
@@ -72,10 +72,10 @@ describe Gori::Hotkeys do
         Gori::Settings.keymap_overrides = {"capture.toggle" => ["escape", "nope"], "scope.edit" => [] of String}
         ov = Gori::Hotkeys.chord_overrides
         ov.has_key?("capture.toggle").should be_false # malformed → default, not installed
-        ov["scope.edit"].should be_empty               # genuine unbind kept
+        ov["scope.edit"].should be_empty              # genuine unbind kept
         km = Gori::Hotkeys.build_keymap(Gori::Verbs.registry)
         km.lookup(Gori::Verb::Chord.new("c"), Gori::Verb::Scope::Global).should eq("capture.toggle") # default intact
-        km.lookup(Gori::Verb::Chord.new("escape"), Gori::Verb::Scope::Global).should be_nil         # never bound
+        km.lookup(Gori::Verb::Chord.new("escape"), Gori::Verb::Scope::Global).should be_nil          # never bound
       ensure
         Gori::Settings.keymap_overrides = prev
       end

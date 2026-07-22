@@ -437,11 +437,21 @@ module Gori::Decoder
     end
 
     def gzip_decompress(data : Bytes) : Bytes
-      drain(Compress::Gzip::Reader.new(IO::Memory.new(data)))
+      reader = begin
+        Compress::Gzip::Reader.new(IO::Memory.new(data))
+      rescue ex
+        raise DecoderError.new("decompress failed: #{ex.message}")
+      end
+      drain(reader)
     end
 
     def zlib_decompress(data : Bytes) : Bytes
-      drain(Compress::Zlib::Reader.new(IO::Memory.new(data)))
+      reader = begin
+        Compress::Zlib::Reader.new(IO::Memory.new(data))
+      rescue ex
+        raise DecoderError.new("decompress failed: #{ex.message}")
+      end
+      drain(reader)
     end
 
     # Raw DEFLATE (RFC 1951) — no zlib/gzip wrapper. Common on the wire: many servers
@@ -454,7 +464,12 @@ module Gori::Decoder
     end
 
     def inflate_raw(data : Bytes) : Bytes
-      drain(Compress::Deflate::Reader.new(IO::Memory.new(data)))
+      reader = begin
+        Compress::Deflate::Reader.new(IO::Memory.new(data))
+      rescue ex
+        raise DecoderError.new("decompress failed: #{ex.message}")
+      end
+      drain(reader)
     end
 
     # Drain a decompression reader into memory, capped at MAX_OUT (no zip-bombs).

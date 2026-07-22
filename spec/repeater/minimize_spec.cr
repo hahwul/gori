@@ -21,7 +21,7 @@ private class FakeOrigin < F::Backend
     req = String.new(bytes)
     reqline = req.lines.first? || ""
     body = req.includes?("\r\n\r\n") ? req.split("\r\n\r\n", 2)[1] : ""
-    return resp(403, "forbidden") unless req.includes?("sid=abc123")     # session cookie
+    return resp(403, "forbidden") unless req.includes?("sid=abc123")         # session cookie
     return resp(400, "bad request") unless req.downcase.includes?("x-keep:") # required header
     # `id` (query) / `keep` (body) are the load-bearing params — checked WHERE they live so
     # the `sid=` cookie's "id=" substring can't masquerade as the query param.

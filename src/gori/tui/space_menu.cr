@@ -37,7 +37,7 @@ module Gori::Tui
     # marker column(1) + right border(1) = 6, plus room for an optional dim
     # direct-chord label (e.g. `^R`) when the verb has a rebindable binding that
     # differs from the space mnemonic.
-    CHROME = 6
+    CHROME    = 6
     CHORD_COL = 5 # reserved right gutter for e.g. `^R` / `⇧I`
 
     SECTION_LABELS = {

@@ -106,7 +106,7 @@ describe "Gori::Store repeater tabs (v9)" do
       meta = store.repeaters_meta.find!(&.id.==(id))
       meta.response_head.should be_nil # not loaded by the metadata query
       meta.response_body.should be_nil
-      meta.target.should eq("https://a.test")                          # request side intact
+      meta.target.should eq("https://a.test")                            # request side intact
       store.repeaters.find!(&.id.==(id)).response_head.should_not be_nil # full query still carries it
     end
   end

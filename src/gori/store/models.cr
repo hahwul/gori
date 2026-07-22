@@ -193,8 +193,8 @@ module Gori
       def self.parse(s : String) : LinkOwnerKind?
         case s
         when "issue" then Issue
-        when "note"    then Note
-        else                nil
+        when "note"  then Note
+        else              nil
         end
       end
     end
@@ -212,11 +212,11 @@ module Gori
 
       def self.parse(s : String) : LinkRefKind?
         case s
-        when "flow"   then Flow
+        when "flow"     then Flow
         when "repeater" then Repeater
-        when "fuzz"   then Fuzz
-        when "miner"  then Miner
-        else               nil
+        when "fuzz"     then Fuzz
+        when "miner"    then Miner
+        else                 nil
         end
       end
 
@@ -436,9 +436,9 @@ module Gori
       getter response_body : Bytes?
       getter response_error : String?
       getter response_duration_us : Int64?
-      getter name : String?         # custom sub-tab label (nil = derive from the request)
-      getter sni : String?          # custom TLS SNI host (nil = present the target host)
-      getter tags : String?         # V31: space-joined flat tags (nil = untagged)
+      getter name : String? # custom sub-tab label (nil = derive from the request)
+      getter sni : String?  # custom TLS SNI host (nil = present the target host)
+      getter tags : String? # V31: space-joined flat tags (nil = untagged)
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,

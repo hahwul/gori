@@ -332,9 +332,9 @@ module Gori::Tui
       when key.down? && @project_view.desc_at_bottom?
         save
         @project_view.focus_pane(:settings)
-      when key.down?      then @project_view.move(1, 0)
-      when key.left?      then @project_view.move(0, -1)
-      when key.right?     then @project_view.move(0, 1)
+      when key.down?  then @project_view.move(1, 0)
+      when key.left?  then @project_view.move(0, -1)
+      when key.right? then @project_view.move(0, 1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)

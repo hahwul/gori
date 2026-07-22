@@ -26,8 +26,8 @@ class SinkBackend < Backend
   end
 end
 
-W = 200
-H = 50
+W    = 200
+H    =  50
 backend = SinkBackend.new(W, H)
 screen = Screen.new(backend)
 LINE = "GET /api/v1/users/12345/profile?include=avatar HTTP/1.1  200  1.4kB  api.example.com"

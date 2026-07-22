@@ -57,11 +57,11 @@ module Gori::Repeater
     record Progress, done : Int32, total : Int32
 
     record Report,
-      minimized_text : String,   # the trimmed request (unchanged from input if nothing dropped/aborted)
-      removed : Array(Removed),  # what was stripped, in removal order
-      sends : Int32,             # total network sends (calibration + probes)
-      aborted : Bool,            # true = calibration failed, request left untouched
-      note : String              # human one-liner for the status bar / notification
+      minimized_text : String,  # the trimmed request (unchanged from input if nothing dropped/aborted)
+      removed : Array(Removed), # what was stripped, in removal order
+      sends : Int32,            # total network sends (calibration + probes)
+      aborted : Bool,           # true = calibration failed, request left untouched
+      note : String             # human one-liner for the status bar / notification
 
     # The immutable baseline a variant is judged against (a FROZEN snapshot of the original
     # response — never re-derived from an intermediate working request, so accumulating

@@ -100,7 +100,7 @@ describe "Chrome.hidden_tabs" do
     hid = Chrome.hidden_tabs(prefs).map(&.first)
     hid.includes?(:repeater).should be_true
     hid.includes?(:decoder).should be_true
-    hid.includes?(:miner).should be_true                                 # still default-hidden
+    hid.includes?(:miner).should be_true                                   # still default-hidden
     hid.index(:repeater).not_nil!.should be < hid.index(:decoder).not_nil! # catalog order
   end
 end
