@@ -258,3 +258,47 @@ describe "Gori::Scope host matching (intercept gate)" do
     end
   end
 end
+
+# ABSOLUTE-FORM targets: the wire shape a plain-HTTP forward-proxy request arrives in
+# (curl -x http://proxy http://site/path, or any client proxying a non-TLS site) — the
+# request-line target IS the full URL, not a bare path. Interceptor#sandbox_blocks?/
+# #scope_allows? must recognise that instead of re-prepending scheme://host onto it
+# (which doubles into "http://hosthttp://host/path" and breaks an anchored/exact-match
+# string or regex scope rule). Regression for the bug fixed alongside this spec.
+describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
+  it "sandbox_blocks? evaluates an anchored regex include the same for absolute- and origin-form" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "regex", "^http://acme\\.test/")
+      scope.enable
+      scope.enable_sandbox
+
+      # origin-form (HTTPS/CONNECT-style target: a bare path)
+      ic.sandbox_blocks?("http", "acme.test", "/x").should be_false
+
+      # absolute-form (plain-HTTP forward-proxy target: already the full URL)
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test/x").should be_false
+    end
+  end
+
+  it "intercepts_request? (scope_allows?) matches an absolute-form target against an anchored include" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      ic.toggle
+      scope.add("include", "regex", "^http://acme\\.test/")
+      scope.enable
+
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_true
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "http://acme.test/x", scheme: "http").should be_true
+    end
+  end
+
+  it "Scope.request_url recognises an absolute-form target regardless of scheme case" do
+    # RFC 3986 §3.1: URI schemes are case-insensitive. A case-sensitive check here would
+    # double an uppercase-scheme absolute-form target into "http://acmeHTTP://acme/x".
+    Gori::Scope.request_url("http", "acme.test", "HTTP://acme.test/x").should eq("HTTP://acme.test/x")
+    Gori::Scope.request_url("http", "acme.test", "HTTPS://acme.test/x").should eq("HTTPS://acme.test/x")
+  end
+end

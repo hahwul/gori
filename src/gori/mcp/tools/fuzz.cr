@@ -229,7 +229,7 @@ module Gori
         raise FuzzArgError.new("template has no §…§ positions (add markers, or pass auto:true with a flow_id)") if template.position_count == 0
         origin = fuzz_origin(h, default_target)
         mode = fuzz_mode(h)
-        sets = fuzz_sets(h)
+        sets = fuzz_sets(h, fuzz_processors(h))
         raise FuzzArgError.new(%(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])) if sets.empty?
         matcher = fuzz_matcher(h)
         config = fuzz_config(h, mode)
@@ -291,7 +291,7 @@ module Gori
         arr.map { |v| v.as_s? || raise FuzzArgError.new("each 'marks' entry must be a string") }
       end
 
-      private def fuzz_sets(h) : Array(Fuzz::PayloadSet)
+      private def fuzz_sets(h, processors : Array(Fuzz::Processor)) : Array(Fuzz::PayloadSet)
         raw = h["payloads"]?
         return [] of Fuzz::PayloadSet unless raw
         arr =
@@ -304,12 +304,94 @@ module Gori
           else
             raise FuzzArgError.new("'payloads' must be a JSON array of sets (not a bare string/scalar)")
           end
-        arr.map { |spec| fuzz_set_from(spec) }
+        arr.map { |spec| fuzz_set_from(spec, processors) }
       end
 
-      private def fuzz_set_from(spec : JSON::Any) : Fuzz::PayloadSet
+      private def fuzz_set_from(spec : JSON::Any, processors : Array(Fuzz::Processor)) : Fuzz::PayloadSet
         obj = spec.as_h? || raise FuzzArgError.new("each payload set must be a JSON object")
-        Fuzz::PayloadSet.new(fuzz_source_from(obj, spec))
+        Fuzz::PayloadSet.new(fuzz_source_from(obj, spec), processors)
+      end
+
+      # The processing pipeline applied to EVERY payload set (mirrors the CLI's
+      # `--prefix`/`--suffix`/`--encode`/`--case`/`--hash`/`--regex-replace`, which all
+      # feed one shared `processors` array applied to every source — see cli/run/fuzz.cr).
+      # Mirrors fuzz_marks/fuzz_sets's dual bare-array/JSON-encoded-string acceptance
+      # (LLM clients vary in whether they send a real array or a JSON string).
+      private def fuzz_processors(h) : Array(Fuzz::Processor)
+        raw = h["processors"]?
+        return [] of Fuzz::Processor unless raw
+        arr =
+          if a = raw.as_a?
+            a
+          elsif s = raw.as_s?
+            return [] of Fuzz::Processor if s.strip.empty?
+            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'processors' must be a JSON array")
+            parsed.as_a? || raise FuzzArgError.new("'processors' must be a JSON array")
+          else
+            raise FuzzArgError.new("'processors' must be a JSON array (not a bare string/scalar)")
+          end
+        arr.map { |spec| fuzz_processor_from(spec) }
+      end
+
+      private def fuzz_processor_from(spec : JSON::Any) : Fuzz::Processor
+        obj = spec.as_h? || raise FuzzArgError.new("each processor must be a JSON object")
+        case obj["type"]?.try(&.as_s?).try(&.downcase)
+        when "prefix"        then Fuzz::Prefix.new(fuzz_processor_text(obj, "text", "prefix"))
+        when "suffix"        then Fuzz::Suffix.new(fuzz_processor_text(obj, "text", "suffix"))
+        when "encode"        then Fuzz::Encode.new(fuzz_encode_kind(jstr(obj, "kind")))
+        when "case"          then Fuzz::Case.new(fuzz_case_kind(jstr(obj, "kind")))
+        when "hash"          then Fuzz::Hasher.new(fuzz_hash_algo(jstr(obj, "algo")))
+        when "regex_replace" then fuzz_regex_replace_processor(obj)
+        else                      raise FuzzArgError.new(%(unknown processor #{spec} (use prefix/suffix/encode/case/hash/regex_replace)))
+        end
+      end
+
+      private def fuzz_processor_text(obj : Hash(String, JSON::Any), key : String, type : String) : String
+        strict_jstr(obj, key) || raise FuzzArgError.new(%(processor "#{type}" needs a '#{key}' string))
+      end
+
+      private def fuzz_regex_replace_processor(obj : Hash(String, JSON::Any)) : Fuzz::RegexReplace
+        pattern = strict_jstr(obj, "pattern")
+        raise FuzzArgError.new(%(processor "regex_replace" needs a non-empty 'pattern' string)) if pattern.nil? || pattern.empty?
+        regex = Regex.new(pattern) rescue raise FuzzArgError.new("invalid processors.regex_replace pattern '#{pattern}'")
+        Fuzz::RegexReplace.new(regex, strict_jstr(obj, "replacement") || "")
+      end
+
+      # Like `jstr`, but WITHOUT its `v.to_s` fallback: a JSON null/array/object stays nil
+      # instead of stringifying into a truthy-but-garbage value (`nil.to_s` => `""`, which is
+      # truthy in Crystal and silently defeats a `jstr(...) || raise` guard; an array/object
+      # stringifies into text that can itself pass as a non-empty regex pattern). Used for
+      # values spliced directly onto the wire (`text`/`pattern`/`replacement`), where only a
+      # genuine JSON string is ever a sane input.
+      private def strict_jstr(obj : Hash(String, JSON::Any), key : String) : String?
+        obj[key]?.try(&.as_s?)
+      end
+
+      private def fuzz_encode_kind(v : String?) : Symbol
+        case v.try(&.downcase)
+        when "url"    then :url
+        when "urlall" then :url_all
+        when "base64" then :base64
+        when "hex"    then :hex
+        else               raise FuzzArgError.new(%(processor "encode" needs 'kind' url|urlall|base64|hex, got #{v.inspect}))
+        end
+      end
+
+      private def fuzz_case_kind(v : String?) : Symbol
+        case v.try(&.downcase)
+        when "upper" then :upper
+        when "lower" then :lower
+        else              raise FuzzArgError.new(%(processor "case" needs 'kind' upper|lower, got #{v.inspect}))
+        end
+      end
+
+      private def fuzz_hash_algo(v : String?) : Symbol
+        case v.try(&.downcase)
+        when "md5"    then :md5
+        when "sha1"   then :sha1
+        when "sha256" then :sha256
+        else               raise FuzzArgError.new(%(processor "hash" needs 'algo' md5|sha1|sha256, got #{v.inspect}))
+        end
       end
 
       private def fuzz_source_from(obj : Hash(String, JSON::Any), spec : JSON::Any) : Fuzz::PayloadSource

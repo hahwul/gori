@@ -30,6 +30,16 @@ module Gori
 
     EMPTY = Filter.new("1", [] of DB::Any)
 
+    # The scope/QL-matching URL for a STORED flow: `scheme://host` + `target`, UNLESS
+    # `target` is already ABSOLUTE-FORM (case-insensitive `http://`/`https://` — the wire
+    # shape a plain-HTTP forward-proxy request arrives in), in which case it already
+    # carries scheme+authority and stands in for the whole URL as-is (mirrors
+    # Store::FlowRow.absolute_form?'s Crystal-side check — kept case-insensitive in sync
+    # by hand, one's SQL, one's Crystal). Shared by the `url~` field below and Scope's
+    # string/regex rule matching (scope.cr) so both agree on every row.
+    URL_EXPR = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
+               "THEN target ELSE (scheme || '://' || host || target) END)"
+
     # What one term compiles to: a SQL fragment plus the values bound into its `?`s.
     alias SqlTerm = {String, Array(DB::Any)}
 
@@ -363,7 +373,7 @@ module Gori
         case field
         when "host"   then {"host REGEXP ?", [value] of DB::Any}
         when "path"   then {"target REGEXP ?", [value] of DB::Any}
-        when "url"    then {"(scheme || '://' || host || target) REGEXP ?", [value] of DB::Any}
+        when "url"    then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
         when "header" then header_regex_cond(value)
         else               body_regex_cond(value)
         end
