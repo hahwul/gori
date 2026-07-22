@@ -6,3 +6,4 @@
 /ca2/
 /home*/
 *.key.pem
+.DS_Store
