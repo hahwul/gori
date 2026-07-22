@@ -138,7 +138,7 @@ module Gori::Discover
                     lower.starts_with?("javascript:") || lower.starts_with?("data:") ||
                     lower.starts_with?("about:") || lower.starts_with?("blob:")
 
-      if h.starts_with?("http://") || h.starts_with?("https://")
+      if lower.starts_with?("http://") || lower.starts_with?("https://")
         return h
       elsif h.starts_with?("//")
         return "#{base.scheme}:#{h}"

@@ -148,9 +148,8 @@ describe Gori::Discover::Url do
     # "some other scheme" branch and returns nil. HTML/URL schemes are
     # case-insensitive (RFC 3986 §3.1) and the doc comment promises to "Handle
     # absolute ... forms", so an uppercase absolute URL should resolve, not drop.
-    pending "resolves an uppercase absolute scheme (schemes are case-insensitive)" do
+    it "resolves an uppercase absolute scheme (schemes are case-insensitive)" do
       base = U.parse("http://h/p").not_nil!
-      # Intended: the absolute URL is returned (browsers treat HTTP:// as http://).
       U.resolve(base, "HTTP://host/p").should eq("HTTP://host/p")
     end
   end

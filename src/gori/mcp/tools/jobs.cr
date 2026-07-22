@@ -8,7 +8,7 @@ module Gori
       private def list_jobs : Result
         Result.new(JSON.build do |j|
           j.object do
-            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size
+            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size + @sequence_jobs.size
             j.field("jobs") do
               j.array do
                 @jobs.each_value do |f|
@@ -43,15 +43,25 @@ module Gori
                     j.field "target", d.audit.target
                   end
                 end
+                @sequence_jobs.each_value do |s|
+                  j.object do
+                    j.field "job_id", s.id
+                    j.field "kind", "sequence"
+                    j.field "status", s.status.to_s
+                    j.field "goal", s.goal
+                    j.field "collected", s.collected
+                    j.field "target", s.audit.target
+                  end
+                end
               end
             end
           end
         end)
       end
 
-      # Unified status for a fuzz OR mine job (dispatch by the id prefix), so a
-      # caller polling many jobs needs one tool. Delegates to the per-engine
-      # status serializers, which already carry counts/audit/incomplete_reason.
+      # Unified status for a fuzz, mine, discover, or sequence job (dispatch by the id prefix),
+      # so a caller polling many jobs needs one tool. Delegates to the per-engine status
+      # serializers, which already carry counts/audit/incomplete_reason.
       private def get_job(h) : Result
         id = str(h, "job_id")
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
@@ -59,18 +69,22 @@ module Gori
           fuzz_status(h)
         elsif @mine_jobs.has_key?(id)
           mine_status(h)
+        elsif @discover_jobs.has_key?(id)
+          discover_status(h)
+        elsif @sequence_jobs.has_key?(id)
+          sequence_status(h)
         else
           not_found("no job #{id}")
         end
       end
 
-      # Stop a fuzz OR mine job. With wait:true, blocks (yielding to the runner
+      # Stop a fuzz, mine, discover, or sequence job. With wait:true, blocks (yielding to the runner
       # fiber via sleep) until the job reaches a terminal state or wait_timeout_ms
       # elapses, so a caller can stop-and-confirm in one call instead of polling.
       private def stop_job(h) : Result
         id = str(h, "job_id")
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
-        job = @jobs[id]? || @mine_jobs[id]?
+        job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]?
         return not_found("no job #{id}") unless job
         job.stop
         wait = bool(h, "wait") || false
@@ -102,15 +116,15 @@ module Gori
         end)
       end
 
-      private def job_running?(job : FuzzJob | MineJob) : Bool
+      private def job_running?(job : FuzzJob | MineJob | DiscoverJob | SequenceJob) : Bool
         job.status == :running
       end
 
-      private def job_status_and_end(job : FuzzJob | MineJob) : {String, Int64?}
+      private def job_status_and_end(job : FuzzJob | MineJob | DiscoverJob | SequenceJob) : {String, Int64?}
         {job.status.to_s, job.ended_at_ms}
       end
 
-      private def job_stop_requested(job : FuzzJob | MineJob) : Int64?
+      private def job_stop_requested(job : FuzzJob | MineJob | DiscoverJob | SequenceJob) : Int64?
         job.stop_requested_at_ms
       end
     end
