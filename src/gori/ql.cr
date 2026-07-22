@@ -406,7 +406,7 @@ module Gori
 
     private def self.free_text(word : String) : {String, Array(DB::Any)}
       pattern = like(word)
-      {"(lower(method) LIKE ? OR lower(host) LIKE ? OR lower(target) LIKE ?)",
+      {"(lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\')",
        [pattern, pattern, pattern] of DB::Any}
     end
 

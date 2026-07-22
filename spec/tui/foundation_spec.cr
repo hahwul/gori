@@ -36,9 +36,9 @@ describe Gori::Tui::Screen do
     line = "ab\rc" # a lone CR (display width 0) between real chars
     # display_width under-counts the control char (0); draw_width matches the drawn
     # cells + column_for, so the caret after it lands on the right column.
-    Screen.display_width(line).should eq(3)                                # CR contributes 0
-    Screen.draw_width(line).should eq(4)                                   # CR occupies a cell → counts as 1
-    Screen.column_for(line, Screen.draw_width(line)).should eq(line.size)  # round-trips
+    Screen.display_width(line).should eq(3)                               # CR contributes 0
+    Screen.draw_width(line).should eq(4)                                  # CR occupies a cell → counts as 1
+    Screen.column_for(line, Screen.draw_width(line)).should eq(line.size) # round-trips
   end
 
   it "draw_width equals display_width for plain text and doubles wide glyphs" do
@@ -74,16 +74,16 @@ describe Gori::Tui::Screen do
 
     # {label, string, display_width, draw_width, what column_width used to return}
     cases = [
-      {"tab", "a\tb", 2, 3, 3},               # control: display under-counts; the tab owns a cell
-      {"ZWSP", "a\u{200B}b", 2, 3, 3},        # zero-width space: same, it still gets a cell
-      {"BOM", "a\u{FEFF}b", 3, 3, 3},         # zero-width no-break space: likewise its own cluster
-      {"skin tone", skin, 2, 2, 3},           # 1 cluster, 1 glyph → 2 cols drawn, not 3
-      {"ZWJ", zwj, 2, 2, 5},                  # column_width drifted 3
-      {"family", family, 2, 2, 11},           # column_width drifted 9 — the worst case
+      {"tab", "a\tb", 2, 3, 3},        # control: display under-counts; the tab owns a cell
+      {"ZWSP", "a\u{200B}b", 2, 3, 3}, # zero-width space: same, it still gets a cell
+      {"BOM", "a\u{FEFF}b", 3, 3, 3},  # zero-width no-break space: likewise its own cluster
+      {"skin tone", skin, 2, 2, 3},    # 1 cluster, 1 glyph → 2 cols drawn, not 3
+      {"ZWJ", zwj, 2, 2, 5},           # column_width drifted 3
+      {"family", family, 2, 2, 11},    # column_width drifted 9 — the worst case
       {"keycap", "1\u{FE0F}\u{20E3}", 2, 2, 3},
-      {"CJK", "한글", 4, 4, 4},                 # wide but single-codepoint: both agree
-      {"NFD Hangul", nfd_han, 2, 2, 4},       # 3 jamo (2 + 0 + 0 floored to 2+1+1), ONE cluster
-      {"combining", "e\u{0301}", 1, 1, 2},    # é as e + U+0301: cluster is 1 col, not 2
+      {"CJK", "한글", 4, 4, 4},              # wide but single-codepoint: both agree
+      {"NFD Hangul", nfd_han, 2, 2, 4},    # 3 jamo (2 + 0 + 0 floored to 2+1+1), ONE cluster
+      {"combining", "e\u{0301}", 1, 1, 2}, # é as e + U+0301: cluster is 1 col, not 2
     ]
 
     cases.each do |(label, str, dw, gw, was_cw)|
@@ -110,17 +110,17 @@ describe Gori::Tui::Screen do
     # (tabs) and #285 (emoji) trade off against each other; there is now only one.
     it "column_for inverts draw_width at every cluster boundary" do
       strings = [
-        "hello world",          # ASCII (the fast path on both sides)
-        "a\tb\tc",              # tabs — the #278 case
-        "ab\rc",                # raw control
-        "한글",                   # NFC CJK, wide, 1 cp per cluster
-        nfd_han + "글",           # NFD Hangul — jamo cluster next to a precomposed one
-        "cafe\u{0301} au lait", # NFD Latin, combining mark mid-word
-        "x#{skin}y",            # skin tone
-        "x#{zwj}y",             # ZWJ pair
-        "x#{family}y",          # 4-person ZWJ family — 9 columns of old drift
-        "1\u{FE0F}\u{20E3}!",   # keycap
-        "a\u{200B}b\u{FEFF}c",  # zero-width chars, each its own cluster
+        "hello world",                    # ASCII (the fast path on both sides)
+        "a\tb\tc",                        # tabs — the #278 case
+        "ab\rc",                          # raw control
+        "한글",                             # NFC CJK, wide, 1 cp per cluster
+        nfd_han + "글",                    # NFD Hangul — jamo cluster next to a precomposed one
+        "cafe\u{0301} au lait",           # NFD Latin, combining mark mid-word
+        "x#{skin}y",                      # skin tone
+        "x#{zwj}y",                       # ZWJ pair
+        "x#{family}y",                    # 4-person ZWJ family — 9 columns of old drift
+        "1\u{FE0F}\u{20E3}!",             # keycap
+        "a\u{200B}b\u{FEFF}c",            # zero-width chars, each its own cluster
         "a\t한#{skin}e\u{0301}#{family}z", # everything at once
       ]
       strings.each do |s|
@@ -236,10 +236,10 @@ describe Gori::Tui::Screen do
       Screen.new(b).input_line(0, 1, value, cx, "", Theme.text)
       # The caret is the single cell painted on the ACCENT background.
       col = (0...40).select { |x| b.bg_at(x, 1) == Theme.accent }
-      col.size.should eq(1) # exactly one caret cell (cx=#{cx})
+      col.size.should eq(1)                              # exactly one caret cell (cx=#{cx})
       col[0].should eq(Screen.draw_width(value[0, cx]))  # sits on its own glyph
-      Screen.column_for(value, col[0]).should eq(cx)       # a click there returns the same cx
-      Screen.display_width(value[0, cx]).should be <= cx   # (the old measure could only under-count)
+      Screen.column_for(value, col[0]).should eq(cx)     # a click there returns the same cx
+      Screen.display_width(value[0, cx]).should be <= cx # (the old measure could only under-count)
     end
     # Concretely: past the ZWSP the two measures disagree by one, which is exactly the
     # column the caret used to be short by.
@@ -273,8 +273,8 @@ describe Gori::Tui::Screen do
     screen.cell(0, 0, '┃', Theme.text) # box-drawing glyph — the scroll gauge thumb
     screen.cell(1, 0, '┃', Theme.text)
     cap.drawn.size.should eq(2)
-    cap.drawn[0].should eq("┃")                       # renders the correct glyph
-    cap.drawn[0].same?(cap.drawn[1]).should be_true   # …and the SAME interned instance, not a fresh String
+    cap.drawn[0].should eq("┃")                     # renders the correct glyph
+    cap.drawn[0].same?(cap.drawn[1]).should be_true # …and the SAME interned instance, not a fresh String
   end
 end
 
@@ -413,7 +413,7 @@ describe Gori::Tui::Chrome do
     row = backend.row(0)
     tx = row.index("01:37 PM").not_nil!
     row.index("CPU 12%").not_nil!.should be < tx # the readout stays left of the clock
-    (tx + "01:37 PM".size).should eq(90 - 1)      # flush against the one-column right pad
+    (tx + "01:37 PM".size).should eq(90 - 1)     # flush against the one-column right pad
     backend.fg_at(tx, 0).should eq(Theme.muted)
     backend.bg_at(tx, 0).should eq(Theme.panel) # nothing on this bar is a button
   end

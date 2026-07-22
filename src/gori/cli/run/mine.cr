@@ -25,7 +25,7 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run mine [<flow-id>] [options]"
-          p.on("--flow=ID", "Seed the request from a captured flow") { |v| flow_id = parse_flow_id(v) }
+          p.on("--flow=ID", "Seed the request from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run mine") }
           p.on("--request=FILE", "Read a raw HTTP request to mine") { |v| request_file = v }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -51,7 +51,7 @@ module Gori
         parser.parse(args)
 
         abort "gori run mine: too many arguments (expected at most one <flow-id>)" if positional.size > 1
-        flow_id ||= positional.first?.try { |s| parse_flow_id(s) }
+        flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run mine") }
 
         bytes, default_target, src_h2 = mine_source(flow_id, request_file, project_name, db_path)
         scheme, host, port = resolve_mine_target(target_override, default_target)

@@ -63,14 +63,14 @@ module Gori::Tui
       @providers = [] of Oast::ProviderConfig
       @listeners = [] of Listener
       @callbacks = [] of CbRow
-      @seen = Hash(Int64, Set(String)).new       # session_id → seen provider_uids (dedup)
-      @session_label = Hash(Int64, String).new    # session_id → provider label for the table
+      @seen = Hash(Int64, Set(String)).new     # session_id → seen provider_uids (dedup)
+      @session_label = Hash(Int64, String).new # session_id → provider label for the table
       @active_sub = 0
       @cb_sel = 0
       @cb_scroll = 0
       @cb_detail = false
       @cb_detail_scroll = 0
-      @filter = TextField.new       # Callbacks free-text filter (`/`)
+      @filter = TextField.new # Callbacks free-text filter (`/`)
       @filter_editing = false
       @prov_sel = 0
       @prov_scroll = 0
@@ -79,8 +79,8 @@ module Gori::Tui
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
       @registering = Set(String).new # provider keys with a register round-trip in flight (dedup g/^R)
-      @max_cb_id = 0_i64            # highest callback row id folded in (watermark for reconcile)
-      @cb_version = 0               # bumped on any @callbacks mutation → invalidates the view caches
+      @max_cb_id = 0_i64             # highest callback row id folded in (watermark for reconcile)
+      @cb_version = 0                # bumped on any @callbacks mutation → invalidates the view caches
       @ordered_cache = nil.as(Array(CbRow)?)
       @ordered_cache_key = nil.as({Int32, String, Int32}?)
       @filtered_cache = nil.as(Array(CbRow)?)
@@ -489,19 +489,19 @@ module Gori::Tui
       x = rect.x + 1
       x = screen.text(x, rect.y, "provider ", Theme.muted, Theme.panel)
       name = if ep.empty?
-        "‹ none — add one › "
-      elsif @payload_pick == 0
-        "‹ All ›"
-      else
-        prov = ep[@payload_pick - 1]?
-        prov ? "‹ #{prov.name} ›" : "‹ unknown ›"
-      end
+               "‹ none — add one › "
+             elsif @payload_pick == 0
+               "‹ All ›"
+             else
+               prov = ep[@payload_pick - 1]?
+               prov ? "‹ #{prov.name} ›" : "‹ unknown ›"
+             end
       listening = if @payload_pick == 0
-        @listeners.any?(&.active?) ? "  ●listening" : ""
-      else
-        prov = ep[@payload_pick - 1]?
-        prov && listener_for(prov.key) ? "  ●listening" : ""
-      end
+                    @listeners.any?(&.active?) ? "  ●listening" : ""
+                  else
+                    prov = ep[@payload_pick - 1]?
+                    prov && listener_for(prov.key) ? "  ●listening" : ""
+                  end
       x = screen.text(x, rect.y, name, Theme.accent, Theme.panel)
       screen.text(x, rect.y, listening, Theme.green, Theme.panel) unless listening.empty?
       # payload row
@@ -651,10 +651,10 @@ module Gori::Tui
       ep = enabled_providers
       selected_prov = (@payload_pick > 0 && @payload_pick <= ep.size) ? ep[@payload_pick - 1] : nil
       base_list = if prov = selected_prov
-        @callbacks.select { |r| r.provider == prov.name }
-      else
-        @callbacks
-      end
+                    @callbacks.select { |r| r.provider == prov.name }
+                  else
+                    @callbacks
+                  end
       q = @filter.value.strip.downcase
       result = q.empty? ? base_list : base_list.select { |r| callback_matches?(r, q) }
       @filtered_cache = result
@@ -748,9 +748,9 @@ module Gori::Tui
           @cb_detail = true
           @cb_detail_scroll = 0
         end
-      when c == 'g'                then generate_payload
-      when c == 'y'                then copy_payload
-      else                              return false
+      when c == 'g' then generate_payload
+      when c == 'y' then copy_payload
+      else               return false
       end
       sync_scroll
       true
@@ -834,14 +834,14 @@ module Gori::Tui
       body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
       return if body.h < 1
       table = if body.h >= 2
-        if my == body.y
-          start_cb_filter unless @filter_editing
-          return
-        end
-        Rect.new(body.x, body.y + 1, body.w, body.h - 1)
-      else
-        body
-      end
+                if my == body.y
+                  start_cb_filter unless @filter_editing
+                  return
+                end
+                Rect.new(body.x, body.y + 1, body.w, body.h - 1)
+              else
+                body
+              end
       return unless idx = callback_row_at(table, mx, my)
       @filter_editing = false # a row click commits the filter, like History's list click
       if idx == @cb_sel

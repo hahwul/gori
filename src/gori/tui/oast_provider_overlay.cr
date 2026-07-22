@@ -51,7 +51,7 @@ module Gori::Tui
       @host = TextField.new(host)
       @token = TextField.new(token)
       @host_dirty = !@edit_id.nil? # editing keeps its host; adding auto-syncs to the type default
-      @sel = 0                      # ROW_NAME · ROW_SCOPE · ROW_TYPE · ROW_HOST · ROW_TOKEN · ROW_SAVE
+      @sel = 0                     # ROW_NAME · ROW_SCOPE · ROW_TYPE · ROW_HOST · ROW_TOKEN · ROW_SAVE
     end
 
     def self.adding : OastProviderOverlay

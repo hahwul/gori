@@ -448,6 +448,5 @@ module Gori::Tui
     private def current : Note
       @notes[@current.clamp(0, @notes.size - 1)]
     end
-
   end
 end

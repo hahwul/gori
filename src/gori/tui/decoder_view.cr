@@ -285,7 +285,7 @@ module Gori::Tui
     end
 
     private def paint_out_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
-                                        lines : Array(String), focused : Bool) : Nil
+                                      lines : Array(String), focused : Bool) : Nil
       return unless focused
       @out_read.highlight_spans(lines).each do |(l, x0, x1)|
         paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li

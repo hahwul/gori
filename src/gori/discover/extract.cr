@@ -53,7 +53,7 @@ module Gori::Discover
       out
     end
 
-    SNIFF_MAX     = 8192 # a sitemap's root element sits at the top; no need to read further
+    SNIFF_MAX    = 8192 # a sitemap's root element sits at the top; no need to read further
     SITEMAP_ROOT = /<(?:urlset|sitemapindex|loc)\b/i
 
     # Does this body look like an XML sitemap? Lets the engine pick the sitemap parser from

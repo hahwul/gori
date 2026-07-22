@@ -36,11 +36,11 @@ describe Gori::Tui::RewriterRuleOverlay do
 
   it "forces a header op onto the HEAD even if part is cycled to body" do
     ov = RewriterRuleOverlay.adding
-    down(ov, 2) # op row
+    down(ov, 2)                                     # op row
     ov.handle_key(skey(Termisu::Input::Key::Right)) # replace → add_header
-    down(ov, 2) # op → match → part
+    down(ov, 2)                                     # op → match → part
     ov.handle_key(skey(Termisu::Input::Key::Right)) # part → body
-    down(ov, 2) # part → host → header(find)
+    down(ov, 2)                                     # part → host → header(find)
     stype(ov, "X-Trace")
     rule = ov.candidate_rule
     rule.op.should eq(Gori::Store::RuleOp::AddHeader)
@@ -50,11 +50,11 @@ describe Gori::Tui::RewriterRuleOverlay do
 
   it "requires a pattern, and validates a regex replace" do
     ov = RewriterRuleOverlay.adding
-    ov.valid?.should be_false # empty pattern
-    down(ov, 3) # name → target → op → match
+    ov.valid?.should be_false                       # empty pattern
+    down(ov, 3)                                     # name → target → op → match
     ov.handle_key(skey(Termisu::Input::Key::Right)) # literal → regex
     ov.match_kind.should eq(Gori::Store::MatchKind::Regex)
-    down(ov, 3) # match → part → host → find
+    down(ov, 3)               # match → part → host → find
     stype(ov, "(")            # an unbalanced group
     ov.valid?.should be_false # bad regex
     ov.handle_key(skey(Termisu::Input::Key::LowerA, ')'))

@@ -59,7 +59,7 @@ describe Gori::Store do
       (b > a && c > b).should be_true # monotonic ids
 
       all = store.events_after(0, 100)
-      all.map(&.id).should eq([a, b, c])                    # oldest-first
+      all.map(&.id).should eq([a, b, c]) # oldest-first
       all.map(&.source).should eq(["miner", "agent", "fuzzer"])
       all[0].goto_session_id.should eq(7_i64)
       all[1].payload.should eq("send_request")

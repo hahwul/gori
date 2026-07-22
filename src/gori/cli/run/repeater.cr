@@ -93,7 +93,7 @@ module Gori
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
           p.on("--http2", "Use HTTP/2 (default: false)") { http2 = true; http2_given = true }
           p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
-          p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v) }
+          p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v, "gori run repeater create") }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }

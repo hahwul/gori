@@ -35,7 +35,7 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run fuzz [<flow-id>] [options]   (mark positions with §…§)"
-          p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v) }
+          p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run fuzz") }
           p.on("--request=FILE", "Read a raw HTTP request (may contain §…§) as the template") { |v| request_file = v }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -86,7 +86,7 @@ module Gori
         parser.parse(args)
 
         abort "gori run fuzz: too many arguments (expected at most one <flow-id>)" if positional.size > 1
-        flow_id ||= positional.first?.try { |s| parse_flow_id(s) }
+        flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
 
         hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
         text, default_target, src_h2 = fuzz_source(flow_id, request_file, project_name, db_path)
@@ -217,10 +217,6 @@ module Gori
         else             puts CLI::Output.fuzz_row_text(r)
         end
         true
-      end
-
-      private def self.parse_flow_id(v : String) : Int64
-        v.to_i64? || abort "gori run fuzz: invalid flow id '#{v}'"
       end
 
       private def self.parse_mode(v : String) : Fuzz::Mode

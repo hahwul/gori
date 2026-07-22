@@ -98,11 +98,11 @@ module Gori::Discover
         case b.kind
         in BaselineKind::Normal           then 1.0
         in BaselineKind::WildcardRedirect then 0.8
-        # A WildcardOk hit is gated on fp_novel && length_div (0.35 + 0.25 = 0.60); at 0.7 the
-        # product 0.42 could never clear the default 0.5 floor, so a genuinely content-divergent
-        # page on a 200-everything site was never reported. 0.85 → 0.51 lets a real divergence through.
-        in BaselineKind::WildcardOk       then 0.85
-        in BaselineKind::Uncalibratable   then 0.6
+          # A WildcardOk hit is gated on fp_novel && length_div (0.35 + 0.25 = 0.60); at 0.7 the
+          # product 0.42 could never clear the default 0.5 floor, so a genuinely content-divergent
+          # page on a 200-everything site was never reported. 0.85 → 0.51 lets a real divergence through.
+        in BaselineKind::WildcardOk     then 0.85
+        in BaselineKind::Uncalibratable then 0.6
         end
       {hit, (conf * penalty).clamp(0.0, 1.0)}
     end

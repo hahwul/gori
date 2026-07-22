@@ -675,25 +675,25 @@ puts "• inserted 8 issues"
 # Pre-seed sub-tabs so entity links have repeater/fuzz/miner targets to jump to.
 xss_req = replay_req("GET", "shop.demo.test",
   "/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
-ids[:repeater_xss] = store.insert_repeater("https://shop.demo.test", xss_req,
+ids[:repeater_xss] = store.insert_repeater("https://shop.demo.test", xss_req.to_slice,
   false, true, ids[:xss], 0)
 store.set_repeater_name(ids[:repeater_xss], "XSS PoC")
 
 idor_req = replay_req("GET", "api.demo.test", "/v1/users/2",
   {"Authorization" => "Bearer #{jwt}"})
-ids[:repeater_idor] = store.insert_repeater("https://api.demo.test", idor_req,
+ids[:repeater_idor] = store.insert_repeater("https://api.demo.test", idor_req.to_slice,
   false, true, ids[:idor], 1)
 store.set_repeater_name(ids[:repeater_idor], "IDOR probe")
 
 ssrf_req = replay_req("POST", "api.demo.test", "/v1/import",
   {"Authorization" => "Bearer #{jwt}", "Content-Type" => "application/json"},
   %({"url":"https://a1b2c3d4.oast.demo.test/hook?from=api.demo.test"}))
-ids[:repeater_ssrf] = store.insert_repeater("https://api.demo.test", ssrf_req,
+ids[:repeater_ssrf] = store.insert_repeater("https://api.demo.test", ssrf_req.to_slice,
   false, true, ids[:ssrf], 2)
 store.set_repeater_name(ids[:repeater_ssrf], "SSRF → OAST")
 
 hahwul_req = "GET / HTTP/2\r\nhost: www.hahwul.com\r\naccept: text/html\r\n\r\n"
-ids[:repeater_hahwul] = store.insert_repeater("https://www.hahwul.com", hahwul_req,
+ids[:repeater_hahwul] = store.insert_repeater("https://www.hahwul.com", hahwul_req.to_slice,
   true, true, ids[:hahwul_home], 3)
 store.set_repeater_name(ids[:repeater_hahwul], "hahwul home")
 

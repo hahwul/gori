@@ -32,8 +32,8 @@ HEAD = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nServer: nginx\r\n\r
 
 # Build a bucket of 128 canaries + the reflected body once.
 CANARIES = Array.new(128) { Canary.fresh }
-BODY = body_with(CANARIES)
-INV = begin
+BODY     = body_with(CANARIES)
+INV      = begin
   h = Hash(String, String).new
   CANARIES.each_with_index { |c, i| h[c] = "param#{i}" }
   h

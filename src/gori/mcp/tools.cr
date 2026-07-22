@@ -1179,11 +1179,11 @@ module Gori
         when "preview_rule"            then gated { preview_rule(h) }
         when "set_rule_enabled"        then gated { set_rule_enabled(h) }
         when "delete_rule"             then gated { delete_rule(h) }
-        # switch is always available (selecting a DB is not a data mutation).
-        when "switch_project"          then switch_project(h)
-        # create when unbound even under --read-only; once bound, actions-gated.
-        when "create_project"          then create_project_entry(h)
-        when "delete_project"          then gated { delete_project(h) }
+          # switch is always available (selecting a DB is not a data mutation).
+        when "switch_project" then switch_project(h)
+          # create when unbound even under --read-only; once bound, actions-gated.
+        when "create_project" then create_project_entry(h)
+        when "delete_project" then gated { delete_project(h) }
         end
       end
 

@@ -217,7 +217,7 @@ describe Gori::FormData do
     # file/binary summary — an unselected file is neither. It should fall through to the
     # inline-text branch (an empty :body field, note nil). Marked pending so the suite stays
     # green without enshrining the buggy note.
-    pending "treats filename=\"\" (no file selected) as an empty field, not a file part" do
+    it "treats filename=\"\" (no file selected) as an empty field, not a file part" do
       body = multipart_body("BND", %(Content-Disposition: form-data; name="f"; filename=""\r\n\r\n))
       f = field_named(Gori::FormData.from_flow("/", multipart_head("BND"), body.to_slice), "f").not_nil!
       f.note.should be_nil

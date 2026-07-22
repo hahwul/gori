@@ -23,8 +23,8 @@ def frame_stream(count : Int32, payload_len : Int32) : Bytes
     io.write_byte(((payload_len >> 16) & 0xff).to_u8)
     io.write_byte(((payload_len >> 8) & 0xff).to_u8)
     io.write_byte((payload_len & 0xff).to_u8)
-    io.write_byte(0x08_u8) # type WINDOW_UPDATE
-    io.write_byte(0x00_u8) # flags
+    io.write_byte(0x08_u8)                                                                         # type WINDOW_UPDATE
+    io.write_byte(0x00_u8)                                                                         # flags
     io.write_byte(0x00_u8); io.write_byte(0x00_u8); io.write_byte(0x00_u8); io.write_byte(0x01_u8) # stream 1
     payload_len.times { |i| io.write_byte((i & 0xff).to_u8) }
   end

@@ -35,7 +35,7 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run sequence [<flow-id>] [options]"
-          p.on("--flow=ID", "Seed the request from a captured flow (live replay)") { |v| flow_id = parse_flow_id(v) }
+          p.on("--flow=ID", "Seed the request from a captured flow (live replay)") { |v| flow_id = parse_flow_id(v, "gori run sequence") }
           p.on("--request=FILE", "Read a raw HTTP request to replay (live)") { |v| request_file = v }
           p.on("--tokens=FILE", "Analyze pasted tokens (one per line; '-' = stdin) — no network") { |v| tokens_file = v }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
@@ -73,7 +73,7 @@ module Gori
         end
 
         abort "gori run sequence: too many arguments (expected at most one <flow-id>)" if positional.size > 1
-        flow_id ||= positional.first?.try { |s| parse_flow_id(s) }
+        flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run sequence") }
         k = kind
         abort "gori run sequence: specify a token location (--cookie/--header/--regex/--position/--jsonpath) or use --tokens" unless k
 

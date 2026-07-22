@@ -34,12 +34,12 @@ module Gori
       def self.parse?(token : String) : ProviderKind?
         norm = token.downcase.gsub(/[-_.]/, "")
         case norm
-        when "interactsh"          then Interactsh
-        when "customhttp"          then CustomHttp
-        when "webhooksite"         then WebhookSite
-        when "boast"               then Boast
-        when "postbin"             then Postbin
-        else                            nil
+        when "interactsh"  then Interactsh
+        when "customhttp"  then CustomHttp
+        when "webhooksite" then WebhookSite
+        when "boast"       then Boast
+        when "postbin"     then Postbin
+        else                    nil
         end
       end
     end

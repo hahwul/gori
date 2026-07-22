@@ -66,11 +66,11 @@ module Gori::Tui
       when :history        then "waiting for traffic…"
       when :sitemap        then "no traffic captured yet"
       when :intercept      then "no held messages"
-      when :repeater         then "no repeater open"
+      when :repeater       then "no repeater open"
       when :fuzzer         then "no fuzz session open"
       when :fuzzer_results then running ? "running…" : "no results yet"
       when :probe          then scan_on ? "no issues yet" : "scanning is OFF"
-      when :issues       then "no issues yet"
+      when :issues         then "no issues yet"
       when :notes          then "empty note"
       else                      "nothing here yet"
       end
@@ -83,11 +83,11 @@ module Gori::Tui
       when :history        then render_history_full(screen, rect, headline, addr, capturing)
       when :sitemap        then render_sitemap_full(screen, rect, headline, addr, capturing)
       when :intercept      then render_intercept_full(screen, rect, headline, addr, capturing, catch_on)
-      when :repeater         then render_repeater_full(screen, rect, headline)
+      when :repeater       then render_repeater_full(screen, rect, headline)
       when :fuzzer         then render_fuzzer_full(screen, rect, headline)
       when :fuzzer_results then render_fuzzer_results_full(screen, rect, headline, running)
       when :probe          then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
-      when :issues       then render_issues_full(screen, rect, headline)
+      when :issues         then render_issues_full(screen, rect, headline)
       when :notes          then render_notes_full(screen, rect)
       end
     end

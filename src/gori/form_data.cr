@@ -78,7 +78,7 @@ module Gori
     private def part_field(headers : HTTP::Headers, content : String) : Field
       cd = headers["Content-Disposition"]? || ""
       name = NAME_RE.match(cd).try(&.[1]) || "(unnamed)"
-      if filename = FILENAME_RE.match(cd).try(&.[1])
+      if (filename = FILENAME_RE.match(cd).try(&.[1])) && !filename.empty?
         Field.new(name, "", :body, "file: #{filename} (#{content.bytesize} bytes)")
       elsif content.valid_encoding? && content.bytesize <= PART_MAX
         Field.new(name, content, :body)

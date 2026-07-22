@@ -23,10 +23,10 @@ module Gori
       ACTIVE_SEEN_CAP  =  5_000     # bound the active dedup set
       ACTIVE_QUEUE     =    128     # bounded active task queue (drop on overflow)
       ACTIVE_TIMEOUT   = 10.seconds # per-probe socket timeout
-      ACTIVE_BACKFILL  =    300     # recent History rows to re-arm when Active is enabled
-      WS_MSG_CAP       =    200     # max WS messages loaded per flow for passive scan
+      ACTIVE_BACKFILL  = 300        # recent History rows to re-arm when Active is enabled
+      WS_MSG_CAP       = 200        # max WS messages loaded per flow for passive scan
       CATCHUP_INTERVAL = 30.seconds # how often the passive catch-up sweep runs
-      CATCHUP_SCAN     =    500     # recent flows the catch-up sweep re-checks each tick
+      CATCHUP_SCAN     = 500        # recent flows the catch-up sweep re-checks each tick
 
       getter events : Channel(Event)
       # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
@@ -34,7 +34,7 @@ module Gori
       # its Fuzz::Sender, so the next probe picks up the change.
       property? verify_upstream : Bool
 
-      @disabled : Set(String) # RuleInfo#id of built-ins the operator turned off (Rules sub-tab)
+      @disabled : Set(String)     # RuleInfo#id of built-ins the operator turned off (Rules sub-tab)
       @custom : Array(CustomRule) # merged global+project user match rules
 
       # One enabled active rule that WOULD run against a given flow, plus the request count it

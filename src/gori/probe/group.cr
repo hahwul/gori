@@ -15,10 +15,10 @@ module Gori
       getter host : String
       getter title : String
       getter severity : Store::Severity
-      getter hit_count : Int32        # every observation (may exceed affected.size once capped)
-      getter affected : Array(String) # distinct affected URLs, capped at Store::PROBE_AFFECTED_CAP
-      getter evidence : String?       # first non-nil short snippet — NEVER a secret value
-      getter sample_flow_id : Int64?  # the flow that first triggered this group
+      getter hit_count : Int32           # every observation (may exceed affected.size once capped)
+      getter affected : Array(String)    # distinct affected URLs, capped at Store::PROBE_AFFECTED_CAP
+      getter evidence : String?          # first non-nil short snippet — NEVER a secret value
+      getter sample_flow_id : Int64?     # the flow that first triggered this group
       getter sample_repeater_id : Int64? # Repeater tab that first triggered this group (when no flow)
 
       def initialize(@code, @category, @host, @title, @severity, @hit_count, @affected,

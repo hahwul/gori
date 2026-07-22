@@ -997,7 +997,7 @@ describe Gori::Tui::RepeaterView do
     repeater_tmp_store do |store|
       id = store.insert_repeater("https://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil, 0, "evil.com")
       store.repeaters.first.sni.should eq("evil.com")
-      store.repeaters_meta.first.sni.should eq("evil.com")                                     # syncs via the fast reconcile poll too
+      store.repeaters_meta.first.sni.should eq("evil.com")                                   # syncs via the fast reconcile poll too
       store.update_repeater(id, "https://h/x", "GET /x HTTP/1.1".to_slice, false, true, nil) # clear
       store.repeaters.first.sni.should be_nil
     end

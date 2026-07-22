@@ -71,7 +71,7 @@ describe Gori::QL do
     # just the value after the ':', so the prefix isn't silently dropped (and a typo
     # surfaces as a no-match rather than masquerading as a successful host filter).
     f = Gori::QL.parse("hosst:acme.test")
-    f.sql.should eq("((lower(method) LIKE ? OR lower(host) LIKE ? OR lower(target) LIKE ?))")
+    f.sql.should eq("((lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["%hosst:acme.test%", "%hosst:acme.test%", "%hosst:acme.test%"])
   end
 
@@ -180,7 +180,7 @@ describe Gori::QL do
     # must fall back to a free-text LIKE search, NOT compile to the never-match clause
     # (the validity guard only applies to real regex fields).
     f = Gori::QL.parse("foo~[")
-    f.sql.should eq("((lower(method) LIKE ? OR lower(host) LIKE ? OR lower(target) LIKE ?))")
+    f.sql.should eq("((lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
   end
 

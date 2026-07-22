@@ -13,7 +13,7 @@ module Gori::Oast
   # file — which pulls in Store + Settings — is required directly by its one consumer
   # (the TUI OastController).
   record ProviderConfig,
-    id : String,   # global: a random hex token; project: the DB row id as text — unique PER SCOPE
+    id : String, # global: a random hex token; project: the DB row id as text — unique PER SCOPE
     name : String,
     kind : String, # ProviderKind label
     host : String,

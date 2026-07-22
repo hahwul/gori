@@ -19,20 +19,20 @@ module Gori::Tui
     record Row, kind : Symbol, verb_id : String, scope : Verb::Scope, title : String
 
     SCOPE_LABEL = {
-      Verb::Scope::Global         => "GLOBAL",
-      Verb::Scope::Sidebar        => "TAB BAR",
-      Verb::Scope::Body           => "HISTORY",
-      Verb::Scope::HistoryDetail  => "FLOW DETAIL",
-      Verb::Scope::Repeater         => "REPEATER",
-      Verb::Scope::Fuzzer         => "FUZZER",
-      Verb::Scope::Sitemap        => "SITEMAP",
-      Verb::Scope::Issues       => "ISSUES",
-      Verb::Scope::IssuesDetail => "ISSUE DETAIL",
-      Verb::Scope::Intercept      => "INTERCEPT",
-      Verb::Scope::Comparer       => "COMPARER",
-      Verb::Scope::Project        => "PROJECT SCOPE",
-      Verb::Scope::Env            => "PROJECT ENV",
-      Verb::Scope::PaletteOpen    => "PALETTE",
+      Verb::Scope::Global        => "GLOBAL",
+      Verb::Scope::Sidebar       => "TAB BAR",
+      Verb::Scope::Body          => "HISTORY",
+      Verb::Scope::HistoryDetail => "FLOW DETAIL",
+      Verb::Scope::Repeater      => "REPEATER",
+      Verb::Scope::Fuzzer        => "FUZZER",
+      Verb::Scope::Sitemap       => "SITEMAP",
+      Verb::Scope::Issues        => "ISSUES",
+      Verb::Scope::IssuesDetail  => "ISSUE DETAIL",
+      Verb::Scope::Intercept     => "INTERCEPT",
+      Verb::Scope::Comparer      => "COMPARER",
+      Verb::Scope::Project       => "PROJECT SCOPE",
+      Verb::Scope::Env           => "PROJECT ENV",
+      Verb::Scope::PaletteOpen   => "PALETTE",
     }
 
     def initialize(@registry : Verb::Registry)

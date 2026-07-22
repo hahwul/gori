@@ -10,8 +10,8 @@ module Gori::Oast
     property id : Int64
     getter kind : ProviderKind
     getter server_url : String
-    getter correlation_id : String # interactsh 20-char corr id; provider token/id otherwise
-    getter secret : String         # interactsh 13-char secret; provider secret otherwise
+    getter correlation_id : String   # interactsh 20-char corr id; provider token/id otherwise
+    getter secret : String           # interactsh 13-char secret; provider secret otherwise
     getter private_key_pem : String? # interactsh RSA private key PEM (nil for others)
     property token : String?         # provider auth token (BOAST secret, webhook/postbin id)
     property? registered : Bool

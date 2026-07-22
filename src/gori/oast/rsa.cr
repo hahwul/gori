@@ -43,9 +43,9 @@ end
 
 module Gori::Oast
   # OpenSSL NID / padding / ctrl constants (kept OAST-local, not in Gori::Proxy::Tls).
-  EVP_PKEY_RSA           =      6      # NID_rsaEncryption
-  RSA_F4                 = 65537_u64   # public exponent e (0x10001)
-  RSA_PKCS1_OAEP_PADDING =      4
+  EVP_PKEY_RSA           =         6 # NID_rsaEncryption
+  RSA_F4                 = 65537_u64 # public exponent e (0x10001)
+  RSA_PKCS1_OAEP_PADDING =         4
   # EVP_PKEY_CTX_ctrl cmds: EVP_PKEY_ALG_CTRL (0x1000) + offset.
   EVP_PKEY_CTRL_RSA_PADDING = 0x1001
   EVP_PKEY_CTRL_RSA_MGF1_MD = 0x1005

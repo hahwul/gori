@@ -14,7 +14,7 @@ module Gori::Tui
 
     # Left key column width + gap before the description. Long enough for labels like
     # "palette / settings" / "Settings: Hotkeys" so they don't run into the desc text.
-    KEY_W = 20
+    KEY_W   = 20
     KEY_GAP =  2
 
     # `verb_id` non-nil ⇒ resolve the key label from the effective keymap at build time.
