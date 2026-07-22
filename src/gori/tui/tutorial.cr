@@ -22,7 +22,7 @@ module Gori::Tui
   # Progression is never blocked — clickable Prev/Next buttons always work.
   class Tutorial
     # The mock tab bar; mirrors the real top-level tabs the user will see.
-    TABS = %w[History Repeater Fuzzer Project Help]
+    TABS = %w[Project Target History Intercept Repeater Fuzzer Help]
 
     # Short labels for the progress rail (keep narrow so 7 chips fit).
     STEP_RAIL = [
@@ -226,6 +226,8 @@ module Gori::Tui
       return false if @edit_insert
       return false unless @overlay == :none
       return false if ev.ctrl? || ev.alt? # leave ^P etc. alone
+      # Suppress n/b shortcuts when navigating inside body to prevent accidental jumps
+      return false if live_shell? && @p_level == :body
       ch = ev.char
       ch == 'n' || ch == 'N' || ch == 'b' || ch == 'B'
     end
@@ -253,14 +255,8 @@ module Gori::Tui
         @tried_nav = true if @step.navigate?
         return
       end
-      # Esc only fully exits the tour on the two steps whose footer hint actually
-      # documents it ("esc leave" — Welcome / Done). On every other step esc isn't
-      # (yet) the lesson's move: either the live mock has nothing to pop (not yet
-      # live, or already back at the tab bar), or the passive lesson never claimed
-      # esc at all — silently ending the WHOLE tour there would be a trap, so treat
-      # it as a safe no-op instead (n/b and the Prev/Next buttons remain the only
-      # way to move; progression is never blocked by this).
-      @running = false if @step.welcome? || @step.done?
+      # Esc exits the tour when back at the top-level tab bar or on any step
+      @running = false
     end
 
     private def live_shell? : Bool
@@ -464,9 +460,9 @@ module Gori::Tui
         if (row = rows[@pal_sel]?)
           # Mirror a couple of real "Go to …" actions so the palette feels alive.
           case row[1]
-          when "Go to Repeater" then @p_tab = 1; mark_switch
-          when "Go to History"  then @p_tab = 0; mark_switch
-          when "Open Help"      then @p_tab = 4; mark_switch
+          when "Go to Repeater" then @p_tab = 4; mark_switch
+          when "Go to History"  then @p_tab = 2; mark_switch
+          when "Open Help"      then @p_tab = 6; mark_switch
           end
         end
       end
@@ -545,7 +541,7 @@ module Gori::Tui
     end
 
     private def palette_open_key?(ev : Termisu::Event::Key) : Bool
-      (ev.ctrl? && ev.key.lower_p?) || (ev.char == 'p' && !ev.ctrl? && !ev.alt?)
+      ev.ctrl? && ev.key.lower_p?
     end
 
     private def space_open_key?(ev : Termisu::Event::Key) : Bool
@@ -698,7 +694,7 @@ module Gori::Tui
       @space_rect = Rect.new(0, 0, 0, 0)
 
       unless Layout.usable?(w, h) && step_card(w, h).h >= MIN_CARD_H
-        screen.text(0, 0, "terminal too small for the tutorial — resize and retry", Theme.red)
+        screen.text(0, 0, "terminal too small for tutorial — min 80x16, resize & retry (esc to leave)", Theme.red)
         @term.hide_cursor
         flush
         return
@@ -784,7 +780,7 @@ module Gori::Tui
           here = i == cur
           ch = here ? '●' : (done ? '●' : '○')
           col = here ? Theme.accent : (done ? Theme.green : Theme.muted)
-          @rail_hits << {Rect.new(cx, y, 1, 1), i}
+          @rail_hits << {Rect.new(cx, y, unit, 1), i}
           screen.cell(cx, y, ch, col, Theme.bg)
           cx += unit
         end
@@ -882,7 +878,7 @@ module Gori::Tui
         elsif @tried_palette
           "✓ #{tour}"
         else
-          "try ^P (or p) · #{tour} to skip"
+          "try ^P · #{tour} to skip"
         end
       when Step::SpaceMenu
         if @overlay == :space
@@ -968,7 +964,7 @@ module Gori::Tui
       screen.text(ix, y, "^P opens it · type to fuzzy-filter · ↑/↓ move · ↵ run · esc close",
         Theme.muted, Theme.panel, width: iw)
       y += 1
-      draw_try_line(screen, ix, y, iw, "Try: press ^P (or p), filter, ↵ to run a command.", @tried_palette)
+      draw_try_line(screen, ix, y, iw, "Try: press ^P, filter, ↵ to run a command.", @tried_palette)
       y += 2
 
       shell = Rect.new(box.x + 2, y, box.w - 4, {box.bottom - 1 - y, 3}.max)
@@ -1202,13 +1198,14 @@ module Gori::Tui
         yy += 1
       end
       if yy < rect.bottom - 1
-        # Keep what the user typed after leaving INS (don't snap back to the demo "alice").
-        user = typed.empty? ? "alice" : typed
+        user = typed
         if insert
           px = screen.text(ix, yy, "username=#{user}", Theme.text_bright, Theme.panel, width: iw)
           screen.cell({px, rect.right - 2}.min, yy, ' ', Theme.bg, Theme.accent)
-        elsif focused || !typed.empty?
-          screen.text(ix, yy, "username=#{user}", typed.empty? ? Theme.muted : Theme.text, Theme.panel, width: iw)
+        elsif focused || !typed.empty? || @tried_edit
+          screen.text(ix, yy, "username=#{user}", Theme.text, Theme.panel, width: iw)
+        else
+          screen.text(ix, yy, "username=alice", Theme.muted, Theme.panel, width: iw)
         end
       end
     end
