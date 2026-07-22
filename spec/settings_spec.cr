@@ -696,6 +696,72 @@ describe Gori::Settings do
     end
   end
 
+  it "round-trips the Fuzzer wordlist recent + favorite paths" do
+    dir = File.tempname("gori-settings-fuzzer-wordlists")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+
+      Gori::Settings.record_recent_wordlist("/tmp/a.txt")
+      Gori::Settings.record_recent_wordlist("/tmp/b.txt")
+      # re-using an already-recent path moves it back to the front instead of duplicating it
+      Gori::Settings.record_recent_wordlist("/tmp/a.txt")
+      Gori::Settings.fuzz_recent_wordlists.should eq(["/tmp/a.txt", "/tmp/b.txt"])
+
+      # re-recording the path ALREADY at the front is a true no-op — no rebuild, no save.
+      # Proven by deleting the persisted file and confirming record doesn't recreate it
+      # (an mtime check could pass even with a broken guard if both saves land in the
+      # same clock tick, so absence/presence of the file is the deterministic signal).
+      File.delete?(Gori::Settings.path)
+      Gori::Settings.record_recent_wordlist("/tmp/a.txt")
+      Gori::Settings.fuzz_recent_wordlists.should eq(["/tmp/a.txt", "/tmp/b.txt"])
+      File.exists?(Gori::Settings.path).should be_false
+
+      Gori::Settings.toggle_favorite_wordlist("/tmp/b.txt").should be_true
+      Gori::Settings.favorite_wordlist?("/tmp/b.txt").should be_true
+
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+      Gori::Settings.load
+      Gori::Settings.fuzz_recent_wordlists.should eq(["/tmp/a.txt", "/tmp/b.txt"])
+      Gori::Settings.fuzz_favorite_wordlists.should eq(["/tmp/b.txt"])
+
+      # toggling again removes it
+      Gori::Settings.toggle_favorite_wordlist("/tmp/b.txt").should be_false
+      Gori::Settings.favorite_wordlist?("/tmp/b.txt").should be_false
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+    end
+  end
+
+  it "caps the recent-wordlists MRU list and omits the fuzzer key when both lists are empty" do
+    dir = File.tempname("gori-settings-fuzzer-wordlists-cap")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).includes?("fuzzer").should be_false
+
+      15.times { |i| Gori::Settings.record_recent_wordlist("/tmp/wl#{i}.txt") }
+      Gori::Settings.fuzz_recent_wordlists.size.should eq(Gori::Settings::RECENT_WORDLISTS_CAP)
+      Gori::Settings.fuzz_recent_wordlists.first.should eq("/tmp/wl14.txt")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+    end
+  end
+
   describe "per-project network override layer" do
     it "effective_* falls back to the global when no override is set" do
       reset_net

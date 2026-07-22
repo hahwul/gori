@@ -492,6 +492,117 @@ describe Gori::Tui::PathComplete do
       FileUtils.rm_rf(root)
     end
   end
+
+  it "a blank field lists favorites (under a header) before recents, excluding recents already favorited" do
+    Gori::Settings.fuzz_favorite_wordlists = ["/wl/fav.txt"]
+    Gori::Settings.fuzz_recent_wordlists = ["/wl/fav.txt", "/wl/recent.txt"]
+    begin
+      pc = PathComplete.new(wordlist_history: true)
+      pc.refresh("")
+      pc.open?.should be_true
+      pc.entries.map(&.label).should eq(["★ Favorites", "/wl/fav.txt", "🕒 Recent", "/wl/recent.txt"])
+      # the cursor lands on the first SELECTABLE row, not the header
+      pc.selected.should eq(1)
+    ensure
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+    end
+  end
+
+  it "an instance NOT opted into wordlist_history ignores recent/favorite state entirely (Import/CA-import overlays)" do
+    home = File.tempname("gori_home_pc_no_history")
+    wl = File.join(home, "wordlists")
+    Dir.mkdir_p(wl)
+    File.write(File.join(wl, "rockyou.txt"), "")
+    old = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = home
+    Gori::Settings.fuzz_favorite_wordlists = ["/wl/fav.txt"]
+    Gori::Settings.fuzz_recent_wordlists = ["/wl/recent.txt"]
+    begin
+      pc = PathComplete.new # the default — every non-Fuzzer caller (Import, CA Import)
+      pc.refresh("")
+      pc.open?.should be_true # still opens the plain cwd + ~/.gori/wordlists listing
+      pc.entries.map(&.label).should_not contain("★ Favorites")
+      pc.entries.map(&.label).should_not contain("🕒 Recent")
+      pc.entries.none? { |e| e.label == "/wl/fav.txt" || e.label == "/wl/recent.txt" }.should be_true
+    ensure
+      old ? (ENV["GORI_HOME"] = old) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(home)
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+    end
+  end
+
+  it "falls back to the cwd + ~/.gori/wordlists listing when blank with no recent/favorite history yet" do
+    home = File.tempname("gori_home_pc_fallback")
+    wl = File.join(home, "wordlists")
+    Dir.mkdir_p(wl)
+    File.write(File.join(wl, "rockyou.txt"), "")
+    cwd = File.tempname("gori_pc_fallback_cwd")
+    Dir.mkdir_p(cwd)
+    old_home = ENV["GORI_HOME"]?
+    old_cwd = Dir.current
+    ENV["GORI_HOME"] = home
+    # An empty, dedicated cwd — the merged cwd + ~/.gori/wordlists list is capped
+    # (PathComplete::CAP), so asserting against the REAL repo root (which the
+    # process's actual cwd would otherwise be) is one runaway top-level file away
+    # from evicting rockyou.txt out of the cap and flaking this assertion.
+    Dir.cd(cwd)
+    Gori::Settings.fuzz_recent_wordlists = [] of String
+    Gori::Settings.fuzz_favorite_wordlists = [] of String
+    begin
+      pc = PathComplete.new(wordlist_history: true)
+      pc.refresh("")
+      pc.open?.should be_true
+      pc.entries.map(&.label).should_not contain("★ Favorites")
+      pc.entries.map(&.label).should_not contain("🕒 Recent")
+      pc.entries.any?(&.label.starts_with?("rockyou.txt")).should be_true
+    ensure
+      Dir.cd(old_cwd)
+      old_home ? (ENV["GORI_HOME"] = old_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(home)
+      FileUtils.rm_rf(cwd)
+    end
+  end
+
+  it "move() steps over header rows in both directions and stops (no-op) at either edge" do
+    Gori::Settings.fuzz_favorite_wordlists = ["/wl/fav.txt"]
+    Gori::Settings.fuzz_recent_wordlists = ["/wl/recent.txt"]
+    begin
+      pc = PathComplete.new(wordlist_history: true)
+      pc.refresh("") # entries: [Header, fav.txt, Header, recent.txt] · selected = 1
+      pc.selected.should eq(1)
+
+      pc.move(-1) # nothing selectable above the Favorites header — no-op
+      pc.selected.should eq(1)
+
+      pc.move(1) # fav.txt → skips the "Recent" header → lands on recent.txt
+      pc.selected.should eq(3)
+
+      pc.move(1) # already on the last row — no-op
+      pc.selected.should eq(3)
+
+      pc.move(-1) # recent.txt → skips the header → back to fav.txt
+      pc.selected.should eq(1)
+    ensure
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+    end
+  end
+
+  it "typing even one character drops the recent/favorite view for the usual fuzzy directory search" do
+    Gori::Settings.fuzz_favorite_wordlists = ["/wl/fav.txt"]
+    Gori::Settings.fuzz_recent_wordlists = ["/wl/recent.txt"]
+    begin
+      pc = PathComplete.new(wordlist_history: true)
+      pc.refresh("x")
+      pc.entries.map(&.label).should_not contain("★ Favorites")
+      pc.entries.map(&.label).should_not contain("🕒 Recent")
+    ensure
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+      Gori::Settings.fuzz_recent_wordlists = [] of String
+    end
+  end
 end
 
 describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do

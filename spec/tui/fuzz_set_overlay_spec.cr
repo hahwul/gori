@@ -11,6 +11,10 @@ private def otype(ov : FuzzSetOverlay, s : String) : Nil
   s.each_char { |c| ov.handle_key(okey(Termisu::Input::Key::LowerA, c)) }
 end
 
+private def ctrl_d : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key::LowerD, Termisu::Input::Modifier::Ctrl)
+end
+
 describe Gori::Tui::FuzzSetOverlay do
   it "List: multi-line values build a comma-joined spec (newline = a new value)" do
     ov = FuzzSetOverlay.for_list
@@ -96,5 +100,38 @@ describe Gori::Tui::FuzzSetOverlay do
     ov.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
     backend.contains?("PAYLOAD SET").should be_true
     backend.contains?("List").should be_true
+  end
+
+  it "^D on the wordlist Path field toggles the typed path in/out of favorites" do
+    dir = File.tempname("gori-fuzz-set-overlay-favorite")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+
+      ov = FuzzSetOverlay.for_list
+      2.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # List → Wordlist
+      ov.handle_key(okey(Termisu::Input::Key::Down))              # Type row → the Path field
+      otype(ov, "/tmp/words.txt")
+
+      Gori::Settings.favorite_wordlist?("/tmp/words.txt").should be_false
+      ov.handle_key(ctrl_d).should eq(:stay) # doesn't apply/close the overlay
+      Gori::Settings.favorite_wordlist?("/tmp/words.txt").should be_true
+      # the star indicator renders alongside the Path field once favorited
+      backend = MemoryBackend.new(120, 30)
+      ov.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("★").should be_true
+
+      ov.handle_key(ctrl_d) # toggle back off
+      Gori::Settings.favorite_wordlist?("/tmp/words.txt").should be_false
+
+      # the path itself is untouched — ^D only manages favorites
+      ov.build_spec.not_nil!.value.should eq("/tmp/words.txt")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.fuzz_favorite_wordlists = [] of String
+    end
   end
 end

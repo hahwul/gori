@@ -278,6 +278,7 @@ module Gori::Tui
     def apply_fuzz_set(edit_index : Int32?, spec : SetSpec?) : Nil
       return unless v = current_view
       v.apply_set(edit_index, spec)
+      Settings.record_recent_wordlist(spec.value) if spec && spec.kind == :file
       save_current
     end
 
