@@ -665,3 +665,9 @@ describe "gori run show --format json sse_events.truncated" do
     sse["events"].as_a.size.should eq(n)
   end
 end
+
+describe "gori run probe --active" do
+  it "includes Category::ACTIVE in PROBE_CATEGORIES" do
+    Gori::CLI::Run::PROBE_CATEGORIES.should contain(Gori::Probe::Category::ACTIVE)
+  end
+end

@@ -1621,6 +1621,14 @@ describe "Gori::Probe::Active (safety + coverage)" do
       Gori::Probe::Active.detections(plan, json, detail).first.severity.should eq(Gori::Store::Severity::Low)
     end
   end
+
+  it "skips active analysis safely when active probe target connection fails or yields no plan" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/no-params", content_type: nil)
+      dets = Gori::Probe::Active.analyze(detail)
+      dets.should be_empty
+    end
+  end
 end
 
 describe "Gori::Probe::Filter (incomplete terms)" do
