@@ -95,7 +95,7 @@ flow_2_desc = "Send interesting flows to Repeater or the Fuzzer, mine hidden par
 flow_2_alt = "gori Fuzzer tab with marked payload positions in the request, a results table, and a status distribution sidebar"
 flow_3_label = "Report"
 flow_3_desc = "Triage results into Issues, take notes, and export, or hand the whole project to an agent over MCP."
-flow_3_alt = "gori Probe scanner listing passive security issues grouped by severity and category"
+flow_3_alt = "gori Issues tab listing triaged findings with severity and status columns: permissive CORS, missing Content-Security-Policy, and missing HSTS, each with an affected host"
 
 agent_title = "Or hand it to an agent."
 agent_intro = "gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent (Claude, Codex, Grok) reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it."

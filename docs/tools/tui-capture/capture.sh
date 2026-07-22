@@ -138,7 +138,12 @@ shoot_all() {
   run_scene sitemap      26 "gori · Sitemap"                   2 SLEEP1.2
   run_scene project      26 "gori · Project"                   1 SLEEP1.2
   run_scene intercept    26 "gori · Intercept"                 4 SLEEP1.2
-  run_scene probe        26 "gori · Probe scanner"             9 SLEEP1.4
+  # Probe and Issues sit past the 1-9 positional-jump range (10th/11th visible
+  # tab), so land on Comparer (9) and cycle right with `]` the rest of the way.
+  # Issues then promotes a few Probe findings on the way through so the shot
+  # isn't the empty-state onboarding card.
+  run_scene probe        26 "gori · Probe scanner"             9 SLEEP0.3 ] SLEEP1.4
+  run_scene issues       26 "gori · Issues"                    9 SLEEP0.3 ] SLEEP0.3 Enter SLEEP0.4 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.7 Escape SLEEP0.3 ] SLEEP1.4
   run_scene decoder      26 "gori · Decoder"                   7 SLEEP1.2
   run_scene repeater     26 "gori · Repeater"                  3 SLEEP0.6 Enter SLEEP0.4 C-r SLEEP1.2 C-r SLEEP3
   run_scene fuzzer       34 "gori · Fuzzer"                    3 SLEEP0.6 Enter SLEEP0.3 Down SLEEP0.3 I SLEEP1 C-a SLEEP0.6 C-l SLEEP0.8 admin Enter root SLEEP0.5 Escape SLEEP0.7 C-r SLEEP5
