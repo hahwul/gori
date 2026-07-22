@@ -51,7 +51,7 @@ module Gori::Tui
       elevated: Color.from_hex("#1b1b1f"),      # one notch above PANEL: header band, active segment
       border: Color.from_hex("#2a2a30"),        # hairline dividers (resting)
       border_focus: Color.from_hex("#3a3a42"),  # brighter hairline for an active modal card
-      focus_gold: Color.from_hex("#d9c28b"),    # logo body gold (gori-wallpaper.jpg / gori.svg) — brand mark + focus outline
+      focus_gold: Color.from_hex("#d9c28b"),    # logo body gold (gori-wallpaper.webp / gori.svg) — brand mark + focus outline
       accent: Color.from_hex("#fafafa"),        # the white highlight (Grok signature)
       accent_bg: Color.from_hex("#26262c"),     # selection band (focused pane)
       selection_dim: Color.from_hex("#19191c"), # selection band (unfocused pane)

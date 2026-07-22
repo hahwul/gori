@@ -1,6 +1,6 @@
 <div align="center">
   <br>
-  <img src="docs/static/images/gori-wallpaper.jpg">
+  <img src="docs/static/images/gori-wallpaper.webp">
   <p>Hack from the terminal.</p>
 </div>
 <p align="center">
