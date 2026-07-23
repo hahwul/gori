@@ -1,10 +1,10 @@
 +++
 title = "Gori vs Burp Suite, Caido, ZAP"
-description = "Gori를 Burp Suite, Caido, OWASP ZAP과 기능 단위로 비교합니다."
+description = "Gori를 Burp Suite, Caido, ZAP과 기능 단위로 비교합니다."
 weight = 40
 +++
 
-Gori, Burp Suite, Caido, OWASP ZAP은 모두 클라이언트와 타겟 사이에 자리하는 인터셉트 프록시입니다. 이 문서는 이들을 기능 단위로 비교합니다. Burp Suite는 무료 Community 에디션과 유료 Professional 에디션으로 나뉘며, 둘의 차이가 있는 항목은 표에 함께 표시합니다.
+Gori, Burp Suite, Caido, ZAP은 모두 클라이언트와 타겟 사이에 자리하는 인터셉트 프록시입니다. 이 문서는 이들을 기능 단위로 비교합니다. Burp Suite는 무료 Community 에디션과 유료 Professional 에디션으로 나뉘며, 둘의 차이가 있는 항목은 표에 함께 표시합니다.
 
 ## 한눈에 보기 {#at-a-glance}
 

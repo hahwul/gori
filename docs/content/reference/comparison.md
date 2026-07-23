@@ -1,10 +1,10 @@
 +++
 title = "Gori vs Burp Suite, Caido & ZAP"
-description = "A feature-by-feature comparison of Gori against Burp Suite, Caido, and OWASP ZAP."
+description = "A feature-by-feature comparison of Gori against Burp Suite, Caido, and ZAP."
 weight = 40
 +++
 
-Gori, [Burp Suite](https://portswigger.net/burp), [Caido](https://caido.io), and [OWASP ZAP](https://www.zaproxy.org) all sit between a client and a target as an intercepting proxy. This page compares them feature by feature. Burp Suite has a free Community edition and a paid Professional edition; where they differ, both are noted.
+Gori, [Burp Suite](https://portswigger.net/burp), [Caido](https://caido.io), and [ZAP](https://www.zaproxy.org) all sit between a client and a target as an intercepting proxy. This page compares them feature by feature. Burp Suite has a free Community edition and a paid Professional edition; where they differ, both are noted.
 
 ## At a Glance
 
