@@ -120,7 +120,12 @@ module Gori::Tui
     private def slot_short(d : Store::FlowDetail) : String
       row = d.row
       path = Url.origin_path(row.target)
-      path = path.size > 12 ? path[0, 11] + "…" : path
+      # Truncate by DISPLAY WIDTH, not char count: a CJK/emoji path is up to 2 cols per
+      # char, so `path.size > 12` / `path[0, 11]` let it overflow the slot budget. Use the
+      # grapheme-aware width + column helpers (identical to the old behavior for ASCII).
+      if Screen.display_width(path) > 12
+        path = path[0, Screen.column_for(path, 11)] + "…"
+      end
       "#{row.method} #{path}"
     end
 

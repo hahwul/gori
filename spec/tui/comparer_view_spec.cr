@@ -25,6 +25,22 @@ describe ComparerView do
     v.label.should eq("login vs register")
   end
 
+  it "truncates a slot label by display width, not char count" do
+    v = ComparerView.new
+    # 12 CJK chars ≈ 24 display cols; char-count truncation (path[0,11]) would keep ~22
+    # cols and overflow the ~12-col slot. Width-aware truncation must fit the budget.
+    v.add_flow(flow("GET", "/日本語テスト日本語ページ路"))
+    path = v.label.lchop("GET ")
+    path.should end_with("…")
+    Screen.display_width(path).should be <= 12
+  end
+
+  it "leaves a short ASCII path label untouched (no regression)" do
+    v = ComparerView.new
+    v.add_flow(flow("GET", "/api/x"))
+    v.label.should eq("GET /api/x")
+  end
+
   it "duplicates slots and appends copy to a custom name" do
     v = ComparerView.new
     v.name = "pair"
