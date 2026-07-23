@@ -816,7 +816,7 @@ module Gori
               "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
               s.field "template", strprop("raw HTTP request with §…§ position markers")
               s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
-              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
               s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
               s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
               s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
@@ -865,7 +865,7 @@ module Gori
               "outbound requests. Capped at #{MINE_MAX_REQUESTS} requests / #{MINE_MAX_CONCURRENCY} concurrency." do |s|
               s.field "template", strprop("raw HTTP request to mine")
               s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
-              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
               s.field "locations", strprop("comma list of where to mine: query,form,multipart,json,headers,cookies (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
               s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
               s.field "bucket", intprop("names stuffed per request before bisection (per location)")
@@ -905,7 +905,7 @@ module Gori
               "#{SEQUENCE_MAX_CONCURRENCY} concurrency. Provide exactly ONE token location." do |s|
               s.field "template", strprop("raw HTTP request to replay")
               s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
-              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
               s.field "cookie", strprop("token location: a Set-Cookie value by name")
               s.field "header", strprop("token location: a response header value by name")
               s.field "regex", strprop("token location: capture group 1 of this regex over the body")
@@ -980,20 +980,20 @@ module Gori
             end
 
             tool j, "list_jobs",
-              "List all fuzz and mine jobs this session started (job_id, kind, status, " \
-              "counts, target) — one call to see everything in flight." { }
+              "List all fuzz, mine, discover, and sequence jobs this session started (job_id, " \
+              "kind, status, counts, target) — one call to see everything in flight." { }
 
             tool j, "get_job",
-              "Full status of a fuzz OR mine job by id (dispatches by the id prefix), " \
-              "so you can poll any job with one tool." do |s|
-              s.field "job_id", strprop("a fuzz (fz_*) or mine (mn_*) job id"), required: true
+              "Full status of a fuzz, mine, discover, or sequence job by id (dispatches by the " \
+              "id prefix), so you can poll any job with one tool." do |s|
+              s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), or sequence (sq_*) job id"), required: true
             end
 
             tool j, "stop_job",
-              "Stop a fuzz OR mine job. With wait:true, block until it reaches a terminal " \
+              "Stop a fuzz, mine, discover, or sequence job. With wait:true, block until it reaches a terminal " \
               "state (or wait_timeout_ms elapses) and report the final status + stopped_at, " \
               "so stop-and-confirm is one call. Without wait, returns immediately (stop is async)." do |s|
-              s.field "job_id", strprop("a fuzz (fz_*) or mine (mn_*) job id"), required: true
+              s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), or sequence (sq_*) job id"), required: true
               s.field "wait", boolprop("block until the job actually stops (default false)")
               s.field "wait_timeout_ms", intprop("max ms to wait when wait:true (default 10000, max 60000)")
             end

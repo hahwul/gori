@@ -74,7 +74,11 @@ module Gori
       Free text (no field:): matches method, host, or target (case-insensitive substring).
 
       Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
-      A mixed query (host:beta status:>=foo) silently drops only the bad terms and applies the rest.
+      A mixed query (host:beta status:>=foo) silently drops only the bad comparison/field terms and
+      applies the rest (a dropped term BROADENS the result). Note the asymmetry with regex: an invalid
+      `~` pattern is a HARD ERROR, not dropped — because a bad regex would otherwise silently match
+      NOTHING (indistinguishable from a genuinely empty result), so it must be fixed or removed. Use
+      strict:true (or ql_explain) to see exactly which terms were dropped before relying on results.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every
