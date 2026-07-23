@@ -20,16 +20,17 @@ module Gori::Fuzz
     getter origin : Origin
 
     def initialize(@origin : Origin, @http2 : Bool, @verify : Bool,
-                   @sni : String? = nil, @timeout : Time::Span? = nil)
+                   @sni : String? = nil, @timeout : Time::Span? = nil,
+                   @overrides : Gori::HostOverrides? = nil)
     end
 
     def send(bytes : Bytes) : Repeater::Result
       if @http2
         Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout)
+          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
       else
         Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout)
+          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
       end
     end
   end

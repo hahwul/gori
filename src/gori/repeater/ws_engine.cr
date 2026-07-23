@@ -78,7 +78,8 @@ module Gori
       def self.send(upgrade_request : Bytes, out_messages : Array(OutMsg), *,
                     scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
-                    idle : Time::Span = DEFAULT_IDLE) : Result
+                    idle : Time::Span = DEFAULT_IDLE,
+                    overrides : Gori::HostOverrides? = nil) : Result
         started = Time.instant
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
@@ -86,7 +87,7 @@ module Gori
         # read that times out is the EXPECTED "server went quiet → stop" signal.
         ht = HANDSHAKE_TIMEOUT
         tls = scheme == "https" || scheme == "wss"
-        upstream = tls ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, io_timeout: ht) : Proxy::Upstream.dial(host, port, io_timeout: ht)
+        upstream = tls ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, io_timeout: ht, overrides: overrides) : Proxy::Upstream.dial(host, port, io_timeout: ht, overrides: overrides)
         return err("connect failed: #{host}:#{port}", started) unless upstream
 
         begin

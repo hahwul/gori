@@ -150,7 +150,8 @@ module Gori
         use_h2 = (bool(h, "http2") || false) || src_h2
         origin = fuzz_origin(h, default_target)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
-          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
+          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
+          overrides: HostOverrides.load(store))
         # Defense-in-depth alongside the job-start scope_check above: that check only
         # covers the origin once, not a path mining mutates per-request.
         backend = Fuzz::ScopedBackend.new(sender, Scope.load(store))

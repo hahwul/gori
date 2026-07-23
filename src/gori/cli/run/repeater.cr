@@ -224,8 +224,8 @@ module Gori
         # get_repeater_full loads the response BLOBs too (needed for --diff), so the
         # store can close before the send — same lifetime pattern as the flow path.
         store = open_store(resolve_read_project(project_name, db_path))
-        rec = begin
-          store.get_repeater_full(id)
+        rec, host_overrides = begin
+          {store.get_repeater_full(id), Gori::HostOverrides.load(store)}
         ensure
           store.close
         end
@@ -242,7 +242,7 @@ module Gori
         abort "gori run repeater send: unsupported target scheme #{send.scheme.inspect} (use http:// or https://)" unless send.scheme.in?("http", "https")
 
         verify = !insecure
-        result = send.http2 ? Repeater::H2Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni) : Repeater::Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni)
+        result = send.http2 ? Repeater::H2Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni, overrides: host_overrides) : Repeater::Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni, overrides: host_overrides)
 
         new_body, _ = decode_body(result.head, result.body)
         diff =
@@ -318,9 +318,11 @@ module Gori
         # cheaply probe whether a repeater SESSION shares this id (get_repeater reads
         # no response BLOBs) — only when the flow exists — to warn about the ambiguity.
         store = open_store(resolve_read_project(project_name, db_path))
-        detail, session_collision = begin
+        # HostOverrides.load snapshots rows into memory (connect_ip never re-touches the
+        # store), so it's safe to load here and use after the store closes.
+        detail, session_collision, host_overrides = begin
           d = store.get_flow(id)
-          {d, d ? !store.get_repeater(id).nil? : false}
+          {d, d ? !store.get_repeater(id).nil? : false, Gori::HostOverrides.load(store)}
         ensure
           store.close
         end
@@ -469,7 +471,7 @@ module Gori
         use_h2 = force_h2 || built.http2
         verify = !insecure
         sni_val = sni_override.presence || built.sni
-        result = use_h2 ? Repeater::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val) : Repeater::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val)
+        result = use_h2 ? Repeater::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val, overrides: host_overrides) : Repeater::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val, overrides: host_overrides)
 
         # Decode the response body once for TEXT display (--diff / plain print); only
         # build the diff lines when --diff asked for them (decoding the captured

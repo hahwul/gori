@@ -138,7 +138,8 @@ module Gori
         loc = sequence_token_loc(h)
         goal = clamp(int(h, "count"), 500, SEQUENCE_MAX_GOAL)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
-          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
+          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
+          overrides: HostOverrides.load(store))
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay, token_loc: loc, goal: goal,
           concurrency: clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
         config.rps = int(h, "rate").try(&.to_f64)

@@ -74,7 +74,8 @@ module Gori
             abort "gori run discover: wordlist error: #{ex.message}"
           end
           policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
-          sender = Discover::Sender.new(verify: !insecure, timeout: timeout, headers: config.headers)
+          sender = Discover::Sender.new(verify: !insecure, timeout: timeout, headers: config.headers,
+            overrides: Gori::HostOverrides.load(store))
           engine = Discover::Engine.new(seed_url, words, sender, config, policy)
           discover_preflight(seed_url, config, words.size, force)
           run_discover_stream(engine, store, format, no_store)

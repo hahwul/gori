@@ -1,6 +1,7 @@
 require "json"
 require "base64"
 require "../../store"
+require "../../host_overrides"
 require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
@@ -96,12 +97,15 @@ module Gori
       private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
                                      verify_upstream : Bool, sni : String? = nil,
                                      timeout : Time::Span? = nil) : Repeater::Result
+        # Honor the project's host overrides on the direct-dial path (parity with the
+        # live proxy). nil/empty is behaviorally identical to no override.
+        ov = HostOverrides.load(store)
         if http2
           Repeater::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout)
+            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout, overrides: ov)
         else
           Repeater::Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout)
+            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout, overrides: ov)
         end
       end
 
@@ -322,7 +326,8 @@ module Gori
         request = Env.expand_wire(repeater_request_text)
         sni = repeater.sni.try { |value| Env.expand(value) }
         result = Repeater::WsEngine.send(request, out_messages,
-          scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle)
+          scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle,
+          overrides: HostOverrides.load(store))
 
         store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
           result.error, result.duration_us)

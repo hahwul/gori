@@ -33,14 +33,15 @@ module Gori
 
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
-                    timeout : Time::Span? = nil) : Result
+                    timeout : Time::Span? = nil,
+                    overrides : Gori::HostOverrides? = nil) : Result
         started = Time.instant
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
         # whole-request deadline would need a timer fiber racing a socket close.
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
-        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
+        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
         return error(connect_error(scheme, host, port, verify_upstream), started) unless upstream
 
         begin
@@ -63,12 +64,13 @@ module Gori
       # "skipped" Result rather than dialing again (a group is ONE connection by definition).
       def self.send_pipeline(requests : Array(Bytes), *, scheme : String, host : String, port : Int32,
                              verify_upstream : Bool, sni : String? = nil,
-                             timeout : Time::Span? = nil) : Array(Result)
+                             timeout : Time::Span? = nil,
+                             overrides : Gori::HostOverrides? = nil) : Array(Result)
         results = [] of Result
         return results if requests.empty?
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
-        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
+        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
         unless upstream
           msg = connect_error(scheme, host, port, verify_upstream)
           now = Time.instant
