@@ -779,3 +779,90 @@ describe "gori run fuzz/mine/sequence — project host overrides (R2-1)" do
     end
   end
 end
+
+# `compare_lines` is private CLI glue (mirrors the TUI Comparer's lines_for) —
+# reopen the module for a bare-call wrapper, the same trick the other whitebox specs use.
+module Gori::CLI::Run
+  def self.compare_lines_for_spec(d : Gori::Store::FlowDetail, pane : Symbol) : Array(String)
+    compare_lines(d, pane)
+  end
+end
+
+describe "gori run compare" do
+  it "builds request lines byte-faithful (no decoding) and response lines decoded" do
+    d = flow_detail("https", "a.test", 443, "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n",
+      response_head: "HTTP/1.1 200 OK\r\n\r\n", response_body: "hello")
+    req_lines = Gori::CLI::Run.compare_lines_for_spec(d, :request)
+    req_lines.first.should eq("GET / HTTP/1.1")
+    resp_lines = Gori::CLI::Run.compare_lines_for_spec(d, :response)
+    resp_lines.should contain("hello")
+  end
+end
+
+# `ws_out_messages` is private CLI glue (mirrors MCP send_websocket's default-messages
+# fallback) — reopen the module for a bare-call wrapper.
+module Gori::CLI::Run
+  def self.ws_out_messages_for_spec(store : Gori::Store, id : Int64, override : Array(String)) : Array(Gori::Repeater::WsEngine::OutMsg)
+    ws_out_messages(store, id, override)
+  end
+end
+
+describe "gori run repeater send (WebSocket)" do
+  it "uses --message overrides as text frames when given" do
+    with_store do |store|
+      msgs = Gori::CLI::Run.ws_out_messages_for_spec(store, 1_i64, ["ping", "pong"])
+      msgs.map(&.opcode).should eq([1, 1])
+      msgs.map { |m| String.new(m.payload) }.should eq(["ping", "pong"])
+    end
+  end
+
+  it "falls back to the repeater's stored OUT messages when no override is given" do
+    with_store do |store|
+      id = store.insert_repeater("ws://x.test", "GET /ws HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.update_repeater_ws_messages(id, ["hello"])
+      msgs = Gori::CLI::Run.ws_out_messages_for_spec(store, id, [] of String)
+      msgs.size.should eq(1)
+      String.new(msgs[0].payload).should eq("hello")
+    end
+  end
+end
+
+# `intercept_bridge_state` / `intercept_live?` are private CLI glue (mirror MCP's
+# identically-named helpers in src/gori/mcp/tools/intercept.cr) — reopen the module
+# for bare-call wrappers.
+module Gori::CLI::Run
+  def self.intercept_bridge_state_for_spec(store : Gori::Store) : Hash(String, JSON::Any)?
+    intercept_bridge_state(store)
+  end
+
+  def self.intercept_live_for_spec(bridge : Hash(String, JSON::Any)) : Bool
+    intercept_live?(bridge)
+  end
+end
+
+describe "gori run intercept (bridge state)" do
+  it "returns nil when no bridge has ever been published" do
+    with_store do |store|
+      Gori::CLI::Run.intercept_bridge_state_for_spec(store).should be_nil
+    end
+  end
+
+  it "parses a published bridge and reports live for a fresh heartbeat" do
+    with_store do |store|
+      now = Time.utc.to_unix_ms
+      store.set_intercept_bridge(%({"capturing":true,"enabled":true,"direction":"both","filter":"","session_token":"tok","heartbeat_ms":#{now}}))
+      bridge = Gori::CLI::Run.intercept_bridge_state_for_spec(store)
+      bridge.should_not be_nil
+      Gori::CLI::Run.intercept_live_for_spec(bridge.not_nil!).should be_true
+    end
+  end
+
+  it "treats a stale heartbeat as not live" do
+    with_store do |store|
+      stale = Time.utc.to_unix_ms - 60_000
+      store.set_intercept_bridge(%({"capturing":true,"session_token":"tok","heartbeat_ms":#{stale}}))
+      bridge = Gori::CLI::Run.intercept_bridge_state_for_spec(store).not_nil!
+      Gori::CLI::Run.intercept_live_for_spec(bridge).should be_false
+    end
+  end
+end
