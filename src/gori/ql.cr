@@ -75,10 +75,13 @@ module Gori
 
       Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
       A mixed query (host:beta status:>=foo) silently drops only the bad comparison/field terms and
-      applies the rest (a dropped term BROADENS the result). Note the asymmetry with regex: an invalid
-      `~` pattern is a HARD ERROR, not dropped — because a bad regex would otherwise silently match
-      NOTHING (indistinguishable from a genuinely empty result), so it must be fixed or removed. Use
-      strict:true (or ql_explain) to see exactly which terms were dropped before relying on results.
+      applies the rest (a dropped term BROADENS the result). A dropped term is treated as if it were
+      never typed, so inside NOT(...) or OR it can SHIFT what the query matches — e.g.
+      `NOT (host:x AND size:>bogus)` becomes `NOT host:x` (excludes host x), not match-all. Note the
+      further asymmetry with regex: an invalid `~` pattern is a HARD ERROR, not dropped — because a bad
+      regex would otherwise silently match NOTHING (indistinguishable from a genuinely empty result),
+      so it must be fixed or removed. Use strict:true (or ql_explain) to see exactly which terms were
+      dropped before relying on results.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every

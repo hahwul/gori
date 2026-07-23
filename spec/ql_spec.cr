@@ -493,6 +493,36 @@ describe "Gori::Store#search (QL)" do
     end
   end
 
+  describe "dropped-term semantics under NOT/OR (R1-2)" do
+    # A term the backend cannot compile is treated as if it were never typed
+    # ("textual deletion"): the query is re-read with the bad token removed. This is
+    # the ONLY reading under which every SURVIVING term keeps its standalone meaning,
+    # and it is what the QL reference documents. Pinned so a future change is deliberate.
+    it "drops a bad numeric term inside a NOT group and negates the survivor" do
+      dropped = Gori::QL.parse("NOT (host:x AND size:>bogus)")
+      dropped.sql.should eq("(NOT (lower(host) LIKE ? ESCAPE '\\'))")
+      dropped.args.should eq(["%x%"])
+      dropped.sql.should eq(Gori::QL.parse("NOT host:x").sql) # bad token vanished entirely
+      # analyze still SURFACES the drop even when nested under NOT
+      Gori::QL.analyze("NOT (host:x AND size:>bogus)").ignored.should eq(["size:>bogus"])
+    end
+
+    it "collapses an OR whose only other term dropped (the OR does nothing)" do
+      Gori::QL.parse("host:x OR size:>bogus").sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+    end
+
+    # The asymmetry that makes this LOOK inconsistent: an INVALID REGEX does NOT drop —
+    # it compiles to a never-match "0" clause that STAYS in the tree, so under NOT it
+    # inverts to match-all. Numeric-bad (dropped) and regex-bad (FALSE clause) genuinely
+    # diverge here; deliberate, because the FALSE clause is what invalid_regex_terms
+    # hard-errors on in the MCP layer.
+    it "keeps an invalid-regex term as a never-match clause inside NOT (does not drop)" do
+      f = Gori::QL.parse("NOT (host:x AND body~[bad)")
+      f.sql.should eq("(NOT ((lower(host) LIKE ? ESCAPE '\\' AND 0)))")
+      f.args.should eq(["%x%"])
+    end
+  end
+
   describe "boolean structure" do
     # Grouping has to change the ANSWER, not just the SQL text: without parens AND
     # binds tighter, so the two queries below are genuinely different predicates.
