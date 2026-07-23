@@ -154,7 +154,9 @@ module Gori
           overrides: HostOverrides.load(store))
         # Defense-in-depth alongside the job-start scope_check above: that check only
         # covers the origin once, not a path mining mutates per-request.
-        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store))
+        # Re-read scope periodically so a mid-run EXCLUDE / Sandbox toggle is honoured —
+        # this Scope is private to the job (nothing else reloads it).
+        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store), reload_every: Fuzz::ScopedBackend::RELOAD_INTERVAL)
         config = Miner::Config.new
         config.locations = mine_locations(h, bytes)
         raise FuzzArgError.new("no applicable locations for this request") if config.locations.empty?
