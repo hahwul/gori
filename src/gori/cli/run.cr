@@ -206,6 +206,22 @@ module Gori
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
       end
 
+      # Project host overrides for a CLI direct-dial command (fuzz/mine/sequence), loaded when
+      # a project is in play — a flow-id reads from one, or --project/--db names one. Returns
+      # nil for --request/stdin with no project (nothing to load; global Settings overrides
+      # still apply inside Upstream.dial). Snapshots into memory, so the store can close.
+      private def self.cli_host_overrides(project_name : String?, db_path : String?, flow_id : Int64?) : Gori::HostOverrides?
+        return nil unless flow_id || project_name || db_path
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          Gori::HostOverrides.load(store)
+        ensure
+          store.close
+        end
+      rescue
+        nil
+      end
+
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
       # aborts them as unknown options before the positional-query join ever runs. Pull
       # them out first so they join the query like any other positional term. A single-

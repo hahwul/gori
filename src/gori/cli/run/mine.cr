@@ -83,7 +83,8 @@ module Gori
           abort "gori run mine: wordlist error: #{ex.message}"
         end
         sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
-          http2: http2, verify: !insecure, sni: sni, timeout: timeout)
+          http2: http2, verify: !insecure, sni: sni, timeout: timeout,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
         engine = Miner::Engine.new(bytes, http2, names, sender, config)
         run_mine_stream(engine, scheme, host, port, config, format)
       end

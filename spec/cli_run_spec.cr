@@ -751,3 +751,31 @@ describe "gori run import" do
     skipped.should eq("imported 5 flows from URLs · u.txt (2 entries skipped)")
   end
 end
+
+# cli_host_overrides is private CLI glue (R2-1 parity for the fuzz/mine/sequence senders);
+# reopen the module for a bare-call wrapper (same whitebox trick as the others above).
+module Gori::CLI::Run
+  def self.cli_host_overrides_for_spec(pn : String?, db : String?, fid : Int64?) : Gori::HostOverrides?
+    cli_host_overrides(pn, db, fid)
+  end
+end
+
+describe "gori run fuzz/mine/sequence — project host overrides (R2-1)" do
+  it "loads a project's host overrides when --db/--project/flow-id is in play, nil otherwise" do
+    path = File.tempname("gori-cliov", ".db")
+    store = Gori::Store.open(path)
+    closed = false
+    begin
+      Gori::HostOverrides.load(store).add("api.invalid", "127.0.0.1")
+      store.close; closed = true # Store#close is NOT idempotent (a 2nd @done.receive blocks forever)
+      ov = Gori::CLI::Run.cli_host_overrides_for_spec(nil, path, nil)
+      ov.should_not be_nil
+      ov.not_nil!.connect_ip("api.invalid").should eq("127.0.0.1")
+      # --request/stdin with no project in play → nil (global Settings overrides still apply)
+      Gori::CLI::Run.cli_host_overrides_for_spec(nil, nil, nil).should be_nil
+    ensure
+      store.close unless closed
+      File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")
+    end
+  end
+end

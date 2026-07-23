@@ -89,7 +89,8 @@ module Gori
         config.retries = retries
         config.max_requests = max_requests
         sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
-          http2: http2, verify: !insecure, sni: sni, timeout: timeout)
+          http2: http2, verify: !insecure, sni: sni, timeout: timeout,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
         engine = Sequencer::Engine.new(bytes, http2, sender, config)
         run_sequence_stream(engine, scheme, host, port, token_loc, count, format)
       end
