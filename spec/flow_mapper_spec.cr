@@ -22,6 +22,24 @@ describe Gori::FlowMapper do
     cap.tls_version.should eq("TLSv1.3")
   end
 
+  it "stores the verbatim request-line and blanks the version for a malformed request-line (R1-4)" do
+    # An unencoded space in the target => 5 tokens, so parse_request_head mis-slices
+    # target='/search?q=raw' / version='proxy'. The stored projection must surface neither.
+    raw = "GET /search?q=raw proxy test HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice
+    req = Gori::Proxy::Codec::Http1.parse_request_head(raw)
+    req.malformed?.should be_true
+    req.target.should eq("/search?q=raw") # mis-sliced live field (left untouched)
+    req.version.should eq("proxy")
+
+    cap = Gori::FlowMapper.request(req,
+      scheme: "http", host: "acme.test", port: 80, created_at: 1_i64)
+
+    cap.method.should eq("GET")                                   # first token still correct
+    cap.target.should eq("GET /search?q=raw proxy test HTTP/1.1") # verbatim request-line
+    cap.http_version.should eq("")                                # not the garbage 'proxy'
+    cap.head.should eq(raw)                                       # truth byte-exact (P7)
+  end
+
   it "projects a RawResponse into a CapturedResponse with content_type" do
     raw = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\n\r\n".to_slice
     resp = Gori::Proxy::Codec::Http1.parse_response_head(raw)

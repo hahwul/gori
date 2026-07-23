@@ -169,6 +169,35 @@ describe Gori::Proxy::Server do
     String.new(resp.body.not_nil!).should eq("Hello!")
   end
 
+  it "captures a malformed request-line without corrupting target/version (R1-4)" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    # Unencoded space in the target => 5-token request-line (malformed).
+    client << "GET /search?q=raw proxy test HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    # Forwarded byte-exact (P7): host came from the Host header, not the mis-sliced target.
+    seen.receive.should eq("GET /search?q=raw proxy test HTTP/1.1")
+
+    sink.requests.size.should eq(1)
+    req = sink.requests.first
+    req.method.should eq("GET")
+    req.target.should eq("GET /search?q=raw proxy test HTTP/1.1") # verbatim, not truncated
+    req.http_version.should eq("")                                # not the garbage 'proxy' token
+  end
+
   it "start(fallback: true) binds a different port when the requested one is taken" do
     blocker = TCPServer.new("127.0.0.1", 0)
     taken = blocker.local_address.port
