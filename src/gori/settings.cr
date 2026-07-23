@@ -120,9 +120,17 @@ module Gori
       # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder sessions.
       # Stage to a sibling temp then rename (atomic on POSIX), mirroring cert_authority.
       tmp = "#{path}.tmp"
-      File.write(tmp, merge_with_disk(serialize))
+      # `mine` = THIS process's serialization of its OWN in-memory state. Base the next
+      # merge on it, NOT on a re-read of the file we just wrote: that file also carries a
+      # concurrent peer's values for sections WE didn't change (we merged them through). If
+      # the base held a peer's value for an unchanged section, our next save would see
+      # current != base for it and wrongly "win", silently clobbering the peer's edit back.
+      # Basing on `mine` keeps "did I change this section?" honest, so an unchanged section
+      # always yields to disk on every subsequent save.
+      mine = serialize
+      File.write(tmp, merge_with_disk(mine))
       File.rename(tmp, path)
-      @@loaded_raw = File.read(path) # our write is now the base for the next merge
+      @@loaded_raw = mine
       true
     rescue
       File.delete?("#{path}.tmp") rescue nil

@@ -401,6 +401,46 @@ describe Gori::Settings do
     end
   end
 
+  it "does not clobber a concurrent writer's change on a SECOND save with no intervening load" do
+    dir = File.tempname("gori-settings-merge2")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.theme = "goriday"
+      Gori::Settings.bind_port = 8070
+      Gori::Settings.save
+      Gori::Settings.load # base = {theme goriday, port 8070}
+
+      # A peer changes an UNRELATED field on disk; this process never learns the new port.
+      disk = JSON.parse(File.read(Gori::Settings.path)).as_h
+      net = disk["network"].as_h
+      net["bind_port"] = JSON::Any.new(4321_i64)
+      disk["network"] = JSON::Any.new(net)
+      File.write(Gori::Settings.path, disk.to_json)
+
+      # Two consecutive saves of a DIFFERENT field with NO load in between (a long-running
+      # process editing its own settings, e.g. TUI toggles + a background update-check).
+      # The peer's port must survive BOTH — the second save previously reverted it because
+      # the merge base had been resynced to disk (which held the peer's port for a section
+      # this process never changed), so save #2 saw current != base and wrongly "won".
+      Gori::Settings.theme = "monokai"
+      Gori::Settings.save
+      Gori::Settings.theme = "dracula"
+      Gori::Settings.save
+
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("dracula")    # my latest change won
+      Gori::Settings.bind_port.should eq(4321_i32) # peer's change preserved across both saves
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   it "keeps defaults on a missing/garbled settings file" do
     dir = File.tempname("gori-settings-empty")
     Dir.mkdir_p(dir)
