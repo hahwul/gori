@@ -138,6 +138,13 @@ describe Gori::QL do
     Gori::QL.parse("dur:<=1.5s").args.should eq([1_500_000_i64]) # fractional seconds
   end
 
+  it "parses the dur: ms/s suffix case-insensitively (like size:'s kb/mb)" do
+    Gori::QL.parse("dur:>2S").sql.should eq("(duration_us > ?)") # not silently dropped
+    Gori::QL.parse("dur:>2S").args.should eq([2_000_000_i64])
+    Gori::QL.parse("dur:>=500MS").args.should eq([500_000_i64])
+    Gori::QL.parse("dur:<1.5S").args.should eq([1_500_000_i64])
+  end
+
   it "drops a size:/dur: term whose magnitude is not numeric (match-all EMPTY)" do
     Gori::QL.parse("size:big").sql.should eq("1")
     Gori::QL.parse("dur:>fast").sql.should eq("1")
@@ -483,6 +490,36 @@ describe "Gori::Store#search (QL)" do
 
     it "echoes a term exactly as typed, quotes and all" do
       Gori::QL.analyze(%(-host:"my host")).applied.should eq([%(-host:"my host")])
+    end
+  end
+
+  describe "dropped-term semantics under NOT/OR (R1-2)" do
+    # A term the backend cannot compile is treated as if it were never typed
+    # ("textual deletion"): the query is re-read with the bad token removed. This is
+    # the ONLY reading under which every SURVIVING term keeps its standalone meaning,
+    # and it is what the QL reference documents. Pinned so a future change is deliberate.
+    it "drops a bad numeric term inside a NOT group and negates the survivor" do
+      dropped = Gori::QL.parse("NOT (host:x AND size:>bogus)")
+      dropped.sql.should eq("(NOT (lower(host) LIKE ? ESCAPE '\\'))")
+      dropped.args.should eq(["%x%"])
+      dropped.sql.should eq(Gori::QL.parse("NOT host:x").sql) # bad token vanished entirely
+      # analyze still SURFACES the drop even when nested under NOT
+      Gori::QL.analyze("NOT (host:x AND size:>bogus)").ignored.should eq(["size:>bogus"])
+    end
+
+    it "collapses an OR whose only other term dropped (the OR does nothing)" do
+      Gori::QL.parse("host:x OR size:>bogus").sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+    end
+
+    # The asymmetry that makes this LOOK inconsistent: an INVALID REGEX does NOT drop —
+    # it compiles to a never-match "0" clause that STAYS in the tree, so under NOT it
+    # inverts to match-all. Numeric-bad (dropped) and regex-bad (FALSE clause) genuinely
+    # diverge here; deliberate, because the FALSE clause is what invalid_regex_terms
+    # hard-errors on in the MCP layer.
+    it "keeps an invalid-regex term as a never-match clause inside NOT (does not drop)" do
+      f = Gori::QL.parse("NOT (host:x AND body~[bad)")
+      f.sql.should eq("(NOT ((lower(host) LIKE ? ESCAPE '\\' AND 0)))")
+      f.args.should eq(["%x%"])
     end
   end
 

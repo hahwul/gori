@@ -66,16 +66,18 @@ module Gori
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
           b << "Host: " << host << "\r\n"
-          # One pass, allocation-free case-insensitive compares: skip the Host line and note
-          # whether a Content-Length is already present (was a `.downcase` per header + a
-          # second `headers.any?` scan — hundreds of throwaway Strings on a large HAR).
-          has_cl = false
+          # One pass, allocation-free case-insensitive compares. Skip BOTH the Host line and any
+          # incoming Content-Length: the stored head must agree with the body we actually build
+          # and store, but a HAR postData.params entry (no `text`) rebuilds a fresh urlencoded
+          # body whose length differs from the original request's Content-Length. Keeping that
+          # header verbatim left the stored request advertising the wrong length; re-emit one
+          # correct Content-Length below from the true (pre-cap) body size.
           headers.each do |k, v|
-            has_cl = true if !has_cl && k.compare("content-length", case_insensitive: true) == 0
             next if k.compare("host", case_insensitive: true) == 0
+            next if k.compare("content-length", case_insensitive: true) == 0
             b << k << ": " << v << "\r\n"
           end
-          b << "Content-Length: " << body.size << "\r\n" if body && !has_cl
+          b << "Content-Length: " << body.size << "\r\n" if body
           b << "\r\n"
         end.to_slice
       end

@@ -174,6 +174,34 @@ describe Gori::Update do
     end
   end
 
+  describe ".parse_sha256_digest" do
+    it "extracts lowercase hex from a sha256: digest (case-insensitive prefix + hex)" do
+      Gori::Update.parse_sha256_digest("sha256:#{"a" * 64}").should eq("a" * 64)
+      Gori::Update.parse_sha256_digest("SHA256:#{"A" * 64}").should eq("a" * 64) # downcased
+    end
+
+    it "returns nil for absent / unsupported / malformed digests" do
+      Gori::Update.parse_sha256_digest(nil).should be_nil
+      Gori::Update.parse_sha256_digest("sha512:#{"a" * 128}").should be_nil # wrong algo
+      Gori::Update.parse_sha256_digest("sha256:xyz").should be_nil          # not hex
+      Gori::Update.parse_sha256_digest("sha256:#{"a" * 63}").should be_nil  # wrong length
+    end
+  end
+
+  describe ".file_sha256" do
+    it "streams the lowercase hex sha256 of a file (known \"abc\" vector)" do
+      dir = File.tempname("gori-sha-")
+      Dir.mkdir_p(dir)
+      begin
+        f = File.join(dir, "x")
+        File.write(f, "abc")
+        Gori::Update.file_sha256(f).should eq("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   describe "release JSON resolution" do
     full_release = <<-JSON
       {
@@ -222,6 +250,18 @@ describe Gori::Update do
       rel.tag_name.should eq("v0.17.0")
       rel.version.should eq("0.17.0")
       rel.assets.size.should eq(4)
+    end
+
+    it "captures an asset digest when present and leaves it nil when absent" do
+      json = <<-JSON
+        {"tag_name":"v1.0.0","assets":[
+          {"name":"a","browser_download_url":"http://x/a","size":1,"digest":"sha256:#{"b" * 64}"},
+          {"name":"b","browser_download_url":"http://x/b","size":2}
+        ]}
+        JSON
+      rel = Gori::Update.parse_release(json)
+      rel.assets[0].digest.should eq("sha256:#{"b" * 64}")
+      rel.assets[1].digest.should be_nil
     end
 
     it "selects the platform asset URL from fixture JSON" do
@@ -575,6 +615,72 @@ describe Gori::Update do
           end
 
           File.read(target).should eq(original)
+        end
+      ensure
+        FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+
+    it "verifies and installs when the release advertises a correct sha256 digest (R2-10)" do
+      payload = "#!/bin/sh\necho mock-verified\n"
+      root = File.tempname("gori-sha-ok-")
+      Dir.mkdir_p(root)
+      begin
+        want = Gori::Update.asset_name("99.0.0", Gori::Update.current_os, Gori::Update.current_arch)
+        body_bytes = if Gori::Update.asset_is_archive?(want)
+                       stage = File.join(root, "stage")
+                       Dir.mkdir_p(File.join(stage, "lib"))
+                       File.write(File.join(stage, "gori"), payload)
+                       File.chmod(File.join(stage, "gori"), 0o755)
+                       File.write(File.join(stage, "lib", "libexample.dylib"), "dylib")
+                       archive = File.join(root, "asset.tar.gz")
+                       Process.run("tar", ["czf", archive, "-C", stage, "gori", "lib"],
+                         output: Process::Redirect::Close, error: Process::Redirect::Close)
+                       File.read(archive).to_slice
+                     else
+                       payload.to_slice
+                     end
+        # provide_digest: the mock computes sha256 over the served body, so it matches.
+        with_mock_release_server(tag: "v99.0.0", body: body_bytes, asset_names: [want], provide_digest: true) do |srv|
+          target_dir = File.join(root, "opt", "gori")
+          Dir.mkdir_p(target_dir)
+          target = File.join(target_dir, "gori")
+          File.write(target, "#!/bin/sh\necho old\n")
+          File.chmod(target, 0o755)
+
+          io = IO::Memory.new
+          Gori::Update.update_binary(target, io, release_json: srv.release_json)
+          io.to_s.should contain("Verifying sha256 checksum")
+          io.to_s.should contain("Installed v99.0.0")
+          File.read(target).should contain("mock-verified")
+        end
+      ensure
+        FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+
+    it "refuses to install on a sha256 checksum mismatch and leaves the target untouched (R2-10)" do
+      # A well-formed download whose advertised digest does NOT match the body — the
+      # CDN/transit-tampering (or wrong-asset) case the digest check exists to catch.
+      payload = "z" * 4096
+      root = File.tempname("gori-sha-bad-")
+      Dir.mkdir_p(root)
+      begin
+        want = Gori::Update.asset_name("99.0.0", Gori::Update.current_os, Gori::Update.current_arch)
+        with_mock_release_server(tag: "v99.0.0", body: payload, asset_names: [want],
+          provide_digest: true, digest_override: "sha256:#{"0" * 64}") do |srv|
+          target_dir = File.join(root, "opt", "gori")
+          Dir.mkdir_p(target_dir)
+          target = File.join(target_dir, "gori")
+          original = "#!/bin/sh\necho keep-me\n"
+          File.write(target, original)
+          File.chmod(target, 0o755)
+
+          io = IO::Memory.new
+          expect_raises(Gori::Error, /checksum mismatch/) do
+            Gori::Update.update_binary(target, io, release_json: srv.release_json)
+          end
+          File.read(target).should eq(original) # never replaced
         end
       ensure
         FileUtils.rm_rf(root) if File.exists?(root)

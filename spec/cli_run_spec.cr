@@ -671,3 +671,111 @@ describe "gori run probe --active" do
     Gori::CLI::Run::PROBE_CATEGORIES.should contain(Gori::Probe::Category::ACTIVE)
   end
 end
+
+# `build_repeater_send` is private CLI glue (mirrors MCP send_request(repeater_id:)) —
+# reopen the module for a bare-call wrapper, the same trick the other whitebox specs use.
+module Gori::CLI::Run
+  def self.build_repeater_send_for_spec(rec : Gori::Store::RepeaterRecord)
+    build_repeater_send(rec)
+  end
+end
+
+describe "gori run repeater send (session replay resolution)" do
+  it "resyncs Content-Length to the body when the session's auto_content_length is ON" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
+      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
+      false, true, nil, 0) # http2=false, auto_content_length=true
+    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
+    String.new(s.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello")
+    s.scheme.should eq("https")
+    s.host.should eq("api.test")
+    s.port.should eq(443)
+    s.http2.should be_false
+  end
+
+  it "preserves a hand-set Content-Length when auto_content_length is OFF (no unconditional resync)" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
+      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
+      false, false, nil, 0) # auto_content_length=false
+    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
+    String.new(s.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello")
+  end
+
+  it "carries the session's http2 flag, non-default port, and env-expanded SNI" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://h.test:8443",
+      "GET / HTTP/2\r\n\r\n".to_slice, true, true, nil, 0, sni: "front.test")
+    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
+    s.http2.should be_true
+    s.port.should eq(8443)
+    s.sni.should eq("front.test")
+  end
+end
+
+# `import_source` / `import_result_*` are private CLI glue; reopen the module to expose
+# thin bare-call wrappers (same whitebox trick as the other *_for_spec wrappers above).
+# The abort paths (zero / two+ sources) call `exit`, so they can't be exercised in-process.
+module Gori::CLI::Run
+  def self.import_source_for_spec(har : String?, oas : String?, urls : String?) : {Symbol, String}
+    import_source(har, oas, urls)
+  end
+
+  def self.import_result_json_for_spec(kind : Symbol, path : String, result : Import::Result) : String
+    import_result_json(kind, path, result)
+  end
+
+  def self.import_result_text_for_spec(kind : Symbol, path : String, result : Import::Result) : String
+    import_result_text(kind, path, result)
+  end
+end
+
+describe "gori run import" do
+  it "import_source maps each source flag to its {kind, path}" do
+    Gori::CLI::Run.import_source_for_spec("a.har", nil, nil).should eq({:har, "a.har"})
+    Gori::CLI::Run.import_source_for_spec(nil, "api.yaml", nil).should eq({:oas, "api.yaml"})
+    Gori::CLI::Run.import_source_for_spec(nil, nil, "urls.txt").should eq({:urls, "urls.txt"})
+  end
+
+  it "import_result_json carries kind, path, count, and skipped" do
+    result = Gori::Import::Result.new(count: 12, skipped: 3)
+    json = JSON.parse(Gori::CLI::Run.import_result_json_for_spec(:har, "dump.har", result))
+    json["kind"].as_s.should eq("har")
+    json["path"].as_s.should eq("dump.har")
+    json["count"].as_i.should eq(12)
+    json["skipped"].as_i.should eq(3)
+  end
+
+  it "import_result_text mirrors the TUI toast wording, with a skipped clause only when > 0" do
+    clean = Gori::CLI::Run.import_result_text_for_spec(:oas, "api.json", Gori::Import::Result.new(count: 1))
+    clean.should eq("imported 1 flow from OpenAPI · api.json")
+    skipped = Gori::CLI::Run.import_result_text_for_spec(:urls, "u.txt", Gori::Import::Result.new(count: 5, skipped: 2))
+    skipped.should eq("imported 5 flows from URLs · u.txt (2 entries skipped)")
+  end
+end
+
+# cli_host_overrides is private CLI glue (R2-1 parity for the fuzz/mine/sequence senders);
+# reopen the module for a bare-call wrapper (same whitebox trick as the others above).
+module Gori::CLI::Run
+  def self.cli_host_overrides_for_spec(pn : String?, db : String?, fid : Int64?) : Gori::HostOverrides?
+    cli_host_overrides(pn, db, fid)
+  end
+end
+
+describe "gori run fuzz/mine/sequence — project host overrides (R2-1)" do
+  it "loads a project's host overrides when --db/--project/flow-id is in play, nil otherwise" do
+    path = File.tempname("gori-cliov", ".db")
+    store = Gori::Store.open(path)
+    closed = false
+    begin
+      Gori::HostOverrides.load(store).add("api.invalid", "127.0.0.1")
+      store.close; closed = true # Store#close is NOT idempotent (a 2nd @done.receive blocks forever)
+      ov = Gori::CLI::Run.cli_host_overrides_for_spec(nil, path, nil)
+      ov.should_not be_nil
+      ov.not_nil!.connect_ip("api.invalid").should eq("127.0.0.1")
+      # --request/stdin with no project in play → nil (global Settings overrides still apply)
+      Gori::CLI::Run.cli_host_overrides_for_spec(nil, nil, nil).should be_nil
+    ensure
+      store.close unless closed
+      File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")
+    end
+  end
+end

@@ -788,6 +788,25 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_encode signs a payload-only request (no token/header) instead of erroring" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"payload":"{\\"user\\":\\"admin\\"}","secret":"test"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"]?.try(&.as_bool).should_not be_true # was a misleading "invalid header JSON"
+        token = tool_payload(resp)["token"].as_s
+        header, body, sig = token.split('.')
+        # a well-formed, verifiable token was produced from the defaulted ({}) header
+        Gori::Jwt.sign("#{header}.#{body}", "HS256", "test").should eq(sig)
+      end
+    end
+
+    it "jwt_encode still rejects a call with no token, header, or payload" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"secret":"test"}}})
+        drive(store, call)[0]["result"]["isError"].as_bool.should be_true
+      end
+    end
+
     it "jwt_attacks lists none/weak-secret/header-inject payloads" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{jwt}"}}})
@@ -1120,6 +1139,28 @@ describe Gori::MCP::Server do
         detail.row.target.should eq("/audit")
         detail.row.status.should eq(200)
         String.new(detail.response_body.not_nil!).should eq("hello")
+      end
+    end
+
+    it "applies request-side Match & Replace rules only when apply_rules:true (R2-2)" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        Gori::Rules.load(store).add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "X-Rewritten", "gori-rewritten", op: Gori::Store::RuleOp::SetHeader)
+
+        # apply_rules:true → the rule rewrites the OUTGOING request (and the recorded flow).
+        on = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","apply_rules":true,"allow_unscoped":true}}})
+        payload = tool_payload(drive(store, on, verify_upstream: false)[0])
+        payload["match_replace_applied"].as_bool.should be_true
+        detail = store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!
+        String.new(detail.request_head).should contain("gori-rewritten")
+
+        # default (no apply_rules) → byte-exact, rule NOT applied, flag absent.
+        off = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","allow_unscoped":true}}})
+        p2 = tool_payload(drive(store, off, verify_upstream: false)[0])
+        p2["match_replace_applied"]?.should be_nil
+        d2 = store.get_flow(p2["recorded_flow_id"].as_i64).not_nil!
+        String.new(d2.request_head).should_not contain("gori-rewritten")
       end
     end
 
@@ -1956,5 +1997,49 @@ describe "Gori::MCP::Tools unbound mode" do
     names.should contain("create_project")
     names.should contain("switch_project")
     names.should contain("list_history")
+  end
+end
+
+describe "MCP env reload (R2-3)" do
+  it "reloads project env vars from the store before an active tool call" do
+    with_store do |store|
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+        Gori::Env.serialize_vars([{"APIHOST", "old.test"}]))
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      begin
+        # initialize -> Env.load_project seeded the old value.
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}])
+
+        # Simulate `gori run project env set APIHOST new.test` from the CLI while the
+        # MCP server keeps running (writes straight to the shared DB).
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"APIHOST", "new.test"}]))
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}]) # still stale in-process
+
+        # Any active/outbound tool reloads first. This fuzz_start fails arg validation
+        # (no template/url) and never touches the network, but the reload in `call` runs
+        # BEFORE dispatch regardless — deterministic.
+        tools.call("fuzz_start", JSON.parse("{}"))
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "new.test"}])
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
+  end
+
+  it "does not reload for a read-only tool" do
+    with_store do |store|
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+        Gori::Env.serialize_vars([{"APIHOST", "old.test"}]))
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      begin
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"APIHOST", "new.test"}]))
+        tools.call("list_scope", JSON.parse("{}"))
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}]) # read tool: no churn
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
   end
 end

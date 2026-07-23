@@ -13,14 +13,23 @@ module Gori
                      body : Bytes? = nil, sni : String? = nil,
                      alpn : String? = nil, tls_version : String? = nil,
                      body_truncated : Bool = false, body_size : Int64? = nil) : Store::CapturedRequest
+      # A malformed request-line (unencoded space ⇒ >3 tokens, or the h2 preface) makes
+      # split(' ') mis-slice target/version — target becomes a truncated fragment and
+      # version a garbage token. RawRequest keeps those for the live forwarding/keep-alive
+      # logic, but they must NOT reach storage: History would render a
+      # deceptively-plausible-but-wrong URL and the garbage token would pollute the
+      # http_version column. Store the verbatim request-line as the target (honestly broken
+      # and greppable) and blank the version. The raw head bytes remain the byte-exact truth
+      # (P7) regardless.
+      malformed = req.malformed?
       Store::CapturedRequest.new(
         created_at: created_at,
         scheme: scheme,
         host: host,
         port: port,
         method: req.method,
-        target: req.target,
-        http_version: req.version,
+        target: malformed ? req.request_line : req.target,
+        http_version: malformed ? "" : req.version,
         head: req.raw_head,
         body: body,
         sni: sni,

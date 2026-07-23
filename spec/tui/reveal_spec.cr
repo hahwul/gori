@@ -17,6 +17,16 @@ describe Gori::Tui::Reveal do
     revealed("plain").should eq("plain")
   end
 
+  it "shows each control byte as its own control picture, distinct from a space" do
+    # A control byte must not look like a space ('·') or like another control byte.
+    revealed("a\eb").should eq("a␛b")     # ESC 0x1B → U+241B
+    revealed("a\ab").should eq("a␇b")     # BEL 0x07 → U+2407
+    revealed("a\u{0}b").should eq("a␀b")  # NUL 0x00 → U+2400
+    revealed("a\u{7f}b").should eq("a␡b") # DEL 0x7F → U+2421
+    # the injection-inspection case: a real space and an ESC render differently
+    revealed(" \e").should_not eq("··")
+  end
+
   it "handles adjacent whitespace without crashing (String::Builder regression)" do
     revealed("a   b  ").should eq("a···b··") # 3 then 2 spaces, no trailing LF
     revealed("   ").should eq("···")         # all whitespace

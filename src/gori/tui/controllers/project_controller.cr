@@ -433,7 +433,7 @@ module Gori::Tui
         @host.status("scope: empty pattern")
         false
       when :invalid
-        @host.status("scope: invalid regex")
+        @host.status("scope: #{Scope.validation_error(match_type, pattern.strip) || "invalid pattern"}")
         false
       when :dup
         @host.status("scope: duplicate rule")

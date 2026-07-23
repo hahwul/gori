@@ -676,3 +676,67 @@ describe Gori::CLI::Output do
     txt.should contain("403")
   end
 end
+
+describe F::ScopedBackend do
+  # A mid-run EXCLUDE written to the store must take effect via the throttled reload,
+  # not stay a start-time snapshot (R2-9). reload_every: 0 → re-read on every send, so
+  # the change is observed deterministically without a wall-clock wait.
+  it "honours a mid-run EXCLUDE via a throttled reload" do
+    path = File.tempname("gori-fuzz-scope", ".db")
+    store = Gori::Store.open(path)
+    begin
+      scope = Gori::Scope.load(store)
+      calls = 0
+      inner = FakeBackend.new(F::Origin.new("http", "target.test", 80)) do |_b|
+        calls += 1
+        ok_result(200, "ok")
+      end
+      backend = F::ScopedBackend.new(inner, scope, reload_every: Time::Span.zero)
+      req = "GET / HTTP/1.1\r\nHost: target.test\r\n\r\n".to_slice
+
+      # No rules yet → allowed, reaches the inner backend.
+      backend.send(req).error.should be_nil
+      calls.should eq(1)
+      backend.blocked.should eq(0_i64)
+
+      # Operator carves the host out mid-run (writes to the SAME db).
+      store.add_scope_rule("exclude", "host", "target.test")
+
+      # Next send reloads and now blocks WITHOUT touching the inner backend.
+      backend.send(req).error.should eq(F::ScopedBackend::SCOPE_ERROR)
+      calls.should eq(1)
+      backend.blocked.should eq(1_i64)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "keeps a start-time snapshot when no reload interval is given" do
+    path = File.tempname("gori-fuzz-scope-snap", ".db")
+    store = Gori::Store.open(path)
+    begin
+      scope = Gori::Scope.load(store)
+      calls = 0
+      inner = FakeBackend.new(F::Origin.new("http", "target.test", 80)) do |_b|
+        calls += 1
+        ok_result(200, "ok")
+      end
+      backend = F::ScopedBackend.new(inner, scope) # reload_every defaults to nil
+      req = "GET / HTTP/1.1\r\nHost: target.test\r\n\r\n".to_slice
+
+      backend.send(req).error.should be_nil
+      store.add_scope_rule("exclude", "host", "target.test")
+      backend.send(req).error.should be_nil # snapshot: exclude not seen
+      calls.should eq(2)
+      backend.blocked.should eq(0_i64)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end

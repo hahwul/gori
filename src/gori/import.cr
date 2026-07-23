@@ -45,7 +45,16 @@ module Gori
                when :oas  then from_oas(expanded)
                else            raise Gori::Error.new("unknown import kind: #{kind}")
                end
-      raise Gori::Error.new("no flows found in #{expanded}") if parsed.flows.empty?
+      if parsed.flows.empty?
+        # Preserve WHY nothing landed: if every entry was skipped as malformed, say so
+        # (with the count) instead of the generic "no flows found", which hid the real
+        # reason and threw away the skipped tally.
+        if parsed.skipped > 0
+          noun = parsed.skipped == 1 ? "entry was" : "entries were"
+          raise Gori::Error.new("no flows imported from #{expanded} — all #{parsed.skipped} #{noun} skipped as malformed")
+        end
+        raise Gori::Error.new("no flows found in #{expanded}")
+      end
       Result.new(insert_all(store, parsed.flows), parsed.skipped)
     end
   end

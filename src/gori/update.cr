@@ -3,6 +3,7 @@ require "json"
 require "uri"
 require "file_utils"
 require "random/secure"
+require "digest/sha256"
 
 module Gori
   # Channel-aware self-update for `gori update`.
@@ -405,8 +406,12 @@ module Gori
       getter name : String
       getter browser_download_url : String
       getter size : Int64
+      # GitHub asset digest as advertised by the releases API, e.g.
+      # "sha256:<hex>" (nil on older API responses / GHE / mock fixtures).
+      getter digest : String?
 
-      def initialize(@name : String, @browser_download_url : String, @size : Int64 = 0_i64)
+      def initialize(@name : String, @browser_download_url : String,
+                     @size : Int64 = 0_i64, @digest : String? = nil)
       end
     end
 
@@ -437,7 +442,8 @@ module Gori
           name = item["name"]?.try(&.as_s?) || next
           url = item["browser_download_url"]?.try(&.as_s?) || next
           size = item["size"]?.try(&.as_i64?) || 0_i64
-          assets << Asset.new(name, url, size)
+          digest = item["digest"]?.try(&.as_s?)
+          assets << Asset.new(name, url, size, digest)
         end
       end
       Release.new(tag, assets)
@@ -586,6 +592,56 @@ module Gori
         progress_io.flush
       end
       downloaded
+    end
+
+    # ---------------------------------------------------------------------------
+    # Checksum verification (integrity, NOT authenticity — see NOTE)
+    # ---------------------------------------------------------------------------
+    #
+    # NOTE: the digest verified here comes from the SAME release JSON that names
+    # the asset. It defeats CDN/transfer tampering and wrong-asset installs (the
+    # JSON is fetched over TLS from api.github.com; assets are redirected to a
+    # separate CDN host), but it does NOT defeat an attacker who controls the
+    # release itself — they would publish a fake tarball AND a matching digest.
+    # True authenticity needs a signed checksums file verified against a public
+    # key embedded in this binary (release-side infra; not implemented).
+    HEX_SHA256 = /\A[0-9a-f]{64}\z/
+
+    # Parse a GitHub asset digest ("sha256:<hex>") into a lowercase 64-char hex
+    # string, or nil when absent/unsupported (older API, GHE, non-sha256 algo).
+    def self.parse_sha256_digest(digest : String?) : String?
+      return nil unless digest
+      d = digest.strip.downcase
+      return nil unless d.starts_with?("sha256:")
+      hex = d.lchop("sha256:")
+      HEX_SHA256.matches?(hex) ? hex : nil
+    end
+
+    # Streamed SHA256 of a file as lowercase hex (constant memory).
+    def self.file_sha256(path : String) : String
+      digest = Digest::SHA256.new
+      File.open(path) do |file|
+        buf = Bytes.new(PROGRESS_CHUNK)
+        loop do
+          n = file.read(buf)
+          break if n == 0
+          digest.update(buf[0, n])
+        end
+      end
+      digest.hexfinal
+    end
+
+    # Verify a downloaded file against the expected sha256 hex; raise on mismatch.
+    # No-op when `expected_hex` is nil (release JSON advertised no usable digest)
+    # so behavior is preserved against older APIs — keeps this change non-breaking.
+    def self.verify_sha256!(path : String, expected_hex : String?, asset_name : String) : Nil
+      return unless expected_hex
+      actual = file_sha256(path)
+      return if actual == expected_hex
+      raise Error.new(
+        "checksum mismatch for #{asset_name}: expected sha256 #{expected_hex} " \
+        "but got #{actual} (download corrupted or tampered in transit)"
+      )
     end
 
     # ---------------------------------------------------------------------------
@@ -879,6 +935,10 @@ module Gori
         raise Error.new("downloaded asset is empty: #{asset.name}") unless got > 0
         if asset.size > 0 && got != asset.size
           raise Error.new("downloaded size mismatch for #{asset.name}: expected #{asset.size} bytes, got #{got}")
+        end
+        if expected_sha = parse_sha256_digest(asset.digest)
+          io.puts "Verifying sha256 checksum"
+          verify_sha256!(dest, expected_sha, asset.name)
         end
         io.puts "Downloaded #{format_size(got)} in #{format_duration(started.elapsed)}"
         install_from_download(dest, target_path, asset_is_archive?(asset.name))

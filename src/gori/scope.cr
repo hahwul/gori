@@ -378,8 +378,65 @@ module Gori
 
     # A regex pattern must compile — the SQLite REGEXP callback and the proxy hot path
     # both call `Regex.new` and would otherwise raise. host/string patterns always valid.
+    # nil when (match_type, pattern) is a storable scope rule; otherwise a human-readable
+    # reason. The SINGLE validation chokepoint: Scope#add / #update — and therefore EVERY
+    # write path (the TUI popup via ProjectView#commit_scope_rule, `gori run project scope
+    # add`, the History add-host quick-action) — gate on Scope.valid?, defined below in
+    # terms of this, so a rejection here keeps a dead rule out of the store regardless of
+    # which entry point created it.
+    #   regex — must compile (the SQLite REGEXP callback + the proxy hot path both call
+    #           Regex.new and would otherwise raise).
+    #   host  — must NOT carry a :PORT. A host rule matches the BARE host on any port
+    #           (Rule#host_match? compares the port-less host, and the scope URL built by
+    #           request_url carries no port for origin-form flows), so "127.0.0.1:9091"
+    #           could NEVER match and would sit in the store as a silent dead rule.
+    def self.validation_error(match_type : String, pattern : String) : String?
+      case match_type
+      when "host"
+        if host_pattern_has_port?(pattern)
+          "host rule must not include a port — a host rule already matches every port; " \
+          "use the bare host #{host_without_port(pattern).inspect} (matches any port)"
+        end
+      when "regex"
+        "invalid regex (failed to compile)" unless valid_regex?(pattern)
+      end
+    end
+
+    # A rule is storable ⇔ validation finds no problem. Kept as the boolean the existing
+    # callers use (Scope#add/#update gate, the overlay's Save-button + commit path).
     def self.valid?(match_type : String, pattern : String) : Bool
-      return true unless match_type == "regex"
+      validation_error(match_type, pattern).nil?
+    end
+
+    # True ⇔ a host-type pattern carries an explicit :PORT suffix a host rule can never
+    # match. Recognises "host:8080", "1.2.3.4:8080", "*.acme.test:8080" and bracketed
+    # "[::1]:8080", while NOT flagging a bare IPv6 literal ("::1", "fe80::1") whose colons
+    # form the address. A non-numeric suffix ("host:abc") is intentionally NOT flagged
+    # here (out of the port scope of this check; still a dead rule but not this finding).
+    private def self.host_pattern_has_port?(pattern : String) : Bool
+      if pattern.starts_with?('[') # bracketed IPv6: [::1] or [::1]:port — the port follows ']'
+        return false unless close = pattern.index(']')
+        rest = pattern[(close + 1)..]
+        return rest.starts_with?(':') && rest.size > 1 && rest[1..].each_char.all?(&.ascii_number?)
+      end
+      i = pattern.rindex(':')
+      return false unless i && i < pattern.size - 1 # no ':' or nothing after it
+      return false if pattern[0...i].includes?(':') # unbracketed IPv6 literal → no port
+      pattern[(i + 1)..].each_char.all?(&.ascii_number?)
+    end
+
+    # The pattern with its :PORT stripped, for the rejection message (only called when a
+    # port is present). "[::1]:9091" → "[::1]"; "127.0.0.1:9091" → "127.0.0.1".
+    private def self.host_without_port(pattern : String) : String
+      if pattern.starts_with?('[') && (close = pattern.index(']'))
+        return pattern[0..close]
+      end
+      i = pattern.rindex(':')
+      i ? pattern[0...i] : pattern
+    end
+
+    # Regex compiles? (the historical `valid?` body, now a helper of validation_error.)
+    private def self.valid_regex?(pattern : String) : Bool
       Regex.new(pattern)
       true
     rescue

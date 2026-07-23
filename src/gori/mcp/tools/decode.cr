@@ -85,11 +85,19 @@ module Gori
 
       private def jwt_encode_tool(h) : Result
         token = str(h, "token")
-        header = str(h, "header") || (token ? Jwt.header_json(token.strip) : "")
-        payload = str(h, "payload") || (token ? Jwt.payload_json(token.strip) : "")
-        if header.empty? && payload.empty?
+        raw_header = str(h, "header").try(&.presence)
+        raw_payload = str(h, "payload").try(&.presence)
+        # Need something to build from: a token to derive header+payload, or an explicit
+        # header/payload to sign.
+        if token.nil? && raw_header.nil? && raw_payload.nil?
           return Result.new("provide a 'token' to re-sign, or explicit 'header'/'payload' JSON", is_error: true)
         end
+        # Supplying only 'payload' (or only 'header') must still produce a valid token:
+        # default the missing half to an empty object so Jwt.encode can force `alg` into the
+        # header. The old code defaulted to "" and then blamed "invalid header JSON" for a
+        # header the caller never touched.
+        header = raw_header || (token ? Jwt.header_json(token.strip) : "{}")
+        payload = raw_payload || (token ? Jwt.payload_json(token.strip) : "{}")
         alg = str(h, "alg") || "HS256"
         secret = str(h, "secret") || ""
         begin

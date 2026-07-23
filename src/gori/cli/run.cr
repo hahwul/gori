@@ -29,6 +29,7 @@ require "../probe/passive"
 require "../probe/group"
 require "../notes"
 require "../issues_export"
+require "../import"
 require "./output"
 require "./run/capture"
 require "./run/history"
@@ -42,6 +43,7 @@ require "./run/oast"
 require "./run/probe"
 require "./run/notes"
 require "./run/sitemap"
+require "./run/import"
 require "./run/issues"
 require "./run/jwt"
 require "./run/decoder"
@@ -98,6 +100,7 @@ module Gori
         when "discover" then cmd_discover(rest)
         when "oast"     then cmd_oast(rest)
         when "sitemap"  then cmd_sitemap(rest)
+        when "import"   then cmd_import(rest)
         when "notes"    then cmd_notes(rest)
         when "issues"   then cmd_issues(rest)
         when "jwt"      then cmd_jwt(rest)
@@ -118,13 +121,14 @@ module Gori
         {"capture", "Start the proxy and stream captured flows to STDOUT"},
         {"history (ls)", "List / QL-query captured flows"},
         {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
-        {"repeater", "Re-send a captured flow, or list/create repeater sessions"},
+        {"repeater", "Re-send a captured flow; list/create/send (replay) repeater sessions"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
         {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
         {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
+        {"import", "Import flows from a HAR, URL list, or OpenAPI spec into History"},
         {"probe [QL]", "Passively scan captured flows for issues (zero requests)"},
         {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, or update issues (text, json, markdown)"},
@@ -200,6 +204,22 @@ module Gori
         store
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
+      end
+
+      # Project host overrides for a CLI direct-dial command (fuzz/mine/sequence), loaded when
+      # a project is in play — a flow-id reads from one, or --project/--db names one. Returns
+      # nil for --request/stdin with no project (nothing to load; global Settings overrides
+      # still apply inside Upstream.dial). Snapshots into memory, so the store can close.
+      private def self.cli_host_overrides(project_name : String?, db_path : String?, flow_id : Int64?) : Gori::HostOverrides?
+        return nil unless flow_id || project_name || db_path
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          Gori::HostOverrides.load(store)
+        ensure
+          store.close
+        end
+      rescue
+        nil
       end
 
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser

@@ -77,6 +77,18 @@ module Gori::Proxy::Codec
     def host? : String?
       headers.get?("Host")
     end
+
+    # The raw request-line as it arrived, up to (but excluding) the first CR/LF.
+    # `method`/`target`/`version` come from split(' '), which mis-slices a malformed line
+    # (an unencoded space ⇒ >3 tokens): target is truncated and version is a garbage token.
+    # This returns the honest whole line for the stored projection (FlowMapper), mirroring
+    # the first-line scan in client_conn#rewrite_request_line.
+    def request_line : String
+      nl = raw_head.index(0x0a_u8)
+      line = nl ? raw_head[0, nl] : raw_head
+      line = line[0, line.size - 1] if line.size > 0 && line.unsafe_fetch(line.size - 1) == 0x0d_u8
+      String.new(line)
+    end
   end
 
   # A captured HTTP/1.1 response. Same truth/projection split as RawRequest.

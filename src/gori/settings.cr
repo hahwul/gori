@@ -47,9 +47,20 @@ module Gori
     # Load persisted values into the class properties. Tolerant: a missing or
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
-      raw = File.read(path)
+      @@loaded_raw = nil
+      raw = load_raw
+      return unless raw # no file yet / unreadable — first run, keep defaults
+      root = load_root(raw)
+      return unless root # present but unparseable — kept a .corrupt copy, keep defaults
       @@loaded_raw = raw
-      root = JSON.parse(raw)
+      apply_sections(root)
+    rescue
+      # a malformed individual section — keep whatever loaded so far
+    end
+
+    # Read each top-level section of a parsed settings document into the class properties.
+    # Split out of load so load stays a small read → parse → apply flow.
+    private def self.apply_sections(root : JSON::Any) : Nil
       if net = root["network"]?
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
@@ -90,8 +101,26 @@ module Gori
       parse_general(root["general"]?)
       parse_update(root["update"]?)
       Env.bump_highlight_rev
+    end
+
+    # Read the settings file; nil on missing/unreadable (a first run keeps defaults).
+    private def self.load_raw : String?
+      File.read(path)
     rescue
-      # no file yet / unreadable / bad JSON — keep current values
+      nil
+    end
+
+    # Parse the settings JSON. On a PRESENT-but-unparseable file, preserve a recoverable
+    # copy at "<path>.corrupt" FIRST — otherwise the next save() overwrites the file with
+    # an all-defaults document (merge_with_disk gives up on an unparseable base), silently
+    # and permanently losing the user's real settings — then return nil so load keeps the
+    # in-memory defaults and leaves @@loaded_raw nil (the next save is a clean write, not a
+    # merge against corrupt bytes).
+    private def self.load_root(raw : String) : JSON::Any?
+      JSON.parse(raw)
+    rescue
+      (File.write("#{path}.corrupt", raw) rescue nil) if raw.presence
+      nil
     end
 
     # load_bool over a Hash (the layout object), same false-preserving semantics as load_bool.
@@ -120,9 +149,17 @@ module Gori
       # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder sessions.
       # Stage to a sibling temp then rename (atomic on POSIX), mirroring cert_authority.
       tmp = "#{path}.tmp"
-      File.write(tmp, merge_with_disk(serialize))
+      # `mine` = THIS process's serialization of its OWN in-memory state. Base the next
+      # merge on it, NOT on a re-read of the file we just wrote: that file also carries a
+      # concurrent peer's values for sections WE didn't change (we merged them through). If
+      # the base held a peer's value for an unchanged section, our next save would see
+      # current != base for it and wrongly "win", silently clobbering the peer's edit back.
+      # Basing on `mine` keeps "did I change this section?" honest, so an unchanged section
+      # always yields to disk on every subsequent save.
+      mine = serialize
+      File.write(tmp, merge_with_disk(mine))
       File.rename(tmp, path)
-      @@loaded_raw = File.read(path) # our write is now the base for the next merge
+      @@loaded_raw = mine
       true
     rescue
       File.delete?("#{path}.tmp") rescue nil

@@ -1,6 +1,8 @@
 require "json"
 require "base64"
 require "../../store"
+require "../../host_overrides"
+require "../../rules"
 require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
@@ -25,6 +27,9 @@ module Gori
         return issue_id if issue_id.is_a?(Result)
 
         built, http2, sni = build_send_request(h)
+        # OPT-IN Match&Replace parity (before the scope gate + History write so the
+        # recorded/effective request == the wire); byte-exact by default.
+        built, applied_rules = maybe_apply_request_rules(h, built)
         # Scope gate BEFORE any outbound byte / History write: an out-of-scope
         # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
         # request_target reads the target VERBATIM off the first line of `built.bytes` —
@@ -46,7 +51,7 @@ module Gori
 
         body_cap, body_omit = body_return_opts(h)
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
-          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h), body_cap, body_omit),
+          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -96,12 +101,15 @@ module Gori
       private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
                                      verify_upstream : Bool, sni : String? = nil,
                                      timeout : Time::Span? = nil) : Repeater::Result
+        # Honor the project's host overrides on the direct-dial path (parity with the
+        # live proxy). nil/empty is behaviorally identical to no override.
+        ov = HostOverrides.load(store)
         if http2
           Repeater::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout)
+            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout, overrides: ov)
         else
           Repeater::Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout)
+            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout, overrides: ov)
         end
       end
 
@@ -211,14 +219,31 @@ module Gori
         Log.error(exception: ex) { "send_request: failed to finalize History flow #{flow_id}" }
       end
 
+      # OPT-IN Match&Replace parity for a direct send: direct sends are byte-exact (P7) by
+      # default — a repeater/fuzz caller wants exactly what it typed. apply_rules:true asks for
+      # live-proxy parity, so run the project's enabled REQUEST-side rules over the built bytes
+      # and re-sync Content-Length. Response-side rules are intentionally NOT applied. Returns
+      # the (possibly rewritten) request and whether a rule actually changed the bytes.
+      private def maybe_apply_request_rules(h, built : RequestBuilder::Built) : {RequestBuilder::Built, Bool}
+        return {built, false} unless bool_arg(h, "apply_rules", false)
+        rules = Gori::Rules.load(store)
+        return {built, false} unless rules.active?
+        rewritten = Repeater::FlowRequest.resync_content_length(
+          rules.transform_message(String.new(built.bytes), Store::RuleTarget::Request, built.host).to_slice)
+        return {built, false} if rewritten == built.bytes
+        {RequestBuilder::Built.new(rewritten, built.scheme, built.host, built.port), true}
+      end
+
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, http2 : Bool,
-                                   ignored : Array(String), body_cap : Int32, body_omit : Bool) : String
+                                   ignored : Array(String), body_cap : Int32, body_omit : Bool,
+                                   applied_rules : Bool = false) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
             emit_effective_request(j, built, http2)
+            j.field "match_replace_applied", true if applied_rules
             unless ignored.empty?
               j.field("ignored_fields") { j.array { ignored.each { |f| j.string f } } }
               j.field "precedence_warning",
@@ -322,7 +347,8 @@ module Gori
         request = Env.expand_wire(repeater_request_text)
         sni = repeater.sni.try { |value| Env.expand(value) }
         result = Repeater::WsEngine.send(request, out_messages,
-          scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle)
+          scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle,
+          overrides: HostOverrides.load(store))
 
         store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
           result.error, result.duration_us)

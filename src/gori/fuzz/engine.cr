@@ -20,16 +20,17 @@ module Gori::Fuzz
     getter origin : Origin
 
     def initialize(@origin : Origin, @http2 : Bool, @verify : Bool,
-                   @sni : String? = nil, @timeout : Time::Span? = nil)
+                   @sni : String? = nil, @timeout : Time::Span? = nil,
+                   @overrides : Gori::HostOverrides? = nil)
     end
 
     def send(bytes : Bytes) : Repeater::Result
       if @http2
         Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout)
+          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
       else
         Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout)
+          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
       end
     end
   end
@@ -73,10 +74,23 @@ module Gori::Fuzz
   # retries/redirects, rather than adding a second accounting path.
   class ScopedBackend < Backend
     SCOPE_ERROR = "blocked by scope"
+    # A running job's Scope would otherwise be a start-time snapshot: an operator's
+    # mid-run EXCLUDE (or Sandbox toggle) would never be seen. When a reload interval
+    # is given, re-read the rules from the Scope's own store at most once per interval
+    # — a per-send DB read is too heavy at high concurrency, so it is time-throttled.
+    # nil ⇒ snapshot (no reload): the caller already holds a Scope something else
+    # refreshes (the TUI's data_version poll reloads @session.scope in place), so only
+    # the MCP tools — which build a private, unshared Scope.load(store) — opt in.
+    RELOAD_INTERVAL = 1.second
 
     getter blocked : Int64 = 0_i64
 
-    def initialize(@inner : Backend, @scope : Gori::Scope)
+    @last_reload : Time::Instant
+
+    def initialize(@inner : Backend, @scope : Gori::Scope, @reload_every : Time::Span? = nil)
+      # Seed the throttle clock now — the Scope was just loaded, so the first reload is
+      # due one interval into the run, not on the first send.
+      @last_reload = Time.instant
     end
 
     def origin : Origin
@@ -84,6 +98,7 @@ module Gori::Fuzz
     end
 
     def send(bytes : Bytes) : Repeater::Result
+      refresh_scope
       o = origin
       url = "#{o.scheme}://#{o.host}#{request_target(bytes)}"
       if @scope.sandbox_blocks?(url, o.host) || @scope.excluded?(url, o.host)
@@ -91,6 +106,23 @@ module Gori::Fuzz
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_ERROR)
       end
       @inner.send(bytes)
+    end
+
+    # Throttled in-place reload of the Scope from its store, so a mid-run rule / Sandbox
+    # change is honoured within ~@reload_every. No-op when @reload_every is nil. Advances
+    # the clock BEFORE the (blocking) reload so a burst of concurrent worker fibers can't
+    # stampede the store — exactly one reload fires per window (single-thread fiber
+    # scheduler: the check→set is a non-yielding critical section). A failed reload is
+    # swallowed: the last-known scope stays in force rather than breaking the run.
+    private def refresh_scope : Nil
+      every = @reload_every
+      return unless every
+      now = Time.instant
+      return if now - @last_reload < every
+      @last_reload = now
+      @scope.reload
+    rescue
+      # keep the last-known scope on a reload failure
     end
 
     # The request-target (path) from the first line of a raw request, mirroring

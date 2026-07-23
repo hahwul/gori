@@ -104,7 +104,8 @@ module Gori
         gen_sets = mode.per_position? ? sets : [sets.first]
         generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
         sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
-          http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout)
+          http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
         engine = Fuzz::Engine.new(generator, matcher, sender, config)
         engine.calibrate_baseline if auto_cal
 

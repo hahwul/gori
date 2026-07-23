@@ -260,6 +260,48 @@ describe Gori::Import do
     end
   end
 
+  it "overwrites a stale Content-Length to match a HAR params-only reconstructed body (R2-8)" do
+    har = File.tempname("gori", ".har")
+    begin
+      # The original request advertised a large Content-Length (a multipart upload), but the
+      # HAR recorded only postData.params (no text), so we rebuild a SHORTER urlencoded body.
+      # The stored head must carry a single Content-Length matching the rebuilt body, not the
+      # stale 9999.
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [{
+              "startedDateTime": "2026-06-01T12:00:00+00:00",
+              "request": {
+                "method": "POST",
+                "url": "https://api.test/upload",
+                "httpVersion": "HTTP/1.1",
+                "headers": [{"name": "Content-Length", "value": "9999"}],
+                "postData": {
+                  "mimeType": "application/x-www-form-urlencoded",
+                  "params": [{"name": "secret_field", "value": "x"}]
+                }
+              }
+            }]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        detail = store.get_flow(store.search(Gori::QL::EMPTY, 1).first.id).not_nil!
+        body = String.new(detail.request_body.not_nil!)
+        body.should eq("secret_field=x") # 14 bytes
+        head = String.new(detail.request_head)
+        head.scan(/Content-Length:/i).size.should eq(1)         # exactly one CL, no stale duplicate
+        head.should contain("Content-Length: #{body.bytesize}") # matches the rebuilt body
+        head.should_not contain("9999")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "prepends https:// to scheme-less URL list lines" do
     urls = File.tempname("gori", ".txt")
     begin
@@ -286,6 +328,94 @@ describe Gori::Import do
         expect_raises(Gori::Error, /servers/) do
           Gori::Import.import_file(store, :oas, oas)
         end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "raises an actionable error when OpenAPI servers[0].url is relative (not the opaque 'no flows found')" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, %({"servers":[{"url":"/v3"}],"paths":{"/users":{"get":{}}}}))
+      with_store do |store|
+        expect_raises(Gori::Error, /relative.*\/v3.*absolute server URL/) do
+          Gori::Import.import_file(store, :oas, oas)
+        end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "raises the same actionable error for a dot-relative OpenAPI servers[0].url (./v3, ../v3)" do
+    ["./v3", "../v3", "v3"].each do |url|
+      oas = File.tempname("gori", ".json")
+      begin
+        File.write(oas, %({"servers":[{"url":"#{url}"}],"paths":{"/users":{"get":{}}}}))
+        with_store do |store|
+          expect_raises(Gori::Error, /relative.*absolute server URL/) do
+            Gori::Import.import_file(store, :oas, oas)
+          end
+        end
+      ensure
+        File.delete?(oas)
+      end
+    end
+  end
+
+  it "reports the skipped count (not the opaque 'no flows found') when every OpenAPI operation is malformed" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, %({"servers":[{"url":"https://api.test"}],"paths":{"/bad":{"post":{"requestBody":{"content":"notanobject"}}}}}))
+      with_store do |store|
+        expect_raises(Gori::Error, /all 1 entry was skipped as malformed/) do
+          Gori::Import.import_file(store, :oas, oas)
+        end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "fills declared path params, appends required query params, and seeds an apiKey header from an OpenAPI operation" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, <<-JSON)
+        {
+          "openapi": "3.0.0",
+          "servers": [{"url": "https://api.test/v1"}],
+          "components": {
+            "securitySchemes": {
+              "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+            }
+          },
+          "security": [{"ApiKeyAuth": []}],
+          "paths": {
+            "/users/{id}": {
+              "parameters": [
+                {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}}
+              ],
+              "get": {
+                "summary": "read",
+                "parameters": [
+                  {"name": "verbose", "in": "query", "required": true, "schema": {"type": "boolean"}},
+                  {"name": "fields", "in": "query", "required": false}
+                ]
+              }
+            }
+          }
+        }
+        JSON
+      with_store do |store|
+        result = Gori::Import.import_file(store, :oas, oas)
+        result.count.should eq(1)
+        row = store.search(Gori::QL::EMPTY, 1).first
+        # {id} filled from the path-ITEM-level declaration (integer -> "1"); required query
+        # param appended; optional one omitted.
+        row.target.should eq("/v1/users/1?verbose=true")
+        detail = store.get_flow(row.id).not_nil!
+        String.new(detail.request_head).should contain("X-API-Key: ") # apiKey security header seeded
       end
     ensure
       File.delete?(oas)

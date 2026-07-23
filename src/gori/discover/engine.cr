@@ -44,7 +44,8 @@ module Gori::Discover
     @header_block : String
 
     def initialize(@verify : Bool, @timeout : Time::Span? = nil, @http2 : Bool = false,
-                   headers : Array({String, String}) = [] of {String, String})
+                   headers : Array({String, String}) = [] of {String, String},
+                   @overrides : Gori::HostOverrides? = nil)
       # Merge the user headers over the defaults once — the block is identical for
       # every send (only Host varies, per target). Host + Connection are emitted
       # separately in build_get and never come from user input.
@@ -55,10 +56,10 @@ module Gori::Discover
       req = build_get(scheme, host, port, target)
       if @http2
         Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
-          verify_upstream: @verify, timeout: @timeout)
+          verify_upstream: @verify, timeout: @timeout, overrides: @overrides)
       else
         Repeater::Engine.send(req, scheme: scheme, host: host, port: port,
-          verify_upstream: @verify, timeout: @timeout)
+          verify_upstream: @verify, timeout: @timeout, overrides: @overrides)
       end
     end
 

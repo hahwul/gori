@@ -34,6 +34,7 @@ require "./tools/issues"
 require "./tools/jobs"
 require "./tools/mine"
 require "./tools/notes"
+require "./tools/probe"
 require "./tools/projects"
 require "./tools/ql"
 require "./tools/repeater"
@@ -88,6 +89,20 @@ module Gori
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
         "oast_start", "oast_stop",
+      }
+
+      # R2-3 — active/outbound tools that expand or mask `$KEY` env tokens at call
+      # time. Env vars live in a process-global (Settings.project_env_vars) loaded
+      # once at bind time (initialize / switch_project's Env.load_project), so a
+      # mid-session CLI change (`gori run project env set KEY val`) is otherwise
+      # invisible to an already-running MCP server. `call` reloads from the store
+      # before dispatching any of these so the fresh value is picked up without a
+      # switch_project. Deliberately EXCLUDES read tools and the async *_status /
+      # *_results / *_stop pollers (a running job already captured its fully
+      # expanded template at build time).
+      ENV_REFRESH_TOOLS = Set{
+        "send_request", "send_websocket",
+        "fuzz_start", "mine_start", "sequence_start", "discover_start",
       }
 
       # A live OAST listening session held server-side across tool calls (oast_start →
@@ -173,6 +188,17 @@ module Gori
 
       private def unbound? : Bool
         @store.nil?
+      end
+
+      # Re-read the per-project `$KEY` env vars from the store into the process
+      # global (Settings.project_env_vars). Cheap: one settings-row read + a JSON
+      # parse (Env.load_project). No-op when unbound. The parsed Array is assigned
+      # synchronously within `call` (no fiber yield between read and assign), so an
+      # in-flight async job fiber — which already expanded its template at build
+      # time and does not re-read env during the run — never sees a torn value.
+      private def refresh_project_env : Nil
+        return unless s = @store
+        Env.load_project(s)
       end
 
       # Tools that work with no project store open.
@@ -448,6 +474,23 @@ module Gori
 
           tool j, "get_issue", "Get one issue by id." do |s|
             s.field "id", intprop("issue id"), required: true
+          end
+
+          tool j, "probe_scan",
+            "Scan captured History flows (optional QL filter) + Repeater tabs for issues — the " \
+            "MCP equivalent of `gori run probe`. PASSIVE by default (zero outbound requests). " \
+            "active:true also runs light-touch active checks that SEND requests (reflected " \
+            "params, CORS reflection, 403 bypass, nginx traversal) — requires write access and " \
+            "is scope-gated (per-flow scope include + a Sandbox/exclude hard-block). Returns " \
+            "{flows_scanned, repeaters_scanned, issue_count, issues:[{code, category, host, " \
+            "title, severity, hit_count, affected, affected_count, evidence, sample_flow_id, " \
+            "sample_repeater_id, remediation}]}, highest-severity first. Writes nothing." do |s|
+            s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
+            s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
+            s.field "severity", strprop("only return issues at/above this level (info|low|medium|high|critical)")
+            s.field "category", strprop("only return issues in this category (#{Probe::SCAN_CATEGORIES.join("|")})")
+            s.field "allow_unscoped", boolprop("with active:true, run even when a target host is outside — or without — a configured scope (default false)")
+            s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
           end
 
           tool j, "list_scope", "List the project's scope include/exclude rules." { }
@@ -727,7 +770,8 @@ module Gori
               "reported in `ignored_fields` with a precedence_warning). The result " \
               "always includes `effective_request` (the scheme/host/port/method/target/" \
               "http_version actually sent). " \
-              "Host + Content-Length are auto-added when omitted on the url path." do |s|
+              "Host + Content-Length are auto-added when omitted on the url path. " \
+              "Match & Replace rules are NOT applied unless apply_rules:true." do |s|
               s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
               s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length)")
               s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
@@ -738,6 +782,7 @@ module Gori
               s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
               s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
               s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
               s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
@@ -816,7 +861,7 @@ module Gori
               "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
               s.field "template", strprop("raw HTTP request with §…§ position markers")
               s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
-              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
               s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
               s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
               s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
@@ -865,7 +910,7 @@ module Gori
               "outbound requests. Capped at #{MINE_MAX_REQUESTS} requests / #{MINE_MAX_CONCURRENCY} concurrency." do |s|
               s.field "template", strprop("raw HTTP request to mine")
               s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
-              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
               s.field "locations", strprop("comma list of where to mine: query,form,multipart,json,headers,cookies (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
               s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
               s.field "bucket", intprop("names stuffed per request before bisection (per location)")
@@ -905,7 +950,7 @@ module Gori
               "#{SEQUENCE_MAX_CONCURRENCY} concurrency. Provide exactly ONE token location." do |s|
               s.field "template", strprop("raw HTTP request to replay")
               s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
-              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
               s.field "cookie", strprop("token location: a Set-Cookie value by name")
               s.field "header", strprop("token location: a response header value by name")
               s.field "regex", strprop("token location: capture group 1 of this regex over the body")
@@ -980,20 +1025,20 @@ module Gori
             end
 
             tool j, "list_jobs",
-              "List all fuzz and mine jobs this session started (job_id, kind, status, " \
-              "counts, target) — one call to see everything in flight." { }
+              "List all fuzz, mine, discover, and sequence jobs this session started (job_id, " \
+              "kind, status, counts, target) — one call to see everything in flight." { }
 
             tool j, "get_job",
-              "Full status of a fuzz OR mine job by id (dispatches by the id prefix), " \
-              "so you can poll any job with one tool." do |s|
-              s.field "job_id", strprop("a fuzz (fz_*) or mine (mn_*) job id"), required: true
+              "Full status of a fuzz, mine, discover, or sequence job by id (dispatches by the " \
+              "id prefix), so you can poll any job with one tool." do |s|
+              s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), or sequence (sq_*) job id"), required: true
             end
 
             tool j, "stop_job",
-              "Stop a fuzz OR mine job. With wait:true, block until it reaches a terminal " \
+              "Stop a fuzz, mine, discover, or sequence job. With wait:true, block until it reaches a terminal " \
               "state (or wait_timeout_ms elapses) and report the final status + stopped_at, " \
               "so stop-and-confirm is one call. Without wait, returns immediately (stop is async)." do |s|
-              s.field "job_id", strprop("a fuzz (fz_*) or mine (mn_*) job id"), required: true
+              s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), or sequence (sq_*) job id"), required: true
               s.field "wait", boolprop("block until the job actually stops (default false)")
               s.field "wait_timeout_ms", intprop("max ms to wait when wait:true (default 10000, max 60000)")
             end
@@ -1008,6 +1053,11 @@ module Gori
         if unbound? && !UNBOUND_SAFE.includes?(name)
           return no_project
         end
+        # R2-3: pick up a mid-session CLI env change before an active tool expands
+        # `$KEY`. After the unbound gate (@store is bound for these tools) and before
+        # dispatch; runs inside this method's rescue, so a store read error becomes an
+        # INTERNAL result rather than crashing the loop.
+        refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
         result = read_tool(name, h) || action_tool(name, h) ||
                  err("unknown tool: #{name}", "UNKNOWN_TOOL")
         result = classify(result)
@@ -1111,6 +1161,7 @@ module Gori
         when "list_sitemap"            then list_sitemap(h)
         when "list_issues"             then list_issues(h)
         when "get_issue"               then get_issue(h)
+        when "probe_scan"              then probe_scan(h)
         when "list_scope"              then list_scope
         when "project_info"            then project_info
         when "get_current_context"     then get_current_context

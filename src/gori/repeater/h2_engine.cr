@@ -41,9 +41,10 @@ module Gori
 
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
-                    timeout : Time::Span? = nil) : Result
+                    timeout : Time::Span? = nil,
+                    overrides : Gori::HostOverrides? = nil) : Result
         started = Time.instant
-        upstream = open(scheme, host, port, verify_upstream, sni, timeout)
+        upstream = open(scheme, host, port, verify_upstream, sni, timeout, overrides)
         return failure(connect_error(scheme, host, port, verify_upstream), started) unless upstream
         begin
           headers, body = parse_request(request, scheme, host, port)
@@ -61,11 +62,12 @@ module Gori
       end
 
       private def self.open(scheme : String, host : String, port : Int32, verify : Bool,
-                            sni : String? = nil, timeout : Time::Span? = nil) : IO?
+                            sni : String? = nil, timeout : Time::Span? = nil,
+                            overrides : Gori::HostOverrides? = nil) : IO?
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
         if scheme == "https"
-          ssl = Proxy::Upstream.dial_tls(host, port, verify: verify, alpn: "h2", sni: sni, connect_timeout: ct, io_timeout: it)
+          ssl = Proxy::Upstream.dial_tls(host, port, verify: verify, alpn: "h2", sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides)
           return nil unless ssl
           # Origin completed the handshake but won't speak h2 — close the live
           # socket before bailing, else it leaks (it's never returned to `ensure`).
@@ -75,7 +77,7 @@ module Gori
           end
           ssl
         else
-          Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it) # h2c prior-knowledge
+          Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides) # h2c prior-knowledge
         end
       end
 

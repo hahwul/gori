@@ -199,7 +199,9 @@ module Gori
         abort "gori run project scope add: --pattern is required" if (pat = pattern).nil? || pat.empty?
         abort "gori run project scope add: invalid kind '#{kind}' (must be include or exclude)" unless kind.in?(Scope::KINDS)
         abort "gori run project scope add: invalid type '#{match_type}' (must be host, string, or regex)" unless match_type.in?(Scope::TYPES)
-        abort "gori run project scope add: invalid pattern for regex (failed to compile)" if match_type == "regex" && !Scope.valid?(match_type, pat)
+        if err = Scope.validation_error(match_type, pat.strip)
+          abort "gori run project scope add: #{err}"
+        end
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

@@ -1,5 +1,6 @@
 require "http/server"
 require "json"
+require "digest/sha256"
 
 # Minimal GitHub-shaped release server for update download/progress specs.
 # Serves /repos/hahwul/gori/releases/latest and /download/<asset>.
@@ -27,7 +28,9 @@ class MockReleaseServer
                  asset_names : Array(String)? = nil,
                  throttle_bps : Int32 = 0,
                  reported_size : Int64? = nil,
-                 truncate_at : Int32? = nil)
+                 truncate_at : Int32? = nil,
+                 provide_digest : Bool = false,
+                 digest_override : String? = nil)
     @tag = tag
     @body = body.is_a?(Bytes) ? body : body.to_slice
     ver = tag.lchop('v').lchop('V')
@@ -40,6 +43,8 @@ class MockReleaseServer
     @throttle_bps = throttle_bps
     @reported_size = reported_size || @body.size.to_i64
     @truncate_at = truncate_at
+    @provide_digest = provide_digest
+    @digest_override = digest_override
 
     # Bind first so we know the ephemeral port before building asset URLs.
     @server = HTTP::Server.new do |context|
@@ -63,11 +68,15 @@ class MockReleaseServer
 
   def release_json : String
     assets = @asset_names.map do |name|
-      {
+      asset = {
         "name"                 => name,
         "browser_download_url" => download_url(name),
         "size"                 => @reported_size,
-      }
+      } of String => String | Int64
+      if @provide_digest
+        asset["digest"] = @digest_override || "sha256:#{Digest::SHA256.new.update(@body).hexfinal}"
+      end
+      asset
     end
     {
       "tag_name" => @tag,

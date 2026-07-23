@@ -1905,8 +1905,13 @@ module Gori::Tui
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty?
       lines = [] of String
       msgs.each_with_index do |m, i|
-        lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
-        lines.concat(hex_preview(m.data))
+        if m.trailer
+          lines << "▸ trailer  #{m.data.size}b"
+          Proxy::H2::Grpc.trailer_headers(m.data).each { |k, v| lines << "  #{k}: #{v}" }
+        else
+          lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
+          lines.concat(hex_preview(m.data))
+        end
       end
       lines
     end

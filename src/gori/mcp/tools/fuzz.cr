@@ -236,10 +236,14 @@ module Gori
         gen_sets = mode.per_position? ? sets : [sets.first]
         generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
-          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
+          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
+          overrides: HostOverrides.load(store))
         # Defense-in-depth alongside the job-start scope_check above: that check only
         # covers the origin once, not a path a template mutates per-request.
-        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store))
+        # Re-read scope periodically so a mid-run EXCLUDE / Sandbox toggle is honoured —
+        # this Scope is private to the job (nothing else reloads it), unlike the TUI's
+        # shared @session.scope which the data_version poll already refreshes in place.
+        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store), reload_every: Fuzz::ScopedBackend::RELOAD_INTERVAL)
         engine = Fuzz::Engine.new(generator, matcher, backend, config)
         {engine, origin, engine.total, use_h2}
       rescue ex : File::Error

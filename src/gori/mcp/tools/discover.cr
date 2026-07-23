@@ -69,7 +69,7 @@ module Gori
         scope = Scope.load(store)
         policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
         sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h),
-          headers: config.headers)
+          headers: config.headers, overrides: HostOverrides.load(store))
         engine = Discover::Engine.new(seed, words, sender, config, policy)
         {engine, seed, parts.host}
       rescue ex : File::Error

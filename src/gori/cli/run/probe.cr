@@ -2,12 +2,8 @@
 module Gori
   module CLI
     module Run
-      # The categories a Probe scan can emit.
-      PROBE_CATEGORIES = [
-        Probe::Category::HEADERS, Probe::Category::COOKIES, Probe::Category::TECH,
-        Probe::Category::INFOLEAK, Probe::Category::CORS, Probe::Category::CLIENT,
-        Probe::Category::ACTIVE,
-      ]
+      # The categories a Probe scan can emit (shared with the MCP probe_scan tool).
+      PROBE_CATEGORIES = Probe::SCAN_CATEGORIES
 
       private def self.cmd_probe(args : Array(String)) : Nil
         db_path : String? = nil
@@ -17,6 +13,7 @@ module Gori
         category : String? = nil
         format = :text
         active = false
+        allow_unscoped = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -32,6 +29,7 @@ module Gori
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("-a", "--active", "Include light-touch active checks (sends probe requests)") { active = true }
+          p.on("--allow-unscoped", "With --active, probe flows even when outside the project scope (default: only scope-included hosts)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -61,13 +59,23 @@ module Gori
         end
 
         store = open_store(resolve_read_project(project_name, db_path))
+        scope = Scope.load(store)
+        # --active with no scope include rule (and no --allow-unscoped) probes NOTHING
+        # (matches_url? requires ≥1 include) — warn so an empty active result isn't mistaken
+        # for "clean".
+        if active && !allow_unscoped && scope.include_count == 0
+          STDERR.puts "gori run probe: --active has no scope include rules — active probes skipped (add a scope include rule or pass --allow-unscoped)"
+        end
         groups, flow_n, repeater_n = begin
           ids = begin
-            probe_scan_ids(store, filter)
+            Probe::Scan.flow_ids(store, filter)
           rescue ex
             abort "gori run probe: query #{query.inspect} failed: #{ex.message}"
           end
-          dets, rn = scan_all(store, ids, active)
+          meter = STDERR.tty?
+          dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
+            allow_unscoped: allow_unscoped, progress: probe_progress_meter(meter))
+          STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
           {Probe.group(dets), ids.size, rn}
         ensure
           store.close
@@ -101,59 +109,17 @@ module Gori
         end
       end
 
-      # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
-      # Reuses the proven search/recent_flows query paths.
-      private def self.probe_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
-        rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
-        rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
-      end
-
-      # Analyze History flows + Repeater tabs. Passively by default; also actively when active is true.
-      # Returns {detections, repeater_count_scanned}. QL filters apply to History only.
-      private def self.scan_all(store : Store, ids : Array(Int64), active : Bool) : {Array(Probe::Detection), Int32}
-        detections = scan_flows(store, ids, active)
-        repeater_dets, repeater_n = scan_repeaters(store, active)
-        detections.concat(repeater_dets)
-        {detections, repeater_n}
-      end
-
-      private def self.scan_flows(store : Store, ids : Array(Int64), active : Bool) : Array(Probe::Detection)
-        detections = [] of Probe::Detection
-        progress = STDERR.tty?
-        ids.each_with_index do |id, i|
-          detail = store.get_flow(id)
-          if detail && detail.response_head
-            ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
-            detections.concat(Probe::Passive.analyze(detail, ws))
-            detections.concat(Probe::Active.analyze(detail)) if active
-          end
-          if progress && (i & 0x3F) == 0
-            STDERR.print "\r[probe] scanned #{i + 1}/#{ids.size} flows"
+      # A live progress callback for Probe::Scan (an in-place "scanned i/n flows" meter,
+      # throttled to every 64th flow), or nil when STDERR isn't a TTY.
+      private def self.probe_progress_meter(meter : Bool) : Proc(Int32, Int32, Nil)?
+        return nil unless meter
+        ->(i : Int32, n : Int32) do
+          if (i & 0x3F) == 0
+            STDERR.print "\r[probe] scanned #{i + 1}/#{n} flows"
             STDERR.flush
           end
+          nil
         end
-        STDERR.print "\r\e[K" if progress # clear the in-place meter before the summary line
-        detections
-      end
-
-      # Scan Repeater tabs. Stamps sample_repeater_id.
-      private def self.scan_repeaters(store : Store, active : Bool) : {Array(Probe::Detection), Int32}
-        detections = [] of Probe::Detection
-        n = 0
-        store.repeaters.each do |rec|
-          next unless detail = Probe.detail_from_repeater(rec)
-          n += 1
-          ws = store.ws_messages_for_repeater(rec.id, 200)
-          Probe::Passive.analyze(detail, ws).each do |d|
-            detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
-          end
-          if active
-            Probe::Active.analyze(detail).each do |d|
-              detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
-            end
-          end
-        end
-        {detections, n}
       end
 
       private def self.parse_severity(v : String) : Store::Severity

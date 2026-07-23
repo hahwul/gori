@@ -4,6 +4,8 @@ require "./active/cors_reflection"
 require "./active/forbidden_bypass"
 require "./active/nginx_alias_traversal"
 require "./active/backslash_powered"
+require "../scope"
+require "../fuzz/engine"
 
 module Gori
   module Probe
@@ -38,13 +40,19 @@ module Gori
       end
 
       # Synchronously execute enabled Active rules against a flow (for headless / CLI scans).
+      # `scope`, when given, wraps the sender in Fuzz::ScopedBackend so a Sandbox block or an
+      # explicit exclude rule HARD-blocks the probe at the socket seam (PR #322's protection for
+      # Fuzz/Miner) even when the caller bypassed its own include gate (--allow-unscoped).
+      # `backend` overrides the default Fuzz::Sender so specs can drive the rules without a socket.
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
-                       timeout : Time::Span = 10.seconds) : Array(Detection)
+                       timeout : Time::Span = 10.seconds, scope : Scope? = nil,
+                       backend : Fuzz::Backend? = nil) : Array(Detection)
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = detail.http_version.starts_with?("HTTP/2")
-        sender = Fuzz::Sender.new(origin, http2, verify_upstream, timeout: timeout)
+        base = backend || Fuzz::Sender.new(origin, http2, verify_upstream, timeout: timeout)
+        sender = scope ? Fuzz::ScopedBackend.new(base, scope) : base
 
         RULES.each do |rule|
           plan = rule.plan(detail)

@@ -92,7 +92,8 @@ describe "ProjectView#commit_scope_rule" do
 
       view.commit_scope_rule("include", "host", "").should eq(:empty)
       view.commit_scope_rule("include", "regex", "(bad").should eq(:invalid)
-      view.commit_scope_rule("exclude", "string", "/admin").should eq(:dup) # same triple, new add
+      view.commit_scope_rule("include", "host", "127.0.0.1:9091").should eq(:invalid) # host+port can never match
+      view.commit_scope_rule("exclude", "string", "/admin").should eq(:dup)           # same triple, new add
     ensure
       store.close
       File.delete?(path)

@@ -74,7 +74,14 @@ module Gori
       Free text (no field:): matches method, host, or target (case-insensitive substring).
 
       Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
-      A mixed query (host:beta status:>=foo) silently drops only the bad terms and applies the rest.
+      A mixed query (host:beta status:>=foo) silently drops only the bad comparison/field terms and
+      applies the rest (a dropped term BROADENS the result). A dropped term is treated as if it were
+      never typed, so inside NOT(...) or OR it can SHIFT what the query matches — e.g.
+      `NOT (host:x AND size:>bogus)` becomes `NOT host:x` (excludes host x), not match-all. Note the
+      further asymmetry with regex: an invalid `~` pattern is a HARD ERROR, not dropped — because a bad
+      regex would otherwise silently match NOTHING (indistinguishable from a genuinely empty result),
+      so it must be fixed or removed. Use strict:true (or ql_explain) to see exactly which terms were
+      dropped before relying on results.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every
@@ -351,9 +358,14 @@ module Gori
     private def self.duration_cond(value : String) : {String, Array(DB::Any)}?
       op, rest = split_op(value)
       scale_us = 1000.0 # ms → µs (default)
-      if rest.ends_with?("ms")
+      # Match the unit suffix case-insensitively, mirroring numeric_cond's kb/mb/… handling,
+      # so `dur:>2S` / `dur:>=500MS` parse like their lowercase forms instead of silently
+      # dropping the term (the numeric part carries no letters, so stripping from `rest`
+      # keeps `to_f?` happy).
+      lower_rest = rest.downcase
+      if lower_rest.ends_with?("ms")
         rest = rest[0...-2]
-      elsif rest.ends_with?('s')
+      elsif lower_rest.ends_with?('s')
         rest = rest[0...-1]
         scale_us = 1_000_000.0
       end

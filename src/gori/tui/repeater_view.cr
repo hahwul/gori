@@ -2784,8 +2784,22 @@ module Gori::Tui
         rows << {"← (no complete gRPC messages)", Theme.muted}
       else
         msgs.each_with_index do |m, i|
-          rows << {"← message ##{i + 1}  #{m.data.size}b#{m.compressed ? " (compressed)" : ""}", Theme.green}
-          grpc_hex_preview(m.data).each { |h| rows << {h, Theme.muted} }
+          if m.trailer
+            rows << {"← trailer  #{m.data.size}b", Theme.green}
+            Proxy::H2::Grpc.trailer_headers(m.data).each do |k, v|
+              if k == "grpc-status"
+                n = v.to_i?
+                ok = n == 0
+                name = n ? Proxy::H2::Grpc.status_name(n) : v
+                rows << {"    #{k}: #{v} #{name}", ok ? Theme.green : Theme.red}
+              else
+                rows << {"    #{k}: #{v}", Theme.muted}
+              end
+            end
+          else
+            rows << {"← message ##{i + 1}  #{m.data.size}b#{m.compressed ? " (compressed)" : ""}", Theme.green}
+            grpc_hex_preview(m.data).each { |h| rows << {h, Theme.muted} }
+          end
         end
       end
       rows
