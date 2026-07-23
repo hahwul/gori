@@ -29,6 +29,7 @@ require "../probe/passive"
 require "../probe/group"
 require "../notes"
 require "../issues_export"
+require "../import"
 require "./output"
 require "./run/capture"
 require "./run/history"
@@ -42,6 +43,7 @@ require "./run/oast"
 require "./run/probe"
 require "./run/notes"
 require "./run/sitemap"
+require "./run/import"
 require "./run/issues"
 require "./run/jwt"
 require "./run/decoder"
@@ -98,6 +100,7 @@ module Gori
         when "discover" then cmd_discover(rest)
         when "oast"     then cmd_oast(rest)
         when "sitemap"  then cmd_sitemap(rest)
+        when "import"   then cmd_import(rest)
         when "notes"    then cmd_notes(rest)
         when "issues"   then cmd_issues(rest)
         when "jwt"      then cmd_jwt(rest)
@@ -125,6 +128,7 @@ module Gori
         {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
         {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
+        {"import", "Import flows from a HAR, URL list, or OpenAPI spec into History"},
         {"probe [QL]", "Passively scan captured flows for issues (zero requests)"},
         {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, or update issues (text, json, markdown)"},
