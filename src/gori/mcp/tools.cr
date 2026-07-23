@@ -90,6 +90,20 @@ module Gori
         "oast_start", "oast_stop",
       }
 
+      # R2-3 — active/outbound tools that expand or mask `$KEY` env tokens at call
+      # time. Env vars live in a process-global (Settings.project_env_vars) loaded
+      # once at bind time (initialize / switch_project's Env.load_project), so a
+      # mid-session CLI change (`gori run project env set KEY val`) is otherwise
+      # invisible to an already-running MCP server. `call` reloads from the store
+      # before dispatching any of these so the fresh value is picked up without a
+      # switch_project. Deliberately EXCLUDES read tools and the async *_status /
+      # *_results / *_stop pollers (a running job already captured its fully
+      # expanded template at build time).
+      ENV_REFRESH_TOOLS = Set{
+        "send_request", "send_websocket",
+        "fuzz_start", "mine_start", "sequence_start", "discover_start",
+      }
+
       # A live OAST listening session held server-side across tool calls (oast_start →
       # oast_poll/oast_payload → oast_stop). Ephemeral to this MCP process.
       private class OastMcpSession
@@ -173,6 +187,17 @@ module Gori
 
       private def unbound? : Bool
         @store.nil?
+      end
+
+      # Re-read the per-project `$KEY` env vars from the store into the process
+      # global (Settings.project_env_vars). Cheap: one settings-row read + a JSON
+      # parse (Env.load_project). No-op when unbound. The parsed Array is assigned
+      # synchronously within `call` (no fiber yield between read and assign), so an
+      # in-flight async job fiber — which already expanded its template at build
+      # time and does not re-read env during the run — never sees a torn value.
+      private def refresh_project_env : Nil
+        return unless s = @store
+        Env.load_project(s)
       end
 
       # Tools that work with no project store open.
@@ -1008,6 +1033,11 @@ module Gori
         if unbound? && !UNBOUND_SAFE.includes?(name)
           return no_project
         end
+        # R2-3: pick up a mid-session CLI env change before an active tool expands
+        # `$KEY`. After the unbound gate (@store is bound for these tools) and before
+        # dispatch; runs inside this method's rescue, so a store read error becomes an
+        # INTERNAL result rather than crashing the loop.
+        refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
         result = read_tool(name, h) || action_tool(name, h) ||
                  err("unknown tool: #{name}", "UNKNOWN_TOOL")
         result = classify(result)

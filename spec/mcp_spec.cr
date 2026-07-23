@@ -1977,3 +1977,47 @@ describe "Gori::MCP::Tools unbound mode" do
     names.should contain("list_history")
   end
 end
+
+describe "MCP env reload (R2-3)" do
+  it "reloads project env vars from the store before an active tool call" do
+    with_store do |store|
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+        Gori::Env.serialize_vars([{"APIHOST", "old.test"}]))
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      begin
+        # initialize -> Env.load_project seeded the old value.
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}])
+
+        # Simulate `gori run project env set APIHOST new.test` from the CLI while the
+        # MCP server keeps running (writes straight to the shared DB).
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"APIHOST", "new.test"}]))
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}]) # still stale in-process
+
+        # Any active/outbound tool reloads first. This fuzz_start fails arg validation
+        # (no template/url) and never touches the network, but the reload in `call` runs
+        # BEFORE dispatch regardless — deterministic.
+        tools.call("fuzz_start", JSON.parse("{}"))
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "new.test"}])
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
+  end
+
+  it "does not reload for a read-only tool" do
+    with_store do |store|
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+        Gori::Env.serialize_vars([{"APIHOST", "old.test"}]))
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      begin
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"APIHOST", "new.test"}]))
+        tools.call("list_scope", JSON.parse("{}"))
+        Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}]) # read tool: no churn
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
+  end
+end
