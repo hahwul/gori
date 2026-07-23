@@ -219,20 +219,7 @@ module Gori
       end
 
       def self.probe_group_fields(j : JSON::Builder, g : Probe::Group) : Nil
-        j.object do
-          j.field "code", g.code
-          j.field "category", g.category
-          j.field "host", g.host
-          j.field "title", g.title
-          j.field "severity", g.severity.label
-          j.field "hit_count", g.hit_count
-          j.field("affected") { j.array { g.affected.each { |u| j.string(u) } } }
-          j.field "affected_count", g.affected.size
-          j.field "evidence", g.evidence
-          j.field "sample_flow_id", g.sample_flow_id
-          j.field "sample_repeater_id", g.sample_repeater_id
-          j.field "remediation", Probe.remediation(g.code)
-        end
+        Probe.group_json(j, g) # shared field shape (also used by the MCP probe_scan tool)
       end
 
       # "[high]      secret_in_url             api.test   ×3   token"

@@ -34,6 +34,7 @@ require "./tools/issues"
 require "./tools/jobs"
 require "./tools/mine"
 require "./tools/notes"
+require "./tools/probe"
 require "./tools/projects"
 require "./tools/ql"
 require "./tools/repeater"
@@ -473,6 +474,23 @@ module Gori
 
           tool j, "get_issue", "Get one issue by id." do |s|
             s.field "id", intprop("issue id"), required: true
+          end
+
+          tool j, "probe_scan",
+            "Scan captured History flows (optional QL filter) + Repeater tabs for issues — the " \
+            "MCP equivalent of `gori run probe`. PASSIVE by default (zero outbound requests). " \
+            "active:true also runs light-touch active checks that SEND requests (reflected " \
+            "params, CORS reflection, 403 bypass, nginx traversal) — requires write access and " \
+            "is scope-gated (per-flow scope include + a Sandbox/exclude hard-block). Returns " \
+            "{flows_scanned, repeaters_scanned, issue_count, issues:[{code, category, host, " \
+            "title, severity, hit_count, affected, affected_count, evidence, sample_flow_id, " \
+            "sample_repeater_id, remediation}]}, highest-severity first. Writes nothing." do |s|
+            s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
+            s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
+            s.field "severity", strprop("only return issues at/above this level (info|low|medium|high|critical)")
+            s.field "category", strprop("only return issues in this category (#{Probe::SCAN_CATEGORIES.join("|")})")
+            s.field "allow_unscoped", boolprop("with active:true, run even when a target host is outside — or without — a configured scope (default false)")
+            s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
           end
 
           tool j, "list_scope", "List the project's scope include/exclude rules." { }
@@ -1141,6 +1159,7 @@ module Gori
         when "list_sitemap"            then list_sitemap(h)
         when "list_issues"             then list_issues(h)
         when "get_issue"               then get_issue(h)
+        when "probe_scan"              then probe_scan(h)
         when "list_scope"              then list_scope
         when "project_info"            then project_info
         when "get_current_context"     then get_current_context

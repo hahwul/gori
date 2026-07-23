@@ -2,12 +2,8 @@
 module Gori
   module CLI
     module Run
-      # The categories a Probe scan can emit.
-      PROBE_CATEGORIES = [
-        Probe::Category::HEADERS, Probe::Category::COOKIES, Probe::Category::TECH,
-        Probe::Category::INFOLEAK, Probe::Category::CORS, Probe::Category::CLIENT,
-        Probe::Category::ACTIVE,
-      ]
+      # The categories a Probe scan can emit (shared with the MCP probe_scan tool).
+      PROBE_CATEGORIES = Probe::SCAN_CATEGORIES
 
       private def self.cmd_probe(args : Array(String)) : Nil
         db_path : String? = nil
@@ -72,11 +68,21 @@ module Gori
         end
         groups, flow_n, repeater_n = begin
           ids = begin
-            probe_scan_ids(store, filter)
+            Probe::Scan.flow_ids(store, filter)
           rescue ex
             abort "gori run probe: query #{query.inspect} failed: #{ex.message}"
           end
-          dets, rn = scan_all(store, ids, active, scope, allow_unscoped)
+          meter = STDERR.tty?
+          progress = meter ? ->(i : Int32, n : Int32) do
+            if (i & 0x3F) == 0
+              STDERR.print "\r[probe] scanned #{i + 1}/#{n} flows"
+              STDERR.flush
+            end
+            nil
+          end : nil
+          dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
+            allow_unscoped: allow_unscoped, progress: progress)
+          STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
           {Probe.group(dets), ids.size, rn}
         ensure
           store.close
@@ -108,73 +114,6 @@ module Gori
         else
           groups.each { |g| puts CLI::Output.probe_group_text(g) }
         end
-      end
-
-      # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
-      # Reuses the proven search/recent_flows query paths.
-      private def self.probe_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
-        rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
-        rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
-      end
-
-      # Analyze History flows + Repeater tabs. Passively by default; also actively when active is true.
-      # Returns {detections, repeater_count_scanned}. QL filters apply to History only.
-      private def self.scan_all(store : Store, ids : Array(Int64), active : Bool,
-                                scope : Scope, allow_unscoped : Bool) : {Array(Probe::Detection), Int32}
-        detections = scan_flows(store, ids, active, scope, allow_unscoped)
-        repeater_dets, repeater_n = scan_repeaters(store, active, scope, allow_unscoped)
-        detections.concat(repeater_dets)
-        {detections, repeater_n}
-      end
-
-      private def self.scan_flows(store : Store, ids : Array(Int64), active : Bool,
-                                  scope : Scope, allow_unscoped : Bool) : Array(Probe::Detection)
-        detections = [] of Probe::Detection
-        progress = STDERR.tty?
-        ids.each_with_index do |id, i|
-          detail = store.get_flow(id)
-          if detail && detail.response_head
-            ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
-            detections.concat(Probe::Passive.analyze(detail, ws))
-            detections.concat(Probe::Active.analyze(detail, scope: scope)) if active && active_target?(detail, scope, allow_unscoped)
-          end
-          if progress && (i & 0x3F) == 0
-            STDERR.print "\r[probe] scanned #{i + 1}/#{ids.size} flows"
-            STDERR.flush
-          end
-        end
-        STDERR.print "\r\e[K" if progress # clear the in-place meter before the summary line
-        detections
-      end
-
-      # Scan Repeater tabs. Stamps sample_repeater_id.
-      private def self.scan_repeaters(store : Store, active : Bool,
-                                      scope : Scope, allow_unscoped : Bool) : {Array(Probe::Detection), Int32}
-        detections = [] of Probe::Detection
-        n = 0
-        store.repeaters.each do |rec|
-          next unless detail = Probe.detail_from_repeater(rec)
-          n += 1
-          ws = store.ws_messages_for_repeater(rec.id, 200)
-          Probe::Passive.analyze(detail, ws).each do |d|
-            detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
-          end
-          if active && active_target?(detail, scope, allow_unscoped)
-            Probe::Active.analyze(detail, scope: scope).each do |d|
-              detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
-            end
-          end
-        end
-        {detections, n}
-      end
-
-      # Layer-1 active gate — mirrors the TUI's maybe_enqueue_active (analyzer.cr): an active
-      # probe is sent only to a flow the project scope INCLUDES (matches_url? — lens-independent,
-      # requires ≥1 include so an excludes-only/empty scope never means "probe everything").
-      # --allow-unscoped bypasses this; Active.analyze's ScopedBackend still hard-blocks Sandbox
-      # and explicit excludes even then.
-      private def self.active_target?(detail : Store::FlowDetail, scope : Scope, allow_unscoped : Bool) : Bool
-        allow_unscoped || scope.matches_url?(detail.row.url, detail.row.host)
       end
 
       private def self.parse_severity(v : String) : Store::Severity

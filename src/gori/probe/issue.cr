@@ -13,6 +13,11 @@ module Gori
       CUSTOM   = "custom" # user-defined string/regex match rule
     end
 
+    # The categories a scan can emit — the single list the CLI (--category) and the MCP
+    # probe_scan tool validate against. Excludes CUSTOM (user match rules, not a scan check).
+    SCAN_CATEGORIES = [Category::HEADERS, Category::COOKIES, Category::TECH,
+                       Category::INFOLEAK, Category::CORS, Category::CLIENT, Category::ACTIVE]
+
     # Static, display-only metadata for one built-in check — the identity the Rules
     # sub-tab lists and toggles by. `id` is a stable slug (one per Rule class, even when
     # the class emits several codes, e.g. Cookies → cookie_*); disabling a rule keys off it.
