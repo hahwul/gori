@@ -1202,6 +1202,11 @@ module Gori::Tui
       http2 = view.http2?
       sni = view.sni_override # custom TLS SNI host (nil → present the dialed host)
       results = @repeater_results
+      if reason = sandbox_block_reason(scheme, host, request_target(bytes))
+        results.send({view, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)})
+        @host.status("repeater: #{reason}")
+        return
+      end
       view.inflight = true
       @host.status("sending → #{host}:#{port}#{sni ? " (SNI #{sni})" : ""}…")
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
@@ -1262,10 +1267,12 @@ module Gori::Tui
         raw = Env.expand_wire(t)
         auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
       end
-      backend = Fuzz::CappedBackend.new(
-        Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), view.http2?,
-          !@host.session.config.insecure_upstream?, view.sni_override, timeout: 10.seconds),
-        MINIMIZE_SEND_CAP)
+      backend = Fuzz::ScopedBackend.new(
+        Fuzz::CappedBackend.new(
+          Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), view.http2?,
+            !@host.session.config.insecure_upstream?, view.sni_override, timeout: 10.seconds),
+          MINIMIZE_SEND_CAP),
+        @host.session.scope)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
       events = @minimize_events
@@ -1290,9 +1297,14 @@ module Gori::Tui
     private def ws_repeater_send(view : RepeaterView, scheme : String, host : String, port : Int32) : Nil
       verify = !@host.session.config.insecure_upstream?
       upgrade = view.ws_upgrade_bytes
+      results = @ws_results
+      if reason = sandbox_block_reason(scheme, host, request_target(upgrade))
+        results.send({view, Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)})
+        @host.status("ws repeater: #{reason}")
+        return
+      end
       messages = view.ws_out_messages
       sni = view.sni_override
-      results = @ws_results
       view.inflight = true
       @host.status("ws sending → #{host}:#{port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…")
       spawn(name: "gori-ws-repeater") do
@@ -1337,6 +1349,14 @@ module Gori::Tui
       labels = reqs.map(&.[0])
       bytes = reqs.map(&.[1])
       results = @group_results
+      # Block the WHOLE pipeline if ANY request in it targets out of scope — these all ride
+      # one connection, so partially sending would still reach the blocked path's origin.
+      if reason = bytes.compact_map { |b| sandbox_block_reason(scheme, host, request_target(b)) }.first?
+        labeled = labels.map { |l| {l, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)} }
+        results.send({view, labeled})
+        @host.status("send group: #{reason}")
+        return
+      end
       view.inflight = true
       @host.status("send group → #{host}:#{port} · #{bytes.size} request#{bytes.size == 1 ? "" : "s"} on one connection…")
       spawn(name: "gori-repeater-group") do
@@ -1367,6 +1387,29 @@ module Gori::Tui
     private def current_repeater_tab : RepeaterTab?
       return nil if @current_repeater_idx < 0 || @current_repeater_idx >= @repeaters.size
       @repeaters[@current_repeater_idx]
+    end
+
+    # Sandbox gate for Repeater's direct sends (^R, send-group, WS, minimize) — unlike ordinary
+    # proxied traffic, these dial Repeater::Engine/H2Engine/WsEngine straight from the TUI,
+    # bypassing ClientConn's per-request gate entirely. Without this, Sandbox mode's "blocks ALL
+    # out-of-scope traffic" promise (project_view.cr) didn't hold for Repeater — the same gap
+    # `Fuzz::ScopedBackend` was added to close for Fuzzer/Miner (fuzz/engine.cr). Mirrors
+    # `Interceptor#sandbox_blocks?` (client_conn.cr): Sandbox alone blocks a single deliberate
+    # send — EXCLUDE doesn't (that's only layered on top for Fuzz/Miner's bigger blast radius).
+    # Returns the block reason, or nil when the send may proceed.
+    private def sandbox_block_reason(scheme : String, host : String, target : String) : String?
+      scope = @host.session.scope
+      return nil unless scope.sandbox?
+      return nil unless scope.sandbox_blocks?(Scope.request_url(scheme, host, target), host)
+      "blocked by sandbox (out of scope)"
+    end
+
+    # The request-target (path) from a raw request's first line — mirrors
+    # fuzz/engine.cr#request_target / mcp/tools/send.cr#request_target (the scope URL
+    # `scheme://host/target` these callers build to match Scope rules against).
+    private def request_target(bytes : Bytes) : String
+      line = String.new(bytes).each_line.first? || ""
+      line.split(' ')[1]? || "/"
     end
 
     # Persist the current repeater tab's edits (cheap no-op when clean). Sprinkled on
