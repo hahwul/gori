@@ -528,7 +528,7 @@ module Gori::Proxy
           @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
           @io.flush
         end
-        resp_head = Codec::Http1.read_head(upstream)
+        resp_head = safe_read_head(upstream)
         if resp_head.nil?
           @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
           release_upstream
@@ -639,16 +639,28 @@ module Gori::Proxy
     # connection after a retry, so callers must rebind their local.
     private def read_response_head(upstream : IO, host : String, port : Int32,
                                    reused : Bool, sent_head : Bytes, can_retry : Bool) : {Bytes?, IO}
-      resp_head = Codec::Http1.read_head(upstream)
+      resp_head = safe_read_head(upstream)
       if resp_head.nil? && reused && can_retry
         release_upstream
         fresh, _ = acquire_upstream(host, port)
         if fresh
           upstream = fresh
-          resp_head = Codec::Http1.read_head(fresh) if write_request(fresh, sent_head, nil)
+          resp_head = safe_read_head(fresh) if write_request(fresh, sent_head, nil)
         end
       end
       {resp_head, upstream}
+    end
+
+    # `Codec::Http1.read_head` returns nil on a graceful EOF, but a RESET upstream
+    # (RST, not FIN — e.g. a dead/killed backend) raises instead. Left uncaught, that
+    # unwinds past the already-recorded Pending flow to `run`'s blanket rescue, which
+    # closes the connection without ever marking the flow — it sits in History as
+    # "waiting for response…" forever. Treat a reset the same as a graceful EOF (nil)
+    # so the caller's existing "no response from upstream" handling covers it too.
+    private def safe_read_head(io : IO) : Bytes?
+      Codec::Http1.read_head(io)
+    rescue
+      nil
     end
 
     # Apply response-head Match&Replace; returns the (possibly rewritten) head +
