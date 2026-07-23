@@ -158,6 +158,37 @@ describe Gori::Scope do
     end
   end
 
+  it "rejects a host pattern carrying a port at add/update (never stored; points at the bare host)" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      # A host rule matches the bare host on ANY port, so a :PORT can never match → reject.
+      Gori::Scope.valid?("host", "127.0.0.1:9091").should be_false
+      err = Gori::Scope.validation_error("host", "127.0.0.1:9091").not_nil!
+      err.should contain("port")
+      err.should contain("127.0.0.1") # bare-host suggestion (port stripped)
+      err.should_not contain("9091")
+
+      scope.add("include", "host", "127.0.0.1:9091").should be_false
+      store.scope_rules.should be_empty
+
+      # An existing bare-host rule cannot be EDITED into a port'd one either.
+      scope.add("include", "host", "acme.test").should be_true
+      id = scope.rules.first.id
+      scope.update(id, "include", "host", "acme.test:8080").should be_false
+      scope.rules.first.pattern.should eq("acme.test") # unchanged
+
+      # Bare host + bare IPv6 stay valid; only host-type is porting-checked.
+      Gori::Scope.valid?("host", "127.0.0.1").should be_true
+      Gori::Scope.valid?("host", "::1").should be_true # bare IPv6, colons ≠ port
+      Gori::Scope.valid?("host", "fe80::1").should be_true
+      Gori::Scope.valid?("host", "[::1]:9091").should be_false # bracketed IPv6 + port
+      Gori::Scope.valid?("host", "[::1]").should be_true
+      Gori::Scope.valid?("host", "*.acme.test:8080").should be_false # host glob + port
+      Gori::Scope.valid?("string", "acme.test:8080").should be_true  # port fine in string/regex
+      Gori::Scope.valid?("regex", ":8080$").should be_true
+    end
+  end
+
   it "treats LIKE metacharacters in a string rule as literal (ESCAPE)" do
     with_store do |store|
       capture(store, "x.test", "/a%b")
