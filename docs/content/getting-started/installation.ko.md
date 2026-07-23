@@ -145,7 +145,7 @@ shards build --release -Dwithout_native_codecs
 gori --version
 ```
 
-`gori 0.1.0`이 표시되어야 합니다.
+`gori 0.1.3`이 표시되어야 합니다.
 
 ## 설치 없이 실행 {#run-without-installing}
 

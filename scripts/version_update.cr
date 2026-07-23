@@ -6,11 +6,13 @@
 # Usage: crystal run scripts/version_update.cr  (just vu)
 
 FILES = {
-  "shard.yml"           => {/^version:\s*\S+/m, ->(v : String) { "version: #{v}" }},
-  "src/gori.cr"         => {/VERSION = "[^"]+"/, ->(v : String) { %(VERSION = "#{v}") }},
-  "snap/snapcraft.yaml" => {/^version:\s*\S+/m, ->(v : String) { "version: #{v}" }},
-  "aur/PKGBUILD"        => {/^pkgver=\S+/m, ->(v : String) { "pkgver=#{v}" }},
-  "spec/gori_spec.cr"   => {/VERSION\.should eq\("[^"]+"\)/, ->(v : String) { %(VERSION.should eq("#{v}")) }},
+  "shard.yml"                                       => {/^version:\s*\S+/m, ->(v : String) { "version: #{v}" }},
+  "src/gori.cr"                                     => {/VERSION = "[^"]+"/, ->(v : String) { %(VERSION = "#{v}") }},
+  "snap/snapcraft.yaml"                             => {/^version:\s*\S+/m, ->(v : String) { "version: #{v}" }},
+  "aur/PKGBUILD"                                    => {/^pkgver=\S+/m, ->(v : String) { "pkgver=#{v}" }},
+  "spec/gori_spec.cr"                               => {/VERSION\.should eq\("[^"]+"\)/, ->(v : String) { %(VERSION.should eq("#{v}")) }},
+  "docs/content/getting-started/installation.md"    => {/You should see `gori [^`]+`\./, ->(v : String) { "You should see `gori #{v}`." }},
+  "docs/content/getting-started/installation.ko.md" => {/`gori [^`]+`이 표시되어야 합니다\./, ->(v : String) { "`gori #{v}`이 표시되어야 합니다." }},
 }
 
 current = File.read("shard.yml").match(/^version:\s*(\S+)/m).try(&.[1]) || "unknown"

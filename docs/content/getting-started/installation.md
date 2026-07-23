@@ -145,7 +145,7 @@ shards build --release -Dwithout_native_codecs
 gori --version
 ```
 
-You should see `gori 0.1.0`.
+You should see `gori 0.1.3`.
 
 ## Run Without Installing
 

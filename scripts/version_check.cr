@@ -4,16 +4,18 @@
 # Usage: crystal run scripts/version_check.cr  (just vc)
 
 FILES = {
-  "shard.yml"           => /^version:\s*(\S+)/m,
-  "src/gori.cr"         => /VERSION = "([^"]+)"/,
-  "snap/snapcraft.yaml" => /^version:\s*(\S+)/m,
-  "aur/PKGBUILD"        => /^pkgver=(\S+)/m,
-  "spec/gori_spec.cr"   => /VERSION\.should eq\("([^"]+)"\)/,
+  "shard.yml"                                       => /^version:\s*(\S+)/m,
+  "src/gori.cr"                                     => /VERSION = "([^"]+)"/,
+  "snap/snapcraft.yaml"                             => /^version:\s*(\S+)/m,
+  "aur/PKGBUILD"                                    => /^pkgver=(\S+)/m,
+  "spec/gori_spec.cr"                               => /VERSION\.should eq\("([^"]+)"\)/,
+  "docs/content/getting-started/installation.md"    => /You should see `gori ([^`]+)`\./,
+  "docs/content/getting-started/installation.ko.md" => /`gori ([^`]+)`이 표시되어야 합니다\./,
 }
 
 versions = FILES.map do |path, pattern|
   version = File.read(path).match(pattern).try(&.[1])
-  puts "#{"#{path}:".ljust(21)} #{version || "not found"}"
+  puts "#{"#{path}:".ljust(51)} #{version || "not found"}"
   {path, version}
 end
 
