@@ -201,15 +201,20 @@ module Gori
         insecure = false
         do_diff = false
         format = :text
+        ws_messages = [] of String
+        idle_ms : Int64? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater send <repeater-id> [options]\n\n" \
-                     "Replay a saved repeater SESSION (ids from `gori run repeater list`)."
+                     "Replay a saved repeater SESSION (ids from `gori run repeater list`).\n" \
+                     "A WebSocket-upgrade session performs a real RFC 6455 framed exchange."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
+          p.on("--message=TEXT", "WebSocket: outbound text message (repeatable; replaces the session's stored messages)") { |v| ws_messages << v }
+          p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -231,10 +236,9 @@ module Gori
         end
         abort "gori run repeater send: no repeater session ##{id}" unless rec
 
-        # A WS upgrade can't be replayed by a one-shot HTTP send (it would stop at the
-        # 101 handshake), matching MCP's repeater-branch guard.
         if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
-          abort "gori run repeater send: repeater session ##{id} is a WebSocket upgrade — replay it from the TUI Repeater tab or via the MCP `send_websocket` tool for a framed exchange."
+          cmd_repeater_send_ws(id, rec, project_name, db_path, insecure, idle_ms, ws_messages, host_overrides, format)
+          return
         end
 
         send = build_repeater_send(rec)
@@ -252,6 +256,101 @@ module Gori
           end
         emit_repeater_result(result, new_body, diff, format)
         exit 1 unless result.ok?
+      end
+
+      # Execute a WebSocket repeater SESSION: a fresh RFC 6455 handshake, the
+      # session's outbound messages (or `--message` overrides), and the inbound
+      # transcript. Mirrors MCP send_websocket (src/gori/mcp/tools/send.cr) so a
+      # script gets the same exchange whether it drives gori via CLI or MCP.
+      private def self.cmd_repeater_send_ws(id : Int64, rec : Store::RepeaterRecord, project_name : String?,
+                                            db_path : String?, insecure : Bool, idle_ms : Int64?,
+                                            message_override : Array(String), host_overrides : Gori::HostOverrides,
+                                            format : Symbol) : Nil
+        target = Env.expand(rec.target)
+        scheme, host, port = Repeater::FlowRequest.parse_target(target)
+        abort "gori run repeater send: could not determine a target host for session ##{id}" if host.empty?
+
+        # host_overrides was already loaded by the caller (cmd_repeater_send) from the
+        # same store open that fetched `rec` — reuse it instead of a second table scan.
+        store = open_store(resolve_read_project(project_name, db_path))
+        out_messages = begin
+          ws_out_messages(store, id, message_override)
+        ensure
+          store.close
+        end
+
+        idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
+        verify = !insecure
+        request = Env.expand_wire(String.new(rec.request))
+        sni = rec.sni.try { |v| Env.expand(v) }
+        result = Repeater::WsEngine.send(request, out_messages, scheme: scheme, host: host, port: port,
+          verify_upstream: verify, sni: sni, idle: idle, overrides: host_overrides)
+
+        store2 = open_store(resolve_read_project(project_name, db_path))
+        begin
+          store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
+        ensure
+          store2.close
+        end
+
+        emit_ws_result(id, result, format)
+        exit 1 unless result.ok?
+      end
+
+      # The session's outbound messages: `--message` overrides when given (each
+      # sent as a text frame), else the WS messages stored on the repeater (the
+      # ones with direction "out"), env-expanded like MCP send_websocket.
+      private def self.ws_out_messages(store : Store, id : Int64, override : Array(String)) : Array(Repeater::WsEngine::OutMsg)
+        return override.map { |t| Repeater::WsEngine::OutMsg.new(1, Env.expand(t).to_slice) } unless override.empty?
+        store.ws_messages_for_repeater(id).compact_map do |m|
+          next nil unless m.direction == "out"
+          payload = m.text? ? Env.expand(String.new(m.payload).scrub).to_slice : m.payload
+          Repeater::WsEngine::OutMsg.new(m.opcode, payload)
+        end
+      end
+
+      private def self.emit_ws_result(id : Int64, result : Repeater::WsEngine::Result, format : Symbol) : Nil
+        if format == :json
+          puts(JSON.build do |j|
+            j.object do
+              j.field "repeater_id", id
+              j.field "upgraded", result.upgraded?
+              j.field "duration_us", result.duration_us
+              j.field "close_code", result.close_code
+              j.field "error", result.error
+              j.field "note", result.note
+              j.field "messages" do
+                j.array do
+                  result.messages.each do |m|
+                    j.object do
+                      j.field "direction", m.direction
+                      j.field "opcode", m.opcode
+                      if m.opcode == 1
+                        j.field "text", scrub(m.payload)
+                      else
+                        j.field "binary", true
+                        j.field "size", m.payload.size
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end)
+        elsif result.ok?
+          STDERR.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
+          STDERR.puts "note: #{result.note}" if result.note
+          result.messages.each do |m|
+            arrow = m.direction == "out" ? "→" : "←"
+            if m.opcode == 1
+              puts "#{arrow} #{scrub(m.payload)}"
+            else
+              puts "#{arrow} [binary frame, #{m.payload.size} bytes]"
+            end
+          end
+        else
+          STDERR.puts "repeater failed: #{result.error}"
+        end
       end
 
       # Render a replay Result (text or json, optional diff), shared by the flow-id
@@ -342,7 +441,7 @@ module Gori
         # (status 101 + a WebSocket upgrade request) and refuse with an actionable pointer,
         # rather than the plain h1/h2 engines that don't do the RFC 6455 framed exchange.
         if detail.row.status == 101 && Repeater::WsEngine.upgrade_request?(String.new(detail.request_head))
-          abort "gori run repeater: flow ##{id} is a WebSocket session — `gori run repeater` only re-sends the HTTP upgrade and captures the 101 handshake, not the framed messages. Repeater it from the TUI Repeater tab, or create a repeater from it and use the MCP `send_websocket` tool for a real framed exchange."
+          abort "gori run repeater: flow ##{id} is a WebSocket session — `gori run repeater` only re-sends the HTTP upgrade and captures the 101 handshake, not the framed messages. Create a repeater from it (`gori run repeater create --flow=#{id}`) and replay it with `gori run repeater send <id>` for a real framed exchange."
         end
 
         # The captured request body was capped at CAPTURE_MAX; FlowRequest.build re-syncs the

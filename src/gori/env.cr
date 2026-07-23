@@ -137,8 +137,10 @@ module Gori
     # Byte-level equivalent of `gsub(/\r?\n/, "\r\n")`: inserts `\r` before any
     # `\n` not already preceded by one, leaving everything else untouched. Used
     # instead of a `Regex` because `bytes` (the expanded request text) may carry
-    # invalid UTF-8, which `Regex` cannot accept as a subject.
-    private def self.normalize_crlf(bytes : Bytes) : Bytes
+    # invalid UTF-8, which `Regex` cannot accept as a subject. Public: also reused
+    # by `gori run intercept edit --raw-file` (a locally-read file may be an
+    # arbitrary binary body, same invalid-UTF-8 hazard).
+    def self.normalize_crlf(bytes : Bytes) : Bytes
       buf = IO::Memory.new(bytes.size)
       prev : UInt8 = 0
       bytes.each do |b|

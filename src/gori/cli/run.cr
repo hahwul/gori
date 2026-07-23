@@ -19,6 +19,7 @@ require "../repeater/h2_engine"
 require "../repeater/ws_engine"
 require "../repeater/flow_request"
 require "../repeater/diff"
+require "../repeater/message_lines"
 require "../fuzz"
 require "../decoder"
 require "../miner"
@@ -34,6 +35,8 @@ require "./output"
 require "./run/capture"
 require "./run/history"
 require "./run/repeater"
+require "./run/compare"
+require "./run/intercept"
 require "./run/fuzz_args"
 require "./run/fuzz"
 require "./run/mine"
@@ -107,6 +110,16 @@ module Gori
         when "decoder"  then cmd_decoder(rest)
         when "rewriter" then cmd_rewriter(rest)
         when "project"  then cmd_project(rest)
+        else                 dispatch_subcommand3(sub, rest)
+        end
+      end
+
+      # The third slice of the subcommand `case` (same complexity-bar reason as
+      # dispatch_subcommand2). `sub` is still non-nil here.
+      private def self.dispatch_subcommand3(sub : String?, rest : Array(String)) : Nil
+        case sub
+        when "compare"   then cmd_compare(rest)
+        when "intercept" then cmd_intercept(rest)
         else
           STDERR.puts "gori run: unknown subcommand '#{sub}'"
           print_help
@@ -121,7 +134,9 @@ module Gori
         {"capture", "Start the proxy and stream captured flows to STDOUT"},
         {"history (ls)", "List / QL-query captured flows"},
         {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
-        {"repeater", "Re-send a captured flow; list/create/send (replay) repeater sessions"},
+        {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"compare <a> <b>", "Diff two flows' request or response, side-by-side"},
+        {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},

@@ -24,11 +24,15 @@ require "../notes"
 require "../probe"
 require "./serialize"
 require "./request_builder"
+require "./tools/compare"
 require "./tools/context"
 require "./tools/decode"
 require "./tools/discover"
+require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
+require "./tools/host_overrides"
+require "./tools/import"
 require "./tools/intercept"
 require "./tools/issues"
 require "./tools/jobs"
@@ -39,6 +43,7 @@ require "./tools/projects"
 require "./tools/ql"
 require "./tools/repeater"
 require "./tools/rules"
+require "./tools/scope"
 require "./tools/send"
 require "./tools/sequence"
 require "./tools/sitemap"
@@ -89,6 +94,10 @@ module Gori
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
         "oast_start", "oast_stop",
+        "add_scope_rule", "delete_scope_rule", "set_scope_enabled",
+        "set_env_var", "delete_env_var",
+        "add_host_override", "update_host_override", "delete_host_override",
+        "import_flows",
       }
 
       # R2-3 — active/outbound tools that expand or mask `$KEY` env tokens at call
@@ -453,6 +462,20 @@ module Gori
             s.field "raw", boolprop("page stored response bytes without content decoding (default false)")
           end
 
+          tool j, "compare_flows",
+            "Line-diff two flows' request or response — the MCP equivalent of the TUI's Comparer " \
+            "tab. Response bodies are decoded (de-chunked/decompressed) before diffing; request " \
+            "bodies are compared byte-faithful. Returns {changed_lines, identical, truncated, " \
+            "diff:[{kind: same|add|del, text}]} (add = only in flow B, del = only in flow A). " \
+            "Authorization/Cookie/Set-Cookie/API-key header values are [REDACTED] in the diff " \
+            "text unless include_sensitive=true. Pure read: no network, nothing written." do |s|
+            s.field "flow_id_a", intprop("first flow id (the 'original' side)"), required: true
+            s.field "flow_id_b", intprop("second flow id (the 'new' side)"), required: true
+            s.field "pane", strprop("request | response (default response)")
+            s.field "changes_only", boolprop("omit unchanged (same) lines from the diff (default false)")
+            s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
+          end
+
           tool j, "list_sitemap",
             "Distinct endpoints discovered in capture, keyed by TRANSPORT " \
             "(scheme, host, port, http_version, method, target) so the same path over " \
@@ -493,7 +516,19 @@ module Gori
             s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
           end
 
-          tool j, "list_scope", "List the project's scope include/exclude rules." { }
+          tool j, "list_scope", "List the project's scope include/exclude rules, plus whether the scope lens/gate is enabled." { }
+
+          tool j, "list_env",
+            "List the project's env vars (used for $KEY substitution in outbound requests — see " \
+            "send_request/send_websocket). Values are [REDACTED] by default (a project env var is " \
+            "exactly the kind of place a credential/token lives); pass include_sensitive:true to see them." do |s|
+            s.field "include_sensitive", boolprop("return actual values instead of [REDACTED] (default false)")
+          end
+
+          tool j, "list_host_overrides",
+            "List the project's host overrides (/etc/hosts-style: dial a specific IP for a hostname; " \
+            "SNI/Host header unchanged). Project overrides win over the global Settings ones on a " \
+            "collision." { }
 
           tool j, "project_info",
             "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
@@ -682,6 +717,60 @@ module Gori
               "Set which leg(s) intercept holds: both | request | response. Applied by the " \
               "capturing instance." do |s|
               s.field "direction", strprop("both | request | response"), required: true
+            end
+
+            tool j, "add_scope_rule",
+              "Add a scope include/exclude rule (the Target/Sitemap ⇧S lens, and the intercept " \
+              "gate). Deduped on the kind/match_type/pattern triple." do |s|
+              s.field "kind", strprop("include | exclude (default include)")
+              s.field "match_type", strprop("host | string | regex (default host)")
+              s.field "pattern", strprop("host: exact/subdomain/'*' glob; string: substring of scheme://host/target; regex: over the same (case-sensitive; use (?i) to opt out)"), required: true
+            end
+
+            tool j, "delete_scope_rule", "Delete a scope rule by id (see list_scope)." do |s|
+              s.field "id", intprop("scope rule id"), required: true
+            end
+
+            tool j, "set_scope_enabled",
+              "Turn the scope lens/gate on or off (the rules themselves are untouched)." do |s|
+              s.field "enabled", boolprop("true = filter to in-scope; false = show/allow everything"), required: true
+            end
+
+            tool j, "set_env_var",
+              "Set (create or update) a project env var used for $KEY substitution in outbound " \
+              "requests (send_request, send_websocket, repeater sends)." do |s|
+              s.field "key", strprop("variable name ([A-Za-z_][A-Za-z0-9_]*)"), required: true
+              s.field "value", strprop("variable value (default empty)")
+            end
+
+            tool j, "delete_env_var", "Delete a project env var by key (see list_env)." do |s|
+              s.field "key", strprop("variable name"), required: true
+            end
+
+            tool j, "add_host_override",
+              "Add a host override (dial a specific IP for a hostname; SNI/Host header unchanged) — " \
+              "used by send_request/send_websocket/repeater and the live proxy." do |s|
+              s.field "host", strprop("hostname to override (case-insensitive)"), required: true
+              s.field "ip", strprop("IPv4/IPv6 literal to dial"), required: true
+            end
+
+            tool j, "update_host_override", "Update an existing host override by id." do |s|
+              s.field "id", intprop("host override id (see list_host_overrides)"), required: true
+              s.field "host", strprop("new hostname"), required: true
+              s.field "ip", strprop("new IPv4/IPv6 literal"), required: true
+            end
+
+            tool j, "delete_host_override", "Delete a host override by id." do |s|
+              s.field "id", intprop("host override id (see list_host_overrides)"), required: true
+            end
+
+            tool j, "import_flows",
+              "Bulk-import flows into the project's History from a HAR export, a URL list, or an " \
+              "OpenAPI/Swagger spec — the MCP equivalent of `gori run import`. `path` is read from " \
+              "the MCP SERVER's local filesystem (this process runs locally, same trust boundary as " \
+              "send_request)." do |s|
+              s.field "kind", strprop("har | urls | oas"), required: true
+              s.field "path", strprop("filesystem path to the HAR/URL-list/OpenAPI file"), required: true
             end
 
             tool j, "create_rule",
@@ -1158,11 +1247,14 @@ module Gori
         when "intercept_get"           then intercept_get(h)
         when "get_flow"                then get_flow(h)
         when "get_response_body_chunk" then get_response_body_chunk(h)
+        when "compare_flows"           then compare_flows(h)
         when "list_sitemap"            then list_sitemap(h)
         when "list_issues"             then list_issues(h)
         when "get_issue"               then get_issue(h)
         when "probe_scan"              then probe_scan(h)
         when "list_scope"              then list_scope
+        when "list_env"                then list_env(h)
+        when "list_host_overrides"     then list_host_overrides
         when "project_info"            then project_info
         when "get_current_context"     then get_current_context
         when "get_repeater_context"    then get_repeater_context(h)
@@ -1198,6 +1290,15 @@ module Gori
         when "intercept_toggle"        then gated { intercept_toggle(h) }
         when "intercept_set_filter"    then gated { intercept_set_filter(h) }
         when "intercept_set_direction" then gated { intercept_set_direction(h) }
+        when "add_scope_rule"          then gated { add_scope_rule(h) }
+        when "delete_scope_rule"       then gated { delete_scope_rule(h) }
+        when "set_scope_enabled"       then gated { set_scope_enabled(h) }
+        when "set_env_var"             then gated { set_env_var(h) }
+        when "delete_env_var"          then gated { delete_env_var(h) }
+        when "add_host_override"       then gated { add_host_override(h) }
+        when "update_host_override"    then gated { update_host_override(h) }
+        when "delete_host_override"    then gated { delete_host_override(h) }
+        when "import_flows"            then gated { import_flows(h) }
         when "create_repeater"         then gated { create_repeater(h) }
         when "update_repeater"         then gated { update_repeater(h) }
         when "delete_repeater"         then gated { delete_repeater(h) }

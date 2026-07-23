@@ -9,13 +9,18 @@ module Gori
     class Tools
       private def list_scope : Result
         Result.new(JSON.build do |j|
-          j.array do
-            store.scope_rules.each do |(id, kind, match_type, pattern)|
-              j.object do
-                j.field "id", id
-                j.field "kind", kind
-                j.field "match_type", match_type
-                j.field "pattern", pattern
+          j.object do
+            j.field "enabled", Scope.load(store).enabled?
+            j.field "rules" do
+              j.array do
+                store.scope_rules.each do |(id, kind, match_type, pattern)|
+                  j.object do
+                    j.field "id", id
+                    j.field "kind", kind
+                    j.field "match_type", match_type
+                    j.field "pattern", pattern
+                  end
+                end
               end
             end
           end

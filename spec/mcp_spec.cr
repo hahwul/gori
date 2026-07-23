@@ -1465,6 +1465,257 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "compare_flows" do
+    it "diffs two flows' response bodies line by line" do
+      with_store do |store|
+        a = seed_flow(store, "a.test", "GET", "/x", 200, resp_body: "line1\nline2\nline3".to_slice)
+        b = seed_flow(store, "a.test", "GET", "/x", 200, resp_body: "line1\nCHANGED\nline3".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b}}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["pane"].as_s.should eq("response")
+        payload["identical"].as_bool.should be_false
+        payload["changed_lines"].as_i.should be > 0
+        kinds = payload["diff"].as_a.map(&.["kind"].as_s)
+        kinds.should contain("add")
+        kinds.should contain("del")
+      end
+    end
+
+    it "reports identical:true and zero changed_lines for identical flows" do
+      with_store do |store|
+        a = seed_flow(store, "a.test", "GET", "/x", 200, resp_body: "same".to_slice)
+        b = seed_flow(store, "a.test", "GET", "/x", 200, resp_body: "same".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b}}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["identical"].as_bool.should be_true
+        payload["changed_lines"].as_i.should eq(0)
+      end
+    end
+
+    it "diffs the request pane when pane:request" do
+      with_store do |store|
+        a = seed_flow(store, "a.test", "GET", "/x", 200)
+        b = seed_flow(store, "a.test", "POST", "/y", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b},"pane":"request"}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["pane"].as_s.should eq("request")
+        payload["identical"].as_bool.should be_false
+      end
+    end
+
+    it "redacts auth headers in the request-pane diff, reveals them with include_sensitive" do
+      with_store do |store|
+        a = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
+          method: "GET", target: "/x", http_version: "HTTP/1.1",
+          head: "GET /x HTTP/1.1\r\nHost: a.test\r\nAuthorization: Bearer topsecret\r\n\r\n".to_slice,
+          body: nil))
+        b = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 2_i64, scheme: "https", host: "a.test", port: 443,
+          method: "GET", target: "/y", http_version: "HTTP/1.1",
+          head: "GET /y HTTP/1.1\r\nHost: a.test\r\nAuthorization: Bearer topsecret\r\n\r\n".to_slice,
+          body: nil))
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b},"pane":"request"}}})
+        payload = tool_payload(drive(store, call)[0])
+        texts = payload["diff"].as_a.map(&.["text"].as_s)
+        texts.any?(&.includes?("Authorization: [REDACTED]")).should be_true
+        texts.any?(&.includes?("topsecret")).should be_false
+
+        sensitive_call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b},"pane":"request","include_sensitive":true}}})
+        sensitive_payload = tool_payload(drive(store, sensitive_call)[0])
+        sensitive_texts = sensitive_payload["diff"].as_a.map(&.["text"].as_s)
+        sensitive_texts.any?(&.includes?("Bearer topsecret")).should be_true
+      end
+    end
+
+    it "changes_only omits unchanged (same) lines from the diff" do
+      with_store do |store|
+        a = seed_flow(store, "a.test", "GET", "/x", 200, resp_body: "line1\nline2\nline3".to_slice)
+        b = seed_flow(store, "a.test", "GET", "/x", 200, resp_body: "line1\nCHANGED\nline3".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b},"changes_only":true}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["diff"].as_a.map(&.["kind"].as_s).should_not contain("same")
+      end
+    end
+
+    it "returns NOT_FOUND for a missing flow id" do
+      with_store do |store|
+        a = seed_flow(store, "a.test", "GET", "/x", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":999999}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("NOT_FOUND")
+      end
+    end
+  end
+
+  describe "scope rule tools" do
+    it "adds, lists (with enabled), and deletes a scope rule" do
+      with_store do |store|
+        add = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_scope_rule","arguments":{"kind":"include","match_type":"host","pattern":"api.example.com"}}})
+        id = tool_payload(drive(store, add)[0])["id"].as_i64
+        id.should be > 0
+
+        listed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_scope"}}))[0])
+        listed["rules"].as_a.size.should eq(1)
+        listed["rules"][0]["pattern"].as_s.should eq("api.example.com")
+
+        del = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"delete_scope_rule","arguments":{"id":#{id}}}})
+        tool_payload(drive(store, del)[0])["deleted"].as_bool.should be_true
+        store.scope_rules.should be_empty
+      end
+    end
+
+    it "rejects an invalid pattern (persists nothing)" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_scope_rule","arguments":{"match_type":"regex","pattern":"[invalid\(regex"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        store.scope_rules.should be_empty
+      end
+    end
+
+    it "toggles the scope lens on/off and reflects it in list_scope" do
+      with_store do |store|
+        listed0 = tool_payload(drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_scope"}}))[0])
+        listed0["enabled"].as_bool.should be_false
+
+        on = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"set_scope_enabled","arguments":{"enabled":true}}})
+        tool_payload(drive(store, on)[0])["enabled"].as_bool.should be_true
+
+        listed1 = tool_payload(drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_scope"}}))[0])
+        listed1["enabled"].as_bool.should be_true
+      end
+    end
+
+    it "reports NOT_FOUND deleting an unknown scope rule id" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"delete_scope_rule","arguments":{"id":999}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("NOT_FOUND")
+      end
+    end
+  end
+
+  describe "env var tools" do
+    it "sets, lists (redacted by default), and deletes an env var" do
+      with_store do |store|
+        set = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_env_var","arguments":{"key":"TOKEN","value":"secret123"}}})
+        tool_payload(drive(store, set)[0])["set"].as_bool.should be_true
+
+        listed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_env"}}))[0]).as_a
+        listed.size.should eq(1)
+        listed[0]["key"].as_s.should eq("TOKEN")
+        listed[0]["value"].as_s.should eq("[REDACTED]")
+
+        sensitive = tool_payload(drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_env","arguments":{"include_sensitive":true}}}))[0]).as_a
+        sensitive[0]["value"].as_s.should eq("secret123")
+
+        del = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_env_var","arguments":{"key":"TOKEN"}}})
+        tool_payload(drive(store, del)[0])["deleted"].as_bool.should be_true
+        Gori::Settings.project_env_vars.should be_empty
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
+
+    it "rejects an invalid key" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_env_var","arguments":{"key":"bad key!","value":"x"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
+
+    it "reports NOT_FOUND deleting an unknown key" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"delete_env_var","arguments":{"key":"NOPE"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("NOT_FOUND")
+      ensure
+        Gori::Settings.project_env_vars = [] of {String, String}
+      end
+    end
+  end
+
+  describe "host override tools" do
+    it "adds, lists, updates, and deletes a host override" do
+      with_store do |store|
+        add = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_host_override","arguments":{"host":"api.example.com","ip":"10.0.0.1"}}})
+        id = tool_payload(drive(store, add)[0])["id"].as_i64
+        id.should be > 0
+
+        listed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_host_overrides"}}))[0]).as_a
+        listed.size.should eq(1)
+        listed[0]["ip"].as_s.should eq("10.0.0.1")
+
+        upd = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"update_host_override","arguments":{"id":#{id},"host":"api.example.com","ip":"10.0.0.2"}}})
+        tool_payload(drive(store, upd)[0])["ip"].as_s.should eq("10.0.0.2")
+
+        del = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_host_override","arguments":{"id":#{id}}}})
+        tool_payload(drive(store, del)[0])["deleted"].as_bool.should be_true
+        Gori::HostOverrides.load(store).entries.should be_empty
+      end
+    end
+
+    it "rejects an invalid ip literal" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_host_override","arguments":{"host":"api.example.com","ip":"not-an-ip"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+      end
+    end
+
+    it "reports NOT_FOUND updating an unknown id" do
+      with_store do |store|
+        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_host_override","arguments":{"id":999,"host":"x.test","ip":"1.2.3.4"}}})
+        resp = drive(store, upd)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("NOT_FOUND")
+      end
+    end
+  end
+
+  describe "import_flows" do
+    it "imports a URL list into History" do
+      with_store do |store|
+        path = File.tempname("gori-mcp-import", ".txt")
+        File.write(path, "https://a.test/\nhttps://b.test/x\n")
+        begin
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"urls","path":#{path.to_json}}}})
+          payload = tool_payload(drive(store, call)[0])
+          payload["count"].as_i.should eq(2)
+          store.count.should eq(2)
+        ensure
+          File.delete?(path)
+        end
+      end
+    end
+
+    it "returns a clean error for a missing file" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"urls","path":"/no/such/file.txt"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["content"][0]["text"].as_s.should contain("not found")
+      end
+    end
+
+    it "rejects an invalid kind" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"csv","path":"/tmp/x"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["field"].as_s.should eq("kind")
+      end
+    end
+  end
+
   describe "list_issues" do
     it "returns a paginated object (not a bare array)" do
       with_store do |store|
