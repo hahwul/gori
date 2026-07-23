@@ -138,6 +138,13 @@ describe Gori::QL do
     Gori::QL.parse("dur:<=1.5s").args.should eq([1_500_000_i64]) # fractional seconds
   end
 
+  it "parses the dur: ms/s suffix case-insensitively (like size:'s kb/mb)" do
+    Gori::QL.parse("dur:>2S").sql.should eq("(duration_us > ?)") # not silently dropped
+    Gori::QL.parse("dur:>2S").args.should eq([2_000_000_i64])
+    Gori::QL.parse("dur:>=500MS").args.should eq([500_000_i64])
+    Gori::QL.parse("dur:<1.5S").args.should eq([1_500_000_i64])
+  end
+
   it "drops a size:/dur: term whose magnitude is not numeric (match-all EMPTY)" do
     Gori::QL.parse("size:big").sql.should eq("1")
     Gori::QL.parse("dur:>fast").sql.should eq("1")

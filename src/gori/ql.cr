@@ -351,9 +351,14 @@ module Gori
     private def self.duration_cond(value : String) : {String, Array(DB::Any)}?
       op, rest = split_op(value)
       scale_us = 1000.0 # ms → µs (default)
-      if rest.ends_with?("ms")
+      # Match the unit suffix case-insensitively, mirroring numeric_cond's kb/mb/… handling,
+      # so `dur:>2S` / `dur:>=500MS` parse like their lowercase forms instead of silently
+      # dropping the term (the numeric part carries no letters, so stripping from `rest`
+      # keeps `to_f?` happy).
+      lower_rest = rest.downcase
+      if lower_rest.ends_with?("ms")
         rest = rest[0...-2]
-      elsif rest.ends_with?('s')
+      elsif lower_rest.ends_with?('s')
         rest = rest[0...-1]
         scale_us = 1_000_000.0
       end
