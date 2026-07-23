@@ -73,15 +73,8 @@ module Gori
             abort "gori run probe: query #{query.inspect} failed: #{ex.message}"
           end
           meter = STDERR.tty?
-          progress = meter ? ->(i : Int32, n : Int32) do
-            if (i & 0x3F) == 0
-              STDERR.print "\r[probe] scanned #{i + 1}/#{n} flows"
-              STDERR.flush
-            end
-            nil
-          end : nil
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
-            allow_unscoped: allow_unscoped, progress: progress)
+            allow_unscoped: allow_unscoped, progress: probe_progress_meter(meter))
           STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
           {Probe.group(dets), ids.size, rn}
         ensure
@@ -113,6 +106,19 @@ module Gori
           STDERR.puts((min_sev || category) ? "no issues match the --severity/--category filter#{scope}" : "no issues#{scope}")
         else
           groups.each { |g| puts CLI::Output.probe_group_text(g) }
+        end
+      end
+
+      # A live progress callback for Probe::Scan (an in-place "scanned i/n flows" meter,
+      # throttled to every 64th flow), or nil when STDERR isn't a TTY.
+      private def self.probe_progress_meter(meter : Bool) : Proc(Int32, Int32, Nil)?
+        return nil unless meter
+        ->(i : Int32, n : Int32) do
+          if (i & 0x3F) == 0
+            STDERR.print "\r[probe] scanned #{i + 1}/#{n} flows"
+            STDERR.flush
+          end
+          nil
         end
       end
 

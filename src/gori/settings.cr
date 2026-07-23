@@ -53,6 +53,14 @@ module Gori
       root = load_root(raw)
       return unless root # present but unparseable — kept a .corrupt copy, keep defaults
       @@loaded_raw = raw
+      apply_sections(root)
+    rescue
+      # a malformed individual section — keep whatever loaded so far
+    end
+
+    # Read each top-level section of a parsed settings document into the class properties.
+    # Split out of load so load stays a small read → parse → apply flow.
+    private def self.apply_sections(root : JSON::Any) : Nil
       if net = root["network"]?
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
@@ -93,8 +101,6 @@ module Gori
       parse_general(root["general"]?)
       parse_update(root["update"]?)
       Env.bump_highlight_rev
-    rescue
-      # a malformed individual section — keep whatever loaded so far
     end
 
     # Read the settings file; nil on missing/unreadable (a first run keeps defaults).

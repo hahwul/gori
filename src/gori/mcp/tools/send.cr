@@ -27,23 +27,9 @@ module Gori
         return issue_id if issue_id.is_a?(Result)
 
         built, http2, sni = build_send_request(h)
-        # OPT-IN Match&Replace parity: direct sends are byte-exact (P7) by default — a
-        # repeater/fuzz caller wants exactly what it typed. apply_rules:true asks for proxy
-        # parity, so run the project's REQUEST-side rules over the built bytes here (before the
-        # scope gate + History write, so the recorded/effective request == the wire) and re-sync
-        # Content-Length. Response-side rules are intentionally NOT applied.
-        applied_rules = false
-        if bool_arg(h, "apply_rules", false)
-          rules = Gori::Rules.load(store)
-          if rules.active?
-            rewritten = Repeater::FlowRequest.resync_content_length(
-              rules.transform_message(String.new(built.bytes), Store::RuleTarget::Request, built.host).to_slice)
-            if rewritten != built.bytes
-              built = RequestBuilder::Built.new(rewritten, built.scheme, built.host, built.port)
-              applied_rules = true
-            end
-          end
-        end
+        # OPT-IN Match&Replace parity (before the scope gate + History write so the
+        # recorded/effective request == the wire); byte-exact by default.
+        built, applied_rules = maybe_apply_request_rules(h, built)
         # Scope gate BEFORE any outbound byte / History write: an out-of-scope
         # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
         # request_target reads the target VERBATIM off the first line of `built.bytes` —
@@ -231,6 +217,21 @@ module Gori
         # The request already left the host. Keep its result usable, but surface
         # a failed evidence update on STDERR (never the JSON-RPC channel).
         Log.error(exception: ex) { "send_request: failed to finalize History flow #{flow_id}" }
+      end
+
+      # OPT-IN Match&Replace parity for a direct send: direct sends are byte-exact (P7) by
+      # default — a repeater/fuzz caller wants exactly what it typed. apply_rules:true asks for
+      # live-proxy parity, so run the project's enabled REQUEST-side rules over the built bytes
+      # and re-sync Content-Length. Response-side rules are intentionally NOT applied. Returns
+      # the (possibly rewritten) request and whether a rule actually changed the bytes.
+      private def maybe_apply_request_rules(h, built : RequestBuilder::Built) : {RequestBuilder::Built, Bool}
+        return {built, false} unless bool_arg(h, "apply_rules", false)
+        rules = Gori::Rules.load(store)
+        return {built, false} unless rules.active?
+        rewritten = Repeater::FlowRequest.resync_content_length(
+          rules.transform_message(String.new(built.bytes), Store::RuleTarget::Request, built.host).to_slice)
+        return {built, false} if rewritten == built.bytes
+        {RequestBuilder::Built.new(rewritten, built.scheme, built.host, built.port), true}
       end
 
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
