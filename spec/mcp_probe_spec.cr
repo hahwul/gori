@@ -87,4 +87,15 @@ describe "MCP probe_scan tool" do
       r.text.should contain("scope")
     end
   end
+
+  it "refuses an active scan with an excludes-only scope (no include rule would send anything)" do
+    with_store do |store|
+      seed_secret_flow(store)
+      Gori::Scope.load(store).add("exclude", "host", "evil.test") # configured, but zero includes
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      r = tools.call("probe_scan", JSON.parse(%({"active":true})))
+      r.is_error.should be_true # was: silently ran zero active probes and reported success
+      r.text.should contain("include")
+    end
+  end
 end

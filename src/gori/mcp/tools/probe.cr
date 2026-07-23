@@ -32,10 +32,12 @@ module Gori
         scope, scope_configured = gate
 
         ids = Probe::Scan.flow_ids(store, filter)
+        # Cap only the ACTIVE sends (network volume); the request-free PASSIVE scan always
+        # covers every flow. (An earlier version truncated `ids`, which silently dropped
+        # passive coverage of the newest flows under active:true.)
         capped = active && ids.size > PROBE_ACTIVE_MAX_FLOWS
-        ids = ids[0, PROBE_ACTIVE_MAX_FLOWS] if capped
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: @verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped)
+          scope: scope, allow_unscoped: allow_unscoped, active_limit: active ? PROBE_ACTIVE_MAX_FLOWS : nil)
 
         groups = probe_filter_groups(Probe.group(dets), severity_from(str(h, "severity")), category.as(String?))
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
@@ -64,12 +66,15 @@ module Gori
         return {nil, false} unless active
         return err("active probe scan is disabled (gori mcp --read-only); pass active:false for a passive scan", "TOOL_DISABLED") unless @allow_actions
         scope = Scope.load(store)
-        configured = scope.configured?
-        if !configured && !allow_unscoped
-          return err("active probe scan needs a configured scope (or allow_unscoped:true); no scope is configured, so outbound probe requests are refused by default",
+        # Layer-1 (matches_url?) sends an active probe only to a scope-INCLUDED flow, so with
+        # zero include rules every flow is gated out and active mode would run nothing. Refuse
+        # up front (mirrors `gori run probe`'s include-count check) — an excludes-only scope
+        # counts as "no includes" here, not as a configured allowlist.
+        if scope.include_count == 0 && !allow_unscoped
+          return err("active probe scan needs a scope INCLUDE rule (or allow_unscoped:true); with no include rule every active probe is gated out, so outbound requests are refused by default",
             "SCOPE_BLOCKED", field: "active", details: JSON.parse({"scope_decision" => "unscoped"}.to_json))
         end
-        {scope, configured}
+        {scope, scope.configured?}
       end
 
       private def probe_filter_groups(groups : Array(Probe::Group), min_sev : Store::Severity?,

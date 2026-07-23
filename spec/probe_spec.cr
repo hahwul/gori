@@ -1620,6 +1620,23 @@ describe "Gori::Probe::Active (safety + coverage)" do
     end
   end
 
+  it "caps active sends via active_limit but never truncates the passive scan (R1-5)" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?token=aaaaaaaa", content_type: nil)
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/b?token=bbbbbbbb", content_type: nil)
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+      ids.size.should eq(2)
+      passive = Gori::Probe::Scan.scan_flows(store, ids, active: false)
+      # active:true with a 0 active budget → ZERO active sends (no network), and the
+      # request-free passive scan must still cover BOTH flows — not be truncated with it.
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      capped = Gori::Probe::Scan.scan_flows(store, ids, active: true, scope: scope, active_limit: 0)
+      capped.size.should eq(passive.size)
+      capped.count { |d| d.code == "secret_in_url" }.should eq(2) # both flows' passive issue kept
+    end
+  end
+
   it "sends active probes when the scope ALLOWLISTS the target" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)

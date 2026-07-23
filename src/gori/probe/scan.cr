@@ -30,11 +30,13 @@ module Gori
 
       # Analyze History flows + Repeater tabs. Returns {detections, repeater_count_scanned}.
       # `progress.call(i, total)` is invoked per flow so a CLI can draw a meter; MCP passes nil.
+      # `active_limit` caps how many flows receive an ACTIVE probe (network volume) WITHOUT
+      # limiting the request-free PASSIVE scan — nil means no active cap (the CLI).
       def scan_all(store : Store, ids : Array(Int64), *, active : Bool,
                    verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
-                   progress : Proc(Int32, Int32, Nil)? = nil) : {Array(Detection), Int32}
+                   active_limit : Int32? = nil, progress : Proc(Int32, Int32, Nil)? = nil) : {Array(Detection), Int32}
         detections = scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, progress: progress)
+          scope: scope, allow_unscoped: allow_unscoped, active_limit: active_limit, progress: progress)
         repeater_dets, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped)
         detections.concat(repeater_dets)
@@ -43,14 +45,18 @@ module Gori
 
       def scan_flows(store : Store, ids : Array(Int64), *, active : Bool,
                      verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
-                     progress : Proc(Int32, Int32, Nil)? = nil) : Array(Detection)
+                     active_limit : Int32? = nil, progress : Proc(Int32, Int32, Nil)? = nil) : Array(Detection)
         detections = [] of Detection
+        active_sent = 0
         ids.each_with_index do |id, i|
           detail = store.get_flow(id)
           if detail && detail.response_head
             ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
-            detections.concat(Passive.analyze(detail, ws))
-            detections.concat(Active.analyze(detail, verify_upstream, scope: scope)) if active && active_target?(detail, scope, allow_unscoped)
+            detections.concat(Passive.analyze(detail, ws)) # passive is request-free — NEVER capped
+            if active && active_target?(detail, scope, allow_unscoped) && !(active_limit && active_sent >= active_limit)
+              detections.concat(Active.analyze(detail, verify_upstream, scope: scope))
+              active_sent += 1
+            end
           end
           progress.try &.call(i, ids.size)
         end
