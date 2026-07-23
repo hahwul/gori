@@ -457,6 +457,37 @@ describe Gori::Settings do
     end
   end
 
+  it "preserves a recoverable .corrupt copy when the settings file is unparseable" do
+    dir = File.tempname("gori-settings-corrupt")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    begin
+      ENV["GORI_HOME"] = dir
+      corrupt = %({"theme":"dracula","network":{"bind_port":9999,) # truncated / invalid JSON
+      File.write(Gori::Settings.path, corrupt)
+
+      Gori::Settings.theme = "goridark"
+      Gori::Settings.bind_port = 8070
+      Gori::Settings.load # unparseable → keep defaults AND back up the file
+
+      Gori::Settings.theme.should eq("goridark") # defaults kept, not the corrupt "dracula"
+      backup = "#{Gori::Settings.path}.corrupt"
+      File.exists?(backup).should be_true
+      File.read(backup).should eq(corrupt) # original content is recoverable
+
+      # A later save (e.g. the background update-check) overwrites settings.json with
+      # defaults but must NOT destroy the recoverable backup, nor merge against corrupt bytes.
+      Gori::Settings.save
+      File.read(backup).should eq(corrupt)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   describe ".editor_command" do
     it "splits a configured command into program + args" do
       Gori::Settings.editor = "code --wait"
