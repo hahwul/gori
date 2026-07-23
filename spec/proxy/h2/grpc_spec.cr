@@ -17,6 +17,19 @@ private def framed(*msgs : String) : Bytes
   io.to_slice
 end
 
+# Build a single grpc-web TRAILER frame (flag 0x80 + 4-byte length + ASCII payload).
+private def trailer_frame(payload : String) : Bytes
+  io = IO::Memory.new
+  io.write_byte(0x80_u8)
+  len = payload.bytesize
+  io.write_byte(((len >> 24) & 0xff).to_u8)
+  io.write_byte(((len >> 16) & 0xff).to_u8)
+  io.write_byte(((len >> 8) & 0xff).to_u8)
+  io.write_byte((len & 0xff).to_u8)
+  io << payload
+  io.to_slice
+end
+
 describe Gori::Proxy::H2::Grpc do
   it "detects application/grpc content types" do
     Grpc.grpc?("application/grpc").should be_true
@@ -43,7 +56,26 @@ describe Gori::Proxy::H2::Grpc do
   it "marks compressed messages" do
     m = Grpc.messages(Bytes[0x01, 0x00, 0x00, 0x00, 0x02, 0xab, 0xcd]).first
     m.compressed.should be_true
+    m.trailer.should be_false # flag 0x01 → compressed, not a trailer
     m.data.should eq(Bytes[0xab, 0xcd])
+  end
+
+  it "flags a grpc-web trailer frame (top bit 0x80) and does not treat it as compressed" do
+    m = Grpc.messages(trailer_frame("grpc-status: 0\r\ngrpc-message: OK\r\n")).first
+    m.trailer.should be_true
+    m.compressed.should be_false
+  end
+
+  it "reads the compressed bit independently of the trailer bit (flag 0x81)" do
+    m = Grpc.messages(Bytes[0x81_u8, 0x00, 0x00, 0x00, 0x02, 0xab, 0xcd]).first
+    m.compressed.should be_true
+    m.trailer.should be_true
+  end
+
+  it "parses grpc-status / grpc-message from a trailer payload" do
+    h = Grpc.trailer_headers("grpc-status: 5\r\ngrpc-message: not found\r\n".to_slice)
+    h["grpc-status"].should eq("5")
+    h["grpc-message"].should eq("not found")
   end
 
   it "names known status codes and falls back for unknown ones" do
@@ -76,6 +108,12 @@ describe Gori::Proxy::H2::Grpc do
 
     it "frames an empty payload as a 5-byte header with zero length" do
       Grpc.frame(false, Bytes.empty).should eq(Bytes[0x00, 0x00, 0x00, 0x00, 0x00])
+    end
+
+    it "sets the trailer bit (0x80) and round-trips via messages" do
+      f = Grpc.frame(false, "grpc-status: 0\r\n".to_slice, trailer: true)
+      f[0].should eq(0x80_u8)
+      Grpc.messages(f).first.trailer.should be_true
     end
   end
 end
