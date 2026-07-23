@@ -10,6 +10,9 @@ module Gori
         elsif sub == "create"
           cmd_repeater_create(args[1..])
           return
+        elsif sub == "send"
+          cmd_repeater_send(args[1..])
+          return
         end
 
         cmd_repeater_single(args)
@@ -171,6 +174,108 @@ module Gori
         end
       end
 
+      # Resolved send parameters for a saved Repeater SESSION replay — the session
+      # counterpart of FlowRequest::Built (which starts from a captured flow).
+      record RepeaterSend, bytes : Bytes, scheme : String, host : String,
+        port : Int32, http2 : Bool, sni : String?
+
+      # Turn a persisted Repeater SESSION row into replayable bytes + engine settings,
+      # mirroring MCP send_request(repeater_id:) (src/gori/mcp/tools/send.cr): env-expand
+      # the request wire, recompute Content-Length ONLY when the session's
+      # auto_content_length toggle is on (so a deliberately hand-set CL survives when
+      # off), env-expand + parse the target, and carry the session's http2 flag and
+      # env-expanded SNI.
+      private def self.build_repeater_send(rec : Store::RepeaterRecord) : RepeaterSend
+        expanded = Env.expand_wire(String.new(rec.request))
+        bytes = rec.auto_content_length? ? Repeater::FlowRequest.resync_content_length(expanded) : expanded
+        scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
+        RepeaterSend.new(bytes, scheme, host, port, rec.http2?, rec.sni.try { |v| Env.expand(v) })
+      end
+
+      # `gori run repeater send <repeater-id>` — replay a saved repeater SESSION (as
+      # opposed to a bare id, which replays a History FLOW). Honors the session's
+      # target / http2 / sni / auto_content_length toggle.
+      private def self.cmd_repeater_send(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        insecure = false
+        do_diff = false
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run repeater send <repeater-id> [options]\n\n" \
+                     "Replay a saved repeater SESSION (ids from `gori run repeater list`)."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run repeater send: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater send: missing value for #{f}" }
+        end
+        parser.parse(args)
+        abort "gori run repeater send: missing <repeater-id>\n#{parser}" if positional.empty?
+        abort "gori run repeater send: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
+        id = positional[0].to_i64? || abort "gori run repeater send: invalid repeater id '#{positional[0]}'"
+
+        # get_repeater_full loads the response BLOBs too (needed for --diff), so the
+        # store can close before the send — same lifetime pattern as the flow path.
+        store = open_store(resolve_read_project(project_name, db_path))
+        rec = begin
+          store.get_repeater_full(id)
+        ensure
+          store.close
+        end
+        abort "gori run repeater send: no repeater session ##{id}" unless rec
+
+        # A WS upgrade can't be replayed by a one-shot HTTP send (it would stop at the
+        # 101 handshake), matching MCP's repeater-branch guard.
+        if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
+          abort "gori run repeater send: repeater session ##{id} is a WebSocket upgrade — replay it from the TUI Repeater tab or via the MCP `send_websocket` tool for a framed exchange."
+        end
+
+        send = build_repeater_send(rec)
+        abort "gori run repeater send: could not determine a target host for session ##{id}" if send.host.empty?
+        abort "gori run repeater send: unsupported target scheme #{send.scheme.inspect} (use http:// or https://)" unless send.scheme.in?("http", "https")
+
+        verify = !insecure
+        result = send.http2 ? Repeater::H2Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni) : Repeater::Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni)
+
+        new_body, _ = decode_body(result.head, result.body)
+        diff =
+          if do_diff && (base_head = rec.response_head)
+            orig = message_lines(base_head, display_body(base_head, rec.response_body))
+            Repeater::Diff.lines(orig, message_lines(result.head, new_body))
+          end
+        emit_repeater_result(result, new_body, diff, format)
+        exit 1 unless result.ok?
+      end
+
+      # Render a replay Result (text or json, optional diff), shared by the flow-id
+      # replay and the session-send paths so the two render identically. Caller has
+      # already decoded `new_body` and built `diff` (the diff baseline differs per
+      # path); caller owns the exit code.
+      private def self.emit_repeater_result(result : Repeater::Result, new_body : Bytes?,
+                                            diff : Array(Repeater::DiffLine)?, format : Symbol) : Nil
+        if format == :json
+          puts repeater_json(result, diff)
+        elsif result.ok?
+          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (incomplete — origin closed before the framed body finished)" : ""}"
+          if d = diff
+            print_diff(d)
+            n = Repeater::Diff.change_count(d)
+            STDERR.puts(n == 0 ? "no differences" : "#{n} line#{n == 1 ? "" : "s"} changed")
+          else
+            print_message_text(result.head, new_body)
+          end
+        else
+          STDERR.puts "repeater failed: #{result.error}"
+        end
+      end
+
       private def self.cmd_repeater_single(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -188,7 +293,8 @@ module Gori
           p.banner = "Usage: gori run repeater <flow-id> [options]\n\n" \
                      "Re-send a captured flow. Or manage repeater sessions:\n" \
                      "  gori run repeater list                List repeater sessions in the workbench\n" \
-                     "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw)\n\n" \
+                     "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw)\n" \
+                     "  gori run repeater send <id> [opts]    Replay a saved repeater SESSION (not a flow id)\n\n" \
                      "Options (single-flow replay):"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -208,14 +314,25 @@ module Gori
         parser.parse(args)
         id = take_flow_id(positional, "repeater")
 
-        # get_flow loads all the BLOBs, so the store can close before the send.
+        # get_flow loads all the BLOBs, so the store can close before the send. Also
+        # cheaply probe whether a repeater SESSION shares this id (get_repeater reads
+        # no response BLOBs) — only when the flow exists — to warn about the ambiguity.
         store = open_store(resolve_read_project(project_name, db_path))
-        detail = begin
-          store.get_flow(id)
+        detail, session_collision = begin
+          d = store.get_flow(id)
+          {d, d ? !store.get_repeater(id).nil? : false}
         ensure
           store.close
         end
         abort "gori run repeater: no flow ##{id}" unless detail
+
+        # `repeater list` prints session ids in the same bare `#N` form as flow ids
+        # (separate 1-based counters), so a bare id here is ambiguous — we always mean
+        # the FLOW. Point at `repeater send` for the saved session.
+        if session_collision
+          STDERR.puts "gori run repeater: a saved repeater session also has id #{id}; " \
+                      "`gori run repeater #{id}` replays FLOW ##{id}. To replay the session instead, use `gori run repeater send #{id}`."
+        end
 
         # A WebSocket flow can't be replayed by a one-shot HTTP send: this path would only
         # re-issue the upgrade request and report the 101 handshake, exchanging zero frames
@@ -365,20 +482,7 @@ module Gori
             Repeater::Diff.lines(orig, message_lines(result.head, new_body))
           end
 
-        if format == :json
-          puts repeater_json(result, diff)
-        elsif result.ok?
-          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (incomplete — origin closed before the framed body finished)" : ""}"
-          if d = diff
-            print_diff(d)
-            n = Repeater::Diff.change_count(d)
-            STDERR.puts(n == 0 ? "no differences" : "#{n} line#{n == 1 ? "" : "s"} changed")
-          else
-            print_message_text(result.head, new_body)
-          end
-        else
-          STDERR.puts "repeater failed: #{result.error}"
-        end
+        emit_repeater_result(result, new_body, diff, format)
         exit 1 unless result.ok?
       end
 

@@ -118,7 +118,7 @@ module Gori
         {"capture", "Start the proxy and stream captured flows to STDOUT"},
         {"history (ls)", "List / QL-query captured flows"},
         {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
-        {"repeater", "Re-send a captured flow, or list/create repeater sessions"},
+        {"repeater", "Re-send a captured flow; list/create/send (replay) repeater sessions"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},

@@ -671,3 +671,42 @@ describe "gori run probe --active" do
     Gori::CLI::Run::PROBE_CATEGORIES.should contain(Gori::Probe::Category::ACTIVE)
   end
 end
+
+# `build_repeater_send` is private CLI glue (mirrors MCP send_request(repeater_id:)) —
+# reopen the module for a bare-call wrapper, the same trick the other whitebox specs use.
+module Gori::CLI::Run
+  def self.build_repeater_send_for_spec(rec : Gori::Store::RepeaterRecord)
+    build_repeater_send(rec)
+  end
+end
+
+describe "gori run repeater send (session replay resolution)" do
+  it "resyncs Content-Length to the body when the session's auto_content_length is ON" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
+      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
+      false, true, nil, 0) # http2=false, auto_content_length=true
+    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
+    String.new(s.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello")
+    s.scheme.should eq("https")
+    s.host.should eq("api.test")
+    s.port.should eq(443)
+    s.http2.should be_false
+  end
+
+  it "preserves a hand-set Content-Length when auto_content_length is OFF (no unconditional resync)" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
+      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
+      false, false, nil, 0) # auto_content_length=false
+    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
+    String.new(s.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello")
+  end
+
+  it "carries the session's http2 flag, non-default port, and env-expanded SNI" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://h.test:8443",
+      "GET / HTTP/2\r\n\r\n".to_slice, true, true, nil, 0, sni: "front.test")
+    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
+    s.http2.should be_true
+    s.port.should eq(8443)
+    s.sni.should eq("front.test")
+  end
+end
