@@ -788,6 +788,25 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_encode signs a payload-only request (no token/header) instead of erroring" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"payload":"{\\"user\\":\\"admin\\"}","secret":"test"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"]?.try(&.as_bool).should_not be_true # was a misleading "invalid header JSON"
+        token = tool_payload(resp)["token"].as_s
+        header, body, sig = token.split('.')
+        # a well-formed, verifiable token was produced from the defaulted ({}) header
+        Gori::Jwt.sign("#{header}.#{body}", "HS256", "test").should eq(sig)
+      end
+    end
+
+    it "jwt_encode still rejects a call with no token, header, or payload" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"secret":"test"}}})
+        drive(store, call)[0]["result"]["isError"].as_bool.should be_true
+      end
+    end
+
     it "jwt_attacks lists none/weak-secret/header-inject payloads" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{jwt}"}}})
