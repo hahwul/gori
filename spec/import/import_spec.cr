@@ -260,6 +260,48 @@ describe Gori::Import do
     end
   end
 
+  it "overwrites a stale Content-Length to match a HAR params-only reconstructed body (R2-8)" do
+    har = File.tempname("gori", ".har")
+    begin
+      # The original request advertised a large Content-Length (a multipart upload), but the
+      # HAR recorded only postData.params (no text), so we rebuild a SHORTER urlencoded body.
+      # The stored head must carry a single Content-Length matching the rebuilt body, not the
+      # stale 9999.
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [{
+              "startedDateTime": "2026-06-01T12:00:00+00:00",
+              "request": {
+                "method": "POST",
+                "url": "https://api.test/upload",
+                "httpVersion": "HTTP/1.1",
+                "headers": [{"name": "Content-Length", "value": "9999"}],
+                "postData": {
+                  "mimeType": "application/x-www-form-urlencoded",
+                  "params": [{"name": "secret_field", "value": "x"}]
+                }
+              }
+            }]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        detail = store.get_flow(store.search(Gori::QL::EMPTY, 1).first.id).not_nil!
+        body = String.new(detail.request_body.not_nil!)
+        body.should eq("secret_field=x") # 14 bytes
+        head = String.new(detail.request_head)
+        head.scan(/Content-Length:/i).size.should eq(1)         # exactly one CL, no stale duplicate
+        head.should contain("Content-Length: #{body.bytesize}") # matches the rebuilt body
+        head.should_not contain("9999")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "prepends https:// to scheme-less URL list lines" do
     urls = File.tempname("gori", ".txt")
     begin
