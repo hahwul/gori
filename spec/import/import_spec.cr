@@ -292,6 +292,78 @@ describe Gori::Import do
     end
   end
 
+  it "raises an actionable error when OpenAPI servers[0].url is relative (not the opaque 'no flows found')" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, %({"servers":[{"url":"/v3"}],"paths":{"/users":{"get":{}}}}))
+      with_store do |store|
+        expect_raises(Gori::Error, /relative.*\/v3.*absolute server URL/) do
+          Gori::Import.import_file(store, :oas, oas)
+        end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "reports the skipped count (not the opaque 'no flows found') when every OpenAPI operation is malformed" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, %({"servers":[{"url":"https://api.test"}],"paths":{"/bad":{"post":{"requestBody":{"content":"notanobject"}}}}}))
+      with_store do |store|
+        expect_raises(Gori::Error, /all 1 entry was skipped as malformed/) do
+          Gori::Import.import_file(store, :oas, oas)
+        end
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "fills declared path params, appends required query params, and seeds an apiKey header from an OpenAPI operation" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, <<-JSON)
+        {
+          "openapi": "3.0.0",
+          "servers": [{"url": "https://api.test/v1"}],
+          "components": {
+            "securitySchemes": {
+              "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+            }
+          },
+          "security": [{"ApiKeyAuth": []}],
+          "paths": {
+            "/users/{id}": {
+              "parameters": [
+                {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}}
+              ],
+              "get": {
+                "summary": "read",
+                "parameters": [
+                  {"name": "verbose", "in": "query", "required": true, "schema": {"type": "boolean"}},
+                  {"name": "fields", "in": "query", "required": false}
+                ]
+              }
+            }
+          }
+        }
+        JSON
+      with_store do |store|
+        result = Gori::Import.import_file(store, :oas, oas)
+        result.count.should eq(1)
+        row = store.search(Gori::QL::EMPTY, 1).first
+        # {id} filled from the path-ITEM-level declaration (integer -> "1"); required query
+        # param appended; optional one omitted.
+        row.target.should eq("/v1/users/1?verbose=true")
+        detail = store.get_flow(row.id).not_nil!
+        String.new(detail.request_head).should contain("X-API-Key: ") # apiKey security header seeded
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
   it "skips a malformed HAR entry (invalid base64 body) instead of aborting the whole import" do
     har = File.tempname("gori", ".har")
     begin
