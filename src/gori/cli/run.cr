@@ -166,7 +166,7 @@ module Gori
       # select by slug/id, not display name alone (parity with MCP --project).
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
         if path = db_path
-          abort "gori run: --db is not a readable file: #{path}" unless File.file?(path)
+          abort "gori run: --db is not a readable file: #{path}" unless File.exists?(path) && !File.directory?(path)
           return Project.new(File.basename(File.dirname(path)), path)
         end
         registry = ProjectRegistry.new(Paths.projects_dir)

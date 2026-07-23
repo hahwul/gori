@@ -55,8 +55,14 @@ module Gori
       end
     end
 
-    NAME_RE     = /name="([^"]*)"/
-    FILENAME_RE = /filename="([^"]*)"/
+    NAME_RE     = /name=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
+    FILENAME_RE = /filename=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
+
+    private def extract_param(cd : String, re : Regex) : String?
+      if m = re.match(cd)
+        m[1]? || m[2]? || m[3]?
+      end
+    end
 
     private def multipart(body : Bytes, ct : String) : Array(Field)
       fields = [] of Field
@@ -77,8 +83,8 @@ module Gori
 
     private def part_field(headers : HTTP::Headers, content : String) : Field
       cd = headers["Content-Disposition"]? || ""
-      name = NAME_RE.match(cd).try(&.[1]) || "(unnamed)"
-      if (filename = FILENAME_RE.match(cd).try(&.[1])) && !filename.empty?
+      name = extract_param(cd, NAME_RE) || "(unnamed)"
+      if (filename = extract_param(cd, FILENAME_RE)) && !filename.empty?
         Field.new(name, "", :body, "file: #{filename} (#{content.bytesize} bytes)")
       elsif content.valid_encoding? && content.bytesize <= PART_MAX
         Field.new(name, content, :body)
