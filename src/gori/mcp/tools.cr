@@ -770,7 +770,8 @@ module Gori
               "reported in `ignored_fields` with a precedence_warning). The result " \
               "always includes `effective_request` (the scheme/host/port/method/target/" \
               "http_version actually sent). " \
-              "Host + Content-Length are auto-added when omitted on the url path." do |s|
+              "Host + Content-Length are auto-added when omitted on the url path. " \
+              "Match & Replace rules are NOT applied unless apply_rules:true." do |s|
               s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
               s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length)")
               s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
@@ -781,6 +782,7 @@ module Gori
               s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
               s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
               s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
               s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")

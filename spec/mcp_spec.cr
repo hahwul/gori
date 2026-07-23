@@ -1142,6 +1142,28 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "applies request-side Match & Replace rules only when apply_rules:true (R2-2)" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        Gori::Rules.load(store).add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "X-Rewritten", "gori-rewritten", op: Gori::Store::RuleOp::SetHeader)
+
+        # apply_rules:true → the rule rewrites the OUTGOING request (and the recorded flow).
+        on = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","apply_rules":true,"allow_unscoped":true}}})
+        payload = tool_payload(drive(store, on, verify_upstream: false)[0])
+        payload["match_replace_applied"].as_bool.should be_true
+        detail = store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!
+        String.new(detail.request_head).should contain("gori-rewritten")
+
+        # default (no apply_rules) → byte-exact, rule NOT applied, flag absent.
+        off = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","allow_unscoped":true}}})
+        p2 = tool_payload(drive(store, off, verify_upstream: false)[0])
+        p2["match_replace_applied"]?.should be_nil
+        d2 = store.get_flow(p2["recorded_flow_id"].as_i64).not_nil!
+        String.new(d2.request_head).should_not contain("gori-rewritten")
+      end
+    end
+
     it "allows an explicit unaudited send and an explicit sensitive-header response" do
       with_store do |store|
         port = start_mcp_http_origin("ok", "Set-Cookie: session=visible\r\n")

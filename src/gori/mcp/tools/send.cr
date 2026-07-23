@@ -2,6 +2,7 @@ require "json"
 require "base64"
 require "../../store"
 require "../../host_overrides"
+require "../../rules"
 require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
@@ -26,6 +27,23 @@ module Gori
         return issue_id if issue_id.is_a?(Result)
 
         built, http2, sni = build_send_request(h)
+        # OPT-IN Match&Replace parity: direct sends are byte-exact (P7) by default — a
+        # repeater/fuzz caller wants exactly what it typed. apply_rules:true asks for proxy
+        # parity, so run the project's REQUEST-side rules over the built bytes here (before the
+        # scope gate + History write, so the recorded/effective request == the wire) and re-sync
+        # Content-Length. Response-side rules are intentionally NOT applied.
+        applied_rules = false
+        if bool_arg(h, "apply_rules", false)
+          rules = Gori::Rules.load(store)
+          if rules.active?
+            rewritten = Repeater::FlowRequest.resync_content_length(
+              rules.transform_message(String.new(built.bytes), Store::RuleTarget::Request, built.host).to_slice)
+            if rewritten != built.bytes
+              built = RequestBuilder::Built.new(rewritten, built.scheme, built.host, built.port)
+              applied_rules = true
+            end
+          end
+        end
         # Scope gate BEFORE any outbound byte / History write: an out-of-scope
         # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
         # request_target reads the target VERBATIM off the first line of `built.bytes` —
@@ -47,7 +65,7 @@ module Gori
 
         body_cap, body_omit = body_return_opts(h)
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
-          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h), body_cap, body_omit),
+          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -218,11 +236,13 @@ module Gori
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, http2 : Bool,
-                                   ignored : Array(String), body_cap : Int32, body_omit : Bool) : String
+                                   ignored : Array(String), body_cap : Int32, body_omit : Bool,
+                                   applied_rules : Bool = false) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
             emit_effective_request(j, built, http2)
+            j.field "match_replace_applied", true if applied_rules
             unless ignored.empty?
               j.field("ignored_fields") { j.array { ignored.each { |f| j.string f } } }
               j.field "precedence_warning",
