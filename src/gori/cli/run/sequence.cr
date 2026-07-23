@@ -96,7 +96,7 @@ module Gori
       end
 
       private def self.read_token_list(file : String) : Array(String)
-        raw = file == "-" ? STDIN.gets_to_end : (File.file?(file) ? File.read(file) : abort("gori run sequence: not a readable file: #{file}"))
+        raw = file == "-" ? STDIN.gets_to_end : (File.exists?(file) && !File.directory?(file) ? File.read(file) : abort("gori run sequence: not a readable file: #{file}"))
         raw.split(/\r?\n/).map(&.strip).reject(&.empty?)
       end
 
@@ -117,7 +117,7 @@ module Gori
       private def self.mine_source_for(cmd : String, flow_id : Int64?, request_file : String?,
                                        project_name : String?, db_path : String?) : {Bytes, String?, Bool}
         if file = request_file
-          abort "gori run #{cmd}: not a readable file: #{file}" unless File.file?(file)
+          abort "gori run #{cmd}: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
           {Env.expand_wire(File.read(file)), nil, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))

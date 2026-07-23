@@ -116,7 +116,7 @@ module Gori
       private def self.fuzz_source(flow_id : Int64?, request_file : String?,
                                    project_name : String?, db_path : String?) : {String, String?, Bool}
         if file = request_file
-          abort "gori run fuzz: not a readable file: #{file}" unless File.file?(file)
+          abort "gori run fuzz: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
           {File.read(file), nil, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))

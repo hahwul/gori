@@ -331,5 +331,18 @@ describe Gori::FormData do
       Gori::FormData.from_flow("/", urlencoded_head, "a=%E".to_slice)
         .not_nil!.first.value.should eq("%E")
     end
+
+    it "extracts unquoted and single-quoted name and filename parameters in multipart forms" do
+      boundary = "----Boundary123"
+      body = multipart_body(boundary,
+        "Content-Disposition: form-data; name=unquoted_name; filename=unquoted.txt\r\n\r\ncontent",
+        "Content-Disposition: form-data; name='single_quoted'; filename='single.txt'\r\n\r\ncontent")
+      fields = Gori::FormData.from_flow("/", multipart_head(boundary), body.to_slice).not_nil!
+      fields.size.should eq(2)
+      fields[0].name.should eq("unquoted_name")
+      fields[0].note.not_nil!.should contain("file: unquoted.txt")
+      fields[1].name.should eq("single_quoted")
+      fields[1].note.not_nil!.should contain("file: single.txt")
+    end
   end
 end

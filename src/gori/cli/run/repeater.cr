@@ -106,7 +106,7 @@ module Gori
 
         req_content = ""
         if file = request_file
-          abort "gori run repeater create: request-file '#{file}' is not readable" unless File.file?(file)
+          abort "gori run repeater create: request-file '#{file}' is not readable" unless File.exists?(file) && !File.directory?(file)
           req_content = File.read(file)
         elsif raw = request_raw
           req_content = raw
