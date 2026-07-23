@@ -39,7 +39,9 @@ module Gori::Proxy::H2
     # trailers.
     def self.trailer_headers(data : Bytes) : Hash(String, String)
       headers = {} of String => String
-      String.new(data).each_line do |raw|
+      # scrub: a hostile/truncated trailer frame is not guaranteed to be valid UTF-8,
+      # and this is parsed straight off the wire — best-effort parsing, not a raise.
+      String.new(data).scrub.each_line do |raw|
         line = raw.rstrip
         next if line.empty?
         next unless idx = line.index(':')

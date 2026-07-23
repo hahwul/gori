@@ -348,6 +348,22 @@ describe Gori::Import do
     end
   end
 
+  it "raises the same actionable error for a dot-relative OpenAPI servers[0].url (./v3, ../v3)" do
+    ["./v3", "../v3", "v3"].each do |url|
+      oas = File.tempname("gori", ".json")
+      begin
+        File.write(oas, %({"servers":[{"url":"#{url}"}],"paths":{"/users":{"get":{}}}}))
+        with_store do |store|
+          expect_raises(Gori::Error, /relative.*absolute server URL/) do
+            Gori::Import.import_file(store, :oas, oas)
+          end
+        end
+      ensure
+        File.delete?(oas)
+      end
+    end
+  end
+
   it "reports the skipped count (not the opaque 'no flows found') when every OpenAPI operation is malformed" do
     oas = File.tempname("gori", ".json")
     begin

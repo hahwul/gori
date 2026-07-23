@@ -57,12 +57,13 @@ module Gori
         if servers && (arr = servers.as_a?) && (first = arr[0]?)
           url = first["url"]?.to_s
           raise Gori::Error.new("OpenAPI spec has no servers[0].url") if url.empty?
-          # A relative server URL (e.g. "/v3") has no host authority: every generated
-          # request would prepend "https://" onto a leading "/", yielding an empty host
-          # ("https:///v3/...") that Builder.endpoint rejects — so EVERY operation would
-          # be skipped and the import would fail with an opaque "no flows found". Report
-          # the real, actionable reason here, up front, instead.
-          if url.starts_with?('/')
+          # A relative server URL ("/v3", "./v3", "../v3", "v3") has no host authority:
+          # every generated request would prepend "https://" onto it, either yielding an
+          # empty host ("https:///v3/...") or a bogus one ("https://./v3/..." → host
+          # "."). Builder.endpoint only catches the empty-host case, so a "./"-style URL
+          # would silently produce garbage requests instead of failing loudly. Reject any
+          # URL without a scheme up front instead.
+          if URI.parse(url).scheme.nil?
             raise Gori::Error.new(%(OpenAPI servers[0].url is relative (#{url.inspect}); provide an absolute server URL, e.g. "https://api.example.com/v3"))
           end
           return url

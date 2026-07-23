@@ -78,6 +78,13 @@ describe Gori::Proxy::H2::Grpc do
     h["grpc-message"].should eq("not found")
   end
 
+  it "parses a trailer payload with an invalid UTF-8 byte instead of raising" do
+    payload = Bytes[0x67, 0x72, 0x70, 0x63, 0x2d, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67,
+      0x65, 0x3a, 0x20, 0xff, 0x0d, 0x0a] # "grpc-message: \xFF\r\n"
+    h = Grpc.trailer_headers(payload)
+    h["grpc-message"]?.should_not be_nil
+  end
+
   it "names known status codes and falls back for unknown ones" do
     Grpc.status_name(0).should eq("OK")
     Grpc.status_name(7).should eq("PERMISSION_DENIED")
