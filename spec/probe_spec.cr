@@ -1,5 +1,21 @@
 require "./spec_helper"
 
+# A Fuzz::Backend that never touches the network — it just counts sends and returns a
+# benign OK response — so a scope test can distinguish "blocked before the socket" (sent
+# == 0) from "sent but the response failed a check".
+private class CountingBackend < Gori::Fuzz::Backend
+  getter origin : Gori::Fuzz::Origin
+  getter sent = 0
+
+  def initialize(@origin : Gori::Fuzz::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice, "ok".to_slice, nil, 1_i64)
+  end
+end
+
 private def with_store(&)
   path = File.tempname("gori-probe", ".db")
   store = Gori::Store.open(path)
@@ -1589,6 +1605,29 @@ describe "Gori::Probe::Active (safety + coverage)" do
       key = Gori::Probe::Active.plan(detail).not_nil!.dedup_key
       key.should contain("GET")
       key.should contain("q@query")
+    end
+  end
+
+  it "never sends an active probe when the scope EXCLUDES the target (ScopedBackend hard-block)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      scope = Gori::Scope.load(store)
+      scope.add("exclude", "host", "acme.test")
+      fake = CountingBackend.new(Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port))
+      dets = Gori::Probe::Active.analyze(detail, scope: scope, backend: fake)
+      fake.sent.should eq(0) # blocked before the socket — proves scope, not a send failure
+      dets.should be_empty
+    end
+  end
+
+  it "sends active probes when the scope ALLOWLISTS the target" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      fake = CountingBackend.new(Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port))
+      Gori::Probe::Active.analyze(detail, scope: scope, backend: fake)
+      fake.sent.should be > 0 # an include rule (no exclude, sandbox off) lets the probe through
     end
   end
 

@@ -17,6 +17,7 @@ module Gori
         category : String? = nil
         format = :text
         active = false
+        allow_unscoped = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -32,6 +33,7 @@ module Gori
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("-a", "--active", "Include light-touch active checks (sends probe requests)") { active = true }
+          p.on("--allow-unscoped", "With --active, probe flows even when outside the project scope (default: only scope-included hosts)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -61,13 +63,20 @@ module Gori
         end
 
         store = open_store(resolve_read_project(project_name, db_path))
+        scope = Scope.load(store)
+        # --active with no scope include rule (and no --allow-unscoped) probes NOTHING
+        # (matches_url? requires ≥1 include) — warn so an empty active result isn't mistaken
+        # for "clean".
+        if active && !allow_unscoped && scope.include_count == 0
+          STDERR.puts "gori run probe: --active has no scope include rules — active probes skipped (add a scope include rule or pass --allow-unscoped)"
+        end
         groups, flow_n, repeater_n = begin
           ids = begin
             probe_scan_ids(store, filter)
           rescue ex
             abort "gori run probe: query #{query.inspect} failed: #{ex.message}"
           end
-          dets, rn = scan_all(store, ids, active)
+          dets, rn = scan_all(store, ids, active, scope, allow_unscoped)
           {Probe.group(dets), ids.size, rn}
         ensure
           store.close
@@ -110,14 +119,16 @@ module Gori
 
       # Analyze History flows + Repeater tabs. Passively by default; also actively when active is true.
       # Returns {detections, repeater_count_scanned}. QL filters apply to History only.
-      private def self.scan_all(store : Store, ids : Array(Int64), active : Bool) : {Array(Probe::Detection), Int32}
-        detections = scan_flows(store, ids, active)
-        repeater_dets, repeater_n = scan_repeaters(store, active)
+      private def self.scan_all(store : Store, ids : Array(Int64), active : Bool,
+                                scope : Scope, allow_unscoped : Bool) : {Array(Probe::Detection), Int32}
+        detections = scan_flows(store, ids, active, scope, allow_unscoped)
+        repeater_dets, repeater_n = scan_repeaters(store, active, scope, allow_unscoped)
         detections.concat(repeater_dets)
         {detections, repeater_n}
       end
 
-      private def self.scan_flows(store : Store, ids : Array(Int64), active : Bool) : Array(Probe::Detection)
+      private def self.scan_flows(store : Store, ids : Array(Int64), active : Bool,
+                                  scope : Scope, allow_unscoped : Bool) : Array(Probe::Detection)
         detections = [] of Probe::Detection
         progress = STDERR.tty?
         ids.each_with_index do |id, i|
@@ -125,7 +136,7 @@ module Gori
           if detail && detail.response_head
             ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
             detections.concat(Probe::Passive.analyze(detail, ws))
-            detections.concat(Probe::Active.analyze(detail)) if active
+            detections.concat(Probe::Active.analyze(detail, scope: scope)) if active && active_target?(detail, scope, allow_unscoped)
           end
           if progress && (i & 0x3F) == 0
             STDERR.print "\r[probe] scanned #{i + 1}/#{ids.size} flows"
@@ -137,7 +148,8 @@ module Gori
       end
 
       # Scan Repeater tabs. Stamps sample_repeater_id.
-      private def self.scan_repeaters(store : Store, active : Bool) : {Array(Probe::Detection), Int32}
+      private def self.scan_repeaters(store : Store, active : Bool,
+                                      scope : Scope, allow_unscoped : Bool) : {Array(Probe::Detection), Int32}
         detections = [] of Probe::Detection
         n = 0
         store.repeaters.each do |rec|
@@ -147,13 +159,22 @@ module Gori
           Probe::Passive.analyze(detail, ws).each do |d|
             detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
           end
-          if active
-            Probe::Active.analyze(detail).each do |d|
+          if active && active_target?(detail, scope, allow_unscoped)
+            Probe::Active.analyze(detail, scope: scope).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
           end
         end
         {detections, n}
+      end
+
+      # Layer-1 active gate — mirrors the TUI's maybe_enqueue_active (analyzer.cr): an active
+      # probe is sent only to a flow the project scope INCLUDES (matches_url? — lens-independent,
+      # requires ≥1 include so an excludes-only/empty scope never means "probe everything").
+      # --allow-unscoped bypasses this; Active.analyze's ScopedBackend still hard-blocks Sandbox
+      # and explicit excludes even then.
+      private def self.active_target?(detail : Store::FlowDetail, scope : Scope, allow_unscoped : Bool) : Bool
+        allow_unscoped || scope.matches_url?(detail.row.url, detail.row.host)
       end
 
       private def self.parse_severity(v : String) : Store::Severity
