@@ -94,7 +94,15 @@
             homepage = "https://gori.hahwul.com";
             downloadPage = "https://github.com/hahwul/gori/releases";
             license = lib.licenses.asl20;
-            maintainers = [ "hahwul" ];
+            # An attrset, not a bare string: nixpkgs types this as `listOf attrs`
+            # (check-meta.nix), and anything reading meta.maintainers expects the
+            # maintainer shape. No lib.maintainers.hahwul exists to reference yet.
+            maintainers = [{
+              name = "hahwul";
+              email = "hahwul@gmail.com";
+              github = "hahwul";
+              githubId = 13212227;
+            }];
             mainProgram = "gori";
           };
         };
