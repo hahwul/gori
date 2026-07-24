@@ -98,6 +98,29 @@ describe "Gori::Proxy::Codec::Body.read_complete" do
     complete.should be_true
   end
 
+  # C1: the capture-only read (Repeater/Fuzz/Miner) bounds the body at max_bytes so a
+  # streaming or oversized origin can't OOM/hang the single-threaded caller.
+  it "caps a close-delimited body at max_bytes and reports it INCOMPLETE (not a false EOF)" do
+    src = IO::Memory.new("x" * 100)
+    bytes, complete = Body.read_complete(src, BodyFraming::CloseDelimited, 0_i64, max_bytes: 10_i64)
+    bytes.not_nil!.size.should eq(10)
+    complete.should be_false # the cap surfaces as an IO::Sized EOF — must NOT read as the real end
+  end
+
+  it "caps a Content-Length body at max_bytes and reports INCOMPLETE" do
+    src = IO::Memory.new("y" * 100)
+    bytes, complete = Body.read_complete(src, BodyFraming::Length, 100_i64, max_bytes: 10_i64)
+    bytes.not_nil!.size.should eq(10)
+    complete.should be_false
+  end
+
+  it "does not cap when max_bytes is unset (proxy forward path stays byte-exact/uncapped)" do
+    src = IO::Memory.new("z" * 100)
+    bytes, complete = Body.read_complete(src, BodyFraming::CloseDelimited, 0_i64)
+    bytes.not_nil!.size.should eq(100)
+    complete.should be_true
+  end
+
   it "reports complete with a nil body for None framing" do
     bytes, complete = Body.read_complete(IO::Memory.new(""), BodyFraming::None, 0_i64)
     bytes.should be_nil

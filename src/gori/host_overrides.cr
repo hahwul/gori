@@ -73,16 +73,18 @@ module Gori
       return false unless HostOverrides.valid?(host, ip)
       @mutex.synchronize do
         return false if @entries.any? { |e| e.id != id && e.host == host }
-        @store.update_host_override(id, host, ip)
+        committed = @store.update_host_override(id, host, ip)
         reload_entries_unlocked
+        committed # false also when the store write rolled back (busy/locked), not just on dup
       end
-      true
     end
 
-    def remove(id : Int64) : Nil
+    # Returns whether the delete committed (false = store busy/locked/closing).
+    def remove(id : Int64) : Bool
       @mutex.synchronize do
-        @store.remove_host_override(id)
+        committed = @store.remove_host_override(id)
         reload_entries_unlocked
+        committed
       end
     end
 

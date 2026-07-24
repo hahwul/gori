@@ -59,7 +59,7 @@ module Gori
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
         ov = HostOverrides.load(store)
         return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
-        ov.remove(id)
+        return busy("host override NOT deleted (store busy or unwritable); it is unchanged") unless ov.remove(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
     end

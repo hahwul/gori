@@ -175,7 +175,7 @@ module Gori
                 end
               end
               if include_content && (repeater = ui["repeater"]?)
-                j.field "tui_repeater", repeater
+                emit_tui_repeater(j, repeater, include_sensitive)
               elsif ui["repeater"]?
                 j.field "tui_repeater_available", true
               end
@@ -283,6 +283,40 @@ module Gori
           # invalid UTF-8 through the store, and JSON::Builder emits it verbatim — which
           # corrupts the stdio JSON-RPC stream (must be well-formed UTF-8).
           j.field field, text.scrub
+        end
+      end
+
+      # The live-TUI repeater snapshot (ui["repeater"]) is the raw editor state the human is
+      # working on; its `request` / `upgrade_request` fields are full HTTP request text whose
+      # headers carry Authorization/Cookie. The blob is persisted (and read back) VERBATIM, so
+      # — unlike the sessions[] path (emit_repeater_session, which redact_head's its request +
+      # response head) — it would bypass redaction if emitted as-is. Rebuild the object here,
+      # running redact_head over those two text fields; every other field (summary, status,
+      # ws payloads-as-body, timings) passes through unchanged. With include_sensitive the blob
+      # is emitted verbatim, matching the sessions policy and the sensitive_headers_redacted flag.
+      private def emit_tui_repeater(j : JSON::Builder, repeater : JSON::Any, include_sensitive : Bool) : Nil
+        if include_sensitive
+          j.field "tui_repeater", repeater
+          return
+        end
+        j.field("tui_repeater") { redact_tui_repeater(j, repeater, nil) }
+      end
+
+      # Re-emit the repeater snapshot with redaction. The raw-HTTP-text fields
+      # (`request` / `upgrade_request`) are NESTED under "active" (repeater_controller
+      # builds count/active_subtab/active{write_mcp_fields}), so walk recursively and run
+      # redact_head over any string reached under one of those keys, at any depth — a
+      # top-level-only pass would miss the nested request and leak its headers. Everything
+      # else passes through verbatim.
+      private def redact_tui_repeater(j : JSON::Builder, value : JSON::Any, key : String?) : Nil
+        if (key == "request" || key == "upgrade_request") && (s = value.as_s?)
+          j.string Serialize.redact_head(s, false)
+        elsif obj = value.as_h?
+          j.object { obj.each { |k, v| j.field(k) { redact_tui_repeater(j, v, k) } } }
+        elsif arr = value.as_a?
+          j.array { arr.each { |v| redact_tui_repeater(j, v, nil) } }
+        else
+          value.to_json(j)
         end
       end
 

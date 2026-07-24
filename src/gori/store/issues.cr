@@ -24,8 +24,10 @@ module Gori
       issue_id
     end
 
+    # Returns whether the write committed (false = store busy/locked/closing). An empty
+    # update (no fields supplied) is a no-op → true (nothing to persist, nothing failed).
     def update_issue(id : Int64, *, title : String? = nil, severity : Severity? = nil,
-                     notes : String? = nil, status : Status? = nil) : Nil
+                     notes : String? = nil, status : Status? = nil) : Bool
       sets = [] of String
       args = [] of DB::Any
       if t = title
@@ -40,15 +42,16 @@ module Gori
       if st = status
         sets << "status = ?"; args << st.value
       end
-      return if sets.empty?
+      return true if sets.empty?
       sets << "updated_at = ?"; args << now_us
       args << id
       sql = "UPDATE issues SET #{sets.join(", ")} WHERE id = ?"
-      exec_task ->(c : DB::Connection) { c.exec(sql, args: args); nil }
+      exec_task_ok ->(c : DB::Connection) { c.exec(sql, args: args); nil }
     end
 
-    def delete_issue(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) {
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def delete_issue(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
         c.exec("DELETE FROM issues WHERE id = ?", id)
         nil

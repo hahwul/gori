@@ -18,14 +18,16 @@ module Gori
       }
     end
 
-    def update_scope_rule(id : Int64, kind : String, match_type : String, pattern : String) : Nil
-      exec_task ->(c : DB::Connection) {
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def update_scope_rule(id : Int64, kind : String, match_type : String, pattern : String) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE scope_rules SET kind = ?, match_type = ?, pattern = ? WHERE id = ?", kind, match_type, pattern, id); nil
       }
     end
 
-    def remove_scope_rule(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM scope_rules WHERE id = ?", id); nil }
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def remove_scope_rule(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM scope_rules WHERE id = ?", id); nil }
     end
   end
 end

@@ -22,6 +22,11 @@ module Gori
         path = str(h, "path").try(&.strip)
         return err("missing required 'path'", "INVALID_ARGUMENT", field: "path") if path.nil? || path.empty?
         result = Import.import_file(store, kind, path)
+        # import_file RAISES when the parse yields zero flows, so it only returns here with
+        # ≥1 flow to insert. A count of 0 therefore means the batch write was rolled back
+        # (store busy/locked) — NOT an empty import — so surface it as retryable rather than
+        # reporting a silent "imported 0".
+        return busy("import parsed flows but persisted none (store busy or unwritable); retry") if result.count == 0
         Result.new(JSON.build do |j|
           j.object do
             j.field "kind", kind_s

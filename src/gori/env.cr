@@ -288,14 +288,20 @@ module Gori
       bump_highlight_rev
     end
 
-    def self.save_project(store : Store, vars : Array({String, String})) : Nil
-      if vars.empty?
-        store.delete_setting(PROJECT_VARS_KEY)
-      else
-        store.set_setting(PROJECT_VARS_KEY, serialize_vars(vars))
-      end
+    # Returns whether the persisted write committed (false = store busy/locked). The
+    # in-memory Settings.project_env_vars is updated regardless (the TUI relies on the
+    # immediate update; an MCP caller that got false reloads from the store on its next
+    # active tool, so a rolled-back change doesn't stick).
+    def self.save_project(store : Store, vars : Array({String, String})) : Bool
+      committed =
+        if vars.empty?
+          store.delete_setting(PROJECT_VARS_KEY)
+        else
+          store.set_setting(PROJECT_VARS_KEY, serialize_vars(vars))
+        end
       Settings.project_env_vars = vars.dup
       bump_highlight_rev
+      committed
     end
 
     def self.valid_key?(key : String) : Bool

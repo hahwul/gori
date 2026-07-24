@@ -34,16 +34,19 @@ module Gori
       }
     end
 
-    def set_rule_enabled(id : Int64, enabled : Bool) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("UPDATE match_rules SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id); nil }
+    # Returns whether the write committed (false = store busy/locked/closing → the
+    # caller must not report the toggle as applied; the rule stays in its prior state).
+    def set_rule_enabled(id : Int64, enabled : Bool) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("UPDATE match_rules SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id); nil }
     end
 
     # Update a rule's fields in place (enabled/position unchanged). No-op when the id
     # doesn't exist.
+    # Returns whether the write committed (false = store busy/locked/closing).
     def update_rule(id : Int64, target : RuleTarget, part : RulePart, pattern : String, replacement : String,
                     op : RuleOp = RuleOp::Replace, match_kind : MatchKind = MatchKind::Literal,
-                    name : String = "", host : String = "") : Nil
-      exec_task ->(c : DB::Connection) {
+                    name : String = "", host : String = "") : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ?, op = ?, match_kind = ?, name = ?, host = ? WHERE id = ?",
           target.label, part.label, pattern, replacement, op.label, match_kind.label, name, host, id)
         nil
@@ -68,8 +71,9 @@ module Gori
       }
     end
 
-    def delete_rule(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM match_rules WHERE id = ?", id); nil }
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def delete_rule(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM match_rules WHERE id = ?", id); nil }
     end
   end
 end

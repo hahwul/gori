@@ -139,6 +139,17 @@ module Gori::Proxy::Codec
     # capture). Tune as needed.
     CAPTURE_MAX = 2 * 1024 * 1024 # 2 MiB
 
+    # Ceiling on the body bytes a CAPTURE-ONLY read (Repeater/Fuzz/Miner send) will
+    # pull off the wire. Mirrors the h2 engine's MAX_BODY (8 MiB): the h1 capture
+    # buffers into a plain IO::Memory and the copy loops read until framing-end, so
+    # WITHOUT this bound an oversized origin OOMs, and a chunked / close-delimited
+    # stream that keeps trickling data inside the idle timeout (SSE, a heartbeat feed)
+    # never returns — hanging the single-threaded caller. A body that hits the cap is
+    # reported incomplete (same signal as a premature EOF), so the connection is not
+    # reused. The live proxy forward path does NOT use this — it passes no cap to
+    # read_complete (Int64::MAX) and streams byte-exact (P6/P7).
+    CAPTURE_READ_MAX = 8 * 1024 * 1024 # 8 MiB (h1 capture read ceiling; parity with H2Engine::MAX_BODY)
+
     # RFC 7230 §3.3.3 framing for a request body.
     def self.request_framing(req : RawRequest) : {BodyFraming, Int64}
       # A header written as `Transfer-Encoding : chunked` (whitespace before colon) or
@@ -222,20 +233,27 @@ module Gori::Proxy::Codec
 
     # Reads a message body (by framing) into a single buffer — used by the Repeater
     # engine to capture a response without forwarding it anywhere.
-    def self.read(src : IO, framing : BodyFraming, length : Int64) : Bytes?
-      read_complete(src, framing, length)[0]
+    def self.read(src : IO, framing : BodyFraming, length : Int64, max_bytes : Int64 = Int64::MAX) : Bytes?
+      read_complete(src, framing, length, max_bytes)[0]
     end
 
     # As `read`, but also returns whether the body completed (false = a
     # Content-Length/chunked body the origin cut short). Lets the Repeater engine
     # flag a half-delivered response instead of presenting it as whole.
-    def self.read_complete(src : IO, framing : BodyFraming, length : Int64) : {Bytes?, Bool}
+    def self.read_complete(src : IO, framing : BodyFraming, length : Int64, max_bytes : Int64 = Int64::MAX) : {Bytes?, Bool}
       return {nil, true} if framing.none?
       # Presize the capture for a KNOWN Content-Length so it doesn't climb IO::Memory's
       # 64→128→…→N doubling-realloc chain (each step copies everything captured so far);
       # bounded by PRESIZE_CAP so a lying Content-Length can't force a huge up-front alloc.
       # Chunked / close-delimited length is unknown → default growth (as before).
       capture = presized_capture(framing, length)
+      # Bound the body READ, not just the capture buffer: the copy loops read until the
+      # framing ends, so a plain IO::Memory would grow with every byte an oversized or
+      # endlessly-streaming origin sends. IO::Sized returns EOF once max_bytes are read,
+      # which makes copy_n/copy_until_eof/copy_chunked stop and report the body incomplete
+      # (false). Only capture-only callers pass a finite cap; the proxy forward path leaves
+      # max_bytes at Int64::MAX so forwarding stays byte-exact and uncapped (P6/P7).
+      src = IO::Sized.new(src, read_size: max_bytes) unless max_bytes == Int64::MAX
       # Right-size the scratch read buffer too: a small Length body drops a 64 KiB
       # large-object scratch to a body-sized small-object alloc (copy_n/copy_until_eof
       # re-key their read size off the buffer's own size, so a sub-BUFSIZE buffer stays
@@ -243,6 +261,15 @@ module Gori::Proxy::Codec
       # sink rather than a second IO::Memory so a large response isn't held in memory
       # TWICE (the old `IO::Memory.new` tee doubled peak RAM on every read_complete).
       complete = stream(src, capture, framing, length, DiscardIO.new, read_buffer(framing, length))
+      # CloseDelimited framing treats EOF as the natural end and returns complete=true, but
+      # our IO::Sized cap surfaces AS an EOF — so a close-delimited body (SSE / no
+      # Content-Length) that hit the ceiling would be mislabeled complete. When the wrapper
+      # is exhausted on such a body, force incomplete (Length/Chunked already report the
+      # short read through copy_n/copy_chunked). Guarded on close_delimited? so an exactly-
+      # max_bytes Length body isn't falsely flagged.
+      if framing.close_delimited? && (limited = src).is_a?(IO::Sized) && limited.read_remaining == 0
+        complete = false
+      end
       # `capture` is a fresh local, never stored in a field/closure and unreachable after
       # return, so the returned view is its SOLE owner (the slice's pointer keeps the backing
       # buffer alive) — no defensive `.dup` of the whole body (mirrors CaptureBuffer#to_slice).

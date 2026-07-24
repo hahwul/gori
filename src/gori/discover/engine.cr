@@ -130,6 +130,13 @@ module Gori::Discover
     EVENT_BUFFER    = 256
     MAX_CONCURRENCY = 500
     MAX_BODY        = 2 * 1024 * 1024 # decoded body cap (matches Extract::MAX_SCAN)
+    # Ceiling on the dedup/template bookkeeping (@seen + @templates). The network send
+    # count is capped by @config.max_requests and crawl pages by max_pages, but @seen and
+    # @templates grow once per CONSIDERED link — bounded by pages×links, not the request
+    # cap — so a pathological target (a huge page of distinct-template links) could bloat
+    # them far past any real crawl. Once @seen hits this, consider_link stops tracking and
+    # enqueuing new links: the run keeps draining what's in flight but adds nothing new.
+    MAX_SEEN = 250_000
 
     enum State : UInt8
       Running
@@ -289,6 +296,11 @@ module Gori::Discover
     rescue ex
       # ErrorEvent is terminal (no trailing DoneEvent) so consumers don't mask the error
       # with a success Done — see the setup-error path above.
+      # Close @jobs too (the happy path does this at line ~285): otherwise the worker
+      # fibers stay parked on @jobs.receive? forever — a fiber + socket leak. Closing it
+      # makes each worker's receive? return nil, so they run their `ensure @finished.send`
+      # and exit (their one in-flight outcome fits in @discovered's conc*2 buffer).
+      @jobs.close rescue nil
       @events.send(ErrorEvent.new(ex.message || "discover error")) rescue nil
       @events.close rescue nil
     end
@@ -479,11 +491,15 @@ module Gori::Discover
     # Resolve a discovered link against its page, dedup, template-fold, bound-check, then
     # enqueue a crawl (spider) and derive a directory (brute).
     private def consider_link(task : Task, base : Url::Parts, link : RawLink) : Nil
+      # Bound the dedup/template bookkeeping: past MAX_SEEN, stop tracking + enqueuing new
+      # links so @seen/@templates can't bloat on a pathological target (see MAX_SEEN). A URL
+      # already in @seen is still cheap to skip below, so honour that first.
       abs = Url.resolve(base, link.href)
       return unless abs
       p = Url.parse(abs)
       return unless p
       key = Url.visit_key(p)
+      return if @seen.size >= MAX_SEEN && !@seen.includes?(key)
       if @seen.includes?(key)
         @dedup_suppressed += 1
         return

@@ -22,14 +22,16 @@ module Gori
       }
     end
 
-    def update_host_override(id : Int64, host : String, ip : String) : Nil
-      exec_task ->(c : DB::Connection) {
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def update_host_override(id : Int64, host : String, ip : String) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE host_overrides SET host = ?, ip = ? WHERE id = ?", host, ip, id); nil
       }
     end
 
-    def remove_host_override(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM host_overrides WHERE id = ?", id); nil }
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def remove_host_override(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM host_overrides WHERE id = ?", id); nil }
     end
   end
 end

@@ -68,6 +68,10 @@ module Gori
         decoded, decode_note = options.raw ? {nil, nil} : Proxy::Codec::ContentDecode.decode(head, stored)
         bytes = decoded || stored
         total = bytes.size.to_i64
+        # The decoded view is capped at ContentDecode::MAX_OUT (decompression-bomb ceiling).
+        # At the cap, `complete:true` at the end would falsely imply the whole body — flag it
+        # so a caller knows more decoded data may exist and can page the wire bytes with raw:true.
+        decode_capped = !decoded.nil? && decoded.size >= Proxy::Codec::ContentDecode::MAX_OUT
         # An offset past the end used to silently clamp to the body end (0 bytes,
         # complete:true) — indistinguishable from a legitimate final read. Surface
         # both the requested and the effective offset plus a warning so the caller
@@ -92,6 +96,10 @@ module Gori
             j.field "total_bytes", total
             j.field "representation", decoded ? "decoded" : "raw"
             j.field "decode_note", decode_note if decode_note
+            if decode_capped
+              j.field "decode_capped", true
+              j.field "decode_cap_warning", "decoded view capped at #{Proxy::Codec::ContentDecode::MAX_OUT} bytes (decompression-bomb ceiling); more decoded data may exist beyond this — page the raw wire bytes with raw:true"
+            end
             j.field "complete", next_offset >= total
             j.field "next_offset", next_offset < total ? next_offset : nil
             if text.valid_encoding?

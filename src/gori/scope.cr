@@ -352,11 +352,13 @@ module Gori
       @mutex.synchronize { set_enabled_unlocked(!@enabled) }
     end
 
-    def enable : Nil
+    # Returns whether the persisted enabled flag committed (false = store busy/locked).
+    def enable : Bool
       @mutex.synchronize { set_enabled_unlocked(true) }
     end
 
-    def disable : Nil
+    # Returns whether the persisted enabled flag committed (false = store busy/locked).
+    def disable : Bool
       @mutex.synchronize { set_enabled_unlocked(false) }
     end
 
@@ -450,7 +452,7 @@ module Gori
       @rules = Scope.load_rules(@store)
     end
 
-    private def set_enabled_unlocked(value : Bool) : Nil
+    private def set_enabled_unlocked(value : Bool) : Bool
       @enabled = value
       @store.set_setting(SETTING_ENABLED, value ? "1" : "0")
     end

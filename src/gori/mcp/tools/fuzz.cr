@@ -29,6 +29,7 @@ module Gori
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit)
+        evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, int(h, "max_requests"))
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).

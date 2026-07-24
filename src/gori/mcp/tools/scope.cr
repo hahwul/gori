@@ -38,7 +38,10 @@ module Gori
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
         scope = Scope.load(store)
         return not_found("no scope rule with id #{id}") unless scope.rules.any? { |r| r.id == id }
-        scope.remove(id)
+        # Write straight to the store (this Scope is a throwaway load, so scope.remove's
+        # in-place reload buys nothing here) and confirm it committed — a busy/locked
+        # rollback must not report the rule deleted while it still gates active requests.
+        return busy("scope rule NOT deleted (store busy or unwritable); it is unchanged and still gates traffic") unless store.remove_scope_rule(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
 
@@ -46,7 +49,8 @@ module Gori
         enabled = bool(h, "enabled")
         return err("missing required 'enabled' (true or false)", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
         scope = Scope.load(store)
-        enabled ? scope.enable : scope.disable
+        committed = enabled ? scope.enable : scope.disable
+        return busy("scope enable/disable NOT persisted (store busy or unwritable); the gate is unchanged") unless committed
         Result.new(JSON.build { |j| j.object { j.field "enabled", enabled } })
       end
     end

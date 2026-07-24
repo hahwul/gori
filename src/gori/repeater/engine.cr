@@ -1,6 +1,7 @@
 require "../proxy/upstream"
 require "../proxy/codec/http1"
 require "../proxy/codec/body"
+require "../proxy/socket_tuning"
 
 module Gori
   module Repeater
@@ -11,11 +12,13 @@ module Gori
       getter response : Proxy::Codec::RawResponse?
       getter duration_us : Int64
       getter error : String?
-      # The origin closed before delivering the full body it framed: a
-      # Content-Length cut short, or a chunked body without its terminating
-      # 0-chunk. The captured `body` is what actually arrived — distinct from a
-      # *display* truncation (gori capping what it shows). A consumer must not
-      # treat a half-delivered response as the whole thing.
+      # The captured `body` is not the whole response the origin framed, for one of
+      # two reasons: the origin closed early (a Content-Length cut short, or a chunked
+      # body without its terminating 0-chunk), OR the body exceeded Body::CAPTURE_READ_MAX
+      # and the read stopped at the ceiling (an oversized or endlessly-streaming origin).
+      # Either way the socket has undelivered/unread bytes, so it must not be reused, and
+      # a consumer must not treat a half-delivered response as the whole thing. Distinct
+      # from a *display* truncation (gori capping what it shows).
       getter? incomplete : Bool
 
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false)
@@ -86,7 +89,11 @@ module Gori
             end
             r = exchange(upstream, request, host, port, Time.instant)
             results << r
-            dead = true if r.error # a failed exchange leaves the socket state unusable for the rest
+            # A failed OR incomplete exchange leaves the socket unusable for the rest: an
+            # error is self-evident; an incomplete body (origin cut it short, or we hit the
+            # CAPTURE_READ_MAX ceiling) leaves unread bytes on the wire, so reusing the
+            # connection would misframe the next request (response desync).
+            dead = true if r.error || r.incomplete?
           end
         ensure
           upstream.close rescue nil
@@ -102,7 +109,7 @@ module Gori
                                 started : Time::Instant) : Result
         upstream.write(request)
         upstream.flush
-        head = Proxy::Codec::Http1.read_head(upstream)
+        head = read_response_head(upstream)
         return error("no response from #{host}:#{port}", started) unless head
 
         resp = Proxy::Codec::Http1.parse_response_head(head)
@@ -122,13 +129,16 @@ module Gori
           # repeater/fuzz worker fiber indefinitely (there is no whole-request deadline).
           interim_seen += 1
           return error("too many interim 1xx responses from #{host}:#{port}", started) if interim_seen > MAX_INTERIM
-          head = Proxy::Codec::Http1.read_head(upstream)
+          head = read_response_head(upstream)
           return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
           resp = Proxy::Codec::Http1.parse_response_head(head)
         end
         begin
           framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
-          body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
+          # Cap the capture read at CAPTURE_READ_MAX (parity with the h2 engine's MAX_BODY):
+          # without it a streaming origin (SSE/heartbeat) or a multi-GB body hangs or OOMs
+          # this single-threaded send. A capped body comes back complete:false → incomplete.
+          body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX)
           Result.new(head, body, resp, elapsed(started), incomplete: !complete)
         rescue ex
           # The head was already read + parsed. A framing rejection (CL+TE — precisely the
@@ -139,6 +149,19 @@ module Gori
         end
       rescue ex
         error(ex.message || "repeater error", started)
+      end
+
+      # Read a response head with a TOTAL head-assembly deadline (parity with the proxy's
+      # client read, client_conn.cr:111). The per-operation io_timeout only bounds the gap
+      # BETWEEN reads, so a slowloris origin dripping the head one byte at a time (each byte
+      # inside io_timeout) would pin this read — and, since the MCP server is single-threaded,
+      # freeze every other tool. HEAD_DEADLINE caps the whole head. underlying_socket returns
+      # nil for an IO with no settable socket, in which case read_head simply skips the
+      # deadline (unchanged behaviour), so this is safe on every transport.
+      private def self.read_response_head(upstream : IO) : Bytes?
+        Proxy::Codec::Http1.read_head(upstream,
+          deadline: Proxy::SocketTuning::HEAD_DEADLINE,
+          timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
       end
 
       private def self.error(message : String, started : Time::Instant) : Result

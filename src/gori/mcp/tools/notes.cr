@@ -52,7 +52,7 @@ module Gori
         new_next_id = new_id + 1
 
         serialized = Notes.serialize(new_cur, new_notes, new_next_id)
-        store.set_setting(Notes::DOCS_KEY, serialized)
+        return busy("note NOT saved (store busy or unwritable); nothing was persisted") unless store.set_setting(Notes::DOCS_KEY, serialized)
 
         Result.new(JSON.build do |j|
           j.object do
@@ -77,7 +77,7 @@ module Gori
         new_notes[entry_idx] = updated_entry
 
         serialized = Notes.serialize(doc.cur, new_notes, doc.next_id)
-        store.set_setting(Notes::DOCS_KEY, serialized)
+        return busy("note NOT updated (store busy or unwritable); it is unchanged") unless store.set_setting(Notes::DOCS_KEY, serialized)
 
         Result.new(JSON.build do |j|
           j.object do
@@ -100,7 +100,7 @@ module Gori
         new_cur = doc.cur.clamp(0, {new_notes.size - 1, 0}.max)
 
         serialized = Notes.serialize(new_cur, new_notes, doc.next_id)
-        store.set_setting(Notes::DOCS_KEY, serialized)
+        return busy("note NOT deleted (store busy or unwritable); it is unchanged") unless store.set_setting(Notes::DOCS_KEY, serialized)
 
         Result.new(JSON.build do |j|
           j.object do

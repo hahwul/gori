@@ -172,14 +172,16 @@ module Gori
         masked_sni = sni.try { |s| Env.mask_secrets(s) }
         name = present?(h, "name") ? str(h, "name").try { |n| Env.mask_secrets(n) } : existing.name
 
-        store.update_repeater(
-          id: id,
-          target: masked_target,
-          request: masked_request.to_slice,
-          http2: http2,
-          auto_cl: auto_cl,
-          sni: masked_sni
-        )
+        unless store.update_repeater(
+                 id: id,
+                 target: masked_target,
+                 request: masked_request.to_slice,
+                 http2: http2,
+                 auto_cl: auto_cl,
+                 sni: masked_sni
+               )
+          return busy("repeater NOT updated (store busy or unwritable); it is unchanged")
+        end
 
         if present?(h, "name")
           store.set_repeater_name(id, name)
@@ -222,7 +224,7 @@ module Gori
         existing = store.get_repeater(id)
         return not_found("no repeater with id #{id}") unless existing
 
-        store.delete_repeater(id)
+        return busy("repeater NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_repeater(id)
         Result.new(JSON.build { |j| j.object { j.field "success", true } })
       end
     end

@@ -21,6 +21,7 @@ module Gori
           clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
         djob = DiscoverJob.new(id, engine, audit)
+        evict_finished_jobs(@discover_jobs)
         @discover_jobs[id] = djob
         Log.info { "discover_start #{id} #{seed_url} scope=#{sc.decision}" }
         spawn(name: "mcp-discover-#{id}") { run_discover_job(djob, engine) }
@@ -81,24 +82,45 @@ module Gori
         ms && ms > 0 ? ms.milliseconds : nil
       end
 
+      # Background drain, mirroring run_fuzz_job/mine/sequence: a per-event rescue keeps the
+      # drain alive on a callback failure (so the engine's worker fibers, parked on
+      # @events.send, still finish and exit instead of leaking), and the ensure GUARANTEES a
+      # terminal state — a fiber that dies here must never leave the job wedged at :running,
+      # which would hang a polling client forever and keep jobs_running? true (blocking
+      # switch_project/delete_project). The discover engine already emits a terminal event on
+      # every path, but this net matches the other three jobs so a future change can't regress.
       private def run_discover_job(djob : DiscoverJob, engine : Discover::Engine) : Nil
         base_ts = Time.utc.to_unix * 1_000_000
-        engine.run do |ev|
-          case ev
-          when Discover::FindingEvent then store_discover_finding(djob, ev.finding, base_ts)
-          when Discover::ProgressEvent
-            p = ev.progress
-            djob.sent = p.sent; djob.found = p.found; djob.errors = p.errors; djob.queued = p.queued
-          when Discover::DoneEvent
-            djob.sent = ev.progress.sent; djob.found = ev.progress.found; djob.errors = ev.progress.errors
-            djob.stats = ev.stats
-            djob.status = ev.stopped ? :stopped : :done
-            djob.ended_at_ms = Time.utc.to_unix_ms
-          when Discover::ErrorEvent
-            djob.status = :error
-            djob.error_msg = ev.message
-          end
+        engine.run { |ev| drain_discover_event(djob, ev, base_ts) }
+      rescue ex
+        Log.error(exception: ex) { "discover job #{djob.id} crashed" }
+        djob.error_msg ||= ex.message || "internal discover job error"
+      ensure
+        finalize_job(djob)
+      end
+
+      # Apply one discover event to the job, contained: a callback failure records the error
+      # and marks the job but never unwinds out of engine.run.
+      private def drain_discover_event(djob : DiscoverJob, ev : Discover::Event, base_ts : Int64) : Nil
+        case ev
+        when Discover::FindingEvent then store_discover_finding(djob, ev.finding, base_ts)
+        when Discover::ProgressEvent
+          p = ev.progress
+          djob.sent = p.sent; djob.found = p.found; djob.errors = p.errors; djob.queued = p.queued
+        when Discover::DoneEvent
+          djob.sent = ev.progress.sent; djob.found = ev.progress.found; djob.errors = ev.progress.errors
+          djob.stats = ev.stats
+          djob.status = ev.stopped ? :stopped : :done
+          djob.ended_at_ms = Time.utc.to_unix_ms
+        when Discover::ErrorEvent
+          djob.status = :error
+          djob.error_msg = ev.message
+          djob.ended_at_ms ||= Time.utc.to_unix_ms # parity with fuzz/mine/sequence — a terminal error stamps end time
         end
+      rescue ex
+        Log.error(exception: ex) { "discover job #{djob.id} drain error" }
+        djob.status = :error if djob.status == :running
+        djob.error_msg ||= ex.message || "internal discover drain error"
       end
 
       # Buffer the finding for discover_results AND write it into the project so list_sitemap /

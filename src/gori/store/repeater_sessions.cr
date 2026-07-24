@@ -121,9 +121,10 @@ module Gori
       }
     end
 
+    # Returns whether the write committed (false = store busy/locked/closing).
     def update_repeater(id : Int64, target : String, request : Bytes, http2 : Bool, auto_cl : Bool,
-                        sni : String? = nil) : Nil
-      exec_task ->(c : DB::Connection) {
+                        sni : String? = nil) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, updated_at = ? WHERE id = ?",
           target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, now_us, id)
         nil
@@ -162,8 +163,9 @@ module Gori
       }
     end
 
-    def delete_repeater(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) {
+    # Returns whether the write committed (false = store busy/locked/closing).
+    def delete_repeater(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
         c.exec("DELETE FROM repeaters WHERE id = ?", id)
         nil

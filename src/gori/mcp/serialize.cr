@@ -356,32 +356,6 @@ module Gori
         end
       end
 
-      # --- repeater / send_request response -------------------------------------
-      def self.repeater_result_json(r : Repeater::Result) : String
-        JSON.build do |j|
-          j.object do
-            if resp = r.response
-              j.field "status", resp.status
-              j.field "reason", resp.reason
-              j.field "http_version", resp.version
-              j.field "headers" do
-                j.array do
-                  resp.headers.each do |h|
-                    j.object { j.field "name", h.name; j.field "value", h.value }
-                  end
-                end
-              end
-            end
-            j.field "duration_us", r.duration_us
-            # The origin cut the body short (premature EOF on a Content-Length /
-            # chunked response). Surfaced top-level so it survives even an empty
-            # body, and kept distinct from a `body.truncated` display cap.
-            j.field "incomplete", true if r.incomplete?
-            emit_body(j, "body", r.head, r.body, false)
-          end
-        end
-      end
-
       # Heads are short and ASCII-ish; render as (lossy-on-display) text. nil head
       # (e.g. a Pending flow's response) becomes JSON null. `scrub` guards a
       # malformed/binary head from emitting invalid UTF-8 that would corrupt the

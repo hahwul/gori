@@ -32,12 +32,13 @@ module Gori
         built, applied_rules = maybe_apply_request_rules(h, built)
         # Scope gate BEFORE any outbound byte / History write: an out-of-scope
         # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
-        # request_target reads the target VERBATIM off the first line of `built.bytes` —
-        # ABSOLUTE-FORM when the caller hand-wrote a `raw` template with a full-URL
-        # request line, same as any plain-HTTP forward-proxy request — so this goes
-        # through Scope.request_url rather than a naive concat (see its doc comment).
-        sc = scope_check(Scope.request_url(built.scheme, built.host, request_target(built.bytes)),
-          built.host, bool(h, "allow_unscoped") || false)
+        # The scope URL is anchored on the DIAL target (built.host — what Engine.send
+        # actually connects to), see request_scope_url. Deliberately spoofing the
+        # request-line/Host to a DIFFERENT host (Host-header attacks, cache poisoning,
+        # SSRF via absolute-form) is a legitimate test and is NOT blocked — we still send
+        # the bytes verbatim; we just scope on the host we dial, so a send can't reach an
+        # out-of-scope host while the gate matched the (spoofed) request-line host instead.
+        sc = scope_check(request_scope_url(built), built.host, bool(h, "allow_unscoped") || false)
         return scope_blocked(sc) if sc.blocked
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
         verify = @verify_upstream && !(bool(h, "insecure") || false)
@@ -486,6 +487,25 @@ module Gori
       private def request_target(bytes : Bytes) : String
         line = String.new(bytes).each_line.first? || ""
         line.split(' ')[1]? || "/"
+      end
+
+      # The URL the scope gate evaluates, ALWAYS anchored on the DIAL target (built.scheme/
+      # host — what Engine.send connects to), never the request LINE's host. A raw request
+      # may carry an absolute-form request line (`GET http://other/p HTTP/1.1`) whose host is
+      # deliberately DIFFERENT from `url` — a Host-header / cache-poisoning / SSRF test, which
+      # gori must allow. Scoping on that spoofed host would either block a legitimate test or
+      # (the bug this fixes) let a send reach an out-of-scope host while an include rule matched
+      # the spoofed host and logged scope=in_scope. So reduce an absolute-form target to its
+      # path+query and rebuild against built.host. Port is omitted to match Scope.request_url's
+      # origin-form convention (the scope lens keys on host, not port).
+      private def request_scope_url(built : RequestBuilder::Built) : String
+        target = request_target(built.bytes)
+        if Store::FlowRow.absolute_form?(target)
+          uri = URI.parse(target) rescue nil
+          path = uri.try(&.path).presence || "/"
+          target = (q = uri.try(&.query)) ? "#{path}?#{q}" : path
+        end
+        Scope.request_url(built.scheme, built.host, target)
       end
 
       # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.

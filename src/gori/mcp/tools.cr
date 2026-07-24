@@ -155,6 +155,20 @@ module Gori
 
       MCP_REPEATER_REQUEST_MAX = 16 * 1024
 
+      # Ceiling on concurrently-live OAST listening sessions (each holds an Oast::Http
+      # socket until oast_stop). Bounds the leak from an agent that starts sessions and
+      # never stops them; well above any realistic out-of-band test.
+      MAX_OAST_SESSIONS = 32
+
+      # Ceiling on how many finished jobs each of the four async-job maps
+      # (@jobs/@mine_jobs/@sequence_jobs/@discover_jobs) retains. The server is
+      # long-lived (it outlives a single call), and a completed job holds its whole
+      # buffered result set (up to FUZZ_MAX_STORED etc.) for the process lifetime, so
+      # a long session issuing many *_start calls would grow memory without bound.
+      # A new *_start evicts the OLDEST terminal jobs down to this cap; :running jobs
+      # are never evicted (their fibers still reference them and a poller may return).
+      MAX_JOBS_RETAINED = 100
+
       # Default inlined-body cap for body_mode:preview (full uses Serialize::MAX_TEXT).
       BODY_PREVIEW_BYTES = 2048
 
@@ -1197,6 +1211,11 @@ module Gori
         return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
         host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
         return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+        # Bound the number of live sessions: each holds an Oast::Http (socket) for the
+        # process life until oast_stop, so an agent that never stops them would leak.
+        if @oast_mcp.size >= MAX_OAST_SESSIONS
+          return Result.new("too many active OAST sessions (#{@oast_mcp.size}/#{MAX_OAST_SESSIONS}); call oast_stop on one before starting another", is_error: true)
+        end
         prov = Oast::Provider.build(kind, host, str(h, "token"))
         http = Oast::HttpClient.new(@verify_upstream)
         session = prov.register(http)
@@ -1394,9 +1413,26 @@ module Gori
         {head, body}
       end
 
+      # Evict the OLDEST terminal (non-:running) jobs from `jobs` so it never grows past
+      # MAX_JOBS_RETAINED across a long session. Insertion order (Hash preserves it) is
+      # age order, so the first removable entries are the oldest. :running jobs are kept
+      # (a fiber still writes them and a poller may still read them) even past the cap.
+      # Called by each *_start just before it inserts the new job.
+      private def evict_finished_jobs(jobs : Hash(String, T)) : Nil forall T
+        return if jobs.size < MAX_JOBS_RETAINED
+        overflow = jobs.size - MAX_JOBS_RETAINED + 1 # +1 to make room for the incoming job
+        # Collect victims first, then delete — mutating a Hash mid-iteration is unsafe.
+        victims = [] of String
+        jobs.each do |key, job|
+          break if victims.size >= overflow
+          victims << key if job.status != :running
+        end
+        victims.each { |k| jobs.delete(k) }
+      end
+
       # A background job's fiber must never exit with the job still :running — that
       # hangs every poller and permanently trips jobs_running?. Land it terminal.
-      private def finalize_job(job : FuzzJob | MineJob | SequenceJob) : Nil
+      private def finalize_job(job : FuzzJob | MineJob | SequenceJob | DiscoverJob) : Nil
         if job.status == :running
           job.status = :error
           job.error_msg ||= "job ended without a terminal event"

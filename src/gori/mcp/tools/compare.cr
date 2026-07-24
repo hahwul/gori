@@ -35,6 +35,12 @@ module Gori
         full_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(full_diff)
         diff = changes_only ? full_diff.reject { |dl| dl.kind == Repeater::DiffKind::Same } : full_diff
+        # Bound the emitted diff by BYTES, not just MAX_LINES (a line count). A decoded
+        # response body can be one enormous line (minified JS/JSON, a base64 data URI up
+        # to the 32 MiB decode ceiling), so a 1500-line diff could still be tens of MiB in
+        # a single JSON-RPC response. Cap each line's text and the total; flag `truncated`.
+        capped, byte_truncated = cap_diff_bytes(diff)
+        truncated ||= byte_truncated
 
         Result.new(JSON.build do |j|
           j.object do
@@ -46,16 +52,50 @@ module Gori
             j.field "truncated", truncated
             j.field "diff" do
               j.array do
-                diff.each do |dl|
+                capped.each do |(kind, text)|
                   j.object do
-                    j.field "kind", dl.kind.to_s.downcase
-                    j.field "text", dl.text
+                    j.field "kind", kind
+                    j.field "text", text
                   end
                 end
               end
             end
           end
         end)
+      end
+
+      # Total byte budget for a compare_flows diff's emitted `text` (across all lines),
+      # and the per-line ceiling. Generous enough for real request/response diffs while
+      # keeping one call off the multi-MB JSON-RPC cliff every other read tool avoids.
+      COMPARE_MAX_DIFF_BYTES = 256 * 1024
+      COMPARE_MAX_LINE_BYTES = Serialize::MAX_TEXT # 64 KiB — a single huge line still shows a prefix
+
+      # Trim the diff to the byte budget: cap each line's text (byte-safe, then scrub so a
+      # cut through a multi-byte UTF-8 sequence can't emit invalid UTF-8 onto the stdio
+      # stream), stop once the total budget is spent. Returns the kept {kind, text} pairs
+      # and whether anything was trimmed.
+      private def cap_diff_bytes(diff : Array(Repeater::DiffLine)) : {Array({String, String}), Bool}
+        budget = COMPARE_MAX_DIFF_BYTES
+        kept = [] of {String, String}
+        trimmed = false
+        diff.each do |dl|
+          if budget <= 0
+            trimmed = true
+            break
+          end
+          text = dl.text
+          if text.bytesize > COMPARE_MAX_LINE_BYTES
+            text = text.byte_slice(0, COMPARE_MAX_LINE_BYTES).scrub
+            trimmed = true
+          end
+          if text.bytesize > budget
+            text = text.byte_slice(0, budget).scrub
+            trimmed = true
+          end
+          budget -= text.bytesize
+          kept << {dl.kind.to_s.downcase, text}
+        end
+        {kept, trimmed}
       end
 
       private def compare_lines(d : Store::FlowDetail, pane : Symbol, include_sensitive : Bool) : Array(String)

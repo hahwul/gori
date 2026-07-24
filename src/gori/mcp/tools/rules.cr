@@ -99,10 +99,10 @@ module Gori
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host
-        store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
+        return busy("rule not updated (store busy or unwritable); the rule is unchanged") unless store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
         if present?(h, "enabled")
           en = bool_arg(h, "enabled", existing.enabled?)
-          store.set_rule_enabled(id, en)
+          return busy("rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_rule_enabled(id, en)
         end
         Result.new(JSON.build do |j|
           j.object do
@@ -211,7 +211,7 @@ module Gori
         enabled = bool(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
         return not_found("no rule with id #{id}") unless rule_exists?(id)
-        store.set_rule_enabled(id, enabled)
+        return busy("enable/disable NOT applied (store busy or unwritable); the rule is unchanged and may still be rewriting live traffic") unless store.set_rule_enabled(id, enabled)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
 
@@ -219,7 +219,7 @@ module Gori
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
         return not_found("no rule with id #{id}") unless rule_exists?(id)
-        store.delete_rule(id)
+        return busy("rule NOT deleted (store busy or unwritable); it is unchanged and may still be rewriting live traffic") unless store.delete_rule(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
 

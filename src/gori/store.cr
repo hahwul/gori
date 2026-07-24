@@ -104,6 +104,20 @@ module Gori
       end
     end
 
+    # Like ExecTask, but its reply is a COMMITTED bool rather than a rowid. exec_task
+    # signals failure only via last_insert_rowid()==0, which is meaningful for INSERTs
+    # but NOT for UPDATE/DELETE (a committed UPDATE can also yield 0), so a rolled-back
+    # UPDATE/DELETE was indistinguishable from a successful one — a busy/locked mutation
+    # reported success. This variant carries an unambiguous commit/rollback signal so a
+    # caller (e.g. an MCP mutation tool) can surface PROJECT_BUSY on a dropped write.
+    struct ExecTaskChecked < WriteOp
+      getter run : DB::Connection -> Nil
+      getter reply : Channel(Bool)
+
+      def initialize(@run, @reply)
+      end
+    end
+
     # Marks every Pending flow Error (e.g. proxy shutdown before a response landed).
     struct AbandonPending < WriteOp
       getter message : String
@@ -382,6 +396,12 @@ module Gori
                   op.run.call(c)
                   rowid = c.scalar("SELECT last_insert_rowid()").as(Int64)
                   deferred << -> { task_reply.send(rowid) }
+                when ExecTaskChecked
+                  checked_reply = op.reply
+                  op.run.call(c)
+                  # Deferred until the batch commits (below), so `true` truthfully means
+                  # persisted; a rollback routes through fail_reply → `false`.
+                  deferred << -> { checked_reply.send(true) }
                 when AbandonPending
                   ab_reply = op.reply
                   ids = abandon_all_pending(c, op.message)
@@ -471,6 +491,7 @@ module Gori
       when UpdateResp        then op.reply.send(nil)
       when InsertWs          then op.reply.send(nil)
       when ExecTask          then op.reply.send(0_i64)
+      when ExecTaskChecked   then op.reply.send(false)
       when AbandonPending    then op.reply.send(0_i32)
       end
     rescue
@@ -708,6 +729,19 @@ module Gori
       reply.receive
     rescue Channel::ClosedError
       0_i64 # store closing — caller (settings/issues/flush) degrades, doesn't raise
+    end
+
+    # Runs a write closure and returns whether its batch COMMITTED (true) or was
+    # rolled back / the store is closing (false). Use for UPDATE/DELETE mutations where
+    # a caller must know the write actually persisted (last_insert_rowid can't tell a
+    # committed non-INSERT from a rollback). A false is transient (cross-process SQLite
+    # busy/lock) → the caller surfaces PROJECT_BUSY (retryable).
+    private def exec_task_ok(run : DB::Connection -> Nil) : Bool
+      reply = Channel(Bool).new(1) # buffered: the writer must never block sending a reply
+      @writes.send(ExecTaskChecked.new(run, reply))
+      reply.receive
+    rescue Channel::ClosedError
+      false # store closing — treat as a failed write
     end
 
     private def read_issue(rs : DB::ResultSet) : Issue

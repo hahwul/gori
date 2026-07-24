@@ -32,6 +32,7 @@ module Gori
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
         sjob = SequenceJob.new(id, goal, engine, audit)
+        evict_finished_jobs(@sequence_jobs)
         @sequence_jobs[id] = sjob
         Log.info { "sequence_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} goal=#{goal} loc=#{loc.label}" }
         spawn(name: "mcp-seq-#{id}") { run_sequence_job(sjob, engine) }

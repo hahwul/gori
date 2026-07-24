@@ -1082,6 +1082,43 @@ describe Gori::MCP::Server do
         payload["project_slug"].as_s.should eq("demo")
       end
     end
+
+    it "redacts sensitive headers in the nested tui_repeater snapshot unless include_sensitive" do
+      with_store do |store|
+        req = "GET / HTTP/1.1\r\nHost: ex.test\r\nAuthorization: Bearer s3cr3t\r\nCookie: sid=abc\r\n\r\n"
+        ui = JSON.build do |j|
+          j.object do
+            j.field "active_tab", "repeater"
+            j.field "repeater" do
+              j.object do
+                j.field "count", 1
+                j.field "active" do
+                  j.object do
+                    j.field "http2", false
+                    j.field "request", req # NESTED under "active" — the real TUI shape
+                  end
+                end
+              end
+            end
+          end
+        end
+        store.set_setting(Gori::Store::UI_STATE_KEY, ui)
+
+        # Default (include_sensitive:false): the nested request's credential values must be redacted.
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"include_content":true}}})
+        redacted = tool_payload(drive(store, call, project_name: "demo", project_slug: "demo")[0])
+        text = redacted["tui_repeater"]["active"]["request"].as_s
+        text.should_not contain("s3cr3t")
+        text.should_not contain("sid=abc")
+        text.should contain("[REDACTED]")
+        redacted["sensitive_headers_redacted"].as_bool.should be_true
+
+        # include_sensitive:true passes the raw request through (matches the sessions[] policy).
+        call2 = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"include_content":true,"include_sensitive":true}}})
+        raw = tool_payload(drive(store, call2, project_name: "demo", project_slug: "demo")[0])
+        raw["tui_repeater"]["active"]["request"].as_s.should contain("s3cr3t")
+      end
+    end
   end
 
   describe "get_current_context" do
@@ -1389,19 +1426,54 @@ describe Gori::MCP::Server do
     end
 
     # A `raw` template's request line is taken VERBATIM (request_target in send.cr),
-    # so it can be ABSOLUTE-FORM (`GET http://host/path HTTP/1.1`) — same wire shape a
-    # plain-HTTP forward-proxy request arrives in. The scope check must not double it
-    # into `http://hosthttp://host/path` (which would break this anchored regex include
-    # and wrongly report the in-scope target as unscoped/out-of-scope).
+    # so it can be ABSOLUTE-FORM (`GET http://host/path HTTP/1.1`). The scope check
+    # anchors on the DIAL host (built.host) reduced to origin-form, so an absolute-form
+    # line whose host matches `url` still resolves in-scope (no URL doubling, host keyed
+    # without port to match Scope.request_url's origin-form convention).
     it "reports in_scope for a raw request whose line is already ABSOLUTE-FORM" do
       with_store do |store|
         port = start_mcp_http_origin("ok")
-        store.add_scope_rule("include", "regex", "^http://127\\.0\\.0\\.1:#{port}/$")
+        store.add_scope_rule("include", "regex", "^http://127\\.0\\.0\\.1/")
         raw = "GET http://127.0.0.1:#{port}/ HTTP/1.1\\r\\nHost: 127.0.0.1:#{port}\\r\\n\\r\\n"
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","raw":"#{raw}"}}})
         p = tool_payload(drive(store, call, verify_upstream: false)[0])
         p["scope_decision"].as_s.should eq("in_scope")
         p["scope_rule_id"].as_i64.should be > 0
+      end
+    end
+
+    # Host-header attack / cache-poisoning / SSRF-via-absolute-form: the caller DELIBERATELY
+    # spoofs the request-line host to a DIFFERENT (here out-of-scope) host while dialing the
+    # in-scope `url`. gori must ALLOW this and scope on the host it actually dials, so the
+    # test proceeds against the in-scope origin and the spoofed line rides along verbatim.
+    it "allows a deliberately spoofed request-line host, scoping on the dialed host" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        store.add_scope_rule("include", "regex", "^http://127\\.0\\.0\\.1/")
+        raw = "GET http://evil.example/ HTTP/1.1\\r\\nHost: evil.example\\r\\n\\r\\n"
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","raw":"#{raw}"}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["scope_decision"].as_s.should eq("in_scope") # scoped on the dialed 127.0.0.1, not the spoofed line
+      end
+    end
+
+    # The converse (the bypass this closes): dialing an OUT-of-scope host while the
+    # absolute-form line names the in-scope host must NOT report in_scope — the scope
+    # decision follows the dialed host, so this is blocked without allow_unscoped.
+    it "scopes a raw absolute-form send on the dialed host, not the request-line host (no bypass)" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        store.add_scope_rule("include", "string", "127.0.0.1")
+        # Absolute-form line names the in-scope 127.0.0.1, but `url` dials the out-of-scope
+        # 10.99.99.99. The gate follows the DIALED host → blocked (no allow_unscoped), and
+        # nothing is sent (so the unroutable IP is never actually dialed).
+        raw = "GET http://127.0.0.1:#{port}/ HTTP/1.1\\r\\nHost: 127.0.0.1:#{port}\\r\\n\\r\\n"
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://10.99.99.99:#{port}/","raw":"#{raw}"}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        sc = resp["result"]["structuredContent"]
+        sc["error_code"].as_s.should eq("SCOPE_BLOCKED")
+        sc["details"]["scope_decision"].as_s.should eq("out_of_scope")
       end
     end
   end
@@ -1947,19 +2019,6 @@ describe Gori::MCP::Serialize do
     text.should contain("A")
   end
 
-  it "flags a repeater result as incomplete when the origin cut the body short" do
-    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
-    r = Gori::Repeater::Result.new(head, "hi".to_slice, nil, 1000_i64, incomplete: true)
-    out = JSON.parse(Gori::MCP::Serialize.repeater_result_json(r))
-    out["incomplete"].as_bool.should be_true
-  end
-
-  it "omits the incomplete field for a complete repeater result" do
-    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
-    r = Gori::Repeater::Result.new(head, "hi".to_slice, nil, 1000_i64)
-    out = JSON.parse(Gori::MCP::Serialize.repeater_result_json(r))
-    out["incomplete"]?.should be_nil
-  end
 end
 
 describe Gori::MCP::RequestBuilder do

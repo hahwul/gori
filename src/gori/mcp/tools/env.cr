@@ -35,7 +35,7 @@ module Gori
         else
           vars << {key, value}
         end
-        Env.save_project(store, vars)
+        return busy("env var NOT saved (store busy or unwritable); the previous value is unchanged") unless Env.save_project(store, vars)
         Result.new(JSON.build { |j| j.object { j.field "key", key; j.field "set", true } })
       end
 
@@ -46,7 +46,7 @@ module Gori
         before = vars.size
         vars.reject! { |(k, _)| k == key }
         return not_found("no env var named '#{key}'") if vars.size == before
-        Env.save_project(store, vars)
+        return busy("env var NOT deleted (store busy or unwritable); it is unchanged") unless Env.save_project(store, vars)
         Result.new(JSON.build { |j| j.object { j.field "key", key; j.field "deleted", true } })
       end
     end

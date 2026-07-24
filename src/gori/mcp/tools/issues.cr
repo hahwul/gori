@@ -111,7 +111,7 @@ module Gori
         end
 
         unless title.nil? && severity.nil? && notes.nil? && status.nil?
-          store.update_issue(id, title: title, severity: severity, notes: notes, status: status)
+          return busy("issue NOT updated (store busy or unwritable); it is unchanged") unless store.update_issue(id, title: title, severity: severity, notes: notes, status: status)
         end
         if repeater_id
           store.add_link(Store::LinkOwnerKind::Issue, id,

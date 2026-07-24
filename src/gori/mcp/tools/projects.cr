@@ -154,8 +154,12 @@ module Gori
 
       private def delete_project_dry_run(reg : ProjectRegistry, proj : Project) : Result
         flows, issues = count_project_objects(proj)
+        now = Time.utc.to_unix_ms
+        # Sweep expired tokens so an issued-but-never-confirmed dry-run doesn't linger for
+        # the whole process life (they're only removed lazily on a confirmed delete today).
+        @delete_tokens.reject! { |_, (_, issued)| now - issued > DELETE_TOKEN_TTL * 1000 }
         token = "del_#{Random::Secure.hex(8)}"
-        @delete_tokens[token] = {proj.db_path, Time.utc.to_unix_ms}
+        @delete_tokens[token] = {proj.db_path, now}
         Result.new(JSON.build do |j|
           j.object do
             j.field "dry_run", true

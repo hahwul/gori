@@ -20,6 +20,7 @@ module Gori
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
         mjob = MineJob.new(id, total, engine, audit)
+        evict_finished_jobs(@mine_jobs)
         @mine_jobs[id] = mjob
         Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} names=#{total}" }
         spawn(name: "mcp-mine-#{id}") { run_mine_job(mjob, engine) }
