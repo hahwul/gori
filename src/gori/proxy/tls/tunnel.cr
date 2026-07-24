@@ -6,7 +6,9 @@ require "../conn/client_conn"
 require "../upstream"
 require "../socket_tuning"
 require "../h2/relay"
+require "../codec/message"
 require "../../host_overrides"
+require "../../flow_mapper"
 require "./cert_authority"
 
 module Gori::Proxy::Tls
@@ -95,21 +97,52 @@ module Gori::Proxy::Tls
       client_tls.try(&.close) rescue nil
     end
 
-    # End-to-end h2: dial the origin offering h2. If the origin won't speak h2,
-    # v1 does not translate h2↔h1 — the connection is dropped (the human sees no
-    # flow rather than a corrupted one, P7).
+    # End-to-end h2: dial the origin offering h2. A tunnel we can't build is
+    # recorded as a visible error flow (see record_h2_error) rather than dropped
+    # silently — most browsers negotiate h2 by default, so a silent drop here left
+    # the user with a blank page and an empty History and no hint of the cause (#323).
     private def intercept_h2(host : String, port : Int32, client_tls : IO, sink : Proxy::FlowSink) : Nil
       upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2", overrides: @host_overrides)
-      if upstream && upstream.alpn_protocol == "h2"
-        upstream.sync = true
-        # Long-lived end-to-end h2 relay: relax both legs so an idle h2 connection isn't reaped
-        # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
-        Proxy::SocketTuning.relax(client_tls)
-        Proxy::SocketTuning.relax(upstream)
-        Proxy::H2::Relay.run(client_tls, upstream, host, port, sink)
+      if upstream.nil?
+        # Couldn't reach or TLS-verify the origin — no h2 tunnel to build. The most common
+        # cause behind #323: upstream-cert verification failing when the (statically-linked)
+        # binary can't resolve a system trust store. The h1 path already surfaces this via
+        # ClientConn#record_error; bring h2 to parity instead of dropping the connection.
+        record_h2_error(host, port, sink, "upstream connect/TLS-verify failed: #{host}:#{port}")
+        return
       end
+      unless upstream.alpn_protocol == "h2"
+        # Origin won't speak h2; v1 does not translate h2↔h1 (a translated flow would be
+        # corrupted, P7). Record WHY rather than dropping silently — an Error flow is an
+        # honest projection, not a corrupted one.
+        record_h2_error(host, port, sink, "origin did not negotiate HTTP/2 (h2↔h1 not supported): #{host}:#{port}")
+        return
+      end
+      upstream.sync = true
+      # Long-lived end-to-end h2 relay: relax both legs so an idle h2 connection isn't reaped
+      # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
+      Proxy::SocketTuning.relax(client_tls)
+      Proxy::SocketTuning.relax(upstream)
+      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink)
     ensure
       upstream.try(&.close) rescue nil
+    end
+
+    # Record a VISIBLE error flow for an h2 tunnel we could not establish, mirroring the
+    # h1 path's ClientConn#record_error. `head` is a synthesized marker: the real h2 request
+    # frames were never relayed or decoded (the failure is before the relay), so there is no
+    # wire request to capture — the raw-frame log stays the truth for real h2 flows (P7).
+    # Best-effort: a store error here must not take down the tunnel teardown.
+    private def record_h2_error(host : String, port : Int32, sink : Proxy::FlowSink, message : String) : Nil
+      created_at = (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
+      head = "GET / HTTP/2\r\nHost: #{host}\r\n\r\n".to_slice
+      req = Proxy::Codec::RawRequest.new(head, "GET", "/", "HTTP/2",
+        Proxy::Codec::HeaderList.new([Proxy::Codec::Header.new("Host", host)]))
+      flow_id = sink.on_request(FlowMapper.request(req,
+        scheme: "https", host: host, port: port, created_at: created_at, alpn: "h2"))
+      sink.on_response(FlowMapper.error_response(flow_id, message))
+    rescue
+      # never let error-recording take down the tunnel teardown path
     end
   end
 end
