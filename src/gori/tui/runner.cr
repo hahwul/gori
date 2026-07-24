@@ -65,6 +65,7 @@ require "./fuzz_advanced_overlay"
 require "./discover_config_overlay"
 require "./discover_headers_overlay"
 require "./probe_active_overlay"
+require "./overlay"
 require "./scope_rule_overlay"
 require "./custom_rule_overlay"
 require "./oast_provider_overlay"
@@ -240,15 +241,12 @@ module Gori::Tui
       # Samples nothing while disabled; see ResourceMeter for the idle-repaint discipline.
       @resource = ResourceMeter.new
       @spinner_frame = 0
-      # The Miner config popup (History/Repeater → space → "Mine parameters"); @overlay is
-      # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
-      @mine_config_overlay = nil.as(MineConfigOverlay?)
+      # The Miner config popup (History/Repeater → space → "Mine parameters") rides the
+      # Overlay seam (@active_overlay); built fresh each open with an injected commit.
       # The Sequencer config popup (History/Repeater/Sitemap → "Send to Sequencer", or `c`
-      # to reconfigure the current session); @overlay is :sequence_config while up.
-      # @sequence_reconfigure distinguishes a reconfigure of the CURRENT session (apply +
-      # re-run) from a new-session flow handoff (create + run).
-      @sequence_config_overlay = nil.as(SequenceConfigOverlay?)
-      @sequence_reconfigure = false
+      # to reconfigure the current session) rides the Overlay seam (@active_overlay). The
+      # new-vs-reconfigure distinction that used to need a @sequence_reconfigure flag now
+      # lives in each open-site's injected commit closure.
       @discover_config_overlay = nil.as(DiscoverConfigOverlay?)
       @discover_headers_overlay = nil.as(DiscoverHeadersOverlay?)
       # :probe_active while the "Run active scan" popup is up (holds the seed flow + estimate).
@@ -258,8 +256,11 @@ module Gori::Tui
       # built fresh from the current fuzz session each time they open.
       @fuzz_set_overlay = nil.as(FuzzSetOverlay?)
       @fuzz_advanced_overlay = nil.as(FuzzAdvancedOverlay?)
-      # Project SCOPE add/edit popup (a/e on the rule list). Built fresh each open.
-      @scope_rule_overlay = nil.as(ScopeRuleOverlay?)
+      # The one active polymorphic modal (see overlay.cr). Overlays migrated onto the
+      # Overlay base flow through here instead of a per-modal typed ivar + `case @overlay`
+      # ladders. nil = no such modal up. (SCOPE add/edit was the first migrated — the
+      # former @scope_rule_overlay ivar now lives here.)
+      @active_overlay = nil.as(Overlay?)
       @custom_rule_overlay = nil.as(CustomRuleOverlay?)
       # Rewriter (Match & Replace) add/edit popup (a/e on the rule list). Built fresh each
       # open; @rewriter_preview_sig gates the live match-preview rescan to real changes.
@@ -929,6 +930,10 @@ module Gori::Tui
       # priority mirrors handle_key: overlays first, then text-entry sub-modes,
       # then the focused tab body — so EVERY text field gets the same live
       # composition preview, not just the Notes/Project/Repeater editors.
+      if ov = active_overlay # a migrated modal routes its own IME text
+        ov.set_preedit(text)
+        return
+      end
       case @overlay
       when :palette          then @palette.set_preedit(text)
       when :issue_new        then @issue_form.set_preedit(text)
@@ -943,7 +948,6 @@ module Gori::Tui
       when :discover_headers then @discover_headers_overlay.try(&.set_preedit(text))
       when :fuzz_set         then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced    then @fuzz_advanced_overlay.try(&.set_preedit(text))
-      when :scope_rule       then @scope_rule_overlay.try(&.set_preedit(text))
       when :oast_provider    then @oast_provider_overlay.try(&.set_preedit(text))
       when :probe_rule       then @custom_rule_overlay.try(&.set_preedit(text))
       when :rewriter_rule    then @rewriter_rule_overlay.try(&.set_preedit(text))
@@ -1040,14 +1044,16 @@ module Gori::Tui
         return
       end
       return handle_notifications_key(ev) if @overlay == :notifications
-      return handle_mine_config_key(ev) if @overlay == :mine_config
+      # Migrated modals (Overlay base) dispatch generically — no per-modal handle_*_key.
+      if ov = active_overlay
+        dispatch_overlay_key(ov, ev)
+        return
+      end
       return handle_probe_active_key(ev) if @overlay == :probe_active
-      return handle_sequence_config_key(ev) if @overlay == :sequence_config
       return handle_discover_config_key(ev) if @overlay == :discover_config
       return handle_discover_headers_key(ev) if @overlay == :discover_headers
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
       return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
-      return handle_scope_rule_key(ev) if @overlay == :scope_rule
       return handle_oast_provider_key(ev) if @overlay == :oast_provider
       return handle_custom_rule_key(ev) if @overlay == :probe_rule
       return handle_rewriter_rule_key(ev) if @overlay == :rewriter_rule
@@ -1305,9 +1311,10 @@ module Gori::Tui
 
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
+      return true if active_overlay # migrated modals capture input via the Overlay seam
       case @overlay
-      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import, :import then true
-      else                                                                                                                                                                                                                                                                                                                                                                                                             false
+      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider, :probe_rule, :rewriter_rule, :ca_import, :import then true
+      else                                                                                                                                                                                                                                                                                                                                                                false
       end
     end
 
@@ -1393,6 +1400,10 @@ module Gori::Tui
     # box (or on the [x]); list overlays run/select on a row click.
     private def handle_overlay_click(layout : Layout, mx : Int32, my : Int32) : Nil
       area = layout.body
+      if ov = active_overlay # migrated modals hit-test + dismiss themselves
+        dispatch_overlay_click(ov, area, mx, my)
+        return
+      end
       case @overlay
       when :palette          then click_palette(area, mx, my)
       when :browser          then click_browser(area, mx, my)
@@ -1411,14 +1422,11 @@ module Gori::Tui
       when :env              then (click_env(area, mx, my); settle_sub_editor)
       when :hotkeys          then (click_hotkeys(area, mx, my); settle_sub_editor)
       when :notifications    then click_notifications(area, mx, my)
-      when :mine_config      then click_mine_config(area, mx, my)
       when :probe_active     then click_probe_active(area, mx, my)
-      when :sequence_config  then click_sequence_config(area, mx, my)
       when :discover_config  then click_discover_config(area, mx, my)
       when :discover_headers then click_discover_headers(area, mx, my)
       when :fuzz_set         then click_fuzz_set(area, mx, my)
       when :fuzz_advanced    then click_fuzz_advanced(area, mx, my)
-      when :scope_rule       then click_scope_rule(area, mx, my)
       when :oast_provider    then click_oast_provider(area, mx, my)
       when :probe_rule       then click_custom_rule(area, mx, my)
       when :rewriter_rule    then click_rewriter_rule(area, mx, my)
@@ -1466,17 +1474,6 @@ module Gori::Tui
       end
     end
 
-    private def click_mine_config(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @mine_config_overlay
-      return unless ov
-      box = ov.overlay_box(area)
-      return close_mine_config if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        ov.on_start_row? ? start_mining(ov) : ov.toggle
-      end
-    end
-
     private def click_probe_active(area : Rect, mx : Int32, my : Int32) : Nil
       ov = @probe_active_overlay
       return unless ov
@@ -1485,17 +1482,6 @@ module Gori::Tui
       if idx = ov.row_at(box, mx, my)
         ov.set_selected(idx)
         ov.on_run_row? ? start_probe_active(ov) : ov.toggle
-      end
-    end
-
-    private def click_sequence_config(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @sequence_config_overlay
-      return unless ov
-      box = ov.overlay_box(area)
-      return close_sequence_config if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        start_sequencing(ov) if ov.on_start_row?
       end
     end
 
@@ -1548,16 +1534,6 @@ module Gori::Tui
       box = ov.overlay_box(area)
       return close_import if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
       ov.handle_click(box, mx, my)
-    end
-
-    private def click_scope_rule(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @scope_rule_overlay || return
-      box = ov.overlay_box(area)
-      return close_scope_rule if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        commit_scope_rule_overlay(ov) if ov.on_save_row?
-      end
     end
 
     private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1693,6 +1669,10 @@ module Gori::Tui
 
     # Wheel inside a centered modal scrolls its list (no movement for the button modals).
     private def wheel_overlay(step : Int32) : Nil
+      if ov = active_overlay # migrated modals scroll themselves
+        ov.handle_wheel(step)
+        return
+      end
       case @overlay
       when :palette         then @palette.move(step)
       when :browser         then @browser_picker.try(&.move(step))
@@ -1710,13 +1690,10 @@ module Gori::Tui
       when :env             then @env_overlay.select_move(step)
       when :hotkeys         then @hotkeys_overlay.select_move(step)
       when :notifications   then @notifications_overlay.select_move(step)
-      when :mine_config     then @mine_config_overlay.try(&.move(step))
       when :probe_active    then @probe_active_overlay.try(&.move(step))
-      when :sequence_config then @sequence_config_overlay.try(&.move(step))
       when :discover_config then @discover_config_overlay.try(&.move(step))
       when :fuzz_set        then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced   then @fuzz_advanced_overlay.try(&.move(step))
-      when :scope_rule      then @scope_rule_overlay.try(&.move(step))
       when :oast_provider   then @oast_provider_overlay.try(&.move(step))
       when :probe_rule      then @custom_rule_overlay.try(&.move(step))
       when :rewriter_rule   then @rewriter_rule_overlay.try(&.move(step))
@@ -1747,25 +1724,6 @@ module Gori::Tui
     end
 
     # Miner config popup: ↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel.
-    private def handle_mine_config_key(ev : Termisu::Event::Key) : Nil
-      ov = @mine_config_overlay
-      return unless ov
-      key = ev.key
-      if key.escape?
-        close_mine_config
-      elsif key.up?
-        ov.move(-1)
-      elsif key.down?
-        ov.move(1)
-      elsif key.left?
-        ov.adjust(-1)
-      elsif key.right?
-        ov.adjust(1)
-      elsif key.enter? || key.space?
-        ov.on_start_row? ? start_mining(ov) : ov.toggle
-      end
-    end
-
     # Run-active-scan popup: ↑/↓ field · ←/→ notify · ↵ run · esc cancel.
     private def handle_probe_active_key(ev : Termisu::Event::Key) : Nil
       ov = @probe_active_overlay
@@ -1789,38 +1747,6 @@ module Gori::Tui
     # Sequencer config popup: ↑/↓ field · type to edit the selector · ←/→ cycle · ↵ start.
     # The selector row is a text field, so printable/caret keys route there first; every
     # other row uses the ←/→ cycler nav.
-    private def handle_sequence_config_key(ev : Termisu::Event::Key) : Nil
-      ov = @sequence_config_overlay
-      return unless ov
-      key = ev.key
-      if key.escape?
-        close_sequence_config
-        return
-      end
-      if key.up?
-        ov.move(-1)
-        return
-      end
-      if key.down?
-        ov.move(1)
-        return
-      end
-      if key.enter?
-        ov.on_start_row? ? start_sequencing(ov) : ov.toggle_or_advance
-        return
-      end
-      # On the selector row, let the text field consume printable/caret/backspace keys
-      # (incl. ←/→ as caret motion) before the cycler nav sees them.
-      return if ov.editing_selector? && ov.handle_text_key(ev)
-      if key.left?
-        ov.adjust(-1)
-      elsif key.right?
-        ov.adjust(1)
-      elsif key.space?
-        ov.toggle_or_advance
-      end
-    end
-
     private def handle_discover_config_key(ev : Termisu::Event::Key) : Nil
       ov = @discover_config_overlay
       return unless ov
@@ -1860,11 +1786,47 @@ module Gori::Tui
     end
 
     # Project SCOPE rule popup: ↑/↓ field · ←/→ kind/type · type pattern · ↵ save · esc cancel.
-    private def handle_scope_rule_key(ev : Termisu::Event::Key) : Nil
-      ov = @scope_rule_overlay || return
+    # --- Overlay seam (see overlay.cr) — generic dispatch for the ONE @active_overlay,
+    # shared by every migrated modal so key/click routing never grows per modal. ---
+
+    # Open a migrated modal: it becomes @active_overlay and syncs @overlay to its key
+    # (so modal_overlay? + residual `@overlay ==` checks keep working during migration).
+    private def open_overlay(ov : Overlay) : Nil
+      @active_overlay = ov
+      @overlay = ov.key
+    end
+
+    private def close_active_overlay : Nil
+      @active_overlay = nil
+      @overlay = :none
+    end
+
+    # The active migrated modal, but ONLY while @overlay still names it. @overlay is the
+    # single source of truth for "what modal is up": ~40 sites reset it to :none directly
+    # (dismiss, tab jump, confirm return, …) without touching @active_overlay. Gating every
+    # read here means such a reset makes the overlay inert (no render, no input capture) —
+    # the pre-seam fail-safe — instead of a zombie that keeps drawing/capturing with
+    # @overlay == :none. Not reachable today (a live modal captures all input), but the
+    # render/modal_overlay?/dispatch reads are authoritative, so this keeps the invariant
+    # honest by construction rather than by convention.
+    private def active_overlay : Overlay?
+      ov = @active_overlay
+      ov if ov && @overlay == ov.key
+    end
+
+    # :stay stays open; :cancel closes; :commit runs the injected commit closure and
+    # closes iff it returns true (a validation failure keeps the form up).
+    private def dispatch_overlay_key(ov : Overlay, ev : Termisu::Event::Key) : Nil
       case ov.handle_key(ev)
-      when :cancel then close_scope_rule
-      when :commit then commit_scope_rule_overlay(ov)
+      when :cancel then close_active_overlay
+      when :commit then close_active_overlay if ov.commit
+      end
+    end
+
+    private def dispatch_overlay_click(ov : Overlay, area : Rect, mx : Int32, my : Int32) : Nil
+      case ov.handle_click(area, mx, my)
+      when :cancel then close_active_overlay
+      when :commit then close_active_overlay if ov.commit
       end
     end
 
@@ -1910,16 +1872,6 @@ module Gori::Tui
           @toast = "CA import failed: #{ex.message}"
         end
       end
-    end
-
-    private def commit_scope_rule_overlay(ov : ScopeRuleOverlay) : Nil
-      return unless project_controller.apply_scope_rule(ov.edit_id, ov.kind, ov.match_type, ov.pattern)
-      close_scope_rule
-    end
-
-    private def close_scope_rule : Nil
-      @overlay = :none
-      @scope_rule_overlay = nil
     end
 
     # OAST provider add/edit popup: same interaction as the scope-rule form. Commit persists
@@ -3835,14 +3787,12 @@ module Gori::Tui
       @env_overlay.render(screen, layout.body) if @overlay == :env
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
-      @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
       @probe_active_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_active
-      @sequence_config_overlay.try(&.render(screen, layout.body)) if @overlay == :sequence_config
       @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_config
       @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_headers
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
-      @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
+      active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
       @oast_provider_overlay.try(&.render(screen, layout.body)) if @overlay == :oast_provider
       @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_rule
       @rewriter_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :rewriter_rule
@@ -3951,6 +3901,9 @@ module Gori::Tui
       return "SPACE" if @space_menu_open                              # orthogonal to @overlay — floats over it
       return @copy_picker.try(&.title) || "COPY AS" if copy_as_shown? # ditto
       return "SEND TO" if send_to_shown?                              # ditto
+      if ov = active_overlay                                          # migrated modals name themselves (Overlay seam)
+        return ov.title
+      end
       case @overlay
       when :palette          then "PALETTE"
       when :issue_new        then "ISSUE"
@@ -3970,14 +3923,11 @@ module Gori::Tui
       when :env              then "ENVIRONMENT"
       when :hotkeys          then "HOTKEYS"
       when :notifications    then "NOTIFICATIONS"
-      when :mine_config      then "MINE PARAMS"
       when :probe_active     then "ACTIVE SCAN"
-      when :sequence_config  then "SEQUENCER"
       when :discover_config  then "DISCOVER"
       when :discover_headers then "CUSTOM HEADERS"
       when :fuzz_set         then "PAYLOAD SET"
       when :fuzz_advanced    then "ADVANCED"
-      when :scope_rule       then "SCOPE RULE"
       when :rewriter_rule    then "REWRITER RULE"
       when :oast_provider    then "OAST PROVIDER"
       when :ca_import        then "IMPORT CA"
@@ -4007,6 +3957,9 @@ module Gori::Tui
       return "press a key · ↑/↓ select · ↵ run · esc close" if @space_menu_open
       return "↑/↓ select · ↵ copy · key picks · esc cancel" if copy_as_shown?
       return "↑/↓ select · ↵ send · key picks · esc cancel" if send_to_shown?
+      if ov = active_overlay # migrated modals carry their own hint (Overlay seam)
+        return ov.hint
+      end
       case @overlay
       when :palette          then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
       when :issue_new        then "type title · ↵ create · esc cancel"
@@ -4026,14 +3979,11 @@ module Gori::Tui
       when :env              then env_overlay_hints
       when :hotkeys          then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications    then "↑/↓ select · ↵ open · c clear · esc close"
-      when :mine_config      then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
       when :probe_active     then "↑/↓ field · ←/→ notify · ↵ run · esc cancel"
-      when :sequence_config  then "↑/↓ field · type to edit selector · ←/→ cycle · ↵ start · esc cancel"
       when :discover_config  then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
       when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
       when :fuzz_set         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
-      when :scope_rule       then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
       when :rewriter_rule    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
       when :oast_provider    then "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
       when :ca_import        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
@@ -4980,36 +4930,33 @@ module Gori::Tui
         @toast = "no mineable locations for this request"
         return
       end
-      @mine_config_overlay = MineConfigOverlay.new(seed)
-      @overlay = :mine_config
-    end
-
-    # Confirm the config popup: kick off the BACKGROUND mine and stay where we are.
-    private def start_mining(ov : MineConfigOverlay) : Nil
-      unless ov.any_checked?
-        @toast = "select at least one location to mine"
-        return
-      end
-      ov.save_prefs
-      miner_controller.start_session(ov.seed, ov.build_config)
-      close_mine_config
-    end
-
-    private def close_mine_config : Nil
-      @overlay = :none
-      @mine_config_overlay = nil
+      ov = MineConfigOverlay.new(seed)
+      # Start commits: require ≥1 location (keep the form up otherwise), then kick off the
+      # BACKGROUND mine and stay where we are.
+      ov.on_commit = -> {
+        if ov.any_checked?
+          ov.save_prefs
+          miner_controller.start_session(ov.seed, ov.build_config)
+          true
+        else
+          @toast = "select at least one location to mine"
+          false
+        end
+      }
+      open_overlay(ov)
     end
 
     # --- Sequencer ExecContext / cross-tab mediators ---
 
     # Reconfigure the CURRENT session's token descriptor/goal (Sequencer `c` / verb). Opens
-    # the same overlay with the reconfigure flag so Start applies to the open session.
+    # the same overlay; Start applies to the OPEN session — that "apply to current" is the
+    # injected commit, so no shell flag distinguishes it from a new-session open.
     def reconfigure_sequence : Nil
       seed = sequencer_controller.build_seed_from_current
       return (@toast = "manual sessions have no token descriptor to configure") unless seed
-      @sequence_reconfigure = true
-      @sequence_config_overlay = SequenceConfigOverlay.new(seed)
-      @overlay = :sequence_config
+      ov = SequenceConfigOverlay.new(seed)
+      ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.reconfigure_current(ov.build_config) } }
+      open_overlay(ov)
     end
 
     private def open_sequence_config(seed : SequenceSeed?) : Nil
@@ -5017,30 +4964,21 @@ module Gori::Tui
         @toast = "cannot sequence this request"
         return
       end
-      @sequence_reconfigure = false
-      @sequence_config_overlay = SequenceConfigOverlay.new(seed)
-      @overlay = :sequence_config
+      ov = SequenceConfigOverlay.new(seed)
+      ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.start_session(ov.seed, ov.build_config) } }
+      open_overlay(ov)
     end
 
-    # Confirm the config popup: start collecting (new session) or apply + re-collect
-    # (reconfigure), staying where we are.
-    private def start_sequencing(ov : SequenceConfigOverlay) : Nil
+    # Shared Start gate for both Sequencer open-sites: reject an unset token location
+    # (keep the form up), else run the site-specific apply and close. Returns whether to
+    # close, matching the Overlay#commit contract.
+    private def commit_sequence(ov : SequenceConfigOverlay, & : -> Nil) : Bool
       unless ov.valid?
         @toast = "set a token location first"
-        return
+        return false
       end
-      if @sequence_reconfigure
-        sequencer_controller.reconfigure_current(ov.build_config)
-      else
-        sequencer_controller.start_session(ov.seed, ov.build_config)
-      end
-      close_sequence_config
-    end
-
-    private def close_sequence_config : Nil
-      @overlay = :none
-      @sequence_config_overlay = nil
-      @sequence_reconfigure = false
+      yield
+      true
     end
 
     # --- Discover config popup (Sitemap/History → "Discover here") ---
@@ -5112,15 +5050,18 @@ module Gori::Tui
       @overlay = :fuzz_advanced
     end
 
-    # Host: open the Project SCOPE rule popup (nil edit_id = add a new rule).
+    # Host: open the Project SCOPE rule popup (nil edit_id = add a new rule). The apply is
+    # injected as the overlay's commit closure (Overlay seam): it persists via the Project
+    # controller and returns whether to close (false = invalid pattern → keep the form up).
     def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-      @scope_rule_overlay =
+      ov =
         if id = edit_id
           ScopeRuleOverlay.editing(id, kind, match_type, pattern)
         else
           ScopeRuleOverlay.new(kind: kind, match_type: match_type, pattern: pattern)
         end
-      @overlay = :scope_rule
+      ov.on_commit = -> { project_controller.apply_scope_rule(ov.edit_id, ov.kind, ov.match_type, ov.pattern) }
+      open_overlay(ov)
     end
 
     # Host: open the OAST provider add/edit popup (nil = add a new provider).

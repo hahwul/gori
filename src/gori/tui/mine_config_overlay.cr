@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../miner"
 require "../settings"
 
@@ -21,8 +22,9 @@ module Gori::Tui
   # The small config popup shown before a mine starts: adaptive location checkboxes,
   # concurrency + notification cyclers, and a Start row. No text field (so no IME
   # plumbing). Restores the last confirmed overlay choices from Settings when present.
-  # On Start the Runner reads build_config + seed and hands them to the MinerController.
-  class MineConfigOverlay
+  # On Start the injected commit closure reads build_config + seed and hands them to the
+  # MinerController. Migrated onto the polymorphic Overlay seam (see overlay.cr).
+  class MineConfigOverlay < Overlay
     CONC_CHOICES   = [5, 10, 20, 40]
     NOTIFY_CHOICES = Miner::NotifyMode.values
 
@@ -77,6 +79,53 @@ module Gori::Tui
 
     def on_start_row? : Bool
       @selected == start_row
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : Symbol
+      :mine_config
+    end
+
+    def title : String
+      "MINE PARAMS"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
+    end
+
+    # Own key handling (formerly Runner#handle_mine_config_key): ↑/↓ move, ←/→ adjust
+    # cyclers, ␣/↵ toggle a checkbox or commit on the Start row, esc cancels.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      return :cancel if key.escape?
+      if key.up?
+        move(-1)
+      elsif key.down?
+        move(1)
+      elsif key.left?
+        adjust(-1)
+      elsif key.right?
+        adjust(1)
+      elsif key.enter? || key.space?
+        return :commit if on_start_row?
+        toggle
+      end
+      :stay
+    end
+
+    # Click a row to select it; a click on Start commits; a click on any other row toggles
+    # it (checkbox flip / cycler advance); a click outside the card cancels. Mirrors the
+    # prior Runner#click_mine_config exactly.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_start_row?
+        toggle
+      end
+      :stay
     end
 
     def move(d : Int32) : Nil
