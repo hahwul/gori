@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
+require "./overlay"
 require "../scope"
 
 module Gori::Tui
@@ -11,7 +12,11 @@ module Gori::Tui
   #   ←/→  cycle kind or type when that row is selected
   #   type into Pattern when focused; ↵ on Save (or last field) commits
   #   esc cancels
-  class ScopeRuleOverlay
+  #
+  # First modal migrated onto the polymorphic Overlay seam (see overlay.cr): the Runner
+  # dispatches key/click/wheel/preedit/render/title/hint to it generically, and the SCOPE
+  # apply is injected as `on_commit` at the open-site (Runner#open_scope_rule_editor).
+  class ScopeRuleOverlay < Overlay
     getter edit_id : Int64?
 
     def initialize(*, kind : String = "include", match_type : String = "host",
@@ -44,6 +49,31 @@ module Gori::Tui
 
     def editing? : Bool
       !@edit_id.nil?
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : Symbol
+      :scope_rule
+    end
+
+    def title : String
+      "SCOPE RULE"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
+    end
+
+    # Click a field row to select it; a click on Save commits; a click outside the card
+    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_save_row?
+      end
+      :stay
     end
 
     private def row_count : Int32

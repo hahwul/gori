@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
+require "./overlay"
 require "../sequencer"
 
 module Gori::Tui
@@ -24,8 +25,15 @@ module Gori::Tui
   # The config popup shown before a live collection: a token-descriptor kind cycler + an
   # editable selector field, then goal / concurrency / notification cyclers and a Start
   # row. The selector is the one text field (a mistyped cookie name is the #1 failure
-  # mode); everything else cycles with ←/→. On Start the Runner reads build_config + seed.
-  class SequenceConfigOverlay
+  # mode); everything else cycles with ←/→. On Start the commit closure reads build_config
+  # + seed.
+  #
+  # Migrated onto the polymorphic Overlay seam (see overlay.cr). It opens from TWO sites
+  # with different apply semantics — a NEW session (open_sequence_config) and a
+  # RECONFIGURE of the current one (reconfigure_sequence). Each site injects its own
+  # `on_commit` closure, so the old `@sequence_reconfigure` shell flag is gone: the
+  # overlay only reports :commit and the closure decides what "Start" means.
+  class SequenceConfigOverlay < Overlay
     KINDS          = Sequencer::ExtractKind.values
     GOAL_CHOICES   = [100, 250, 500, 1000, 2000, 5000]
     CONC_CHOICES   = [1, 2, 5, 10]
@@ -74,6 +82,66 @@ module Gori::Tui
 
     def handle_text_key(ev : Termisu::Event::Key) : Bool
       @selector.handle_edit_key(ev)
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : Symbol
+      :sequence_config
+    end
+
+    def title : String
+      "SEQUENCER"
+    end
+
+    def hint : String
+      "↑/↓ field · type to edit selector · ←/→ cycle · ↵ start · esc cancel"
+    end
+
+    # Own key handling (formerly Runner#handle_sequence_config_key). ↑/↓ move fields; the
+    # selector row eats printable/caret/backspace (incl. ←/→ as caret motion) before the
+    # cyclers see them; ↵ on Start commits, elsewhere advances the cycler; esc cancels.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      return :cancel if key.escape?
+      if key.up?
+        move(-1)
+        return :stay
+      end
+      if key.down?
+        move(1)
+        return :stay
+      end
+      if key.enter?
+        return :commit if on_start_row?
+        toggle_or_advance
+        return :stay
+      end
+      return :stay if editing_selector? && handle_text_key(ev)
+      if key.left?
+        adjust(-1)
+      elsif key.right?
+        adjust(1)
+      elsif key.space?
+        toggle_or_advance
+      end
+      :stay
+    end
+
+    # Click a row to select it; a click on Start commits; a click outside the card cancels.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_start_row?
+      end
+      :stay
+    end
+
+    # Live IME composition for the selector text field (only meaningful on that row) — a
+    # mistyped cookie/header name is the #1 failure mode, so show composition as it builds.
+    def set_preedit(text : String) : Nil
+      @selector.set_preedit(text) if editing_selector?
     end
 
     def adjust(d : Int32) : Nil
