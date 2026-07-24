@@ -4,6 +4,16 @@ require "../settings"
 require "../host_overrides"
 require "./socket_tuning"
 
+# OpenSSL's own compiled-in default trust locations — the paths SSL_CTX_set_default_verify_paths
+# consults. Not bound by the stdlib, so declared here to let the no-store warning reflect the
+# store OpenSSL ACTUALLY uses rather than a guessed path list. Reopening the stdlib's LibCrypto
+# inherits its @[Link], so no extra linker directive is needed; both symbols are stable,
+# long-standing C API present in OpenSSL and LibreSSL alike.
+lib LibCrypto
+  fun x509_get_default_cert_file = X509_get_default_cert_file : Char*
+  fun x509_get_default_cert_dir = X509_get_default_cert_dir : Char*
+end
+
 module Gori::Proxy
   # Dials origin servers and parses authorities. A dialed upstream is reused across a
   # single client connection's keep-alive requests (see ClientConn#acquire_upstream) and
@@ -255,13 +265,32 @@ module Gori::Proxy
     # both load an empty store (verify still fails) AND suppress the startup warning in exactly
     # the no-store case it exists for. Pure (no ENV, no side effects) so it is unit-testable.
     def self.resolve_ca_source(files = SYSTEM_CA_FILES, dirs = SYSTEM_CA_DIRS) : {String?, String?}
-      if f = files.find { |p| File.file?(p) }
+      if f = files.find { |p| ca_file_usable?(p) }
         {f, nil}
-      elsif d = dirs.find { |p| Dir.exists?(p) && !Dir.empty?(p) }
+      elsif d = dirs.find { |p| ca_dir_usable?(p) }
         {nil, d}
       else
         {nil, nil}
       end
+    end
+
+    # A readable, NON-EMPTY regular file. Non-empty because a zero-byte placeholder bundle at
+    # a standard path would otherwise count as "trust available", suppressing the no-store
+    # warning while verification silently fails against an empty store. rescue-guarded: a
+    # permission error (or a TOCTOU with the Dir.exists? guard) on a probed path must not
+    # propagate out of the startup warning check — print_banner has no rescue around it, and
+    # apply_system_trust already swallows the same failures on the load side.
+    private def self.ca_file_usable?(path : String) : Bool
+      File.file?(path) && File.size(path) > 0
+    rescue
+      false
+    end
+
+    # A present, non-empty directory. Same rescue rationale as ca_file_usable?.
+    private def self.ca_dir_usable?(path : String) : Bool
+      Dir.exists?(path) && !Dir.empty?(path)
+    rescue
+      false
     end
 
     # SSL_CERT_FILE / SSL_CERT_DIR are already honoured by SSL_CTX_set_default_verify_paths
@@ -294,8 +323,28 @@ module Gori::Proxy
     # on this together with verify being on.
     def self.system_trust_available? : Bool
       return true if env_ca_override?
+      return true if openssl_default_store_populated?
       file, dir = resolve_ca_source
       !(file.nil? && dir.nil?)
+    end
+
+    # Is OpenSSL's OWN default trust store (the OPENSSLDIR paths compiled into the linked
+    # libcrypto) actually populated? A statically-linked musl build's compiled-in path resolves
+    # to nothing — the #323 case the warning exists for — but a normal dynamic build (e.g. a
+    # Homebrew macOS openssl@3) has a populated default that the hardcoded SYSTEM_CA_* list
+    # would MISS, producing a spurious warning even though verification works. Consulting the
+    # real default paths keeps the warning accurate on both. Fully guarded — a getter returning
+    # null / an unreadable path must never propagate out of the startup check.
+    private def self.openssl_default_store_populated? : Bool
+      file = default_cert_path(LibCrypto.x509_get_default_cert_file)
+      dir = default_cert_path(LibCrypto.x509_get_default_cert_dir)
+      !!((file && ca_file_usable?(file)) || (dir && ca_dir_usable?(dir)))
+    rescue
+      false
+    end
+
+    private def self.default_cert_path(ptr : LibCrypto::Char*) : String?
+      ptr.null? ? nil : String.new(ptr).presence
     end
 
     # A one-line operator hint when NO trust store can be resolved (a statically-linked
