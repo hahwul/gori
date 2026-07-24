@@ -250,11 +250,14 @@ module Gori::Proxy
     ]
 
     # First existing CA source among the candidates → {file?, dir?} (a file wins over a
-    # dir). Pure existence check (no ENV, no side effects) so it is directly unit-testable.
+    # dir). A dir must be NON-EMPTY to count: `/etc/ssl/certs` exists as an empty directory
+    # on many Linux systems that ship no certs, and treating that as "trust available" would
+    # both load an empty store (verify still fails) AND suppress the startup warning in exactly
+    # the no-store case it exists for. Pure (no ENV, no side effects) so it is unit-testable.
     def self.resolve_ca_source(files = SYSTEM_CA_FILES, dirs = SYSTEM_CA_DIRS) : {String?, String?}
       if f = files.find { |p| File.file?(p) }
         {f, nil}
-      elsif d = dirs.find { |p| Dir.exists?(p) }
+      elsif d = dirs.find { |p| Dir.exists?(p) && !Dir.empty?(p) }
         {nil, d}
       else
         {nil, nil}

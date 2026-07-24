@@ -262,13 +262,26 @@ describe Gori::Proxy::Upstream do
       end
     end
 
-    it "falls back to the first existing dir when no file candidate exists" do
+    it "falls back to the first NON-EMPTY dir when no file candidate exists" do
       d = File.tempname("gori-cadir")
       Dir.mkdir_p(d)
+      File.write(File.join(d, "some-ca.0"), "x") # a hashed-cert dir is non-empty
       begin
         file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem"], ["/nonexistent/dir", d])
         file.should be_nil
         dir.should eq(d)
+      ensure
+        FileUtils.rm_rf(d)
+      end
+    end
+
+    it "ignores an empty dir (present but shipping no certs → not a usable store)" do
+      d = File.tempname("gori-cadir-empty")
+      Dir.mkdir_p(d)
+      begin
+        file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem"], [d])
+        file.should be_nil
+        dir.should be_nil
       ensure
         FileUtils.rm_rf(d)
       end
