@@ -1,5 +1,7 @@
 require "../spec_helper"
 require "socket"
+require "openssl"
+require "file_utils"
 
 describe Gori::Proxy::Upstream do
   describe "upstream proxy (CONNECT tunnel)" do
@@ -238,6 +240,100 @@ describe Gori::Proxy::Upstream do
 
     it "keeps the wildcard-target refusal scoped to the listener port" do
       Gori::Proxy::Upstream.loops_to_self?("0.0.0.0", 9999, nil, {"127.0.0.1", 8080}).should be_false
+    end
+  end
+
+  # System CA trust resolution (#323): a statically-linked binary whose compiled-in
+  # OPENSSLDIR resolves to nothing leaves the verify store EMPTY, so all upstream HTTPS
+  # verification fails. We probe the standard system CA locations and load them explicitly.
+  describe ".resolve_ca_source" do
+    it "returns the first existing file, preferring files over dirs" do
+      f = File.tempname("gori-ca", ".pem")
+      File.write(f, "x")
+      d = File.tempname("gori-cadir")
+      Dir.mkdir_p(d)
+      begin
+        file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem", f], [d])
+        file.should eq(f)
+        dir.should be_nil
+      ensure
+        File.delete?(f)
+        FileUtils.rm_rf(d)
+      end
+    end
+
+    it "falls back to the first NON-EMPTY dir when no file candidate exists" do
+      d = File.tempname("gori-cadir")
+      Dir.mkdir_p(d)
+      File.write(File.join(d, "some-ca.0"), "x") # a hashed-cert dir is non-empty
+      begin
+        file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem"], ["/nonexistent/dir", d])
+        file.should be_nil
+        dir.should eq(d)
+      ensure
+        FileUtils.rm_rf(d)
+      end
+    end
+
+    it "ignores an empty dir (present but shipping no certs → not a usable store)" do
+      d = File.tempname("gori-cadir-empty")
+      Dir.mkdir_p(d)
+      begin
+        file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem"], [d])
+        file.should be_nil
+        dir.should be_nil
+      ensure
+        FileUtils.rm_rf(d)
+      end
+    end
+
+    it "returns {nil, nil} when no candidate exists" do
+      file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem"], ["/nonexistent/dir"])
+      file.should be_nil
+      dir.should be_nil
+    end
+  end
+
+  describe ".apply_system_trust" do
+    it "makes a client context trust an origin signed by a probed CA (untrusted without it)" do
+      # A CA + a leaf for "localhost" signed by it; the origin presents [leaf, ca].
+      ca_cert, ca_key = Gori::Proxy::Tls::CertBuilder.build_root("gori-spec Test CA")
+      leaf_cert, leaf_key = Gori::Proxy::Tls::CertBuilder.build_leaf("localhost", ca_cert, ca_key)
+      origin_ctx = Gori::Proxy::Tls::ContextFactory.server_context(leaf_cert, leaf_key, ca_cert: ca_cert)
+
+      ca_path = File.tempname("gori-spec-ca", ".pem")
+      ca_cert.write_pem(ca_path)
+
+      origin = TCPServer.new("127.0.0.1", 0)
+      port = origin.local_address.port
+      spawn do
+        2.times do
+          next unless raw = origin.accept?
+          begin
+            OpenSSL::SSL::Socket::Server.new(raw, origin_ctx, sync_close: true).close
+          rescue
+            raw.close rescue nil
+          end
+        end
+      end
+
+      begin
+        # WITHOUT the probed CA: the leaf chains to an untrusted root → verification fails.
+        expect_raises(OpenSSL::SSL::Error) do
+          tcp = TCPSocket.new("127.0.0.1", port)
+          OpenSSL::SSL::Socket::Client.new(tcp, context: OpenSSL::SSL::Context::Client.new,
+            sync_close: true, hostname: "localhost")
+        end
+
+        # WITH the probed CA loaded via apply_system_trust: verification succeeds.
+        trusting = OpenSSL::SSL::Context::Client.new
+        Gori::Proxy::Upstream.apply_system_trust(trusting, files: [ca_path], dirs: [] of String)
+        tcp2 = TCPSocket.new("127.0.0.1", port)
+        OpenSSL::SSL::Socket::Client.new(tcp2, context: trusting, sync_close: true, hostname: "localhost").close
+      ensure
+        origin.close rescue nil
+        File.delete?(ca_path)
+      end
     end
   end
 end
