@@ -287,6 +287,20 @@ describe Gori::Proxy::Upstream do
       end
     end
 
+    it "ignores a zero-byte file (present but shipping no certs → not a usable store)" do
+      f = File.tempname("gori-ca-empty", ".pem")
+      File.write(f, "")
+      begin
+        # A placeholder/zero-byte bundle at a standard path must not count as "trust available"
+        # — doing so would suppress the no-store warning while verify fails on an empty store.
+        file, dir = Gori::Proxy::Upstream.resolve_ca_source([f], [] of String)
+        file.should be_nil
+        dir.should be_nil
+      ensure
+        File.delete?(f)
+      end
+    end
+
     it "returns {nil, nil} when no candidate exists" do
       file, dir = Gori::Proxy::Upstream.resolve_ca_source(["/nonexistent/a.pem"], ["/nonexistent/dir"])
       file.should be_nil
