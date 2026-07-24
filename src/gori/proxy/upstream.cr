@@ -369,6 +369,16 @@ module Gori::Proxy
       end
     end
 
+    # Why a TLS upstream dial failed. The proxy capture path records this so a failed HTTPS
+    # flow says WHAT broke instead of a blanket "connect/write failed": a Connect failure is a
+    # reachability problem, whereas a Tls failure under verify-on is almost always an untrusted
+    # / self-signed / expired origin cert (the #323 shape) whose fix is --insecure-upstream
+    # (or SSL_CERT_FILE) — guidance a "connect failed" message actively hides.
+    enum TlsDialError
+      Connect # TCP connect (or the upstream proxy's CONNECT tunnel) to the origin failed
+      Tls     # origin reached, but the TLS handshake / certificate verification failed
+    end
+
     # `sni` overrides the name presented in the TLS ClientHello (and, under verify,
     # the name the cert is checked against) WITHOUT changing the dialed host:port —
     # the repeater workbench uses it for domain-fronting / vhost-confusion / IP-direct
@@ -377,19 +387,30 @@ module Gori::Proxy
                       connect_timeout : Time::Span = Settings.connect_timeout,
                       io_timeout : Time::Span = Settings.io_timeout,
                       *, overrides : Gori::HostOverrides? = nil) : OpenSSL::SSL::Socket::Client?
+      dial_tls_result(host, port, verify, alpn, sni, connect_timeout, io_timeout, overrides: overrides)[0]
+    end
+
+    # Like `dial_tls` but also reports WHY the dial failed (see TlsDialError) as the second
+    # tuple element — nil on success. The proxy capture path uses this to record an accurate,
+    # actionable upstream error; other callers use `dial_tls` and only need the socket.
+    def self.dial_tls_result(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
+                             connect_timeout : Time::Span = Settings.connect_timeout,
+                             io_timeout : Time::Span = Settings.io_timeout,
+                             *, overrides : Gori::HostOverrides? = nil) : {OpenSSL::SSL::Socket::Client?, TlsDialError?}
       tcp = dial(host, port, connect_timeout, io_timeout, overrides: overrides)
-      return nil unless tcp
+      return {nil, TlsDialError::Connect} unless tcp
       ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: sni || host)
       ssl.sync = true
-      ssl
+      {ssl, nil}
     rescue
       # A handshake failure inside Socket::Client.new (cert mismatch under verify,
       # expired/self-signed cert, plaintext-on-443, peer reset mid-handshake) does
       # NOT close the underlying socket — sync_close only transfers ownership once
       # the SSL object is constructed. Close `tcp` ourselves or the fd leaks (one
-      # per failed origin → fd exhaustion).
+      # per failed origin → fd exhaustion). `tcp` is non-nil here: `dial` never raises
+      # (it returns nil), so the only raising step runs after the nil-guard above.
       tcp.try(&.close) rescue nil
-      nil
+      {nil, TlsDialError::Tls}
     end
 
     # Splits an "host:port" / "host" authority. Falls back to default_port.

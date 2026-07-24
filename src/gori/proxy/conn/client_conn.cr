@@ -47,6 +47,10 @@ module Gori::Proxy
       # this connection (see `copy_buf`), so a keep-alive stream stops churning a large-object
       # allocation per body. Lazily allocated on the first body copy.
       @copy_buf = nil.as(Bytes?)
+      # Why the most recent upstream dial failed, set by `open_upstream` and read only when a
+      # dial returned nil — lets a failed HTTPS flow distinguish unreachable from a TLS/verify
+      # rejection (the #323 case, whose fix is --insecure-upstream). See `upstream_error_message`.
+      @last_tls_dial_error = nil.as(Upstream::TlsDialError?)
     end
 
     # The connection-lifetime scratch buffer for body forwarding, allocated on first use.
@@ -241,7 +245,7 @@ module Gori::Proxy
       end
       unless upstream && sent
         release_upstream
-        record_error(req, scheme, host, port, created_at, "upstream connect/write failed: #{host}:#{port}")
+        record_error(req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
         write_gateway_error
         return false
       end
@@ -301,7 +305,7 @@ module Gori::Proxy
       upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
       unless upstream && sent
         release_upstream
-        record_error(sent_req, scheme, host, port, created_at, "upstream connect/write failed: #{host}:#{port}")
+        record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
         write_gateway_error
         return false
       end
@@ -334,7 +338,7 @@ module Gori::Proxy
       upstream, reused, sent = acquire_and_send(host, port, false) { |up| write_request(up, sent_head, fwd_body) }
       unless upstream && sent
         release_upstream
-        record_error(sent_req, scheme, host, port, created_at, "upstream connect/write failed: #{host}:#{port}")
+        record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
         write_gateway_error
         return false
       end
@@ -862,9 +866,31 @@ module Gori::Proxy
     # origin-form for the upstream; the captured truth keeps the original bytes.
     private def open_upstream(host : String, port : Int32) : IO?
       if @tls_upstream
-        Upstream.dial_tls(host, port, verify: @verify_upstream, overrides: @host_overrides)
+        sock, err = Upstream.dial_tls_result(host, port, verify: @verify_upstream, overrides: @host_overrides)
+        @last_tls_dial_error = err
+        sock
       else
+        @last_tls_dial_error = nil # plaintext forward-proxy dial: no TLS leg to classify
         Upstream.dial(host, port, overrides: @host_overrides)
+      end
+    end
+
+    # The error text for a failed upstream acquire/send. A nil `upstream` is a DIAL failure,
+    # split into unreachable (connect) vs. a TLS/verify rejection — the #323 case, whose fix is
+    # --insecure-upstream, so the recorded flow points there instead of at reachability. A
+    # non-nil `upstream` means the socket was live but the mid-request write failed.
+    private def upstream_error_message(host : String, port : Int32, upstream : IO?) : String
+      return "upstream write failed: #{host}:#{port}" unless upstream.nil?
+      case @last_tls_dial_error
+      when Upstream::TlsDialError::Tls
+        if @verify_upstream
+          "upstream TLS verification failed: #{host}:#{port} — origin certificate not trusted; " \
+          "retry with --insecure-upstream or set SSL_CERT_FILE"
+        else
+          "upstream TLS handshake failed: #{host}:#{port}"
+        end
+      else
+        "upstream connect failed: #{host}:#{port}"
       end
     end
 
