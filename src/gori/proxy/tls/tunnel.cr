@@ -23,6 +23,11 @@ module Gori::Proxy::Tls
     # origin's TCP connect; a slower one simply reflects h1 (loads over h1, just not the relay).
     H2_PROBE_CONNECT_TIMEOUT = 5.seconds
 
+    # Cap on the negative ALPN cache (see @h1_only_origins) so a proxy left running against many
+    # distinct h1-only hosts can't grow it without bound. A pentest run touches at most dozens
+    # to hundreds of hosts, so the common origins are all cached long before this.
+    H1_ONLY_CACHE_MAX = 4096
+
     # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
     # flip upstream TLS verification without a restart; read per-CONNECT in `intercept`, so
     # the next tunnelled connection picks up the change.
@@ -38,6 +43,11 @@ module Gori::Proxy::Tls
                    @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
                    @serve_landing : Bool = true)
+      # Origins that definitively negotiated HTTP/1.1 (not h2) on a prior probe — a repeat
+      # CONNECT skips the throwaway ALPN-reflection probe for these. See reflect_origin_h2.
+      # Bare Set, no mutex: single-threaded fibers, and the read/add don't yield (the yielding
+      # dial happens before the add), so a concurrent double-probe just re-adds idempotently.
+      @h1_only_origins = Set({String, Int32}).new
     end
 
     # TlsMitm seam: hand the connection loop the root CA (for the self-serve download
@@ -114,15 +124,26 @@ module Gori::Proxy::Tls
     # so advertising h2 for any of those stranded the client on a dead h2 tunnel (a blank page,
     # empty History). Nil falls the client back to the h1 ClientConn path, which loads normally
     # and records its own upstream errors. The cost: an h1-only origin, or a client that
-    # declines h2 (e.g. curl), spends one throwaway probe connection, closed here.
+    # declines h2 (e.g. curl), spends one throwaway probe connection, closed here — but a repeat
+    # visit to a KNOWN h1-only origin skips the probe entirely (see @h1_only_origins). This
+    # caching does NOT help the non-h2-client → h2-origin case (a curl to an h2 target still
+    # probes every connection: the probe negotiates h2, the client then takes h1, and the h2
+    # probe can't serve it) — a positive "this host is h2" cache WOULD, but a stale positive
+    # entry (origin since dropped to h1/down) would re-strand the client on a dead h2 tunnel,
+    # the exact #323 failure, so only the benign negative direction is cached.
     private def reflect_origin_h2(host : String, port : Int32) : OpenSSL::SSL::Socket::Client?
       return nil unless h2_candidate?(host)
+      return nil if @h1_only_origins.includes?({host, port}) # known h1-only: skip the probe
       # Cap the connect wait so an unreachable origin doesn't burn the full timeout here before
       # the h1 fallback re-dials and waits again (never longer than the configured timeout).
       timeout = {Gori::Settings.connect_timeout, H2_PROBE_CONNECT_TIMEOUT}.min
       upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2",
         connect_timeout: timeout, overrides: @host_overrides)
       return upstream if upstream && upstream.alpn_protocol == "h2"
+      # Remember a DEFINITIVE h1 negotiation (handshake completed, ALPN != h2) so repeat visits
+      # skip the probe. Never cache a nil dial — that's a transient reach/verify failure, not a
+      # statement about the origin's ALPN; caching it would wrongly pin a briefly-down origin.
+      @h1_only_origins << {host, port} if upstream && @h1_only_origins.size < H1_ONLY_CACHE_MAX
       upstream.try(&.close) rescue nil
       nil
     end
