@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection을 확인하세요.">
+  <title>OAST - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="OAST">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/guide/oast/">
+  <meta property="og:description" content="out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection을 확인하세요.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="OAST">
+  <meta name="twitter:description" content="out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection을 확인하세요.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/guide/oast/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"OAST","url":"https://gori.hahwul.com/ko/guide/oast/","description":"out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection을 확인하세요."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://gori.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"OAST"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/oast/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/oast/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/guide/oast/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/oast/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/" class="active" aria-current="page">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>OAST</h1>
+    <p>어떤 버그는 응답에 절대 드러나지 않습니다. blind SSRF, blind XXE, out-of-band SQL injection, 또는 백오피스 브라우저에서만 발동하는 stored payload는 여러분에게 답하는 대신 <em>다른 어딘가의 서버</em>로 손을 뻗습니다. <strong>OAST</strong>(Out-of-band Application Security Testing)는 바로 그 서버를 제공합니다. gori가 interaction 리스너에 payload URL을 등록하고, 여러분은 그 payload를 요청에 심어두면, 대상이 그 서버로 보내는 DNS, HTTP, SMTP 콜백이 hit로 나타납니다.</p>
+<p><strong>OAST</strong> 탭은 기본적으로 표시됩니다(Fuzzer 옆). 두 개의 서브탭이 있습니다. <strong>Callbacks</strong>(hit 목록, 기본)와 <strong>Providers</strong>(설정한 리스너)입니다.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/oast.svg" alt="interactsh payload를 리스닝 중인 gori OAST 탭: 복호화된 콜백 4건(DNS A 조회 2건, HTTP GET 2건)이 각각 source IP와 목적지 payload와 함께 나열된 Callbacks 테이블">
+  <figcaption><strong>OAST</strong> 탭은 payload를 등록하고, 대상이 그 payload로 보내는 모든 DNS, HTTP, SMTP 콜백을 복호화해 타임스탬프와 함께 나열합니다.</figcaption>
+</figure>
+<h2 id="the-loop">동작 흐름</h2>
+<ol>
+<li><strong>OAST</strong> 탭에서 <code>Ctrl-R</code>를 눌러 리스닝을 시작합니다. gori가 provider에 등록하고 <strong>payload</strong>(고유한 호스트명/URL)를 발급합니다.</li>
+<li><code>g</code>(get payload)나 <code>y</code>로 payload를 복사하거나, <strong>Repeater</strong> / <strong>Fuzzer</strong>에서 요청에 바로 삽입합니다(<code>Space</code> → <strong>Insert OAST payload</strong>가 커서 위치에 넣습니다). <strong>History</strong>에서는 <code>Space</code> → <strong>Copy OAST payload</strong>입니다.</li>
+<li>대상이 URL을 역참조하거나 호스트명을 resolve할 만한 곳이라면 어디든 심습니다. URL 파라미터, <code>Host</code>/<code>X-Forwarded-For</code> 헤더, XML 엔티티, webhook 필드 등입니다.</li>
+<li>대상의 인프라가 이름을 resolve하거나 다시 연결해 오면, 콜백이 프로토콜(<code>dns</code> / <code>http</code> / <code>smtp</code>), 소스 IP, 타임스탬프, 그리고 어떤 payload가 발동했는지 알 수 있는 전체 sub-identifier와 함께 <strong>Callbacks</strong>에 도착합니다.</li>
+</ol>
+<p>콜백은 대상이 접근해서는 안 될 서버에 접근했다는 증거입니다. 콜백이 없다고 해서 안전하다는 증거는 아니며(egress가 필터링됐을 수 있습니다), 다만 이 경로가 조용했다는 뜻일 뿐입니다.</p>
+<h2 id="providers">Providers</h2>
+<p>각 리스너가 하나의 <strong>provider</strong>입니다. <strong>Providers</strong> 서브탭에서 추가하세요(<code>a</code> 추가, <code>e</code> 편집, <code>t</code> 타입 설정, <code>d</code> 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interactsh</code></td>
+<td>자체 호스팅 또는 public <a href="https://github.com/projectdiscovery/interactsh">interactsh</a> 서버. 암호화된 <strong>DNS, HTTP, SMTP</strong> 콜백을 잡습니다. Public preset: <code>oast.pro</code>, <code>oast.live</code>, <code>oast.site</code>, <code>oast.fun</code>, <code>oast.me</code>. 기본값입니다.</td>
+</tr>
+<tr>
+<td><code>custom-http</code></td>
+<td>여러분이 제어하며 hit를 폴링하는 평범한 HTTP 엔드포인트.</td>
+</tr>
+<tr>
+<td><code>webhook.site</code></td>
+<td>public <a href="https://webhook.site">webhook.site</a> 서비스(HTTP 전용).</td>
+</tr>
+<tr>
+<td><code>BOAST</code></td>
+<td><a href="https://github.com/firebasextended/boast">BOAST</a> 서버(public preset <code>odiss.eu</code>).</td>
+</tr>
+<tr>
+<td><code>postbin</code></td>
+<td>PostBin 인스턴스(<code>postb.in</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를 등록하고 각 콜백을 복호화합니다(비밀 키는 프로젝트 데이터베이스에 <code>0600</code>으로 저장되며 로그에 남지 않습니다). payload id는 correlation id로부터 로컬에서 파생되므로, 한 번의 등록으로 별도의 왕복 없이 여러 payload를 발급할 수 있습니다.</p>
+<p>콜백은 프로젝트별로 지속되는 이력입니다. 리스너는 수동으로 재개할 수 있습니다(키가 보존됩니다). 재시작 시 자동으로 재개되지는 않습니다.</p>
+<h2 id="keys">키</h2>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>리스닝 시작(payload 등록 후 폴링 시작)</td>
+</tr>
+<tr>
+<td><code>Ctrl-X</code></td>
+<td>활성 리스너 중지</td>
+</tr>
+<tr>
+<td><code>g</code></td>
+<td>현재 payload 가져오기 / 복사</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>선택한 콜백 복사</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>콜백 목록 필터링</td>
+</tr>
+<tr>
+<td><code>a</code> / <code>e</code> / <code>t</code> / <code>d</code></td>
+<td>Providers 서브탭: 추가 / 편집 / 타입 설정 / 삭제</td>
+</tr>
+</tbody>
+</table>
+<h2 id="headless">헤드리스</h2>
+<p><code>gori run oast</code>는 임시적이고 저장소를 쓰지 않는 리스너입니다. payload를 등록하고 stdout에 출력한 다음, 멈출 때까지 콜백을 스트리밍합니다.</p>
+<pre><code class="language-bash hljs">gori run oast presets                          # list the built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site   # a different provider
+gori run oast listen --once --json             # poll once, emit JSON lines
+</code></pre>
+<p>모든 플래그는 <a href="/ko/reference/cli/#run-oast">CLI Reference</a>를 참고하세요. MCP에서는 에이전트가 <code>oast_presets</code> / <code>oast_payload</code> / <code>oast_poll</code>(읽기)와 <code>oast_start</code> / <code>oast_stop</code>(동작)으로 같은 엔진을 구동합니다.</p>
+<blockquote>
+<p>콜백은 대상이 서드파티 interaction 서버에 접속했다는 뜻이며, public interactsh/webhook 서버는 그 콜백의 메타데이터를 보게 됩니다. 테스트 권한이 있는 시스템에만 OAST를 실행하고, 민감한 engagement에서는 자체 호스팅 서버를 우선하세요.</p>
+</blockquote>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: payload를 심고 여러 위치에서 fuzz합니다</li>
+<li><a href="/ko/guide/scanning/">Scanning &amp; Issues</a>: 확인된 콜백을 Issue로 승격합니다</li>
+<li><a href="/ko/guide/mcp/">MCP Server</a>: 에이전트가 payload를 등록하고 hit를 폴링하게 합니다</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

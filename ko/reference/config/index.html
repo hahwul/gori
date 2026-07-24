@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="settings.json 키와 GORI_HOME 저장소 레이아웃.">
+  <title>설정 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="설정">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/reference/config/">
+  <meta property="og:description" content="settings.json 키와 GORI_HOME 저장소 레이아웃.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="설정">
+  <meta name="twitter:description" content="settings.json 키와 GORI_HOME 저장소 레이아웃.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/reference/config/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"설정","url":"https://gori.hahwul.com/ko/reference/config/","description":"settings.json 키와 GORI_HOME 저장소 레이아웃."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"레퍼런스","item":"https://gori.hahwul.com/ko/reference/"},{"@type":"ListItem","position":3,"name":"설정"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/config/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/config/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/" class="active" aria-current="true">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/" class="active" aria-current="true">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/reference/config/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/config/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/" class="active" aria-current="page">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>설정</h1>
+    <p>gori는 전역 환경설정을 <code>settings.json</code>에, 각 프로젝트를 자체 SQLite 데이터베이스로 저장합니다. 전체 흐름은 <a href="/ko/getting-started/configuration/">설정 가이드</a>를 참고하세요. 이 페이지는 키 단위 레퍼런스입니다.</p>
+<h2 id="storage-layout">저장소 레이아웃</h2>
+<p>모든 것은 <code>GORI_HOME</code> 아래에 있습니다(<code>$GORI_HOME</code>이 설정되어 있고 비어 있지 않으면 그 값, 아니면 <code>~/.gori</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>settings.json</code></td>
+<td>전역 환경설정</td>
+</tr>
+<tr>
+<td><code>gori.db</code></td>
+<td>기본 프로젝트 데이터베이스</td>
+</tr>
+<tr>
+<td><code>projects/</code></td>
+<td>이름이 지정된 프로젝트마다 하나의 하위 디렉터리, 각각 자체 DB 보유</td>
+</tr>
+<tr>
+<td><code>ca/</code></td>
+<td>루트 CA: <code>root.crt.pem</code>과 <code>root.key.pem</code></td>
+</tr>
+<tr>
+<td><code>themes/</code></td>
+<td>사용자 테마</td>
+</tr>
+<tr>
+<td><code>wordlists/</code></td>
+<td>Fuzzer / miner 워드리스트</td>
+</tr>
+<tr>
+<td><code>active_project</code></td>
+<td>가장 최근에 사용한 프로젝트 마커</td>
+</tr>
+</tbody>
+</table>
+<h2 id="settingsjson">settings.json</h2>
+<p><code>settings.json</code>은 JSON입니다. <code>gori settings</code> / <code>gori settings --edit</code>로 찾거나 편집합니다.</p>
+<h3 id="network">network</h3>
+<pre><code class="language-json hljs">{
+  &quot;network&quot;: {
+    &quot;bind_host&quot;: &quot;127.0.0.1&quot;,
+    &quot;bind_port&quot;: 8070,
+    &quot;upstream_proxy&quot;: &quot;&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bind_host</code></td>
+<td>string</td>
+<td><code>127.0.0.1</code></td>
+<td>전역 기본 리스닝 주소 (프로젝트에 <code>net.bind_host</code>가 없을 때 사용)</td>
+</tr>
+<tr>
+<td><code>bind_port</code></td>
+<td>integer</td>
+<td><code>8070</code></td>
+<td>전역 기본 리스닝 포트 (프로젝트에 <code>net.bind_port</code>가 없을 때 사용)</td>
+</tr>
+<tr>
+<td><code>upstream_proxy</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>전역 기본 업스트림(<code>host:port</code>); 비어 있으면 직접 연결. 설정 시 프로젝트 <code>net.upstream_proxy</code>가 우선</td>
+</tr>
+<tr>
+<td><code>verify_upstream</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>시스템 CA 트러스트 스토어로 업스트림 TLS 인증서 검증(표준 위치에서 자동 탐색하며 <code>SSL_CERT_FILE</code> / <code>SSL_CERT_DIR</code> 존중; 스토어를 못 찾으면 HTTPS 검증 실패 — <code>SSL_CERT_FILE</code> 지정 또는 끄기). 토글하면 재시작 없이 실행 중인 프록시, 액티브 프로브, Repeater / Fuzzer / Miner 전송기에 즉시 반영됩니다. <code>--insecure-upstream</code>은 해당 세션에만 끈 상태로 시작</td>
+</tr>
+<tr>
+<td><code>serve_landing</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>프록시 경유가 아니라 리슨 주소로 직접 접속했을 때 내장 안내 / CA 다운로드 페이지 제공</td>
+</tr>
+<tr>
+<td><code>connect_timeout_secs</code></td>
+<td>integer</td>
+<td><code>30</code></td>
+<td>업스트림 연결 타임아웃(초, 최소 <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>io_timeout_secs</code></td>
+<td>integer</td>
+<td><code>30</code></td>
+<td>업스트림 읽기 / 쓰기 유휴 타임아웃(초, 최소 <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>capture_max_mib</code></td>
+<td>integer</td>
+<td><code>2</code></td>
+<td>메시지당 저장하는 본문의 최대 크기(MiB). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다</td>
+</tr>
+</tbody>
+</table>
+<p>CLI <code>--listen</code> / <code>--port</code>는 현재 프로세스에 한해서만 이 값들을 오버라이드합니다(디스크에 기록되지 않음). <a href="#per-project-overrides">프로젝트별 오버라이드</a>를 참고하세요.</p>
+<h3 id="layout">layout</h3>
+<p>영역별 TUI 레이아웃 환경설정 (커맨드 팔레트 → <strong>Settings: Layout</strong>). 두 값 모두 공장 기본값이면 생략됩니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;layout&quot;: {
+    &quot;history_preview&quot;: false,
+    &quot;probe_preview&quot;: false,
+    &quot;issues_preview&quot;: false,
+    &quot;history_list_order&quot;: &quot;newest&quot;,
+    &quot;sitemap_expand_depth&quot;: -1
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>history_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>History 목록 페이지가 선택한 플로우의 하단 Req|Res 미리보기를 표시</td>
+</tr>
+<tr>
+<td><code>probe_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Probe 목록 페이지가 선택한 이슈의 하단 요약을 표시</td>
+</tr>
+<tr>
+<td><code>issues_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Issues 목록 페이지가 선택한 이슈의 하단 요약을 표시</td>
+</tr>
+<tr>
+<td><code>history_list_order</code></td>
+<td>string</td>
+<td><code>&quot;newest&quot;</code></td>
+<td>목록 정렬: <code>&quot;newest&quot;</code>(최신이 위) 또는 <code>&quot;oldest&quot;</code>(오래된 것이 위)</td>
+</tr>
+<tr>
+<td><code>sitemap_expand_depth</code></td>
+<td>integer</td>
+<td><code>-1</code></td>
+<td>재로딩 후 Sitemap 트리가 열리는 깊이: <code>-1</code> = 모두 펼침; <code>0</code>-<code>3</code> = 이 깊이보다 얕은 노드만 펼침</td>
+</tr>
+</tbody>
+</table>
+<h3 id="statusline">statusline</h3>
+<p>TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → <strong>General</strong> → <strong>Statusline</strong>). 활성화하면 gori가 일정 간격으로 셸 명령을 실행하고 그 stdout을 해당 행으로 렌더링합니다. Claude Code의 상태 표시줄에서 영감을 받은 커스터마이즈 가능한 상태 바라고 생각하면 됩니다. 기본적으로 비활성화되어 있으며, 변경하기 전까지는 이 섹션이 <code>settings.json</code>에서 생략됩니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;printf 'proj:%s flows:%s' \&quot;$(jq -r .project)\&quot; \&quot;$(jq -r .flows)\&quot;&quot;,
+    &quot;interval&quot;: 3
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>statusline 행 표시 여부</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td><code>/bin/sh -c</code>로 실행되는 셸 명령. stdout의 첫 줄이 행이 됨</td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td>integer</td>
+<td><code>3</code></td>
+<td>실행 간격 초 (최소 <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>명령의 stdout은 ANSI/SGR 색상 이스케이프(16색, 256색, truecolor, 그리고 볼드/밑줄 등)를 파싱하므로 색상이 있는 세그먼트를 만들 수 있습니다. 첫 줄만 사용되며, 출력은 터미널 너비로 잘립니다. <code>interval</code>초를 초과하는 실행은 종료되고, 실패한 명령은 그냥 행을 비워 둡니다. UI를 절대 막지 않습니다.</p>
+<p>각 실행은 라이브 세션을 설명하는 JSON 컨텍스트를 stdin으로 받으므로, 스크립트는 gori를 쿼리하지 않고도 프록시 상태를 표시할 수 있습니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;version&quot;: 1,
+  &quot;project&quot;: &quot;acme&quot;,
+  &quot;capturing&quot;: true,
+  &quot;flows&quot;: 1234,
+  &quot;proxy&quot;: { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8070, &quot;addr&quot;: &quot;127.0.0.1:8070&quot; },
+  &quot;upstream&quot;: &quot;&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>컨텍스트 스키마 버전 (현재 <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+<td>활성 프로젝트 이름</td>
+</tr>
+<tr>
+<td><code>capturing</code></td>
+<td>bool</td>
+<td>프록시가 현재 캡처 중인지 여부</td>
+</tr>
+<tr>
+<td><code>flows</code></td>
+<td>integer</td>
+<td>캡처한 플로우 수</td>
+</tr>
+<tr>
+<td><code>proxy.host</code> / <code>proxy.port</code> / <code>proxy.addr</code></td>
+<td>string / integer / string</td>
+<td>프록시가 실제로 리스닝 중인 주소</td>
+</tr>
+<tr>
+<td><code>upstream</code></td>
+<td>string</td>
+<td>업스트림 프록시 <code>host:port</code>, 직접 연결이면 비어 있음</td>
+</tr>
+</tbody>
+</table>
+<h3 id="display">display</h3>
+<p>메시지 본문과 화면 요소 설정입니다 (커맨드 팔레트 → <strong>Settings: Display</strong>). 모든 값이 기본값이면 섹션이 생략됩니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;display&quot;: {
+    &quot;detail_pane&quot;: &quot;request&quot;,
+    &quot;history_time_format&quot;: &quot;absolute&quot;,
+    &quot;show_gutter&quot;: true,
+    &quot;preview_body_kib&quot;: 64,
+    &quot;resource_meter&quot;: true,
+    &quot;terminal_title&quot;: &quot;project&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>타입</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>detail_pane</code></td>
+<td>string</td>
+<td><code>&quot;request&quot;</code></td>
+<td>History 플로우를 열었을 때 먼저 보여줄 페인: <code>&quot;request&quot;</code> 또는 <code>&quot;response&quot;</code></td>
+</tr>
+<tr>
+<td><code>history_time_format</code></td>
+<td>string</td>
+<td><code>&quot;absolute&quot;</code></td>
+<td>History 목록의 시간 열: <code>&quot;absolute&quot;</code>(MM-DD HH:MM:SS) 또는 <code>&quot;relative&quot;</code>(3s/5m/2h)</td>
+</tr>
+<tr>
+<td><code>show_gutter</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>메시지 본문 뷰의 줄번호 거터</td>
+</tr>
+<tr>
+<td><code>preview_body_kib</code></td>
+<td>integer</td>
+<td><code>64</code></td>
+<td>History 목록 미리보기가 읽는 본문 바이트 수 (표시 전용이며 캡처 상한과는 별개)</td>
+</tr>
+<tr>
+<td><code>resource_meter</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>하단 바 맨 오른쪽에 표시되는 gori 자신의 CPU/메모리</td>
+</tr>
+<tr>
+<td><code>terminal_title</code></td>
+<td>string</td>
+<td><code>&quot;project&quot;</code></td>
+<td>터미널 창 제목: <code>&quot;project&quot;</code> → <code>Gori - &lt;프로젝트&gt; - &lt;탭&gt;</code>, <code>&quot;tab&quot;</code> → <code>Gori - &lt;탭&gt;</code>, <code>&quot;off&quot;</code> → gori가 제목을 건드리지 않음 (셸이나 tmux에 맡김)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="hostname-overrides">hostname_overrides</h3>
+<p>전역 다이얼 맵(충돌 시 프로젝트 레벨 오버라이드가 우선). <code>/etc/hosts</code>와 같은 개념입니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;hostname_overrides&quot;: [
+    { &quot;host&quot;: &quot;api.prod.internal&quot;, &quot;ip&quot;: &quot;10.0.0.42&quot; }
+  ]
+}
+</code></pre>
+<p>Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>에서, 또는 프로젝트별 항목은 Project 탭에서 편집합니다. <a href="/ko/guide/proxy/#host-overrides">Proxy &amp; History</a>를 참고하세요.</p>
+<h3 id="env">env</h3>
+<p><code>$TOKEN</code> 같은 토큰은 Repeater, Fuzzer, Miner, Intercept, CLI, MCP에서 전송 시점에 확장됩니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;env&quot;: {
+    &quot;prefix&quot;: &quot;$&quot;,
+    &quot;vars&quot;: [
+      { &quot;key&quot;: &quot;TOKEN&quot;, &quot;value&quot;: &quot;eyJhbGciOi…&quot; }
+    ]
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prefix</code></td>
+<td>string</td>
+<td><code>&quot;$&quot;</code></td>
+<td>토큰 접두사 (<code>$KEY</code>)</td>
+</tr>
+<tr>
+<td><code>vars</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>전역 키/값 쌍; 프로젝트 변수(Project 탭 → ENV)가 충돌 시 우선</td>
+</tr>
+</tbody>
+</table>
+<p><a href="/ko/guide/repeater-and-fuzzer/#environment-variables">환경 변수</a>를 참고하세요.</p>
+<h3 id="general">general</h3>
+<p>Preferences → <strong>General</strong> → <strong>General</strong>:</p>
+<pre><code class="language-json hljs">{
+  &quot;general&quot;: {
+    &quot;clipboard_osc52&quot;: true,
+    &quot;confirm_quit&quot;: false
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clipboard_osc52</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>OSC 52 터미널 이스케이프로 복사. SSH 너머에서도 <code>y</code>가 로컬 클립보드에 도달합니다</td>
+</tr>
+<tr>
+<td><code>confirm_quit</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>종료 전에 확인</td>
+</tr>
+</tbody>
+</table>
+<h3 id="notifications">notifications</h3>
+<p>백그라운드 작업(Miner, Fuzzer, Probe, Discover)이 결과를 알리는 방식입니다. Preferences → <strong>General</strong> → <strong>Notifications</strong>:</p>
+<pre><code class="language-json hljs">{
+  &quot;notifications&quot;: {
+    &quot;bell&quot;: false,
+    &quot;toast&quot;: true,
+    &quot;retention&quot;: 100
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bell</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>백그라운드 작업이 결과를 냈을 때 터미널 벨 울림</td>
+</tr>
+<tr>
+<td><code>toast</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>같은 이벤트에 대해 잠깐 나타나는 토스트 표시</td>
+</tr>
+<tr>
+<td><code>retention</code></td>
+<td>integer</td>
+<td><code>100</code></td>
+<td>알림 센터가 보관하는 알림 개수</td>
+</tr>
+</tbody>
+</table>
+<h3 id="probe">probe</h3>
+<pre><code class="language-json hljs">{
+  &quot;probe&quot;: {
+    &quot;active_notify&quot;: &quot;when-found&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>active_notify</code></td>
+<td>string</td>
+<td><code>&quot;when-found&quot;</code></td>
+<td>액티브 스캔의 알림 시점: <code>&quot;when-found&quot;</code>, <code>&quot;always&quot;</code>, <code>&quot;off&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="discover">discover</h3>
+<p>Discover 실행의 저장된 기본값입니다. discover 옵션을 저장해야 기록되므로 그 전까지는 섹션이 없습니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;discover&quot;: {
+    &quot;containment&quot;: &quot;scope-aware&quot;,
+    &quot;max_depth&quot;: 4,
+    &quot;concurrency&quot;: 20,
+    &quot;spider&quot;: true,
+    &quot;bruteforce&quot;: true,
+    &quot;extensions&quot;: false
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>containment</code></td>
+<td>string</td>
+<td><code>&quot;scope-aware&quot;</code></td>
+<td>탐색이 벗어날 수 있는 범위: <code>&quot;same-origin&quot;</code>, <code>&quot;scope-aware&quot;</code>, <code>&quot;host+subdomains&quot;</code></td>
+</tr>
+<tr>
+<td><code>max_depth</code></td>
+<td>integer</td>
+<td><code>4</code></td>
+<td>스파이더 깊이 상한</td>
+</tr>
+<tr>
+<td><code>concurrency</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td>동시 요청 수</td>
+</tr>
+<tr>
+<td><code>spider</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>응답에서 찾은 링크를 따라감</td>
+</tr>
+<tr>
+<td><code>bruteforce</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>워드리스트로 경로 무차별 탐색</td>
+</tr>
+<tr>
+<td><code>extensions</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>각 후보의 확장자 변형도 함께 시도</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mine">mine</h3>
+<p>Param Miner의 저장된 기본값입니다. mine 옵션을 저장해야 기록됩니다:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>locations</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>주입 위치: <code>query</code>, <code>form</code>, <code>multipart</code>, <code>json</code>, <code>headers</code>, <code>cookies</code>. 비어 있으면 요청마다 자동 감지</td>
+</tr>
+<tr>
+<td><code>concurrency</code></td>
+<td>integer</td>
+<td><code>10</code></td>
+<td>동시 요청 수</td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td>string</td>
+<td><code>&quot;when-found&quot;</code></td>
+<td><code>&quot;when-found&quot;</code>, <code>&quot;always&quot;</code>, <code>&quot;off&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="scan-rules">scan_rules</h3>
+<p>직접 만든 Probe 매치 규칙으로, 모든 프로젝트에 걸쳐 전역으로 적용됩니다. 프로젝트 범위 규칙은 대신 프로젝트 데이터베이스에 저장됩니다. Probe → <strong>Rules</strong> → CUSTOM에서 편집합니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;scan_rules&quot;: [
+    {
+      &quot;id&quot;: &quot;a1b2c3d4&quot;,
+      &quot;title&quot;: &quot;Internal hostname leak&quot;,
+      &quot;description&quot;: &quot;Build-server hostname in a response body&quot;,
+      &quot;side&quot;: &quot;response&quot;,
+      &quot;region&quot;: &quot;body&quot;,
+      &quot;kind&quot;: &quot;regex&quot;,
+      &quot;pattern&quot;: &quot;build-\\d+\\.corp\\.internal&quot;,
+      &quot;severity&quot;: &quot;medium&quot;,
+      &quot;enabled&quot;: true
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>생성 시 부여되는 무작위 hex 토큰</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>발견 항목 제목</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>발견 상세에 표시</td>
+</tr>
+<tr>
+<td><code>side</code></td>
+<td>string</td>
+<td><code>request</code> 또는 <code>response</code></td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>string</td>
+<td><code>whole</code>, <code>header</code>, <code>body</code></td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td><code>string</code> 또는 <code>regex</code></td>
+</tr>
+<tr>
+<td><code>pattern</code></td>
+<td>string</td>
+<td>매칭할 리터럴 또는 정규식</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>string</td>
+<td><code>info</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>critical</code></td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td>규칙 실행 여부</td>
+</tr>
+</tbody>
+</table>
+<p>파싱은 관대합니다. <code>id</code>, <code>title</code>, <code>pattern</code>이 없는 항목은 버려지고, 허용 범위를 벗어난 <code>side</code> / <code>region</code> / <code>kind</code> / <code>severity</code>는 로드를 실패시키는 대신 가장 안전한 값으로 대체됩니다.</p>
+<h3 id="other-sections">그 외 섹션</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>theme</code></td>
+<td>활성 테마 이름 (기본값 <code>goridark</code>). <a href="/ko/guide/themes/">테마 가이드</a> 참고</td>
+</tr>
+<tr>
+<td><code>mouse</code></td>
+<td>마우스 지원 토글</td>
+</tr>
+<tr>
+<td><code>pretty_bodies</code></td>
+<td>상세 뷰에서 JSON/XML 등의 본문을 pretty-print</td>
+</tr>
+<tr>
+<td><code>editor</code></td>
+<td>외부 편집기 <code>command</code>와 Markdown 처리</td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td>표시/숨김할 TUI 탭</td>
+</tr>
+<tr>
+<td><code>hostname_overrides</code></td>
+<td>전역 host → IP 다이얼 맵. 위의 <a href="#hostname_overrides">hostname_overrides</a> 참고</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>Env 토큰 접두사와 전역 값. 위의 <a href="#env">env</a> 참고</td>
+</tr>
+<tr>
+<td><code>hotkeys</code></td>
+<td>키바인딩 오버라이드 (<code>os</code> 계층 + <code>bindings</code>). <a href="/ko/guide/hotkeys/">단축키 가이드</a> 참고</td>
+</tr>
+<tr>
+<td><code>decoder</code></td>
+<td>마지막 입력과 체인, 저장된 Decoder 세션과 이름 붙인 체인</td>
+</tr>
+<tr>
+<td><code>mine</code></td>
+<td>Param Miner의 저장된 기본값. 위 <a href="#mine">mine</a> 참고</td>
+</tr>
+<tr>
+<td><code>layout</code></td>
+<td>History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 <a href="#layout">layout</a> 참고</td>
+</tr>
+<tr>
+<td><code>statusline</code></td>
+<td>일정 간격으로 명령을 실행하는 하단 상태 행. 위의 <a href="#statusline">statusline</a> 참고</td>
+</tr>
+<tr>
+<td><code>display</code></td>
+<td>기본 상세 페인, 목록 시간 형식, 줄번호 거터, 미리보기 본문 상한, <code>resource_meter</code>(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 <code>terminal_title</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="per-project-overrides">프로젝트별 오버라이드</h2>
+<p>프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 <code>net.bind_host</code>, <code>net.bind_port</code>, <code>net.upstream_proxy</code>), <strong>Project</strong> 탭의 설정 패널에서 편집합니다.</p>
+<p>열려 있는 프로젝트의 <strong>유효 바인드 / 업스트림</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (최우선)</td>
+<td>설정되어 있으면 프로젝트 DB <code>net.bind_host</code> / <code>net.bind_port</code> / <code>net.upstream_proxy</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>CLI <code>--listen</code> / <code>--port</code> (전역 계층의 프로세스 한정 오버라이드)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>settings.json</code> <code>network.*</code></td>
+</tr>
+<tr>
+<td>4 (최하위)</td>
+<td>공장 기본값 <code>127.0.0.1:8070</code> / 직접 연결</td>
+</tr>
+</tbody>
+</table>
+<p>현재 전역 값과 같은 Project 탭 필드를 저장하면 해당 KV 키가 삭제되므로, 프로젝트는 중복을 고정하는 대신 이후의 전역 변경을 계속 상속합니다.</p>
+<h2 id="projects-database">프로젝트와 데이터베이스</h2>
+<p>각 프로젝트는 SQLite 데이터베이스(<code>crystal-db</code> / <code>crystal-sqlite3</code> 사용)입니다. 여기에는 플로우, WebSocket 메시지, 스코프 규칙, 이슈, match 규칙, HTTP/2 프레임, repeater 및 fuzz 세션, 호스트 오버라이드, sitemap 태그, miner 세션, Probe 이슈가 담기고, 플로우 본문 전체를 훑는 전문 인덱스도 들어 있습니다. 저장하는 요청/응답 본문은 2 MiB로 상한이 걸려 있어, 더 큰 본문은 데이터베이스에서 잘리지만 실제 와이어 크기는 그대로 기록합니다. <code>--db PATH</code>로 어떤 프로젝트의 데이터베이스든 직접 지정하거나, <code>--project NAME</code>으로 이름이 지정된 프로젝트를 고릅니다.</p>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

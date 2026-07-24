@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="The settings.json keys and the GORI_HOME storage layout.">
+  <title>Configuration - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Configuration">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/reference/config/">
+  <meta property="og:description" content="The settings.json keys and the GORI_HOME storage layout.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Configuration">
+  <meta name="twitter:description" content="The settings.json keys and the GORI_HOME storage layout.">
+  <link rel="canonical" href="https://gori.hahwul.com/reference/config/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Configuration","url":"https://gori.hahwul.com/reference/config/","description":"The settings.json keys and the GORI_HOME storage layout."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Reference","item":"https://gori.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"Configuration"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/config/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/config/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/reference/config/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/config/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/" class="active" aria-current="page">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Configuration</h1>
+    <p>gori stores global preferences in <code>settings.json</code> and each project as its own SQLite database. See the <a href="/getting-started/configuration/">Configuration guide</a> for a walkthrough; this page is the key-by-key reference.</p>
+<h2 id="storage-layout">Storage Layout</h2>
+<p>Everything lives under <code>GORI_HOME</code> (<code>$GORI_HOME</code> if set and non-empty, otherwise <code>~/.gori</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>settings.json</code></td>
+<td>Global preferences</td>
+</tr>
+<tr>
+<td><code>gori.db</code></td>
+<td>Default project database</td>
+</tr>
+<tr>
+<td><code>projects/</code></td>
+<td>One subdirectory per named project, each with its own DB</td>
+</tr>
+<tr>
+<td><code>ca/</code></td>
+<td>Root CA: <code>root.crt.pem</code> and <code>root.key.pem</code></td>
+</tr>
+<tr>
+<td><code>themes/</code></td>
+<td>User themes</td>
+</tr>
+<tr>
+<td><code>wordlists/</code></td>
+<td>Fuzzer / miner wordlists</td>
+</tr>
+<tr>
+<td><code>active_project</code></td>
+<td>Marker for the most-recently-used project</td>
+</tr>
+</tbody>
+</table>
+<h2 id="settingsjson">settings.json</h2>
+<p><code>settings.json</code> is JSON. Find or edit it with <code>gori settings</code> / <code>gori settings --edit</code>.</p>
+<h3 id="network">network</h3>
+<pre><code class="language-json hljs">{
+  &quot;network&quot;: {
+    &quot;bind_host&quot;: &quot;127.0.0.1&quot;,
+    &quot;bind_port&quot;: 8070,
+    &quot;upstream_proxy&quot;: &quot;&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bind_host</code></td>
+<td>string</td>
+<td><code>127.0.0.1</code></td>
+<td>Global default listen address (used when a project has no <code>net.bind_host</code>)</td>
+</tr>
+<tr>
+<td><code>bind_port</code></td>
+<td>integer</td>
+<td><code>8070</code></td>
+<td>Global default listen port (used when a project has no <code>net.bind_port</code>)</td>
+</tr>
+<tr>
+<td><code>upstream_proxy</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>Global default upstream (<code>host:port</code>); empty = direct. Project <code>net.upstream_proxy</code> wins when set</td>
+</tr>
+<tr>
+<td><code>verify_upstream</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring <code>SSL_CERT_FILE</code> / <code>SSL_CERT_DIR</code>); if none is found, HTTPS verification fails — set <code>SSL_CERT_FILE</code> or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. <code>--insecure-upstream</code> seeds it off for one session</td>
+</tr>
+<tr>
+<td><code>serve_landing</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Serve the built-in info / CA-download page when the listen address is hit directly instead of proxied</td>
+</tr>
+<tr>
+<td><code>connect_timeout_secs</code></td>
+<td>integer</td>
+<td><code>30</code></td>
+<td>Upstream connect timeout in seconds (minimum <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>io_timeout_secs</code></td>
+<td>integer</td>
+<td><code>30</code></td>
+<td>Upstream read / write idle timeout in seconds (minimum <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>capture_max_mib</code></td>
+<td>integer</td>
+<td><code>2</code></td>
+<td>Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded</td>
+</tr>
+</tbody>
+</table>
+<p>CLI <code>--listen</code> / <code>--port</code> override these for the current process only (not written to disk). See <a href="#per-project-overrides">Per-Project Overrides</a>.</p>
+<h3 id="layout">layout</h3>
+<p>Per-area TUI layout prefs (command palette → <strong>Settings: Layout</strong>). Omitted when both values are factory defaults.</p>
+<pre><code class="language-json hljs">{
+  &quot;layout&quot;: {
+    &quot;history_preview&quot;: false,
+    &quot;probe_preview&quot;: false,
+    &quot;issues_preview&quot;: false,
+    &quot;history_list_order&quot;: &quot;newest&quot;,
+    &quot;sitemap_expand_depth&quot;: -1
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>history_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>History list page shows a bottom Req|Res preview for the selected flow</td>
+</tr>
+<tr>
+<td><code>probe_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Probe list page shows a bottom summary of the selected issue</td>
+</tr>
+<tr>
+<td><code>issues_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Issues list page shows a bottom summary of the selected issue</td>
+</tr>
+<tr>
+<td><code>history_list_order</code></td>
+<td>string</td>
+<td><code>&quot;newest&quot;</code></td>
+<td>List sort: <code>&quot;newest&quot;</code> (newest at top) or <code>&quot;oldest&quot;</code> (oldest at top)</td>
+</tr>
+<tr>
+<td><code>sitemap_expand_depth</code></td>
+<td>integer</td>
+<td><code>-1</code></td>
+<td>How deep the Sitemap tree opens after reload: <code>-1</code> = all expanded; <code>0</code>-<code>3</code> = expand only nodes shallower than this depth</td>
+</tr>
+</tbody>
+</table>
+<h3 id="statusline">statusline</h3>
+<p>An opt-in extra row at the very bottom of the TUI (Preferences → <strong>General</strong> → <strong>Statusline</strong>). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from <code>settings.json</code> until you change it.</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;printf 'proj:%s flows:%s' \&quot;$(jq -r .project)\&quot; \&quot;$(jq -r .flows)\&quot;&quot;,
+    &quot;interval&quot;: 3
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Whether the statusline row is shown</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>Shell command, run via <code>/bin/sh -c</code>. Its first line of stdout becomes the row</td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td>integer</td>
+<td><code>3</code></td>
+<td>Seconds between runs (minimum <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. A run that exceeds <code>interval</code> seconds is terminated, and a failing command simply leaves the row blank. It never blocks the UI.</p>
+<p>Each run receives a JSON context on stdin describing the live session, so scripts can display proxy state without querying gori:</p>
+<pre><code class="language-json hljs">{
+  &quot;version&quot;: 1,
+  &quot;project&quot;: &quot;acme&quot;,
+  &quot;capturing&quot;: true,
+  &quot;flows&quot;: 1234,
+  &quot;proxy&quot;: { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8070, &quot;addr&quot;: &quot;127.0.0.1:8070&quot; },
+  &quot;upstream&quot;: &quot;&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>Context schema version (currently <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+<td>Active project name</td>
+</tr>
+<tr>
+<td><code>capturing</code></td>
+<td>bool</td>
+<td>Whether the proxy is currently capturing</td>
+</tr>
+<tr>
+<td><code>flows</code></td>
+<td>integer</td>
+<td>Number of captured flows</td>
+</tr>
+<tr>
+<td><code>proxy.host</code> / <code>proxy.port</code> / <code>proxy.addr</code></td>
+<td>string / integer / string</td>
+<td>The address the proxy is actually listening on</td>
+</tr>
+<tr>
+<td><code>upstream</code></td>
+<td>string</td>
+<td>Upstream proxy <code>host:port</code>, or empty when connecting directly</td>
+</tr>
+</tbody>
+</table>
+<h3 id="display">display</h3>
+<p>Message-body and chrome prefs (command palette → <strong>Settings: Display</strong>). Omitted when every value is a factory default.</p>
+<pre><code class="language-json hljs">{
+  &quot;display&quot;: {
+    &quot;detail_pane&quot;: &quot;request&quot;,
+    &quot;history_time_format&quot;: &quot;absolute&quot;,
+    &quot;show_gutter&quot;: true,
+    &quot;preview_body_kib&quot;: 64,
+    &quot;resource_meter&quot;: true,
+    &quot;terminal_title&quot;: &quot;project&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>detail_pane</code></td>
+<td>string</td>
+<td><code>&quot;request&quot;</code></td>
+<td>Which pane a freshly-opened History flow shows first: <code>&quot;request&quot;</code> or <code>&quot;response&quot;</code></td>
+</tr>
+<tr>
+<td><code>history_time_format</code></td>
+<td>string</td>
+<td><code>&quot;absolute&quot;</code></td>
+<td>History list time column: <code>&quot;absolute&quot;</code> (MM-DD HH:MM:SS) or <code>&quot;relative&quot;</code> (3s/5m/2h)</td>
+</tr>
+<tr>
+<td><code>show_gutter</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Line-number gutter on the message body views</td>
+</tr>
+<tr>
+<td><code>preview_body_kib</code></td>
+<td>integer</td>
+<td><code>64</code></td>
+<td>How many body bytes the History list preview reads (display only, not the capture limit)</td>
+</tr>
+<tr>
+<td><code>resource_meter</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>CPU/memory readout for gori&#39;s own process, at the far right of the bottom bar</td>
+</tr>
+<tr>
+<td><code>terminal_title</code></td>
+<td>string</td>
+<td><code>&quot;project&quot;</code></td>
+<td>Terminal window title: <code>&quot;project&quot;</code> → <code>Gori - &lt;project&gt; - &lt;tab&gt;</code>, <code>&quot;tab&quot;</code> → <code>Gori - &lt;tab&gt;</code>, <code>&quot;off&quot;</code> → gori never writes the title (leave it to your shell or tmux)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="hostname-overrides">hostname_overrides</h3>
+<p>Global dial map (project-level overrides win on collision). Same idea as <code>/etc/hosts</code>:</p>
+<pre><code class="language-json hljs">{
+  &quot;hostname_overrides&quot;: [
+    { &quot;host&quot;: &quot;api.prod.internal&quot;, &quot;ip&quot;: &quot;10.0.0.42&quot; }
+  ]
+}
+</code></pre>
+<p>Edit from Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>, or the Project tab for per-project entries. See <a href="/guide/proxy/#host-overrides">Proxy &amp; History</a>.</p>
+<h3 id="env">env</h3>
+<p>Tokens like <code>$TOKEN</code> expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP:</p>
+<pre><code class="language-json hljs">{
+  &quot;env&quot;: {
+    &quot;prefix&quot;: &quot;$&quot;,
+    &quot;vars&quot;: [
+      { &quot;key&quot;: &quot;TOKEN&quot;, &quot;value&quot;: &quot;eyJhbGciOi…&quot; }
+    ]
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prefix</code></td>
+<td>string</td>
+<td><code>&quot;$&quot;</code></td>
+<td>Token prefix (<code>$KEY</code>)</td>
+</tr>
+<tr>
+<td><code>vars</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>Global key/value pairs; project vars (Project tab → ENV) override on collision</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="/guide/repeater-and-fuzzer/#environment-variables">Environment Variables</a>.</p>
+<h3 id="general">general</h3>
+<p>Preferences → <strong>General</strong> → <strong>General</strong>:</p>
+<pre><code class="language-json hljs">{
+  &quot;general&quot;: {
+    &quot;clipboard_osc52&quot;: true,
+    &quot;confirm_quit&quot;: false
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clipboard_osc52</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Copy through the OSC 52 terminal escape, so <code>y</code> reaches your local clipboard over SSH</td>
+</tr>
+<tr>
+<td><code>confirm_quit</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Ask before quitting</td>
+</tr>
+</tbody>
+</table>
+<h3 id="notifications">notifications</h3>
+<p>How background jobs (Miner, Fuzzer, Probe, Discover) announce their results. Preferences → <strong>General</strong> → <strong>Notifications</strong>:</p>
+<pre><code class="language-json hljs">{
+  &quot;notifications&quot;: {
+    &quot;bell&quot;: false,
+    &quot;toast&quot;: true,
+    &quot;retention&quot;: 100
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bell</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Ring the terminal bell when a background job produces a result</td>
+</tr>
+<tr>
+<td><code>toast</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Show a transient toast for the same events</td>
+</tr>
+<tr>
+<td><code>retention</code></td>
+<td>integer</td>
+<td><code>100</code></td>
+<td>How many notifications the notification center keeps</td>
+</tr>
+</tbody>
+</table>
+<h3 id="probe">probe</h3>
+<pre><code class="language-json hljs">{
+  &quot;probe&quot;: {
+    &quot;active_notify&quot;: &quot;when-found&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>active_notify</code></td>
+<td>string</td>
+<td><code>&quot;when-found&quot;</code></td>
+<td>When an active scan notifies: <code>&quot;when-found&quot;</code>, <code>&quot;always&quot;</code>, or <code>&quot;off&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="discover">discover</h3>
+<p>Saved defaults for a Discover run. Written only once you save the discover options, so the section is absent until then:</p>
+<pre><code class="language-json hljs">{
+  &quot;discover&quot;: {
+    &quot;containment&quot;: &quot;scope-aware&quot;,
+    &quot;max_depth&quot;: 4,
+    &quot;concurrency&quot;: 20,
+    &quot;spider&quot;: true,
+    &quot;bruteforce&quot;: true,
+    &quot;extensions&quot;: false
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>containment</code></td>
+<td>string</td>
+<td><code>&quot;scope-aware&quot;</code></td>
+<td>How far a run may wander: <code>&quot;same-origin&quot;</code>, <code>&quot;scope-aware&quot;</code>, or <code>&quot;host+subdomains&quot;</code></td>
+</tr>
+<tr>
+<td><code>max_depth</code></td>
+<td>integer</td>
+<td><code>4</code></td>
+<td>Spider depth cap</td>
+</tr>
+<tr>
+<td><code>concurrency</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td>Parallel requests</td>
+</tr>
+<tr>
+<td><code>spider</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Follow links found in responses</td>
+</tr>
+<tr>
+<td><code>bruteforce</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Brute-force paths from the wordlist</td>
+</tr>
+<tr>
+<td><code>extensions</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Also probe extension variants of each candidate</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mine">mine</h3>
+<p>Saved Param Miner defaults, written only once you save the mine options:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>locations</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>Where to inject: <code>query</code>, <code>form</code>, <code>multipart</code>, <code>json</code>, <code>headers</code>, <code>cookies</code>. Empty means auto-detect per request</td>
+</tr>
+<tr>
+<td><code>concurrency</code></td>
+<td>integer</td>
+<td><code>10</code></td>
+<td>Parallel requests</td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td>string</td>
+<td><code>&quot;when-found&quot;</code></td>
+<td><code>&quot;when-found&quot;</code>, <code>&quot;always&quot;</code>, or <code>&quot;off&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="scan-rules">scan_rules</h3>
+<p>Your own Probe match rules, global across every project. Project-scoped rules live in the project database instead. Edit them in Probe → <strong>Rules</strong> → CUSTOM:</p>
+<pre><code class="language-json hljs">{
+  &quot;scan_rules&quot;: [
+    {
+      &quot;id&quot;: &quot;a1b2c3d4&quot;,
+      &quot;title&quot;: &quot;Internal hostname leak&quot;,
+      &quot;description&quot;: &quot;Build-server hostname in a response body&quot;,
+      &quot;side&quot;: &quot;response&quot;,
+      &quot;region&quot;: &quot;body&quot;,
+      &quot;kind&quot;: &quot;regex&quot;,
+      &quot;pattern&quot;: &quot;build-\\d+\\.corp\\.internal&quot;,
+      &quot;severity&quot;: &quot;medium&quot;,
+      &quot;enabled&quot;: true
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Random hex token assigned at creation</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>Finding title</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>Shown in the finding detail</td>
+</tr>
+<tr>
+<td><code>side</code></td>
+<td>string</td>
+<td><code>request</code> or <code>response</code></td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>string</td>
+<td><code>whole</code>, <code>header</code>, or <code>body</code></td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td><code>string</code> or <code>regex</code></td>
+</tr>
+<tr>
+<td><code>pattern</code></td>
+<td>string</td>
+<td>Literal or regex to match</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>string</td>
+<td><code>info</code>, <code>low</code>, <code>medium</code>, <code>high</code>, or <code>critical</code></td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td>Whether the rule runs</td>
+</tr>
+</tbody>
+</table>
+<p>Parsing is tolerant. An entry missing <code>id</code>, <code>title</code>, or <code>pattern</code> is dropped, and an out-of-range <code>side</code> / <code>region</code> / <code>kind</code> / <code>severity</code> falls back to the safest value rather than failing the load.</p>
+<h3 id="other-sections">Other sections</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>theme</code></td>
+<td>Active theme name (default <code>goridark</code>). See the <a href="/guide/themes/">Themes guide</a></td>
+</tr>
+<tr>
+<td><code>mouse</code></td>
+<td>Mouse support toggle</td>
+</tr>
+<tr>
+<td><code>pretty_bodies</code></td>
+<td>Pretty-print JSON/XML/etc. bodies in the detail view</td>
+</tr>
+<tr>
+<td><code>editor</code></td>
+<td>External editor <code>command</code> and Markdown handling</td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td>Which TUI tabs are shown/hidden</td>
+</tr>
+<tr>
+<td><code>hostname_overrides</code></td>
+<td>Global host → IP dial map. See <a href="#hostname_overrides">hostname_overrides</a> above</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>Env-token prefix and global values. See <a href="#env">env</a> above</td>
+</tr>
+<tr>
+<td><code>hotkeys</code></td>
+<td>Keybinding overrides (<code>os</code> layer + <code>bindings</code>). See the <a href="/guide/hotkeys/">Hotkeys guide</a></td>
+</tr>
+<tr>
+<td><code>decoder</code></td>
+<td>Last input and chain, plus saved Decoder sessions and named chains</td>
+</tr>
+<tr>
+<td><code>mine</code></td>
+<td>Saved Param Miner defaults. See <a href="#mine">mine</a> above</td>
+</tr>
+<tr>
+<td><code>layout</code></td>
+<td>History / Probe / Issues previews + Sitemap expand depth. See <a href="#layout">layout</a> above</td>
+</tr>
+<tr>
+<td><code>statusline</code></td>
+<td>Bottom status row that runs a command on an interval. See <a href="#statusline">statusline</a> above</td>
+</tr>
+<tr>
+<td><code>display</code></td>
+<td>Default detail pane, list time format, line-number gutter, preview body cap, <code>resource_meter</code> (the CPU/memory readout at the far right of the bottom bar, on by default), and <code>terminal_title</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="per-project-overrides">Per-Project Overrides</h2>
+<p>A project can pin its own network settings without editing the global file. These are stored in the project database (keys <code>net.bind_host</code>, <code>net.bind_port</code>, <code>net.upstream_proxy</code>) and edited from the <strong>Project</strong> tab's settings pane.</p>
+<p><strong>Effective bind / upstream</strong> for an open project:</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (highest)</td>
+<td>Project DB <code>net.bind_host</code> / <code>net.bind_port</code> / <code>net.upstream_proxy</code> when set</td>
+</tr>
+<tr>
+<td>2</td>
+<td>CLI <code>--listen</code> / <code>--port</code> (process-only override of the global layer)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>settings.json</code> <code>network.*</code></td>
+</tr>
+<tr>
+<td>4 (lowest)</td>
+<td>Factory defaults <code>127.0.0.1:8070</code> / direct</td>
+</tr>
+</tbody>
+</table>
+<p>Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate.</p>
+<h2 id="projects-database">Projects &amp; Database</h2>
+<p>Each project is a SQLite database (via <code>crystal-db</code> / <code>crystal-sqlite3</code>) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with <code>--db PATH</code>, or select a named project with <code>--project NAME</code>.</p>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

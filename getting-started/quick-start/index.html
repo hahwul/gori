@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater.">
+  <title>Quick Start - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Quick Start">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/getting-started/quick-start/">
+  <meta property="og:description" content="A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Quick Start">
+  <meta name="twitter:description" content="A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater.">
+  <link rel="canonical" href="https://gori.hahwul.com/getting-started/quick-start/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Quick Start","url":"https://gori.hahwul.com/getting-started/quick-start/","description":"A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Getting Started","item":"https://gori.hahwul.com/getting-started/"},{"@type":"ListItem","position":3,"name":"Quick Start"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/quick-start/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/quick-start/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="getting-started">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/" class="active" aria-current="true">Start</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/" class="active" aria-current="true">Start</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/getting-started/quick-start/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/getting-started/quick-start/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/" class="active" aria-current="page">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Quick Start</h1>
+    <p>This is a follow-along tutorial. Work through it top to bottom and you'll go from a fresh install to a captured HTTPS request that you have inspected, sent to <strong>Repeater</strong>, edited, and re-sent, all without leaving the terminal. Set aside about ten minutes.</p>
+<p>Each step ends with a <strong>Checkpoint</strong>: what you should see before moving on. If something looks different, that line is where to stop and fix it.</p>
+<blockquote>
+<p><strong>Before you begin.</strong> <a href="/getting-started/installation/">Install gori</a> and have a browser installed. You'll capture your own browsing, so pick a site you are authorized to test (your own app, a staging box, or a deliberately vulnerable practice target). The examples use a stable throwaway target, <code>example.com</code>, for the parts that need an exact result.</p>
+</blockquote>
+<h2 id="1-start-gori">1. Start gori</h2>
+<p>With no subcommand, gori starts the proxy and opens the interface:</p>
+<pre><code class="language-bash hljs">gori
+</code></pre>
+<p>The first launch runs a short <a href="#first-run-wizard">setup wizard</a> (global bind and theme), then offers a <a href="#guided-ui-tour">guided UI tour</a>. You can take the tour now or skip it and come back; this page covers the same ground against live traffic.</p>
+<p>By default the proxy listens on <code>127.0.0.1:8070</code>. Override it for a single run (a project's own bind still wins when set):</p>
+<pre><code class="language-bash hljs">gori --listen 0.0.0.0 --port 8080
+</code></pre>
+<p><strong>Checkpoint.</strong> You're looking at the gori TUI: a row of tabs down the side (Project, Target, History, …) and a top bar showing the proxy address, <code>127.0.0.1:8070</code>.</p>
+<h2 id="2-trust-the-ca-and-capture-your-first-flow">2. Trust the CA and capture your first flow</h2>
+<p>To read HTTPS, the client has to trust gori's root certificate (generated on first run under <code>~/.gori/ca</code>). The fastest path is a pre-trusted browser.</p>
+<h3 id="option-a-open-a-pre-trusted-browser-recommended">Option A: Open a pre-trusted browser (recommended)</h3>
+<p>Inside the TUI:</p>
+<ol>
+<li>Press <code>Ctrl-P</code> to open the <strong>command palette</strong>.</li>
+<li>Type <code>browser</code> and run <strong>Open browser</strong>.</li>
+<li>Pick an installed browser (Chrome, Chromium, Brave, Edge, Firefox, …).</li>
+</ol>
+<p>gori launches it with a throwaway profile that already trusts the CA and routes HTTP/HTTPS through the proxy. In that browser, visit a site (try <code>https://example.com</code>, then a site you're testing).</p>
+<blockquote>
+<p><strong>Firefox note.</strong> Auto-trusting the CA needs <code>certutil</code> (NSS) on <code>PATH</code>. Without it, gori still sets the proxy but Firefox won't trust the CA, so HTTPS sites show a security warning. Either install it first (<code>brew install nss</code> on macOS, <code>apt install libnss3-tools</code> on Debian/Ubuntu, <code>dnf install nss-tools</code> on Fedora) and reopen the browser, or trust the CA by hand in that same window: open <code>about:preferences#privacy</code>, click <strong>View Certificates</strong>, go to <strong>Authorities</strong>, then <strong>Import</strong> the file <code>gori ca</code> prints.</p>
+</blockquote>
+<h3 id="option-b-point-any-client-yourself">Option B: Point any client yourself</h3>
+<p>Print the CA path and import that file into your system or browser trust store as a <strong>trusted root CA</strong>:</p>
+<pre><code class="language-bash hljs">gori ca
+</code></pre>
+<p>Then set the client's HTTP <strong>and</strong> HTTPS proxy to <code>127.0.0.1:8070</code>. Quick smoke test from another terminal:</p>
+<pre><code class="language-bash hljs">curl -x http://127.0.0.1:8070 https://example.com
+</code></pre>
+<p>gori mints per-host leaf certificates from the root on demand, so you trust the root only once.</p>
+<blockquote>
+<p>gori's private key is a machine secret, written with <code>0600</code> permissions, and never leaves your machine. Rotate it from the palette (<strong>Regenerate CA certificate</strong>) only when you mean to invalidate every prior trust.</p>
+</blockquote>
+<p><strong>Checkpoint.</strong> Switch to <strong>History</strong> (press <code>3</code>). You should see at least one row: your <code>GET https://example.com/</code> request with a <code>200</code> status. If History is empty, capture isn't reaching gori: recheck the proxy setting (Option B) or use <strong>Open browser</strong> (Option A).</p>
+<h2 id="3-learn-the-two-discovery-surfaces">3. Learn the two discovery surfaces</h2>
+<p>Before memorizing tab-specific keys, learn the two places almost everything lives.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Key</th>
+<th>What it is for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Command palette</strong></td>
+<td><code>Ctrl-P</code></td>
+<td>App-wide control: settings, Open browser, Export CA, jump actions, anything global</td>
+</tr>
+<tr>
+<td><strong>Space menu</strong></td>
+<td><code>Space</code></td>
+<td>Actions for whatever has focus right now (History row, detail pane, Repeater, …)</td>
+</tr>
+</tbody>
+</table>
+<p>The palette is the map of the whole tool. The space menu is the map of <em>this</em> pane. Both show key hints, so if you forget a chord, open one of them.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/command-palette.svg" alt="gori command palette open over the History tab, listing settings, navigation and export actions with a filter box">
+  <figcaption>The command palette (<kbd>Ctrl-P</kbd>): fuzzy-filter every app-wide action, from settings to <em>Open browser</em> to tab jumps.</figcaption>
+</figure>
+<p>Three global toggles are worth knowing from the start:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>c</code></td>
+<td>Toggle <strong>capture</strong> (off = traffic passes through without being stored)</td>
+</tr>
+<tr>
+<td><code>i</code></td>
+<td>Toggle <strong>intercept</strong> (hold matching requests to forward / drop / edit)</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>Toggle the <strong>scope lens</strong> (filter views to in-scope traffic)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-move-around-the-tui">4. Move around the TUI</h2>
+<p>gori is a row of tabs. The default order starts Project → Target → <strong>History</strong> → Intercept → Repeater → Fuzzer → …</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[</code> / <code>]</code></td>
+<td>Previous / next tab</td>
+</tr>
+<tr>
+<td><code>1</code>-<code>9</code></td>
+<td>Jump to the Nth visible tab (with defaults, History is <code>3</code>)</td>
+</tr>
+<tr>
+<td><code>Enter</code> / <code>↓</code></td>
+<td>Enter the tab body from the tab bar</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Pop focus back toward the tab bar</td>
+</tr>
+<tr>
+<td><code>Tab</code> / <code>Shift-Tab</code></td>
+<td>Move focus between the tab bar and panes</td>
+</tr>
+</tbody>
+</table>
+<p>Mouse works when enabled (Preferences → <strong>Editor &amp; Keys</strong> → <strong>Editor</strong>): click a tab, click a row to select, click again to open. The <strong>Help</strong> tab is a full key cheatsheet inside the app when this page isn't open.</p>
+<h2 id="5-read-a-flow-in-history">5. Read a flow in History</h2>
+<p>Make sure History is active (<code>3</code>). Every request/response is a <em>flow</em>: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns">
+  <figcaption>The <strong>History</strong> tab: every captured flow with method, status, size and timing, filterable with the query language.</figcaption>
+</figure>
+<p>Try each of these:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (or <code>j</code> / <code>k</code>)</td>
+<td>Move the selection</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>Open request/response detail</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>Filter with the <a href="/reference/query-language/">query language</a></td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>Toggle follow-newest (tail)</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>Copy the selected flow</td>
+</tr>
+</tbody>
+</table>
+<p>Press <code>/</code> and type a filter, then <code>Enter</code>:</p>
+<pre><code class="language-text hljs">host:example.com
+</code></pre>
+<p>History narrows to that host. Clear the filter (<code>/</code>, erase, <code>Enter</code>) to see everything again. A few more to try later:</p>
+<pre><code class="language-text hljs">status:5xx
+method:POST body:password
+</code></pre>
+<p>Now select your <code>example.com</code> flow and press <code>Enter</code>. In the detail view, scroll with <code>↑</code> / <code>↓</code>, copy with <code>y</code>, and toggle <code>x</code> / <code>b</code> / <code>p</code> for hex / whitespace / pretty bodies. <code>Esc</code> returns to the list.</p>
+<p><strong>Checkpoint.</strong> You can filter History down to one host and open a flow to read its full request and response.</p>
+<h2 id="6-send-it-to-repeater-and-re-send-the-core-loop">6. Send it to Repeater and re-send (the core loop)</h2>
+<p>This is the loop you'll spend most of your time in: take a captured request, change something, send it again, and compare.</p>
+<ol>
+<li>In <strong>History</strong>, select your <code>example.com</code> flow.</li>
+<li>Press <code>Ctrl-R</code>. gori copies it into the <strong>Repeater</strong> tab and switches you there.</li>
+<li>Press <code>Enter</code> or <code>i</code> on the request pane to edit (INS mode). Change something small, for example add a header line:
+<pre><code class="language-http hljs">X-Gori-Test: 1
+</code></pre>
+</li>
+<li>Press <code>Esc</code> to leave edit mode, then <code>Ctrl-R</code> to <strong>send</strong>.</li>
+<li>The response, its timing, and a diff against the previous reply appear on the right. <code>Tab</code> cycles target → request → response.</li>
+</ol>
+<figure class="tui-shot">
+  <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
+  <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
+</figure>
+<p><strong>Checkpoint.</strong> The Repeater status line reads something like <code>replayed 200 in … ms</code>, and you can re-send with <code>Ctrl-R</code> as many times as you like. That is the full capture → inspect → replay loop.</p>
+<h2 id="7-where-to-go-next">7. Where to go next</h2>
+<p>You now have the core loop. A few directions from here, each covered in depth in the <a href="/guide/">Guide</a>:</p>
+<ul>
+<li><strong>Fuzz a parameter.</strong> Select a flow, press <code>Shift-I</code> to send it to the <strong>Fuzzer</strong>, mark a position (<code>Ctrl-A</code> auto-marks common params), attach a wordlist, and <code>Ctrl-R</code> to run. See <a href="/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>.</li>
+<li><strong>Intercept and edit in flight.</strong> Press <code>i</code> to hold matching requests and forward, drop, or modify them before they continue. See <a href="/guide/proxy/#intercept">Proxy &amp; History</a>.</li>
+<li><strong>Track what you find.</strong> Turn anything worth reporting into an <strong>Issue</strong> with <code>Shift-F</code>, and read passive findings on the <strong>Probe</strong> tab as you browse. See <a href="/guide/scanning/">Scanning &amp; Issues</a>.</li>
+</ul>
+<h2 id="day-1-key-map">Day-1 key map</h2>
+<p>Keep this table nearby until the chords stick:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Where</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-P</code></td>
+<td>Anywhere</td>
+<td>Command palette (settings, Match &amp; Replace, notifications, …)</td>
+</tr>
+<tr>
+<td><code>Ctrl-,</code></td>
+<td>Anywhere</td>
+<td>Preferences (all settings in one modal)</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>Focused pane</td>
+<td>Area action menu</td>
+</tr>
+<tr>
+<td><code>c</code> / <code>i</code> / <code>s</code></td>
+<td>Anywhere</td>
+<td>Capture / intercept / scope lens</td>
+</tr>
+<tr>
+<td><code>[</code> <code>]</code> · <code>1</code>-<code>9</code></td>
+<td>Anywhere</td>
+<td>Switch tabs</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>History</td>
+<td>Query-language filter</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>History</td>
+<td>Open flow detail</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>History</td>
+<td>→ Repeater</td>
+</tr>
+<tr>
+<td><code>Shift-I</code></td>
+<td>History</td>
+<td>→ Fuzzer</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>Repeater / Fuzzer</td>
+<td>Send request / run fuzz</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Most places</td>
+<td>Back out one level</td>
+</tr>
+</tbody>
+</table>
+<h2 id="first-run-wizard">First-run wizard</h2>
+<p>Re-run the guided setup (global proxy bind default, then theme) at any time:</p>
+<pre><code class="language-bash hljs">gori wizard
+</code></pre>
+<p>The bind step sets the shared default in <code>settings.json</code>, the same layer as Preferences → **Network &amp; Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.</p>
+<h2 id="guided-ui-tour">Guided UI tour</h2>
+<p>A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and READ/INS edit mode. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist.</p>
+<pre><code class="language-bash hljs">gori tutorial
+</code></pre>
+<figure class="tui-shot">
+  <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the command palette, the action menu, and edit mode">
+  <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
+</figure>
+<p>It is also offered at the end of the first-run wizard.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/getting-started/configuration/">Configuration</a>: storage layout, network settings, and the CA</li>
+<li><a href="/guide/proxy/">Proxy &amp; History</a>: capture, intercept, scope, import, match &amp; replace</li>
+<li><a href="/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: the testing workbench and env tokens</li>
+<li><a href="/reference/query-language/">Query Language</a>: full filter syntax</li>
+<li><a href="/guide/hotkeys/">Hotkeys</a>: rebind any of the chords above</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

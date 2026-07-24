@@ -1,0 +1,1517 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>gori</title>
+    <link>https://gori.hahwul.com/</link>
+    <description>Sit in the loop. A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal.</description>
+    <atom:link href="https://gori.hahwul.com/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AI Setup</title>
+      <link>https://gori.hahwul.com/getting-started/ai-setup/</link>
+      <guid>https://gori.hahwul.com/getting-started/ai-setup/</guid>
+      <description>Connect an AI agent to gori over MCP: install the server into your client, pin the project, and drive your first request.</description>
+      <content:encoded><![CDATA[<p>gori has three entry points over one project and one engine: <code>gori</code> (the TUI, for you), <code>gori run</code> (the headless CLI, for scripts), and <code>gori mcp</code> (the <a href="https://gori.hahwul.com/guide/mcp/">MCP server</a>, for AI agents). This page is the AI path. It gets an agent connected to a gori project and running its first request.</p>
+<p>There is no chat window inside the TUI. You bring your own model and client; gori exposes the project over a clean tool interface, and the agent reads your traffic and drives the same tools you do. For the full tool catalog and deeper topics (live intercept, the design rationale), see the <a href="https://gori.hahwul.com/guide/mcp/">MCP Server guide</a>.</p>
+<blockquote>
+<p><strong>Before you begin.</strong> <a href="https://gori.hahwul.com/getting-started/installation/">Install gori</a> and have an MCP-capable client ready (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, and others).</p>
+</blockquote>
+<h2 id="1-install-the-server-into-your-client">1. Install the server into your client</h2>
+<p><code>gori mcp</code> speaks JSON-RPC 2.0 over stdio: an AI client spawns it, sends requests on STDIN, and reads results on STDOUT (STDERR carries logs). Rather than hand-editing each client's config, let gori write it for you:</p>
+<pre><code class="language-bash hljs">gori mcp --install-claude-code   # Claude Code
+gori mcp --install-claude        # Claude Desktop
+gori mcp --install-codex         # OpenAI Codex
+gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-grok          # Grok
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Client</th>
+<th>Config written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop</td>
+<td><code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code</td>
+<td><code>~/.claude.json</code> (<code>mcpServers.gori</code>)</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex</td>
+<td><code>~/.codex/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok</td>
+<td><code>~/.grok/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML <code>[mcp_servers.gori]</code> table, not JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.</p>
+<p>Wiring it up by hand instead? The server is just the <code>gori mcp</code> command over stdio. Point any MCP client at that command with no extra arguments.</p>
+<p><strong>Checkpoint.</strong> Your client lists gori's tools (<code>list_history</code>, <code>send_request</code>, <code>project_info</code>, and the rest). If they do not appear, confirm the client was restarted and that <code>gori</code> is on the <code>PATH</code> the client uses.</p>
+<h2 id="2-bind-a-project-or-let-the-agent-pick-one">2. Bind a project (or let the agent pick one)</h2>
+<p>Each gori project is its own database. After install, <code>gori mcp</code> always connects:</p>
+<table>
+<thead>
+<tr>
+<th>How the client starts MCP</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inside a Git repository</td>
+<td>Path-binds that workspace to its own gori project</td>
+</tr>
+<tr>
+<td>Outside a Git repository (common for Desktop / global agents)</td>
+<td>Starts <strong>unbound</strong> — handshake succeeds; the agent calls <code>list_projects</code> / <code>create_project</code> / <code>switch_project</code> before traffic tools</td>
+</tr>
+<tr>
+<td>Installed with <code>--project</code> / <code>--db</code></td>
+<td>Serves that project from the first tool call</td>
+</tr>
+</tbody>
+</table>
+<p>Have the agent call <code>project_info</code> first. When <code>bound</code> is false, it should list or create a project (create auto-binds when unbound), then switch if needed. When bound, confirm the name, database path, and selection source before mutating data.</p>
+<p>To pin a fixed engagement at install time:</p>
+<pre><code class="language-bash hljs">gori mcp --project my-engagement --install-codex     # a named project's database
+gori mcp --db /path/to/project.db --install-claude-code   # a specific database file
+</code></pre>
+<p>The full selection rules live in <a href="https://gori.hahwul.com/guide/mcp/#choosing-a-project">Choosing a Project</a>.</p>
+<h2 id="3-hand-off-safely-with-read-only">3. Hand off safely with read-only</h2>
+<p>By default the server also exposes action tools that send live requests and write issues. To give an agent (or a teammate you do not fully trust with the target) only the read tools, install it read-only:</p>
+<pre><code class="language-bash hljs">gori mcp --read-only --install-claude-code
+</code></pre>
+<p>Read-only keeps <code>list_history</code>, <code>get_flow</code>, <code>list_sitemap</code>, and the other inspection tools while disabling <code>send_request</code>, issue writes, and the intercept mutators. Pure-compute helpers like <code>decode</code> and <code>jwt_decode</code> stay available because they never touch the network or your data.</p>
+<h2 id="4-drive-your-first-request">4. Drive your first request</h2>
+<p>With the tools live, prompt the agent in plain language. It maps your intent onto the read and action tools:</p>
+<blockquote>
+<p>&quot;List the last 20 POSTs to <code>/login</code>, resend the newest one with a different password, and open an issue if the status code changes.&quot;</p>
+</blockquote>
+<p>A capable agent turns that into a short tool sequence:</p>
+<pre><code class="language-text hljs">→ list_history   method:POST path~/login   (newest 20)
+→ get_flow       &lt;the newest flow&gt;
+→ send_request   POST /login  (edited body)
+→ create_issue   &quot;Auth bypass on /login&quot; severity:high
+</code></pre>
+<p>Agent actions are not silent. Each one lands in gori's notification center tagged as agent-driven and rendered differently from your own actions, so you can see what a co-pilot did to a project while you were reading another tab.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a>: the full tool catalog, live intercept, and why gori uses an MCP seam</li>
+<li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a>: every <code>gori mcp</code> flag</li>
+<li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a>: the filter syntax agents use with <code>list_history</code></li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Configuration</title>
+      <link>https://gori.hahwul.com/getting-started/configuration/</link>
+      <guid>https://gori.hahwul.com/getting-started/configuration/</guid>
+      <description>Where gori stores data, how to configure the network, and the root CA.</description>
+      <content:encoded><![CDATA[<p>gori keeps global preferences in a JSON settings file and stores each project as its own SQLite database. This page covers the essentials you need on day one: where things live, how the proxy binds, and how clients trust gori's CA. For the full, key-by-key breakdown, see the <a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a>.</p>
+<h2 id="the-gori-home-directory">The gori Home Directory</h2>
+<p>Everything gori writes lives under a single tree, <code>GORI_HOME</code> — <code>$GORI_HOME</code> when that variable is set and non-empty, otherwise <code>~/.gori</code>. It holds <code>settings.json</code> (global preferences), your project databases under <code>projects/</code>, the root CA in <code>ca/</code>, plus <code>themes/</code> and <code>wordlists/</code>. See <a href="https://gori.hahwul.com/reference/config/#storage-layout">Storage Layout</a> for the full tree.</p>
+<p>Point gori at an isolated home for a session:</p>
+<pre><code class="language-bash hljs">GORI_HOME=/tmp/gori-scratch gori
+</code></pre>
+<h2 id="global-settings">Global Settings</h2>
+<p>Global preferences are stored in <code>settings.json</code>. Print its path, or open it in <code>$EDITOR</code>:</p>
+<pre><code class="language-bash hljs">gori settings          # print the settings.json path
+gori settings --edit   # open it in your editor
+</code></pre>
+<p>You rarely need to edit the file by hand. Everything in it is editable in-app from one surface, the <strong>Preferences</strong> modal, grouped into four sub-tabs (General, Appearance, Editor &amp; Keys, Network &amp; Tabs):</p>
+<table>
+<thead>
+<tr>
+<th>Open it with</th>
+<th>Lands on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-,</code> from anywhere</td>
+<td>The group strip, so you pick a group first</td>
+</tr>
+<tr>
+<td>The <code>⚙</code> chip in the top bar</td>
+<td>Same as <code>Ctrl-,</code></td>
+</tr>
+<tr>
+<td><code>Ctrl-P</code> → any <strong>Settings: …</strong> entry</td>
+<td>That section&#39;s fields directly</td>
+</tr>
+</tbody>
+</table>
+<p><code>Ctrl-,</code> also works in the project picker, before any project is open, so you can set your theme on first launch. Saved changes apply live, no restart. See the <a href="https://gori.hahwul.com/guide/settings/">Settings guide</a> for every section and field, and the <a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a> for the underlying keys.</p>
+<h2 id="network">Network</h2>
+<p>By default the proxy listens on <code>127.0.0.1:8070</code> and connects directly to targets. You can change that in three places, highest priority first:</p>
+<ol>
+<li><strong>Per-project</strong> — pin a bind address, port, and upstream for one project from the <strong>Project</strong> tab; these win for that project only.</li>
+<li><strong>CLI flags</strong> — <code>--listen</code> / <code>--port</code> override the global default for the current process, without writing to disk.</li>
+<li><strong><code>settings.json</code> <code>network</code></strong> — the shared default, edited by the first-run wizard and Preferences → <strong>Network</strong>.</li>
+</ol>
+<p>When nothing is set, the factory default is <code>127.0.0.1:8070</code>, direct. See <a href="https://gori.hahwul.com/reference/config/#network">network</a> for every key and <a href="https://gori.hahwul.com/reference/config/#per-project-overrides">Per-Project Overrides</a> for the exact precedence.</p>
+<h2 id="the-root-ca">The Root CA</h2>
+<p>To intercept HTTPS, clients must trust gori's root certificate, kept in <code>~/.gori/ca</code> as <code>root.crt.pem</code> and <code>root.key.pem</code>.</p>
+<pre><code class="language-bash hljs">gori ca                       # print the certificate path
+gori ca --pem                 # print the PEM to stdout
+gori ca --ca-dir /path        # use a custom CA directory
+gori ca regenerate --yes      # replace the root CA (scripts/CI; voids prior trust)
+</code></pre>
+<p>You can also rotate the CA from the TUI command palette (<strong>Regenerate CA certificate</strong>), or interactively with <code>gori ca regenerate</code> (type <code>regenerate</code> to confirm). Both paths are confirm-gated because rotation invalidates all previously issued trust; any already-running gori keeps the old CA until restarted.</p>
+<h3 id="bring-your-own-ca">Bring your own CA</h3>
+<p>To reuse one CA across a team or machines, generate a root externally and import it (cert <strong>and</strong> key: gori signs leaf certificates with the key; clients trust only the cert):</p>
+<pre><code class="language-bash hljs">openssl ecparam -genkey -name prime256v1 -out root.key.pem
+openssl req -x509 -new -key root.key.pem -days 3650 -subj &quot;/CN=my ca&quot; -out root.crt.pem
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+</code></pre>
+<p>The same action is available from the palette (<strong>Import CA certificate</strong>). gori checks the key matches the cert and that it is a CA before adopting it. Distribute only <code>root.crt.pem</code> to trust; keep <code>root.key.pem</code> secret. See <a href="https://gori.hahwul.com/reference/cli/#gori-ca-import"><code>gori ca import</code></a>.</p>
+<p>The palette's <strong>Open browser</strong> action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy (see the <a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a>).</p>
+<h2 id="full-reference">Full Reference</h2>
+<p>See the <a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a> for every settings key and the <a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a> for all command-line flags.</p>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Installation</title>
+      <link>https://gori.hahwul.com/getting-started/installation/</link>
+      <guid>https://gori.hahwul.com/getting-started/installation/</guid>
+      <description>Install gori via curl, Homebrew, the AUR, Docker, a pre-built binary, or from source.</description>
+      <content:encoded><![CDATA[<p>gori is written in <a href="https://crystal-lang.org/">Crystal</a>. Pick a pre-built channel below, or <a href="#build-from-source">build from source</a> if none fits your platform. Every channel installs the same <code>gori</code> binary. Once it's on your <code>PATH</code>, jump to <a href="#verify-the-installation">Verify the Installation</a>.</p>
+<h2 id="quick-install-curl">Quick install (curl)</h2>
+<p>macOS and Linux one-liner. Detects OS/arch, downloads the matching <a href="https://github.com/hahwul/gori/releases/latest">GitHub Release</a> asset, and puts <code>gori</code> on your <code>PATH</code>:</p>
+<pre><code class="language-bash hljs">curl -fsSL https://gori.hahwul.com/install.sh | bash
+</code></pre>
+<p>Installs under <code>/usr/local</code> when writable, otherwise <code>~/.local</code>. Override with <code>GORI_INSTALL_PREFIX</code>. After install, <code>gori update</code> self-updates the binary (or guides you through Homebrew / Snap / AUR when those channels own the install).</p>
+<h2 id="homebrew">Homebrew</h2>
+<p>Works on <strong>macOS</strong> (Apple Silicon &amp; Intel) and <strong>Linux</strong> (x86_64 &amp; arm64):</p>
+<pre><code class="language-bash hljs">brew install hahwul/gori/gori
+</code></pre>
+<p>That is shorthand for tapping first, which you can also do explicitly:</p>
+<pre><code class="language-bash hljs">brew tap hahwul/gori
+brew install gori
+</code></pre>
+<p>The macOS bottle is a self-contained tarball with every linked dylib bundled next to the binary, and the Linux bottle is a static build. Neither pulls extra Homebrew dependencies.</p>
+<h2 id="arch-linux-aur">Arch Linux (AUR)</h2>
+<p>A binary package is published to the <a href="https://aur.archlinux.org/packages/gori">AUR</a> for <strong>x86_64</strong>. Install it with your favorite AUR helper:</p>
+<pre><code class="language-bash hljs">yay -S gori
+# or
+paru -S gori
+</code></pre>
+<h2 id="docker">Docker</h2>
+<p>Multi-arch images (x86_64 &amp; arm64) are published to the GitHub Container Registry as <a href="https://github.com/hahwul/gori/pkgs/container/gori"><code>ghcr.io/hahwul/gori</code></a>.</p>
+<p>The TUI needs a terminal, so run it interactively. Mount a volume at <code>/data</code> (that's <code>GORI_HOME</code> inside the container) so your settings and root CA survive restarts, and bind to <code>0.0.0.0</code> so the proxy is reachable from your host:</p>
+<pre><code class="language-bash hljs">docker run --rm -it \
+  -v gori:/data \
+  -p 8070:8070 \
+  ghcr.io/hahwul/gori --listen 0.0.0.0
+</code></pre>
+<blockquote>
+<p>Without a mounted <code>/data</code> volume the root CA is regenerated on every run, and must be re-trusted each time. The default bind host is <code>127.0.0.1</code>, which is not reachable from outside the container, hence <code>--listen 0.0.0.0</code>.</p>
+</blockquote>
+<p>Headless subcommands don't need a TTY:</p>
+<pre><code class="language-bash hljs">docker run --rm    -v gori:/data ghcr.io/hahwul/gori run history
+docker run --rm -i -v gori:/data ghcr.io/hahwul/gori mcp
+</code></pre>
+<h2 id="pre-built-binary">Pre-built Binary</h2>
+<p>Standalone binaries for macOS and Linux are attached to every <a href="https://github.com/hahwul/gori/releases/latest">GitHub Release</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Asset</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux x86_64</td>
+<td><code>gori-v*-linux-x86_64</code></td>
+</tr>
+<tr>
+<td>Linux arm64</td>
+<td><code>gori-v*-linux-arm64</code></td>
+</tr>
+<tr>
+<td>macOS Apple Silicon</td>
+<td><code>gori-v*-osx-arm64.tar.gz</code></td>
+</tr>
+<tr>
+<td>macOS Intel</td>
+<td><code>gori-v*-osx-x86_64.tar.gz</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="linux">Linux</h3>
+<p>The Linux binaries are statically linked (musl) and self-contained. Download one, make it executable, and move it onto your <code>PATH</code>:</p>
+<pre><code class="language-bash hljs">chmod +x gori-v*-linux-x86_64
+sudo mv gori-v*-linux-x86_64 /usr/local/bin/gori
+</code></pre>
+<h3 id="macos">macOS</h3>
+<p>The macOS archive is self-contained. It bundles every dependent dylib in a <code>lib/</code> folder next to the binary, which resolves them relative to itself. <strong>Keep <code>gori</code> and <code>lib/</code> together.</strong> Extract it into a stable location and link the binary onto your <code>PATH</code>:</p>
+<pre><code class="language-bash hljs">tar xzf gori-v*-osx-arm64.tar.gz          # extracts `gori` + `lib/`
+sudo mkdir -p /usr/local/opt/gori
+sudo cp -R gori lib /usr/local/opt/gori/
+sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
+</code></pre>
+<blockquote>
+<p>The binaries are ad-hoc signed. If Gatekeeper blocks the download, clear the quarantine flag: <code>xattr -dr com.apple.quarantine /usr/local/opt/gori</code>. Installing via <a href="#homebrew">Homebrew</a> avoids this.</p>
+</blockquote>
+<h2 id="build-from-source">Build from Source</h2>
+<h3 id="prerequisites">Prerequisites</h3>
+<ul>
+<li><strong>Crystal</strong> <code>&gt;= 1.20.2</code></li>
+<li><strong>pkg-config</strong></li>
+<li><strong>Git</strong>, to clone the repository</li>
+</ul>
+<h4 id="system-libraries-brotli-zstd">System libraries (Brotli / Zstd)</h4>
+<p>By default gori links against native decoders so it can display HTTP bodies sent with <code>Content-Encoding: br</code> (Brotli) and <code>zstd</code>. Install them before building:</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS (Homebrew)</td>
+<td><code>brew install brotli zstd</code></td>
+</tr>
+<tr>
+<td>Debian / Ubuntu</td>
+<td><code>sudo apt install libbrotli-dev libzstd-dev</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="build">Build</h3>
+<pre><code class="language-bash hljs">git clone https://github.com/hahwul/gori
+cd gori
+shards build --release
+</code></pre>
+<p>The release binary is written to <code>bin/gori</code>. Move it somewhere on your <code>PATH</code>:</p>
+<pre><code class="language-bash hljs">cp bin/gori /usr/local/bin/
+</code></pre>
+<h3 id="building-without-brotli-zstd">Building without Brotli / Zstd</h3>
+<p>If those libraries are unavailable, build without them. Gzip and deflate decoding (from the Crystal standard library) keep working; Brotli and Zstd bodies show a &quot;decoder not built in&quot; note instead of decoded text:</p>
+<pre><code class="language-bash hljs">shards build --release -Dwithout_native_codecs
+</code></pre>
+<blockquote>
+<p>If linking fails with undefined <code>BrotliDecoder*</code> symbols, <code>libbrotlidec</code> is missing or <code>pkg-config</code> cannot find it. Install <code>brotli</code> (see above) or use <code>-Dwithout_native_codecs</code>.</p>
+</blockquote>
+<h2 id="verify-the-installation">Verify the Installation</h2>
+<pre><code class="language-bash hljs">gori --version
+</code></pre>
+<p>You should see <code>gori 0.1.3</code>.</p>
+<h2 id="run-without-installing">Run Without Installing</h2>
+<p>During development you can run directly from a checkout:</p>
+<pre><code class="language-bash hljs">shards run gori
+</code></pre>
+<h2 id="next-steps">Next Steps</h2>
+<p>You're ready to capture traffic. Head to the <a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a>.</p>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Quick Start</title>
+      <link>https://gori.hahwul.com/getting-started/quick-start/</link>
+      <guid>https://gori.hahwul.com/getting-started/quick-start/</guid>
+      <description>A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater.</description>
+      <content:encoded><![CDATA[<p>This is a follow-along tutorial. Work through it top to bottom and you'll go from a fresh install to a captured HTTPS request that you have inspected, sent to <strong>Repeater</strong>, edited, and re-sent, all without leaving the terminal. Set aside about ten minutes.</p>
+<p>Each step ends with a <strong>Checkpoint</strong>: what you should see before moving on. If something looks different, that line is where to stop and fix it.</p>
+<blockquote>
+<p><strong>Before you begin.</strong> <a href="https://gori.hahwul.com/getting-started/installation/">Install gori</a> and have a browser installed. You'll capture your own browsing, so pick a site you are authorized to test (your own app, a staging box, or a deliberately vulnerable practice target). The examples use a stable throwaway target, <code>example.com</code>, for the parts that need an exact result.</p>
+</blockquote>
+<h2 id="1-start-gori">1. Start gori</h2>
+<p>With no subcommand, gori starts the proxy and opens the interface:</p>
+<pre><code class="language-bash hljs">gori
+</code></pre>
+<p>The first launch runs a short <a href="#first-run-wizard">setup wizard</a> (global bind and theme), then offers a <a href="#guided-ui-tour">guided UI tour</a>. You can take the tour now or skip it and come back; this page covers the same ground against live traffic.</p>
+<p>By default the proxy listens on <code>127.0.0.1:8070</code>. Override it for a single run (a project's own bind still wins when set):</p>
+<pre><code class="language-bash hljs">gori --listen 0.0.0.0 --port 8080
+</code></pre>
+<p><strong>Checkpoint.</strong> You're looking at the gori TUI: a row of tabs down the side (Project, Target, History, …) and a top bar showing the proxy address, <code>127.0.0.1:8070</code>.</p>
+<h2 id="2-trust-the-ca-and-capture-your-first-flow">2. Trust the CA and capture your first flow</h2>
+<p>To read HTTPS, the client has to trust gori's root certificate (generated on first run under <code>~/.gori/ca</code>). The fastest path is a pre-trusted browser.</p>
+<h3 id="option-a-open-a-pre-trusted-browser-recommended">Option A: Open a pre-trusted browser (recommended)</h3>
+<p>Inside the TUI:</p>
+<ol>
+<li>Press <code>Ctrl-P</code> to open the <strong>command palette</strong>.</li>
+<li>Type <code>browser</code> and run <strong>Open browser</strong>.</li>
+<li>Pick an installed browser (Chrome, Chromium, Brave, Edge, Firefox, …).</li>
+</ol>
+<p>gori launches it with a throwaway profile that already trusts the CA and routes HTTP/HTTPS through the proxy. In that browser, visit a site (try <code>https://example.com</code>, then a site you're testing).</p>
+<blockquote>
+<p><strong>Firefox note.</strong> Auto-trusting the CA needs <code>certutil</code> (NSS) on <code>PATH</code>. Without it, gori still sets the proxy but Firefox won't trust the CA, so HTTPS sites show a security warning. Either install it first (<code>brew install nss</code> on macOS, <code>apt install libnss3-tools</code> on Debian/Ubuntu, <code>dnf install nss-tools</code> on Fedora) and reopen the browser, or trust the CA by hand in that same window: open <code>about:preferences#privacy</code>, click <strong>View Certificates</strong>, go to <strong>Authorities</strong>, then <strong>Import</strong> the file <code>gori ca</code> prints.</p>
+</blockquote>
+<h3 id="option-b-point-any-client-yourself">Option B: Point any client yourself</h3>
+<p>Print the CA path and import that file into your system or browser trust store as a <strong>trusted root CA</strong>:</p>
+<pre><code class="language-bash hljs">gori ca
+</code></pre>
+<p>Then set the client's HTTP <strong>and</strong> HTTPS proxy to <code>127.0.0.1:8070</code>. Quick smoke test from another terminal:</p>
+<pre><code class="language-bash hljs">curl -x http://127.0.0.1:8070 https://example.com
+</code></pre>
+<p>gori mints per-host leaf certificates from the root on demand, so you trust the root only once.</p>
+<blockquote>
+<p>gori's private key is a machine secret, written with <code>0600</code> permissions, and never leaves your machine. Rotate it from the palette (<strong>Regenerate CA certificate</strong>) only when you mean to invalidate every prior trust.</p>
+</blockquote>
+<p><strong>Checkpoint.</strong> Switch to <strong>History</strong> (press <code>3</code>). You should see at least one row: your <code>GET https://example.com/</code> request with a <code>200</code> status. If History is empty, capture isn't reaching gori: recheck the proxy setting (Option B) or use <strong>Open browser</strong> (Option A).</p>
+<h2 id="3-learn-the-two-discovery-surfaces">3. Learn the two discovery surfaces</h2>
+<p>Before memorizing tab-specific keys, learn the two places almost everything lives.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Key</th>
+<th>What it is for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Command palette</strong></td>
+<td><code>Ctrl-P</code></td>
+<td>App-wide control: settings, Open browser, Export CA, jump actions, anything global</td>
+</tr>
+<tr>
+<td><strong>Space menu</strong></td>
+<td><code>Space</code></td>
+<td>Actions for whatever has focus right now (History row, detail pane, Repeater, …)</td>
+</tr>
+</tbody>
+</table>
+<p>The palette is the map of the whole tool. The space menu is the map of <em>this</em> pane. Both show key hints, so if you forget a chord, open one of them.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/command-palette.svg" alt="gori command palette open over the History tab, listing settings, navigation and export actions with a filter box">
+  <figcaption>The command palette (<kbd>Ctrl-P</kbd>): fuzzy-filter every app-wide action, from settings to <em>Open browser</em> to tab jumps.</figcaption>
+</figure>
+<p>Three global toggles are worth knowing from the start:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>c</code></td>
+<td>Toggle <strong>capture</strong> (off = traffic passes through without being stored)</td>
+</tr>
+<tr>
+<td><code>i</code></td>
+<td>Toggle <strong>intercept</strong> (hold matching requests to forward / drop / edit)</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>Toggle the <strong>scope lens</strong> (filter views to in-scope traffic)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-move-around-the-tui">4. Move around the TUI</h2>
+<p>gori is a row of tabs. The default order starts Project → Target → <strong>History</strong> → Intercept → Repeater → Fuzzer → …</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[</code> / <code>]</code></td>
+<td>Previous / next tab</td>
+</tr>
+<tr>
+<td><code>1</code>-<code>9</code></td>
+<td>Jump to the Nth visible tab (with defaults, History is <code>3</code>)</td>
+</tr>
+<tr>
+<td><code>Enter</code> / <code>↓</code></td>
+<td>Enter the tab body from the tab bar</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Pop focus back toward the tab bar</td>
+</tr>
+<tr>
+<td><code>Tab</code> / <code>Shift-Tab</code></td>
+<td>Move focus between the tab bar and panes</td>
+</tr>
+</tbody>
+</table>
+<p>Mouse works when enabled (Preferences → <strong>Editor &amp; Keys</strong> → <strong>Editor</strong>): click a tab, click a row to select, click again to open. The <strong>Help</strong> tab is a full key cheatsheet inside the app when this page isn't open.</p>
+<h2 id="5-read-a-flow-in-history">5. Read a flow in History</h2>
+<p>Make sure History is active (<code>3</code>). Every request/response is a <em>flow</em>: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns">
+  <figcaption>The <strong>History</strong> tab: every captured flow with method, status, size and timing, filterable with the query language.</figcaption>
+</figure>
+<p>Try each of these:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (or <code>j</code> / <code>k</code>)</td>
+<td>Move the selection</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>Open request/response detail</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>Filter with the <a href="https://gori.hahwul.com/reference/query-language/">query language</a></td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>Toggle follow-newest (tail)</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>Copy the selected flow</td>
+</tr>
+</tbody>
+</table>
+<p>Press <code>/</code> and type a filter, then <code>Enter</code>:</p>
+<pre><code class="language-text hljs">host:example.com
+</code></pre>
+<p>History narrows to that host. Clear the filter (<code>/</code>, erase, <code>Enter</code>) to see everything again. A few more to try later:</p>
+<pre><code class="language-text hljs">status:5xx
+method:POST body:password
+</code></pre>
+<p>Now select your <code>example.com</code> flow and press <code>Enter</code>. In the detail view, scroll with <code>↑</code> / <code>↓</code>, copy with <code>y</code>, and toggle <code>x</code> / <code>b</code> / <code>p</code> for hex / whitespace / pretty bodies. <code>Esc</code> returns to the list.</p>
+<p><strong>Checkpoint.</strong> You can filter History down to one host and open a flow to read its full request and response.</p>
+<h2 id="6-send-it-to-repeater-and-re-send-the-core-loop">6. Send it to Repeater and re-send (the core loop)</h2>
+<p>This is the loop you'll spend most of your time in: take a captured request, change something, send it again, and compare.</p>
+<ol>
+<li>In <strong>History</strong>, select your <code>example.com</code> flow.</li>
+<li>Press <code>Ctrl-R</code>. gori copies it into the <strong>Repeater</strong> tab and switches you there.</li>
+<li>Press <code>Enter</code> or <code>i</code> on the request pane to edit (INS mode). Change something small, for example add a header line:
+<pre><code class="language-http hljs">X-Gori-Test: 1
+</code></pre>
+</li>
+<li>Press <code>Esc</code> to leave edit mode, then <code>Ctrl-R</code> to <strong>send</strong>.</li>
+<li>The response, its timing, and a diff against the previous reply appear on the right. <code>Tab</code> cycles target → request → response.</li>
+</ol>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
+  <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
+</figure>
+<p><strong>Checkpoint.</strong> The Repeater status line reads something like <code>replayed 200 in … ms</code>, and you can re-send with <code>Ctrl-R</code> as many times as you like. That is the full capture → inspect → replay loop.</p>
+<h2 id="7-where-to-go-next">7. Where to go next</h2>
+<p>You now have the core loop. A few directions from here, each covered in depth in the <a href="https://gori.hahwul.com/guide/">Guide</a>:</p>
+<ul>
+<li><strong>Fuzz a parameter.</strong> Select a flow, press <code>Shift-I</code> to send it to the <strong>Fuzzer</strong>, mark a position (<code>Ctrl-A</code> auto-marks common params), attach a wordlist, and <code>Ctrl-R</code> to run. See <a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>.</li>
+<li><strong>Intercept and edit in flight.</strong> Press <code>i</code> to hold matching requests and forward, drop, or modify them before they continue. See <a href="https://gori.hahwul.com/guide/proxy/#intercept">Proxy &amp; History</a>.</li>
+<li><strong>Track what you find.</strong> Turn anything worth reporting into an <strong>Issue</strong> with <code>Shift-F</code>, and read passive findings on the <strong>Probe</strong> tab as you browse. See <a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a>.</li>
+</ul>
+<h2 id="day-1-key-map">Day-1 key map</h2>
+<p>Keep this table nearby until the chords stick:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Where</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-P</code></td>
+<td>Anywhere</td>
+<td>Command palette (settings, Match &amp; Replace, notifications, …)</td>
+</tr>
+<tr>
+<td><code>Ctrl-,</code></td>
+<td>Anywhere</td>
+<td>Preferences (all settings in one modal)</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>Focused pane</td>
+<td>Area action menu</td>
+</tr>
+<tr>
+<td><code>c</code> / <code>i</code> / <code>s</code></td>
+<td>Anywhere</td>
+<td>Capture / intercept / scope lens</td>
+</tr>
+<tr>
+<td><code>[</code> <code>]</code> · <code>1</code>-<code>9</code></td>
+<td>Anywhere</td>
+<td>Switch tabs</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>History</td>
+<td>Query-language filter</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>History</td>
+<td>Open flow detail</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>History</td>
+<td>→ Repeater</td>
+</tr>
+<tr>
+<td><code>Shift-I</code></td>
+<td>History</td>
+<td>→ Fuzzer</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>Repeater / Fuzzer</td>
+<td>Send request / run fuzz</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Most places</td>
+<td>Back out one level</td>
+</tr>
+</tbody>
+</table>
+<h2 id="first-run-wizard">First-run wizard</h2>
+<p>Re-run the guided setup (global proxy bind default, then theme) at any time:</p>
+<pre><code class="language-bash hljs">gori wizard
+</code></pre>
+<p>The bind step sets the shared default in <code>settings.json</code>, the same layer as Preferences → **Network &amp; Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.</p>
+<h2 id="guided-ui-tour">Guided UI tour</h2>
+<p>A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and READ/INS edit mode. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist.</p>
+<pre><code class="language-bash hljs">gori tutorial
+</code></pre>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the command palette, the action menu, and edit mode">
+  <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
+</figure>
+<p>It is also offered at the end of the first-run wizard.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a>: storage layout, network settings, and the CA</li>
+<li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a>: capture, intercept, scope, import, match &amp; replace</li>
+<li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: the testing workbench and env tokens</li>
+<li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a>: full filter syntax</li>
+<li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a>: rebind any of the chords above</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Decoder</title>
+      <link>https://gori.hahwul.com/guide/decoder/</link>
+      <guid>https://gori.hahwul.com/guide/decoder/</guid>
+      <description>Encode, decode, hash, and transform data in a multi-step pipeline inside the TUI.</description>
+      <content:encoded><![CDATA[<p>The <strong>Decoder</strong> tab is a scratch workbench for encoding, decoding, hashing, and transforming data. Paste input, build a chain of converters, and read the intermediate and final results.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/decoder.svg" alt="gori Decoder tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-encode then upper chain, showing each step's intermediate result">
+  <figcaption>The <strong>Decoder</strong> workbench: an input, a chain of converters, and the per-step pipeline with the final output below.</figcaption>
+</figure>
+<h2 id="layout">Layout</h2>
+<p>Four cards stack top to bottom:</p>
+<table>
+<thead>
+<tr>
+<th>Pane</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>INPUT</strong></td>
+<td>Source text (editable)</td>
+</tr>
+<tr>
+<td><strong>CHAIN</strong></td>
+<td>Pipeline spec: converter names separated by <code>|</code>, <code>&gt;</code>, or <code>,</code> (all equivalent)</td>
+</tr>
+<tr>
+<td><strong>PIPELINE</strong></td>
+<td>One row per step with its intermediate output</td>
+</tr>
+<tr>
+<td><strong>OUTPUT</strong></td>
+<td>Final result (text / hex / base64 display modes)</td>
+</tr>
+</tbody>
+</table>
+<p>You can keep several conversions open as <strong>sub-tabs</strong> (new, rename, duplicate, close from the space menu).</p>
+<h2 id="building-a-chain">Building a Chain</h2>
+<p>Type converter names on the CHAIN line. Steps run left to right:</p>
+<pre><code class="language-text hljs">url-decode | base64-decode | jwt-decode
+hex-encode | upper
+gzip-decompress | json-unescape
+</code></pre>
+<p>Aliases work the same as the primary name (<code>b64</code> → <code>base64-encode</code>, <code>url</code> → <code>url-encode</code>, and so on). Autocomplete helps when the name is fuzzy.</p>
+<p>Save a chain under a name (<strong>Save chain by name</strong> from the space menu) and reload it later. Defaults also persist under the <code>decoder</code> section of settings.</p>
+<h2 id="converters">Converters</h2>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Encoding</strong></td>
+<td><code>base64-encode</code> / <code>base64-decode</code>, <code>base64url-encode</code>, <code>url-encode</code> / <code>url-decode</code>, <code>hex-encode</code> / <code>hex-decode</code>, <code>base32</code>, <code>ascii85</code>, <code>base58</code></td>
+</tr>
+<tr>
+<td><strong>Compression</strong></td>
+<td><code>gzip-compress</code> / <code>gzip-decompress</code>, <code>zlib-compress</code> / <code>zlib-decompress</code></td>
+</tr>
+<tr>
+<td><strong>Token</strong></td>
+<td><code>jwt-decode</code> (header + payload; signature shown, not verified)</td>
+</tr>
+<tr>
+<td><strong>Hash</strong></td>
+<td><code>md5</code>, <code>sha1</code>, <code>sha256</code>, <code>sha512</code></td>
+</tr>
+<tr>
+<td><strong>Escape</strong></td>
+<td><code>html-escape</code> / <code>html-unescape</code>, <code>json-escape</code> / <code>json-unescape</code>, <code>unicode-escape</code> / <code>unicode-unescape</code></td>
+</tr>
+<tr>
+<td><strong>Text</strong></td>
+<td><code>rot13</code>, <code>upper</code>, <code>lower</code>, <code>reverse</code></td>
+</tr>
+</tbody>
+</table>
+<p>OUTPUT can cycle display modes (text → hex → base64) for binary results. Copy with <code>y</code> in READ mode, or use the space menu.</p>
+<h2 id="when-to-use-it">When to Use It</h2>
+<ul>
+<li>Decode a JWT or nested Base64 blob from History without mutating the flow</li>
+<li>Build the same transform you'll apply as a Fuzzer payload processor</li>
+<li>Quickly hash or URL-encode values while writing Repeater requests</li>
+</ul>
+<p>Decoder does not send network traffic; it's pure local transformation.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: payload processors use similar encode/hash steps</li>
+<li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a>: JWT / SAML / GraphQL are also decoded inline on captured flows</li>
+<li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a>: rebind Decoder-scoped actions</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Hotkeys</title>
+      <link>https://gori.hahwul.com/guide/hotkeys/</link>
+      <guid>https://gori.hahwul.com/guide/hotkeys/</guid>
+      <description>Rebind gori&apos;s keyboard shortcuts from the Preferences modal.</description>
+      <content:encoded><![CDATA[<p>gori's keyboard shortcuts are rebindable from the <strong>Hotkeys</strong> editor. Reach it from Preferences (<code>Ctrl-,</code> → **Editor &amp; Keys** → **Hotkeys**, then `↵`), or jump straight there with **`settings:hotkeys`** in the command palette (`Ctrl-P`). The editor lists every rebindable action grouped by where it fires (GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …); pick a row, press a new key, done.</p>
+<pre><code class="language-text hljs">Ctrl-,  → Editor &amp; Keys → Hotkeys
+Ctrl-P  → settings:hotkeys
+</code></pre>
+<h2 id="key-budget-how-new-shortcuts-earn-a-key">Key budget (how new shortcuts earn a key)</h2>
+<p>Bare letter keys are scarce. New actions should pick a <strong>price tier</strong> before taking a chord:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Price</th>
+<th>When</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 Structural</strong></td>
+<td><code>Esc</code> <code>Enter</code> <code>Tab</code> arrows <code>Space</code> (leader)</td>
+<td>Always</td>
+<td>focus, open/close, READ/INS, space menu</td>
+</tr>
+<tr>
+<td><strong>L1 Loop</strong></td>
+<td>bare letter or sticky family (<code>^R</code>)</td>
+<td>many times / minute</td>
+<td>History <code>j/k</code> <code>/</code> <code>y</code>, Repeater send</td>
+</tr>
+<tr>
+<td><strong>L2 Session breath</strong></td>
+<td>Global bare (cap: <code>c</code> <code>i</code> <code>s</code> only)</td>
+<td>many times / session</td>
+<td>capture, intercept, scope lens</td>
+</tr>
+<tr>
+<td><strong>L3 Contextual</strong></td>
+<td><code>Space</code> then mnemonic</td>
+<td>occasional, pane-local</td>
+<td>compare, mine, send-group, copy-as</td>
+</tr>
+<tr>
+<td><strong>L4 Rare / config</strong></td>
+<td>palette (<code>Ctrl-P</code>) or Preferences (<code>Ctrl-,</code>)</td>
+<td>rare</td>
+<td>settings, Match &amp; Replace, notifications</td>
+</tr>
+</tbody>
+</table>
+<p>Rules of thumb:</p>
+<ul>
+<li>Default for new pane actions is L3 (space menu only). Promote to a direct key only after the loop proves it.</li>
+<li><strong>Ctrl</strong> is for actions that must work while typing (INS) or that are destructive. It is not a general upgrade from bare.</li>
+<li><strong>History → Repeater</strong> and <strong>Repeater send</strong> stay on <strong><code>Ctrl-R</code></strong> (same muscle memory). Do not move History→Repeater to bare <code>r</code>.</li>
+<li>Match &amp; Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.</li>
+</ul>
+<h2 id="editing">Editing</h2>
+<p>The editor opens a working copy. Nothing is saved until you press <code>Enter</code>, and <code>Esc</code> discards every change.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (or <code>j</code> / <code>k</code>), wheel</td>
+<td>Move the selection</td>
+</tr>
+<tr>
+<td><code>e</code> or <code>Space</code></td>
+<td>Rebind the selected action, then press the new key</td>
+</tr>
+<tr>
+<td><code>x</code> or <code>Backspace</code></td>
+<td>Unbind the selected action</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>Reset the selected action to its default</td>
+</tr>
+<tr>
+<td><code>Shift-R</code></td>
+<td>Reset every action to its defaults</td>
+</tr>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>Cycle the OS default profile (see below)</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>Save + apply (live, no restart)</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Discard and close</td>
+</tr>
+</tbody>
+</table>
+<p>When you start a rebind the footer shows <em>&quot;press a key to bind&quot;</em>. Press the chord you want, modifiers included, except the ones listed under <em>Reserved keys</em> below. If the key is reserved or already used by another action <strong>in the same place</strong>, the editor refuses it and tells you why; capture stays open so you can try another key.</p>
+<p>A row's chord shows <code>(unbound)</code> when nothing is bound. The <code>●</code> marker means you've changed it from the default; <code>·</code> means it's at the default.</p>
+<h2 id="conflicts">Conflicts</h2>
+<p>Two actions may share a key only if they fire in <strong>different</strong> places. That's by design (<code>s</code> is &quot;scope lens&quot; almost everywhere but &quot;swap&quot; on the Comparer tab, <code>c</code> is &quot;toggle capture&quot; everywhere except the Intercept queue where it cycles the catch direction). The editor blocks only a <strong>same-place</strong> collision, because there the keymap could keep just one of them.</p>
+<h2 id="reserved-keys">Reserved Keys</h2>
+<p>Some keys can't be rebound because the terminal or gori needs them:</p>
+<ul>
+<li><strong>Quit</strong>: <code>Ctrl-C</code>, <code>Ctrl-D</code>.</li>
+<li><strong>Indistinguishable from named keys</strong>: <code>Ctrl-M</code> / <code>Ctrl-J</code> (Enter), <code>Ctrl-I</code> (Tab), <code>Ctrl-H</code> (Backspace), <code>Ctrl-[</code> (Escape).</li>
+<li><strong>Structural</strong>: <code>Enter</code>, <code>Esc</code>, <code>Tab</code>, <code>Backspace</code>, and a bare <code>:</code> (the command line).</li>
+<li><strong>gori shortcuts claimed before the keymap</strong>: <code>Ctrl-G</code> (go to line), <code>Ctrl-F</code> (find, then <code>Tab</code> for find &amp; replace), <code>Ctrl-B</code> (reveal whitespace), <code>Ctrl-E</code> (external editor), <code>Ctrl-P</code> (command palette), <code>Ctrl-N</code> (new repeater/fuzz/note), <code>Ctrl-W</code> (close sub-tab), and <code>Ctrl-1</code>…<code>Ctrl-9</code> (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason <strong>Command palette</strong>, <strong>New repeater request</strong>, and <strong>New fuzz session</strong> aren't listed in the editor. Their key is fixed.</li>
+</ul>
+<p>Flow-control/signal chords like <code>Ctrl-S</code> are <strong>not</strong> reserved; gori runs the terminal in raw mode, so they reach the app (Repeater's SNI toggle ships on <code>Ctrl-S</code>).</p>
+<h2 id="os-default-profiles">OS Default Profiles</h2>
+<p>The <code>←</code> / <code>→</code> profile selector picks which <strong>default</strong> key set a fresh (un-overridden) binding uses: <code>auto</code> (tracks the platform gori was built for), <code>macOS</code>, <code>Linux</code>, or <code>Windows</code>. Your own rebindings always sit on top of the chosen profile, regardless of OS.</p>
+<p>Today the per-OS defaults are identical: in a terminal, <code>Ctrl</code>+letter chords reach the application on macOS, Linux, and Windows alike, and the genuinely hazardous keys are the reserved control characters above (blocked everywhere). The profile mechanism is in place so a real per-terminal clash can be fixed without touching dispatch. For now, <code>auto</code> is the right choice for everyone.</p>
+<h2 id="where-its-stored">Where It's Stored</h2>
+<p>Saved to <code>~/.gori/settings.json</code> (override the directory with <code>$GORI_HOME</code>) under a sparse <code>hotkeys</code> block. Only the bindings you changed are written, as a list of chord labels per action id; an empty list is an explicit unbind:</p>
+<pre><code class="language-json hljs">{
+  &quot;hotkeys&quot;: {
+    &quot;os&quot;: &quot;auto&quot;,
+    &quot;bindings&quot;: {
+      &quot;rules.edit&quot;: [&quot;g&quot;],
+      &quot;scope.edit&quot;: []
+    }
+  }
+}
+</code></pre>
+<p>An absent action uses the profile default. Unknown ids and unparseable chords are ignored on load, so hand-edits and version drift degrade gracefully.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>Only an action's <strong>primary</strong> chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of <code>j</code> / <code>k</code>) aren't listed.</li>
+<li>The <strong>command palette</strong> and the <strong>Help</strong> tab (Global / History / Repeater rows wired to verb ids) resolve chords through the effective keymap after a rebind. Other Help sections and some status chips may still use curated defaults.</li>
+<li>Space-menu <strong>mnemonic</strong> letters are stable action identities (Helix-like); rebinding changes the <em>direct</em> chord, not the space-menu letter.</li>
+<li>Pane-local keys that share a letter (Repeater response <code>x</code> = hex vs request/target <code>x</code> = select line) stay controller-owned so both meanings can coexist.</li>
+<li>Press <strong><code>?</code></strong> from a navigable context to jump to the <strong>Help</strong> tab (mitmproxy-style cheat-sheet).</li>
+</ul>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/guide/settings/">Settings</a>: the Preferences modal and every section in it</li>
+<li><a href="https://gori.hahwul.com/guide/themes/">Themes</a>: switch or create colour themes the same way</li>
+<li><a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a>: the <code>hotkeys</code> key in <code>settings.json</code></li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>JWT</title>
+      <link>https://gori.hahwul.com/guide/jwt/</link>
+      <guid>https://gori.hahwul.com/guide/jwt/</guid>
+      <description>Decode, edit and re-sign JSON Web Tokens, and generate alg:none, weak-secret, and header-injection payloads.</description>
+      <content:encoded><![CDATA[<p>The <strong>JWT</strong> tab is a workbench for JSON Web Tokens: decode one, edit its claims and re-sign it, and generate the classic attack payloads to test against the server. It goes further than the <a href="https://gori.hahwul.com/guide/decoder/">Decoder</a>'s read-only <code>jwt-decode</code> converter, which only shows you the parts.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token, the decoded header JSON, and an ATTACKS list of 23 generated payloads including alg=none case variants and signature stripping">
+  <figcaption>The <strong>JWT</strong> tab decodes a token live (header, payload, signature) and lists ready-to-send attack payloads: alg:none, weak-secret, and header injection.</figcaption>
+</figure>
+<p>The tab is hidden by default. Reveal it from the tab-bar <code>⋯</code> menu or the command palette (<code>Ctrl-P</code> → <strong>Go to JWT</strong>). Select a token anywhere (a <strong>History</strong> detail pane, <strong>Notes</strong>, …) and <code>Space</code> → <strong>Send to JWT</strong> to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk.</p>
+<h2 id="two-lenses">Two Lenses</h2>
+<p>One session, two views, toggled with <code>Ctrl-E</code>:</p>
+<ul>
+<li><strong>Decode</strong>: paste a token into INPUT and the header, payload, and signature decode live. Below them is a selectable list of generated <strong>attack payloads</strong>.</li>
+<li><strong>Encode</strong>: edit the HEADER and PAYLOAD as JSON, choose an algorithm (<code>Ctrl-A</code> cycles <code>HS256</code> / <code>HS384</code> / <code>HS512</code> / <code>none</code>), set a SECRET, and the re-signed token appears live in OUTPUT.</li>
+</ul>
+<p>Press <code>l</code> to load the token currently decoded on the Decode side into the Encode editors, so you can tweak a claim and re-sign in two moves. Copy any result with <code>y</code>.</p>
+<blockquote>
+<p>A signature is decoded and shown but <strong>never verified</strong>, so a decode tells you what a token claims, not whether it is trusted. Encode genuinely signs with the secret and algorithm you give it (the first and only HMAC in gori).</p>
+</blockquote>
+<h2 id="attack-payloads">Attack Payloads</h2>
+<p>From a decoded token, gori generates ready-to-send variants that probe common JWT verification flaws:</p>
+<table>
+<thead>
+<tr>
+<th>Attack</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>alg:none</strong></td>
+<td>Strips the signature and sets <code>alg</code> to <code>none</code> (plus <code>None</code> / <code>NONE</code> case variants), for a server that accepts unsigned tokens.</td>
+</tr>
+<tr>
+<td><strong>Weak secret</strong></td>
+<td>Re-signs the token with a list of common weak HMAC secrets, to catch a guessable signing key.</td>
+</tr>
+<tr>
+<td><strong>Header injection</strong></td>
+<td>Manipulates the <code>kid</code>, <code>jku</code>, <code>x5u</code>, and <code>jwk</code> header parameters, for a server that trusts attacker-supplied key material.</td>
+</tr>
+</tbody>
+</table>
+<p>Send a candidate to <strong>Repeater</strong> to try it against the target, or straight into a request you're already editing.</p>
+<h2 id="headless">Headless</h2>
+<pre><code class="language-bash hljs">gori run jwt eyJhbGci...                       # decode (default)
+gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
+gori run jwt eyJhbGci... --attacks             # print the attack payloads
+cat token.txt | gori run jwt --attacks         # token from stdin
+</code></pre>
+<p>The token comes from the argument or stdin; there is no project or capture involved (it is pure local compute). <code>--format</code> is <code>text</code> or <code>json</code>. See the <a href="https://gori.hahwul.com/reference/cli/#run-jwt">CLI Reference</a>.</p>
+<p>Over MCP, <code>jwt_decode</code> / <code>jwt_encode</code> / <code>jwt_attacks</code> are read tools available even under <code>--read-only</code>, since they touch no network or state.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a>: decode a JWT inside a longer transform chain</li>
+<li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a>: grade the randomness of a token that is not a JWT</li>
+<li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: fire an attack payload at the target</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>MCP Server</title>
+      <link>https://gori.hahwul.com/guide/mcp/</link>
+      <guid>https://gori.hahwul.com/guide/mcp/</guid>
+      <description>Drive gori from an AI agent or script over the Model Context Protocol.</description>
+      <content:encoded><![CDATA[<p>gori ships a built-in <strong>MCP (Model Context Protocol) server</strong>. Instead of embedding a chat window in the TUI, gori exposes its project over a clean tool interface so any MCP-capable agent (Claude, Codex, Grok, and others) can read your traffic and drive the tools.</p>
+<figure class="agent-session" aria-label="Example agent session: an agent finds an IDOR over MCP and logs an issue">
+  <div class="agent-session-bar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="agent-session-title">agent · gori over MCP</span>
+  </div>
+  <div class="agent-session-body">
+    <p class="as-user"><span class="as-who">you</span>Find an IDOR on the users API and log it.</p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>list_history</code> <span class="as-args">path~/v1/users status:200</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">14 flows, customer and admin tokens</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>send_request</code> <span class="as-args">GET /v1/users/2 · customer token</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"}, not the caller's row</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>create_issue</code> <span class="as-args">"IDOR on /v1/users/{id}" severity:high</span></p>
+    <p class="as-done"><span class="as-check">✓</span> Issue logged; the request is saved as a Repeater session for repro.</p>
+  </div>
+</figure>
+<pre><code class="language-bash hljs">gori mcp
+</code></pre>
+<p>The server speaks JSON-RPC 2.0 over stdio: STDOUT carries the protocol, STDERR carries logs. Tool results include both backward-compatible text and MCP <code>structuredContent</code> when the payload is JSON.</p>
+<h2 id="choosing-a-project">Choosing a Project</h2>
+<pre><code class="language-bash hljs">cd /path/to/my-repository &amp;&amp; gori mcp # path-binds this Git workspace to its own gori project
+gori mcp --project my-engagement   # serve a named project's database
+gori mcp --db /path/to/project.db  # serve a specific database file
+gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
+gori mcp --no-project              # force unbound even inside a Git workspace
+</code></pre>
+<p>With no explicit selector, gori discovers the nearest Git root and binds its canonical path to an isolated project. The binding prevents two repositories with the same directory name from sharing a database.</p>
+<p><strong>Outside a Git workspace</strong> (the common case when an AI client spawns MCP from a home or app directory), the server starts <strong>unbound</strong>: the MCP handshake and tool list succeed immediately, but traffic tools (<code>list_history</code>, <code>send_request</code>, …) return <code>NO_PROJECT</code> until the agent calls <code>list_projects</code>, <code>create_project</code> (auto-binds when unbound), or <code>switch_project</code>. Unbound mode never silently opens the active TUI or MRU project — that requires the explicit <code>--use-active-project</code> opt-in (or <code>--project</code> / <code>--db</code> / <code>GORI_MCP_PROJECT</code> / <code>GORI_MCP_DB</code>).</p>
+<p>Call <code>project_info</code> before using data. It reports <code>bound</code>, the selected project, database path, workspace root, and selection source.</p>
+<h2 id="read-only-mode">Read-Only Mode</h2>
+<p>By default the server also exposes action tools that send live requests and write issues. To expose only the read tools (safe for handing a project to an untrusted agent), start it read-only:</p>
+<pre><code class="language-bash hljs">gori mcp --read-only
+</code></pre>
+<h2 id="installing-into-an-agent">Installing Into an Agent</h2>
+<p>gori can write the MCP configuration for common clients for you:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Client</th>
+<th>Config written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop</td>
+<td><code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code</td>
+<td><code>~/.claude.json</code> (<code>mcpServers.gori</code>)</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex</td>
+<td><code>~/.codex/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok</td>
+<td><code>~/.grok/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash hljs">gori mcp --install-claude-code
+gori mcp --install-codex
+gori mcp --install-grok
+</code></pre>
+<p>Codex and Grok use TOML with an <code>[mcp_servers.gori]</code> table (not JSON). Restart the client (or re-open the session) after installing so it reloads MCP servers.</p>
+<p>If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example <code>gori mcp --project my-engagement --install-codex</code>.</p>
+<h2 id="tools">Tools</h2>
+<p><strong>Read tools</strong> (always available):</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list_history</code></td>
+<td>List flows newest-first, with optional QL and pagination</td>
+</tr>
+<tr>
+<td><code>list_events</code></td>
+<td>Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows</td>
+</tr>
+<tr>
+<td><code>get_flow</code></td>
+<td>Full request + response for one flow</td>
+</tr>
+<tr>
+<td><code>get_response_body_chunk</code></td>
+<td>Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap</td>
+</tr>
+<tr>
+<td><code>list_sitemap</code></td>
+<td>Distinct endpoints (host, method, path)</td>
+</tr>
+<tr>
+<td><code>list_issues</code> / <code>get_issue</code></td>
+<td>Read triaged issues</td>
+</tr>
+<tr>
+<td><code>list_scope</code></td>
+<td>Current scope include/exclude rules</td>
+</tr>
+<tr>
+<td><code>intercept_list</code> / <code>intercept_get</code></td>
+<td>Inspect the live intercept queue and one held item in full</td>
+</tr>
+<tr>
+<td><code>list_projects</code></td>
+<td>Every gori project on this host</td>
+</tr>
+<tr>
+<td><code>list_notes</code> / <code>get_note</code></td>
+<td>Read project notes</td>
+</tr>
+<tr>
+<td><code>list_rules</code></td>
+<td>List the project&#39;s Match &amp; Replace rules in apply order</td>
+</tr>
+<tr>
+<td><code>decode</code></td>
+<td>Run an encode/decode/hash/compress chain over <code>input</code> (pure transform; no network or state)</td>
+</tr>
+<tr>
+<td><code>jwt_decode</code> / <code>jwt_encode</code> / <code>jwt_attacks</code></td>
+<td>Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under <code>--read-only</code>)</td>
+</tr>
+<tr>
+<td><code>sequence_analyze</code></td>
+<td>Grade a pasted token list for randomness / predictability (pure)</td>
+</tr>
+<tr>
+<td><code>oast_presets</code> / <code>oast_payload</code> / <code>oast_poll</code></td>
+<td>List OAST providers, read the active payload, and poll a running listener for callbacks</td>
+</tr>
+<tr>
+<td><code>discover_status</code> / <code>discover_results</code></td>
+<td>Progress and findings of a Discover run</td>
+</tr>
+<tr>
+<td><code>project_info</code></td>
+<td>Flow / issue counts, database, workspace binding, and selection source</td>
+</tr>
+<tr>
+<td><code>get_current_context</code></td>
+<td>What the user is viewing in the TUI right now</td>
+</tr>
+<tr>
+<td><code>get_repeater_context</code></td>
+<td>Repeater workbench state and saved sessions</td>
+</tr>
+<tr>
+<td><code>ql_reference</code></td>
+<td>The query-language reference</td>
+</tr>
+<tr>
+<td><code>ql_explain</code></td>
+<td>Diagnose a query without running it, to check a filter before spending requests on it</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Action tools</strong> (disabled by <code>--read-only</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>send_request</code></td>
+<td>Send / resend an HTTP request (active; records History by default, expands <code>$KEY</code> env tokens, and redacts sensitive response-header values unless explicitly requested)</td>
+</tr>
+<tr>
+<td><code>send_websocket</code></td>
+<td>Execute a saved WebSocket Repeater session and collect the replies</td>
+</tr>
+<tr>
+<td><code>create_repeater</code> / <code>update_repeater</code> / <code>delete_repeater</code></td>
+<td>Manage Repeater sessions</td>
+</tr>
+<tr>
+<td><code>create_issue</code> / <code>update_issue</code></td>
+<td>Record and update issues</td>
+</tr>
+<tr>
+<td><code>create_note</code> / <code>update_note</code> / <code>delete_note</code></td>
+<td>Manage project notes</td>
+</tr>
+<tr>
+<td><code>create_rule</code> / <code>update_rule</code> / <code>set_rule_enabled</code> / <code>delete_rule</code></td>
+<td>Create, edit, toggle, and delete Match &amp; Replace rules (rewrites on in-flight request/response head or body)</td>
+</tr>
+<tr>
+<td><code>preview_rule</code></td>
+<td>Estimate how many stored flows a rule would change, before creating it</td>
+</tr>
+<tr>
+<td><code>create_project</code> / <code>switch_project</code> / <code>delete_project</code></td>
+<td>Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a <code>dry_run</code> first, then a confirmation token</td>
+</tr>
+<tr>
+<td><code>fuzz_start</code> / <code>fuzz_status</code> / <code>fuzz_results</code> / <code>fuzz_stop</code></td>
+<td>Drive the fuzzer</td>
+</tr>
+<tr>
+<td><code>mine_start</code> / <code>mine_status</code> / <code>mine_results</code> / <code>mine_stop</code></td>
+<td>Drive the param miner</td>
+</tr>
+<tr>
+<td><code>sequence_start</code> / <code>sequence_status</code> / <code>sequence_results</code> / <code>sequence_stop</code></td>
+<td>Collect tokens by live replay and grade them (results return the report, never the tokens)</td>
+</tr>
+<tr>
+<td><code>discover_start</code> / <code>discover_stop</code></td>
+<td>Spider and brute-force endpoints (poll with <code>discover_status</code> / <code>discover_results</code>)</td>
+</tr>
+<tr>
+<td><code>oast_start</code> / <code>oast_stop</code></td>
+<td>Register an OAST payload and poll for callbacks (read the hits with <code>oast_poll</code>)</td>
+</tr>
+<tr>
+<td><code>list_jobs</code> / <code>get_job</code> / <code>stop_job</code></td>
+<td>Work across job kinds: list every fuzz and mine job this session started, or fetch and stop one by id</td>
+</tr>
+<tr>
+<td><code>intercept_forward</code> / <code>intercept_forward_edit</code> / <code>intercept_drop</code></td>
+<td>Release a held message byte-exact, release it with edited wire bytes, or drop it</td>
+</tr>
+<tr>
+<td><code>intercept_toggle</code> / <code>intercept_set_filter</code> / <code>intercept_set_direction</code></td>
+<td>Arm or disarm the catch, set its condition query, and choose which leg it holds</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Action tools are capped for safety: fuzz, mine, sequence, and discover jobs are limited in total requests, concurrency, and stored results. A rule created via <code>create_rule</code> is picked up by <code>gori run</code> and newly opened TUIs; an already-running TUI applies it only after its rules reload.</p>
+</blockquote>
+<h2 id="live-intercept">Live Intercept</h2>
+<p>An agent can sit in the intercept loop next to you rather than reading History after the fact. The TUI session holding the capture lock mirrors held messages out to the agent and drains the commands it sends back, so <code>intercept_list</code> → <code>intercept_get</code> → <code>intercept_forward_edit</code> is the same loop you drive by hand.</p>
+<p>The mutating half (<code>intercept_forward</code>, <code>intercept_forward_edit</code>, <code>intercept_drop</code>, <code>intercept_toggle</code>, <code>intercept_set_filter</code>, <code>intercept_set_direction</code>) is disabled by <code>--read-only</code>, and every one of them refuses when no live capture session is holding the lock. There is nothing to forward without a proxy actually holding traffic.</p>
+<p>Agent actions are visible, not silent. Each one lands in the notification center tagged as coming from an agent, rendered differently from your own actions, so you can see what a co-pilot did to traffic while you were reading another tab.</p>
+<p>One safety rule is worth knowing before you leave an agent running. A held message normally waits forever for a human decision, which is what you want when you are the only one at the keyboard. Once an agent attaches to the intercept queue in that session, gori arms a 30 second auto-forward for items nobody is watching, so a client that dies mid-hold cannot wedge the connection indefinitely. A session with no agent attached never auto-forwards.</p>
+<h2 id="why-an-mcp-seam">Why an MCP Seam</h2>
+<p>gori deliberately has no in-tool AI chat. The intelligence lives outside the tool, reachable through MCP. That means you choose the model, your traffic isn't shipped anywhere you didn't intend, and the same interface serves scripts and agents alike. <code>gori run</code> covers the non-interactive path; MCP covers the interactive-agent path.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a>: a step-by-step walkthrough to connect an agent and drive its first request</li>
+<li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a>: full <code>gori mcp</code> flags</li>
+<li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a>: the syntax agents use to filter</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>OAST</title>
+      <link>https://gori.hahwul.com/guide/oast/</link>
+      <guid>https://gori.hahwul.com/guide/oast/</guid>
+      <description>Catch out-of-band callbacks (interactsh &amp; friends) to confirm blind SSRF, XXE, and injection.</description>
+      <content:encoded><![CDATA[<p>Some bugs never show up in the response. A blind SSRF, a blind XXE, an out-of-band SQL injection, or a stored payload that only fires in a back-office browser all reach out to <em>some other server</em> instead of answering you. <strong>OAST</strong> (Out-of-band Application Security Testing) gives you that server: gori registers a payload URL with an interaction listener, you plant the payload in a request, and any DNS, HTTP, or SMTP callback the target makes to it shows up as a hit.</p>
+<p>The <strong>OAST</strong> tab is visible by default (next to Fuzzer). It has two sub-tabs: <strong>Callbacks</strong> (the hits, default) and <strong>Providers</strong> (the listeners you've configured).</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/oast.svg" alt="gori OAST tab listening on an interactsh payload, with a Callbacks table of four decrypted callbacks: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination">
+  <figcaption>The <strong>OAST</strong> tab registers a payload and lists every DNS, HTTP, or SMTP callback the target makes to it, decrypted and timestamped.</figcaption>
+</figure>
+<h2 id="the-loop">The Loop</h2>
+<ol>
+<li>On the <strong>OAST</strong> tab, press <code>Ctrl-R</code> to start listening. gori registers with a provider and mints a <strong>payload</strong> (a unique hostname/URL).</li>
+<li>Copy the payload with <code>g</code> (get payload) or <code>y</code>, or insert it straight into a request from <strong>Repeater</strong> / <strong>Fuzzer</strong> (<code>Space</code> → <strong>Insert OAST payload</strong> drops it at the cursor). From <strong>History</strong>, <code>Space</code> → <strong>Copy OAST payload</strong>.</li>
+<li>Plant it wherever the target might dereference a URL or resolve a hostname: a URL parameter, a <code>Host</code>/<code>X-Forwarded-For</code> header, an XML entity, a webhook field.</li>
+<li>When the target's infrastructure resolves the name or connects back, the callback lands in <strong>Callbacks</strong> with its protocol (<code>dns</code> / <code>http</code> / <code>smtp</code>), source IP, timestamp, and the full sub-identifier so you can tell which payload fired.</li>
+</ol>
+<p>A callback is proof the target reached a server it shouldn't have. No callback is not proof of safety (egress may be filtered), only that this path stayed quiet.</p>
+<h2 id="providers">Providers</h2>
+<p>Each listener is a <strong>provider</strong>. Add one from the <strong>Providers</strong> sub-tab (<code>a</code> add, <code>e</code> edit, <code>t</code> set type, <code>d</code> delete); a public preset auto-fills the server host when you pick its type.</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interactsh</code></td>
+<td>Self-hosted or public <a href="https://github.com/projectdiscovery/interactsh">interactsh</a> servers. Catches encrypted <strong>DNS, HTTP, and SMTP</strong> callbacks. Public presets: <code>oast.pro</code>, <code>oast.live</code>, <code>oast.site</code>, <code>oast.fun</code>, <code>oast.me</code>. Default.</td>
+</tr>
+<tr>
+<td><code>custom-http</code></td>
+<td>A plain HTTP endpoint you control and poll for hits.</td>
+</tr>
+<tr>
+<td><code>webhook.site</code></td>
+<td>The public <a href="https://webhook.site">webhook.site</a> service (HTTP only).</td>
+</tr>
+<tr>
+<td><code>BOAST</code></td>
+<td>A <a href="https://github.com/firebasextended/boast">BOAST</a> server (public preset <code>odiss.eu</code>).</td>
+</tr>
+<tr>
+<td><code>postbin</code></td>
+<td>A PostBin instance (<code>postb.in</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>With interactsh, gori generates an RSA key pair locally, registers the public key, and decrypts each callback (the private key is stored <code>0600</code> in the project database and never logged). The payload id is derived locally from the correlation id, so you can mint many payloads from one registration without another round trip.</p>
+<p>Callbacks are durable per-project history. A listener can be resumed manually (its key is persisted); there is no automatic resume on restart.</p>
+<h2 id="keys">Keys</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>Start listening (register a payload and begin polling)</td>
+</tr>
+<tr>
+<td><code>Ctrl-X</code></td>
+<td>Stop the active listener</td>
+</tr>
+<tr>
+<td><code>g</code></td>
+<td>Get / copy the current payload</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>Copy the selected callback</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>Filter the callback list</td>
+</tr>
+<tr>
+<td><code>a</code> / <code>e</code> / <code>t</code> / <code>d</code></td>
+<td>Providers sub-tab: add / edit / set type / delete</td>
+</tr>
+</tbody>
+</table>
+<h2 id="headless">Headless</h2>
+<p><code>gori run oast</code> is an ad-hoc, store-free listener: it registers a payload, prints it to stdout, then streams callbacks until you stop it.</p>
+<pre><code class="language-bash hljs">gori run oast presets                          # list the built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site   # a different provider
+gori run oast listen --once --json             # poll once, emit JSON lines
+</code></pre>
+<p>See the <a href="https://gori.hahwul.com/reference/cli/#run-oast">CLI Reference</a> for every flag. Over MCP, an agent drives the same engine with <code>oast_presets</code> / <code>oast_payload</code> / <code>oast_poll</code> (read) and <code>oast_start</code> / <code>oast_stop</code> (action).</p>
+<blockquote>
+<p>A callback means the target contacted a third-party interaction server, and public interactsh/webhook servers see that callback's metadata. Only run OAST against systems you are authorized to test, and prefer a self-hosted server for sensitive engagements.</p>
+</blockquote>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: plant payloads and fuzz them across positions</li>
+<li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a>: promote a confirmed callback into an Issue</li>
+<li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a>: let an agent register a payload and poll for hits</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Proxy &amp; History</title>
+      <link>https://gori.hahwul.com/guide/proxy/</link>
+      <guid>https://gori.hahwul.com/guide/proxy/</guid>
+      <description>Capture traffic, intercept requests, scope your target, and inspect every protocol.</description>
+      <content:encoded><![CDATA[<p>The proxy sits between your client and the upstream server, records each exchange as a <em>flow</em>, and stores it in the current project. <strong>History</strong> is where you read those flows back.</p>
+<h2 id="capturing-traffic">Capturing Traffic</h2>
+<p>Start gori and point your client at <code>127.0.0.1:8070</code> (see the <a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a>). Toggle capture at any time with <code>c</code>. Turning it off lets traffic pass through without being recorded, which is handy while you set up.</p>
+<p>Each flow records the full request and response: start line, headers, and body (the stored body is capped at 2 MiB; larger bodies still forward byte-exact and report their true size). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.</p>
+<blockquote>
+<p>**HTTPS &amp; upstream verification.** For HTTPS, gori verifies the origin server's certificate against your system CA trust store, resolved automatically from standard locations (and honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`). If none is found — e.g. a minimal container — verification fails and those flows are recorded as errors; set <code>SSL_CERT_FILE=/path/to/ca-bundle.crt</code>, or run with <code>--insecure-upstream</code> (Settings → <strong>Network → verify upstream</strong>). This is separate from trusting gori's own root CA in your <em>client</em>, which is what lets gori decrypt the traffic in the first place.</p>
+</blockquote>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
+  <figcaption>Open any flow with <kbd>Enter</kbd> to read the full request and response, with sub-tabs for headers, HTTP/2 frames, and raw bytes.</figcaption>
+</figure>
+<h2 id="intercept">Intercept</h2>
+<p>Press <code>i</code> to enable <strong>Intercept</strong>. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
+  <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
+</figure>
+<h2 id="scope">Scope</h2>
+<p>Scope keeps a large session focused on your target. In the <strong>Project</strong> tab you define include/exclude rules by host, string, or regular expression. Toggle the <strong>scope lens</strong> with <code>s</code> to filter the views down to in-scope traffic, and use scope to gate what Intercept and the scanners act on.</p>
+<h3 id="sandbox">Sandbox</h3>
+<p>The <strong>Sandbox</strong> is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the <strong>Project</strong> tab's <strong>NETWORK</strong> pane (default: off). While it's on, the capture proxy forwards only the requests your scope <em>allows</em>. Everything else is blocked before it reaches the origin (the client gets a <code>403</code> with an <code>X-Gori-Sandbox: blocked</code> header) and recorded as an aborted flow so the attempt stays visible. &quot;Allowed&quot; means the scope evaluated as an allowlist: at least one include rule must match, and no exclude rule may match.</p>
+<p>Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red <code>sandbox</code> chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.</p>
+<p>The sandbox governs proxied and captured traffic only. Repeater, Fuzzer, Miner, and the MCP <code>send_request</code> tool enforce scope on their own (they refuse an out-of-scope target with <code>SCOPE_BLOCKED</code>). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the <code>CONNECT</code> step, and interceptable connections are kept on HTTP/1.1 so every request is checked individually.</p>
+<h2 id="sitemap">Sitemap</h2>
+<p>The <strong>Sitemap</strong> tab collapses History into a deduplicated tree of <code>host → path</code> endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Press <code>g</code> to fold path-param ids, so <code>/user/1</code> and <code>/user/2</code> share one node and <code>/user/&lt;uuid&gt;</code> collapses into a single <code>{uuid}</code>.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
+  <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so you can read a target's surface at a glance.</figcaption>
+</figure>
+<h2 id="protocol-support">Protocol Support</h2>
+<p>gori understands the protocols it carries:</p>
+<table>
+<thead>
+<tr>
+<th>Protocol</th>
+<th>Support</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTTP/1.1</strong></td>
+<td>Full capture and repeater</td>
+</tr>
+<tr>
+<td><strong>HTTP/2</strong></td>
+<td>Transparent relay after ALPN, raw frame log, HPACK decode, stream → flow assembly</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong></td>
+<td>Live message capture and repeater (no permessage-deflate)</td>
+</tr>
+<tr>
+<td><strong>gRPC</strong></td>
+<td>Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no <code>.proto</code> schema)</td>
+</tr>
+<tr>
+<td><strong>Server-Sent Events</strong></td>
+<td>Parsed into discrete events at display time</td>
+</tr>
+</tbody>
+</table>
+<p>On top of the wire protocols, gori decodes common payloads inline:</p>
+<ul>
+<li><strong>JWT</strong>: header and payload decoded from <code>Authorization</code>, cookies, URLs, and bodies (signatures are shown but never verified).</li>
+<li><strong>SAML</strong>: base64 (and DEFLATE for the redirect binding) decoded for <code>SAMLRequest</code> / <code>SAMLResponse</code>.</li>
+<li><strong>GraphQL</strong>: <code>query</code>, <code>operationName</code>, and <code>variables</code> parsed from POST bodies and <code>?query=</code> parameters.</li>
+<li><strong>Form params</strong>: <code>application/x-www-form-urlencoded</code> and <code>multipart/form-data</code> request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).</li>
+</ul>
+<h2 id="filtering-history">Filtering History</h2>
+<p>History is searchable with gori's <a href="https://gori.hahwul.com/reference/query-language/">query language</a>. A few examples:</p>
+<pre><code class="language-text hljs">status:5xx                  flows that errored
+host:api.example.com        a single host
+method:POST body:password   POST requests mentioning &quot;password&quot;
+dur:&gt;500                    responses slower than 500 ms
+path~/admin/                path matching a regex
+</code></pre>
+<p>Type a query in the History filter bar, or run it headless:</p>
+<pre><code class="language-bash hljs">gori run history -q 'status:5xx host:api.example.com'
+</code></pre>
+<h2 id="match-replace-rewriter-tab">Match &amp; Replace (Rewriter tab)</h2>
+<p>The <strong>Rewriter</strong> tab is the Match &amp; Replace editor: rules that rewrite requests and responses in flight. It is hidden by default, so reach it from the tab-bar <code>⋯</code> menu or the command palette (<code>Ctrl-P</code> → <strong>Match &amp; Replace</strong>, or <strong>Go to Rewriter</strong>).</p>
+<p>Each rule has an operation:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Replace</strong></td>
+<td>Find and replace text in the head or body, by literal substring or regex</td>
+</tr>
+<tr>
+<td><strong>Add header</strong></td>
+<td>Append a <code>Name: value</code> header</td>
+</tr>
+<tr>
+<td><strong>Set header</strong></td>
+<td>Replace a header&#39;s value by name, or add it if absent</td>
+</tr>
+<tr>
+<td><strong>Remove header</strong></td>
+<td>Drop a header by name</td>
+</tr>
+</tbody>
+</table>
+<p>A <strong>Replace</strong> rule targets the request or response, and the <strong>head</strong> (request/status line + headers) or <strong>body</strong> (the entity). Choose literal or regex matching; a regex replacement supports <code>$1</code>/<code>$2</code> capture-group interpolation (write <code>$$</code> for a literal <code>$</code>). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.</p>
+<p>Scope any rule to a <strong>host</strong> glob so it only fires for matching traffic: a plain string matches as a substring (<code>example.com</code> matches <code>api.example.com</code>), and <code>*</code> is a wildcard (<code>*.example.com</code>). Leave it empty to apply to every host.</p>
+<p>Manage the list with <code>a</code> add, <code>e</code>/<code>Enter</code> edit, <code>x</code> enable/disable, <code>d</code> delete, <code>Shift-J</code>/<code>Shift-K</code> reorder (rules apply top to bottom), and <code>space</code> for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules are per-project and take effect as soon as you save, with no restart.</p>
+<p>A <strong>body</strong> rule buffers the message to rewrite it and re-syncs <code>Content-Length</code> automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed (<code>Content-Encoding: gzip</code>/<code>br</code>/…) body isn't decompressed, so a literal pattern won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Enabling any rule forces matching hosts to HTTP/1.1, since HTTP/2 heads never reach the rewrite seam.</p>
+<p>The same rules are scriptable headless: <code>gori run rewriter</code> (list / add / rm / enable / disable / preview) and the MCP <code>create_rule</code> / <code>update_rule</code> / <code>list_rules</code> / <code>preview_rule</code> tools.</p>
+<h2 id="import">Import</h2>
+<p>You don't have to capture everything live. From the command palette (<code>Ctrl-P</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Import: HAR</strong></td>
+<td>Browser or proxy HAR export → full request/response flows</td>
+</tr>
+<tr>
+<td><strong>Import: URLs</strong></td>
+<td>Text file, one URL per line → skeleton request flows</td>
+</tr>
+<tr>
+<td><strong>Import: OpenAPI</strong></td>
+<td>OpenAPI/Swagger JSON or YAML → one request template per operation</td>
+</tr>
+</tbody>
+</table>
+<p>Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.</p>
+<h2 id="host-overrides">Host Overrides</h2>
+<p>Host overrides are a <code>/etc/hosts</code>-style map: dial a specific IP for a hostname without changing DNS. Two layers exist:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where</th>
+<th>Precedence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Project</strong></td>
+<td><strong>Project</strong> tab → HOST OVERRIDES pane (<code>a</code> / <code>e</code> / <code>d</code>)</td>
+<td>Wins on collision</td>
+</tr>
+<tr>
+<td><strong>Global</strong></td>
+<td>Preferences (<code>Ctrl-,</code>) → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>, <code>Ctrl-P</code> → <strong>Settings: Hostnames</strong>, or <code>hostname_overrides</code> in <code>settings.json</code></td>
+<td>Fallback</td>
+</tr>
+</tbody>
+</table>
+<p>Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the <code>Host</code> header intact.</p>
+<h2 id="project-tab">Project Tab</h2>
+<p>The <strong>Project</strong> home tab is more than a summary. Focusable panes (cycle with <code>Tab</code>):</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
+  <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>
+</figure>
+<table>
+<thead>
+<tr>
+<th>Pane</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SCOPE</strong></td>
+<td>Include/exclude rules (host, string, or regex)</td>
+</tr>
+<tr>
+<td><strong>HOST OVERRIDES</strong></td>
+<td>Per-project dial map</td>
+</tr>
+<tr>
+<td><strong>ENV</strong></td>
+<td>Per-project <code>$KEY</code> variables for outbound requests. See <a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/#environment-variables">Repeater &amp; Fuzzer</a></td>
+</tr>
+<tr>
+<td><strong>DESCRIPTION</strong></td>
+<td>Free-form project notes</td>
+</tr>
+<tr>
+<td><strong>NETWORK</strong></td>
+<td>Scope-lens + <strong>sandbox</strong> toggles, plus per-project network pins (bind / upstream) that override the global Settings default</td>
+</tr>
+</tbody>
+</table>
+<p>Scope rules and host overrides are also scriptable: <code>gori run project scope add --kind=include --type=host --pattern=api.example.com</code>, <code>gori run project host-override add --host=api.example.com --ip=10.0.0.1</code>. Full flags are in the <a href="https://gori.hahwul.com/reference/cli/#run-project">CLI Reference</a>.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: act on the flows you capture</li>
+<li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a>: encode, decode, and hash without leaving the TUI</li>
+<li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a>: automated and manual analysis</li>
+<li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a>: the full filter syntax</li>
+</ul>
+]]></content:encoded>
+    </item>
+  </channel>
+</rss>

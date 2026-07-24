@@ -1,0 +1,3326 @@
+:root {
+  color-scheme: dark;
+  /* Overlay/tint bases as R G B triplets so they flip with the theme. The
+     palette is drawn from the official art: indigo-ink night, gold leaf, and
+     the cool blue-grey of brushed cloud line-work. */
+  --ink-rgb: 250 250 250;      /* near-white surface overlays (GORIDARK) */
+  --accent-rgb: 200 168 96;    /* gori focus gold, warmed toward leaf */
+  --cloud-rgb: 108 126 178;    /* cool indigo ink for cloud/wave layers */
+  --scrim-rgb: 6 8 14;         /* fixed dark scrim over dark art */
+  --bg: #080a11;               /* indigo-black night */
+  --bg-soft: #0c0f18;
+  --bg-panel: #12141e;
+  --bg-panel-strong: #191c28;
+  --text: #c6c8d4;
+  --heading: #f6f5f1;          /* warm near-white */
+  --muted: #8d90a2;
+  --quiet: #6a6d7e;
+  --line: rgb(var(--ink-rgb) / 0.12);
+  --line-strong: rgb(var(--ink-rgb) / 0.24);
+  --line-soft: rgb(var(--ink-rgb) / 0.07);
+  --accent: #c8a860;
+  --accent-strong: #e6cf92;
+  --accent-ink: #120f06;
+  /* Brushed gold-leaf gradient for accent surfaces (mark, primary CTA, rules). */
+  --grad-gold-leaf: linear-gradient(135deg, #a67f36 0%, #e6cf92 24%, #c8a860 48%, #8c6a2c 72%, #ddc084 100%);
+  /* Wordmark/brand-mark gold, sampled from the logo in gori-wallpaper.webp
+     (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
+  --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
+  --selection: rgb(var(--accent-rgb) / 0.26);
+  --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
+  --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
+  --header-bg: rgb(9 11 18 / 0.82);
+  --sidebar-bg: rgb(9 11 18 / 0.9);
+  --modal-bg: #12141e;
+  --overlay-bg: rgb(4 5 10 / 0.76);
+  --pre-bg: #0c0e17;
+  /* syntax (GORIDARK) */
+  --syn-comment: #6e6e76;
+  --syn-keyword: #b08ec2;
+  --syn-string: #8fb87a;
+  --syn-number: #ca9b6a;
+  --syn-name: #82a8c4;
+  --syn-title: #fafafa;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+  --header-h: 68px;
+  --sidebar-w: 284px;
+  --toc-w: 220px;
+  --content-max-w: 800px;
+  --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ink-rgb: 26 22 14;         /* warm-dark surface overlays (GORILIGHT) */
+  --accent-rgb: 168 121 31;    /* gori focus gold (light) */
+  --cloud-rgb: 150 132 96;     /* warm taupe ink for cloud/wave layers */
+  --scrim-rgb: 8 8 9;
+  --bg: #faf9f7;
+  --bg-soft: #f4f2ee;
+  --bg-panel: #f1efe9;
+  --bg-panel-strong: #e7e5de;
+  --text: #33322f;
+  --heading: #141210;
+  --muted: #6b6454;
+  --quiet: #8a8272;
+  --line: rgb(var(--ink-rgb) / 0.14);
+  --line-strong: rgb(var(--ink-rgb) / 0.26);
+  --line-soft: rgb(var(--ink-rgb) / 0.08);
+  --accent: #a8791f;
+  --accent-strong: #8a5d0a;
+  --accent-ink: #fbf7ee;
+  --grad-gold-leaf: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 52%, #6f4e12 76%, #cba43e 100%);
+  --grad-logo: linear-gradient(135deg, #c5a45a 0%, #b08d3f 55%, #8a6a28 100%);
+  --selection: rgb(var(--accent-rgb) / 0.2);
+  --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
+  --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
+  --header-bg: rgb(250 249 247 / 0.82);
+  --sidebar-bg: rgb(244 242 238 / 0.9);
+  --modal-bg: #f4f2ee;
+  --overlay-bg: rgb(40 34 22 / 0.4);
+  --pre-bg: #f1efe9;
+  /* syntax (GORILIGHT) */
+  --syn-comment: #8a8272;
+  --syn-keyword: #864f9e;
+  --syn-string: #2f7d1f;
+  --syn-number: #9c5d1f;
+  --syn-name: #2f6d99;
+  --syn-title: #141210;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text);
+  /* Indigo cloud masses top-right and bottom-left, a warm gold glow where the
+     art's leaf concentrates, over an indigo-black night. */
+  background:
+    radial-gradient(58rem 42rem at 90% -8%, rgb(var(--cloud-rgb) / 0.16), transparent 70%),
+    radial-gradient(52rem 40rem at 6% 108%, rgb(var(--cloud-rgb) / 0.11), transparent 72%),
+    radial-gradient(38rem 30rem at 94% 6%, rgb(var(--accent-rgb) / 0.07), transparent 66%),
+    linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 46rem);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ambient ink-wave line-work: the contour SVG is used as a mask so the indigo
+   gradient shows only where the brushed strokes are. It flows in from the
+   top-right, behind the hero art, and dissolves at its own edges. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.46;
+  /* The wave colour is baked into the SVG, so this is a plain background-image
+     (cheap) rather than an image mask. A single linear-gradient mask keeps the
+     line-work in the right half, clear of the headline. */
+  background: url("../images/contour-waves.svg") 118% -8% / 128% auto no-repeat;
+  -webkit-mask: linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%);
+  mask: linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%);
+}
+
+/* Scattered gold-leaf flecks, clustered toward the top-right of the night field. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.75;
+  background: url("../images/gold-flecks.svg") top right / 62% auto no-repeat;
+}
+
+:root[data-theme="light"] body::before {
+  opacity: 0.34;
+  /* Warm the baked cool-indigo strokes toward taupe so the wave line-work sits
+     in the warm-paper palette instead of reading as cold blue ink. */
+  filter: hue-rotate(172deg) saturate(0.65);
+}
+
+:root[data-theme="light"] body::after {
+  opacity: 0.5;
+}
+
+/* Documentation pages keep the reading column calm: the wave line-work drops to
+   a whisper and the flecks thin out, so the atmosphere stays present without
+   sitting under body text. The landing keeps the full treatment. */
+body.is-doc::before {
+  opacity: 0.09;
+}
+
+body.is-doc::after {
+  opacity: 0.4;
+}
+
+:root[data-theme="light"] body.is-doc::before {
+  opacity: 0.16;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent-rgb) / 0.5);
+  text-underline-offset: 0.22em;
+  transition: color var(--transition), text-decoration-color var(--transition);
+}
+
+a:hover {
+  color: var(--heading);
+  text-decoration-color: currentColor;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 1000;
+  transform: translateY(-150%);
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform var(--transition);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.docs-header {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 100;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--header-bg);
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-right: 1.4rem;
+  color: var(--heading);
+  font-weight: 760;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* The loop mark is the PNG used as a mask, filled with --grad-logo so it reads
+   as a gilded silhouette. --grad-logo is redefined per theme (light gold leaf
+   on dark, deepened gold on light) and is color-picked from the official gori
+   artwork, so the mark matches the real logo instead of the deeper
+   --grad-gold-leaf used elsewhere. --logo-src is set inline in the template to
+   carry base_url. */
+.logo-mark {
+  width: 2.75rem;
+  height: 2.5rem;
+  background: var(--grad-logo);
+  -webkit-mask: var(--logo-src) center / contain no-repeat;
+  mask: var(--logo-src) center / contain no-repeat;
+  /* Hint that the mark owns a custom context menu (logo downloads). */
+  cursor: context-menu;
+}
+
+/* Brand asset picker: right-click the logo mark (herdr.dev-style). Fixed so it
+   floats above the sticky header without disturbing the header flex row. */
+.logo-menu {
+  position: fixed;
+  z-index: 1100;
+  min-width: 10.5rem;
+  max-height: min(28rem, calc(100vh - 24px));
+  overflow-y: auto;
+  padding: 0.3rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow-soft);
+}
+
+.logo-menu[hidden] {
+  display: none;
+}
+
+.logo-menu-sep {
+  padding: 0.45rem 0.7rem 0.2rem;
+  color: var(--quiet);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.logo-menu-sep--rule {
+  height: 0;
+  margin: 0.3rem 0.45rem;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.logo-menu a,
+.logo-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--heading);
+  padding: 0.42rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.logo-menu a:hover,
+.logo-menu a:focus-visible,
+.logo-menu button:hover,
+.logo-menu button:focus-visible {
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent-strong);
+  outline: none;
+}
+
+/* Gilded wordmark: shares --grad-logo with the mark so both pieces of the
+   brand read as the same gold. --accent is the flat fallback where
+   background-clip text is unsupported. */
+.logo-word {
+  font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", "Apple Symbols", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1;
+  letter-spacing: 0;
+  transform: translateY(-0.04em);
+  color: var(--accent);
+  background: var(--grad-logo);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Header zones: brand | primary sections | tools.
+   Primary links are quiet pills; the right cluster is utilities only
+   (search, language, GitHub, theme). Install is not header chrome —
+   it lives under Start and on the home hero one-liner. */
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.top-nav a {
+  padding: 0.38rem 0.78rem;
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--transition), background var(--transition);
+}
+
+.top-nav a:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+
+.top-nav a.active {
+  color: var(--accent-strong);
+  background: rgb(var(--accent-rgb) / 0.12);
+  font-weight: 500;
+}
+
+/* Mobile section picker: hidden on desktop; replaces .top-nav when it collapses. */
+.nav-compact {
+  display: none;
+  position: relative;
+  margin-right: 0.15rem;
+}
+
+.nav-compact-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  list-style: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.nav-compact-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.nav-compact-trigger:hover,
+.nav-compact[open] > .nav-compact-trigger {
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--accent-strong);
+}
+
+.nav-compact-trigger svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.nav-compact-panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-width: 10.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow-soft);
+}
+
+.nav-compact-panel a {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--heading);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.nav-compact-panel a:hover {
+  background: rgb(var(--ink-rgb) / 0.06);
+  color: var(--heading);
+}
+
+.nav-compact-panel a.active {
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent-strong);
+}
+
+/* Tools cluster: one drawn control (language pill) + quiet icon hits.
+   Search first (docs muscle memory), then locale, source, theme. */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+/* Language switcher — a segmented pill of locale codes. Every language is one
+   click away and the control stays narrower than the old named dropdown. */
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--ink-rgb) / 0.045);
+}
+
+.lang-switch a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.26rem 0.5rem;
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-decoration: none;
+  transition: color var(--transition), background var(--transition);
+}
+
+.lang-switch a:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.07);
+}
+
+.lang-switch a.is-current {
+  color: var(--accent-strong);
+  background: rgb(var(--accent-rgb) / 0.16);
+}
+
+.search-trigger,
+.github-link,
+.theme-toggle,
+.nav-compact-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform var(--transition), background var(--transition), color var(--transition);
+}
+
+.search-trigger:hover,
+.github-link:hover,
+.theme-toggle:hover {
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--accent-strong);
+}
+
+.search-trigger svg,
+.github-link svg,
+.theme-toggle svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.theme-toggle .icon-sun {
+  display: none;
+}
+
+.theme-toggle .icon-moon {
+  display: block;
+}
+
+:root[data-theme="light"] .theme-toggle .icon-sun {
+  display: block;
+}
+
+:root[data-theme="light"] .theme-toggle .icon-moon {
+  display: none;
+}
+
+/* The path rings are deliberately absent here: nudging one breaks the weave
+   against its neighbours, so they answer a press with fill, not movement. */
+.search-trigger:active,
+.theme-toggle:active,
+.github-link:active,
+.button:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.8rem;
+  min-height: 1.38rem;
+  padding: 0.08rem 0.42rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+/* No decorative rings in the background: every circle on this page is a real
+   object (the hero disc, the three path rings, the structure disc, the mark). */
+.home-main {
+  position: relative;
+  overflow: hidden;
+  padding: var(--header-h) 1.25rem 0;
+}
+
+.home-hero,
+.home-showcase,
+.home-paths,
+.home-structure,
+.home-flow,
+.home-meaning {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1380px);
+  margin: 0 auto;
+}
+
+.home-hero {
+  min-height: calc(100dvh - var(--header-h));
+  display: grid;
+  grid-template-columns: minmax(0, 0.86fr) minmax(420px, 1.14fr);
+  gap: 2.5rem;
+  align-items: center;
+  padding: 4rem 0 3rem;
+}
+
+.hero-copy {
+  max-width: 680px;
+}
+
+.home-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: max-content;
+  margin-bottom: 1.2rem;
+  padding: 0.38rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-rgb) / 0.08);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+.home-kicker::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--grad-gold-leaf);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.2);
+}
+
+.home-hero h1 {
+  max-width: 15ch;
+  color: var(--heading);
+  font-size: 5.1rem;
+  line-height: 1.04;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.hero-lede {
+  max-width: 35rem;
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 1.08rem;
+  line-height: 1.75;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.65rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.85rem;
+  padding: 0.78rem 1.15rem;
+  border-radius: var(--radius-pill);
+  font-weight: 760;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: transform var(--transition), border-color var(--transition), background var(--transition), color var(--transition);
+}
+
+/* Hover lifts, press pushes. :not(:active) keeps the shared :active rule
+   (earlier in the file, same specificity) in charge while the button is down. */
+.button:hover:not(:active) {
+  transform: translateY(-1px);
+}
+
+/* Flat gold, no leaf gradient: the brushed metal look stays on the artwork
+   and the mark, while the CTA reads as a plain, confident surface. */
+.button-primary {
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.button-primary:hover {
+  background: var(--accent-strong);
+}
+
+/* On paper the mid gold leaves the cream label short of AA, so the flat fill
+   deepens and hover lightens instead. */
+:root[data-theme="light"] .button-primary {
+  background: var(--accent-strong);
+}
+
+:root[data-theme="light"] .button-primary:hover {
+  background: var(--accent);
+}
+
+.button-secondary {
+  border: 1px solid var(--line-strong);
+  background: rgb(var(--ink-rgb) / 0.04);
+  color: var(--heading);
+}
+
+.button-secondary:hover {
+  border-color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.12);
+}
+
+/* Install one-liner under the CTAs: pick a channel, the line updates, one
+   click copies it. The docker command is long and scrolls inside the code
+   element instead of wrapping the widget. */
+.hero-install {
+  max-width: 35rem;
+  margin-top: 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(var(--ink-rgb) / 0.03);
+}
+
+.install-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.install-tab {
+  padding: 0.24rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.install-tab:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+
+.install-tab[aria-pressed="true"] {
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent-strong);
+}
+
+.install-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.62rem 0.6rem 0.62rem 0.95rem;
+}
+
+/* Undo the inline-code chip styling: in here the command is the content, not
+   a token inside prose. */
+.install-line code {
+  flex: 1 1 auto;
+  /* A flex item's min-width:auto would refuse to shrink below the command's
+     full width, blowing the hero grid past narrow viewports. */
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* The prompt glyph lives outside the copied text (pseudo-element text never
+   lands in a selection or the clipboard). */
+.install-line code::before {
+  content: "$ ";
+  color: var(--accent);
+}
+
+.install-copy {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.install-copy:hover {
+  color: var(--heading);
+  border-color: var(--line-strong);
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+
+.install-copy svg {
+  width: 15px;
+  height: 15px;
+}
+
+.install-copy svg:last-child {
+  display: none;
+}
+
+.install-copy.copied {
+  color: var(--accent-strong);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.install-copy.copied svg:first-child {
+  display: none;
+}
+
+.install-copy.copied svg:last-child {
+  display: block;
+}
+
+/* The disc lives in its own element so it can clip the drifting image, while
+   .hero-art stays unclipped and carries the two orbits around it. The width
+   stays under 100% of the column so those orbits never reach the page edge. */
+.hero-art {
+  position: relative;
+  justify-self: center;
+  /* Under 100% of the column so the orbits below never reach the page edge,
+     which .home-main would clip. */
+  width: min(84%, 36rem);
+  aspect-ratio: 1;
+}
+
+/* Two concentric orbits: the border draws the inner one, the outline the
+   outer. An outline follows border-radius and ignores the element's own
+   overflow, which is why it can sit outside without a third element. */
+.hero-art::before {
+  content: "";
+  position: absolute;
+  inset: -1.7rem;
+  border: 1px solid rgb(var(--accent-rgb) / 0.24);
+  border-radius: 50%;
+  outline: 1px solid rgb(var(--accent-rgb) / 0.1);
+  outline-offset: 1.6rem;
+  pointer-events: none;
+}
+
+/* Two request nodes riding the orbits, one per circle, opposite directions:
+   traffic circling the loop. The spin lives in the motion block below; with
+   motion off they park at the base rotations here, two nodes at rest. */
+.hero-orbit {
+  position: absolute;
+  inset: -1.7rem;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: rotate(230deg);
+}
+
+.hero-orbit-out {
+  inset: -3.3rem;
+  transform: rotate(115deg);
+}
+
+.hero-orbit::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.9), 0 0 0 3px rgb(var(--accent-rgb) / 0.16);
+}
+
+.hero-orbit-out::before {
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+}
+
+.hero-disc {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #0a0a0b;
+  box-shadow: var(--shadow);
+}
+
+.hero-disc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid rgb(var(--accent-rgb) / 0.26);
+  border-radius: 50%;
+  background: linear-gradient(115deg, rgb(var(--scrim-rgb) / 0.2), transparent 40%, rgb(var(--accent-rgb) / 0.1));
+}
+
+/* Warm the monochrome wave capture into gold leaf on indigo, so the disc reads
+   like the official art rather than a cold render. */
+.hero-disc img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Showcase: a real terminal capture floating under the hero --------- */
+
+.home-showcase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 0 3.5rem;
+  /* Depth for the frame's reveal tilt (motion block); inert when static. */
+  perspective: 1100px;
+}
+
+.showcase-frame {
+  width: min(100%, 1040px);
+  margin: 0;
+}
+
+.showcase-frame img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  filter: drop-shadow(0 26px 60px rgb(0 0 0 / 0.5));
+}
+
+.showcase-note {
+  max-width: 46ch;
+  margin: 1.5rem auto 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.showcase-note strong {
+  color: var(--heading);
+}
+
+/* --- Paths: three links woven into a chain ----------------------------- */
+
+.home-paths {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0 6rem;
+}
+
+/* --lead/--link/--lap size the whole chain; the breakpoints only resize
+   those three. --cut is the width of the background band each ring carries
+   to erase the stroke running beneath it. */
+.path-chain {
+  --lead: clamp(19rem, 27vw, 25rem);
+  --link: clamp(15.5rem, 22vw, 20rem);
+  --lap: clamp(2.8rem, 4.2vw, 4rem);
+  --cut: 5px;
+  position: relative;
+  width: calc(var(--lead) + 2 * var(--link) - 2 * var(--lap));
+  height: var(--lead);
+}
+
+/* z-index stays auto on the rings themselves: no stacking context, so the
+   woven ::after halves below can rise above .path-ring-mid. */
+.path-ring {
+  position: absolute;
+  top: calc((var(--lead) - var(--link)) / 2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: var(--link);
+  height: var(--link);
+  /* Reserve --lap on both sides: that is exactly how far the neighbouring
+     ring reaches into this one, and a label must not sit on its stroke.
+     Not a percentage either, since padding percentages would resolve
+     against .path-chain rather than against the ring. */
+  padding: 0 calc(var(--lap) + 0.8rem);
+  border: 1.5px solid;
+  /* Opaque, so the half redrawn in ::after does not composite over itself
+     and read brighter than the half that is not. */
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--bg));
+  border-radius: 50%;
+  color: var(--text);
+  text-align: center;
+  text-decoration: none;
+  text-wrap: balance;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.path-ring:focus-visible {
+  outline-offset: 8px;
+}
+
+/* On hover a signal runs just inside the ring: an arc cut from a conic wash
+   with a thin radial mask, spun in the motion block. Inset past --cut so it
+   clears the opaque weave bands the ::after halves draw over the border. */
+.path-ring::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: conic-gradient(transparent 0 70%, rgb(var(--accent-rgb) / 0.9) 88%, transparent 97%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+}
+
+.path-ring:hover::before,
+.path-ring:focus-visible::before {
+  opacity: 1;
+}
+
+.path-ring:hover,
+.path-ring:active {
+  border-color: var(--accent-strong);
+  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.09), transparent 72%);
+}
+
+.path-ring:active {
+  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.17), transparent 70%);
+}
+
+.path-ring:hover h2 {
+  color: var(--accent-strong);
+}
+
+/* The first link is the wide one, and the only one drawn at full strength.
+   Size and stroke carry the hierarchy; the weave carries the metaphor. */
+.path-ring-lead {
+  top: 0;
+  left: 0;
+  width: var(--lead);
+  height: var(--lead);
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--bg));
+}
+
+/* The middle ring rides above both neighbours and cuts them; each neighbour
+   then redraws one half of itself higher still and cuts the middle ring
+   back. So every pair crosses over on one side and under on the other,
+   which is what makes the three read as woven rather than stacked. */
+.path-ring-mid {
+  z-index: 1;
+  left: calc(var(--lead) - var(--lap));
+  box-shadow:
+    0 0 0 var(--cut) var(--bg),
+    inset 0 0 0 var(--cut) var(--bg);
+}
+
+.path-ring-tail {
+  left: calc(var(--lead) + var(--link) - 2 * var(--lap));
+}
+
+.path-ring-lead::after,
+.path-ring-tail::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  border: inherit;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 var(--cut) var(--bg),
+    inset 0 0 0 var(--cut) var(--bg);
+}
+
+.path-ring-lead::after {
+  clip-path: inset(0 0 50% 0);
+}
+
+.path-ring-tail::after {
+  clip-path: inset(50% 0 0 0);
+}
+
+.path-ring span,
+.flow-list span,
+.structure-grid strong {
+  color: var(--accent-strong);
+  font-weight: 760;
+}
+
+.path-ring h2 {
+  color: var(--heading);
+  font-size: 1.2rem;
+  line-height: 1.24;
+  letter-spacing: -0.01em;
+  transition: color var(--transition);
+}
+
+.path-ring p {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.path-ring-lead h2 {
+  font-size: 1.5rem;
+}
+
+.path-ring-lead p {
+  font-size: 0.95rem;
+}
+
+.home-structure {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.92fr) minmax(0, 1.08fr);
+  gap: 2rem;
+  align-items: center;
+  padding: 2rem 0 6rem;
+}
+
+/* A gold-ringed disc matching the hero orb: the same ink-and-gold wallpaper art
+   fills it as a backdrop, with the real Space-menu capture floating on top like
+   a window resting on the art. A soft radial scrim sinks the wallpaper behind
+   the screenshot so the terminal stays the focal point. */
+.structure-art {
+  position: relative;
+  justify-self: center;
+  width: min(92%, 30rem);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 46%, transparent 30%, rgb(4 5 10 / 0.55) 78%),
+    #0a0a0b url("../images/wallpaper.webp") left / cover;
+  box-shadow: var(--shadow-soft);
+  outline: 1px solid rgb(var(--accent-rgb) / 0.2);
+  outline-offset: 1.5rem;
+}
+
+.structure-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+  border-radius: 50%;
+}
+
+/* The screenshot floats centred as a window; the wallpaper shows around it
+   (mostly above/below, since the capture is wide). The light twin swaps in via
+   the theme-swap JS and pops even harder against the dark art. */
+.structure-art img {
+  position: absolute;
+  top: 50%;
+  max-width: 800px;
+  height: auto;
+  transform: translate(-50%, -50%);
+  border-radius: 9px;
+  box-shadow: 0 22px 55px rgb(0 0 0 / 0.55);
+  outline: 1px solid rgb(255 255 255 / 0.08);
+  outline-offset: -1px;
+}
+
+.structure-copy {
+  padding: 1rem 0 1rem 1rem;
+}
+
+.structure-copy h2,
+.home-flow h2 {
+  max-width: 12em;
+  color: var(--heading);
+  font-size: 3.05rem;
+  line-height: 1.08;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.structure-copy > p {
+  max-width: 40rem;
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+/* No boxes: a hairline and the space around it separate these three. */
+.structure-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.95fr 0.9fr;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.structure-grid div {
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line-strong);
+}
+
+.structure-grid span {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.home-flow {
+  padding: 1.5rem 0 4.5rem;
+}
+
+.home-flow h2 {
+  max-width: 14em;
+}
+
+.flow-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  max-width: 1080px;
+  margin-top: 1.6rem;
+  border-top: 1px solid var(--line);
+}
+
+/* Each step alternates copy / screenshot so the workflow reads as a walkthrough,
+   not three identical cards. */
+.flow-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  gap: 2.6rem;
+  align-items: center;
+  padding: 2.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Even rows mirror the layout (screenshot on the left). The columns are swapped
+   too so the screenshot keeps the wide 1.18fr track — otherwise `order` would
+   drop it into the narrow track and it would render smaller than its neighbours. */
+.flow-list > div:nth-child(even) {
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+}
+
+.flow-list > div:nth-child(even) .flow-shot {
+  order: -1;
+}
+
+.flow-copy span {
+  display: block;
+  margin-bottom: 0.55rem;
+}
+
+.flow-list p {
+  color: var(--muted);
+  max-width: 34ch;
+}
+
+/* Every shot is framed to the same 1206:520 box so the three steps read as one
+   uniform set. The Fuzzer capture is taller (34 rows vs 26), so it is cropped
+   from the top — the marked request and payload config stay in view, only the
+   empty results/hint strip at the bottom is trimmed. */
+.flow-shot {
+  margin: 0;
+  aspect-ratio: 1206 / 520;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.42);
+}
+
+.flow-shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  transform-origin: top center;
+  transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The whole row is the hover surface, so reading the copy also leans the
+   capture in. Origin stays at the top: the crop keeps its upper edge. */
+.flow-list > div:hover .flow-shot img {
+  transform: scale(1.02);
+}
+
+/* --- Hand it to an agent (the MCP seam) ------------------------------- */
+
+.home-agent {
+  padding: 1.5rem 0 5.5rem;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+
+.home-agent h2 {
+  max-width: 16em;
+  margin: 0 auto;
+  color: var(--heading);
+  font-size: 3.05rem;
+  line-height: 1.08;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.agent-intro {
+  max-width: 44rem;
+  margin: 1rem auto 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+/* agent  ⇄ MCP ⇄  gori project — two panels joined by a bidirectional wire. */
+.agent-seam {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  margin: 2.8rem auto 0;
+  max-width: 62rem;
+}
+
+.seam-node {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1.3rem 1.45rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  text-align: left;
+}
+
+.seam-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.seam-node > strong {
+  color: var(--heading);
+  font-size: 1.02rem;
+  font-weight: 680;
+  line-height: 1.3;
+}
+
+.seam-toollist {
+  margin-top: 0.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--muted);
+  word-spacing: 0.08em;
+}
+
+/* The connector: protocol label above a gold wire, the entry command below. */
+.seam-link {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1.1rem;
+  min-width: 12.5rem;
+}
+
+.seam-link-label {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.seam-wire {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  background: var(--grad-gold-leaf);
+  border-radius: 2px;
+}
+
+/* A light runs the wire, out and back: the call going over, the answer
+   coming home. The <i> clips the streak to the wire's box (the wire's own
+   pseudo-elements are spent on the arrowheads, and overflow must stay
+   visible for them). Kept at opacity 0 until the motion block animates it,
+   so a static page shows a clean wire. */
+.seam-pulse {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.seam-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  right: auto;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, var(--accent-strong), transparent);
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+/* Arrowheads at both ends: the agent calls, gori answers. */
+.seam-wire::before,
+.seam-wire::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border-block: 5px solid transparent;
+}
+.seam-wire::before {
+  left: -1px;
+  border-right: 7px solid var(--accent);
+}
+.seam-wire::after {
+  right: -1px;
+  border-left: 7px solid var(--accent);
+}
+
+.seam-mcp {
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: var(--accent-ink);
+  background: var(--accent);
+  padding: 0.14rem 0.55rem;
+  border-radius: var(--radius-pill);
+}
+
+.agent-link {
+  display: inline-block;
+  margin-top: 2.2rem;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* Narrow: stack the seam vertically and turn the wire on its end. */
+@media (max-width: 720px) {
+  .agent-seam {
+    flex-direction: column;
+    max-width: 26rem;
+  }
+
+  .seam-node {
+    text-align: center;
+    align-items: center;
+  }
+
+  .seam-link {
+    width: 100%;
+    min-width: 0;
+    padding: 0.85rem 0;
+  }
+
+  .seam-wire {
+    width: 2px;
+    height: 2.4rem;
+  }
+
+  .seam-wire::before,
+  .seam-wire::after {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    border-block: 0;
+    border-inline: 5px solid transparent;
+  }
+
+  .seam-wire::before {
+    top: -1px;
+    border-right: 0;
+    border-bottom: 7px solid var(--accent);
+  }
+
+  .seam-wire::after {
+    top: auto;
+    bottom: -1px;
+    border-left: 0;
+    border-top: 7px solid var(--accent);
+  }
+
+  /* The wire stands on end here, so the streak becomes a band that travels
+     vertically; the motion block swaps its keyframes to match. */
+  .seam-pulse::before {
+    inset: 0;
+    bottom: auto;
+    width: auto;
+    height: 34%;
+    background: linear-gradient(180deg, transparent, var(--accent-strong), transparent);
+    transform: translateY(-100%);
+  }
+}
+
+/* --- Agent session card (shared: MCP guide transcript) --------------- */
+
+.agent-session {
+  margin: 1.6rem 0 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel-strong);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+
+.agent-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.agent-session-bar .dots {
+  display: flex;
+  gap: 0.34rem;
+}
+
+.agent-session-bar .dots i {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: rgb(var(--ink-rgb) / 0.16);
+}
+
+.agent-session-title {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.agent-session-body {
+  padding: 1rem 1.15rem;
+  font-size: 0.82rem;
+  line-height: 1.75;
+}
+
+.agent-session-body p {
+  margin: 0.1rem 0;
+  color: var(--text);
+}
+
+.agent-session-body .as-user {
+  margin-bottom: 0.55rem;
+  color: var(--heading);
+}
+
+.as-who {
+  display: inline-block;
+  margin-right: 0.5rem;
+  padding: 0.02rem 0.42rem;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.as-arrow {
+  color: var(--accent);
+}
+
+.agent-session-body .as-ret .as-arrow {
+  color: var(--quiet);
+}
+
+.agent-session-body code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: inherit;
+}
+
+.as-args {
+  color: var(--muted);
+}
+
+.as-warn {
+  color: #d98b5f;
+  font-weight: 600;
+}
+
+.agent-session-body .as-done {
+  margin-top: 0.55rem;
+  color: var(--heading);
+}
+
+.as-check {
+  color: var(--syn-string);
+  font-weight: 700;
+}
+
+/* --- The name (dictionary entry) -------------------------------------- */
+
+.home-meaning {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3.5rem;
+  align-items: center;
+  padding: 4.5rem 0 6rem;
+  border-top: 1px solid var(--line);
+}
+
+.meaning-word {
+  color: var(--heading);
+  font-size: 3.05rem;
+  font-weight: 780;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+/* --muted, not --quiet: --quiet is 3.9:1 here and fails AA at this size. */
+.meaning-pron {
+  margin: 0.85rem 0 1.15rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+}
+
+.meaning-def {
+  max-width: 54ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.85;
+  text-wrap: pretty;
+}
+
+.meaning-def + .meaning-def {
+  margin-top: 0.9rem;
+}
+
+/* Two plain rings woven onto a third. --link/--side/--lap drive the whole
+   mark; the breakpoints only resize those. */
+.meaning-chain {
+  --link: 160px;
+  --side: 138px;
+  --lap: 38px;
+  position: relative;
+  width: calc(2 * var(--side) + var(--link) - 2 * var(--lap));
+  height: var(--link);
+}
+
+/* z-index stays auto here: no stacking context, so the woven ::after below
+   can rise above .chain-ring-link. */
+.chain-ring {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.chain-ring-side {
+  top: calc((var(--link) - var(--side)) / 2);
+  width: var(--side);
+  height: var(--side);
+  border: 1px solid rgb(var(--accent-rgb) / 0.45);
+  /* Opaque, so the half redrawn in ::after does not composite over itself
+     and read brighter than the half that is not. */
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--bg));
+}
+
+.chain-ring-side:first-child {
+  left: 0;
+}
+
+.chain-ring-side:last-child {
+  left: calc(var(--side) + var(--link) - 2 * var(--lap));
+}
+
+/* Every ring carries a background-coloured band that cuts whatever stroke
+   runs beneath it. The link ring sits above both side rings and cuts them;
+   each side ring then redraws one half of itself higher still and cuts the
+   link ring back. So each pair crosses over on one side and under on the
+   other, which is what makes the three read as woven rather than stacked. */
+.chain-ring-link {
+  z-index: 1;
+  top: 0;
+  left: calc(var(--side) - var(--lap));
+  width: var(--link);
+  height: var(--link);
+  border: 1.5px solid var(--accent);
+  box-shadow:
+    0 0 0 3px var(--bg),
+    inset 0 0 0 3px var(--bg);
+}
+
+.chain-ring-side::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  border: inherit;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px var(--bg),
+    inset 0 0 0 3px var(--bg);
+}
+
+.chain-ring-side:first-child::after {
+  clip-path: inset(0 0 50% 0);
+}
+
+.chain-ring-side:last-child::after {
+  clip-path: inset(50% 0 0 0);
+}
+
+.docs-container {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 3rem;
+  min-height: 100dvh;
+  padding-top: var(--header-h);
+  padding-left: var(--sidebar-w);
+}
+
+.docs-sidebar {
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  width: var(--sidebar-w);
+  height: calc(100dvh - var(--header-h));
+  padding: 1.2rem 0.85rem 1.5rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgb(var(--ink-rgb) / 0.045), transparent 18rem),
+    var(--sidebar-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.docs-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.docs-sidebar::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+
+.sidebar-section {
+  margin-bottom: 1.05rem;
+}
+
+/* Section titles are bold sans in natural case so they read as a different
+   level from the mono-caps group labels (CORE, WORKBENCHES) inside them. */
+.sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.34rem 0.75rem;
+  margin-bottom: 0.3rem;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--transition), background var(--transition);
+}
+
+/* Suppress the native <summary> disclosure triangle across engines. */
+.sidebar-title::-webkit-details-marker {
+  display: none;
+}
+
+/* The open section is the one being read: its title steps forward while the
+   collapsed ones stay recessed. */
+.sidebar-section[open] > .sidebar-title {
+  color: var(--heading);
+}
+
+.sidebar-title:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.05);
+}
+
+.sidebar-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-caret {
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  opacity: 0.6;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.sidebar-section[open] > .sidebar-title .sidebar-caret {
+  transform: rotate(180deg);
+}
+
+.sidebar-title:hover .sidebar-caret {
+  opacity: 1;
+}
+
+/* A hairline rail turns the flat link pile into a tree: pages hang off their
+   section, and the active page pins a gold marker onto the rail itself. */
+.sidebar-links {
+  list-style: none;
+  margin-left: 1.05rem;
+  border-left: 1px solid var(--line);
+}
+
+.sidebar-subhead {
+  margin: 0.75rem 0 0.2rem;
+  padding: 0 0.8rem;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.sidebar-links li {
+  margin-bottom: 0.1rem;
+}
+
+.sidebar-links a {
+  position: relative;
+  display: block;
+  padding: 0.38rem 0.7rem 0.38rem 0.8rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  text-decoration: none;
+  transition: color var(--transition), background var(--transition);
+}
+
+/* The marker sits on the rail (the ul border), not inside the link box. */
+.sidebar-links a::before {
+  content: "";
+  position: absolute;
+  top: 0.3rem;
+  bottom: 0.3rem;
+  left: -1px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background var(--transition);
+}
+
+.sidebar-links a:hover {
+  background: rgb(var(--ink-rgb) / 0.05);
+  color: var(--heading);
+}
+
+.sidebar-links a:hover::before {
+  background: var(--line-strong);
+}
+
+.sidebar-links a.active {
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.sidebar-links a.active::before {
+  background: var(--accent);
+}
+
+.docs-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: calc(var(--content-max-w) + 6rem);
+  padding: 4rem 3rem 2rem;
+}
+
+.docs-main h2,
+.docs-main h3,
+.docs-main h4 {
+  scroll-margin-top: calc(var(--header-h) + 1.2rem);
+}
+
+/* Hover # anchors injected by toc.js */
+.docs-main .h-anchor {
+  margin-left: 0.45rem;
+  color: var(--quiet);
+  font-weight: 400;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition);
+}
+
+.docs-main h2:hover .h-anchor,
+.docs-main h3:hover .h-anchor,
+.docs-main .h-anchor:focus-visible {
+  opacity: 1;
+}
+
+.docs-main .h-anchor:hover {
+  color: var(--accent-strong);
+}
+
+.docs-toc-rail {
+  display: none;
+  flex: 0 0 var(--toc-w);
+  align-self: flex-start;
+  position: sticky;
+  top: calc(var(--header-h) + 2.2rem);
+  max-height: calc(100dvh - var(--header-h) - 4rem);
+  padding: 0.1rem 0 1.5rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.docs-toc-rail::-webkit-scrollbar {
+  width: 6px;
+}
+
+.docs-toc-rail::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+
+.docs-toc-rail .toc-title {
+  margin: 0 0 0.7rem 0.7rem;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.docs-toc-rail nav > ul {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid var(--line);
+}
+
+.docs-toc-rail ul ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-toc-rail li {
+  margin: 0;
+}
+
+.docs-toc-rail a {
+  display: block;
+  margin-left: -1px;
+  padding: 0.3rem 0.7rem;
+  border-left: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  text-decoration: none;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.docs-toc-rail ul ul a {
+  padding-left: 1.5rem;
+  font-size: 0.8rem;
+}
+
+.docs-toc-rail a:hover {
+  color: var(--heading);
+}
+
+.docs-toc-rail a.active {
+  border-left-color: var(--accent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+@media (min-width: 1200px) {
+  .docs-toc-rail {
+    display: block;
+  }
+}
+
+.docs-main h1 {
+  max-width: 13em;
+  color: var(--heading);
+  font-size: 3.2rem;
+  line-height: 1.08;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.docs-main > h1:first-child {
+  position: relative;
+  margin-bottom: 1.35rem;
+  padding-bottom: 1.1rem;
+}
+
+.docs-main > h1:first-child::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 7rem;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent) 46%, transparent);
+}
+
+.docs-main h2 {
+  margin: 3.5rem 0 0.8rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--line);
+  color: var(--heading);
+  font-size: 1.72rem;
+  line-height: 1.22;
+  font-weight: 760;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+
+.docs-main > h1:first-child + h2 {
+  margin-top: 2.2rem;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.docs-main h3 {
+  margin: 2rem 0 0.45rem;
+  color: var(--heading);
+  font-size: 1.22rem;
+  line-height: 1.3;
+  font-weight: 740;
+}
+
+.docs-main h4 {
+  margin: 1.4rem 0 0.45rem;
+  color: var(--heading);
+  font-size: 1rem;
+  font-weight: 740;
+}
+
+.docs-main p,
+.docs-main li {
+  color: var(--text);
+}
+
+.docs-main p {
+  max-width: var(--content-max-w);
+  margin-bottom: 1rem;
+}
+
+.docs-main ul,
+.docs-main ol {
+  max-width: var(--content-max-w);
+  margin: 0 0 1.1rem;
+  padding-left: 1.35rem;
+}
+
+.docs-main li {
+  margin-bottom: 0.35rem;
+}
+
+.docs-main li::marker {
+  color: var(--accent);
+}
+
+.docs-main strong {
+  color: var(--heading);
+}
+
+/* --- TUI screenshots: real terminal captures rendered to self-contained SVG.
+   The SVG carries its own near-black (or theme) canvas + rounded window frame,
+   so on the dark docs it floats on the same field; on light it reads as a card.
+   drop-shadow (not box-shadow) hugs the rounded shape's alpha. --- */
+.tui-shot {
+  margin: 2rem 0 2.4rem;
+}
+.tui-shot img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 14px 36px rgb(0 0 0 / 0.34));
+}
+.tui-shot figcaption {
+  margin-top: 0.75rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  text-align: center;
+}
+.docs-main kbd {
+  padding: 0.06rem 0.36rem;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--heading);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+/* theme gallery: a tidy grid of the same view across palettes */
+.tui-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  margin: 2rem 0 2.4rem;
+}
+.tui-gallery figure {
+  margin: 0;
+}
+.tui-gallery img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 22px rgb(0 0 0 / 0.3));
+}
+.tui-gallery figcaption {
+  margin-top: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+/* Gentle breakout on wide screens so the terminal text stays legible. */
+@media (min-width: 1180px) {
+  .tui-shot {
+    margin-inline: -2.5rem;
+  }
+}
+@media (max-width: 620px) {
+  .tui-gallery {
+    grid-template-columns: 1fr;
+  }
+}
+
+hr {
+  height: 1px;
+  margin: 3.5rem 0;
+  border: 0;
+  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+}
+
+code {
+  padding: 0.16rem 0.38rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+pre {
+  max-width: min(100%, 58rem);
+  margin: 1rem 0 1.5rem;
+  padding: 1.05rem 1.15rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(var(--ink-rgb) / 0.03), transparent),
+    var(--pre-bg);
+  box-shadow: var(--shadow-soft);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* codecopy.js wraps each pre so the copy button can sit outside the pre's
+   horizontal scroll (an absolute child of the pre would scroll with it). */
+.code-block {
+  position: relative;
+  max-width: min(100%, 58rem);
+  margin: 1rem 0 1.5rem;
+}
+
+.code-block pre {
+  max-width: 100%;
+  margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus-visible,
+.code-copy.copied {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  border-color: var(--line-strong);
+  color: var(--heading);
+}
+
+.code-copy svg {
+  width: 15px;
+  height: 15px;
+}
+
+.code-copy svg:last-child {
+  display: none;
+}
+
+.code-copy.copied svg:first-child {
+  display: none;
+}
+
+.code-copy.copied svg:last-child {
+  display: block;
+  color: var(--accent-strong);
+}
+
+.code-copy.copied {
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+/* Touch screens have no hover: keep the button always visible there. */
+@media (hover: none) {
+  .code-copy {
+    opacity: 1;
+  }
+}
+
+pre code,
+pre code.hljs {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--syn-comment);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-doctag {
+  color: var(--syn-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+  color: var(--syn-string);
+}
+
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-bullet {
+  color: var(--syn-number);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section .hljs-title {
+  color: var(--syn-title);
+}
+
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title.class_,
+.hljs-tag {
+  color: var(--syn-name);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-name {
+  color: var(--syn-name);
+}
+
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-symbol,
+.hljs-link,
+.hljs-meta,
+.hljs-params {
+  color: var(--text);
+}
+
+.hljs-deletion {
+  color: var(--syn-number);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 760;
+}
+
+pre code .line.hl {
+  display: inline-block;
+  width: 100%;
+  background: rgb(var(--accent-rgb) / 0.12);
+}
+
+pre code .ln {
+  opacity: 0.48;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+table {
+  width: 100%;
+  max-width: 58rem;
+  margin: 1.2rem 0 1.6rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+th,
+td {
+  padding: 0.72rem 0.8rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  color: var(--heading);
+  font-weight: 760;
+  text-align: left;
+  background: rgb(var(--ink-rgb) / 0.035);
+}
+
+tbody tr:hover {
+  background: rgb(var(--ink-rgb) / 0.035);
+}
+
+blockquote {
+  max-width: 48rem;
+  margin: 1.5rem 0;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid rgb(var(--accent-rgb) / 0.5);
+  border-radius: var(--radius);
+  background: rgb(var(--ink-rgb) / 0.04);
+  color: var(--muted);
+}
+
+blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.info-box {
+  max-width: var(--content-max-w);
+  margin: 1rem 0;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgb(var(--ink-rgb) / 0.045);
+}
+
+.info-box > strong:first-child {
+  color: var(--accent-strong);
+}
+
+ul.section-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  padding: 0;
+  list-style: none;
+}
+
+ul.section-list li {
+  min-height: 6rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(var(--ink-rgb) / 0.045);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+ul.section-list li:hover {
+  border-color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.08);
+}
+
+ul.section-list li a {
+  color: var(--heading);
+  font-weight: 760;
+  text-decoration: none;
+}
+
+nav.pagination {
+  margin: 1.6rem 0;
+}
+
+nav.pagination .pagination-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0;
+  list-style: none;
+}
+
+nav.pagination a,
+.pagination-current span,
+.pagination-disabled span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.1rem;
+  padding: 0.36rem 0.68rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+nav.pagination a:hover,
+.pagination-current span {
+  border-color: var(--accent);
+  color: var(--heading);
+}
+
+.pagination-disabled span {
+  opacity: 0.52;
+}
+
+.taxonomy-desc {
+  color: var(--muted);
+}
+
+.docs-footer {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1380px);
+  margin: 0 auto;
+  padding: 2rem 1.25rem 2.4rem;
+  border-top: 1px solid var(--line);
+  color: var(--quiet);
+  font-size: 0.9rem;
+}
+
+/* Doc pages keep the sidebar fixed for the full viewport height, so the
+   footer (a flow sibling after .docs-container closes) starts AFTER the
+   sidebar — margin, not padding, so its border-top never runs underneath
+   the translucent sidebar and crosses its border-right. */
+.is-doc .docs-footer {
+  width: auto;
+  margin: 0 0 0 var(--sidebar-w);
+  padding-left: 3rem;
+}
+
+.docs-footer p {
+  margin: 0;
+}
+
+.docs-footer a {
+  color: var(--muted);
+}
+
+.docs-footer a:hover {
+  color: var(--accent-strong);
+}
+
+/* hahwul mark — Built with Love (matches dalfox docs footer) */
+.footer-mark {
+  text-align: center;
+  margin-top: 1.5rem;
+}
+
+.footer-mark a {
+  display: inline-block;
+  line-height: 0;
+}
+
+.footer-mark .hahwul-img {
+  display: inline-block;
+  width: 80px;
+  height: 80px;
+  /* Recolor the logo to the footer text tone by using its alpha as a mask
+     and filling with the muted token (the raster itself is white). */
+  background-color: var(--muted);
+  -webkit-mask: url("../images/hahwul.webp") center / contain no-repeat;
+  mask: url("../images/hahwul.webp") center / contain no-repeat;
+  transition: background-color 0.3s ease;
+}
+
+.footer-mark .hahwul-img:hover {
+  background-color: var(--text);
+}
+
+.footer-love {
+  margin-top: 0.85rem;
+  color: var(--muted);
+  font-family: "Bradley Hand", "Snell Roundhand", "Apple Chancery", cursive;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+
+/* Freeze the page behind the search modal (search.js toggles the class). */
+html.search-lock,
+html.search-lock body {
+  overflow: hidden;
+}
+
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: none;
+  justify-content: center;
+  padding-top: 12dvh;
+  background: var(--overlay-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.search-overlay.active {
+  display: flex;
+  animation: search-fade 160ms ease both;
+}
+
+.search-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 640px);
+  max-height: 76dvh;
+  overflow: hidden;
+  align-self: flex-start;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--modal-bg);
+  box-shadow: var(--shadow), 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
+}
+
+.search-overlay.active .search-modal {
+  animation: search-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes search-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes search-rise {
+  from { transform: translateY(-10px) scale(0.985); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-icon {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--quiet);
+  transition: color var(--transition);
+}
+
+.search-input-wrap:focus-within .search-icon {
+  color: var(--accent);
+}
+
+.search-input-wrap input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1.05rem;
+}
+
+.search-input-wrap input::placeholder {
+  color: var(--quiet);
+}
+
+.search-input-wrap input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.search-esc {
+  flex: none;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+
+.search-esc:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.search-results::-webkit-scrollbar {
+  width: 8px;
+}
+
+.search-results::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+
+.search-result-item {
+  position: relative;
+  display: block;
+  padding: 0.72rem 2rem 0.72rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.search-result-item:hover,
+.search-result-item.active {
+  border-color: rgb(var(--accent-rgb) / 0.28);
+  background: rgb(var(--accent-rgb) / 0.1);
+}
+
+.search-result-item.active::after {
+  content: "↵";
+  position: absolute;
+  top: 50%;
+  right: 0.85rem;
+  transform: translateY(-50%);
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+}
+
+.search-result-title {
+  margin-bottom: 0.15rem;
+  color: var(--heading);
+  font-weight: 720;
+  font-size: 0.96rem;
+}
+
+.search-result-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.search-result-snippet mark,
+.search-result-title mark {
+  border-radius: 4px;
+  padding: 0 0.1em;
+  background: rgb(var(--accent-rgb) / 0.24);
+  color: var(--accent-strong);
+}
+
+.search-no-results {
+  padding: 2.2rem 1rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.search-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 0.35rem;
+  padding: 0.75rem 0.5rem 0.35rem;
+  border-top: 1px solid var(--line);
+  color: var(--quiet);
+  font-size: 0.76rem;
+}
+
+.search-hint span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.search-hint kbd {
+  min-width: 1.5rem;
+  min-height: 1.25rem;
+  font-size: 0.68rem;
+}
+
+/* --- Motion ------------------------------------------------------------ */
+/* Everything that moves sits behind two gates: this reduced-motion query,
+   and html.js around the scroll reveals. A no-script visit, or motion off,
+   renders the page static and complete. home.js flips .in on each .rv as it
+   scrolls up; only the hero animates on load, because it is the only part
+   guaranteed to be on screen while a load animation runs. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Load: the hero copy steps in top to bottom, the disc follows, and the
+     orbit traffic fades in with it. */
+  .hero-copy > * {
+    animation: hero-rise 620ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  .hero-copy > :nth-child(2) {
+    animation-delay: 80ms;
+  }
+
+  .hero-copy > :nth-child(3) {
+    animation-delay: 160ms;
+  }
+
+  .hero-copy > :nth-child(4) {
+    animation-delay: 240ms;
+  }
+
+  .hero-copy > :nth-child(5) {
+    animation-delay: 320ms;
+  }
+
+  .hero-art {
+    animation: hero-rise 760ms cubic-bezier(0.16, 1, 0.3, 1) 160ms backwards;
+  }
+
+  .hero-disc img {
+    animation: quiet-drift 16s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
+    transform-origin: 74% 45%;
+  }
+
+  /* The negative delay puts the outer node mid-lap from the first frame, so
+     the two never read as starting from the same spot. */
+  .hero-orbit {
+    animation: orbit-spin 34s linear infinite;
+  }
+
+  .hero-orbit-out {
+    animation-duration: 56s;
+    animation-direction: reverse;
+    animation-delay: -21s;
+  }
+
+  .path-ring:hover::before,
+  .path-ring:focus-visible::before {
+    animation: ring-run 2.2s linear infinite;
+  }
+
+  .seam-pulse::before {
+    opacity: 1;
+    animation: seam-run 2.6s ease-in-out infinite alternate;
+  }
+
+  /* Scroll reveals. Base: fade and rise as one piece. Sections whose parts
+     carry the movement instead pin their own transform to none below, so
+     the choreography reads from the parts, not the whole. */
+  html.js .rv {
+    opacity: 0;
+    transform: translateY(26px);
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .rv.in {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Showcase: the capture tips flat as it arrives, a screen turned to face
+     you. The perspective lives on .home-showcase. */
+  html.js .home-showcase.rv .showcase-frame {
+    transform: rotateX(9deg) scale(0.97);
+    transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-showcase.rv.in .showcase-frame {
+    transform: none;
+  }
+
+  /* Structure: art and copy close in from opposite sides, then the three
+     hairline entries step in. The chain in .home-paths above stays on the
+     base reveal: it rises as one piece, staggering the rings would pull the
+     weave apart mid-animation. */
+  html.js .home-structure.rv {
+    transform: none;
+  }
+
+  html.js .home-structure.rv .structure-art,
+  html.js .home-structure.rv .structure-copy,
+  html.js .home-structure.rv .structure-grid > div {
+    opacity: 0;
+    transition: opacity 750ms cubic-bezier(0.16, 1, 0.3, 1), transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-structure.rv .structure-art {
+    transform: translateX(-26px) scale(0.98);
+  }
+
+  html.js .home-structure.rv .structure-copy {
+    transform: translateX(24px);
+    transition-delay: 90ms;
+  }
+
+  html.js .home-structure.rv .structure-grid > div {
+    transform: translateY(14px);
+  }
+
+  html.js .home-structure.rv .structure-grid > div:nth-child(1) {
+    transition-delay: 260ms;
+  }
+
+  html.js .home-structure.rv .structure-grid > div:nth-child(2) {
+    transition-delay: 350ms;
+  }
+
+  html.js .home-structure.rv .structure-grid > div:nth-child(3) {
+    transition-delay: 440ms;
+  }
+
+  html.js .home-structure.rv.in .structure-art,
+  html.js .home-structure.rv.in .structure-copy,
+  html.js .home-structure.rv.in .structure-grid > div {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Flow: the section reveal carries only the title; each row then fades in
+     on its own, copy and capture sliding from the sides they occupy (the
+     even rows mirror, matching their swapped columns). */
+  html.js .home-flow.rv {
+    opacity: 1;
+    transform: none;
+  }
+
+  html.js .home-flow.rv h2 {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-flow.rv.in h2 {
+    opacity: 1;
+    transform: none;
+  }
+
+  html.js .flow-list > .rv {
+    transform: none;
+  }
+
+  html.js .flow-list > .rv .flow-copy,
+  html.js .flow-list > .rv .flow-shot {
+    transition: transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .flow-list > .rv .flow-copy {
+    transform: translateX(-24px);
+  }
+
+  html.js .flow-list > .rv .flow-shot {
+    transform: translateX(30px);
+    transition-delay: 90ms;
+  }
+
+  html.js .flow-list > .rv:nth-child(even) .flow-copy {
+    transform: translateX(24px);
+  }
+
+  html.js .flow-list > .rv:nth-child(even) .flow-shot {
+    transform: translateX(-30px);
+  }
+
+  html.js .flow-list > .rv.in .flow-copy,
+  html.js .flow-list > .rv.in .flow-shot {
+    transform: none;
+  }
+
+  /* Agent: the nodes arrive from both ends and the wire closes the seam,
+     growing outward from the MCP chip at its middle. */
+  html.js .home-agent.rv {
+    transform: none;
+  }
+
+  html.js .home-agent.rv .seam-node,
+  html.js .home-agent.rv .seam-wire,
+  html.js .home-agent.rv .seam-mcp,
+  html.js .home-agent.rv .agent-link {
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-agent.rv .seam-node:first-child {
+    transform: translateX(-26px);
+  }
+
+  html.js .home-agent.rv .seam-node:last-child {
+    transform: translateX(26px);
+  }
+
+  html.js .home-agent.rv .seam-wire {
+    transform: scaleX(0);
+    transition-delay: 220ms;
+  }
+
+  html.js .home-agent.rv .seam-mcp {
+    transform: scale(0.85);
+    transition-delay: 220ms;
+  }
+
+  html.js .home-agent.rv .agent-link {
+    opacity: 0;
+    transform: translateY(10px);
+    transition-delay: 420ms;
+  }
+
+  html.js .home-agent.rv.in .seam-node,
+  html.js .home-agent.rv.in .seam-wire,
+  html.js .home-agent.rv.in .seam-mcp {
+    transform: none;
+  }
+
+  html.js .home-agent.rv.in .agent-link {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* The name: the entry settles up while the mark breathes in from slightly
+     small, one piece each, for the weave. */
+  html.js .home-meaning.rv {
+    transform: none;
+  }
+
+  html.js .home-meaning.rv .meaning-entry,
+  html.js .home-meaning.rv .meaning-chain {
+    transition: transform 800ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-meaning.rv .meaning-entry {
+    transform: translateY(20px);
+  }
+
+  html.js .home-meaning.rv .meaning-chain {
+    transform: scale(0.94);
+    transition-delay: 140ms;
+  }
+
+  html.js .home-meaning.rv.in .meaning-entry,
+  html.js .home-meaning.rv.in .meaning-chain {
+    transform: none;
+  }
+}
+
+/* The stacked seam (narrow layout) turns the wire on its end: the closing
+   scale and the running light swap to the vertical axis. */
+@media (max-width: 720px) and (prefers-reduced-motion: no-preference) {
+  html.js .home-agent.rv .seam-wire {
+    transform: scaleY(0);
+  }
+
+  .seam-pulse::before {
+    animation-name: seam-run-y;
+  }
+}
+
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes quiet-drift {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.035) translateX(-0.8rem);
+  }
+}
+
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ring-run {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The streak is 34% of the wire; 320% of its own width clears the far end. */
+@keyframes seam-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes seam-run-y {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(320%);
+  }
+}
+
+@media (max-width: 1100px) {
+  .home-hero {
+    /* minmax(0, 1fr), not bare 1fr: 1fr's auto minimum inherits the install
+       one-liner's nowrap width and shoves the whole column past narrow
+       viewports. A zero minimum lets the widget shrink and scroll inside. */
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 3rem;
+  }
+
+  .home-hero h1 {
+    max-width: 15ch;
+    font-size: 4.15rem;
+  }
+
+  .hero-art {
+    width: min(88%, 30rem);
+  }
+
+  .home-structure {
+    grid-template-columns: 1fr;
+  }
+
+  .structure-copy {
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 860px) {
+  :root {
+    --header-h: 64px;
+  }
+
+  .docs-header {
+    padding: 0 1rem;
+  }
+
+  /* Wordmark drops first; the mark alone is enough next to the tools. */
+  .logo-word {
+    display: none;
+  }
+
+  .logo {
+    margin-right: 0.55rem;
+  }
+
+  /* Primary section links stay available via the compact menu. */
+  .top-nav {
+    display: none;
+  }
+
+  .nav-compact {
+    display: block;
+  }
+
+  .home-main {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .home-hero {
+    min-height: auto;
+    padding: 2.2rem 0 2.5rem;
+  }
+
+  .home-hero h1,
+  .structure-copy h2,
+  .home-flow h2 {
+    font-size: 3rem;
+  }
+
+  .hero-art {
+    width: min(84%, 24rem);
+  }
+
+  .hero-art::before {
+    inset: -1.1rem;
+    outline-offset: 1rem;
+  }
+
+  /* The orbit nodes track the tightened circles above. */
+  .hero-orbit {
+    inset: -1.1rem;
+  }
+
+  .hero-orbit-out {
+    inset: -2.1rem;
+  }
+
+  .structure-art {
+    width: min(88%, 26rem);
+    outline-offset: 1.1rem;
+  }
+
+  .home-paths {
+    padding-bottom: 4rem;
+  }
+
+  /* Narrow enough that the chain hangs vertically instead. The weave cuts
+     move from top/bottom halves to left/right halves to follow it. */
+  .path-chain {
+    --lead: min(84vw, 22rem);
+    --link: min(76vw, 19rem);
+    --lap: 2.6rem;
+    width: var(--lead);
+    height: calc(var(--lead) + 2 * var(--link) - 2 * var(--lap));
+  }
+
+  /* Stacked, the neighbours reach in from above and below, so the sides are
+     free again and --lap no longer belongs in the horizontal padding. */
+  .path-ring {
+    top: auto;
+    left: calc((var(--lead) - var(--link)) / 2);
+    padding: 0 calc(var(--link) * 0.14);
+  }
+
+  .path-ring-lead {
+    top: 0;
+    left: 0;
+    padding: 0 calc(var(--lead) * 0.15);
+  }
+
+  .path-ring-mid {
+    top: calc(var(--lead) - var(--lap));
+  }
+
+  .path-ring-tail {
+    top: calc(var(--lead) + var(--link) - 2 * var(--lap));
+  }
+
+  .path-ring-lead::after {
+    clip-path: inset(0 50% 0 0);
+  }
+
+  .path-ring-tail::after {
+    clip-path: inset(0 0 0 50%);
+  }
+
+  .structure-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-list > div,
+  .flow-list > div:nth-child(even) {
+    grid-template-columns: 1fr;
+    gap: 1.1rem;
+  }
+
+  .flow-list > div:nth-child(even) .flow-shot {
+    order: 0;
+  }
+
+  .home-meaning {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+    padding-bottom: 4.5rem;
+  }
+
+  .meaning-chain {
+    justify-self: start;
+  }
+
+  .docs-sidebar {
+    display: none;
+  }
+
+  .docs-container {
+    display: block;
+    padding-left: 0;
+  }
+
+  .is-doc .docs-footer {
+    width: min(100%, 1380px);
+    margin: 0 auto;
+    padding-left: 1.25rem;
+  }
+
+  .docs-main {
+    max-width: 100%;
+    padding: 2rem 1rem;
+  }
+
+  /* Wide reference tables scroll inside their own box on small screens. */
+  .docs-main table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .docs-main h1 {
+    font-size: 2.55rem;
+  }
+
+  ul.section-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .logo {
+    margin-right: 0.4rem;
+  }
+
+  .header-right {
+    gap: 0.15rem;
+  }
+
+  .lang-switch a {
+    min-width: 1.85rem;
+    padding: 0.26rem 0.38rem;
+  }
+
+  .search-trigger,
+  .github-link,
+  .theme-toggle,
+  .nav-compact-trigger {
+    width: 2.1rem;
+    height: 2.1rem;
+  }
+
+  .home-hero h1,
+  .structure-copy h2,
+  .home-flow h2 {
+    font-size: 2.45rem;
+  }
+
+  .meaning-word {
+    font-size: 2.6rem;
+  }
+
+  .meaning-chain {
+    --link: 116px;
+    --side: 100px;
+    --lap: 28px;
+  }
+
+  .hero-lede {
+    font-size: 1rem;
+  }
+
+  .button {
+    width: 100%;
+  }
+
+  .home-actions {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html {
+  overflow-x: hidden;
+}

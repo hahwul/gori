@@ -1,0 +1,1518 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>gori (한국어)</title>
+    <link>https://gori.hahwul.com/ko/</link>
+    <description>Sit in the loop. A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal.</description>
+    <language>ko</language>
+    <atom:link href="https://gori.hahwul.com/ko/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AI 설정</title>
+      <link>https://gori.hahwul.com/ko/getting-started/ai-setup/</link>
+      <guid>https://gori.hahwul.com/ko/getting-started/ai-setup/</guid>
+      <description>MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 그리고 첫 요청 구동.</description>
+      <content:encoded><![CDATA[<p>gori는 하나의 프로젝트와 하나의 엔진 위에 세 가지 진입점을 둡니다. <code>gori</code>(TUI, 당신을 위한 것), <code>gori run</code>(헤드리스 CLI, 스크립트를 위한 것), 그리고 <code>gori mcp</code>(<a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a>, AI 에이전트를 위한 것)입니다. 이 페이지는 AI 경로를 다룹니다. 에이전트를 gori 프로젝트에 연결하고 첫 요청까지 구동합니다.</p>
+<p>TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 당신이 직접 가져오고, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 그러면 에이전트가 트래픽을 읽고 당신과 동일한 도구를 구동합니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 <a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버 가이드</a>를 참고하세요.</p>
+<blockquote>
+<p><strong>시작하기 전에.</strong> <a href="https://gori.hahwul.com/ko/getting-started/installation/">gori를 설치</a>하고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok 등)를 준비하세요.</p>
+</blockquote>
+<h2 id="1-클라이언트에-서버-설치하기-1-install-the-server-into-your-client">1. 클라이언트에 서버 설치하기 {#1-install-the-server-into-your-client}</h2>
+<p><code>gori mcp</code>는 stdio 위에서 JSON-RPC 2.0으로 통신합니다. AI 클라이언트가 이를 spawn 해 STDIN으로 요청을 보내고 STDOUT으로 결과를 읽습니다(STDERR은 로그를 전달합니다). 클라이언트마다 설정을 손으로 편집하는 대신, gori가 대신 작성하게 하세요.</p>
+<pre><code class="language-bash hljs">gori mcp --install-claude-code   # Claude Code
+gori mcp --install-claude        # Claude Desktop
+gori mcp --install-codex         # OpenAI Codex
+gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-grok          # Grok
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>클라이언트</th>
+<th>작성되는 설정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop</td>
+<td><code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code</td>
+<td><code>~/.claude.json</code> (<code>mcpServers.gori</code>)</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex</td>
+<td><code>~/.codex/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok</td>
+<td><code>~/.grok/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 JSON이 아니라 TOML <code>[mcp_servers.gori]</code> 테이블을 사용합니다. 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.</p>
+<p>직접 연결하고 싶다면? 서버는 그저 stdio 위의 <code>gori mcp</code> 명령입니다. 추가 인자 없이 이 명령을 MCP 클라이언트에 가리키기만 하면 됩니다.</p>
+<p><strong>체크포인트.</strong> 클라이언트가 gori의 도구들(<code>list_history</code>, <code>send_request</code>, <code>project_info</code> 등)을 나열합니다. 나타나지 않으면 클라이언트를 재시작했는지, 그리고 <code>gori</code>가 클라이언트가 사용하는 <code>PATH</code>에 있는지 확인하세요.</p>
+<h2 id="2-프로젝트-바인딩-또는-에이전트가-고르게-2-pin-the-right-project">2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-pin-the-right-project}</h2>
+<p>각 gori 프로젝트는 별도의 데이터베이스입니다. 설치 후 <code>gori mcp</code>는 항상 연결됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>클라이언트가 MCP를 띄우는 방식</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Git 리포지토리 안</td>
+<td>그 워크스페이스를 자체 gori 프로젝트에 path-bind</td>
+</tr>
+<tr>
+<td>Git 밖 (Desktop / 전역 에이전트에서 흔함)</td>
+<td><strong>unbound</strong>로 시작 — 핸드셰이크 성공; 에이전트가 트래픽 도구 전에 <code>list_projects</code> / <code>create_project</code> / <code>switch_project</code> 호출</td>
+</tr>
+<tr>
+<td><code>--project</code> / <code>--db</code>로 설치</td>
+<td>첫 도구 호출부터 그 프로젝트 제공</td>
+</tr>
+</tbody>
+</table>
+<p>에이전트가 먼저 <code>project_info</code>를 호출하게 하세요. <code>bound</code>가 false이면 프로젝트를 나열·생성(unbound일 때 create는 자동 바인딩)하거나 switch 한 뒤, bound일 때 이름·DB 경로·선택 출처를 확인한 다음 데이터를 건드리게 합니다.</p>
+<p>설치 시점에 고정 engagement를 박아 두려면:</p>
+<pre><code class="language-bash hljs">gori mcp --project my-engagement --install-codex     # 이름 붙은 프로젝트의 데이터베이스
+gori mcp --db /path/to/project.db --install-claude-code   # 특정 데이터베이스 파일
+</code></pre>
+<p>전체 선택 규칙은 <a href="https://gori.hahwul.com/ko/guide/mcp/#choosing-a-project">프로젝트 선택</a>에 있습니다.</p>
+<h2 id="3-읽기-전용으로-안전하게-넘기기-3-hand-off-safely-with-read-only">3. 읽기 전용으로 안전하게 넘기기 {#3-hand-off-safely-with-read-only}</h2>
+<p>기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 에이전트(또는 대상에 대해 완전히 신뢰하지는 않는 동료)에게 읽기 도구만 주려면, 읽기 전용으로 설치하세요.</p>
+<pre><code class="language-bash hljs">gori mcp --read-only --install-claude-code
+</code></pre>
+<p>읽기 전용은 <code>list_history</code>, <code>get_flow</code>, <code>list_sitemap</code> 등 검사 도구를 유지하면서 <code>send_request</code>, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. <code>decode</code>, <code>jwt_decode</code> 같은 순수 계산 헬퍼는 네트워크나 데이터를 절대 건드리지 않으므로 그대로 사용할 수 있습니다.</p>
+<h2 id="4-첫-요청-구동하기-4-drive-your-first-request">4. 첫 요청 구동하기 {#4-drive-your-first-request}</h2>
+<p>도구가 살아 있으면, 에이전트에게 평범한 말로 지시하세요. 에이전트가 의도를 읽기·액션 도구로 매핑합니다.</p>
+<blockquote>
+<p>&quot;<code>/login</code>에 대한 마지막 POST 20개를 나열하고, 가장 최근 것을 다른 비밀번호로 재전송한 뒤, 상태 코드가 바뀌면 이슈를 열어줘.&quot;</p>
+</blockquote>
+<p>유능한 에이전트는 이를 짧은 도구 시퀀스로 바꿉니다.</p>
+<pre><code class="language-text hljs">→ list_history   method:POST path~/login   (최신 20개)
+→ get_flow       &lt;가장 최근 플로우&gt;
+→ send_request   POST /login  (본문 편집)
+→ create_issue   &quot;Auth bypass on /login&quot; severity:high
+</code></pre>
+<p>에이전트의 행동은 조용히 지나가지 않습니다. 각 행동은 에이전트에서 온 것으로 표시되어 gori의 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 코파일럿이 프로젝트에 무엇을 했는지 확인할 수 있습니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a>: 전체 도구 목록, 라이브 인터셉트, 그리고 gori가 MCP 이음새를 쓰는 이유</li>
+<li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI Reference</a>: 전체 <code>gori mcp</code> 플래그</li>
+<li><a href="https://gori.hahwul.com/ko/reference/query-language/">Query Language</a>: 에이전트가 <code>list_history</code>에 사용하는 필터 문법</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>설정</title>
+      <link>https://gori.hahwul.com/ko/getting-started/configuration/</link>
+      <guid>https://gori.hahwul.com/ko/getting-started/configuration/</guid>
+      <description>gori가 데이터를 저장하는 위치, 네트워크 설정 방법, 그리고 루트 CA를 다룹니다.</description>
+      <content:encoded><![CDATA[<p>gori는 전역 환경설정을 JSON 설정 파일에 보관하고, 각 프로젝트를 자체 SQLite 데이터베이스로 저장합니다. 이 페이지는 첫날 필요한 핵심만 다룹니다. 무엇이 어디에 있는지, 프록시가 어떻게 바인딩되는지, 클라이언트가 gori의 CA를 어떻게 신뢰하는지입니다. 키 단위 전체 설명은 <a href="https://gori.hahwul.com/ko/reference/config/">설정 레퍼런스</a>를 참고하세요.</p>
+<h2 id="the-gori-home-directory">gori 홈 디렉터리</h2>
+<p>gori가 기록하는 모든 것은 하나의 트리 <code>GORI_HOME</code> 아래에 있습니다. 해당 환경 변수가 설정되어 있고 비어 있지 않으면 <code>$GORI_HOME</code>으로, 아니면 <code>~/.gori</code>로 해석됩니다. 여기에는 <code>settings.json</code>(전역 환경설정), <code>projects/</code> 아래의 프로젝트 데이터베이스, <code>ca/</code>의 루트 CA, 그리고 <code>themes/</code>와 <code>wordlists/</code>가 담깁니다. 전체 트리는 <a href="https://gori.hahwul.com/ko/reference/config/#storage-layout">저장소 레이아웃</a>을 참고하세요.</p>
+<p>한 세션 동안 격리된 홈을 사용하도록 gori를 지정하려면:</p>
+<pre><code class="language-bash hljs">GORI_HOME=/tmp/gori-scratch gori
+</code></pre>
+<h2 id="global-settings">전역 설정</h2>
+<p>전역 환경설정은 <code>settings.json</code>에 저장됩니다. 경로를 출력하거나 <code>$EDITOR</code>에서 열려면:</p>
+<pre><code class="language-bash hljs">gori settings          # print the settings.json path
+gori settings --edit   # open it in your editor
+</code></pre>
+<p>파일을 직접 편집할 일은 거의 없습니다. 파일에 담기는 모든 항목은 하나의 화면, <strong>Preferences</strong> 모달에서 편집할 수 있으며, 네 개의 서브탭(General, Appearance, Editor &amp; Keys, Network &amp; Tabs)으로 묶여 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>여는 방법</th>
+<th>도착 지점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>어디서나 <code>Ctrl-,</code></td>
+<td>그룹 스트립. 그룹을 먼저 고릅니다</td>
+</tr>
+<tr>
+<td>상단 바의 <code>⚙</code> 칩</td>
+<td><code>Ctrl-,</code>와 동일</td>
+</tr>
+<tr>
+<td><code>Ctrl-P</code> → <strong>Settings: …</strong> 항목</td>
+<td>해당 섹션의 필드로 바로</td>
+</tr>
+</tbody>
+</table>
+<p><code>Ctrl-,</code>는 프로젝트 선택기에서도, 즉 프로젝트를 열기 전에도 동작하므로 첫 실행에서 테마를 정할 수 있습니다. 저장한 변경은 재시작 없이 즉시 적용됩니다. 모든 섹션과 필드는 <a href="https://gori.hahwul.com/ko/guide/settings/">설정 가이드</a>를, 그 아래의 키는 <a href="https://gori.hahwul.com/ko/reference/config/">설정 레퍼런스</a>를 참고하세요.</p>
+<h2 id="network">Network</h2>
+<p>기본적으로 프록시는 <code>127.0.0.1:8070</code>에서 수신하며 대상에 직접 연결합니다. 이를 바꿀 수 있는 곳은 세 군데이며, 우선순위가 높은 순서대로:</p>
+<ol>
+<li><strong>프로젝트별</strong> — <strong>Project</strong> 탭에서 한 프로젝트의 바인드 주소, 포트, 업스트림을 고정합니다. 해당 프로젝트에 한해 우선합니다.</li>
+<li><strong>CLI 플래그</strong> — <code>--listen</code> / <code>--port</code>는 현재 프로세스에 한해 전역 기본값을 재정의하며 디스크에 기록되지 않습니다.</li>
+<li><strong><code>settings.json</code>의 <code>network</code></strong> — 공유되는 기본값으로, 첫 실행 마법사와 Preferences → <strong>Network</strong>가 편집합니다.</li>
+</ol>
+<p>아무것도 설정되지 않으면 공장 기본값은 <code>127.0.0.1:8070</code>, 직접 연결입니다. 모든 키는 <a href="https://gori.hahwul.com/ko/reference/config/#network">network</a>를, 정확한 우선순위는 <a href="https://gori.hahwul.com/ko/reference/config/#per-project-overrides">프로젝트별 재정의</a>를 참고하세요.</p>
+<h2 id="the-root-ca">루트 CA</h2>
+<p>HTTPS를 인터셉트하려면 클라이언트가 gori의 루트 인증서를 신뢰해야 합니다. 이 인증서는 <code>~/.gori/ca</code>에 <code>root.crt.pem</code>과 <code>root.key.pem</code>으로 보관됩니다.</p>
+<pre><code class="language-bash hljs">gori ca                       # print the certificate path
+gori ca --pem                 # print the PEM to stdout
+gori ca --ca-dir /path        # use a custom CA directory
+gori ca regenerate --yes      # replace the root CA (scripts/CI; voids prior trust)
+</code></pre>
+<p>TUI 커맨드 팔레트(<strong>Regenerate CA certificate</strong>)에서, 또는 대화식으로 <code>gori ca regenerate</code>(<code>regenerate</code>를 입력해 확인)로 CA를 교체할 수도 있습니다. 두 경로 모두 확인 절차를 거치는데, 교체하면 이전에 발급된 모든 신뢰가 무효화되기 때문입니다. 이미 실행 중인 gori는 재시작 전까지 기존 CA를 유지합니다.</p>
+<h3 id="bring-your-own-ca">자체 CA 사용하기</h3>
+<p>CA 하나를 팀이나 여러 머신에서 재사용하려면, 루트를 외부에서 생성한 뒤 가져오세요(인증서 <strong>및</strong> 키: gori는 키로 리프 인증서에 서명하고, 클라이언트는 인증서만 신뢰합니다):</p>
+<pre><code class="language-bash hljs">openssl ecparam -genkey -name prime256v1 -out root.key.pem
+openssl req -x509 -new -key root.key.pem -days 3650 -subj &quot;/CN=my ca&quot; -out root.crt.pem
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+</code></pre>
+<p>같은 동작을 팔레트(<strong>Import CA certificate</strong>)에서도 할 수 있습니다. gori는 가져오기 전에 키가 인증서와 일치하는지, 그리고 그 인증서가 CA인지 확인합니다. 신뢰용으로는 <code>root.crt.pem</code>만 배포하고, <code>root.key.pem</code>은 비밀로 유지하세요. <a href="https://gori.hahwul.com/ko/reference/cli/#gori-ca-import"><code>gori ca import</code></a>를 참고하세요.</p>
+<p>팔레트의 <strong>Open browser</strong> 동작은 이미 CA를 신뢰하고 프록시를 경유하는 격리된 프로파일로 설치된 브라우저를 실행합니다(<a href="https://gori.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a> 참조).</p>
+<h2 id="full-reference">전체 레퍼런스</h2>
+<p>모든 설정 키는 <a href="https://gori.hahwul.com/ko/reference/config/">설정 레퍼런스</a>를, 모든 명령줄 플래그는 <a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a>를 참고하세요.</p>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>설치</title>
+      <link>https://gori.hahwul.com/ko/getting-started/installation/</link>
+      <guid>https://gori.hahwul.com/ko/getting-started/installation/</guid>
+      <description>curl, Homebrew, AUR, Docker, 사전 빌드 바이너리, 또는 소스에서 gori를 설치합니다.</description>
+      <content:encoded><![CDATA[<p>gori는 <a href="https://crystal-lang.org/">Crystal</a>로 작성되었습니다. 아래에서 사전 빌드된 채널을 고르거나, 플랫폼에 맞는 것이 없으면 <a href="#build-from-source">소스에서 빌드</a>하세요. 모든 채널은 동일한 <code>gori</code> 바이너리를 설치합니다. 바이너리가 <code>PATH</code>에 올라가면 <a href="#verify-the-installation">설치 확인</a>으로 넘어가세요.</p>
+<h2 id="quick-install-curl">빠른 설치 (curl)</h2>
+<p>macOS와 Linux용 한 줄 명령입니다. OS/아키텍처를 감지해 알맞은 <a href="https://github.com/hahwul/gori/releases/latest">GitHub Release</a> 자산을 내려받고 <code>gori</code>를 <code>PATH</code>에 올립니다:</p>
+<pre><code class="language-bash hljs">curl -fsSL https://gori.hahwul.com/install.sh | bash
+</code></pre>
+<p><code>/usr/local</code>에 쓸 수 있으면 그 아래에, 아니면 <code>~/.local</code>에 설치합니다. <code>GORI_INSTALL_PREFIX</code>로 재정의할 수 있습니다. 설치 후에는 <code>gori update</code>가 바이너리를 스스로 업데이트합니다(설치를 담당하는 채널이 Homebrew / Snap / AUR인 경우 그쪽으로 안내합니다).</p>
+<h2 id="homebrew">Homebrew</h2>
+<p><strong>macOS</strong>(Apple Silicon 및 Intel)와 <strong>Linux</strong>(x86_64 및 arm64)에서 동작합니다:</p>
+<pre><code class="language-bash hljs">brew install hahwul/gori/gori
+</code></pre>
+<p>이는 먼저 tap을 추가하는 것의 축약형이며, 다음과 같이 명시적으로 할 수도 있습니다:</p>
+<pre><code class="language-bash hljs">brew tap hahwul/gori
+brew install gori
+</code></pre>
+<p>macOS 보틀은 링크된 모든 dylib를 바이너리 옆에 함께 번들한 자립형 tarball이고, Linux 보틀은 정적 빌드입니다. 어느 쪽도 추가 Homebrew 의존성을 끌어오지 않습니다.</p>
+<h2 id="arch-linux-aur">Arch Linux (AUR)</h2>
+<p><strong>x86_64</strong>용 바이너리 패키지가 <a href="https://aur.archlinux.org/packages/gori">AUR</a>에 게시되어 있습니다. 원하는 AUR 헬퍼로 설치하세요:</p>
+<pre><code class="language-bash hljs">yay -S gori
+# or
+paru -S gori
+</code></pre>
+<h2 id="docker">Docker</h2>
+<p>멀티 아키텍처 이미지(x86_64 및 arm64)가 GitHub Container Registry에 <a href="https://github.com/hahwul/gori/pkgs/container/gori"><code>ghcr.io/hahwul/gori</code></a>로 게시되어 있습니다.</p>
+<p>TUI는 터미널이 필요하므로 대화식으로 실행하세요. 설정과 루트 CA가 재시작 후에도 유지되도록 <code>/data</code>(컨테이너 내부의 <code>GORI_HOME</code>)에 볼륨을 마운트하고, 호스트에서 프록시에 접근할 수 있도록 <code>0.0.0.0</code>에 바인딩하세요:</p>
+<pre><code class="language-bash hljs">docker run --rm -it \
+  -v gori:/data \
+  -p 8070:8070 \
+  ghcr.io/hahwul/gori --listen 0.0.0.0
+</code></pre>
+<blockquote>
+<p><code>/data</code> 볼륨을 마운트하지 않으면 루트 CA가 매 실행마다 재생성되며, 매번 다시 신뢰해야 합니다. 기본 바인드 호스트는 <code>127.0.0.1</code>이라 컨테이너 외부에서 접근할 수 없으므로 <code>--listen 0.0.0.0</code>이 필요합니다.</p>
+</blockquote>
+<p>헤드리스 하위 명령은 TTY가 필요 없습니다:</p>
+<pre><code class="language-bash hljs">docker run --rm    -v gori:/data ghcr.io/hahwul/gori run history
+docker run --rm -i -v gori:/data ghcr.io/hahwul/gori mcp
+</code></pre>
+<h2 id="pre-built-binary">사전 빌드 바이너리</h2>
+<p>macOS와 Linux용 독립 실행 바이너리가 모든 <a href="https://github.com/hahwul/gori/releases/latest">GitHub Release</a>에 첨부됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>플랫폼</th>
+<th>자산</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux x86_64</td>
+<td><code>gori-v*-linux-x86_64</code></td>
+</tr>
+<tr>
+<td>Linux arm64</td>
+<td><code>gori-v*-linux-arm64</code></td>
+</tr>
+<tr>
+<td>macOS Apple Silicon</td>
+<td><code>gori-v*-osx-arm64.tar.gz</code></td>
+</tr>
+<tr>
+<td>macOS Intel</td>
+<td><code>gori-v*-osx-x86_64.tar.gz</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="linux">Linux</h3>
+<p>Linux 바이너리는 정적으로 링크(musl)된 자립형입니다. 하나를 내려받아 실행 권한을 주고 <code>PATH</code>로 옮기세요:</p>
+<pre><code class="language-bash hljs">chmod +x gori-v*-linux-x86_64
+sudo mv gori-v*-linux-x86_64 /usr/local/bin/gori
+</code></pre>
+<h3 id="macos">macOS</h3>
+<p>macOS 아카이브는 자립형입니다. 의존 dylib를 모두 바이너리 옆의 <code>lib/</code> 폴더에 번들하고, 바이너리를 기준으로 상대 경로를 해석합니다. <strong><code>gori</code>와 <code>lib/</code>를 함께 두세요.</strong> 안정적인 위치에 압축을 풀고 바이너리를 <code>PATH</code>에 링크하세요:</p>
+<pre><code class="language-bash hljs">tar xzf gori-v*-osx-arm64.tar.gz          # extracts `gori` + `lib/`
+sudo mkdir -p /usr/local/opt/gori
+sudo cp -R gori lib /usr/local/opt/gori/
+sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
+</code></pre>
+<blockquote>
+<p>바이너리는 ad-hoc 서명되어 있습니다. Gatekeeper가 다운로드를 차단하면 격리 플래그를 지우세요: <code>xattr -dr com.apple.quarantine /usr/local/opt/gori</code>. <a href="#homebrew">Homebrew</a>로 설치하면 이 문제를 피할 수 있습니다.</p>
+</blockquote>
+<h2 id="build-from-source">소스에서 빌드</h2>
+<h3 id="prerequisites">사전 요구 사항</h3>
+<ul>
+<li><strong>Crystal</strong> <code>&gt;= 1.20.2</code></li>
+<li><strong>pkg-config</strong></li>
+<li>리포지터리를 클론할 <strong>Git</strong></li>
+</ul>
+<h4 id="system-libraries-brotli-zstd">시스템 라이브러리 (Brotli / Zstd)</h4>
+<p>기본적으로 gori는 네이티브 디코더에 링크하여 <code>Content-Encoding: br</code>(Brotli)와 <code>zstd</code>로 전송된 HTTP 본문을 표시할 수 있습니다. 빌드 전에 설치하세요:</p>
+<table>
+<thead>
+<tr>
+<th>플랫폼</th>
+<th>명령</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS (Homebrew)</td>
+<td><code>brew install brotli zstd</code></td>
+</tr>
+<tr>
+<td>Debian / Ubuntu</td>
+<td><code>sudo apt install libbrotli-dev libzstd-dev</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="build">빌드</h3>
+<pre><code class="language-bash hljs">git clone https://github.com/hahwul/gori
+cd gori
+shards build --release
+</code></pre>
+<p>릴리스 바이너리는 <code>bin/gori</code>에 생성됩니다. <code>PATH</code>에 있는 위치로 옮기세요:</p>
+<pre><code class="language-bash hljs">cp bin/gori /usr/local/bin/
+</code></pre>
+<h3 id="building-without-brotli-zstd">Brotli / Zstd 없이 빌드</h3>
+<p>해당 라이브러리를 사용할 수 없다면 이를 빼고 빌드하세요. Gzip과 deflate 디코딩(Crystal 표준 라이브러리 제공)은 계속 동작하며, Brotli와 Zstd 본문은 디코드된 텍스트 대신 &quot;decoder not built in&quot; 안내를 표시합니다:</p>
+<pre><code class="language-bash hljs">shards build --release -Dwithout_native_codecs
+</code></pre>
+<blockquote>
+<p>정의되지 않은 <code>BrotliDecoder*</code> 심볼 때문에 링크가 실패하면, <code>libbrotlidec</code>이 없거나 <code>pkg-config</code>가 찾지 못하는 것입니다. <code>brotli</code>를 설치하거나(위 참조) <code>-Dwithout_native_codecs</code>를 사용하세요.</p>
+</blockquote>
+<h2 id="verify-the-installation">설치 확인</h2>
+<pre><code class="language-bash hljs">gori --version
+</code></pre>
+<p><code>gori 0.1.3</code>이 표시되어야 합니다.</p>
+<h2 id="run-without-installing">설치 없이 실행</h2>
+<p>개발 중에는 체크아웃한 위치에서 바로 실행할 수 있습니다:</p>
+<pre><code class="language-bash hljs">shards run gori
+</code></pre>
+<h2 id="next-steps">다음 단계</h2>
+<p>이제 트래픽을 캡처할 준비가 되었습니다. <a href="https://gori.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a>으로 이동하세요.</p>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Quick Start</title>
+      <link>https://gori.hahwul.com/ko/getting-started/quick-start/</link>
+      <guid>https://gori.hahwul.com/ko/getting-started/quick-start/</guid>
+      <description>직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다.</description>
+      <content:encoded><![CDATA[<p>이 페이지는 처음부터 끝까지 따라 하는 튜토리얼입니다. 위에서 아래로 진행하면 갓 설치한 상태에서 시작해, 캡처한 HTTPS 요청을 살펴보고 <strong>Repeater</strong>로 보내 편집한 뒤 재전송하는 것까지 터미널을 벗어나지 않고 끝낼 수 있습니다. 10분 정도 잡아 두세요.</p>
+<p>각 단계는 <strong>확인</strong> 항목으로 끝납니다. 다음으로 넘어가기 전에 보여야 하는 상태입니다. 화면이 다르게 보인다면 그 지점에서 멈추고 바로잡으세요.</p>
+<blockquote>
+<p><strong>시작하기 전에.</strong> <a href="https://gori.hahwul.com/ko/getting-started/installation/">gori를 설치</a>하고 브라우저를 준비하세요. 자신의 브라우징을 캡처하게 되므로, 테스트 권한이 있는 사이트(자신의 앱, 스테이징 서버, 또는 의도적으로 취약하게 만든 연습용 타깃)를 고르세요. 정확한 결과가 필요한 부분에서는 안정적인 일회용 타깃인 <code>example.com</code>을 사용합니다.</p>
+</blockquote>
+<h2 id="1-gori-시작하기-1-start-gori">1. gori 시작하기 {#1-start-gori}</h2>
+<p>하위 명령 없이 실행하면 gori는 프록시를 시작하고 인터페이스를 엽니다:</p>
+<pre><code class="language-bash hljs">gori
+</code></pre>
+<p>첫 실행 시 짧은 <a href="#first-run-wizard">설정 마법사</a>(전역 바인드와 테마)가 실행되고, 이어서 <a href="#guided-ui-tour">가이드 UI 투어</a>를 제안합니다. 투어는 지금 해도 되고 건너뛰었다가 나중에 돌아와도 됩니다. 이 페이지는 같은 내용을 실제 트래픽으로 다룹니다.</p>
+<p>기본적으로 프록시는 <code>127.0.0.1:8070</code>에서 수신합니다. 한 번의 실행에 대해서만 재정의할 수 있습니다(프로젝트 자체 바인드가 설정되어 있으면 여전히 그쪽이 우선합니다):</p>
+<pre><code class="language-bash hljs">gori --listen 0.0.0.0 --port 8080
+</code></pre>
+<p><strong>확인.</strong> gori TUI가 보입니다. 한쪽에 늘어선 탭들(Project, Target, History, …)과 프록시 주소 <code>127.0.0.1:8070</code>을 보여주는 상단 바입니다.</p>
+<h2 id="2-ca-신뢰-후-첫-플로우-캡처-2-trust-the-ca-and-capture-your-first-flow">2. CA 신뢰 후 첫 플로우 캡처 {#2-trust-the-ca-and-capture-your-first-flow}</h2>
+<p>HTTPS를 읽으려면 클라이언트가 gori의 루트 인증서(첫 실행 시 <code>~/.gori/ca</code> 아래에 생성됨)를 신뢰해야 합니다. 가장 빠른 길은 사전 신뢰된 브라우저입니다.</p>
+<h3 id="option-a-open-a-pre-trusted-browser-recommended">Option A: 사전 신뢰된 브라우저 열기 (권장)</h3>
+<p>TUI 안에서:</p>
+<ol>
+<li><code>Ctrl-P</code>를 눌러 <strong>커맨드 팔레트</strong>를 엽니다.</li>
+<li><code>browser</code>를 입력하고 <strong>Open browser</strong>를 실행합니다.</li>
+<li>설치된 브라우저(Chrome, Chromium, Brave, Edge, Firefox, …)를 고릅니다.</li>
+</ol>
+<p>gori는 이미 CA를 신뢰하고 HTTP/HTTPS를 프록시로 경유하는 일회용 프로파일로 브라우저를 실행합니다. 그 브라우저에서 사이트를 방문하세요(<code>https://example.com</code>을 먼저, 그다음 테스트 중인 사이트를).</p>
+<blockquote>
+<p><strong>Firefox 참고.</strong> CA 자동 신뢰에는 <code>PATH</code>에 있는 <code>certutil</code>(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(<code>brew install nss</code> macOS, <code>apt install libnss3-tools</code> Debian/Ubuntu, <code>dnf install nss-tools</code> Fedora) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요: <code>about:preferences#privacy</code>를 열고 <strong>인증서 보기</strong>, <strong>인증기관</strong> 탭으로 가서 <code>gori ca</code>가 출력한 파일을 <strong>가져오기</strong> 하면 됩니다.</p>
+</blockquote>
+<h3 id="option-b-point-any-client-yourself">Option B: 클라이언트를 직접 지정하기</h3>
+<p>CA 경로를 출력하고 그 파일을 시스템 또는 브라우저 신뢰 저장소에 <strong>신뢰된 루트 CA</strong>로 가져오세요:</p>
+<pre><code class="language-bash hljs">gori ca
+</code></pre>
+<p>그런 다음 클라이언트가 <code>127.0.0.1:8070</code>을 HTTP <strong>및</strong> HTTPS 프록시로 사용하도록 설정하세요. 다른 터미널에서 간단한 동작 확인:</p>
+<pre><code class="language-bash hljs">curl -x http://127.0.0.1:8070 https://example.com
+</code></pre>
+<p>gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.</p>
+<blockquote>
+<p>gori의 개인 키는 머신 비밀입니다. <code>0600</code> 권한으로 기록되며 머신을 절대 벗어나지 않습니다. 이전의 모든 신뢰를 무효화할 의도가 있을 때만 팔레트(<strong>Regenerate CA certificate</strong>)에서 교체하세요.</p>
+</blockquote>
+<p><strong>확인.</strong> <strong>History</strong>로 전환하세요(<code>3</code>). 최소 한 개의 행이 보여야 합니다. <code>200</code> 상태의 <code>GET https://example.com/</code> 요청입니다. History가 비어 있다면 캡처가 gori에 도달하지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 <strong>Open browser</strong>(Option A)를 사용하세요.</p>
+<h2 id="3-두-가지-탐색-표면-익히기-3-learn-the-two-discovery-surfaces">3. 두 가지 탐색 표면 익히기 {#3-learn-the-two-discovery-surfaces}</h2>
+<p>탭별 단축키를 외우기 전에, 거의 모든 것이 있는 두 곳을 먼저 익히세요.</p>
+<table>
+<thead>
+<tr>
+<th>표면</th>
+<th>키</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>커맨드 팔레트</strong></td>
+<td><code>Ctrl-P</code></td>
+<td>앱 전역 제어: 설정, Open browser, Export CA, 이동 동작 등 전역적인 모든 것</td>
+</tr>
+<tr>
+<td><strong>space 메뉴</strong></td>
+<td><code>Space</code></td>
+<td>지금 포커스를 가진 대상에 대한 동작(History 행, 상세 패널, Repeater, …)</td>
+</tr>
+</tbody>
+</table>
+<p>팔레트는 도구 전체의 지도입니다. space 메뉴는 <em>이</em> 패널의 지도입니다. 둘 다 키 힌트를 보여주니, 코드를 잊었으면 둘 중 하나를 여세요.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/command-palette.svg" alt="History 탭 위에 열린 gori 커맨드 팔레트로, 필터 상자와 함께 설정, 이동, 내보내기 동작을 나열한다">
+  <figcaption>커맨드 팔레트(<kbd>Ctrl-P</kbd>): 설정부터 <em>Open browser</em>, 탭 이동까지 앱 전역의 모든 동작을 퍼지 필터로 찾습니다.</figcaption>
+</figure>
+<p>처음부터 알아 두면 좋은 전역 토글 세 가지입니다:</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>c</code></td>
+<td><strong>캡처</strong> 토글(끄면 트래픽이 저장되지 않고 그대로 통과)</td>
+</tr>
+<tr>
+<td><code>i</code></td>
+<td><strong>인터셉트</strong> 토글(일치하는 요청을 잡아 forward / drop / edit)</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td><strong>스코프 렌즈</strong> 토글(뷰를 스코프 내 트래픽으로 필터)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-tui-이동하기-4-move-around-the-tui">4. TUI 이동하기 {#4-move-around-the-tui}</h2>
+<p>gori는 탭의 한 줄입니다. 기본 순서는 Project → Target → <strong>History</strong> → Intercept → Repeater → Fuzzer → … 로 시작합니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[</code> / <code>]</code></td>
+<td>이전 / 다음 탭</td>
+</tr>
+<tr>
+<td><code>1</code>-<code>9</code></td>
+<td>N번째 표시된 탭으로 이동(기본값에서 History는 <code>3</code>)</td>
+</tr>
+<tr>
+<td><code>Enter</code> / <code>↓</code></td>
+<td>탭 바에서 탭 본문으로 진입</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>포커스를 탭 바 쪽으로 되돌림</td>
+</tr>
+<tr>
+<td><code>Tab</code> / <code>Shift-Tab</code></td>
+<td>탭 바와 패널 사이로 포커스 이동</td>
+</tr>
+</tbody>
+</table>
+<p>마우스는 활성화하면(Preferences → <strong>Editor &amp; Keys</strong> → <strong>Editor</strong>) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. <strong>Help</strong> 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.</p>
+<h2 id="5-history에서-플로우-읽기-5-read-a-flow-in-history">5. History에서 플로우 읽기 {#5-read-a-flow-in-history}</h2>
+<p>History가 활성화되어 있는지 확인하세요(<code>3</code>). 모든 요청/응답은 <em>플로우</em>입니다. 시작 줄, 헤더, 본문(최대 2 MiB 저장), 그리고 HTTP/2 프레임, WebSocket 메시지, 존재하면 디코드된 JWT / SAML / GraphQL까지.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/history.svg" alt="시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간 열로 캡처된 HTTP 플로우를 나열하는 gori History 탭">
+  <figcaption><strong>History</strong> 탭: 메서드, 상태, 크기, 타이밍이 담긴 모든 캡처 플로우를 쿼리 언어로 필터할 수 있습니다.</figcaption>
+</figure>
+<p>다음을 하나씩 해보세요:</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (또는 <code>j</code> / <code>k</code>)</td>
+<td>선택 이동</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>요청/응답 상세 열기</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a>로 필터</td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>최신 따라가기(tail) 토글</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>선택한 플로우 복사</td>
+</tr>
+</tbody>
+</table>
+<p><code>/</code>를 누르고 필터를 입력한 뒤 <code>Enter</code>를 누르세요:</p>
+<pre><code class="language-text hljs">host:example.com
+</code></pre>
+<p>History가 그 호스트로 좁혀집니다. 필터를 지우면(<code>/</code>, 지우기, <code>Enter</code>) 다시 전체가 보입니다. 나중에 시도해 볼 몇 가지:</p>
+<pre><code class="language-text hljs">status:5xx
+method:POST body:password
+</code></pre>
+<p>이제 <code>example.com</code> 플로우를 선택하고 <code>Enter</code>를 누르세요. 상세 화면에서는 <code>↑</code> / <code>↓</code>로 스크롤하고 <code>y</code>로 복사하며, hex / whitespace / pretty 본문은 <code>x</code> / <code>b</code> / <code>p</code>로 토글합니다. <code>Esc</code>로 목록에 돌아옵니다.</p>
+<p><strong>확인.</strong> History를 호스트 하나로 필터하고, 플로우를 열어 전체 요청과 응답을 읽을 수 있습니다.</p>
+<h2 id="6-repeater로-보내-재전송하기-핵심-루프-6-send-it-to-repeater-and-re-send-the-core-loop">6. Repeater로 보내 재전송하기 (핵심 루프) {#6-send-it-to-repeater-and-re-send-the-core-loop}</h2>
+<p>대부분의 시간을 보내게 될 루프입니다. 캡처한 요청을 가져와 무언가를 바꾸고, 다시 보내고, 비교합니다.</p>
+<ol>
+<li><strong>History</strong>에서 <code>example.com</code> 플로우를 선택합니다.</li>
+<li><code>Ctrl-R</code>을 누릅니다. gori가 플로우를 <strong>Repeater</strong> 탭으로 복사하고 그쪽으로 전환합니다.</li>
+<li>요청 패널에서 <code>Enter</code> 또는 <code>i</code>를 눌러 편집합니다(INS 모드). 작은 것 하나를 바꿔 보세요. 예를 들어 헤더 한 줄을 추가합니다:
+<pre><code class="language-http hljs">X-Gori-Test: 1
+</code></pre>
+</li>
+<li><code>Esc</code>로 편집 모드를 벗어난 뒤 <code>Ctrl-R</code>로 <strong>전송</strong>합니다.</li>
+<li>응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. <code>Tab</code>으로 target → request → response를 순회합니다.</li>
+</ol>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, replayed 200 in 1152ms라는 상태 줄이 보이는 gori Repeater 탭">
+  <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 그리고 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
+</figure>
+<p><strong>확인.</strong> Repeater 상태 줄에 <code>replayed 200 in … ms</code> 같은 문구가 보이고, <code>Ctrl-R</code>로 원하는 만큼 재전송할 수 있습니다. 이것이 완전한 캡처 → 검사 → 리플레이 루프입니다.</p>
+<h2 id="7-다음으로-갈-곳-7-where-to-go-next">7. 다음으로 갈 곳 {#7-where-to-go-next}</h2>
+<p>이제 핵심 루프를 갖췄습니다. 여기서 나아갈 몇 가지 방향이며, 각각 <a href="https://gori.hahwul.com/ko/guide/">가이드</a>에서 깊이 다룹니다:</p>
+<ul>
+<li><strong>파라미터 퍼징.</strong> 플로우를 선택하고 <code>Shift-I</code>로 <strong>Fuzzer</strong>에 보낸 뒤, 위치를 표시하고(<code>Ctrl-A</code>가 흔한 파라미터를 자동 표시), 워드리스트를 붙이고 <code>Ctrl-R</code>로 실행합니다. <a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>를 보세요.</li>
+<li><strong>진행 중 인터셉트와 편집.</strong> <code>i</code>를 눌러 일치하는 요청을 잡아 두고, 계속 진행되기 전에 forward, drop, 또는 수정합니다. <a href="https://gori.hahwul.com/ko/guide/proxy/#intercept">Proxy &amp; History</a>를 보세요.</li>
+<li><strong>찾은 것 추적하기.</strong> 보고할 가치가 있는 것은 <code>Shift-F</code>로 <strong>Issue</strong>로 만들고, 둘러보는 동안 <strong>Probe</strong> 탭에서 패시브 결과를 읽으세요. <a href="https://gori.hahwul.com/ko/guide/scanning/">Scanning &amp; Issues</a>를 보세요.</li>
+</ul>
+<h2 id="day-1-key-map">Day-1 키 맵</h2>
+<p>코드가 손에 익을 때까지 이 표를 가까이 두세요:</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>위치</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-P</code></td>
+<td>어디서나</td>
+<td>커맨드 팔레트(설정, Match &amp; Replace, 알림, …)</td>
+</tr>
+<tr>
+<td><code>Ctrl-,</code></td>
+<td>어디서나</td>
+<td>Preferences(모든 설정을 담은 하나의 모달)</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>포커스된 패널</td>
+<td>영역 동작 메뉴</td>
+</tr>
+<tr>
+<td><code>c</code> / <code>i</code> / <code>s</code></td>
+<td>어디서나</td>
+<td>캡처 / 인터셉트 / 스코프 렌즈</td>
+</tr>
+<tr>
+<td><code>[</code> <code>]</code> · <code>1</code>-<code>9</code></td>
+<td>어디서나</td>
+<td>탭 전환</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>History</td>
+<td>쿼리 언어 필터</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>History</td>
+<td>플로우 상세 열기</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>History</td>
+<td>→ Repeater</td>
+</tr>
+<tr>
+<td><code>Shift-I</code></td>
+<td>History</td>
+<td>→ Fuzzer</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>Repeater / Fuzzer</td>
+<td>요청 전송 / 퍼즈 실행</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>대부분의 곳</td>
+<td>한 단계 뒤로</td>
+</tr>
+</tbody>
+</table>
+<h2 id="first-run-wizard">첫 실행 마법사</h2>
+<p>가이드 설정(전역 프록시 바인드 기본값, 그다음 테마)을 언제든 다시 실행할 수 있습니다:</p>
+<pre><code class="language-bash hljs">gori wizard
+</code></pre>
+<p>바인드 단계는 <code>settings.json</code>의 공유 기본값을 설정합니다. Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong>와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요.</p>
+<h2 id="guided-ui-tour">가이드 UI 투어</h2>
+<p>탭/패널 이동, 팔레트, space 메뉴, READ/INS 편집 모드를 목업 UI로 따라가는 안내입니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여주고 실제 키를 눌러 보도록 요청하며, 마지막 단계는 네 가지 동작 모두를 직접 해보는 실습 샌드박스와 첫 세션 체크리스트입니다.</p>
+<pre><code class="language-bash hljs">gori tutorial
+</code></pre>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/tutorial.svg" alt="탭과 패널, 커맨드 팔레트, 동작 메뉴, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드">
+  <figcaption>가이드 투어는 탭과 패널, 팔레트, space 메뉴, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
+</figure>
+<p>이 투어는 첫 실행 마법사의 마지막에도 제안됩니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a>: 저장소 구조, 네트워크 설정, 그리고 CA</li>
+<li><a href="https://gori.hahwul.com/ko/guide/proxy/">Proxy &amp; History</a>: 캡처, 인터셉트, 스코프, 가져오기, match &amp; replace</li>
+<li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: 테스트 워크벤치와 env 토큰</li>
+<li><a href="https://gori.hahwul.com/ko/reference/query-language/">Query Language</a>: 전체 필터 문법</li>
+<li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">Hotkeys</a>: 위의 코드를 원하는 대로 재지정</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Decoder</title>
+      <link>https://gori.hahwul.com/ko/guide/decoder/</link>
+      <guid>https://gori.hahwul.com/ko/guide/decoder/</guid>
+      <description>TUI 안에서 다단계 파이프라인으로 데이터를 인코드, 디코드, 해시, 변환합니다.</description>
+      <content:encoded><![CDATA[<p><strong>Decoder</strong> 탭은 데이터를 인코드, 디코드, 해시, 변환하는 스크래치 워크벤치입니다. 입력을 붙여넣고, 변환기 체인을 구성하고, 중간 결과와 최종 결과를 읽습니다.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/decoder.svg" alt="base64-encode 후 upper 체인을 실행하며 각 단계의 중간 결과를 보여주는 INPUT, CHAIN, PIPELINE, OUTPUT 패널을 갖춘 gori Decoder 탭">
+  <figcaption><strong>Decoder</strong> 워크벤치: 입력, 변환기 체인, 단계별 파이프라인, 그리고 아래의 최종 출력.</figcaption>
+</figure>
+<h2 id="layout">레이아웃</h2>
+<p>네 개의 카드가 위에서 아래로 쌓입니다.</p>
+<table>
+<thead>
+<tr>
+<th>패널</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>INPUT</strong></td>
+<td>소스 텍스트(편집 가능)</td>
+</tr>
+<tr>
+<td><strong>CHAIN</strong></td>
+<td>파이프라인 스펙: <code>|</code>, <code>&gt;</code>, <code>,</code>(모두 동등)로 구분된 변환기 이름</td>
+</tr>
+<tr>
+<td><strong>PIPELINE</strong></td>
+<td>각 단계당 한 줄과 그 중간 출력</td>
+</tr>
+<tr>
+<td><strong>OUTPUT</strong></td>
+<td>최종 결과(text / hex / base64 표시 모드)</td>
+</tr>
+</tbody>
+</table>
+<p>여러 변환을 <strong>서브탭</strong>으로 열어둘 수 있습니다(space 메뉴에서 생성, 이름 변경, 복제, 닫기).</p>
+<h2 id="building-a-chain">체인 구성</h2>
+<p>CHAIN 줄에 변환기 이름을 입력합니다. 단계는 왼쪽에서 오른쪽으로 실행됩니다.</p>
+<pre><code class="language-text hljs">url-decode | base64-decode | jwt-decode
+hex-encode | upper
+gzip-decompress | json-unescape
+</code></pre>
+<p>별칭은 기본 이름과 동일하게 동작합니다(<code>b64</code> → <code>base64-encode</code>, <code>url</code> → <code>url-encode</code>, 등). 이름이 모호할 때 자동완성이 도와줍니다.</p>
+<p>체인을 이름으로 저장하고(space 메뉴의 <strong>Save chain by name</strong>) 나중에 다시 불러올 수 있습니다. 기본값도 설정의 <code>decoder</code> 섹션에 유지됩니다.</p>
+<h2 id="converters">변환기</h2>
+<table>
+<thead>
+<tr>
+<th>범주</th>
+<th>예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Encoding</strong></td>
+<td><code>base64-encode</code> / <code>base64-decode</code>, <code>base64url-encode</code>, <code>url-encode</code> / <code>url-decode</code>, <code>hex-encode</code> / <code>hex-decode</code>, <code>base32</code>, <code>ascii85</code>, <code>base58</code></td>
+</tr>
+<tr>
+<td><strong>Compression</strong></td>
+<td><code>gzip-compress</code> / <code>gzip-decompress</code>, <code>zlib-compress</code> / <code>zlib-decompress</code></td>
+</tr>
+<tr>
+<td><strong>Token</strong></td>
+<td><code>jwt-decode</code> (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음)</td>
+</tr>
+<tr>
+<td><strong>Hash</strong></td>
+<td><code>md5</code>, <code>sha1</code>, <code>sha256</code>, <code>sha512</code></td>
+</tr>
+<tr>
+<td><strong>Escape</strong></td>
+<td><code>html-escape</code> / <code>html-unescape</code>, <code>json-escape</code> / <code>json-unescape</code>, <code>unicode-escape</code> / <code>unicode-unescape</code></td>
+</tr>
+<tr>
+<td><strong>Text</strong></td>
+<td><code>rot13</code>, <code>upper</code>, <code>lower</code>, <code>reverse</code></td>
+</tr>
+</tbody>
+</table>
+<p>OUTPUT은 바이너리 결과를 위해 표시 모드(text → hex → base64)를 순환할 수 있습니다. READ 모드에서 <code>y</code>로 복사하거나 space 메뉴를 사용하세요.</p>
+<h2 id="when-to-use-it">언제 사용하는가</h2>
+<ul>
+<li>플로우를 변형하지 않고 History에서 JWT나 중첩된 Base64 블롭을 디코드합니다</li>
+<li>Fuzzer 페이로드 프로세서에 쓸 변환을 미리 구성합니다</li>
+<li>Repeater 요청을 작성하면서 값을 빠르게 해시하거나 URL 인코드합니다</li>
+</ul>
+<p>Decoder는 네트워크 트래픽을 보내지 않습니다. 순수한 로컬 변환입니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: 페이로드 프로세서는 비슷한 인코드/해시 단계를 사용합니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/proxy/">Proxy &amp; History</a>: JWT / SAML / GraphQL은 캡처된 플로우에서도 인라인으로 디코드됩니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">Hotkeys</a>: Decoder 범위의 동작을 재지정합니다</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>단축키</title>
+      <link>https://gori.hahwul.com/ko/guide/hotkeys/</link>
+      <guid>https://gori.hahwul.com/ko/guide/hotkeys/</guid>
+      <description>Preferences 모달에서 gori의 단축키를 재지정합니다.</description>
+      <content:encoded><![CDATA[<p>gori의 단축키는 <strong>Hotkeys</strong> 편집기에서 재지정합니다. Preferences(<code>Ctrl-,</code> → <strong>Editor &amp; Keys</strong> → <strong>Hotkeys</strong>에서 <code>↵</code>)로 들어가거나, 커맨드 팔레트(<code>Ctrl-P</code>)의 **<code>settings:hotkeys</code>**로 바로 갈 수 있습니다. 에디터는 재지정 가능한 모든 동작을 발생 위치별(GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …)로 묶어 나열합니다. 행을 고르고, 새 키를 누르면, 끝입니다.</p>
+<pre><code class="language-text hljs">Ctrl-,  → Editor &amp; Keys → Hotkeys
+Ctrl-P  → settings:hotkeys
+</code></pre>
+<h2 id="key-budget-how-new-shortcuts-earn-a-key">키 예산 (새 단축키가 키를 얻는 방식)</h2>
+<p>맨 글자 키는 귀합니다. 새 동작은 키를 차지하기 전에 <strong>가격 등급</strong>을 정해야 합니다.</p>
+<table>
+<thead>
+<tr>
+<th>등급</th>
+<th>가격</th>
+<th>언제</th>
+<th>예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 구조적</strong></td>
+<td><code>Esc</code> <code>Enter</code> <code>Tab</code> 화살표 <code>Space</code>(리더)</td>
+<td>항상</td>
+<td>포커스, 열기/닫기, READ/INS, space 메뉴</td>
+</tr>
+<tr>
+<td><strong>L1 루프</strong></td>
+<td>맨 글자 또는 스티키 패밀리(<code>^R</code>)</td>
+<td>분당 여러 번</td>
+<td>History <code>j/k</code> <code>/</code> <code>y</code>, Repeater 전송</td>
+</tr>
+<tr>
+<td><strong>L2 세션 호흡</strong></td>
+<td>Global 맨 글자(상한: <code>c</code> <code>i</code> <code>s</code>만)</td>
+<td>세션당 여러 번</td>
+<td>capture, intercept, scope 렌즈</td>
+</tr>
+<tr>
+<td><strong>L3 맥락적</strong></td>
+<td><code>Space</code> 다음 니모닉</td>
+<td>가끔, 패널 로컬</td>
+<td>compare, mine, send-group, copy-as</td>
+</tr>
+<tr>
+<td><strong>L4 드묾 / 설정</strong></td>
+<td>팔레트(<code>Ctrl-P</code>) 전용</td>
+<td>드묾</td>
+<td>설정, Match &amp; Replace, 알림</td>
+</tr>
+</tbody>
+</table>
+<p>경험칙:</p>
+<ul>
+<li>새 패널 동작의 기본값은 L3(space 메뉴 전용)입니다. 루프가 입증된 뒤에야 직접 키로 승격하세요.</li>
+<li><strong>Ctrl</strong>은 타이핑 중(INS)에도 작동해야 하는 동작이나 파괴적인 동작을 위한 것입니다. 맨 글자를 손쉽게 승격하는 수단이 아닙니다.</li>
+<li><strong>History → Repeater</strong>와 <strong>Repeater 전송</strong>은 **<code>Ctrl-R</code>**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 <code>r</code>로 옮기지 마세요.</li>
+<li>Match &amp; Replace와 알림은 키 없이(팔레트 / 배지) 제공됩니다. Global 코드를 원하면 재지정하세요.</li>
+</ul>
+<h2 id="editing">편집</h2>
+<p>에디터는 작업 복사본을 엽니다. <code>Enter</code>를 누르기 전에는 아무것도 저장되지 않으며, <code>Esc</code>는 모든 변경을 버립니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (또는 <code>j</code> / <code>k</code>), 휠</td>
+<td>선택 이동</td>
+</tr>
+<tr>
+<td><code>e</code> 또는 <code>Space</code></td>
+<td>선택한 동작 재지정, 그다음 새 키를 누릅니다</td>
+</tr>
+<tr>
+<td><code>x</code> 또는 <code>Backspace</code></td>
+<td>선택한 동작의 바인딩 해제</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>선택한 동작을 기본값으로 초기화</td>
+</tr>
+<tr>
+<td><code>Shift-R</code></td>
+<td>모든 동작을 기본값으로 초기화</td>
+</tr>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>OS 기본 프로파일 순환(아래 참고)</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>저장 + 적용(실시간, 재시작 없음)</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>버리고 닫기</td>
+</tr>
+</tbody>
+</table>
+<p>재지정을 시작하면 푸터에 *&quot;press a key to bind&quot;*가 표시됩니다. 아래 <em>예약된 키</em>에 나열된 것들을 제외하고, 원하는 코드를 수정자와 함께 누르세요. 키가 예약되어 있거나 <strong>같은 위치</strong>의 다른 동작에서 이미 사용 중이면, 에디터는 이를 거부하고 이유를 알려줍니다. 캡처는 열린 채로 남아 다른 키를 시도할 수 있습니다.</p>
+<p>바인딩된 것이 없으면 행의 코드에 <code>(unbound)</code>가 표시됩니다. <code>●</code> 마커는 기본값에서 변경했음을 뜻하고, <code>·</code>은 기본값 상태를 뜻합니다.</p>
+<h2 id="conflicts">충돌</h2>
+<p>두 동작은 <strong>다른</strong> 위치에서 발생할 때만 키를 공유할 수 있습니다. 이는 의도된 동작입니다(<code>s</code>는 거의 모든 곳에서 &quot;scope 렌즈&quot;지만 Comparer 탭에서는 &quot;swap&quot;, <code>c</code>는 Intercept 큐에서 catch 방향을 순환하는 것을 제외하면 어디서나 &quot;toggle capture&quot;). 에디터는 <strong>같은 위치</strong>의 충돌만 막습니다. 거기서는 키맵이 둘 중 하나만 남길 수 있기 때문입니다.</p>
+<h2 id="reserved-keys">예약된 키</h2>
+<p>일부 키는 터미널이나 gori가 필요로 하므로 재지정할 수 없습니다.</p>
+<ul>
+<li><strong>종료</strong>: <code>Ctrl-C</code>, <code>Ctrl-D</code>.</li>
+<li><strong>명명된 키와 구별 불가</strong>: <code>Ctrl-M</code> / <code>Ctrl-J</code> (Enter), <code>Ctrl-I</code> (Tab), <code>Ctrl-H</code> (Backspace), <code>Ctrl-[</code> (Escape).</li>
+<li><strong>구조적</strong>: <code>Enter</code>, <code>Esc</code>, <code>Tab</code>, <code>Backspace</code>, 그리고 맨 <code>:</code>(명령줄).</li>
+<li><strong>키맵보다 먼저 점유되는 gori 단축키</strong>: <code>Ctrl-G</code> (go to line), <code>Ctrl-F</code> (find, <code>Tab</code>으로 find &amp; replace), <code>Ctrl-B</code> (reveal whitespace), <code>Ctrl-E</code> (external editor), <code>Ctrl-P</code> (command palette), <code>Ctrl-N</code> (new repeater/fuzz/note), <code>Ctrl-W</code> (close sub-tab), 그리고 <code>Ctrl-1</code>…<code>Ctrl-9</code> (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 <strong>Command palette</strong>, <strong>New repeater request</strong>, <strong>New fuzz session</strong>은 에디터에 나열되지 않습니다. 그 키는 고정입니다.</li>
+</ul>
+<p><code>Ctrl-S</code> 같은 흐름 제어/시그널 코드는 예약되어 있지 <strong>않습니다</strong>. gori는 터미널을 raw 모드로 실행하므로 이들이 앱에 도달합니다(Repeater의 SNI 토글은 <code>Ctrl-S</code>로 제공됩니다).</p>
+<h2 id="os-default-profiles">OS 기본 프로파일</h2>
+<p><code>←</code> / <code>→</code> 프로파일 선택기는 새(재정의되지 않은) 바인딩이 어떤 <strong>기본</strong> 키 세트를 사용할지 고릅니다: <code>auto</code>(gori가 빌드된 플랫폼을 추적), <code>macOS</code>, <code>Linux</code>, <code>Windows</code>. 직접 지정한 재바인딩은 OS와 무관하게 항상 선택한 프로파일 위에 얹힙니다.</p>
+<p>현재 OS별 기본값은 동일합니다. 터미널에서 <code>Ctrl</code>+글자 코드는 macOS, Linux, Windows 모두에서 애플리케이션에 도달하며, 정말 위험한 키는 위의 예약된 제어 문자들입니다(어디서나 차단됨). 프로파일 메커니즘은 실제 터미널별 충돌이 생겼을 때 디스패치를 건드리지 않고 바로잡을 수 있도록 마련해 둔 것입니다. 지금으로서는 <code>auto</code>가 모두에게 옳은 선택입니다.</p>
+<h2 id="where-its-stored">저장 위치</h2>
+<p><code>~/.gori/settings.json</code>(디렉터리는 <code>$GORI_HOME</code>으로 재정의)의 희소한 <code>hotkeys</code> 블록에 저장됩니다. 변경한 바인딩만 동작 id별 코드 라벨 목록으로 기록되며, 빈 목록은 명시적 바인딩 해제입니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;hotkeys&quot;: {
+    &quot;os&quot;: &quot;auto&quot;,
+    &quot;bindings&quot;: {
+      &quot;rules.edit&quot;: [&quot;g&quot;],
+      &quot;scope.edit&quot;: []
+    }
+  }
+}
+</code></pre>
+<p>없는 동작은 프로파일 기본값을 사용합니다. 알 수 없는 id와 파싱 불가능한 코드는 로드할 때 무시되므로, 수동 편집이나 버전 차이가 있어도 무리 없이 동작합니다.</p>
+<h2 id="limitations">제약</h2>
+<ul>
+<li>동작의 <strong>주</strong> 코드만 표시/편집됩니다. 탐색 별칭(예: <code>j</code> / <code>k</code>의 화살표 키 중복)은 나열되지 않습니다.</li>
+<li><strong>커맨드 팔레트</strong>와 <strong>Help</strong> 탭(verb id에 연결된 Global / History / Repeater 행)은 재지정 후 유효 키맵을 통해 코드를 해석합니다. 다른 Help 섹션과 일부 상태 칩은 여전히 정제된 기본값을 사용할 수 있습니다.</li>
+<li>Space 메뉴 <strong>니모닉</strong> 글자는 동작을 가리키는 안정적인 식별자입니다(Helix와 비슷). 재지정은 <em>직접</em> 코드만 바꿀 뿐 space 메뉴 글자는 바꾸지 않습니다.</li>
+<li>한 글자를 공유하는 패널 로컬 키(Repeater 응답 <code>x</code> = hex 대 요청/대상 <code>x</code> = 줄 선택)는 두 의미가 공존할 수 있도록 컨트롤러 소유로 유지됩니다.</li>
+<li>탐색 가능한 컨텍스트에서 **<code>?</code>**를 누르면 <strong>Help</strong> 탭(mitmproxy 스타일 치트시트)으로 점프합니다.</li>
+</ul>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/guide/settings/">Settings</a>: Preferences 모달과 그 안의 모든 섹션</li>
+<li><a href="https://gori.hahwul.com/ko/guide/themes/">Themes</a>: 같은 방식으로 컬러 테마를 전환하거나 만듭니다</li>
+<li><a href="https://gori.hahwul.com/ko/reference/config/">Configuration Reference</a>: <code>settings.json</code>의 <code>hotkeys</code> 키</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>JWT</title>
+      <link>https://gori.hahwul.com/ko/guide/jwt/</link>
+      <guid>https://gori.hahwul.com/ko/guide/jwt/</guid>
+      <description>JSON Web Token을 디코드, 편집, 재서명하고 alg:none, weak-secret, header-injection 페이로드를 생성합니다.</description>
+      <content:encoded><![CDATA[<p><strong>JWT</strong> 탭은 JSON Web Token을 위한 워크벤치입니다. 토큰을 디코드하고, claim을 편집해 재서명하며, 서버를 상대로 테스트할 고전적인 공격 페이로드를 생성합니다. 파트를 보여주기만 하는 <a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a>의 읽기 전용 <code>jwt-decode</code> 컨버터보다 한 걸음 더 나아갑니다.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/jwt.svg" alt="디코드된 HS256 토큰을 보여주는 gori JWT 탭: INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 signature 제거를 포함한 23개 공격 페이로드의 ATTACKS 목록">
+  <figcaption><strong>JWT</strong> 탭은 토큰을 실시간으로 디코드하고(header, payload, signature), 바로 보낼 수 있는 공격 페이로드(alg:none, weak-secret, header injection)를 나열합니다.</figcaption>
+</figure>
+<p>이 탭은 기본적으로 숨겨져 있습니다. 탭 바의 <code>⋯</code> 메뉴나 커맨드 팔레트(<code>Ctrl-P</code> → <strong>Go to JWT</strong>)에서 드러내세요. 어디서든(예: <strong>History</strong> 상세 패널, <strong>Notes</strong> 등) 토큰을 선택하고 <code>Space</code> → <strong>Send to JWT</strong>를 누르면 그 토큰으로 새 워크벤치 서브탭을 채웁니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다.</p>
+<h2 id="two-lenses">두 개의 렌즈</h2>
+<p>하나의 세션, 두 개의 뷰이며 <code>Ctrl-E</code>로 전환합니다:</p>
+<ul>
+<li><strong>Decode</strong>: INPUT에 토큰을 붙여 넣으면 header, payload, signature가 실시간으로 디코드됩니다. 그 아래에는 생성된 <strong>공격 페이로드</strong>를 고를 수 있는 목록이 있습니다.</li>
+<li><strong>Encode</strong>: HEADER와 PAYLOAD를 JSON으로 편집하고, 알고리즘을 선택하며(<code>Ctrl-A</code>로 <code>HS256</code> / <code>HS384</code> / <code>HS512</code> / <code>none</code> 순환), SECRET을 설정하면 재서명된 토큰이 OUTPUT에 실시간으로 나타납니다.</li>
+</ul>
+<p><code>l</code>을 누르면 현재 Decode 쪽에서 디코드된 토큰을 Encode 편집기로 불러옵니다. 그래서 claim 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 <code>y</code>로 복사하세요.</p>
+<blockquote>
+<p>signature는 디코드되어 표시되지만 <strong>결코 검증되지 않습니다</strong>. 따라서 디코드는 토큰이 무엇을 주장하는지 알려줄 뿐, 신뢰할 수 있는지는 알려주지 않습니다. Encode는 여러분이 준 secret과 알고리즘으로 실제로 서명합니다(gori에서 처음이자 유일한 HMAC).</p>
+</blockquote>
+<h2 id="attack-payloads">공격 페이로드</h2>
+<p>디코드된 토큰에서 gori는 흔한 JWT 검증 결함을 찔러보는, 바로 전송 가능한 변형을 생성합니다:</p>
+<table>
+<thead>
+<tr>
+<th>공격</th>
+<th>무엇을 테스트하는가</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>alg:none</strong></td>
+<td>signature를 제거하고 <code>alg</code>를 <code>none</code>으로 설정합니다(그리고 <code>None</code> / <code>NONE</code> 대소문자 변형 포함). 서명 없는 토큰을 받아들이는 서버를 겨냥합니다.</td>
+</tr>
+<tr>
+<td><strong>Weak secret</strong></td>
+<td>흔한 약한 HMAC secret 목록으로 토큰을 재서명해, 추측 가능한 서명 키를 잡아냅니다.</td>
+</tr>
+<tr>
+<td><strong>Header injection</strong></td>
+<td><code>kid</code>, <code>jku</code>, <code>x5u</code>, <code>jwk</code> header 파라미터를 조작합니다. 공격자가 제공한 키 자료를 신뢰하는 서버를 겨냥합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>후보를 <strong>Repeater</strong>로 보내 대상을 상대로 시도하거나, 이미 편집 중인 요청에 곧바로 넣으세요.</p>
+<h2 id="headless">헤드리스</h2>
+<pre><code class="language-bash hljs">gori run jwt eyJhbGci...                       # decode (default)
+gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
+gori run jwt eyJhbGci... --attacks             # print the attack payloads
+cat token.txt | gori run jwt --attacks         # token from stdin
+</code></pre>
+<p>토큰은 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수한 로컬 연산입니다). <code>--format</code>은 <code>text</code> 또는 <code>json</code>입니다. <a href="https://gori.hahwul.com/ko/reference/cli/#run-jwt">CLI Reference</a>를 참고하세요.</p>
+<p>MCP에서는 <code>jwt_decode</code> / <code>jwt_encode</code> / <code>jwt_attacks</code>가 네트워크나 상태를 건드리지 않으므로 <code>--read-only</code>에서도 사용할 수 있는 read 도구입니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a>: 더 긴 변환 체인 안에서 JWT를 디코드합니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a>: JWT가 아닌 토큰의 무작위성을 평가합니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: 공격 페이로드를 대상에 발사합니다</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>MCP 서버</title>
+      <link>https://gori.hahwul.com/ko/guide/mcp/</link>
+      <guid>https://gori.hahwul.com/ko/guide/mcp/</guid>
+      <description>Model Context Protocol을 통해 AI 에이전트나 스크립트로 gori를 구동합니다.</description>
+      <content:encoded><![CDATA[<p>gori는 내장 <strong>MCP(Model Context Protocol) 서버</strong>를 제공합니다. TUI에 채팅 창을 넣는 대신, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 덕분에 MCP를 지원하는 어떤 에이전트든(Claude, Codex, Grok 등) 트래픽을 읽고 도구를 구동할 수 있습니다.</p>
+<figure class="agent-session" aria-label="에이전트 세션 예시: 에이전트가 MCP로 IDOR를 찾아 이슈를 기록한다">
+  <div class="agent-session-bar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="agent-session-title">에이전트 · MCP로 구동하는 gori</span>
+  </div>
+  <div class="agent-session-body">
+    <p class="as-user"><span class="as-who">나</span>users API에서 IDOR를 찾아 기록해줘.</p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>list_history</code> <span class="as-args">path~/v1/users status:200</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">플로우 14개, customer 및 admin 토큰</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>send_request</code> <span class="as-args">GET /v1/users/2 · customer 토큰</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"}, 호출자의 행이 아님</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>create_issue</code> <span class="as-args">"IDOR on /v1/users/{id}" severity:high</span></p>
+    <p class="as-done"><span class="as-check">✓</span> 이슈 기록됨; 재현을 위해 요청이 Repeater 세션으로 저장됨.</p>
+  </div>
+</figure>
+<pre><code class="language-bash hljs">gori mcp
+</code></pre>
+<p>서버는 stdio 위에서 JSON-RPC 2.0으로 통신합니다. STDOUT은 프로토콜을, STDERR은 로그를 전달합니다. 도구 결과에는 하위 호환용 텍스트가 담기며, 페이로드가 JSON이면 MCP <code>structuredContent</code>도 함께 들어갑니다.</p>
+<h2 id="choosing-a-project">프로젝트 선택</h2>
+<pre><code class="language-bash hljs">cd /path/to/my-repository &amp;&amp; gori mcp # path-binds this Git workspace to its own gori project
+gori mcp --project my-engagement   # serve a named project's database
+gori mcp --db /path/to/project.db  # serve a specific database file
+gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
+gori mcp --no-project              # force unbound even inside a Git workspace
+</code></pre>
+<p>명시적 선택자가 없으면, gori는 가장 가까운 Git 루트를 찾아 그 정규 경로를 격리된 프로젝트에 바인딩합니다. 이 바인딩은 디렉터리 이름이 같은 두 리포지토리가 하나의 데이터베이스를 공유하는 것을 막습니다.</p>
+<p><strong>Git 워크스페이스 밖</strong>에서 뜨면(AI 클라이언트가 홈·앱 디렉터리에서 MCP를 띄우는 흔한 경우) 서버는 <strong>unbound</strong>로 시작합니다. MCP 핸드셰이크와 도구 목록은 바로 성공하지만, 트래픽 도구(<code>list_history</code>, <code>send_request</code> 등)는 에이전트가 <code>list_projects</code>, <code>create_project</code>(unbound일 때 자동 바인딩), 또는 <code>switch_project</code>를 호출하기 전까지 <code>NO_PROJECT</code>를 반환합니다. unbound는 활성 TUI/MRU 프로젝트를 슬그머니 열지 않습니다 — 그건 명시적 <code>--use-active-project</code> 옵트인(또는 <code>--project</code> / <code>--db</code> / <code>GORI_MCP_PROJECT</code> / <code>GORI_MCP_DB</code>)이 필요합니다.</p>
+<p>데이터를 사용하기 전에 <code>project_info</code>를 호출하세요. <code>bound</code>, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처를 보고합니다.</p>
+<h2 id="read-only-mode">읽기 전용 모드</h2>
+<p>기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 읽기 도구만 노출하려면(신뢰할 수 없는 에이전트에게 프로젝트를 넘길 때 안전합니다) 읽기 전용으로 시작하세요.</p>
+<pre><code class="language-bash hljs">gori mcp --read-only
+</code></pre>
+<h2 id="installing-into-an-agent">에이전트에 설치하기</h2>
+<p>gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍니다.</p>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>클라이언트</th>
+<th>작성되는 설정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop</td>
+<td><code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code</td>
+<td><code>~/.claude.json</code> (<code>mcpServers.gori</code>)</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex</td>
+<td><code>~/.codex/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok</td>
+<td><code>~/.grok/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash hljs">gori mcp --install-claude-code
+gori mcp --install-codex
+gori mcp --install-grok
+</code></pre>
+<p>Codex와 Grok은 JSON이 아니라 <code>[mcp_servers.gori]</code> 테이블이 있는 TOML을 사용합니다. 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.</p>
+<p>클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 고정 engagement를 박아 두려면 선택자를 넘기세요. 예: <code>gori mcp --project my-engagement --install-codex</code>.</p>
+<h2 id="tools">도구</h2>
+<p><strong>읽기 도구</strong>(항상 사용 가능):</p>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list_history</code></td>
+<td>최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함</td>
+</tr>
+<tr>
+<td><code>list_events</code></td>
+<td>작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음</td>
+</tr>
+<tr>
+<td><code>get_flow</code></td>
+<td>한 플로우의 전체 요청 + 응답</td>
+</tr>
+<tr>
+<td><code>get_response_body_chunk</code></td>
+<td>인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회</td>
+</tr>
+<tr>
+<td><code>list_sitemap</code></td>
+<td>고유 엔드포인트(host, method, path)</td>
+</tr>
+<tr>
+<td><code>list_issues</code> / <code>get_issue</code></td>
+<td>트리아지된 이슈 읽기</td>
+</tr>
+<tr>
+<td><code>list_scope</code></td>
+<td>현재 스코프 include/exclude 규칙</td>
+</tr>
+<tr>
+<td><code>intercept_list</code> / <code>intercept_get</code></td>
+<td>라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회</td>
+</tr>
+<tr>
+<td><code>list_projects</code></td>
+<td>이 호스트의 모든 gori 프로젝트</td>
+</tr>
+<tr>
+<td><code>list_notes</code> / <code>get_note</code></td>
+<td>프로젝트 노트 읽기</td>
+</tr>
+<tr>
+<td><code>list_rules</code></td>
+<td>프로젝트의 Match &amp; Replace 규칙을 적용 순서로 나열</td>
+</tr>
+<tr>
+<td><code>decode</code></td>
+<td><code>input</code>에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음)</td>
+</tr>
+<tr>
+<td><code>jwt_decode</code> / <code>jwt_encode</code> / <code>jwt_attacks</code></td>
+<td>JWT 디코드, 재서명, 공격 페이로드 생성(순수 계산; <code>--read-only</code>에서도 사용 가능)</td>
+</tr>
+<tr>
+<td><code>sequence_analyze</code></td>
+<td>붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수)</td>
+</tr>
+<tr>
+<td><code>oast_presets</code> / <code>oast_payload</code> / <code>oast_poll</code></td>
+<td>OAST 프로바이더 나열, 현재 페이로드 조회, 실행 중인 리스너의 콜백 폴링</td>
+</tr>
+<tr>
+<td><code>discover_status</code> / <code>discover_results</code></td>
+<td>Discover 실행의 진행 상황과 결과</td>
+</tr>
+<tr>
+<td><code>project_info</code></td>
+<td>플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처</td>
+</tr>
+<tr>
+<td><code>get_current_context</code></td>
+<td>사용자가 지금 TUI에서 보고 있는 것</td>
+</tr>
+<tr>
+<td><code>get_repeater_context</code></td>
+<td>Repeater 워크벤치 상태와 저장된 세션</td>
+</tr>
+<tr>
+<td><code>ql_reference</code></td>
+<td>쿼리 언어 레퍼런스</td>
+</tr>
+<tr>
+<td><code>ql_explain</code></td>
+<td>쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용</td>
+</tr>
+</tbody>
+</table>
+<p><strong>액션 도구</strong>(<code>--read-only</code>로 비활성화됨):</p>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>send_request</code></td>
+<td>HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, <code>$KEY</code> 환경 토큰을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림)</td>
+</tr>
+<tr>
+<td><code>send_websocket</code></td>
+<td>저장된 WebSocket Repeater 세션을 실행하고 응답을 수집</td>
+</tr>
+<tr>
+<td><code>create_repeater</code> / <code>update_repeater</code> / <code>delete_repeater</code></td>
+<td>Repeater 세션 관리</td>
+</tr>
+<tr>
+<td><code>create_issue</code> / <code>update_issue</code></td>
+<td>이슈 기록 및 갱신</td>
+</tr>
+<tr>
+<td><code>create_note</code> / <code>update_note</code> / <code>delete_note</code></td>
+<td>프로젝트 노트 관리</td>
+</tr>
+<tr>
+<td><code>create_rule</code> / <code>update_rule</code> / <code>set_rule_enabled</code> / <code>delete_rule</code></td>
+<td>Match &amp; Replace 규칙 생성, 편집, 토글, 삭제(이동 중인 요청/응답 헤드 또는 본문 재작성)</td>
+</tr>
+<tr>
+<td><code>preview_rule</code></td>
+<td>규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정</td>
+</tr>
+<tr>
+<td><code>create_project</code> / <code>switch_project</code> / <code>delete_project</code></td>
+<td>프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, <code>dry_run</code> 후 확인 토큰 필요</td>
+</tr>
+<tr>
+<td><code>fuzz_start</code> / <code>fuzz_status</code> / <code>fuzz_results</code> / <code>fuzz_stop</code></td>
+<td>Fuzzer 구동</td>
+</tr>
+<tr>
+<td><code>mine_start</code> / <code>mine_status</code> / <code>mine_results</code> / <code>mine_stop</code></td>
+<td>Param Miner 구동</td>
+</tr>
+<tr>
+<td><code>sequence_start</code> / <code>sequence_status</code> / <code>sequence_results</code> / <code>sequence_stop</code></td>
+<td>라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음)</td>
+</tr>
+<tr>
+<td><code>discover_start</code> / <code>discover_stop</code></td>
+<td>엔드포인트 스파이더링 &amp; 브루트포스(<code>discover_status</code> / <code>discover_results</code>로 폴링)</td>
+</tr>
+<tr>
+<td><code>oast_start</code> / <code>oast_stop</code></td>
+<td>OAST 페이로드 등록 후 콜백 폴링(<code>oast_poll</code>로 히트 조회)</td>
+</tr>
+<tr>
+<td><code>list_jobs</code> / <code>get_job</code> / <code>stop_job</code></td>
+<td>작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz와 mine 작업 나열, 또는 id로 하나를 조회하고 중지</td>
+</tr>
+<tr>
+<td><code>intercept_forward</code> / <code>intercept_forward_edit</code> / <code>intercept_drop</code></td>
+<td>홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭</td>
+</tr>
+<tr>
+<td><code>intercept_toggle</code> / <code>intercept_set_filter</code> / <code>intercept_set_direction</code></td>
+<td>캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. <code>create_rule</code>로 생성된 규칙은 <code>gori run</code>과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.</p>
+</blockquote>
+<h2 id="live-intercept">라이브 인터셉트</h2>
+<p>에이전트가 나중에 History를 읽는 대신, 인터셉트 루프 안에 나란히 앉을 수 있습니다. 캡처 락을 쥔 TUI 세션이 홀드된 메시지를 에이전트 쪽으로 미러링하고 에이전트가 보낸 명령을 받아 처리하므로, <code>intercept_list</code> → <code>intercept_get</code> → <code>intercept_forward_edit</code>은 직접 손으로 도는 것과 같은 루프입니다.</p>
+<p>변경을 일으키는 쪽(<code>intercept_forward</code>, <code>intercept_forward_edit</code>, <code>intercept_drop</code>, <code>intercept_toggle</code>, <code>intercept_set_filter</code>, <code>intercept_set_direction</code>)은 <code>--read-only</code>에서 비활성화되며, 라이브 캡처 세션이 락을 쥐고 있지 않으면 모두 거부합니다. 프록시가 실제로 트래픽을 홀드하고 있지 않으면 내보낼 것 자체가 없기 때문입니다.</p>
+<p>에이전트의 행동은 조용히 지나가지 않고 드러납니다. 각 행동은 에이전트에서 온 것으로 표시되어 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 코파일럿이 트래픽에 무엇을 했는지 확인할 수 있습니다.</p>
+<p>에이전트를 켜둔 채 자리를 뜨기 전에 알아둘 안전 규칙이 하나 있습니다. 홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 키보드 앞에 사람만 있을 때는 그게 맞는 동작입니다. 하지만 해당 세션에서 에이전트가 인터셉트 큐에 붙고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켭니다. 홀드 도중 죽은 클라이언트가 연결을 영영 막아버리지 못하게 하기 위해서입니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.</p>
+<h2 id="why-an-mcp-seam">MCP 이음새인 이유</h2>
+<p>gori는 의도적으로 도구 내 AI 챗을 두지 않습니다. 지능은 도구 바깥, 곧 MCP로 접근할 수 있는 곳에 있습니다. 덕분에 모델을 직접 고를 수 있고, 트래픽이 의도치 않은 곳으로 흘러가지 않으며, 동일한 인터페이스가 스크립트와 에이전트 양쪽을 모두 지원합니다. <code>gori run</code>은 비대화형 경로를, MCP는 대화형 에이전트 경로를 담당합니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a>: 에이전트를 연결하고 첫 요청을 구동하는 단계별 안내</li>
+<li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI Reference</a>: 전체 <code>gori mcp</code> 플래그</li>
+<li><a href="https://gori.hahwul.com/ko/reference/query-language/">Query Language</a>: 에이전트가 필터링에 사용하는 문법</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>OAST</title>
+      <link>https://gori.hahwul.com/ko/guide/oast/</link>
+      <guid>https://gori.hahwul.com/ko/guide/oast/</guid>
+      <description>out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection을 확인하세요.</description>
+      <content:encoded><![CDATA[<p>어떤 버그는 응답에 절대 드러나지 않습니다. blind SSRF, blind XXE, out-of-band SQL injection, 또는 백오피스 브라우저에서만 발동하는 stored payload는 여러분에게 답하는 대신 <em>다른 어딘가의 서버</em>로 손을 뻗습니다. <strong>OAST</strong>(Out-of-band Application Security Testing)는 바로 그 서버를 제공합니다. gori가 interaction 리스너에 payload URL을 등록하고, 여러분은 그 payload를 요청에 심어두면, 대상이 그 서버로 보내는 DNS, HTTP, SMTP 콜백이 hit로 나타납니다.</p>
+<p><strong>OAST</strong> 탭은 기본적으로 표시됩니다(Fuzzer 옆). 두 개의 서브탭이 있습니다. <strong>Callbacks</strong>(hit 목록, 기본)와 <strong>Providers</strong>(설정한 리스너)입니다.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/oast.svg" alt="interactsh payload를 리스닝 중인 gori OAST 탭: 복호화된 콜백 4건(DNS A 조회 2건, HTTP GET 2건)이 각각 source IP와 목적지 payload와 함께 나열된 Callbacks 테이블">
+  <figcaption><strong>OAST</strong> 탭은 payload를 등록하고, 대상이 그 payload로 보내는 모든 DNS, HTTP, SMTP 콜백을 복호화해 타임스탬프와 함께 나열합니다.</figcaption>
+</figure>
+<h2 id="the-loop">동작 흐름</h2>
+<ol>
+<li><strong>OAST</strong> 탭에서 <code>Ctrl-R</code>를 눌러 리스닝을 시작합니다. gori가 provider에 등록하고 <strong>payload</strong>(고유한 호스트명/URL)를 발급합니다.</li>
+<li><code>g</code>(get payload)나 <code>y</code>로 payload를 복사하거나, <strong>Repeater</strong> / <strong>Fuzzer</strong>에서 요청에 바로 삽입합니다(<code>Space</code> → <strong>Insert OAST payload</strong>가 커서 위치에 넣습니다). <strong>History</strong>에서는 <code>Space</code> → <strong>Copy OAST payload</strong>입니다.</li>
+<li>대상이 URL을 역참조하거나 호스트명을 resolve할 만한 곳이라면 어디든 심습니다. URL 파라미터, <code>Host</code>/<code>X-Forwarded-For</code> 헤더, XML 엔티티, webhook 필드 등입니다.</li>
+<li>대상의 인프라가 이름을 resolve하거나 다시 연결해 오면, 콜백이 프로토콜(<code>dns</code> / <code>http</code> / <code>smtp</code>), 소스 IP, 타임스탬프, 그리고 어떤 payload가 발동했는지 알 수 있는 전체 sub-identifier와 함께 <strong>Callbacks</strong>에 도착합니다.</li>
+</ol>
+<p>콜백은 대상이 접근해서는 안 될 서버에 접근했다는 증거입니다. 콜백이 없다고 해서 안전하다는 증거는 아니며(egress가 필터링됐을 수 있습니다), 다만 이 경로가 조용했다는 뜻일 뿐입니다.</p>
+<h2 id="providers">Providers</h2>
+<p>각 리스너가 하나의 <strong>provider</strong>입니다. <strong>Providers</strong> 서브탭에서 추가하세요(<code>a</code> 추가, <code>e</code> 편집, <code>t</code> 타입 설정, <code>d</code> 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interactsh</code></td>
+<td>자체 호스팅 또는 public <a href="https://github.com/projectdiscovery/interactsh">interactsh</a> 서버. 암호화된 <strong>DNS, HTTP, SMTP</strong> 콜백을 잡습니다. Public preset: <code>oast.pro</code>, <code>oast.live</code>, <code>oast.site</code>, <code>oast.fun</code>, <code>oast.me</code>. 기본값입니다.</td>
+</tr>
+<tr>
+<td><code>custom-http</code></td>
+<td>여러분이 제어하며 hit를 폴링하는 평범한 HTTP 엔드포인트.</td>
+</tr>
+<tr>
+<td><code>webhook.site</code></td>
+<td>public <a href="https://webhook.site">webhook.site</a> 서비스(HTTP 전용).</td>
+</tr>
+<tr>
+<td><code>BOAST</code></td>
+<td><a href="https://github.com/firebasextended/boast">BOAST</a> 서버(public preset <code>odiss.eu</code>).</td>
+</tr>
+<tr>
+<td><code>postbin</code></td>
+<td>PostBin 인스턴스(<code>postb.in</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를 등록하고 각 콜백을 복호화합니다(비밀 키는 프로젝트 데이터베이스에 <code>0600</code>으로 저장되며 로그에 남지 않습니다). payload id는 correlation id로부터 로컬에서 파생되므로, 한 번의 등록으로 별도의 왕복 없이 여러 payload를 발급할 수 있습니다.</p>
+<p>콜백은 프로젝트별로 지속되는 이력입니다. 리스너는 수동으로 재개할 수 있습니다(키가 보존됩니다). 재시작 시 자동으로 재개되지는 않습니다.</p>
+<h2 id="keys">키</h2>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>리스닝 시작(payload 등록 후 폴링 시작)</td>
+</tr>
+<tr>
+<td><code>Ctrl-X</code></td>
+<td>활성 리스너 중지</td>
+</tr>
+<tr>
+<td><code>g</code></td>
+<td>현재 payload 가져오기 / 복사</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>선택한 콜백 복사</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>콜백 목록 필터링</td>
+</tr>
+<tr>
+<td><code>a</code> / <code>e</code> / <code>t</code> / <code>d</code></td>
+<td>Providers 서브탭: 추가 / 편집 / 타입 설정 / 삭제</td>
+</tr>
+</tbody>
+</table>
+<h2 id="headless">헤드리스</h2>
+<p><code>gori run oast</code>는 임시적이고 저장소를 쓰지 않는 리스너입니다. payload를 등록하고 stdout에 출력한 다음, 멈출 때까지 콜백을 스트리밍합니다.</p>
+<pre><code class="language-bash hljs">gori run oast presets                          # list the built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site   # a different provider
+gori run oast listen --once --json             # poll once, emit JSON lines
+</code></pre>
+<p>모든 플래그는 <a href="https://gori.hahwul.com/ko/reference/cli/#run-oast">CLI Reference</a>를 참고하세요. MCP에서는 에이전트가 <code>oast_presets</code> / <code>oast_payload</code> / <code>oast_poll</code>(읽기)와 <code>oast_start</code> / <code>oast_stop</code>(동작)으로 같은 엔진을 구동합니다.</p>
+<blockquote>
+<p>콜백은 대상이 서드파티 interaction 서버에 접속했다는 뜻이며, public interactsh/webhook 서버는 그 콜백의 메타데이터를 보게 됩니다. 테스트 권한이 있는 시스템에만 OAST를 실행하고, 민감한 engagement에서는 자체 호스팅 서버를 우선하세요.</p>
+</blockquote>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: payload를 심고 여러 위치에서 fuzz합니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/scanning/">Scanning &amp; Issues</a>: 확인된 콜백을 Issue로 승격합니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP Server</a>: 에이전트가 payload를 등록하고 hit를 폴링하게 합니다</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>프록시 &amp; History</title>
+      <link>https://gori.hahwul.com/ko/guide/proxy/</link>
+      <guid>https://gori.hahwul.com/ko/guide/proxy/</guid>
+      <description>트래픽을 캡처하고, 요청을 인터셉트하고, 대상을 스코프로 좁히고, 모든 프로토콜을 살펴봅니다.</description>
+      <content:encoded><![CDATA[<p>프록시는 클라이언트와 업스트림 서버 사이에 자리 잡아 오가는 요청과 응답을 <em>플로우</em>로 기록하고 현재 프로젝트에 저장합니다. <strong>History</strong>는 그 플로우를 되짚어 읽는 곳입니다.</p>
+<h2 id="capturing-traffic">트래픽 캡처</h2>
+<p>gori를 실행하고 클라이언트를 <code>127.0.0.1:8070</code>으로 향하게 하세요(자세한 내용은 <a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a> 참고). <code>c</code>로 언제든 캡처를 토글할 수 있습니다. 꺼두면 트래픽이 기록 없이 통과하므로 환경을 설정하는 동안 편리합니다.</p>
+<p>각 플로우는 요청과 응답 전체를 기록합니다. 시작 줄, 헤더, 본문(저장되는 본문은 2 MiB로 제한되지만, 더 큰 본문도 바이트 단위 그대로 전달되며 실제 크기를 보고합니다)까지 담습니다. gzip, deflate, Brotli, Zstd로 압축된 본문은 화면에 표시할 때 디코드됩니다.</p>
+<blockquote>
+<p><strong>HTTPS와 업스트림 검증.</strong> HTTPS의 경우 gori는 오리진 서버 인증서를 시스템 CA 트러스트 스토어로 검증합니다(표준 위치에서 자동 탐색하며 <code>SSL_CERT_FILE</code> / <code>SSL_CERT_DIR</code>를 존중). 최소 컨테이너 등에서 스토어를 찾지 못하면 검증이 실패해 해당 플로우는 오류로 기록됩니다. 이때는 <code>SSL_CERT_FILE=/path/to/ca-bundle.crt</code>를 지정하거나 <code>--insecure-upstream</code>으로 실행하세요(설정 → <strong>Network → verify upstream</strong>). 이는 gori가 트래픽을 복호화하기 위해 <em>클라이언트</em>에서 gori 루트 CA를 신뢰하는 것과는 별개입니다.</p>
+</blockquote>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/response-detail.svg" alt="RESPONSE 서브탭의 gori 플로우 상세 뷰. HTTP/2 200 상태 줄과 구문 강조된 응답 헤더를 보여준다">
+  <figcaption><kbd>Enter</kbd>로 아무 플로우나 열어 전체 요청과 응답을 읽습니다. 헤더, HTTP/2 프레임, 원시 바이트를 볼 수 있는 서브탭이 함께 제공됩니다.</figcaption>
+</figure>
+<h2 id="intercept">인터셉트</h2>
+<p><code>i</code>를 눌러 <strong>Intercept</strong>를 켭니다. 켜져 있으면 매칭되는 요청(그리고 선택적으로 응답)이 붙잡혀, 계속 진행하기 전에 포워드, 드롭, 편집할 수 있습니다. Intercept 탭 상단의 필터 바에서 붙잡을 방향을 고르고 쿼리 언어 표현식으로 붙잡을 대상을 좁힐 수 있어, 관심 있는 트래픽에서만 멈춥니다.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/intercept.svg" alt="붙잡을 방향과 쿼리 조건을 위한 필터 바, 그리고 catch가 꺼졌을 때의 forward/drop을 설명하는 카드를 갖춘 gori Intercept 탭">
+  <figcaption><strong>Intercept</strong> 탭: <kbd>i</kbd>로 catch를 토글하고, 방향을 고르고, 매칭되는 트래픽만 붙잡아 이동 중에 포워드, 드롭, 편집합니다.</figcaption>
+</figure>
+<h2 id="scope">스코프</h2>
+<p>스코프는 큰 세션을 대상에 집중시킵니다. <strong>Project</strong> 탭에서 호스트, 문자열, 정규식으로 include/exclude 규칙을 정의합니다. <code>s</code>로 <strong>scope 렌즈</strong>를 토글하면 뷰가 스코프 내 트래픽으로 좁혀집니다. Intercept와 스캐너가 작동할 대상도 스코프로 제한할 수 있습니다.</p>
+<h3 id="sandbox">샌드박스</h3>
+<p><strong>샌드박스</strong>는 테스트를 허용된 범위 안으로만 강하게 가두는 차단 게이트입니다. <strong>Project</strong> 탭의 <strong>NETWORK</strong> 패널에서 토글합니다(기본값: off). on인 동안 캡처 프록시는 스코프가 <em>허용</em>하는 요청만 전달하고, 나머지는 오리진에 닿기 전에 차단합니다(클라이언트는 <code>X-Gori-Sandbox: blocked</code> 헤더가 붙은 <code>403</code>을 받습니다). 차단된 시도도 aborted 플로우로 기록되어 History에서 확인할 수 있습니다. 여기서 &quot;허용&quot;이란 스코프를 허용 목록(allowlist)으로 평가한 것으로, include 규칙이 하나 이상 매칭되고 exclude 규칙에는 매칭되지 않아야 합니다.</p>
+<p>허용 목록이므로 include 규칙이 하나도 없으면 모든 트래픽이 차단됩니다. 먼저 대상에 대한 include를 추가하세요(스코프가 빈 상태에서 샌드박스를 켜면 바로 이 점을 확인하도록 물어봅니다). 켜져 있는 동안에는 상단 바에 빨간 <code>sandbox</code> 칩이 계속 표시되고, NETWORK 행의 토글 옆에 현재 효과가 안내됩니다.</p>
+<p>샌드박스는 프록시로 캡처되는 트래픽에만 적용됩니다. Repeater, Fuzzer, Miner, MCP <code>send_request</code> 도구는 각자 스코프를 강제합니다(범위를 벗어난 대상은 <code>SCOPE_BLOCKED</code>로 거부). HTTPS는 요청 URL을 확인하기 위해 TLS 인터셉트에 의존합니다. 스코프에 들 수 없는 호스트는 <code>CONNECT</code> 단계에서 거부되고, 인터셉트 가능한 연결은 매 요청을 개별 검사할 수 있도록 HTTP/1.1로 유지됩니다.</p>
+<h2 id="sitemap">Sitemap</h2>
+<p><strong>Sitemap</strong> 탭은 History를 중복 제거된 <code>host → path</code> 엔드포인트 트리로 접어, 메서드 칩과 스코프 마커를 함께 보여줍니다. 대상의 공격 표면을 한눈에 파악하기 좋습니다. <code>g</code>를 누르면 경로 파라미터의 id를 접습니다. <code>/user/1</code>과 <code>/user/2</code>가 한 노드를 공유하고, <code>/user/&lt;uuid&gt;</code>는 <code>{uuid}</code> 하나로 모입니다.</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/sitemap.svg" alt="캡처된 호스트들이 경로 트리로 펼쳐지고 메서드 칩과 호스트별 경로 개수가 표시된 gori Sitemap 탭">
+  <figcaption><strong>Sitemap</strong>은 History를 메서드 칩이 달린 <code>host → path</code> 트리로 접어, 대상의 표면을 한눈에 보여줍니다.</figcaption>
+</figure>
+<h2 id="protocol-support">프로토콜 지원</h2>
+<p>gori는 지나가는 프로토콜을 인식합니다.</p>
+<table>
+<thead>
+<tr>
+<th>프로토콜</th>
+<th>지원</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTTP/1.1</strong></td>
+<td>전체 캡처 및 리피터</td>
+</tr>
+<tr>
+<td><strong>HTTP/2</strong></td>
+<td>ALPN 이후 투명 릴레이, 원시 프레임 로그, HPACK 디코드, stream → flow 조립</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong></td>
+<td>실시간 메시지 캡처 및 리피터 (permessage-deflate 미지원)</td>
+</tr>
+<tr>
+<td><strong>gRPC</strong></td>
+<td>HTTP/2 위에 프레이밍되고 status 트레일러 포함; protobuf는 원시 바이트로 표시 (<code>.proto</code> 스키마 없음)</td>
+</tr>
+<tr>
+<td><strong>Server-Sent Events</strong></td>
+<td>표시 시점에 개별 이벤트로 파싱</td>
+</tr>
+</tbody>
+</table>
+<p>와이어 프로토콜 위에서, gori는 흔히 쓰이는 페이로드를 인라인으로 디코드합니다.</p>
+<ul>
+<li><strong>JWT</strong>: <code>Authorization</code>, 쿠키, URL, 본문에서 헤더와 페이로드를 디코드합니다(서명은 표시되지만 검증하지 않습니다).</li>
+<li><strong>SAML</strong>: <code>SAMLRequest</code> / <code>SAMLResponse</code>에 대해 base64(그리고 리다이렉트 바인딩의 경우 DEFLATE)를 디코드합니다.</li>
+<li><strong>GraphQL</strong>: POST 본문과 <code>?query=</code> 파라미터에서 <code>query</code>, <code>operationName</code>, <code>variables</code>를 파싱합니다.</li>
+<li><strong>Form 파라미터</strong>: <code>application/x-www-form-urlencoded</code> 및 <code>multipart/form-data</code> 요청 본문과 URL 쿼리 문자열을 PARAMS 패널에서 단순한 key=value 목록으로 디코드합니다(multipart 파일 파트는 요약됩니다).</li>
+</ul>
+<h2 id="filtering-history">History 필터링</h2>
+<p>History는 gori의 <a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a>로 검색할 수 있습니다. 몇 가지 예시입니다.</p>
+<pre><code class="language-text hljs">status:5xx                  flows that errored
+host:api.example.com        a single host
+method:POST body:password   POST requests mentioning &quot;password&quot;
+dur:&gt;500                    responses slower than 500 ms
+path~/admin/                path matching a regex
+</code></pre>
+<p>History 필터 바에 쿼리를 입력하거나, 헤드리스로 실행하세요.</p>
+<pre><code class="language-bash hljs">gori run history -q 'status:5xx host:api.example.com'
+</code></pre>
+<h2 id="match-replace">Match &amp; Replace (Rewriter 탭)</h2>
+<p><strong>Rewriter</strong> 탭이 Match &amp; Replace 편집기입니다. 이동 중인 요청/응답을 재작성하는 규칙을 관리합니다. 기본적으로 숨김 상태이므로 탭 바의 <code>⋯</code> 메뉴나 커맨드 팔레트(<code>Ctrl-P</code> → <strong>Match &amp; Replace</strong> 또는 <strong>Go to Rewriter</strong>)로 엽니다.</p>
+<p>각 규칙에는 동작이 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>동작</th>
+<th>하는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Replace</strong></td>
+<td>헤드나 본문의 텍스트를 리터럴 부분 문자열 또는 정규식으로 찾아 치환</td>
+</tr>
+<tr>
+<td><strong>Add header</strong></td>
+<td><code>Name: value</code> 헤더를 추가</td>
+</tr>
+<tr>
+<td><strong>Set header</strong></td>
+<td>이름으로 헤더 값을 교체(없으면 추가)</td>
+</tr>
+<tr>
+<td><strong>Remove header</strong></td>
+<td>이름으로 헤더를 제거</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Replace</strong> 규칙은 요청이나 응답의 <strong>헤드</strong>(요청/상태 줄 + 헤더) 또는 <strong>본문</strong>(엔티티)을 대상으로 합니다. 리터럴과 정규식 중에서 고르며, 정규식 치환은 <code>$1</code>/<code>$2</code> 캡처 그룹 삽입을 지원합니다(리터럴 <code>$</code>는 <code>$$</code>). 헤더 동작은 항상 헤드에 적용되고, 헤더 이름을 대소문자 구분 없이 매칭합니다. 값이 비어 있으면 매칭된 텍스트를 삭제하거나 헤더를 제거합니다.</p>
+<p>어떤 규칙이든 <strong>호스트</strong> 글롭으로 범위를 좁혀 매칭되는 트래픽에만 적용할 수 있습니다. 일반 문자열은 부분 문자열로 매칭되고(<code>example.com</code>은 <code>api.example.com</code>에 매칭), <code>*</code>는 와일드카드입니다(<code>*.example.com</code>). 비워 두면 모든 호스트에 적용됩니다.</p>
+<p>목록은 <code>a</code> 추가, <code>e</code>/<code>Enter</code> 편집, <code>x</code> 켜기/끄기, <code>d</code> 삭제, <code>Shift-J</code>/<code>Shift-K</code> 순서 변경(규칙은 위에서 아래로 적용), <code>space</code>로 전체 메뉴를 다룹니다. 편집기는 규칙이 최근 몇 개의 플로에 영향을 줄지 실시간 미리보기로 보여 줍니다. 규칙은 프로젝트별이며 저장 즉시 적용되고 재시작은 필요 없습니다.</p>
+<p><strong>본문</strong> 규칙은 메시지를 버퍼링해 재작성하고 <code>Content-Length</code>를 자동으로 다시 맞춥니다(청크 본문은 de-chunk 후 재프레이밍됩니다). 헤드 규칙은 본문을 손대지 않고 계속 스트리밍합니다. 압축된(<code>Content-Encoding: gzip</code>/<code>br</code>/…) 본문은 압축을 풀지 않으므로 리터럴 패턴이 매칭되지 않고, 스트리밍 응답(SSE, close로 구분되는 응답, WebSocket 업그레이드)은 그대로 흘려보냅니다. 규칙을 하나라도 켜면 매칭되는 호스트는 HTTP/1.1로 내려갑니다. HTTP/2 헤드는 재작성 지점에 닿지 않기 때문입니다.</p>
+<p>같은 규칙을 헤드리스에서도 다룰 수 있습니다. <code>gori run rewriter</code>(list / add / rm / enable / disable / preview)와 MCP의 <code>create_rule</code> / <code>update_rule</code> / <code>list_rules</code> / <code>preview_rule</code> 도구입니다.</p>
+<h2 id="import">임포트</h2>
+<p>모든 것을 실시간으로 캡처할 필요는 없습니다. 커맨드 팔레트(<code>Ctrl-P</code>)에서:</p>
+<table>
+<thead>
+<tr>
+<th>동작</th>
+<th>소스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Import: HAR</strong></td>
+<td>브라우저 또는 프록시 HAR 익스포트 → 전체 요청/응답 플로우</td>
+</tr>
+<tr>
+<td><strong>Import: URLs</strong></td>
+<td>한 줄에 URL 하나씩 담긴 텍스트 파일 → 골격 요청 플로우</td>
+</tr>
+<tr>
+<td><strong>Import: OpenAPI</strong></td>
+<td>OpenAPI/Swagger JSON 또는 YAML → 오퍼레이션마다 요청 템플릿 하나</td>
+</tr>
+</tbody>
+</table>
+<p>형식이 잘못된 항목은 전체 임포트를 중단시키지 않고 건너뜁니다. 임포트된 플로우는 캡처된 트래픽처럼 History에 들어오므로, 똑같이 필터링하고 Repeater로 재전송하거나 퍼징·스캔할 수 있습니다.</p>
+<h2 id="host-overrides">호스트 오버라이드</h2>
+<p>호스트 오버라이드는 <code>/etc/hosts</code> 스타일 맵입니다. DNS를 바꾸지 않고 호스트명에 대해 특정 IP로 접속합니다. 두 개의 레이어가 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>레이어</th>
+<th>위치</th>
+<th>우선순위</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Project</strong></td>
+<td><strong>Project</strong> 탭 → HOST OVERRIDES 패널 (<code>a</code> / <code>e</code> / <code>d</code>)</td>
+<td>충돌 시 우선</td>
+</tr>
+<tr>
+<td><strong>Global</strong></td>
+<td>Preferences(<code>Ctrl-,</code>) → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>, <code>Ctrl-P</code> → <strong>Settings: Hostnames</strong>, 또는 <code>settings.json</code>의 <code>hostname_overrides</code></td>
+<td>폴백</td>
+</tr>
+</tbody>
+</table>
+<p>스테이징 호스트, IP 기반 가상 호스트, 또는 <code>Host</code> 헤더를 그대로 유지하면서 프로덕션 호스트명을 랩 박스로 향하게 할 때 유용합니다.</p>
+<h2 id="project-tab">Project 탭</h2>
+<p><strong>Project</strong> 홈 탭은 단순한 요약 이상입니다. 포커스 가능한 패널들(<code>Tab</code>으로 순환):</p>
+<figure class="tui-shot">
+  <img src="https://gori.hahwul.com/images/tui/project.svg" alt="개요, 한눈에 보는 상태 바, 스코프, 호스트 오버라이드, 환경 변수, 설명, 네트워크 패널을 갖춘 gori Project 탭">
+  <figcaption><strong>Project</strong> 홈: 개요와 한눈에 보는 상태, 그리고 스코프, 호스트 오버라이드, 환경 변수, 프로젝트별 네트워크 설정 패널.</figcaption>
+</figure>
+<table>
+<thead>
+<tr>
+<th>패널</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SCOPE</strong></td>
+<td>include/exclude 규칙 (호스트, 문자열, 정규식)</td>
+</tr>
+<tr>
+<td><strong>HOST OVERRIDES</strong></td>
+<td>프로젝트별 접속 맵</td>
+</tr>
+<tr>
+<td><strong>ENV</strong></td>
+<td>아웃바운드 요청을 위한 프로젝트별 <code>$KEY</code> 변수. <a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/#environment-variables">Repeater &amp; Fuzzer</a> 참고</td>
+</tr>
+<tr>
+<td><strong>DESCRIPTION</strong></td>
+<td>자유 형식 프로젝트 노트</td>
+</tr>
+<tr>
+<td><strong>NETWORK</strong></td>
+<td>scope 렌즈 + <strong>샌드박스</strong> 토글, 그리고 전역 Settings 기본값을 재정의하는 프로젝트별 네트워크 고정(bind / upstream)</td>
+</tr>
+</tbody>
+</table>
+<p>스코프 규칙과 호스트 오버라이드는 스크립트로도 다룰 수 있습니다: <code>gori run project scope add --kind=include --type=host --pattern=api.example.com</code>, <code>gori run project host-override add --host=api.example.com --ip=10.0.0.1</code>. 전체 플래그는 <a href="https://gori.hahwul.com/ko/reference/cli/#run-project">CLI Reference</a>에 있습니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: 캡처한 플로우를 다룹니다</li>
+<li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a>: TUI를 벗어나지 않고 인코드, 디코드, 해시</li>
+<li><a href="https://gori.hahwul.com/ko/guide/scanning/">Scanning &amp; Issues</a>: 자동 및 수동 분석</li>
+<li><a href="https://gori.hahwul.com/ko/reference/query-language/">Query Language</a>: 전체 필터 문법</li>
+</ul>
+]]></content:encoded>
+    </item>
+  </channel>
+</rss>

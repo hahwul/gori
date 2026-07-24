@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Switch between gori&#39;s built-in colour themes, or drop in your own.">
+  <title>Themes - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Themes">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/themes/">
+  <meta property="og:description" content="Switch between gori&apos;s built-in colour themes, or drop in your own.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Themes">
+  <meta name="twitter:description" content="Switch between gori&apos;s built-in colour themes, or drop in your own.">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/themes/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Themes","url":"https://gori.hahwul.com/guide/themes/","description":"Switch between gori's built-in colour themes, or drop in your own."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Themes"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/themes/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/themes/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/themes/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/themes/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/" class="active" aria-current="page">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Themes</h1>
+    <p>gori ships twenty-six built-in colour themes: <code>goridark</code> (the default), <code>goriday</code>, <code>latte</code>, <code>espresso</code>, <code>tokyonight</code>, <code>gruvbox</code>, <code>nord</code>, <code>dracula</code>, <code>solarized_light</code>, <code>rosepine_dawn</code>, <code>catppuccin_mocha</code>, <code>monokai</code>, <code>everforest</code>, <code>onedark</code>, <code>kanagawa</code>, <code>github_dark</code>, <code>zenburn</code>, <code>synthwave84</code>, <code>cyberpunk</code>, <code>matrix</code>, <code>cobalt2</code>, <code>high_contrast</code>, <code>github_light</code>, <code>gruvbox_light</code>, <code>one_light</code>, and <code>ayu_light</code>.</p>
+<h2 id="switching-themes">Switching Themes</h2>
+<p>Open Preferences with <code>Ctrl-,</code> (or the <code>⚙</code> chip in the top bar), go to <strong>Appearance</strong>, and press <code>↵</code> on the <strong>Theme</strong> row. The row previews the current theme inline: its name and a small swatch of its palette. <code>Ctrl-P</code> → <strong><code>settings:theme</code></strong> opens the same picker in one step.</p>
+<p>The picker is a vertical, scrollable list; each row shows a small swatch of the theme's own palette, and selecting a row previews it live. <code>Enter</code> applies and persists the choice, <code>Esc</code> reverts.</p>
+<p><code>Ctrl-,</code> works in the project picker too, so you can set your theme on first launch before opening a project. Theme is the only section editable there; the rest need a project open.</p>
+<p>The same History view across four of the built-ins:</p>
+<div class="tui-gallery">
+  <figure>
+    <img src="/images/tui/theme-goridark.svg" alt="gori History tab in the goridark theme: near-black canvas with a subtle gold focus outline">
+    <figcaption>goridark (default)</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-goriday.svg" alt="gori History tab in the goriday light theme: warm off-white canvas with dark text">
+    <figcaption>goriday (light)</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-tokyonight.svg" alt="gori History tab in the tokyonight theme: deep blue canvas with cool accent colours">
+    <figcaption>tokyonight</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-gruvbox.svg" alt="gori History tab in the gruvbox theme: warm dark canvas with retro amber and green accents">
+    <figcaption>gruvbox</figcaption>
+  </figure>
+</div>
+<h2 id="custom-themes">Custom Themes</h2>
+<p>You can add your own themes as JSON files, dropped into:</p>
+<pre><code>~/.gori/themes/&lt;name&gt;.json
+</code></pre>
+<p>(<code>~/.gori</code> is the gori home directory; override it with <code>$GORI_HOME</code>.) The file name is the theme name. <code>ocean.json</code> becomes the theme <code>ocean</code>. Custom themes appear in the picker after the built-ins, in file-name order. gori loads them at startup and again each time you open the theme picker, so you can drop a file in and reopen it without restarting.</p>
+<h3 id="format">Format</h3>
+<p>A theme is a JSON object mapping palette fields to <code>#rrggbb</code> hex colours. Use the optional <code>&quot;base&quot;</code> key to inherit every colour you don't override from a built-in theme, so a theme can be as small as one accent tweak:</p>
+<pre><code class="language-json hljs">{
+  &quot;base&quot;: &quot;goridark&quot;,
+  &quot;accent&quot;: &quot;#ff33cc&quot;,
+  &quot;syn_header&quot;: &quot;#33ccff&quot;
+}
+</code></pre>
+<p>Without <code>&quot;base&quot;</code>, the default (<code>goridark</code>) supplies any omitted colour.</p>
+<h3 id="a-full-theme">A Full Theme</h3>
+<p>Every field, all inheriting from <code>base</code> when omitted:</p>
+<pre><code class="language-json hljs">{
+  &quot;base&quot;: &quot;goridark&quot;,
+
+  &quot;bg&quot;:            &quot;#0a0a0b&quot;,
+  &quot;panel&quot;:         &quot;#141417&quot;,
+  &quot;elevated&quot;:      &quot;#1b1b1f&quot;,
+  &quot;border&quot;:        &quot;#2a2a30&quot;,
+  &quot;border_focus&quot;:  &quot;#3a3a42&quot;,
+  &quot;focus_gold&quot;:    &quot;#d9c28b&quot;,
+  &quot;accent&quot;:        &quot;#fafafa&quot;,
+  &quot;accent_bg&quot;:     &quot;#26262c&quot;,
+  &quot;selection_dim&quot;: &quot;#19191c&quot;,
+  &quot;text&quot;:          &quot;#c8c8cc&quot;,
+  &quot;text_bright&quot;:   &quot;#fafafa&quot;,
+  &quot;muted&quot;:         &quot;#6e6e76&quot;,
+  &quot;green&quot;:         &quot;#52c77a&quot;,
+  &quot;yellow&quot;:        &quot;#d6a13a&quot;,
+  &quot;red&quot;:           &quot;#e5534b&quot;,
+  &quot;orange&quot;:        &quot;#d9813f&quot;,
+  &quot;syn_header&quot;:    &quot;#82a8c4&quot;,
+  &quot;syn_string&quot;:    &quot;#8fb87a&quot;,
+  &quot;syn_number&quot;:    &quot;#ca9b6a&quot;,
+  &quot;syn_literal&quot;:   &quot;#b08ec2&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Used For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bg</code></td>
+<td>The canvas (main background)</td>
+</tr>
+<tr>
+<td><code>panel</code></td>
+<td>Top bar, status bar, overlays</td>
+</tr>
+<tr>
+<td><code>elevated</code></td>
+<td>Header bands, active segments</td>
+</tr>
+<tr>
+<td><code>border</code></td>
+<td>Resting hairline dividers</td>
+</tr>
+<tr>
+<td><code>border_focus</code></td>
+<td>The outline of an active modal card</td>
+</tr>
+<tr>
+<td><code>focus_gold</code></td>
+<td>The focused body pane&#39;s outline</td>
+</tr>
+<tr>
+<td><code>accent</code></td>
+<td>The highlight colour (selection marker, emphasis)</td>
+</tr>
+<tr>
+<td><code>accent_bg</code></td>
+<td>The selection band in the focused pane</td>
+</tr>
+<tr>
+<td><code>selection_dim</code></td>
+<td>The selection band in an unfocused pane</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>Body text</td>
+</tr>
+<tr>
+<td><code>text_bright</code></td>
+<td>Emphasised / active text</td>
+</tr>
+<tr>
+<td><code>muted</code></td>
+<td>Secondary / dimmed text</td>
+</tr>
+<tr>
+<td><code>green</code></td>
+<td>2xx status</td>
+</tr>
+<tr>
+<td><code>yellow</code></td>
+<td>4xx status</td>
+</tr>
+<tr>
+<td><code>red</code></td>
+<td>5xx status / errors</td>
+</tr>
+<tr>
+<td><code>orange</code></td>
+<td>Accent for warnings</td>
+</tr>
+<tr>
+<td><code>syn_header</code></td>
+<td>Header/field names, JSON keys, tag names</td>
+</tr>
+<tr>
+<td><code>syn_string</code></td>
+<td>Quoted strings</td>
+</tr>
+<tr>
+<td><code>syn_number</code></td>
+<td>Numbers, tag attribute names</td>
+</tr>
+<tr>
+<td><code>syn_literal</code></td>
+<td><code>true</code> / <code>false</code> / <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="notes">Notes</h3>
+<ul>
+<li>The file name is normalised to lower-case <code>a-z 0-9 - _</code>; other characters are dropped (<code>My Theme!.json</code> → <code>mytheme</code>).</li>
+<li>A file whose name collides with a built-in (e.g. <code>goridark.json</code>) is ignored. The built-ins can't be redefined.</li>
+<li>Loading is tolerant: an unreadable file, invalid JSON, or a non-object is skipped, and a single malformed colour falls back to the <code>base</code> value rather than discarding the whole theme. A broken theme file never crashes the TUI.</li>
+<li>For readability, keep your functional colours (text, status, syntax) well-contrasted against <code>bg</code>; the built-ins target WCAG AA (≥ 4.5:1).</li>
+</ul>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/hotkeys/">Hotkeys</a>: rebind gori's keyboard shortcuts the same way</li>
+<li><a href="/guide/settings/">Settings</a>: the Preferences modal and every section in it</li>
+<li><a href="/getting-started/configuration/">Configuration</a>: where <code>settings.json</code> lives and what else it holds</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

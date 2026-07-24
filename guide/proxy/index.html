@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Capture traffic, intercept requests, scope your target, and inspect every protocol.">
+  <title>Proxy &amp; History - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Proxy &amp; History">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/proxy/">
+  <meta property="og:description" content="Capture traffic, intercept requests, scope your target, and inspect every protocol.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Proxy &amp; History">
+  <meta name="twitter:description" content="Capture traffic, intercept requests, scope your target, and inspect every protocol.">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/proxy/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Proxy \u0026 History","url":"https://gori.hahwul.com/guide/proxy/","description":"Capture traffic, intercept requests, scope your target, and inspect every protocol."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Proxy \u0026 History"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/proxy/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/proxy/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/proxy/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/proxy/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/" class="active" aria-current="page">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Proxy &amp; History</h1>
+    <p>The proxy sits between your client and the upstream server, records each exchange as a <em>flow</em>, and stores it in the current project. <strong>History</strong> is where you read those flows back.</p>
+<h2 id="capturing-traffic">Capturing Traffic</h2>
+<p>Start gori and point your client at <code>127.0.0.1:8070</code> (see the <a href="/getting-started/quick-start/">Quick Start</a>). Toggle capture at any time with <code>c</code>. Turning it off lets traffic pass through without being recorded, which is handy while you set up.</p>
+<p>Each flow records the full request and response: start line, headers, and body (the stored body is capped at 2 MiB; larger bodies still forward byte-exact and report their true size). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.</p>
+<blockquote>
+<p>**HTTPS &amp; upstream verification.** For HTTPS, gori verifies the origin server's certificate against your system CA trust store, resolved automatically from standard locations (and honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`). If none is found — e.g. a minimal container — verification fails and those flows are recorded as errors; set <code>SSL_CERT_FILE=/path/to/ca-bundle.crt</code>, or run with <code>--insecure-upstream</code> (Settings → <strong>Network → verify upstream</strong>). This is separate from trusting gori's own root CA in your <em>client</em>, which is what lets gori decrypt the traffic in the first place.</p>
+</blockquote>
+<figure class="tui-shot">
+  <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
+  <figcaption>Open any flow with <kbd>Enter</kbd> to read the full request and response, with sub-tabs for headers, HTTP/2 frames, and raw bytes.</figcaption>
+</figure>
+<h2 id="intercept">Intercept</h2>
+<p>Press <code>i</code> to enable <strong>Intercept</strong>. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
+  <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
+</figure>
+<h2 id="scope">Scope</h2>
+<p>Scope keeps a large session focused on your target. In the <strong>Project</strong> tab you define include/exclude rules by host, string, or regular expression. Toggle the <strong>scope lens</strong> with <code>s</code> to filter the views down to in-scope traffic, and use scope to gate what Intercept and the scanners act on.</p>
+<h3 id="sandbox">Sandbox</h3>
+<p>The <strong>Sandbox</strong> is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the <strong>Project</strong> tab's <strong>NETWORK</strong> pane (default: off). While it's on, the capture proxy forwards only the requests your scope <em>allows</em>. Everything else is blocked before it reaches the origin (the client gets a <code>403</code> with an <code>X-Gori-Sandbox: blocked</code> header) and recorded as an aborted flow so the attempt stays visible. &quot;Allowed&quot; means the scope evaluated as an allowlist: at least one include rule must match, and no exclude rule may match.</p>
+<p>Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red <code>sandbox</code> chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.</p>
+<p>The sandbox governs proxied and captured traffic only. Repeater, Fuzzer, Miner, and the MCP <code>send_request</code> tool enforce scope on their own (they refuse an out-of-scope target with <code>SCOPE_BLOCKED</code>). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the <code>CONNECT</code> step, and interceptable connections are kept on HTTP/1.1 so every request is checked individually.</p>
+<h2 id="sitemap">Sitemap</h2>
+<p>The <strong>Sitemap</strong> tab collapses History into a deduplicated tree of <code>host → path</code> endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Press <code>g</code> to fold path-param ids, so <code>/user/1</code> and <code>/user/2</code> share one node and <code>/user/&lt;uuid&gt;</code> collapses into a single <code>{uuid}</code>.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
+  <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so you can read a target's surface at a glance.</figcaption>
+</figure>
+<h2 id="protocol-support">Protocol Support</h2>
+<p>gori understands the protocols it carries:</p>
+<table>
+<thead>
+<tr>
+<th>Protocol</th>
+<th>Support</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTTP/1.1</strong></td>
+<td>Full capture and repeater</td>
+</tr>
+<tr>
+<td><strong>HTTP/2</strong></td>
+<td>Transparent relay after ALPN, raw frame log, HPACK decode, stream → flow assembly</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong></td>
+<td>Live message capture and repeater (no permessage-deflate)</td>
+</tr>
+<tr>
+<td><strong>gRPC</strong></td>
+<td>Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no <code>.proto</code> schema)</td>
+</tr>
+<tr>
+<td><strong>Server-Sent Events</strong></td>
+<td>Parsed into discrete events at display time</td>
+</tr>
+</tbody>
+</table>
+<p>On top of the wire protocols, gori decodes common payloads inline:</p>
+<ul>
+<li><strong>JWT</strong>: header and payload decoded from <code>Authorization</code>, cookies, URLs, and bodies (signatures are shown but never verified).</li>
+<li><strong>SAML</strong>: base64 (and DEFLATE for the redirect binding) decoded for <code>SAMLRequest</code> / <code>SAMLResponse</code>.</li>
+<li><strong>GraphQL</strong>: <code>query</code>, <code>operationName</code>, and <code>variables</code> parsed from POST bodies and <code>?query=</code> parameters.</li>
+<li><strong>Form params</strong>: <code>application/x-www-form-urlencoded</code> and <code>multipart/form-data</code> request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).</li>
+</ul>
+<h2 id="filtering-history">Filtering History</h2>
+<p>History is searchable with gori's <a href="/reference/query-language/">query language</a>. A few examples:</p>
+<pre><code class="language-text hljs">status:5xx                  flows that errored
+host:api.example.com        a single host
+method:POST body:password   POST requests mentioning &quot;password&quot;
+dur:&gt;500                    responses slower than 500 ms
+path~/admin/                path matching a regex
+</code></pre>
+<p>Type a query in the History filter bar, or run it headless:</p>
+<pre><code class="language-bash hljs">gori run history -q 'status:5xx host:api.example.com'
+</code></pre>
+<h2 id="match-replace-rewriter-tab">Match &amp; Replace (Rewriter tab)</h2>
+<p>The <strong>Rewriter</strong> tab is the Match &amp; Replace editor: rules that rewrite requests and responses in flight. It is hidden by default, so reach it from the tab-bar <code>⋯</code> menu or the command palette (<code>Ctrl-P</code> → <strong>Match &amp; Replace</strong>, or <strong>Go to Rewriter</strong>).</p>
+<p>Each rule has an operation:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Replace</strong></td>
+<td>Find and replace text in the head or body, by literal substring or regex</td>
+</tr>
+<tr>
+<td><strong>Add header</strong></td>
+<td>Append a <code>Name: value</code> header</td>
+</tr>
+<tr>
+<td><strong>Set header</strong></td>
+<td>Replace a header&#39;s value by name, or add it if absent</td>
+</tr>
+<tr>
+<td><strong>Remove header</strong></td>
+<td>Drop a header by name</td>
+</tr>
+</tbody>
+</table>
+<p>A <strong>Replace</strong> rule targets the request or response, and the <strong>head</strong> (request/status line + headers) or <strong>body</strong> (the entity). Choose literal or regex matching; a regex replacement supports <code>$1</code>/<code>$2</code> capture-group interpolation (write <code>$$</code> for a literal <code>$</code>). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.</p>
+<p>Scope any rule to a <strong>host</strong> glob so it only fires for matching traffic: a plain string matches as a substring (<code>example.com</code> matches <code>api.example.com</code>), and <code>*</code> is a wildcard (<code>*.example.com</code>). Leave it empty to apply to every host.</p>
+<p>Manage the list with <code>a</code> add, <code>e</code>/<code>Enter</code> edit, <code>x</code> enable/disable, <code>d</code> delete, <code>Shift-J</code>/<code>Shift-K</code> reorder (rules apply top to bottom), and <code>space</code> for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules are per-project and take effect as soon as you save, with no restart.</p>
+<p>A <strong>body</strong> rule buffers the message to rewrite it and re-syncs <code>Content-Length</code> automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed (<code>Content-Encoding: gzip</code>/<code>br</code>/…) body isn't decompressed, so a literal pattern won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Enabling any rule forces matching hosts to HTTP/1.1, since HTTP/2 heads never reach the rewrite seam.</p>
+<p>The same rules are scriptable headless: <code>gori run rewriter</code> (list / add / rm / enable / disable / preview) and the MCP <code>create_rule</code> / <code>update_rule</code> / <code>list_rules</code> / <code>preview_rule</code> tools.</p>
+<h2 id="import">Import</h2>
+<p>You don't have to capture everything live. From the command palette (<code>Ctrl-P</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Import: HAR</strong></td>
+<td>Browser or proxy HAR export → full request/response flows</td>
+</tr>
+<tr>
+<td><strong>Import: URLs</strong></td>
+<td>Text file, one URL per line → skeleton request flows</td>
+</tr>
+<tr>
+<td><strong>Import: OpenAPI</strong></td>
+<td>OpenAPI/Swagger JSON or YAML → one request template per operation</td>
+</tr>
+</tbody>
+</table>
+<p>Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.</p>
+<h2 id="host-overrides">Host Overrides</h2>
+<p>Host overrides are a <code>/etc/hosts</code>-style map: dial a specific IP for a hostname without changing DNS. Two layers exist:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where</th>
+<th>Precedence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Project</strong></td>
+<td><strong>Project</strong> tab → HOST OVERRIDES pane (<code>a</code> / <code>e</code> / <code>d</code>)</td>
+<td>Wins on collision</td>
+</tr>
+<tr>
+<td><strong>Global</strong></td>
+<td>Preferences (<code>Ctrl-,</code>) → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>, <code>Ctrl-P</code> → <strong>Settings: Hostnames</strong>, or <code>hostname_overrides</code> in <code>settings.json</code></td>
+<td>Fallback</td>
+</tr>
+</tbody>
+</table>
+<p>Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the <code>Host</code> header intact.</p>
+<h2 id="project-tab">Project Tab</h2>
+<p>The <strong>Project</strong> home tab is more than a summary. Focusable panes (cycle with <code>Tab</code>):</p>
+<figure class="tui-shot">
+  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
+  <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>
+</figure>
+<table>
+<thead>
+<tr>
+<th>Pane</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SCOPE</strong></td>
+<td>Include/exclude rules (host, string, or regex)</td>
+</tr>
+<tr>
+<td><strong>HOST OVERRIDES</strong></td>
+<td>Per-project dial map</td>
+</tr>
+<tr>
+<td><strong>ENV</strong></td>
+<td>Per-project <code>$KEY</code> variables for outbound requests. See <a href="/guide/repeater-and-fuzzer/#environment-variables">Repeater &amp; Fuzzer</a></td>
+</tr>
+<tr>
+<td><strong>DESCRIPTION</strong></td>
+<td>Free-form project notes</td>
+</tr>
+<tr>
+<td><strong>NETWORK</strong></td>
+<td>Scope-lens + <strong>sandbox</strong> toggles, plus per-project network pins (bind / upstream) that override the global Settings default</td>
+</tr>
+</tbody>
+</table>
+<p>Scope rules and host overrides are also scriptable: <code>gori run project scope add --kind=include --type=host --pattern=api.example.com</code>, <code>gori run project host-override add --host=api.example.com --ip=10.0.0.1</code>. Full flags are in the <a href="/reference/cli/#run-project">CLI Reference</a>.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: act on the flows you capture</li>
+<li><a href="/guide/decoder/">Decoder</a>: encode, decode, and hash without leaving the TUI</li>
+<li><a href="/guide/scanning/">Scanning &amp; Issues</a>: automated and manual analysis</li>
+<li><a href="/reference/query-language/">Query Language</a>: the full filter syntax</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

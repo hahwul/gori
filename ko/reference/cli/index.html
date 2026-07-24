@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="모든 gori 서브커맨드와 커맨드라인 플래그.">
+  <title>CLI 레퍼런스 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="CLI 레퍼런스">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/reference/cli/">
+  <meta property="og:description" content="모든 gori 서브커맨드와 커맨드라인 플래그.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="CLI 레퍼런스">
+  <meta name="twitter:description" content="모든 gori 서브커맨드와 커맨드라인 플래그.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/reference/cli/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"CLI 레퍼런스","url":"https://gori.hahwul.com/ko/reference/cli/","description":"모든 gori 서브커맨드와 커맨드라인 플래그."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"레퍼런스","item":"https://gori.hahwul.com/ko/reference/"},{"@type":"ListItem","position":3,"name":"CLI 레퍼런스"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/cli/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/cli/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/" class="active" aria-current="true">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/" class="active" aria-current="true">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/reference/cli/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/cli/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/" class="active" aria-current="page">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>CLI 레퍼런스</h1>
+    <p><code>gori</code> 커맨드라인 레퍼런스입니다. 서브커맨드 없이 <code>gori</code>를 실행하면 TUI가 시작됩니다.</p>
+<pre><code class="language-text hljs">gori [command] [options]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tui</code></td>
+<td>프록시와 터미널 UI 시작 (기본값)</td>
+</tr>
+<tr>
+<td><code>run</code></td>
+<td>프로젝트 단위 비대화형 스위트</td>
+</tr>
+<tr>
+<td><code>mcp</code></td>
+<td>Model Context Protocol stdio 서버</td>
+</tr>
+<tr>
+<td><code>ca</code></td>
+<td>루트 CA 경로 / PEM 출력, 또는 CA 재생성 / 가져오기</td>
+</tr>
+<tr>
+<td><code>settings</code></td>
+<td><code>settings.json</code> 표시 또는 편집</td>
+</tr>
+<tr>
+<td><code>wizard</code></td>
+<td>대화형 최초 실행 설정</td>
+</tr>
+<tr>
+<td><code>tutorial</code></td>
+<td>가이드형 TUI 투어 (탐색, 팔레트, 스페이스 메뉴, 편집 모드)</td>
+</tr>
+<tr>
+<td><code>update</code></td>
+<td>채널 인식 자체 업데이트 (바이너리 / Homebrew / Snap / AUR)</td>
+</tr>
+</tbody>
+</table>
+<p>전역 플래그: <code>-v</code> / <code>--version</code>, <code>-h</code> / <code>--help</code>.</p>
+<h2 id="gori-tui">gori tui</h2>
+<p>인터셉트 프록시와 TUI를 시작합니다. 서브커맨드를 주지 않으면 이것이 기본값입니다.</p>
+<pre><code class="language-bash hljs">gori
+gori tui --listen 0.0.0.0 --port 8080
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-l</code>, <code>--listen=HOST</code></td>
+<td>이 프로세스의 전역 바인드 주소 (<code>settings.json</code> 기본값, 없으면 <code>127.0.0.1</code>). 저장되지 않음. 프로젝트 자체 바인드가 설정되어 있으면 그쪽이 우선</td>
+</tr>
+<tr>
+<td><code>-p</code>, <code>--port=PORT</code></td>
+<td>이 프로세스의 전역 바인드 포트, <code>0</code>-<code>65535</code> (<code>settings.json</code> 기본값, 없으면 <code>8070</code>). 저장되지 않음. 프로젝트 <code>net.bind_port</code>가 설정되어 있으면 그쪽이 우선</td>
+</tr>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>SQLite 데이터베이스 경로</td>
+</tr>
+<tr>
+<td><code>--ca-dir=PATH</code></td>
+<td>루트 CA 디렉터리</td>
+</tr>
+<tr>
+<td><code>--insecure-upstream</code></td>
+<td>업스트림 TLS 인증서를 검증하지 않음</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>GORI_HOME</code>은 플래그가 아니라 환경 변수입니다. TUI에서는 프로젝트 피커로 프로젝트를 고릅니다. 바인드 플래그는 이번 실행에 한해 전역 계층만 설정합니다. <a href="/ko/getting-started/configuration/#network">설정</a>을 참고하세요. 루트 CA 경로는 <a href="#gori-ca"><code>gori ca</code></a>를 사용하세요.</p>
+</blockquote>
+<h2 id="gori-run">gori run</h2>
+<p>비대화형 스위트입니다. 각 서브커맨드는 프로젝트 단위로 동작합니다. <code>--project</code>와 <code>--db</code>가 모두 없으면 가장 최근에 활성화한 프로젝트를 씁니다.</p>
+<pre><code class="language-bash hljs">gori run &lt;subcommand&gt; [options]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>capture</code></td>
+<td>프록시를 실행하고 캡처한 플로우를 STDOUT으로 스트리밍</td>
+</tr>
+<tr>
+<td><code>history</code> (<code>ls</code>)</td>
+<td>캡처한 플로우 목록 / 쿼리</td>
+</tr>
+<tr>
+<td><code>show &lt;flow-id&gt;</code></td>
+<td>플로우 하나의 요청과 응답 출력</td>
+</tr>
+<tr>
+<td><code>repeater &lt;flow-id&gt;</code> · <code>list</code> · <code>create</code></td>
+<td>캡처한 플로우 재전송, 또는 Repeater 워크벤치 세션 목록 / 생성</td>
+</tr>
+<tr>
+<td><code>fuzz [&lt;flow-id&gt;]</code></td>
+<td>Intruder 스타일 퍼저</td>
+</tr>
+<tr>
+<td><code>mine [&lt;flow-id&gt;]</code></td>
+<td>숨은 파라미터 탐색</td>
+</tr>
+<tr>
+<td><code>sequence</code> (<code>seq</code>) <code>[&lt;flow-id&gt;]</code></td>
+<td>토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 <code>--tokens</code>)</td>
+</tr>
+<tr>
+<td><code>probe [QL]</code></td>
+<td>패시브 보안 스캔 (요청 없음)</td>
+</tr>
+<tr>
+<td><code>discover</code></td>
+<td>엔드포인트를 스파이더링 &amp; 브루트포스하여 Sitemap으로 반영</td>
+</tr>
+<tr>
+<td><code>sitemap [QL]</code></td>
+<td>호스트 → 경로 엔드포인트 트리</td>
+</tr>
+<tr>
+<td><code>oast listen</code> · <code>presets</code></td>
+<td>아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스)</td>
+</tr>
+<tr>
+<td><code>jwt [&lt;token&gt;]</code></td>
+<td>JWT 디코드, 재서명, 또는 공격 페이로드 생성</td>
+</tr>
+<tr>
+<td><code>convert &lt;chain&gt; [input]</code></td>
+<td>Decoder 인코드 / 디코드 / 해시 체인 실행</td>
+</tr>
+<tr>
+<td><code>notes [&lt;n&gt;]</code> · <code>create</code> · <code>delete</code></td>
+<td>프로젝트 노트 읽기, 작성, 삭제</td>
+</tr>
+<tr>
+<td><code>issues</code> · <code>create</code> · <code>update</code></td>
+<td>이슈 목록 / 내보내기, 또는 이슈 작성</td>
+</tr>
+<tr>
+<td><code>rewriter</code> · <code>add</code> · <code>rm</code> · <code>enable</code> · <code>disable</code> · <code>preview</code></td>
+<td>Match &amp; Replace 규칙 관리</td>
+</tr>
+<tr>
+<td><code>project [list]</code></td>
+<td>알려진 프로젝트 목록</td>
+</tr>
+<tr>
+<td><code>project scope</code></td>
+<td>스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화</td>
+</tr>
+<tr>
+<td><code>project env</code></td>
+<td>프로젝트 env 변수 목록 / 설정 / 삭제 (<code>$KEY</code> 치환)</td>
+</tr>
+</tbody>
+</table>
+<p>읽기 서브커맨드에 공통인 플래그: <code>--project=NAME</code>, <code>--db=PATH</code>, <code>--format=FMT</code> (보통 <code>text</code> 또는 <code>json</code>).</p>
+<h3 id="run-capture">run capture</h3>
+<pre><code class="language-bash hljs">gori run capture --port 8070 --format json --for 5m
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-l</code>, <code>--listen</code>; <code>-p</code>, <code>--port</code></td>
+<td>이 프로세스의 전역 바인드 (설정 기본값; 프로젝트 오버라이드가 여전히 우선)</td>
+</tr>
+<tr>
+<td><code>--project=NAME</code></td>
+<td>기록할 프로젝트 (기본값 <code>default</code>)</td>
+</tr>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>데이터베이스 경로</td>
+</tr>
+<tr>
+<td><code>-k</code>, <code>--insecure-upstream</code></td>
+<td>업스트림 TLS 검증 생략</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> 또는 <code>json</code> (JSON Lines)</td>
+</tr>
+<tr>
+<td><code>--for=DURATION</code></td>
+<td>예: <code>30s</code>, <code>5m</code>, <code>1h</code> 이후 중지</td>
+</tr>
+<tr>
+<td><code>--max=N</code></td>
+<td>플로우 N개 이후 중지</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-history-ls">run history / ls</h3>
+<pre><code class="language-bash hljs">gori run history -q 'status:5xx' --limit 100 --format json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-q</code>, <code>--query=QL</code></td>
+<td>쿼리 언어 필터 (위치 인자로도 허용)</td>
+</tr>
+<tr>
+<td><code>-n</code>, <code>--limit=N</code></td>
+<td>최대 행 수 (기본값 50)</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> 또는 <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-show">run show</h3>
+<pre><code class="language-bash hljs">gori run show &lt;flow-id&gt; --format raw
+</code></pre>
+<p><code>--format</code>은 <code>text</code>, <code>json</code>, 또는 <code>raw</code>(정확한 바이트)입니다. <code>--request-only</code> / <code>--response-only</code>로 출력을 제한합니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.</p>
+<h3 id="run-repeater">run repeater</h3>
+<p>캡처한 플로우 하나를 재전송하거나, TUI와 공유되는 Repeater 워크벤치 세션을 관리합니다.</p>
+<pre><code class="language-bash hljs">gori run repeater &lt;flow-id&gt; --target https://staging.example.com --http2 --diff
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--target=URL</code></td>
+<td>다른 URL로 전송</td>
+</tr>
+<tr>
+<td><code>--http2</code></td>
+<td>HTTP/2 사용</td>
+</tr>
+<tr>
+<td><code>--sni=HOST</code></td>
+<td>TLS SNI 오버라이드</td>
+</tr>
+<tr>
+<td><code>-k</code>, <code>--insecure-upstream</code></td>
+<td>업스트림 TLS 검증 생략</td>
+</tr>
+<tr>
+<td><code>-H</code>, <code>--header=HEADER</code></td>
+<td>요청 헤더 덮어쓰기/추가 (반복 가능)</td>
+</tr>
+<tr>
+<td><code>-b</code>, <code>--body=BODY</code></td>
+<td>요청 본문 오버라이드</td>
+</tr>
+<tr>
+<td><code>--diff</code></td>
+<td>원본 응답과 비교</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> (기본값) 또는 <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>repeater list</code></strong>: 저장된 Repeater 세션 목록 (<code>--format text|json</code>).</p>
+<p><strong><code>repeater create</code></strong>: Repeater 세션 생성:</p>
+<pre><code class="language-bash hljs">gori run repeater create --target https://api.example.com --request-file req.txt --name &quot;login probe&quot;
+gori run repeater create --flow 42 --name &quot;clone of 42&quot;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t</code>, <code>--target=URL</code></td>
+<td>대상 URL (<code>--flow</code>로 복제하는 경우가 아니면 필수)</td>
+</tr>
+<tr>
+<td><code>-f</code>, <code>--request-file=FILE</code></td>
+<td>FILE에서 원시 HTTP 요청을 읽음</td>
+</tr>
+<tr>
+<td><code>-r</code>, <code>--request-raw=RAW</code></td>
+<td>원시 HTTP 요청 문자열 그대로</td>
+</tr>
+<tr>
+<td><code>--flow=ID</code></td>
+<td>캡처한 플로우에서 요청 / 대상 / HTTP/2 복제</td>
+</tr>
+<tr>
+<td><code>--name=NAME</code></td>
+<td>사용자 지정 탭 이름</td>
+</tr>
+<tr>
+<td><code>--http2</code>, <code>--no-auto-cl</code>, <code>--sni=HOST</code></td>
+<td>HTTP/2, 자동 <code>Content-Length</code> 생략, SNI 오버라이드</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-fuzz">run fuzz</h3>
+<p>소스: <code>--flow=ID</code>, <code>--request=FILE</code>, 또는 stdin. 위치: <code>§…§</code> 마커, <code>--auto</code>, 또는 <code>--mark=TOKEN</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transport</td>
+<td><code>--target=URL</code> (<code>--request</code>/stdin에 필수), <code>--http2</code>, <code>--sni=HOST</code>, <code>-k</code>/<code>--insecure-upstream</code></td>
+</tr>
+<tr>
+<td>Mode</td>
+<td><code>--mode=</code> <code>sniper</code> (기본값), <code>batteringram</code>, <code>pitchfork</code>, <code>clusterbomb</code></td>
+</tr>
+<tr>
+<td>Payloads</td>
+<td><code>-w</code>/<code>--wordlist</code>, <code>--payloads=LIST</code>, <code>--numbers=FROM-TO[:STEP]</code>, <code>--null=N</code>, <code>--brute=CHARSET:MIN-MAX</code></td>
+</tr>
+<tr>
+<td>Processors</td>
+<td><code>--prefix</code>, <code>--suffix</code>, <code>--encode</code> (<code>url</code>|<code>urlall</code>|<code>base64</code>|<code>hex</code>), <code>--case</code> (<code>upper</code>|<code>lower</code>), <code>--hash</code> (<code>md5</code>|<code>sha1</code>|<code>sha256</code>), <code>--regex-replace=/pat/rep/</code></td>
+</tr>
+<tr>
+<td>Rate</td>
+<td><code>--concurrency</code> (20), <code>--rate=RPS</code>, <code>--throttle=MS</code>, <code>--timeout=SEC</code>, <code>--retries=N</code>, <code>--follow-redirects</code></td>
+</tr>
+<tr>
+<td>Matchers</td>
+<td><code>--mc</code>/<code>--fc</code> status, <code>--ms</code>/<code>--fs</code> size, <code>--mw</code>/<code>--fw</code> words, <code>--ml</code>/<code>--fl</code> lines, <code>--mr</code>/<code>--fr</code> body regex, <code>--extract=REGEX</code>, <code>--ac</code> auto-calibrate</td>
+</tr>
+<tr>
+<td>Output</td>
+<td><code>--format</code> (<code>text</code>|<code>json</code>|<code>jsonl</code>), <code>--force</code>, <code>--fail-if-no-matches</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-mine">run mine</h3>
+<pre><code class="language-bash hljs">gori run mine &lt;flow-id&gt; --locations query,headers --wordlist params.txt
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--flow</code>, <code>--request</code>, <code>--target</code>, <code>--sni</code>, <code>--http2</code>, <code>-k</code></td>
+<td>요청 소스와 트랜스포트</td>
+</tr>
+<tr>
+<td><code>--locations=LIST</code></td>
+<td><code>query</code>, <code>form</code>, <code>json</code>, <code>headers</code>, <code>cookies</code></td>
+</tr>
+<tr>
+<td><code>--wordlist</code>, <code>--bucket=N</code></td>
+<td>후보 이름과 버킷 크기</td>
+</tr>
+<tr>
+<td><code>--concurrency</code> (10), <code>--rate</code>, <code>--throttle</code>, <code>--timeout</code>, <code>--retries</code> (1), <code>--max-requests=N</code></td>
+<td>속도 제어</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>, <code>json</code>, 또는 <code>jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-sequence">run sequence</h3>
+<p>토큰의 무작위성을 평가합니다. <strong>라이브</strong>: 요청을 리플레이하며 각 응답에서 토큰을 추출합니다. <strong>수동</strong>: <code>--tokens</code>로 붙여넣은 목록을 분석합니다(네트워크 없음). 별칭 <code>seq</code>.</p>
+<pre><code class="language-bash hljs">gori run sequence 42 --cookie SESSIONID --count 500
+gori run sequence --tokens tokens.txt          # '-' reads stdin
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--flow=ID</code>, <code>--request=FILE</code>, stdin</td>
+<td>라이브 리플레이의 요청 소스(또는 맨 앞의 <code>&lt;flow-id&gt;</code>)</td>
+</tr>
+<tr>
+<td><code>--tokens=FILE</code></td>
+<td>붙여넣은 토큰 목록 분석(한 줄에 하나, <code>-</code>=stdin), 네트워크 없음</td>
+</tr>
+<tr>
+<td>토큰 위치(하나만 선택)</td>
+<td><code>--cookie=NAME</code>, <code>--header=NAME</code>, <code>--regex=RE</code>, <code>--position=A:B</code>, <code>--jsonpath=EXPR</code></td>
+</tr>
+<tr>
+<td><code>--count=N</code></td>
+<td>목표 토큰 개수(기본값 500)</td>
+</tr>
+<tr>
+<td><code>--target</code>, <code>--http2</code>, <code>--sni</code>, <code>-k</code></td>
+<td>트랜스포트(<code>--request</code>/stdin에는 target 필요)</td>
+</tr>
+<tr>
+<td><code>--concurrency</code> (1), <code>--rate</code>, <code>--throttle</code>, <code>--timeout</code>, <code>--retries</code>, <code>--max-requests=N</code></td>
+<td>속도 제어(상태 기반 토큰을 위해 concurrency는 1 유지)</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>, <code>json</code>, 또는 <code>jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-probe">run probe</h3>
+<pre><code class="language-bash hljs">gori run probe --severity high --category cors
+gori run probe -a
+</code></pre>
+<p><code>--severity</code>는 <code>info</code>|<code>low</code>|<code>medium</code>|<code>high</code>|<code>critical</code> 중 하나입니다. <code>--category</code>는 <code>headers</code>|<code>cookies</code>|<code>tech</code>|<code>infoleak</code>|<code>cors</code>|<code>client</code>|<code>active</code>입니다. 기본적으로 패시브 검사를 수행하며, <code>-a</code>/<code>--active</code> 옵션을 사용하여 액티브 프로브 검사를 포함할 수 있습니다. <code>-q</code>/<code>--query</code>로 QL 필터를 겁니다.</p>
+<h3 id="run-discover">run discover</h3>
+<p>대상을 스파이더링하고 링크되지 않은 경로를 브루트포스합니다. <code>--no-store</code>가 아니면 결과는 Sitemap으로 반영됩니다. 실제 요청을 무단으로 보내므로 권한이 있는 대상에만 실행하세요.</p>
+<pre><code class="language-bash hljs">gori run discover --target https://target.example --max-depth 3 --extensions php,json,bak --format jsonl
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--target=URL</code></td>
+<td>탐색할 시드 origin 또는 경로 하위 트리(필수)</td>
+</tr>
+<tr>
+<td><code>--max-depth=N</code></td>
+<td>시드로부터의 스파이더 깊이(기본값 4)</td>
+</tr>
+<tr>
+<td><code>--no-spider</code> / <code>--no-bruteforce</code></td>
+<td>링크 크롤링 / 디렉터리 브루트포스 비활성화</td>
+</tr>
+<tr>
+<td><code>--wordlist=PATH</code></td>
+<td>내장 목록과 병합할 추가 경로 워드리스트</td>
+</tr>
+<tr>
+<td><code>--extensions=LIST</code></td>
+<td>이 확장자도 프로브(예: <code>php,json,bak</code>)</td>
+</tr>
+<tr>
+<td><code>-H</code>, <code>--header=HEADER</code></td>
+<td>모든 프로브에 붙일 커스텀 헤더(반복 가능)</td>
+</tr>
+<tr>
+<td><code>--containment=MODE</code></td>
+<td><code>same-origin</code> | <code>scope-aware</code>(기본) | <code>host+subdomains</code></td>
+</tr>
+<tr>
+<td><code>--concurrency</code> (20), <code>--rate</code>, <code>--throttle</code>, <code>--timeout</code>, <code>--retries</code>, <code>--max-requests=N</code></td>
+<td>속도 제어</td>
+</tr>
+<tr>
+<td><code>-k</code>, <code>--insecure-upstream</code></td>
+<td>업스트림 TLS 검증 생략</td>
+</tr>
+<tr>
+<td><code>--allow-unscoped</code></td>
+<td>대상이 프로젝트 스코프 밖이어도 실행</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>무제한 실행 안전 게이트 우회</td>
+</tr>
+<tr>
+<td><code>--no-store</code></td>
+<td>결과를 프로젝트에 기록하지 않음</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>, <code>json</code>, 또는 <code>jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-sitemap">run sitemap</h3>
+<pre><code class="language-bash hljs">gori run sitemap --in-scope --format paths
+</code></pre>
+<p><code>-q</code>/<code>--query=QL</code>는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). <code>-n</code>/<code>--limit=N</code>은 스캔할 엔드포인트 수를 제한합니다(기본값 <code>SITEMAP_MAX</code>). <code>--in-scope</code>는 스코프 내 호스트로 한정하고, <code>--no-group</code>은 id 접기를 끕니다. <code>--format</code>은 <code>text</code>(트리), <code>json</code>, <code>paths</code> 중에서 고릅니다.</p>
+<h3 id="run-oast">run oast</h3>
+<p>즉석에서 쓰는, 저장소 없는 아웃오브밴드 리스너입니다. 페이로드를 등록하고 출력한 뒤 콜백을 스트리밍합니다.</p>
+<pre><code class="language-bash hljs">gori run oast presets                          # list built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site --once --json
+</code></pre>
+<p><code>presets</code>는 공개 프로바이더를 나열합니다. <code>listen</code> 옵션:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--provider=KIND</code></td>
+<td><code>interactsh</code>(기본) | <code>custom-http</code> | <code>webhook.site</code> | <code>BOAST</code> | <code>postbin</code></td>
+</tr>
+<tr>
+<td><code>--server=URL</code></td>
+<td>프로바이더 서버 / 베이스 URL(기본값: 프로바이더의 공개 프리셋)</td>
+</tr>
+<tr>
+<td><code>--token=TOK</code></td>
+<td>선택적 프로바이더 인증 토큰</td>
+</tr>
+<tr>
+<td><code>--interval=SEC</code></td>
+<td>폴링 간격(기본값 5)</td>
+</tr>
+<tr>
+<td><code>--once</code></td>
+<td>한 번만 폴링하고 종료</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>각 콜백을 JSON 라인으로 출력(MCP와 동일한 형태)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-jwt">run jwt</h3>
+<p>JWT를 디코드, 재서명, 또는 공격 페이로드를 생성합니다. 저장소 없는 계산이며, 토큰은 <code>&lt;token&gt;</code> 인자나 stdin에서 받습니다.</p>
+<pre><code class="language-bash hljs">gori run jwt eyJhbGci...                        # decode (default)
+gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
+gori run jwt eyJhbGci... --attacks
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--decode</code></td>
+<td>header / payload / signature 디코드(기본)</td>
+</tr>
+<tr>
+<td><code>--encode</code></td>
+<td><code>--alg</code> / <code>--secret</code>로 토큰 클레임 재서명</td>
+</tr>
+<tr>
+<td><code>--attacks</code></td>
+<td>테스트 페이로드 생성(alg:none, weak-secret, header injection)</td>
+</tr>
+<tr>
+<td><code>--alg=ALG</code></td>
+<td><code>--encode</code>용 서명 alg: <code>HS256</code>(기본) | <code>HS384</code> | <code>HS512</code> | <code>none</code></td>
+</tr>
+<tr>
+<td><code>--secret=SECRET</code></td>
+<td>HS 알고리즘 <code>--encode</code>용 HMAC 시크릿</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>(기본) 또는 <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-decoder">run decoder</h3>
+<p>값에 대해 <a href="/ko/guide/decoder/">Decoder</a> 체인을 실행합니다. 단계는 <code>|</code>, <code>&gt;</code>, <code>,</code>로 구분합니다.</p>
+<pre><code class="language-bash hljs">gori run decoder 'base64-decode | jwt-decode' &quot;$TOKEN&quot;
+echo -n secret | gori run decoder 'sha256 | hex-encode'
+gori run decoder list                           # every converter (name, category, direction)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--input=STR</code></td>
+<td>변환할 값(없으면 두 번째 위치 인자, 그것도 없으면 stdin)</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--output=MODE</code></td>
+<td>최종 바이트 렌더링: <code>auto</code>(기본) | <code>text</code> | <code>base64</code> | <code>hex</code></td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>(기본) 또는 <code>json</code>(단계별 상세)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-issues-notes">run issues / notes</h3>
+<pre><code class="language-bash hljs">gori run issues --format markdown --export report.md
+gori run notes --all
+</code></pre>
+<p>스크립트에서 <code>create</code> / <code>update</code>로 이슈를 작성합니다:</p>
+<pre><code class="language-bash hljs">gori run issues create --title &quot;Reflected XSS on /search&quot; --severity high --host app.example.com --flow 42
+gori run issues update 7 --status confirmed --notes &quot;Verified on staging&quot; --severity critical
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create</code></td>
+<td><code>-t</code>/<code>--title</code> (필수), <code>-s</code>/<code>--severity</code> (<code>info</code>|<code>low</code>|<code>medium</code>|<code>high</code>|<code>critical</code>), <code>--host</code>, <code>--flow=ID</code></td>
+</tr>
+<tr>
+<td><code>update &lt;id&gt;</code></td>
+<td><code>-t</code>/<code>--title</code>, <code>-s</code>/<code>--severity</code>, <code>-n</code>/<code>--notes</code>, <code>--status</code> (<code>open</code>|<code>confirmed</code>|<code>false-positive</code>|<code>resolved</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>노트도 읽고 쓸 수 있습니다. 인자 없이 <code>notes</code>를 실행하면 목록을 보여주고(<code>*</code>가 활성 노트), <code>notes &lt;n&gt;</code>은 인덱스로 하나를 출력합니다:</p>
+<pre><code class="language-bash hljs">gori run notes                                  # 목록
+gori run notes 2                                # 2번 노트 출력
+gori run notes create --text &quot;SSRF candidate on /fetch&quot;
+echo &quot;pasted from a scratchpad&quot; | gori run notes create
+gori run notes delete 2
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list</code></td>
+<td><code>--all</code>은 요약 한 줄 대신 모든 노트를 전문으로 출력</td>
+</tr>
+<tr>
+<td><code>create</code></td>
+<td><code>--text=TEXT</code>, 위치 인자, 또는 STDIN</td>
+</tr>
+<tr>
+<td><code>delete &lt;n&gt;</code> (<code>rm</code>)</td>
+<td>인덱스 <code>n</code>의 노트 삭제</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-rewriter">run rewriter</h3>
+<p>스크립트에서 Match &amp; Replace 규칙을 관리합니다. <a href="/guide/proxy/">Rewriter 탭</a>이 편집하는 것과 같은 규칙이며, 실시간 프록시 트래픽에 적용됩니다:</p>
+<pre><code class="language-bash hljs">gori run rewriter                                       # 적용 순서대로 규칙 목록
+gori run rewriter add --op set_header --target request \
+  --find X-Forwarded-For --value 127.0.0.1 --host '*.example.com'
+gori run rewriter add --op replace --target response --part body \
+  --match regex --find 'secret=(\w+)' --value 'secret=[redacted]'
+gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter disable 3
+gori run rewriter rm 3
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--op=OP</code></td>
+<td><code>replace</code>(기본값), <code>add_header</code>, <code>set_header</code>, <code>remove_header</code></td>
+</tr>
+<tr>
+<td><code>--target=SIDE</code></td>
+<td><code>request</code>(기본값) 또는 <code>response</code></td>
+</tr>
+<tr>
+<td><code>--part=PART</code></td>
+<td><code>head</code>(기본값) 또는 <code>body</code>. <code>replace</code>에서만 의미가 있음</td>
+</tr>
+<tr>
+<td><code>--match=MODE</code></td>
+<td><code>literal</code>(기본값) 또는 <code>regex</code>, <code>replace</code> 전용. 정규식 치환은 <code>$1</code>, <code>$2</code>를 쓰고 <code>$$</code>는 리터럴 <code>$</code></td>
+</tr>
+<tr>
+<td><code>-f</code>, <code>--find=FIND</code></td>
+<td>필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름</td>
+</tr>
+<tr>
+<td><code>-v</code>, <code>--value=VALUE</code></td>
+<td>치환할 텍스트 또는 헤더 값</td>
+</tr>
+<tr>
+<td><code>--host=GLOB</code></td>
+<td>매칭되는 호스트로 규칙을 한정(부분 문자열, <code>*</code> 와일드카드). 생략하면 전체 적용</td>
+</tr>
+<tr>
+<td><code>--name=NAME</code></td>
+<td>규칙 목록에 표시할 라벨</td>
+</tr>
+<tr>
+<td><code>--disabled</code></td>
+<td>규칙을 만들되 활성화하지 않음</td>
+</tr>
+</tbody>
+</table>
+<p><code>preview</code>는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. <code>rm</code>(<code>delete</code>), <code>enable</code>, <code>disable</code>은 목록의 규칙 id를 받습니다.</p>
+<p>본문 규칙은 필요에 따라 <code>Content-Length</code>를 다시 맞추고 청크를 해제하며, 활성화된 규칙은 매칭되는 호스트에서 HTTP/1.1을 강제합니다. 대화형 편집기는 <a href="/guide/proxy/">Proxy &amp; History</a>를 참고하세요.</p>
+<h3 id="run-project">run project</h3>
+<p>알려진 프로젝트 목록, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수, 호스트 오버라이드) 관리:</p>
+<pre><code class="language-bash hljs">gori run project --format json
+gori run project list
+</code></pre>
+<h4 id="run-project-scope">project scope</h4>
+<p>프로젝트의 include/exclude 스코프 규칙을 스크립트에서 관리합니다:</p>
+<pre><code class="language-bash hljs">gori run project scope                                          # list rules + enabled state
+gori run project scope --format json
+gori run project scope add --kind=include --type=host --pattern=api.example.com
+gori run project scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
+gori run project scope delete 3
+gori run project scope enable
+gori run project scope disable
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default)</td>
+<td>규칙 목록; <code>--format</code>은 <code>text</code> 또는 <code>json</code></td>
+</tr>
+<tr>
+<td><code>add</code></td>
+<td><code>--kind=include|exclude</code>, <code>--type=host|string|regex</code>, <code>--pattern=…</code></td>
+</tr>
+<tr>
+<td><code>delete &lt;rule-id&gt;</code></td>
+<td>id로 규칙 제거</td>
+</tr>
+<tr>
+<td><code>enable</code> / <code>disable</code></td>
+<td>스코프 필터링 적용 여부 토글</td>
+</tr>
+</tbody>
+</table>
+<h4 id="run-project-env">project env</h4>
+<p>아웃바운드 요청의 <code>$KEY</code> 치환에 쓰이는 <strong>프로젝트</strong> env 변수를 관리합니다. 전역 변수는 <code>settings.json</code> / TUI Settings에 있고, 이 명령은 프로젝트 레이어만 다룹니다.</p>
+<pre><code class="language-bash hljs">gori run project env                              # list KEY=value
+gori run project env --format json
+gori run project env set TOKEN=secret
+gori run project env set HOST api.example.com
+gori run project env delete TOKEN
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default)</td>
+<td>프로젝트 변수 목록; <code>--format</code>은 <code>text</code> 또는 <code>json</code></td>
+</tr>
+<tr>
+<td><code>set KEY=value</code> · <code>set KEY value</code></td>
+<td>프로젝트 변수 upsert (KEY는 <code>[A-Za-z_][A-Za-z0-9_]*</code>)</td>
+</tr>
+<tr>
+<td><code>delete KEY</code></td>
+<td>프로젝트 변수 제거</td>
+</tr>
+</tbody>
+</table>
+<h4 id="run-project-host-override">project host-override</h4>
+<p><strong>프로젝트</strong> 호스트 오버라이드를 관리합니다. <code>/etc/hosts</code>처럼 호스트명에 대해 dial할 IP만 바꾸고, SNI·인증서 호스트·<code>Host</code> 헤더는 원래 이름을 유지합니다. 충돌 시 프로젝트 항목이 전역 호스트네임 오버라이드보다 우선합니다. 별칭: <code>host-overrides</code>.</p>
+<pre><code class="language-bash hljs">gori run project host-override                              # list
+gori run project host-override --format json
+gori run project host-override add --host=api.example.com --ip=10.0.0.1
+gori run project host-override add 10.0.0.1 api.example.com   # /etc/hosts 순서
+gori run project host-override update 1 --host=api.example.com --ip=10.0.0.9
+gori run project host-override delete 1
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default)</td>
+<td>오버라이드 목록; <code>--format</code>은 <code>text</code> 또는 <code>json</code></td>
+</tr>
+<tr>
+<td><code>add</code></td>
+<td><code>--host=…</code> + <code>--ip=…</code>, 또는 positional <code>IP HOST</code></td>
+</tr>
+<tr>
+<td><code>update &lt;id&gt;</code></td>
+<td><code>--host=…</code> + <code>--ip=…</code> (둘 다 필수)</td>
+</tr>
+<tr>
+<td><code>delete &lt;id&gt;</code></td>
+<td>id로 오버라이드 제거</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gori-mcp">gori mcp</h2>
+<p>MCP stdio 서버입니다. 도구 세부사항은 <a href="/ko/guide/mcp/">MCP 가이드</a>를 참고하세요.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>이 데이터베이스를 제공 (<code>--project</code>보다 우선)</td>
+</tr>
+<tr>
+<td><code>--project=NAME</code></td>
+<td>이름이 지정된 프로젝트의 데이터베이스 제공</td>
+</tr>
+<tr>
+<td><code>--use-active-project</code></td>
+<td>Git 워크스페이스 선택을 무시하고 활성 TUI/MRU 프로젝트를 명시적으로 제공</td>
+</tr>
+<tr>
+<td><code>--no-project</code></td>
+<td>Git 워크스페이스 안에서도 unbound로 시작 (에이전트가 list/create/switch로 선택)</td>
+</tr>
+<tr>
+<td><code>--insecure-upstream</code></td>
+<td><code>send_request</code>: 업스트림 TLS 검증 생략</td>
+</tr>
+<tr>
+<td><code>--read-only</code></td>
+<td>액션 도구 비활성화 (<code>send_request</code>, 이슈 생성/수정, fuzz/mine); <code>switch_project</code>(및 unbound 시 <code>create_project</code>)는 유지</td>
+</tr>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop <code>mcpServers</code> 설정 기록</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code <code>~/.claude.json</code> <code>mcpServers</code> 항목 기록</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex <code>~/.codex/config.toml</code> <code>[mcp_servers.gori]</code> 기록</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity <code>~/.gemini/antigravity-cli/mcp_config.json</code> 기록</td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok <code>~/.grok/config.toml</code> <code>[mcp_servers.gori]</code> 기록</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gori-ca">gori ca</h2>
+<pre><code class="language-bash hljs">gori ca
+gori ca --pem
+gori ca --ca-dir=DIR
+gori ca regenerate
+gori ca regenerate --yes
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+</code></pre>
+<p>gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성). 브라우저나 시스템 저장소에서 CA를 신뢰시킬 때, 또는 클라이언트에 <code>--cacert</code>를 지정할 때 사용하세요.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--ca-dir=DIR</code></td>
+<td>CA 디렉터리 (기본값 <code>~/.gori/ca</code>, 또는 <code>$GORI_HOME/ca</code>)</td>
+</tr>
+<tr>
+<td><code>--pem</code></td>
+<td>경로 대신 인증서 PEM을 stdout으로 출력</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gori-ca-regenerate">gori ca regenerate</h3>
+<p>디스크의 루트 CA를 새로 발급한 것으로 교체합니다. <strong>파괴적</strong>: 이전 CA를 신뢰하던 모든 클라이언트는 새 인증서를 다시 신뢰해야 합니다. 이미 실행 중인 gori 프로세스는 재시작 전까지 이전 CA를 메모리에 유지합니다.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--yes</code>, <code>-y</code></td>
+<td>대화형 확인 생략 (stdin이 tty가 아닐 때 필수)</td>
+</tr>
+<tr>
+<td><code>--ca-dir=DIR</code></td>
+<td>재생성할 CA 디렉터리</td>
+</tr>
+</tbody>
+</table>
+<p><code>--yes</code> 없이는 tty에서 프롬프트가 뜨며 <code>regenerate</code>를 입력하도록 요구합니다(TUI 확인과 같은 단어). 스크립트와 CI는 <code>--yes</code>를 전달해야 합니다. 성공하면 새 인증서 경로가 stdout으로 출력됩니다.</p>
+<h3 id="gori-ca-import">gori ca import</h3>
+<p>외부에서 생성한 루트 CA(인증서 + 일치하는 개인 키, 둘 다 PEM)를 gori 자체 CA 대신 채택합니다. 팀이나 여러 머신에서 하나의 CA를 공유하거나, 조직 CA를 재사용하기 위해서입니다. gori는 호스트별 리프 인증서를 즉석에서 서명하므로 두 파일이 모두 필요합니다. 클라이언트는 인증서만 신뢰합니다. <code>regenerate</code>처럼 <strong>파괴적</strong>이며, 디스크의 루트를 교체하고 기존 신뢰를 무효화합니다.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--cert FILE</code></td>
+<td>채택할 루트 CA 인증서 PEM (필수)</td>
+</tr>
+<tr>
+<td><code>--key FILE</code></td>
+<td>일치하는 개인 키 PEM (필수)</td>
+</tr>
+<tr>
+<td><code>--yes</code>, <code>-y</code></td>
+<td>대화형 확인 생략 (stdin이 tty가 아닐 때 필수)</td>
+</tr>
+<tr>
+<td><code>--ca-dir=DIR</code></td>
+<td>설치할 CA 디렉터리</td>
+</tr>
+</tbody>
+</table>
+<p>무엇이든 디스크에 기록하기 전에 쌍을 먼저 검증합니다: 키는 인증서와 일치해야 하고 인증서는 CA여야 합니다(<code>basicConstraints CA:TRUE</code>). 쌍이 맞지 않으면 현재 CA를 건드리지 않고 중단합니다. 만료되었거나 아직 유효하지 않은 인증서는 경고만 남기고 그대로 가져옵니다. tty에서 <code>import</code>를 입력하여 확인하거나 <code>--yes</code>를 전달하세요. 같은 동작을 TUI 팔레트(<strong>Import CA certificate</strong>)에서도 사용할 수 있습니다.</p>
+<p>OpenSSL로 루트를 생성한 뒤 가져옵니다:</p>
+<pre><code class="language-bash hljs">openssl ecparam -genkey -name prime256v1 -out root.key.pem
+openssl req -x509 -new -key root.key.pem -days 3650 -subj &quot;/CN=my ca&quot; -out root.crt.pem
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+</code></pre>
+<p>클라이언트에서는 <code>root.crt.pem</code>만 신뢰하세요. 개인 키는 절대 배포하지 마세요.</p>
+<h2 id="gori-settings">gori settings</h2>
+<pre><code class="language-bash hljs">gori settings          # print the settings.json path
+gori settings --edit   # open it in $EDITOR
+</code></pre>
+<h2 id="gori-wizard">gori wizard</h2>
+<pre><code class="language-bash hljs">gori wizard
+</code></pre>
+<p>대화형 설정(전역 프록시 바인드 기본값, 그다음 테마)을 실행합니다. 최초 실행 시에도 자동으로 실행됩니다. 바인드 단계는 공유 <code>settings.json</code> 기본값을 기록합니다. 프로젝트는 Project 탭에서 자체 주소를 고정할 수 있으며, <code>--listen</code> / <code>--port</code>는 이번 실행에 한해서만 오버라이드합니다.</p>
+<h2 id="gori-tutorial">gori tutorial</h2>
+<pre><code class="language-bash hljs">gori tutorial
+</code></pre>
+<p>목업 UI에서 TUI를 대화형으로 둘러봅니다: 탭/패널 탐색, 커맨드 팔레트(<code>Ctrl-P</code>), 스페이스 메뉴(<code>Space</code>), READ/INS 편집 모드. 각 레슨은 동작을 시연하고 키를 직접 눌러 보도록 안내하며, 마지막 연습 단계는 완료 전에 네 가지를 모두 요구한 뒤 첫 실제 세션으로 안내합니다. <code>gori wizard</code> 끝에서 제공되며, 실제 프록시 세션 없이도 언제든 안전하게 다시 실행할 수 있습니다. <a href="/ko/getting-started/quick-start/">빠른 시작</a>을 참고하세요.</p>
+<h2 id="gori-update">gori update</h2>
+<pre><code class="language-bash hljs">gori update
+gori update --exec   # Homebrew/Snap: run the package-manager command
+</code></pre>
+<p>이 <code>gori</code> 바이너리가 어떻게 설치되었는지 감지하여 그에 맞게 업데이트합니다:</p>
+<table>
+<thead>
+<tr>
+<th>Install channel</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>독립 실행 바이너리 (curl 설치, 수동 다운로드, 워크스페이스 빌드, 또는 어떤 패키지 관리자도 소유하지 않은 <code>/usr/bin</code>으로의 수동 복사)</td>
+<td>이 OS/arch에 맞는 최신 GitHub 릴리스 자산을 내려받아 바이너리를 교체 (macOS는 전용 디렉터리의 형제 <code>lib/</code>도 갱신)</td>
+</tr>
+<tr>
+<td>Homebrew</td>
+<td><code>brew upgrade gori</code> 출력 (<code>--exec</code>로 실행; brew 관리 경로는 절대 덮어쓰지 않음)</td>
+</tr>
+<tr>
+<td>Snap</td>
+<td><code>snap refresh gori</code> 출력 (<code>--exec</code>로 실행)</td>
+</tr>
+<tr>
+<td>pacman / AUR</td>
+<td><code>yay</code> / <code>paru</code> / <code>pacman</code> 안내 출력</td>
+</tr>
+<tr>
+<td>deb (dpkg)</td>
+<td><code>apt</code> 업그레이드 안내 출력</td>
+</tr>
+<tr>
+<td>rpm</td>
+<td><code>dnf</code> / <code>yum</code> / <code>zypper</code> 안내 출력</td>
+</tr>
+</tbody>
+</table>
+<p><code>/usr/bin</code> 또는 <code>/bin</code> 아래 경로는 패키지 소유권(<code>pacman -Qo</code>, <code>dpkg-query -S</code>, <code>rpm -qf</code>)으로 분류됩니다. 관리자가 파일을 소유하면 gori는 절대 덮어쓰지 않습니다. 프로브가 소유자를 찾지 못하면 바이너리 채널이 자체 업데이트합니다. 패키지 도구가 전혀 없으면 <code>/etc/os-release</code>(<code>ID</code> / <code>ID_LIKE</code>)로 Arch 계열 / Debian 계열 / RHEL 계열 안내를 폴백으로 고릅니다.</p>
+<p>릴리스 자산 이름은 <a href="/ko/getting-started/installation/">설치 가이드</a>와 일치합니다(<code>gori-v*-linux-*</code> 순수 바이너리, <code>gori-v*-osx-*.tar.gz</code> 아카이브). macOS 아카이브 업데이트는 전용 레이아웃(예: curl 설치 프로그램의 <code>PREFIX/opt/gori</code>)을 요구하여 번들된 <code>lib/</code>가 <code>/usr/local/lib</code> 같은 공유 루트 아래에 절대 기록되지 않도록 합니다. 아직 릴리스 자산이 없으면 명령은 릴리스 페이지를 가리키는 명확한 오류로 종료합니다. 조용히 아무 동작도 하지 않는 것이 아닙니다.</p>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다.">
+  <title>Quick Start - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Quick Start">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/getting-started/quick-start/">
+  <meta property="og:description" content="직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Quick Start">
+  <meta name="twitter:description" content="직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/getting-started/quick-start/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Quick Start","url":"https://gori.hahwul.com/ko/getting-started/quick-start/","description":"직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"시작하기","item":"https://gori.hahwul.com/ko/getting-started/"},{"@type":"ListItem","position":3,"name":"Quick Start"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/quick-start/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/quick-start/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="getting-started">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/" class="active" aria-current="true">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/" class="active" aria-current="true">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/getting-started/quick-start/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/getting-started/quick-start/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/" class="active" aria-current="page">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Quick Start</h1>
+    <p>이 페이지는 처음부터 끝까지 따라 하는 튜토리얼입니다. 위에서 아래로 진행하면 갓 설치한 상태에서 시작해, 캡처한 HTTPS 요청을 살펴보고 <strong>Repeater</strong>로 보내 편집한 뒤 재전송하는 것까지 터미널을 벗어나지 않고 끝낼 수 있습니다. 10분 정도 잡아 두세요.</p>
+<p>각 단계는 <strong>확인</strong> 항목으로 끝납니다. 다음으로 넘어가기 전에 보여야 하는 상태입니다. 화면이 다르게 보인다면 그 지점에서 멈추고 바로잡으세요.</p>
+<blockquote>
+<p><strong>시작하기 전에.</strong> <a href="/ko/getting-started/installation/">gori를 설치</a>하고 브라우저를 준비하세요. 자신의 브라우징을 캡처하게 되므로, 테스트 권한이 있는 사이트(자신의 앱, 스테이징 서버, 또는 의도적으로 취약하게 만든 연습용 타깃)를 고르세요. 정확한 결과가 필요한 부분에서는 안정적인 일회용 타깃인 <code>example.com</code>을 사용합니다.</p>
+</blockquote>
+<h2 id="1-gori-시작하기-1-start-gori">1. gori 시작하기 {#1-start-gori}</h2>
+<p>하위 명령 없이 실행하면 gori는 프록시를 시작하고 인터페이스를 엽니다:</p>
+<pre><code class="language-bash hljs">gori
+</code></pre>
+<p>첫 실행 시 짧은 <a href="#first-run-wizard">설정 마법사</a>(전역 바인드와 테마)가 실행되고, 이어서 <a href="#guided-ui-tour">가이드 UI 투어</a>를 제안합니다. 투어는 지금 해도 되고 건너뛰었다가 나중에 돌아와도 됩니다. 이 페이지는 같은 내용을 실제 트래픽으로 다룹니다.</p>
+<p>기본적으로 프록시는 <code>127.0.0.1:8070</code>에서 수신합니다. 한 번의 실행에 대해서만 재정의할 수 있습니다(프로젝트 자체 바인드가 설정되어 있으면 여전히 그쪽이 우선합니다):</p>
+<pre><code class="language-bash hljs">gori --listen 0.0.0.0 --port 8080
+</code></pre>
+<p><strong>확인.</strong> gori TUI가 보입니다. 한쪽에 늘어선 탭들(Project, Target, History, …)과 프록시 주소 <code>127.0.0.1:8070</code>을 보여주는 상단 바입니다.</p>
+<h2 id="2-ca-신뢰-후-첫-플로우-캡처-2-trust-the-ca-and-capture-your-first-flow">2. CA 신뢰 후 첫 플로우 캡처 {#2-trust-the-ca-and-capture-your-first-flow}</h2>
+<p>HTTPS를 읽으려면 클라이언트가 gori의 루트 인증서(첫 실행 시 <code>~/.gori/ca</code> 아래에 생성됨)를 신뢰해야 합니다. 가장 빠른 길은 사전 신뢰된 브라우저입니다.</p>
+<h3 id="option-a-open-a-pre-trusted-browser-recommended">Option A: 사전 신뢰된 브라우저 열기 (권장)</h3>
+<p>TUI 안에서:</p>
+<ol>
+<li><code>Ctrl-P</code>를 눌러 <strong>커맨드 팔레트</strong>를 엽니다.</li>
+<li><code>browser</code>를 입력하고 <strong>Open browser</strong>를 실행합니다.</li>
+<li>설치된 브라우저(Chrome, Chromium, Brave, Edge, Firefox, …)를 고릅니다.</li>
+</ol>
+<p>gori는 이미 CA를 신뢰하고 HTTP/HTTPS를 프록시로 경유하는 일회용 프로파일로 브라우저를 실행합니다. 그 브라우저에서 사이트를 방문하세요(<code>https://example.com</code>을 먼저, 그다음 테스트 중인 사이트를).</p>
+<blockquote>
+<p><strong>Firefox 참고.</strong> CA 자동 신뢰에는 <code>PATH</code>에 있는 <code>certutil</code>(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(<code>brew install nss</code> macOS, <code>apt install libnss3-tools</code> Debian/Ubuntu, <code>dnf install nss-tools</code> Fedora) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요: <code>about:preferences#privacy</code>를 열고 <strong>인증서 보기</strong>, <strong>인증기관</strong> 탭으로 가서 <code>gori ca</code>가 출력한 파일을 <strong>가져오기</strong> 하면 됩니다.</p>
+</blockquote>
+<h3 id="option-b-point-any-client-yourself">Option B: 클라이언트를 직접 지정하기</h3>
+<p>CA 경로를 출력하고 그 파일을 시스템 또는 브라우저 신뢰 저장소에 <strong>신뢰된 루트 CA</strong>로 가져오세요:</p>
+<pre><code class="language-bash hljs">gori ca
+</code></pre>
+<p>그런 다음 클라이언트가 <code>127.0.0.1:8070</code>을 HTTP <strong>및</strong> HTTPS 프록시로 사용하도록 설정하세요. 다른 터미널에서 간단한 동작 확인:</p>
+<pre><code class="language-bash hljs">curl -x http://127.0.0.1:8070 https://example.com
+</code></pre>
+<p>gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.</p>
+<blockquote>
+<p>gori의 개인 키는 머신 비밀입니다. <code>0600</code> 권한으로 기록되며 머신을 절대 벗어나지 않습니다. 이전의 모든 신뢰를 무효화할 의도가 있을 때만 팔레트(<strong>Regenerate CA certificate</strong>)에서 교체하세요.</p>
+</blockquote>
+<p><strong>확인.</strong> <strong>History</strong>로 전환하세요(<code>3</code>). 최소 한 개의 행이 보여야 합니다. <code>200</code> 상태의 <code>GET https://example.com/</code> 요청입니다. History가 비어 있다면 캡처가 gori에 도달하지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 <strong>Open browser</strong>(Option A)를 사용하세요.</p>
+<h2 id="3-두-가지-탐색-표면-익히기-3-learn-the-two-discovery-surfaces">3. 두 가지 탐색 표면 익히기 {#3-learn-the-two-discovery-surfaces}</h2>
+<p>탭별 단축키를 외우기 전에, 거의 모든 것이 있는 두 곳을 먼저 익히세요.</p>
+<table>
+<thead>
+<tr>
+<th>표면</th>
+<th>키</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>커맨드 팔레트</strong></td>
+<td><code>Ctrl-P</code></td>
+<td>앱 전역 제어: 설정, Open browser, Export CA, 이동 동작 등 전역적인 모든 것</td>
+</tr>
+<tr>
+<td><strong>space 메뉴</strong></td>
+<td><code>Space</code></td>
+<td>지금 포커스를 가진 대상에 대한 동작(History 행, 상세 패널, Repeater, …)</td>
+</tr>
+</tbody>
+</table>
+<p>팔레트는 도구 전체의 지도입니다. space 메뉴는 <em>이</em> 패널의 지도입니다. 둘 다 키 힌트를 보여주니, 코드를 잊었으면 둘 중 하나를 여세요.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/command-palette.svg" alt="History 탭 위에 열린 gori 커맨드 팔레트로, 필터 상자와 함께 설정, 이동, 내보내기 동작을 나열한다">
+  <figcaption>커맨드 팔레트(<kbd>Ctrl-P</kbd>): 설정부터 <em>Open browser</em>, 탭 이동까지 앱 전역의 모든 동작을 퍼지 필터로 찾습니다.</figcaption>
+</figure>
+<p>처음부터 알아 두면 좋은 전역 토글 세 가지입니다:</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>c</code></td>
+<td><strong>캡처</strong> 토글(끄면 트래픽이 저장되지 않고 그대로 통과)</td>
+</tr>
+<tr>
+<td><code>i</code></td>
+<td><strong>인터셉트</strong> 토글(일치하는 요청을 잡아 forward / drop / edit)</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td><strong>스코프 렌즈</strong> 토글(뷰를 스코프 내 트래픽으로 필터)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-tui-이동하기-4-move-around-the-tui">4. TUI 이동하기 {#4-move-around-the-tui}</h2>
+<p>gori는 탭의 한 줄입니다. 기본 순서는 Project → Target → <strong>History</strong> → Intercept → Repeater → Fuzzer → … 로 시작합니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[</code> / <code>]</code></td>
+<td>이전 / 다음 탭</td>
+</tr>
+<tr>
+<td><code>1</code>-<code>9</code></td>
+<td>N번째 표시된 탭으로 이동(기본값에서 History는 <code>3</code>)</td>
+</tr>
+<tr>
+<td><code>Enter</code> / <code>↓</code></td>
+<td>탭 바에서 탭 본문으로 진입</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>포커스를 탭 바 쪽으로 되돌림</td>
+</tr>
+<tr>
+<td><code>Tab</code> / <code>Shift-Tab</code></td>
+<td>탭 바와 패널 사이로 포커스 이동</td>
+</tr>
+</tbody>
+</table>
+<p>마우스는 활성화하면(Preferences → <strong>Editor &amp; Keys</strong> → <strong>Editor</strong>) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. <strong>Help</strong> 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.</p>
+<h2 id="5-history에서-플로우-읽기-5-read-a-flow-in-history">5. History에서 플로우 읽기 {#5-read-a-flow-in-history}</h2>
+<p>History가 활성화되어 있는지 확인하세요(<code>3</code>). 모든 요청/응답은 <em>플로우</em>입니다. 시작 줄, 헤더, 본문(최대 2 MiB 저장), 그리고 HTTP/2 프레임, WebSocket 메시지, 존재하면 디코드된 JWT / SAML / GraphQL까지.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/history.svg" alt="시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간 열로 캡처된 HTTP 플로우를 나열하는 gori History 탭">
+  <figcaption><strong>History</strong> 탭: 메서드, 상태, 크기, 타이밍이 담긴 모든 캡처 플로우를 쿼리 언어로 필터할 수 있습니다.</figcaption>
+</figure>
+<p>다음을 하나씩 해보세요:</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (또는 <code>j</code> / <code>k</code>)</td>
+<td>선택 이동</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>요청/응답 상세 열기</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td><a href="/ko/reference/query-language/">쿼리 언어</a>로 필터</td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>최신 따라가기(tail) 토글</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>선택한 플로우 복사</td>
+</tr>
+</tbody>
+</table>
+<p><code>/</code>를 누르고 필터를 입력한 뒤 <code>Enter</code>를 누르세요:</p>
+<pre><code class="language-text hljs">host:example.com
+</code></pre>
+<p>History가 그 호스트로 좁혀집니다. 필터를 지우면(<code>/</code>, 지우기, <code>Enter</code>) 다시 전체가 보입니다. 나중에 시도해 볼 몇 가지:</p>
+<pre><code class="language-text hljs">status:5xx
+method:POST body:password
+</code></pre>
+<p>이제 <code>example.com</code> 플로우를 선택하고 <code>Enter</code>를 누르세요. 상세 화면에서는 <code>↑</code> / <code>↓</code>로 스크롤하고 <code>y</code>로 복사하며, hex / whitespace / pretty 본문은 <code>x</code> / <code>b</code> / <code>p</code>로 토글합니다. <code>Esc</code>로 목록에 돌아옵니다.</p>
+<p><strong>확인.</strong> History를 호스트 하나로 필터하고, 플로우를 열어 전체 요청과 응답을 읽을 수 있습니다.</p>
+<h2 id="6-repeater로-보내-재전송하기-핵심-루프-6-send-it-to-repeater-and-re-send-the-core-loop">6. Repeater로 보내 재전송하기 (핵심 루프) {#6-send-it-to-repeater-and-re-send-the-core-loop}</h2>
+<p>대부분의 시간을 보내게 될 루프입니다. 캡처한 요청을 가져와 무언가를 바꾸고, 다시 보내고, 비교합니다.</p>
+<ol>
+<li><strong>History</strong>에서 <code>example.com</code> 플로우를 선택합니다.</li>
+<li><code>Ctrl-R</code>을 누릅니다. gori가 플로우를 <strong>Repeater</strong> 탭으로 복사하고 그쪽으로 전환합니다.</li>
+<li>요청 패널에서 <code>Enter</code> 또는 <code>i</code>를 눌러 편집합니다(INS 모드). 작은 것 하나를 바꿔 보세요. 예를 들어 헤더 한 줄을 추가합니다:
+<pre><code class="language-http hljs">X-Gori-Test: 1
+</code></pre>
+</li>
+<li><code>Esc</code>로 편집 모드를 벗어난 뒤 <code>Ctrl-R</code>로 <strong>전송</strong>합니다.</li>
+<li>응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. <code>Tab</code>으로 target → request → response를 순회합니다.</li>
+</ol>
+<figure class="tui-shot">
+  <img src="/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, replayed 200 in 1152ms라는 상태 줄이 보이는 gori Repeater 탭">
+  <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 그리고 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
+</figure>
+<p><strong>확인.</strong> Repeater 상태 줄에 <code>replayed 200 in … ms</code> 같은 문구가 보이고, <code>Ctrl-R</code>로 원하는 만큼 재전송할 수 있습니다. 이것이 완전한 캡처 → 검사 → 리플레이 루프입니다.</p>
+<h2 id="7-다음으로-갈-곳-7-where-to-go-next">7. 다음으로 갈 곳 {#7-where-to-go-next}</h2>
+<p>이제 핵심 루프를 갖췄습니다. 여기서 나아갈 몇 가지 방향이며, 각각 <a href="/ko/guide/">가이드</a>에서 깊이 다룹니다:</p>
+<ul>
+<li><strong>파라미터 퍼징.</strong> 플로우를 선택하고 <code>Shift-I</code>로 <strong>Fuzzer</strong>에 보낸 뒤, 위치를 표시하고(<code>Ctrl-A</code>가 흔한 파라미터를 자동 표시), 워드리스트를 붙이고 <code>Ctrl-R</code>로 실행합니다. <a href="/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>를 보세요.</li>
+<li><strong>진행 중 인터셉트와 편집.</strong> <code>i</code>를 눌러 일치하는 요청을 잡아 두고, 계속 진행되기 전에 forward, drop, 또는 수정합니다. <a href="/ko/guide/proxy/#intercept">Proxy &amp; History</a>를 보세요.</li>
+<li><strong>찾은 것 추적하기.</strong> 보고할 가치가 있는 것은 <code>Shift-F</code>로 <strong>Issue</strong>로 만들고, 둘러보는 동안 <strong>Probe</strong> 탭에서 패시브 결과를 읽으세요. <a href="/ko/guide/scanning/">Scanning &amp; Issues</a>를 보세요.</li>
+</ul>
+<h2 id="day-1-key-map">Day-1 키 맵</h2>
+<p>코드가 손에 익을 때까지 이 표를 가까이 두세요:</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>위치</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-P</code></td>
+<td>어디서나</td>
+<td>커맨드 팔레트(설정, Match &amp; Replace, 알림, …)</td>
+</tr>
+<tr>
+<td><code>Ctrl-,</code></td>
+<td>어디서나</td>
+<td>Preferences(모든 설정을 담은 하나의 모달)</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>포커스된 패널</td>
+<td>영역 동작 메뉴</td>
+</tr>
+<tr>
+<td><code>c</code> / <code>i</code> / <code>s</code></td>
+<td>어디서나</td>
+<td>캡처 / 인터셉트 / 스코프 렌즈</td>
+</tr>
+<tr>
+<td><code>[</code> <code>]</code> · <code>1</code>-<code>9</code></td>
+<td>어디서나</td>
+<td>탭 전환</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>History</td>
+<td>쿼리 언어 필터</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>History</td>
+<td>플로우 상세 열기</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>History</td>
+<td>→ Repeater</td>
+</tr>
+<tr>
+<td><code>Shift-I</code></td>
+<td>History</td>
+<td>→ Fuzzer</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>Repeater / Fuzzer</td>
+<td>요청 전송 / 퍼즈 실행</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>대부분의 곳</td>
+<td>한 단계 뒤로</td>
+</tr>
+</tbody>
+</table>
+<h2 id="first-run-wizard">첫 실행 마법사</h2>
+<p>가이드 설정(전역 프록시 바인드 기본값, 그다음 테마)을 언제든 다시 실행할 수 있습니다:</p>
+<pre><code class="language-bash hljs">gori wizard
+</code></pre>
+<p>바인드 단계는 <code>settings.json</code>의 공유 기본값을 설정합니다. Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong>와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요.</p>
+<h2 id="guided-ui-tour">가이드 UI 투어</h2>
+<p>탭/패널 이동, 팔레트, space 메뉴, READ/INS 편집 모드를 목업 UI로 따라가는 안내입니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여주고 실제 키를 눌러 보도록 요청하며, 마지막 단계는 네 가지 동작 모두를 직접 해보는 실습 샌드박스와 첫 세션 체크리스트입니다.</p>
+<pre><code class="language-bash hljs">gori tutorial
+</code></pre>
+<figure class="tui-shot">
+  <img src="/images/tui/tutorial.svg" alt="탭과 패널, 커맨드 팔레트, 동작 메뉴, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드">
+  <figcaption>가이드 투어는 탭과 패널, 팔레트, space 메뉴, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
+</figure>
+<p>이 투어는 첫 실행 마법사의 마지막에도 제안됩니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/getting-started/configuration/">설정</a>: 저장소 구조, 네트워크 설정, 그리고 CA</li>
+<li><a href="/ko/guide/proxy/">Proxy &amp; History</a>: 캡처, 인터셉트, 스코프, 가져오기, match &amp; replace</li>
+<li><a href="/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: 테스트 워크벤치와 env 토큰</li>
+<li><a href="/ko/reference/query-language/">Query Language</a>: 전체 필터 문법</li>
+<li><a href="/ko/guide/hotkeys/">Hotkeys</a>: 위의 코드를 원하는 대로 재지정</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

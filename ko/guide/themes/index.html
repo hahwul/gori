@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다.">
+  <title>테마 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="테마">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/guide/themes/">
+  <meta property="og:description" content="gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="테마">
+  <meta name="twitter:description" content="gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/guide/themes/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"테마","url":"https://gori.hahwul.com/ko/guide/themes/","description":"gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://gori.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"테마"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/themes/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/themes/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/guide/themes/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/themes/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/" class="active" aria-current="page">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>테마</h1>
+    <p>gori는 26개의 내장 컬러 테마를 제공합니다: <code>goridark</code>(기본값), <code>goriday</code>, <code>latte</code>, <code>espresso</code>, <code>tokyonight</code>, <code>gruvbox</code>, <code>nord</code>, <code>dracula</code>, <code>solarized_light</code>, <code>rosepine_dawn</code>, <code>catppuccin_mocha</code>, <code>monokai</code>, <code>everforest</code>, <code>onedark</code>, <code>kanagawa</code>, <code>github_dark</code>, <code>zenburn</code>, <code>synthwave84</code>, <code>cyberpunk</code>, <code>matrix</code>, <code>cobalt2</code>, <code>high_contrast</code>, <code>github_light</code>, <code>gruvbox_light</code>, <code>one_light</code>, <code>ayu_light</code>.</p>
+<h2 id="switching-themes">테마 전환</h2>
+<p><code>Ctrl-,</code>(또는 상단 바의 <code>⚙</code> 칩)로 Preferences를 열고 <strong>Appearance</strong>로 이동한 뒤 <strong>Theme</strong> 행에서 <code>↵</code>를 누릅니다. 이 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. <code>Ctrl-P</code> → **<code>settings:theme</code>**로 같은 선택기를 한 번에 열 수도 있습니다.</p>
+<p>선택기는 세로로 스크롤되는 목록입니다. 각 행은 테마 고유 팔레트의 작은 스와치를 보여주며, 행을 선택하면 실시간으로 미리보기가 나타납니다. <code>Enter</code>는 선택을 적용하고 유지하며, <code>Esc</code>는 되돌립니다.</p>
+<p><code>Ctrl-,</code>는 프로젝트 선택기에서도 동작하므로, 프로젝트를 열기 전 첫 실행에서 테마를 정할 수 있습니다. 그곳에서 편집할 수 있는 섹션은 Theme뿐이고, 나머지는 프로젝트를 열어야 합니다.</p>
+<p>같은 History 뷰를 내장 테마 네 개에서 나란히 본 모습입니다.</p>
+<div class="tui-gallery">
+  <figure>
+    <img src="/images/tui/theme-goridark.svg" alt="goridark 테마의 gori History 탭: 은은한 골드 포커스 아웃라인이 있는 거의 검은 캔버스">
+    <figcaption>goridark (기본값)</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-goriday.svg" alt="goriday 라이트 테마의 gori History 탭: 어두운 텍스트가 있는 따뜻한 오프화이트 캔버스">
+    <figcaption>goriday (라이트)</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-tokyonight.svg" alt="tokyonight 테마의 gori History 탭: 차분한 강조색이 있는 짙은 파란 캔버스">
+    <figcaption>tokyonight</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-gruvbox.svg" alt="gruvbox 테마의 gori History 탭: 복고풍 앰버와 그린 강조색이 있는 따뜻한 어두운 캔버스">
+    <figcaption>gruvbox</figcaption>
+  </figure>
+</div>
+<h2 id="custom-themes">커스텀 테마</h2>
+<p>직접 만든 테마를 JSON 파일로 추가할 수 있습니다. 다음 위치에 넣으세요.</p>
+<pre><code>~/.gori/themes/&lt;name&gt;.json
+</code></pre>
+<p>(<code>~/.gori</code>는 gori 홈 디렉터리입니다. <code>$GORI_HOME</code>으로 재정의하세요.) 파일 이름이 테마 이름입니다. <code>ocean.json</code>은 테마 <code>ocean</code>이 됩니다. 커스텀 테마는 선택기에서 내장 테마 다음에 파일 이름 순으로 나타납니다. gori는 시작 시, 그리고 테마 선택기를 열 때마다 다시 로드하므로, 파일을 넣고 재시작 없이 선택기를 다시 열 수 있습니다.</p>
+<h3 id="format">형식</h3>
+<p>테마는 팔레트 필드를 <code>#rrggbb</code> 헥스 컬러에 매핑하는 JSON 객체입니다. 선택적 <code>&quot;base&quot;</code> 키를 사용하면 재정의하지 않은 모든 색을 내장 테마에서 상속하므로, 테마를 강조색 하나만 손보는 정도로 작게 만들 수 있습니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;base&quot;: &quot;goridark&quot;,
+  &quot;accent&quot;: &quot;#ff33cc&quot;,
+  &quot;syn_header&quot;: &quot;#33ccff&quot;
+}
+</code></pre>
+<p><code>&quot;base&quot;</code>가 없으면 기본값(<code>goridark</code>)이 생략된 색을 채웁니다.</p>
+<h3 id="a-full-theme">전체 테마</h3>
+<p>모든 필드이며, 생략 시 <code>base</code>에서 상속합니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;base&quot;: &quot;goridark&quot;,
+
+  &quot;bg&quot;:            &quot;#0a0a0b&quot;,
+  &quot;panel&quot;:         &quot;#141417&quot;,
+  &quot;elevated&quot;:      &quot;#1b1b1f&quot;,
+  &quot;border&quot;:        &quot;#2a2a30&quot;,
+  &quot;border_focus&quot;:  &quot;#3a3a42&quot;,
+  &quot;focus_gold&quot;:    &quot;#d9c28b&quot;,
+  &quot;accent&quot;:        &quot;#fafafa&quot;,
+  &quot;accent_bg&quot;:     &quot;#26262c&quot;,
+  &quot;selection_dim&quot;: &quot;#19191c&quot;,
+  &quot;text&quot;:          &quot;#c8c8cc&quot;,
+  &quot;text_bright&quot;:   &quot;#fafafa&quot;,
+  &quot;muted&quot;:         &quot;#6e6e76&quot;,
+  &quot;green&quot;:         &quot;#52c77a&quot;,
+  &quot;yellow&quot;:        &quot;#d6a13a&quot;,
+  &quot;red&quot;:           &quot;#e5534b&quot;,
+  &quot;orange&quot;:        &quot;#d9813f&quot;,
+  &quot;syn_header&quot;:    &quot;#82a8c4&quot;,
+  &quot;syn_string&quot;:    &quot;#8fb87a&quot;,
+  &quot;syn_number&quot;:    &quot;#ca9b6a&quot;,
+  &quot;syn_literal&quot;:   &quot;#b08ec2&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>사용처</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bg</code></td>
+<td>캔버스(메인 배경)</td>
+</tr>
+<tr>
+<td><code>panel</code></td>
+<td>상단 바, 상태 바, 오버레이</td>
+</tr>
+<tr>
+<td><code>elevated</code></td>
+<td>헤더 밴드, 활성 세그먼트</td>
+</tr>
+<tr>
+<td><code>border</code></td>
+<td>기본 상태의 얇은 구분선</td>
+</tr>
+<tr>
+<td><code>border_focus</code></td>
+<td>활성 모달 카드의 아웃라인</td>
+</tr>
+<tr>
+<td><code>focus_gold</code></td>
+<td>포커스된 본문 패널의 아웃라인</td>
+</tr>
+<tr>
+<td><code>accent</code></td>
+<td>강조색(선택 마커, 강조)</td>
+</tr>
+<tr>
+<td><code>accent_bg</code></td>
+<td>포커스된 패널의 선택 밴드</td>
+</tr>
+<tr>
+<td><code>selection_dim</code></td>
+<td>포커스되지 않은 패널의 선택 밴드</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>본문 텍스트</td>
+</tr>
+<tr>
+<td><code>text_bright</code></td>
+<td>강조 / 활성 텍스트</td>
+</tr>
+<tr>
+<td><code>muted</code></td>
+<td>보조 / 흐린 텍스트</td>
+</tr>
+<tr>
+<td><code>green</code></td>
+<td>2xx 상태</td>
+</tr>
+<tr>
+<td><code>yellow</code></td>
+<td>4xx 상태</td>
+</tr>
+<tr>
+<td><code>red</code></td>
+<td>5xx 상태 / 오류</td>
+</tr>
+<tr>
+<td><code>orange</code></td>
+<td>경고용 강조색</td>
+</tr>
+<tr>
+<td><code>syn_header</code></td>
+<td>헤더/필드 이름, JSON 키, 태그 이름</td>
+</tr>
+<tr>
+<td><code>syn_string</code></td>
+<td>따옴표 문자열</td>
+</tr>
+<tr>
+<td><code>syn_number</code></td>
+<td>숫자, 태그 속성 이름</td>
+</tr>
+<tr>
+<td><code>syn_literal</code></td>
+<td><code>true</code> / <code>false</code> / <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="notes">참고</h3>
+<ul>
+<li>파일 이름은 소문자 <code>a-z 0-9 - _</code>로 정규화되며, 다른 문자는 제거됩니다(<code>My Theme!.json</code> → <code>mytheme</code>).</li>
+<li>이름이 내장 테마와 충돌하는 파일(예: <code>goridark.json</code>)은 무시됩니다. 내장 테마는 재정의할 수 없습니다.</li>
+<li>로딩은 너그럽습니다: 읽을 수 없는 파일, 잘못된 JSON, 객체가 아닌 것은 건너뛰며, 잘못된 색 하나는 테마 전체를 버리는 대신 <code>base</code> 값으로 폴백합니다. 깨진 테마 파일이 TUI를 죽이는 일은 없습니다.</li>
+<li>가독성을 위해, 기능적인 색(text, status, syntax)은 <code>bg</code>와 충분히 대비되게 유지하세요. 내장 테마는 WCAG AA(≥ 4.5:1)를 목표로 합니다.</li>
+</ul>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/guide/hotkeys/">Hotkeys</a>: 같은 방식으로 gori의 단축키를 재지정합니다</li>
+<li><a href="/ko/guide/settings/">Settings</a>: Preferences 모달과 그 안의 모든 섹션</li>
+<li><a href="/ko/getting-started/configuration/">Configuration</a>: <code>settings.json</code>이 있는 위치와 그 밖에 담는 내용</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>
