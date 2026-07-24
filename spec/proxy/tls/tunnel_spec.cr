@@ -177,9 +177,17 @@ describe Gori::Proxy::Tls::Tunnel do
 
       tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
       tls.alpn_protocol.should eq("h2") # took the h2 relay path
-      tls.close rescue nil
+      # Send + flush the h2 client connection preface, exactly as a real h2 client does right
+      # after the handshake. This is REQUIRED, not cosmetic: under TLS 1.3 the server's
+      # SSL_accept only returns once it has read the client's Finished, which the client's SSL
+      # socket buffers until the first app-data flush. Without this the server handshake blocks
+      # forever, intercept_h2 (and its error recording) is never reached, and the spec hangs
+      # (reproduced on Linux/OpenSSL; masked on macOS/LibreSSL).
+      tls << "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+      tls.flush
 
       done.receive # an error response was recorded (previously: silent drop, empty History)
+      tls.close rescue nil
       proxy.stop
 
       req = sink.requests.first
