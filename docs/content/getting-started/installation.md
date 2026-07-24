@@ -68,7 +68,9 @@ Or pin it as an input to a NixOS / home-manager configuration:
 }
 ```
 
-Unlike the other channels this one **builds from source**, so the first install spends a few minutes compiling. Brotli and Zstd decoding are included; nothing else is needed on the host. Works on Linux and macOS, x86_64 and arm64.
+Unlike the other channels this one **builds from source**. nixpkgs is still a Crystal release behind what gori needs, so the flake pins its own compiler and a cold build compiles that too: several minutes, cached from then on. Brotli and Zstd decoding are included, and nothing else is needed on the host.
+
+Covers Linux (x86_64 and arm64) and Apple Silicon macOS. nixpkgs has dropped Intel macOS, so on those machines use [Homebrew](#homebrew) or a [pre-built binary](#pre-built-binary).
 
 `nix develop` gives you a shell with Crystal, shards, `just` and the linked libraries, which is all you need to [hack on gori itself](https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md).
 

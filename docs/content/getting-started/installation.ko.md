@@ -68,7 +68,9 @@ NixOS / home-manager 설정에 입력(input)으로 고정할 수도 있습니다
 }
 ```
 
-다른 채널과 달리 이 채널은 **소스에서 빌드**하므로, 첫 설치에는 컴파일에 몇 분이 걸립니다. Brotli와 Zstd 디코딩이 포함되며 호스트에 따로 준비할 것은 없습니다. Linux와 macOS의 x86_64 및 arm64에서 동작합니다.
+다른 채널과 달리 이 채널은 **소스에서 빌드**합니다. nixpkgs의 Crystal이 gori가 요구하는 버전보다 한 단계 낮아, 플레이크가 컴파일러를 직접 고정하며 첫 빌드는 그것까지 함께 컴파일합니다. 몇 분이 걸리고 이후로는 캐시됩니다. Brotli와 Zstd 디코딩이 포함되며 호스트에 따로 준비할 것은 없습니다.
+
+Linux(x86_64 및 arm64)와 Apple Silicon macOS를 지원합니다. nixpkgs가 Intel macOS 지원을 중단했으므로, 그쪽에서는 [Homebrew](#homebrew)나 [사전 빌드 바이너리](#pre-built-binary)를 사용하세요.
 
 `nix develop`을 실행하면 Crystal, shards, `just`와 링크되는 라이브러리가 갖춰진 셸로 들어갑니다. [gori 자체를 개발](https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md)하는 데 필요한 것이 모두 들어 있습니다.
 

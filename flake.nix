@@ -7,7 +7,11 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    # Not eachDefaultSystem: that set includes x86_64-darwin, which nixpkgs 26.11
+    # dropped outright, so every output would fail to even evaluate there (and take
+    # `nix flake show` down with it). Intel macOS installs via Homebrew or the
+    # release tarball instead.
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (system:
       let
         pkgs = import nixpkgs { inherit system; };
         inherit (pkgs) lib;
@@ -41,10 +45,13 @@
         #   brotli -> src/gori/proxy/codec/brotli.cr  @[Link(pkg_config: "libbrotlidec")]
         #   zstd   -> src/gori/proxy/codec/zstd.cr    @[Link(pkg_config: "libzstd")]
         #   sqlite -> the sqlite3 shard               @[Link("sqlite3")]
+        #   gmp    -> src/gori/decoder/codecs.cr      `require "big"`
         #
+        # gmp is easy to miss: nixpkgs' crystal lists it under nativeCheckInputs only,
+        # so the stdlib emits `-lgmp` with no `-L` to match and the link dies.
         # brotli/zstd resolve through pkg-config, so they need their `dev` outputs —
         # which is exactly what listing them in buildInputs arranges.
-        nativeLibs = with pkgs; [ brotli zstd sqlite ];
+        nativeLibs = with pkgs; [ brotli zstd sqlite gmp ];
 
         # `lib/` and `bin/` are shards' working dirs: buildCrystalPackage populates
         # `lib/` itself from shards.nix, so a checkout that already ran `shards
