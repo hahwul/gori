@@ -25,6 +25,7 @@ module Gori
         retries = 1
         max_requests : Int64? = nil
         format = :text
+        allow_unscoped = false
         positional = [] of String
 
         set_loc = ->(k : Sequencer::ExtractKind, v : String) {
@@ -56,6 +57,7 @@ module Gori
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -91,7 +93,13 @@ module Gori
         sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
           http2: http2, verify: !insecure, sni: sni, timeout: timeout,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
-        engine = Sequencer::Engine.new(bytes, http2, sender, config)
+        # Scope gate — see cmd_fuzz / cli_scope: refuse an out-of-scope host unless
+        # --allow-unscoped, and enforce Sandbox + exclude rules on every send. (The
+        # --tokens path returned above without touching the network, so it needs none.)
+        scope = cli_scope(project_name, db_path, flow_id)
+        guard_active_scope(scope, scheme, host, request_target(bytes), allow_unscoped, "gori run sequence")
+        backend = scope ? Fuzz::ScopedBackend.new(sender, scope) : sender
+        engine = Sequencer::Engine.new(bytes, http2, backend, config)
         run_sequence_stream(engine, scheme, host, port, token_loc, count, format)
       end
 

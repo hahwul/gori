@@ -51,13 +51,18 @@ module Gori
         else
           if final_bytes = result.output
             rendered, _ = Decoder.display(final_bytes, output_mode)
-            STDOUT.puts rendered
+            # Decoder input is routinely attacker-controlled captured traffic (base64/hex/
+            # gzip blobs); an auto/text render of a decoded ANSI/OSC escape would otherwise
+            # write raw control bytes to the live terminal. Neutralize them like every other
+            # captured-text view (run.cr#print_message_text). --format json and --output
+            # hex/base64 stay byte-exact for scripts.
+            STDOUT.puts CLI::Output.term_safe_multiline(rendered)
           end
-          unless result.ok?
-            report_convert_failure(result)
-            exit 1
-          end
+          report_convert_failure(result) unless result.ok?
         end
+        # A broken chain exits non-zero in BOTH formats — the json branch previously always
+        # exited 0, burying "ok":false (inconsistent with the text view + intercept acks).
+        exit 1 unless result.ok?
       end
 
       # STDERR line for the first non-Ok step, so a failing chain is diagnosable in

@@ -14,7 +14,11 @@ module Gori
         rescue ex : JSON::ParseException
           raise Gori::Error.new("HAR file is not valid JSON: #{ex.message}")
         end
-        log = doc["log"]?
+        # A valid-JSON-but-wrong-shape file (a top-level array, a scalar, a `log` that
+        # isn't an object) must yield a clean Gori::Error, not the raw Exception that
+        # JSON::Any#[](String) throws on a non-Hash — cmd_import only rescues Gori::Error.
+        doc_h = doc.as_h? || raise Gori::Error.new("HAR file is not a JSON object")
+        log = doc_h["log"]?.try(&.as_h?)
         raise Gori::Error.new("HAR file missing log object") unless log
         entries = log["entries"]?.try(&.as_a?)
         raise Gori::Error.new("HAR file has no entries") unless entries

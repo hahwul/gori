@@ -25,6 +25,11 @@ module Gori
         rescue ex : JSON::ParseException
           raise Gori::Error.new("OpenAPI spec is not valid JSON: #{ex.message}")
         end
+        # A valid-JSON-but-wrong-shape spec (top-level array/scalar) must yield a clean
+        # Gori::Error, not the raw Exception JSON::Any#[](String) throws on a non-Hash —
+        # cmd_import only rescues Gori::Error. Guarding here also makes the later
+        # spec["servers"]/["security"]/["components"] accesses safe (spec is a Hash).
+        raise Gori::Error.new("OpenAPI spec is not a JSON object") unless spec.as_h?
         paths = spec["paths"]?
         raise Gori::Error.new("OpenAPI spec missing paths") unless paths
         # A `paths` that isn't an object (null / string / array) is a malformed spec, not

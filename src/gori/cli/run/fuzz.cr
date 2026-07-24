@@ -29,6 +29,7 @@ module Gori
         auto_cal = false
         format = :text
         force = false
+        allow_unscoped = false
         fail_if_no_matches = false
         matcher = Fuzz::Matcher.new(keep_bodies: :none)
         positional = [] of String
@@ -77,6 +78,7 @@ module Gori
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope") { allow_unscoped = true }
           p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -106,7 +108,15 @@ module Gori
         sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
           http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
-        engine = Fuzz::Engine.new(generator, matcher, sender, config)
+        # Gate outbound traffic through the project scope, like the TUI/MCP fuzzer and
+        # `gori run discover`/`repeater` (a snapshot Scope, so no store stays open): the
+        # up-front check refuses an out-of-scope host unless --allow-unscoped, and
+        # ScopedBackend enforces Sandbox mode + explicit exclude rules on every send
+        # regardless of that flag. No scope (or --request/stdin with no project) → no gate.
+        scope = cli_scope(project_name, db_path, flow_id)
+        guard_active_scope(scope, scheme, host, request_target(text.to_slice), allow_unscoped, "gori run fuzz")
+        backend = scope ? Fuzz::ScopedBackend.new(sender, scope) : sender
+        engine = Fuzz::Engine.new(generator, matcher, backend, config)
         engine.calibrate_baseline if auto_cal
 
         run_fuzz_stream(engine, mode, scheme, host, port, format, force, fail_if_no_matches)

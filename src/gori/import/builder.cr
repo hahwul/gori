@@ -60,9 +60,37 @@ module Gori
       # silently collapse duplicates to the last value.
       alias Headers = Array({String, String})
 
+      # A raw CR/LF (or NUL) inside a header NAME or VALUE forges a message boundary once
+      # the head is serialized here and later replayed byte-exact (Repeater): a HAR/OAS
+      # value of `"a\r\nX-Injected: evil\r\n\r\nGET /admin HTTP/1.1"` would smuggle a whole
+      # second request into the stored head. This is the header analogue of the URL
+      # smuggling normalize_url guards against — reject the entry at the SAME point (a raise
+      # here is caught by every import parser's per-entry rescue, dropping the bad entry
+      # exactly like a bad URL). Narrower than CONTROL_CHAR on purpose: a header VALUE may
+      # legally contain a horizontal tab (RFC 7230 §3.2 field-value), so only CR/LF/NUL —
+      # the bytes that can actually forge a boundary or truncate — are rejected.
+      HEADER_INJECT = /[\r\n\x00]/
+
+      # Reject any header whose name/value could forge a message boundary (see HEADER_INJECT).
+      def self.reject_header_injection!(headers : Headers) : Nil
+        headers.each do |k, v|
+          raise Gori::Error.new("invalid header (control character): #{k.inspect}") if k.matches?(HEADER_INJECT) || v.matches?(HEADER_INJECT)
+        end
+      end
+
+      # A start-line scalar (method / statusText reason / HTTP version) that reaches the
+      # request/status line: same boundary-forging risk as a header, so reject the same
+      # CR/LF/NUL bytes. (`target`/`host` come from normalize_url and are already clean.)
+      def self.reject_inject!(field : String, label : String) : Nil
+        raise Gori::Error.new("invalid #{label} (control character): #{field.inspect}") if field.matches?(HEADER_INJECT)
+      end
+
       def self.request_head(method : String, target : String, http_version : String,
                             host : String, headers : Headers,
                             body : Bytes?) : Bytes
+        reject_inject!(method, "method")
+        reject_inject!(http_version, "HTTP version")
+        reject_header_injection!(headers)
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
           b << "Host: " << host << "\r\n"
@@ -84,6 +112,9 @@ module Gori
 
       def self.response_head(http_version : String, status : Int32, reason : String,
                              headers : Headers, body : Bytes?) : Bytes
+        reject_inject!(http_version, "HTTP version")
+        reject_inject!(reason, "reason phrase")
+        reject_header_injection!(headers)
         String.build do |b|
           b << http_version << ' ' << status << ' ' << reason << "\r\n"
           has_cl = false

@@ -135,7 +135,7 @@ module Gori
         {"history (ls)", "List / QL-query captured flows"},
         {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
-        {"compare <a> <b>", "Diff two flows' request or response, side-by-side"},
+        {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
         {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
@@ -235,6 +235,43 @@ module Gori
         end
       rescue
         nil
+      end
+
+      # Project Scope for a CLI direct-dial command (fuzz/mine/sequence) — the missing gate
+      # that let those three fire at any host regardless of scope/Sandbox, unlike the TUI,
+      # MCP, and `gori run discover`/`repeater` which all enforce it. Loaded on the same
+      # trigger as cli_host_overrides (a project is in play). A SNAPSHOT: Scope.load reads
+      # every rule into memory, so the store can close and the read-only sandbox/exclude/
+      # include checks still work — ScopedBackend gets reload_every: nil (a short CLI run
+      # needs no mid-run reload). nil for --request/stdin with no project (nothing to gate
+      # against). A scope that fails to load must NOT silently fail OPEN (unlike overrides'
+      # rescue-to-nil): a raise here becomes a clean fail-CLOSED abort — never a raw
+      # backtrace, never a silently-unscoped run. (open_store already aborts on a bad DB.)
+      private def self.cli_scope(project_name : String?, db_path : String?, flow_id : Int64?) : Gori::Scope?
+        return nil unless flow_id || project_name || db_path
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          Gori::Scope.load(store)
+        rescue ex
+          store.close
+          abort "gori run: could not load project scope (refusing to send unscoped): #{ex.message}"
+        ensure
+          store.close
+        end
+      end
+
+      # Up-front include-scope gate for the CLI direct-dial tools (fuzz/mine/sequence),
+      # mirroring `guard_discover_scope`: when the project HAS a configured scope and the
+      # target is outside it, refuse unless --allow-unscoped. An unconfigured scope (or no
+      # project) does NOT block here — the same permissive default as `gori run discover`.
+      # This is only the soft include boundary; Sandbox mode + explicit exclude rules are
+      # still enforced per-request by Fuzz::ScopedBackend regardless of --allow-unscoped.
+      private def self.guard_active_scope(scope : Gori::Scope?, scheme : String, host : String,
+                                          target : String, allow_unscoped : Bool, cmd : String) : Nil
+        return if allow_unscoped
+        return unless (s = scope) && s.configured?
+        return if s.matches_url?(Gori::Scope.request_url(scheme, host, target), host)
+        abort "#{cmd}: #{host} is out of the project scope — add a scope include rule or pass --allow-unscoped"
       end
 
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser

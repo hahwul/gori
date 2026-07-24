@@ -26,6 +26,19 @@ module Gori::Discover
     end
   end
 
+  # StoreScope for a run that passed --allow-unscoped on an OUT-OF-SCOPE seed: the hard
+  # sandbox/exclude gate (allowed?) still applies, but configured? reports false so
+  # scope-aware containment falls back to same-origin (bounding the crawl to the seed the
+  # operator explicitly named). Without this, StoreScope#boundary? blocked every hop the
+  # seed's own include rules don't match — so --allow-unscoped fetched only the seed +
+  # robots/sitemap, brute-force never started, and the spider was stuck at depth 0, silently
+  # contradicting the flag. (The include boundary is exactly what --allow-unscoped waives.)
+  class UnscopedStoreScope < StoreScope
+    def configured? : Bool
+      false
+    end
+  end
+
   # Persist a discovered endpoint as a normal flow row so it surfaces in the Sitemap (which
   # groups by host/method/target). No response body is stored — the Sitemap needs only
   # method/target/status; re-send via Repeater for the live body. A finding with no status

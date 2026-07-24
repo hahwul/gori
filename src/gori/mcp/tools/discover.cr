@@ -68,13 +68,23 @@ module Gori
           headers: Discover::Headers.parse_lines(header_lines))
         words = Discover::Wordlist.load(str(h, "wordlist").presence)
         scope = Scope.load(store)
-        policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
+        policy = discover_policy(scope, seed, parts.host, bool(h, "allow_unscoped") || false)
         sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h),
           headers: config.headers, overrides: HostOverrides.load(store))
         engine = Discover::Engine.new(seed, words, sender, config, policy)
         {engine, seed, parts.host}
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")
+      end
+
+      # Mirror of the CLI's discover_policy (cli/run/discover.cr): with allow_unscoped on an
+      # out-of-scope seed, keep sandbox/exclude but drop the include boundary so scope-aware
+      # containment falls back to same-origin instead of blocking every hop (which otherwise
+      # gutted the crawl to just the seed + robots/sitemap — see UnscopedStoreScope).
+      private def discover_policy(scope : Scope, seed : String, host : String, allow_unscoped : Bool) : Discover::ScopePolicy
+        return Discover::OpenScope.new unless scope.configured?
+        return Discover::UnscopedStoreScope.new(scope) if allow_unscoped && !scope.matches_url?(seed, host)
+        Discover::StoreScope.new(scope)
       end
 
       private def discover_timeout(h) : Time::Span?

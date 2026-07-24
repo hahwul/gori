@@ -188,7 +188,10 @@ module Gori
             store.close
             abort "gori run rewriter rm: no rule with id #{id}"
           end
-          store.delete_rule(id)
+          unless store.delete_rule(id)
+            store.close
+            abort "gori run rewriter rm: project is busy (write did not commit) — try again"
+          end
           puts "Rule ##{id} deleted."
         ensure
           store.close
@@ -220,7 +223,10 @@ module Gori
             store.close
             abort "gori run rewriter #{action}: no rule with id #{id}"
           end
-          store.set_rule_enabled(id, enable)
+          unless store.set_rule_enabled(id, enable)
+            store.close
+            abort "gori run rewriter #{action}: project is busy (write did not commit) — try again"
+          end
           puts "Rule ##{id} #{enable ? "enabled" : "disabled"}."
         ensure
           store.close

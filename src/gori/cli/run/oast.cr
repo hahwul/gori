@@ -6,7 +6,7 @@ module Gori
       # `gori run oast` — headless out-of-band listener (interactsh & friends). Store-free
       # and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       private def self.cmd_oast(args : Array(String)) : Nil
-        filtered = args.reject { |a| a.starts_with?("--project") || a.starts_with?("--db") }
+        filtered = strip_project_flags(args)
         case sub = filtered.first?
         when "presets"           then oast_presets
         when "listen"            then oast_listen(filtered[1..])
@@ -16,6 +16,28 @@ module Gori
           oast_help
           exit 1
         end
+      end
+
+      # oast is a store-free ad-hoc listener, so --project/--db are accepted-and-ignored for
+      # CLI consistency (the top-level help says most subcommands take them). Strip BOTH the
+      # attached `--project=X` and the space-separated `--project X` forms — the old
+      # reject-token-only left a stray value that then parsed as the subcommand ("unknown
+      # subcommand 'myproj'").
+      private def self.strip_project_flags(args : Array(String)) : Array(String)
+        out = [] of String
+        i = 0
+        while i < args.size
+          a = args[i]
+          if a == "--project" || a == "--db"
+            i += 2 # skip the flag AND its value
+          elsif a.starts_with?("--project=") || a.starts_with?("--db=")
+            i += 1 # attached form is a single token
+          else
+            out << a
+            i += 1
+          end
+        end
+        out
       end
 
       private def self.oast_help : Nil

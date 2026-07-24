@@ -53,7 +53,10 @@ module Gori
         if format == :json
           puts Jwt.decode_json(token)
         else
-          puts Decoder::Codecs.jwt_decode(token.to_slice)
+          # A JWT is routinely lifted from live (attacker-controlled) traffic; the decode
+          # view prints the signature segment raw, so neutralize ANSI/OSC/control bytes
+          # before the terminal sees them (--format json stays escaped/byte-exact).
+          puts CLI::Output.term_safe_multiline(Decoder::Codecs.jwt_decode(token.to_slice))
         end
       rescue ex : Gori::Error
         abort "gori run jwt: #{ex.message}"
@@ -79,7 +82,9 @@ module Gori
         if format == :json
           puts Jwt.attacks_json(attacks)
         else
-          attacks.each { |a| puts CLI::Output.jwt_attack_text(a) }
+          # Attack tokens splice the token's raw (unvalidated) payload segment, which can
+          # carry control bytes from a captured token — neutralize before the terminal.
+          attacks.each { |a| puts CLI::Output.term_safe_multiline(CLI::Output.jwt_attack_text(a)) }
         end
       end
     end

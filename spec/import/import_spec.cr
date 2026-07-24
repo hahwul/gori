@@ -628,4 +628,96 @@ describe Gori::Import do
       File.delete?(oas)
     end
   end
+
+  # --- valid-JSON-but-wrong-shape files must be clean errors, not raw crashes -------------
+  # JSON::Any#[](String) raises a plain Exception on a non-Hash; cmd_import only rescues
+  # Gori::Error, so an unshaped-but-valid file used to dump a raw backtrace.
+  it "raises a clean Gori::Error (not a raw crash) for a valid-JSON but wrong-shape HAR" do
+    ["[]", %q({"log":"oops"}), "42"].each do |bad|
+      har = File.tempname("gori", ".har")
+      begin
+        File.write(har, bad)
+        with_store do |store|
+          expect_raises(Gori::Error) { Gori::Import.import_file(store, :har, har) }
+        end
+      ensure
+        File.delete?(har)
+      end
+    end
+  end
+
+  it "raises a clean Gori::Error (not a raw crash) for a valid-JSON but wrong-shape OpenAPI spec" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, "[]")
+      with_store do |store|
+        expect_raises(Gori::Error) { Gori::Import.import_file(store, :oas, oas) }
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  # --- header/start-line CRLF injection (request smuggling on later replay) ---------------
+  it "skips a HAR entry whose header value smuggles a CRLF, leaving no fabricated request" do
+    # \r\n in a header value would forge a second HTTP message inside the stored head, which
+    # gori replays byte-exact. The bad entry is dropped (counted as skipped); the clean one
+    # imports, and the stored head carries no injected line.
+    inject = %q(bar\r\nX-Injected: evil\r\n\r\nGET /admin HTTP/1.1)
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {"log":{"entries":[
+          {"startedDateTime":"2026-06-01T12:00:00Z","request":{"method":"GET","url":"https://ok.test/a","httpVersion":"HTTP/1.1","headers":[{"name":"Accept","value":"*/*"}]}},
+          {"startedDateTime":"2026-06-01T12:00:00Z","request":{"method":"GET","url":"https://bad.test/b","httpVersion":"HTTP/1.1","headers":[{"name":"X-Foo","value":"#{inject}"}]}}
+        ]}}
+        JSON
+
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        result.count.should eq(1)
+        result.skipped.should eq(1)
+        row = store.search(Gori::QL::EMPTY, 10).first
+        row.host.should eq("ok.test")
+        String.new(store.get_flow(row.id).not_nil!.request_head).should_not contain("X-Injected")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+end
+
+describe Gori::Import::Builder do
+  it "rejects a header value containing CR/LF (request smuggling guard)" do
+    headers = Gori::Import::Builder::Headers.new
+    headers << {"X-Foo", "bar\r\nX-Injected: evil"}
+    expect_raises(Gori::Error, /control character/) do
+      Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "h.test", headers, nil)
+    end
+  end
+
+  it "rejects a header NAME containing CR/LF" do
+    headers = Gori::Import::Builder::Headers.new
+    headers << {"X-Foo\r\nEvil", "bar"}
+    expect_raises(Gori::Error, /control character/) do
+      Gori::Import::Builder.response_head("HTTP/1.1", 200, "OK", headers, nil)
+    end
+  end
+
+  it "rejects a method / reason phrase containing CR/LF (start-line smuggling guard)" do
+    empty = Gori::Import::Builder::Headers.new
+    expect_raises(Gori::Error, /control character/) do
+      Gori::Import::Builder.request_head("GET\r\nHost: evil", "/", "HTTP/1.1", "h.test", empty, nil)
+    end
+    expect_raises(Gori::Error, /control character/) do
+      Gori::Import::Builder.response_head("HTTP/1.1", 200, "OK\r\nX-Injected: evil", empty, nil)
+    end
+  end
+
+  it "allows a horizontal tab in a header value (a legal field-value byte, not a boundary)" do
+    headers = Gori::Import::Builder::Headers.new
+    headers << {"X-Foo", "a\tb"}
+    head = String.new(Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "h.test", headers, nil))
+    head.should contain("X-Foo: a\tb")
+  end
 end

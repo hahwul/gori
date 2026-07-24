@@ -128,7 +128,10 @@ module Gori
             detail = store.get_flow(fid)
             abort "gori run repeater create: no flow ##{fid} to clone" unless detail
             built = Repeater::FlowRequest.build(detail)
-            req_content = String.new(built.bytes)
+            # Only seed the request from the flow when the user didn't hand one in: --flow
+            # doubles as provenance (the flow_id column) for a custom --request-raw/-file,
+            # so an explicit request must NOT be silently overwritten by the flow's bytes.
+            req_content = String.new(built.bytes) if request_file.nil? && request_raw.nil?
             if tgt_str.empty?
               bt = built.target
               tgt_str = bt ? bt : ""
@@ -218,6 +221,20 @@ module Gori
         RepeaterSend.new(bytes, scheme, host, port, rec.http2?, rec.sni.try { |v| Env.expand(v) })
       end
 
+      # Persist a repeater SESSION's last response (V11) so it survives a reopen and a later
+      # `repeater list` / `--diff` see it — parity with the TUI (repeater_controller.cr
+      # #drain_results). Reopens the store because `send` closed it before the (slow) dial.
+      # Callers gate on `result.ok?`: a failed resend must not wipe a good stored response.
+      private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
+                                                 duration_us : Int64, project_name : String?, db_path : String?) : Nil
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          store.update_repeater_response(id, head, body, error, duration_us)
+        ensure
+          store.close
+        end
+      end
+
       # `gori run repeater send <repeater-id>` — replay a saved repeater SESSION (as
       # opposed to a bare id, which replays a History FLOW). Honors the session's
       # target / http2 / sni / auto_content_length toggle.
@@ -286,6 +303,7 @@ module Gori
             Repeater::Diff.lines(orig, message_lines(result.head, new_body))
           end
         emit_repeater_result(result, new_body, diff, format)
+        persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project_name, db_path) if result.ok?
         exit 1 unless result.ok?
       end
 
@@ -319,11 +337,15 @@ module Gori
         result = Repeater::WsEngine.send(request, out_messages, scheme: scheme, host: host, port: port,
           verify_upstream: verify, sni: sni, idle: idle, overrides: host_overrides)
 
-        store2 = open_store(resolve_read_project(project_name, db_path))
-        begin
-          store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
-        ensure
-          store2.close
+        # Persist ONLY on success — parity with the TUI (repeater_controller#drain_results):
+        # a later failed resend must not wipe a good stored handshake/response.
+        if result.ok?
+          store2 = open_store(resolve_read_project(project_name, db_path))
+          begin
+            store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
+          ensure
+            store2.close
+          end
         end
 
         emit_ws_result(id, result, format)
@@ -502,44 +524,57 @@ module Gori
         head_bytes = raw_bytes[0, crlf_crlf_idx + 4]
         body_bytes = raw_bytes[crlf_crlf_idx + 4..]
 
-        raw_req = Proxy::Codec::Http1.parse_request_head(head_bytes)
+        # Edit the head as RAW LINES so the request line and every header stay byte-exact
+        # except where a flag overrides them. The old path rebuilt the request line from
+        # split method/target/version tokens, which corrupted any line with a raw space in
+        # the target (fuzzer/smuggling captures split into >3 tokens: the version was dropped
+        # and the path truncated); it also re-emitted only parse_headers' output, silently
+        # dropping any colon-less header line. Both are exactly the payloads this tool exists
+        # to replay faithfully, so we never reconstruct them from parsed tokens.
+        head_str = String.new(head_bytes)
+        first_crlf = head_str.index("\r\n") || head_str.size
+        request_line = head_str[0, first_crlf]
+        # Header lines between the request line and the terminating blank line, each verbatim.
+        raw_lines = head_str[first_crlf..].split("\r\n").reject(&.empty?)
 
+        # -H overrides: lower-name → value, plus the flag-cased name in flag order for appends.
         custom_headers = {} of String => String
+        custom_order = [] of {String, String}
         headers.each do |h_str|
           next unless h_str.includes?(':')
           name, _, val = h_str.partition(':')
           next if name.strip.empty?
-          custom_headers[name.strip.downcase] = val.strip
+          lname = name.strip.downcase
+          custom_order << {lname, name.strip} unless custom_headers.has_key?(lname)
+          custom_headers[lname] = val.strip
         end
 
-        new_headers = [] of Proxy::Codec::Header
-        applied = Set(String).new # custom names whose FIRST occurrence was already replaced
-        raw_req.headers.each do |hdr|
-          lower_name = hdr.name.downcase
-          if custom_headers.has_key?(lower_name)
-            # Replace the first matching line; DROP later duplicates (a captured h2 request
-            # can carry several `cookie:`/`set-cookie:` lines) so the override isn't left
-            # half-applied with a stale second occurrence.
-            next if applied.includes?(lower_name)
-            new_headers << Proxy::Codec::Header.new(hdr.name, custom_headers[lower_name])
-            applied << lower_name
+        # The header NAME of a raw line (bytes before the first colon), or "" for a
+        # colon-less line — those are kept verbatim, never treated as a header to edit.
+        line_name = ->(line : String) do
+          c = line.index(':')
+          c && c > 0 ? line[0, c] : ""
+        end
+
+        # Replace the FIRST occurrence of an overridden header (DROP later duplicates so an
+        # h2 request's repeated cookie:/set-cookie: lines aren't left half-overridden), and
+        # keep every other line — including colon-less ones — byte-exact.
+        applied = Set(String).new
+        new_lines = [] of String
+        raw_lines.each do |line|
+          name = line_name.call(line)
+          lname = name.strip.downcase
+          if !lname.empty? && custom_headers.has_key?(lname)
+            next if applied.includes?(lname)
+            applied << lname
+            new_lines << "#{name}: #{custom_headers[lname]}"
           else
-            new_headers << hdr
+            new_lines << line
           end
         end
-
-        custom_headers.each do |lower_name, val|
-          next if applied.includes?(lower_name) # already replaced an existing line
-          orig_name = ""
-          headers.each do |h_str|
-            name, _, _ = h_str.partition(':')
-            if name.strip.downcase == lower_name
-              orig_name = name.strip
-              break
-            end
-          end
-          orig_name = lower_name if orig_name.empty?
-          new_headers << Proxy::Codec::Header.new(orig_name, val)
+        custom_order.each do |(lname, orig)|
+          next if applied.includes?(lname)
+          new_lines << "#{orig}: #{custom_headers[lname]}"
         end
 
         final_body = if b_over = body_override
@@ -548,22 +583,22 @@ module Gori
                        body_bytes
                      end
 
-        has_cl = new_headers.any? { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
-        has_te = new_headers.any? { |h| h.name.compare("Transfer-Encoding", case_insensitive: true) == 0 }
+        has_te = new_lines.any? { |l| line_name.call(l).compare("Transfer-Encoding", case_insensitive: true) == 0 }
         # RFC 7230 §3.3.3 forbids sending Transfer-Encoding and Content-Length together.
         # When the original request was chunked (TE present, no override), keep its wire
         # framing byte-exact and don't inject a Content-Length. When the body is replaced
         # via -b, drop Transfer-Encoding and self-frame the new bytes with Content-Length.
         if has_te && body_override
-          new_headers.reject! { |h| h.name.compare("Transfer-Encoding", case_insensitive: true) == 0 }
+          new_lines.reject! { |l| line_name.call(l).compare("Transfer-Encoding", case_insensitive: true) == 0 }
           has_te = false
         end
+        has_cl = new_lines.any? { |l| line_name.call(l).compare("Content-Length", case_insensitive: true) == 0 }
         if !has_te && (body_override || has_cl || final_body.size > 0)
-          cl_idx = new_headers.index { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
+          cl_idx = new_lines.index { |l| line_name.call(l).compare("Content-Length", case_insensitive: true) == 0 }
           if cl_idx
-            new_headers[cl_idx] = Proxy::Codec::Header.new(new_headers[cl_idx].name, final_body.size.to_s)
+            new_lines[cl_idx] = "#{line_name.call(new_lines[cl_idx])}: #{final_body.size}"
           else
-            new_headers << Proxy::Codec::Header.new("Content-Length", final_body.size.to_s)
+            new_lines << "Content-Length: #{final_body.size}"
           end
         end
 
@@ -574,19 +609,17 @@ module Gori
           scheme_part, host_part, port_part = Repeater::FlowRequest.parse_target(override)
           default_port = scheme_part == "https" ? 443 : 80
           host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
-          host_idx = new_headers.index { |h| h.name.compare("Host", case_insensitive: true) == 0 }
+          host_idx = new_lines.index { |l| line_name.call(l).compare("Host", case_insensitive: true) == 0 }
           if host_idx
-            new_headers[host_idx] = Proxy::Codec::Header.new(new_headers[host_idx].name, host_hdr_val)
+            new_lines[host_idx] = "#{line_name.call(new_lines[host_idx])}: #{host_hdr_val}"
           else
-            new_headers << Proxy::Codec::Header.new("Host", host_hdr_val)
+            new_lines << "Host: #{host_hdr_val}"
           end
         end
 
         new_head_str = String.build do |io|
-          io << raw_req.method << " " << raw_req.target << " " << raw_req.version << "\r\n"
-          new_headers.each do |hdr|
-            io << hdr.name << ": " << hdr.value << "\r\n"
-          end
+          io << request_line << "\r\n"
+          new_lines.each { |l| io << l << "\r\n" }
           io << "\r\n"
         end
 

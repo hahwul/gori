@@ -73,7 +73,7 @@ module Gori
           rescue ex
             abort "gori run discover: wordlist error: #{ex.message}"
           end
-          policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
+          policy = discover_policy(scope, seed_url, allow_unscoped)
           sender = Discover::Sender.new(verify: !insecure, timeout: timeout, headers: config.headers,
             overrides: Gori::HostOverrides.load(store))
           engine = Discover::Engine.new(seed_url, words, sender, config, policy)
@@ -109,6 +109,22 @@ module Gori
         return unless p
         return if scope.matches_url?(seed_url, p.host)
         abort "gori run discover: #{seed_url} is out of the project scope — add a scope include rule or pass --allow-unscoped"
+      end
+
+      # The ScopePolicy the crawl engine enforces. Unconfigured scope ⇒ OpenScope (nothing
+      # bounded). Otherwise StoreScope (sandbox/exclude + the include boundary) — UNLESS
+      # --allow-unscoped was passed AND the seed is genuinely outside the include boundary,
+      # in which case UnscopedStoreScope keeps the hard sandbox/exclude gate but drops the
+      # include boundary so scope-aware containment can fall back to same-origin (the flag
+      # was a no-op on the policy before, gutting the crawl — see UnscopedStoreScope). When
+      # the seed IS in scope the flag is redundant, so normal StoreScope is kept unchanged.
+      private def self.discover_policy(scope : Scope, seed_url : String, allow_unscoped : Bool) : Discover::ScopePolicy
+        return Discover::OpenScope.new unless scope.configured?
+        if allow_unscoped
+          p = Discover::Url.parse(seed_url)
+          return Discover::UnscopedStoreScope.new(scope) if p.nil? || !scope.matches_url?(seed_url, p.host)
+        end
+        Discover::StoreScope.new(scope)
       end
 
       private def self.parse_extensions(v : String) : Array(String)

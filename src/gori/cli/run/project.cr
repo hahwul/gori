@@ -272,13 +272,14 @@ module Gori
         store = open_store(project)
         begin
           scope = Scope.load(store)
-          if enable
-            scope.enable
-            puts "Scope filtering enabled."
-          else
-            scope.disable
-            puts "Scope filtering disabled."
+          # enable/disable return false when the write didn't commit (store busy/locked/
+          # closing, e.g. a live capture holds the writer): don't claim success then.
+          ok = enable ? scope.enable : scope.disable
+          unless ok
+            store.close
+            abort "gori run project scope #{enable ? "enable" : "disable"}: project is busy (write did not commit) — try again"
           end
+          puts enable ? "Scope filtering enabled." : "Scope filtering disabled."
         ensure
           store.close
         end
@@ -384,7 +385,10 @@ module Gori
           else
             vars << {key, val}
           end
-          Env.save_project(store, vars)
+          unless Env.save_project(store, vars)
+            store.close
+            abort "gori run project env set: project is busy (write did not commit) — try again"
+          end
           puts "Env var #{key} set."
         ensure
           store.close
@@ -422,7 +426,10 @@ module Gori
             store.close
             abort "gori run project env delete: no env var named '#{key}'"
           end
-          Env.save_project(store, vars)
+          unless Env.save_project(store, vars)
+            store.close
+            abort "gori run project env delete: project is busy (write did not commit) — try again"
+          end
           puts "Env var #{key} deleted."
         ensure
           store.close
@@ -530,6 +537,10 @@ module Gori
         pair =
           if (h_flag = host) && (i_flag = ip)
             {h_flag, i_flag}
+          elsif host || ip
+            # A lone --host/--ip is ambiguous next to positional args, which would otherwise
+            # silently win and drop the flag — require the pair to be fully one form or the other.
+            abort "gori run project host-override add: give BOTH --host and --ip, or the positional IP HOST form (not a mix)"
           else
             abort "gori run project host-override add: need --host and --ip, or positional IP HOST" if positional.empty?
             parsed = HostOverrides.parse_line(positional.join(' '))
@@ -632,7 +643,10 @@ module Gori
             store.close
             abort "gori run project host-override delete: no override with id #{id}"
           end
-          ov.remove(id)
+          unless ov.remove(id)
+            store.close
+            abort "gori run project host-override delete: project is busy (write did not commit) — try again"
+          end
           puts "Host override ##{id} deleted."
         ensure
           store.close

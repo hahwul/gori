@@ -81,11 +81,21 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          doc = Notes.load(store)
-          new_id = doc.next_id
-          new_notes = doc.notes + [Notes::NoteEntry.new(new_id, body)]
-          store.set_setting(Notes::DOCS_KEY, Notes.serialize(new_notes.size - 1, new_notes, new_id + 1))
-          puts "Note ##{new_notes.size} created."
+          # Merge the append into the freshly-read doc instead of a blind load→overwrite,
+          # so a concurrent writer's notes (a TUI editing the same project) aren't reverted.
+          # Same reconcile the TUI save path uses (Notes.merge): `mine` is only the new note,
+          # so every persisted note is kept and just the delta is added.
+          persisted = Notes.load(store)
+          new_id = persisted.next_id
+          merged = Notes.merge(persisted, [Notes::NoteEntry.new(new_id, body)], Set(Int64).new,
+            persisted.size, persisted.next_id + 1)
+          # set_setting returns false when the write didn't commit (store busy/locked):
+          # don't claim success then — same guard as issues/rewriter/project mutations.
+          unless store.set_setting(Notes::DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
+            store.close
+            abort "gori run notes create: project is busy (write did not commit) — try again"
+          end
+          puts "Note ##{merged.size} created."
         ensure
           store.close
         end
@@ -114,12 +124,20 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          doc = Notes.load(store)
-          abort "gori run notes delete: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})" unless n <= doc.size
-          new_notes = doc.notes.dup
-          new_notes.delete_at(n - 1)
-          new_cur = doc.cur.clamp(0, {new_notes.size - 1, 0}.max)
-          store.set_setting(Notes::DOCS_KEY, Notes.serialize(new_cur, new_notes, doc.next_id))
+          persisted = Notes.load(store)
+          unless n <= persisted.size
+            store.close
+            abort "gori run notes delete: no note ##{n} (this project has #{persisted.size} note#{persisted.size == 1 ? "" : "s"})"
+          end
+          # Delete by the note's STABLE id (not its list position) and merge, so a concurrent
+          # writer's other notes aren't clobbered by a blind overwrite. See Notes.merge.
+          target_id = persisted.notes[n - 1].id
+          merged = Notes.merge(persisted, [] of Notes::NoteEntry, Set{target_id},
+            persisted.cur, persisted.next_id)
+          unless store.set_setting(Notes::DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
+            store.close
+            abort "gori run notes delete: project is busy (write did not commit) — try again"
+          end
           puts "Note ##{n} deleted."
         ensure
           store.close
