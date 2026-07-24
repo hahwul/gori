@@ -87,6 +87,83 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("— not sent — press ^R to resend —").should be_true
   end
 
+  it "mirrors the target host into the Host header on the first edit of a blank tab" do
+    view = RepeaterView.new
+    view.load_blank
+    view.request_text.should contain("Host: example.com") # the placeholder Host
+
+    # Simulate replacing the target and leaving insert mode (the ^N → edit-target flow).
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://real.test".each_char { |c| view.target_insert(c) }
+    view.exit_target_insert!
+
+    view.target.should eq("https://real.test")
+    view.request_text.should contain("Host: real.test")
+    view.request_text.should_not contain("Host: example.com")
+  end
+
+  it "keeps a non-default port in the mirrored Host header" do
+    view = RepeaterView.new
+    view.load_blank
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://real.test:8443".each_char { |c| view.target_insert(c) }
+    view.exit_target_insert!
+    view.request_text.should contain("Host: real.test:8443")
+  end
+
+  it "syncs the Host only ONCE — a later target edit never re-clobbers it" do
+    view = RepeaterView.new
+    view.load_blank
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://real.test".each_char { |c| view.target_insert(c) }
+    view.exit_target_insert! # first edit → Host synced to real.test
+
+    # A second target change must NOT re-sync (so a hand-set Host survives).
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://other.test".each_char { |c| view.target_insert(c) }
+    view.exit_target_insert!
+
+    view.target.should eq("https://other.test")
+    view.request_text.should contain("Host: real.test") # NOT re-synced to other.test
+  end
+
+  # ^R sends WITHOUT leaving target-insert (a modified chord defers past exit_target_insert!),
+  # so repeater_send calls sync_host_to_target_once at send prep. Mimic that: type the target
+  # but never exit insert, then run the send-time hook.
+  it "mirrors the Host at send time even if the target edit never left insert mode" do
+    view = RepeaterView.new
+    view.load_blank
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://real.test".each_char { |c| view.target_insert(c) }
+    view.sync_host_to_target_once # what repeater_send does beside commit_chain_pane (no exit_target_insert!)
+    view.request_text.should contain("Host: real.test")
+    view.request_text.should_not contain("Host: example.com")
+  end
+
+  # The clobber guard: leaving the target for the body must SPEND the one-shot, so a Host the
+  # user then sets by hand (a deliberate Host≠target mismatch — Host-header attack) is never
+  # overwritten by the send-time hook. This is why the primary trigger is focus-leave.
+  it "never clobbers a hand-set Host once focus has left the target" do
+    view = RepeaterView.new
+    view.load_blank
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://real.test".each_char { |c| view.target_insert(c) }
+    view.focus_pane(:request) # leaving the target flushes the link AND spends the one-shot
+    view.request_text.should contain("Host: real.test")
+
+    # User deliberately sets a mismatched Host in the body, then sends.
+    view.replace_edit_buffer("GET / HTTP/1.1\nHost: evil.test\nUser-Agent: gori\n\n")
+    view.sync_host_to_target_once # send-time hook — one-shot already spent, must be a no-op
+    view.request_text.should contain("Host: evil.test")
+    view.request_text.should_not contain("Host: real.test")
+  end
+
   # The response body is styled one visible line at a time and memoized (per-line) so an
   # unrelated re-render (a keystroke in the request editor) doesn't re-tokenize the pane.
   # The memo must be dropped in lockstep with the response view — a new send, or a pretty

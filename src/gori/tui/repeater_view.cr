@@ -42,6 +42,11 @@ module Gori::Tui
     getter target : String # the raw target URL (persistence + cross-session sync)
     # unsaved local edits — gates persistence + protects the tab from sync clobber
     @dirty : Bool = false
+    # One-shot, armed only by load_blank (a fresh ^N tab). The first time the user edits the
+    # target away from the placeholder, the Host header is mirrored to the new host so they
+    # don't have to edit both; cleared after that first sync (and never armed for tabs loaded
+    # from a captured flow / saved repeater), so a hand-set Host is never clobbered.
+    @link_host_to_target : Bool = false
 
     def dirty? : Bool
       @dirty || (@ws_mode && @decoded_dirty)
@@ -321,6 +326,7 @@ module Gori::Tui
 
     def exit_target_insert! : Nil
       @target_mode = InputMode::Read
+      sync_host_to_target_once
     end
 
     def resp_navigable? : Bool
@@ -1092,6 +1098,7 @@ module Gori::Tui
       @flow = nil
       @http2 = false
       @target = BLANK_TARGET
+      @link_host_to_target = true # first target edit mirrors into the Host header (see the field)
       @tcx = @target.size
       @sni = ""
       @scx = 0
@@ -1481,6 +1488,43 @@ module Gori::Tui
       @editor.replace_line(raw_cl_idx, new_line)
     end
 
+    # See @link_host_to_target: on the FIRST target edit of a fresh ^N tab, mirror the new
+    # host into the Host header (a ^N tab starts on https://example.com / Host: example.com,
+    # so without this the user edits both). One-shot — cleared after the first sync, and it
+    # only fires once the target actually moved off the placeholder.
+    # Public so the send path can flush it too: ^R sends WITHOUT going through
+    # exit_target_insert! (a modified chord defers straight to the keymap), so a
+    # type-target-then-^R flow would otherwise send the stale Host. Calling this at send
+    # prep (repeater_send, beside commit_chain_pane) closes that. No-op unless armed.
+    def sync_host_to_target_once : Nil
+      return unless @link_host_to_target
+      return if @target == BLANK_TARGET # not edited off the placeholder yet — keep waiting
+      _, host, _ = parse_target
+      return if host.empty? # edited to something with no parseable host — stay armed for a real one
+      @link_host_to_target = false
+      reflect_target_host_in_editor
+    end
+
+    # Rewrite the request's `Host:` line to the target's authority (host, or host:port for a
+    # non-default port). Plain text tabs only — WS/gRPC/hex request buffers frame their host
+    # elsewhere. Models reflect_content_length_in_editor (locate the header by content, then
+    # replace_line). @dirty is already set by the target edit that triggered this.
+    private def reflect_target_host_in_editor : Nil
+      return if @req_hex_edit || @ws_mode || @grpc_mode
+      scheme, host, port = parse_target
+      return if host.empty?
+      default_port = (scheme == "https" || scheme == "wss") ? 443 : 80
+      authority = port == default_port ? host : "#{host}:#{port}"
+      env_sep = @editor.text.index("\n\n")
+      return unless env_sep
+      head_lines = @editor.text[0, env_sep].split('\n')
+      host_idx = head_lines.index { |l| l.lstrip.downcase.starts_with?("host:") }
+      return unless host_idx
+      new_line = "Host: #{authority}"
+      return if head_lines[host_idx] == new_line
+      @editor.replace_line(host_idx, new_line)
+    end
+
     # {scheme, host, port} parsed from the target field.
     # Delegate to the engine's parser so the TUI field and `gori run`/the repeater engine never
     # disagree on host/port (they used to be byte-for-byte duplicate implementations).
@@ -1528,6 +1572,13 @@ module Gori::Tui
     # editing SNI and returning would silently route URL keystrokes into @sni.
     private def set_focus(pane : Symbol) : Nil
       commit_chain_pane if @chain_focused # any focus change saves a pending chain edit
+      # Leaving the target for another pane flushes the ^N host-link here — BEFORE the user
+      # can reach the request body to hand-edit the Host. That ordering is what keeps the
+      # one-shot from ever clobbering a deliberately-mismatched Host (Host-header attacks):
+      # the flag is spent on the way out of the target, so a later body Host edit stands.
+      # Covers every target→elsewhere path (keyboard pane_advance, mouse focus_pane, chips);
+      # exit_target_insert! (Esc) and repeater_send (^R straight from target) are the other two.
+      sync_host_to_target_once if @focus == :target && pane != :target
       @focus = pane
       @target_field = :url
     end

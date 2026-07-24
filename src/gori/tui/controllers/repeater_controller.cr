@@ -1182,7 +1182,8 @@ module Gori::Tui
 
     def repeater_send : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      view.commit_chain_pane # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
+      view.commit_chain_pane           # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
+      view.sync_host_to_target_once    # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
       if view.inflight?      # one outstanding round-trip per view — don't pile up fibers on ^R mashing
         @host.status("repeater already in flight…")
         return
