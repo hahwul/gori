@@ -6,9 +6,7 @@ require "../conn/client_conn"
 require "../upstream"
 require "../socket_tuning"
 require "../h2/relay"
-require "../codec/message"
 require "../../host_overrides"
-require "../../flow_mapper"
 require "./cert_authority"
 
 module Gori::Proxy::Tls
@@ -18,6 +16,13 @@ module Gori::Proxy::Tls
   # loop with the upstream pinned to the CONNECT target over a TLS client
   # connection — so the same codec/capture path serves decrypted traffic.
   class Tunnel < Proxy::TlsMitm
+    # Connect timeout for the ALPN-reflection probe (see reflect_origin_h2). Capped well below
+    # the full connect timeout: the probe only CLASSIFIES the origin's ALPN, and an unreachable
+    # origin would otherwise burn the full timeout here AND again when the h1 fallback re-dials
+    # — doubling the wait a browser sees before its 502. 5s is generous for any reachable
+    # origin's TCP connect; a slower one simply reflects h1 (loads over h1, just not the relay).
+    H2_PROBE_CONNECT_TIMEOUT = 5.seconds
+
     # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
     # flip upstream TLS verification without a restart; read per-CONNECT in `intercept`, so
     # the next tunnelled connection picks up the change.
@@ -54,15 +59,12 @@ module Gori::Proxy::Tls
     end
 
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink) : Nil
-      # Don't advertise h2 — forcing the client to HTTP/1.1, the ClientConn path —
-      # when the sandbox is on, OR intercept is on for this host, OR Match&Replace rules
-      # are live. h2's HPACK-encoded heads never reach the HeadRewriter/interceptor seams
-      # (nor ClientConn's sandbox block), so the fast h2 relay would silently skip all of
-      # them. Sandbox forces h1 for EVERY MITM'd host so the per-request block always runs;
-      # out-of-scope, sandbox-off, intercept-off, rule-less hosts keep the fast h2 relay.
-      advertise_h2 = !(@interceptor.try(&.sandbox_enabled?) ||
-                       @interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
-      server_ctx = @ca.context_for(host, advertise_h2: advertise_h2)
+      # ALPN reflection (#323): advertise h2 to the client only when the ORIGIN speaks it. A
+      # non-nil result is a live upstream already confirmed h2 (reflect_origin_h2 dials it and
+      # keeps it for reuse); nil means fall the client back to the h1 path. See that helper.
+      upstream = reflect_origin_h2(host, port)
+
+      server_ctx = @ca.context_for(host, advertise_h2: !upstream.nil?)
       # sync_close: true is REQUIRED, not cosmetic. The h2/ws relays tear down by
       # closing the socket the *other* pump fiber is mid-read on, to unblock it.
       # With sync_close: false, OpenSSL::SSL::Socket#close does a *bidirectional*
@@ -77,11 +79,16 @@ module Gori::Proxy::Tls
       client_tls = OpenSSL::SSL::Socket::Server.new(client, server_ctx, sync_close: true, accept: true)
       client_tls.sync = true
 
-      # ALPN routing: if the client negotiated h2 with us, run the h2 relay
-      # (end-to-end h2, raw-frame capture); otherwise the normal h1 path.
-      if client_tls.alpn_protocol == "h2"
-        intercept_h2(host, port, client_tls, sink)
+      # ALPN routing: if the client negotiated h2 with us, run the h2 relay (end-to-end h2,
+      # raw-frame capture) over the upstream we already confirmed speaks h2; otherwise the
+      # normal h1 path. A non-nil `upstream` is guaranteed whenever the client could have picked
+      # h2 (we only advertised h2 in that case).
+      if client_tls.alpn_protocol == "h2" && (up = upstream)
+        upstream = nil # ownership transfers to relay_h2 (its ensure closes it)
+        relay_h2(host, port, client_tls, up, sink)
       else
+        upstream.try(&.close) rescue nil # client took h1: an h2 probe socket can't serve it
+        upstream = nil
         Proxy::ClientConn.new(
           client_tls, "https", sink,
           fixed_host: host, fixed_port: port,
@@ -94,30 +101,48 @@ module Gori::Proxy::Tls
       # Client refused our cert (CA not trusted) or handshake failed: there's
       # nothing decrypted to capture. The outer connection is torn down.
     ensure
+      upstream.try(&.close) rescue nil # a probe orphaned by a failed client handshake
       client_tls.try(&.close) rescue nil
     end
 
-    # End-to-end h2: dial the origin offering h2. A tunnel we can't build is
-    # recorded as a visible error flow (see record_h2_error) rather than dropped
-    # silently — most browsers negotiate h2 by default, so a silent drop here left
-    # the user with a blank page and an empty History and no hint of the cause (#323).
-    private def intercept_h2(host : String, port : Int32, client_tls : IO, sink : Proxy::FlowSink) : Nil
-      upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2", overrides: @host_overrides)
-      if upstream.nil?
-        # Couldn't reach or TLS-verify the origin — no h2 tunnel to build. The most common
-        # cause behind #323: upstream-cert verification failing when the (statically-linked)
-        # binary can't resolve a system trust store. The h1 path already surfaces this via
-        # ClientConn#record_error; bring h2 to parity instead of dropping the connection.
-        record_h2_error(host, port, sink, "upstream connect/TLS-verify failed: #{host}:#{port}")
-        return
-      end
-      unless upstream.alpn_protocol == "h2"
-        # Origin won't speak h2; v1 does not translate h2↔h1 (a translated flow would be
-        # corrupted, P7). Record WHY rather than dropping silently — an Error flow is an
-        # honest projection, not a corrupted one.
-        record_h2_error(host, port, sink, "origin did not negotiate HTTP/2 (h2↔h1 not supported): #{host}:#{port}")
-        return
-      end
+    # ALPN reflection probe (#323). When this host is an h2 candidate, pre-dial the origin
+    # offering h2 BEFORE the client handshake and return the socket ONLY if the origin
+    # negotiated h2 — the caller then advertises h2 to the client and hands this same socket to
+    # the relay (reused, not re-dialed), so the common browser→h2-origin path adds no extra
+    # origin connection: the dial just moves ahead of the client handshake. Returns nil for a
+    # non-candidate, an h1-only origin, or an unreachable origin — v1 has no h2↔h1 translation,
+    # so advertising h2 for any of those stranded the client on a dead h2 tunnel (a blank page,
+    # empty History). Nil falls the client back to the h1 ClientConn path, which loads normally
+    # and records its own upstream errors. The cost: an h1-only origin, or a client that
+    # declines h2 (e.g. curl), spends one throwaway probe connection, closed here.
+    private def reflect_origin_h2(host : String, port : Int32) : OpenSSL::SSL::Socket::Client?
+      return nil unless h2_candidate?(host)
+      # Cap the connect wait so an unreachable origin doesn't burn the full timeout here before
+      # the h1 fallback re-dials and waits again (never longer than the configured timeout).
+      timeout = {Gori::Settings.connect_timeout, H2_PROBE_CONNECT_TIMEOUT}.min
+      upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2",
+        connect_timeout: timeout, overrides: @host_overrides)
+      return upstream if upstream && upstream.alpn_protocol == "h2"
+      upstream.try(&.close) rescue nil
+      nil
+    end
+
+    # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
+    # ClientConn path — when the sandbox is on, OR intercept is on for this host, OR
+    # Match&Replace rules are live: h2's HPACK-encoded heads never reach the
+    # HeadRewriter/interceptor seams (nor ClientConn's sandbox block), so the relay would
+    # silently skip all of them. Out-of-scope, sandbox-off, intercept-off, rule-less hosts are
+    # candidates (subject to the origin actually speaking h2 — see reflect_origin_h2).
+    private def h2_candidate?(host : String) : Bool
+      !(@interceptor.try(&.sandbox_enabled?) ||
+        @interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
+    end
+
+    # End-to-end h2 relay over an upstream ALREADY dialed (and confirmed h2) by `intercept`.
+    # Reusing that socket is what keeps the common browser→h2-origin path at a single origin
+    # connection. Owns `upstream` — closes it on teardown.
+    private def relay_h2(host : String, port : Int32, client_tls : IO,
+                         upstream : OpenSSL::SSL::Socket::Client, sink : Proxy::FlowSink) : Nil
       upstream.sync = true
       # Long-lived end-to-end h2 relay: relax both legs so an idle h2 connection isn't reaped
       # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
@@ -125,24 +150,7 @@ module Gori::Proxy::Tls
       Proxy::SocketTuning.relax(upstream)
       Proxy::H2::Relay.run(client_tls, upstream, host, port, sink)
     ensure
-      upstream.try(&.close) rescue nil
-    end
-
-    # Record a VISIBLE error flow for an h2 tunnel we could not establish, mirroring the
-    # h1 path's ClientConn#record_error. `head` is a synthesized marker: the real h2 request
-    # frames were never relayed or decoded (the failure is before the relay), so there is no
-    # wire request to capture — the raw-frame log stays the truth for real h2 flows (P7).
-    # Best-effort: a store error here must not take down the tunnel teardown.
-    private def record_h2_error(host : String, port : Int32, sink : Proxy::FlowSink, message : String) : Nil
-      created_at = (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
-      head = "GET / HTTP/2\r\nHost: #{host}\r\n\r\n".to_slice
-      req = Proxy::Codec::RawRequest.new(head, "GET", "/", "HTTP/2",
-        Proxy::Codec::HeaderList.new([Proxy::Codec::Header.new("Host", host)]))
-      flow_id = sink.on_request(FlowMapper.request(req,
-        scheme: "https", host: host, port: port, created_at: created_at, alpn: "h2"))
-      sink.on_response(FlowMapper.error_response(flow_id, message))
-    rescue
-      # never let error-recording take down the tunnel teardown path
+      upstream.close rescue nil
     end
   end
 end
