@@ -176,7 +176,15 @@ module Gori
           return :back
         end
       begin
-        Tui::Runner.new(session, term).run
+        runner = Tui::Runner.new(session, term)
+        # Verify on but no CA trust store resolvable (e.g. a static musl build on a host
+        # without a standard CA bundle): every HTTPS flow would fail upstream verification
+        # (#323). Surface it once at startup — the per-flow error (#332) explains each failure,
+        # this explains WHY up front.
+        if Settings.verify_upstream? && (warning = Proxy::Upstream.trust_store_warning)
+          runner.notifications.push(:warn, warning)
+        end
+        runner.run
       ensure
         session.close
       end
@@ -269,6 +277,11 @@ module Gori
       STDERR.puts "  root CA: #{@ca.ca_cert_path}"
       STDERR.puts "  trust the CA above, then point your client's HTTP+HTTPS proxy at #{addr}"
       STDERR.puts "  db: #{session.project.db_path}"
+      # Upstream verification is on but no CA trust store resolved (e.g. a static musl build
+      # on a host without a standard CA bundle) — every HTTPS flow would fail to verify (#323).
+      if !@config.insecure_upstream? && (warning = Proxy::Upstream.trust_store_warning)
+        STDERR.puts "  ⚠ #{warning}"
+      end
       STDERR.puts "  press Ctrl-C to stop"
     end
 

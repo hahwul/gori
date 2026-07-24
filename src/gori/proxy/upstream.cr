@@ -232,10 +232,86 @@ module Gori::Proxy
     # is race-free.
     @@tls_contexts = {} of {Bool, String?} => OpenSSL::SSL::Context::Client
 
+    # Standard system CA locations (the same list Go's crypto/x509 probes). A single
+    # bundle FILE carries every root, so files are tried first; the DIRS are the
+    # hashed-symlink fallback for systems that ship no bundle file. Kept in probe order.
+    SYSTEM_CA_FILES = %w[
+      /etc/ssl/certs/ca-certificates.crt                 # Debian/Ubuntu/Alpine/Gentoo
+      /etc/pki/tls/certs/ca-bundle.crt                   # Fedora/RHEL 6
+      /etc/ssl/ca-bundle.pem                             # openSUSE
+      /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem # CentOS/RHEL 7+
+      /etc/pki/tls/cacert.pem                            # OpenELEC
+      /etc/ssl/cert.pem                                  # Alpine/macOS/OpenBSD/FreeBSD
+    ]
+    SYSTEM_CA_DIRS = %w[
+      /etc/ssl/certs
+      /etc/pki/tls/certs
+      /system/etc/security/cacerts # Android
+    ]
+
+    # First existing CA source among the candidates → {file?, dir?} (a file wins over a
+    # dir). Pure existence check (no ENV, no side effects) so it is directly unit-testable.
+    def self.resolve_ca_source(files = SYSTEM_CA_FILES, dirs = SYSTEM_CA_DIRS) : {String?, String?}
+      if f = files.find { |p| File.file?(p) }
+        {f, nil}
+      elsif d = dirs.find { |p| Dir.exists?(p) }
+        {nil, d}
+      else
+        {nil, nil}
+      end
+    end
+
+    # SSL_CERT_FILE / SSL_CERT_DIR are already honoured by SSL_CTX_set_default_verify_paths
+    # (run inside Context::Client.new), so when either is set we leave the store to that
+    # explicit choice and don't augment it with system paths.
+    private def self.env_ca_override? : Bool
+      !!(ENV["SSL_CERT_FILE"]?.presence || ENV["SSL_CERT_DIR"]?.presence)
+    end
+
+    # Load the OS trust store into a verifying client context. Context::Client.new already
+    # ran SSL_CTX_set_default_verify_paths, but a statically-linked (musl) binary's
+    # compiled-in OPENSSLDIR often resolves to nothing, leaving the store EMPTY so every
+    # upstream HTTPS verification fails (#323). Explicitly loading the system CA bundle (like
+    # Go's crypto/x509) makes the SECURE default — verify on — work out of the box. This is
+    # ADDITIVE (SSL_CTX_load_verify_locations appends): harmless on a build whose default
+    # store already works, a rescue on a build where it is empty. rescue-guarded so a
+    # malformed/unreadable bundle can't break context creation.
+    def self.apply_system_trust(ctx : OpenSSL::SSL::Context::Client,
+                                files = SYSTEM_CA_FILES, dirs = SYSTEM_CA_DIRS) : Nil
+      file, dir = resolve_ca_source(files, dirs)
+      ctx.ca_certificates = file if file
+      ctx.ca_certificates_path = dir if dir
+    rescue
+      # a malformed bundle at a standard path must not take down TLS entirely; the
+      # default store (or #332's visible error on the failed dial) still applies
+    end
+
+    # Whether upstream verification has a trust store to check against: an explicit
+    # SSL_CERT_FILE/DIR, or a resolvable system CA path. Callers gate the startup warning
+    # on this together with verify being on.
+    def self.system_trust_available? : Bool
+      return true if env_ca_override?
+      file, dir = resolve_ca_source
+      !(file.nil? && dir.nil?)
+    end
+
+    # A one-line operator hint when NO trust store can be resolved (a statically-linked
+    # binary on a host without a standard CA bundle). nil when a store is available.
+    # Callers surface it only while verify is on. Complements the per-flow error #332 records.
+    def self.trust_store_warning : String?
+      return nil if system_trust_available?
+      "no system CA trust store found — upstream HTTPS verification will likely fail; " \
+      "set SSL_CERT_FILE=/path/to/ca-bundle.crt or run with --insecure-upstream"
+    end
+
     private def self.client_context(verify : Bool, alpn : String?) : OpenSSL::SSL::Context::Client
       @@tls_contexts[{verify, alpn}] ||= begin
         ctx = OpenSSL::SSL::Context::Client.new
-        ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE unless verify
+        if verify
+          apply_system_trust(ctx) unless env_ca_override?
+        else
+          ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
+        end
         ctx.alpn_protocol = alpn if alpn
         ctx
       end

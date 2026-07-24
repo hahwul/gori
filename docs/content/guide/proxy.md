@@ -15,6 +15,8 @@ Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/get
 
 Each flow records the full request and response: start line, headers, and body (the stored body is capped at 2 MiB; larger bodies still forward byte-exact and report their true size). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.
 
+> **HTTPS & upstream verification.** For HTTPS, gori verifies the origin server's certificate against your system CA trust store, resolved automatically from standard locations (and honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`). If none is found — e.g. a minimal container — verification fails and those flows are recorded as errors; set `SSL_CERT_FILE=/path/to/ca-bundle.crt`, or run with `--insecure-upstream` (Settings → **Network → verify upstream**). This is separate from trusting gori's own root CA in your *client*, which is what lets gori decrypt the traffic in the first place.
+
 <figure class="tui-shot">
   <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
   <figcaption>Open any flow with <kbd>Enter</kbd> to read the full request and response, with sub-tabs for headers, HTTP/2 frames, and raw bytes.</figcaption>
