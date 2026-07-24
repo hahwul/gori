@@ -20,6 +20,16 @@ dev: build
 build:
     shards build
 
+# Build through the flake — the exact path `nix profile install` takes.
+[group('build')]
+nix-build:
+    nix build .#gori
+
+# Regenerate shards.nix from shard.lock (run it alongside any dependency change).
+[group('build')]
+nix-shards:
+    nix run nixpkgs#crystal2nix
+
 # Run all tests.
 [group('development')]
 test:

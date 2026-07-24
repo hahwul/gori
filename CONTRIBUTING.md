@@ -10,6 +10,7 @@ for HTTP body decode:
 
 - macOS: `brew install crystal brotli zstd sqlite`
 - Debian/Ubuntu: `apt install crystal libbrotli-dev libzstd-dev libsqlite3-dev`
+- Nix: `nix develop` sets all of it up, pinned to the compiler CI builds with
 
 Then:
 
@@ -31,6 +32,9 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
   you touched; `just test-<area>` runs a single subdir while iterating.
 - Never build or benchmark with `-Dpreview_mt` — gori assumes the single-threaded fiber
   scheduler.
+- If you change `shard.lock`, regenerate the Nix dependency set in the same commit:
+  `crystal2nix` (in the dev shell) rewrites `shards.nix`. `just vu` keeps `flake.nix`'s
+  version in step with `shard.yml`.
 - Keep changes scoped and behavior-preserving unless the PR is explicitly a behavior
   change; note any intentional behavior change in the PR description.
 

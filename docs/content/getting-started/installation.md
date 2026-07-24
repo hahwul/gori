@@ -1,6 +1,6 @@
 +++
 title = "Installation"
-description = "Install gori via curl, Homebrew, the AUR, Docker, a pre-built binary, or from source."
+description = "Install gori via curl, Homebrew, the AUR, Nix, Docker, a pre-built binary, or from source."
 weight = 10
 +++
 
@@ -42,6 +42,35 @@ yay -S gori
 # or
 paru -S gori
 ```
+
+## Nix
+
+The repository is a [flake](https://wiki.nixos.org/wiki/Flakes), so you can run gori without installing it at all:
+
+```bash
+nix run github:hahwul/gori
+```
+
+Install it into your profile instead:
+
+```bash
+nix profile install github:hahwul/gori
+```
+
+Or pin it as an input to a NixOS / home-manager configuration:
+
+```nix
+{
+  inputs.gori.url = "github:hahwul/gori";
+
+  # then, in your package list:
+  #   inputs.gori.packages.${pkgs.system}.default
+}
+```
+
+Unlike the other channels this one **builds from source**, so the first install spends a few minutes compiling. Brotli and Zstd decoding are included; nothing else is needed on the host. Works on Linux and macOS, x86_64 and arm64.
+
+`nix develop` gives you a shell with Crystal, shards, `just` and the linked libraries, which is all you need to [hack on gori itself](https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md).
 
 ## Docker
 

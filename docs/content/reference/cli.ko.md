@@ -19,7 +19,7 @@ gori [command] [options]
 | `settings` | `settings.json` 표시 또는 편집 |
 | `wizard` | 대화형 최초 실행 설정 |
 | `tutorial` | 가이드형 TUI 투어 (탐색, 팔레트, 스페이스 메뉴, 편집 모드) |
-| `update` | 채널 인식 자체 업데이트 (바이너리 / Homebrew / Snap / AUR) |
+| `update` | 채널 인식 자체 업데이트 (바이너리 / Homebrew / Snap / AUR / Nix) |
 
 전역 플래그: `-v` / `--version`, `-h` / `--help`.
 
@@ -535,6 +535,7 @@ gori update --exec   # Homebrew/Snap: run the package-manager command
 | pacman / AUR | `yay` / `paru` / `pacman` 안내 출력 |
 | deb (dpkg) | `apt` 업그레이드 안내 출력 |
 | rpm | `dnf` / `yum` / `zypper` 안내 출력 |
+| Nix (`/nix/store`) | `nix profile upgrade` / 플레이크 업데이트 안내 출력; 스토어가 읽기 전용이므로 아무것도 내려받지 않음 |
 
 `/usr/bin` 또는 `/bin` 아래 경로는 패키지 소유권(`pacman -Qo`, `dpkg-query -S`, `rpm -qf`)으로 분류됩니다. 관리자가 파일을 소유하면 gori는 절대 덮어쓰지 않습니다. 프로브가 소유자를 찾지 못하면 바이너리 채널이 자체 업데이트합니다. 패키지 도구가 전혀 없으면 `/etc/os-release`(`ID` / `ID_LIKE`)로 Arch 계열 / Debian 계열 / RHEL 계열 안내를 폴백으로 고릅니다.
 

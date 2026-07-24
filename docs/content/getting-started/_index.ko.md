@@ -24,7 +24,7 @@ gori는 **HTTP/1.1, HTTP/2, WebSocket, gRPC, Server-Sent Events**를 이해하�
 
 ## 다음 단계 {#next-steps}
 
-- [설치](/ko/getting-started/installation/): Homebrew, AUR, Docker, 바이너리, 또는 소스에서 빌드
+- [설치](/ko/getting-started/installation/): Homebrew, AUR, Nix, Docker, 바이너리, 또는 소스에서 빌드
 - [빠른 시작](/ko/getting-started/quick-start/): 캡처, 단축키, 그리고 첫 Repeater
 - [AI 설정](/ko/getting-started/ai-setup/): AI 에이전트를 MCP로 프로젝트에 연결
 - [설정](/ko/getting-started/configuration/): 설정, 저장소, 그리고 CA

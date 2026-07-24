@@ -8,6 +8,7 @@ FILES = {
   "src/gori.cr"                                     => /VERSION = "([^"]+)"/,
   "snap/snapcraft.yaml"                             => /^version:\s*(\S+)/m,
   "aur/PKGBUILD"                                    => /^pkgver=(\S+)/m,
+  "flake.nix"                                       => /version = "([^"]+)";/,
   "spec/gori_spec.cr"                               => /VERSION\.should eq\("([^"]+)"\)/,
   "docs/content/getting-started/installation.md"    => /You should see `gori ([^`]+)`\./,
   "docs/content/getting-started/installation.ko.md" => /`gori ([^`]+)`이 표시되어야 합니다\./,

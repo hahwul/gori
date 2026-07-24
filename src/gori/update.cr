@@ -44,6 +44,7 @@ module Gori
       Pacman
       Deb
       Rpm
+      Nix
       Binary
     end
 
@@ -70,6 +71,10 @@ module Gori
 
     # Classify an install from the executable path plus optional ownership/OS hints.
     #
+    # The Nix store is checked first: it is the one root that is *immutable*, so a
+    # self-update there cannot even be attempted (and `~/.nix-profile/bin/gori` is a
+    # symlink chain the caller's `File.realpath` has already resolved into it).
+    #
     # For FHS system bins (`/usr/bin`, `/bin`):
     # - owned by pacman/dpkg/rpm → that package channel (never overwrite)
     # - probed and **not** owned → Binary (manual copy; self-update allowed)
@@ -77,6 +82,7 @@ module Gori
     def self.detect_channel(exe_path : String, *,
                             owner : OwnerResult = OwnerResult::Unknown,
                             os_family : OsFamily = OsFamily::Unknown) : Channel
+      return Channel::Nix if nix_path?(exe_path)
       return Channel::Snap if snap_path?(exe_path)
       return Channel::Homebrew if homebrew_path?(exe_path)
 
@@ -123,6 +129,14 @@ module Gori
 
     def self.snap_path?(path : String) : Bool
       path.starts_with?("/snap/") || path.includes?("/snap/gori/")
+    end
+
+    # Covers every Nix entry point — `nix profile`, `nix run`, NixOS/home-manager —
+    # because all of them ultimately resolve to a store path. Kept to the default
+    # store location (a relocated NIX_STORE_DIR would degrade to Binary, which the
+    # read-only store then rejects with a plain permission error).
+    def self.nix_path?(path : String) : Bool
+      path.starts_with?("/nix/store/")
     end
 
     # Paths where distro packages typically install the CLI (not /usr/local).
@@ -251,6 +265,13 @@ module Gori
           message: "RPM package install detected. Upgrade with your package manager (do not overwrite /usr/bin):\n  sudo dnf upgrade gori\n  # or: sudo yum upgrade gori\n  # or: sudo zypper update gori",
           command: nil,
         }
+      when .nix?
+        # No `command:` — which one is right depends on how it was installed, and the
+        # store is read-only either way, so guessing would be worse than listing them.
+        {
+          message: "Nix install detected (the store is read-only). Upgrade the way you installed it:\n  nix profile upgrade gori\n  # declarative (NixOS / home-manager): nix flake update gori, then rebuild\n  # one-off run of the latest: nix run github:hahwul/gori",
+          command: nil,
+        }
       else
         {
           message: "Standalone binary install — downloading the latest GitHub release asset.",
@@ -260,7 +281,7 @@ module Gori
     end
 
     def self.package_managed?(channel : Channel) : Bool
-      channel.homebrew? || channel.snap? || channel.pacman? || channel.deb? || channel.rpm?
+      channel.homebrew? || channel.snap? || channel.pacman? || channel.deb? || channel.rpm? || channel.nix?
     end
 
     # ---------------------------------------------------------------------------

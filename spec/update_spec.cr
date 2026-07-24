@@ -21,6 +21,16 @@ describe Gori::Update do
       Gori::Update.detect_channel("/snap/bin/gori").should eq(Gori::Update::Channel::Snap)
     end
 
+    it "detects Nix store paths" do
+      Gori::Update.detect_channel("/nix/store/0fhkwk15n3ya0llfr0754awcldpz4x54-gori-0.1.3/bin/gori")
+        .should eq(Gori::Update::Channel::Nix)
+      # `~/.nix-profile/bin/gori` is a symlink; the caller realpaths it into the store
+      # before this runs, so only the resolved form has to match.
+      Gori::Update.detect_channel("/nix/store/abc-gori-0.1.3/bin/gori")
+        .should eq(Gori::Update::Channel::Nix)
+      Gori::Update.detect_channel("/home/u/nix/store/gori").should eq(Gori::Update::Channel::Binary)
+    end
+
     it "classifies /usr/bin by package ownership, not path alone" do
       Gori::Update.detect_channel("/usr/bin/gori",
         owner: Gori::Update::OwnerResult::Pacman).should eq(Gori::Update::Channel::Pacman)
@@ -325,6 +335,13 @@ describe Gori::Update do
       rpm[:message].should match(/dnf|yum|zypper/i)
     end
 
+    it "returns nix guidance without a single auto-run command" do
+      action = Gori::Update.package_action(Gori::Update::Channel::Nix)
+      action[:command].should be_nil
+      action[:message].should contain("nix profile upgrade gori")
+      action[:message].should match(/read-only/i)
+    end
+
     it "describes standalone binary self-update" do
       action = Gori::Update.package_action(Gori::Update::Channel::Binary)
       action[:command].should be_nil
@@ -364,6 +381,16 @@ describe Gori::Update do
       out = io.to_s
       out.should contain("install channel: pacman")
       out.should contain("yay -Syu gori")
+    end
+
+    it "prints nix guidance instead of downloading into the read-only store" do
+      io = IO::Memory.new
+      Gori::Update.run(io, io,
+        exe_path: "/nix/store/0fhkwk15n3ya0llfr0754awcldpz4x54-gori-0.1.3/bin/gori")
+      out = io.to_s
+      out.should contain("install channel: nix")
+      out.should contain("nix profile upgrade gori")
+      out.should_not contain("Running:")
     end
 
     it "prints apt guidance for dpkg-owned /usr/bin" do

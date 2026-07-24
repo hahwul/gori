@@ -19,7 +19,7 @@ gori [command] [options]
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
 | `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
-| `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR) |
+| `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR / Nix) |
 
 Global flags: `-v` / `--version`, `-h` / `--help`.
 
@@ -535,6 +535,7 @@ Detects how this `gori` binary was installed and updates accordingly:
 | pacman / AUR | Prints `yay` / `paru` / `pacman` guidance |
 | deb (dpkg) | Prints `apt` upgrade guidance |
 | rpm | Prints `dnf` / `yum` / `zypper` guidance |
+| Nix (`/nix/store`) | Prints `nix profile upgrade` / flake-update guidance; the store is read-only, so nothing is downloaded |
 
 Paths under `/usr/bin` or `/bin` are classified by package ownership (`pacman -Qo`, `dpkg-query -S`, `rpm -qf`). If a manager owns the file, gori never overwrites it. If probes find no owner, the binary channel self-updates. When no package tools are available, `/etc/os-release` (`ID` / `ID_LIKE`) picks Arch-like / Debian-like / RHEL-like guidance as a fallback.
 

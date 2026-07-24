@@ -75,6 +75,15 @@ brew tap hahwul/gori
 brew install gori
 ```
 
+### Nix
+
+The repo is a flake, so it runs without being installed:
+
+```bash
+nix run github:hahwul/gori
+nix profile install github:hahwul/gori   # or keep it
+```
+
 ### From source
 
 Requires [Crystal](https://crystal-lang.org/) `>= 1.20.2` and `pkg-config`.
