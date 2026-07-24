@@ -186,8 +186,8 @@ describe Gori::Settings do
       Gori::Settings.save.should be_true
       raw = File.read(Gori::Settings.path)
       raw.should contain(%("layout"))
-      raw.should contain(%("history_preview":true))
-      raw.should contain(%("history_list_order":"oldest"))
+      raw.should contain(%("history_preview": true))
+      raw.should contain(%("history_list_order": "oldest"))
 
       Gori::Settings.history_preview = false
       Gori::Settings.history_list_order = "newest"
@@ -257,8 +257,8 @@ describe Gori::Settings do
       Gori::Settings.save.should be_true
       raw = File.read(Gori::Settings.path)
       raw.should contain(%("display"))
-      raw.should contain(%("detail_pane":"response"))
-      raw.should contain(%("terminal_title":"off"))
+      raw.should contain(%("detail_pane": "response"))
+      raw.should contain(%("terminal_title": "off"))
 
       Gori::Settings.default_detail_pane = "request"
       Gori::Settings.history_time_format = "absolute"

@@ -180,7 +180,7 @@ module Gori
       disk_h = (JSON.parse(disk).as_h? rescue nil)
       return current unless cur_h && base_h && disk_h
       keys = (cur_h.keys + disk_h.keys).uniq!
-      JSON.build do |j|
+      JSON.build(indent: "  ") do |j|
         j.object do
           keys.each do |k|
             cur_v = cur_h[k]?
@@ -202,7 +202,7 @@ module Gori
     # reads by key), so this ordering is cosmetic/historical, kept only to make a
     # settings.json diff before/after this split a no-op.
     private def self.serialize : String
-      JSON.build do |j|
+      JSON.build(indent: "  ") do |j|
         j.object do
           serialize_appearance(j)
           serialize_layout(j)
