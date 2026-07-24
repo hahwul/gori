@@ -156,7 +156,7 @@ module Gori::Proxy::Codec
       # obs-folded is invisible to the exact-match framing lookups below, yet a lenient
       # backend still honours it — a CL/TE request-smuggling primitive. Reject up front,
       # like CL+TE, rather than framing on a header we can't see (RFC 7230 §3.2.4).
-      raise Gori::Error.new("obfuscated request header (whitespace before colon, obs-fold, or bare LF)") if Http1.obfuscated_header?(req.raw_head)
+      raise Gori::Error.new("obfuscated request header (whitespace before colon, obs-fold, or a bare CR/LF)") if Http1.obfuscated_header?(req.raw_head)
       # Skip the get_all Array allocation when Transfer-Encoding is absent (the common case);
       # an empty list means neither chunked? nor te_present? — fall straight to Content-Length.
       te = req.headers.has?("Transfer-Encoding") ? req.headers.get_all("Transfer-Encoding") : EMPTY_TE
@@ -181,6 +181,19 @@ module Gori::Proxy::Codec
 
     # RFC 7230 §3.3.3 framing for a response body, given the request method.
     def self.response_framing(resp : RawResponse, request_method : String) : {BodyFraming, Int64}
+      # A response head whose FRAMING headers a lenient recipient would read differently
+      # than this parse did is a response-desync primitive, the mirror of the request-side
+      # smuggling request_framing rejects above. gori frames (and so stops reading) by what
+      # IT sees, then forwards the head byte-exact (P7) — so the browser behind gori, which
+      # RFC 7230 §3.5 lets accept a bare LF and which unfolds obs-fold, can frame by a
+      # Content-Length/Transfer-Encoding gori never saw. The bytes gori then reads as the
+      # NEXT response on a reused upstream are the bytes that client is still consuming as
+      # this body: a malicious origin picks what the user's browser renders as the following
+      # response. Checked BEFORE the bodyless short-circuits below so no status/method
+      # combination can route around it. Narrower than the request side's blanket
+      # obfuscated_header? on purpose — see Http1.framing_ambiguous?. RFC 7230 §3.2.4
+      # explicitly sanctions refusing a message here rather than guessing.
+      raise Gori::Error.new("ambiguous framing headers (a lenient recipient would frame this response differently)") if Http1.framing_ambiguous?(resp.raw_head, resp.headers)
       # Allocation-free case-insensitive match (per response); `.upcase` allocated a String.
       if request_method.compare("HEAD", case_insensitive: true) == 0 ||
          request_method.compare("CONNECT", case_insensitive: true) == 0

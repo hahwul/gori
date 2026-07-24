@@ -204,12 +204,18 @@ module Gori::Proxy::Codec::Http1
   # (RFC 7230 §3.5) still reads it — a hidden Transfer-Encoding/Content-Length. read_head
   # only ever returns a head ending in CRLFCRLF, so a well-formed head has every LF
   # CR-preceded; reject any that doesn't.
+  #
+  # A bare CR (0x0d NOT immediately followed by 0x0a) is the mirror image and is rejected
+  # for the same reason: index_crlf/parse_headers only ever break a line on the 2-byte
+  # CRLF, so a lone CR is just another byte inside the current field-value and everything
+  # after it — up to the next real CRLF — is swallowed into that value. A recipient that
+  # treats a lone CR as end-of-line (they exist; CR is not a legal field-vchar, so parsers
+  # differ on what to do with one) reads the smuggled `Transfer-Encoding: chunked` sitting
+  # after it. CR is never valid inside a field-value (RFC 7230 §3.2.6 field-vchar is
+  # VCHAR/obs-text), so this can't false-positive on conformant traffic. A CR as the very
+  # last byte counts as bare: a genuine head always ends CRLFCRLF, never a dangling CR.
   def self.obfuscated_header?(raw : Bytes) : Bool
-    i = 0
-    while i < raw.size
-      return true if raw.unsafe_fetch(i) == 0x0a_u8 && (i == 0 || raw.unsafe_fetch(i - 1) != 0x0d_u8)
-      i += 1
-    end
+    return true if bare_cr_or_lf?(raw)
     start_crlf = index_crlf(raw, 0)
     return false if start_crlf.nil?
     pos = start_crlf + 2 # first byte after the start-line's CRLF
@@ -219,19 +225,134 @@ module Gori::Proxy::Codec::Http1
       break if line_end == pos # empty line → end of headers
       first = raw.unsafe_fetch(pos)
       return true if first == 0x20_u8 || first == 0x09_u8 # obs-fold continuation line
-      # Whitespace between field-name and colon: the byte just before the first ':' is SP/HTAB.
-      i = pos
-      while i < line_end && raw.unsafe_fetch(i) != 0x3a_u8 # ':'
-        i += 1
-      end
-      if i < line_end && i > pos
-        prev = raw.unsafe_fetch(i - 1)
-        return true if prev == 0x20_u8 || prev == 0x09_u8
-      end
+      return true if space_before_colon?(raw, pos, line_end)
       break if crlf.nil?
       pos = crlf + 2
     end
     false
+  end
+
+  # Whitespace between field-name and colon on the header line spanning [pos, line_end):
+  # the byte just before the first ':' is SP/HTAB (`Transfer-Encoding : chunked`), which the
+  # exact-match framing lookups cannot see but a lenient backend still reads.
+  private def self.space_before_colon?(raw : Bytes, pos : Int32, line_end : Int32) : Bool
+    i = pos
+    while i < line_end && raw.unsafe_fetch(i) != 0x3a_u8 # ':'
+      i += 1
+    end
+    return false unless i < line_end && i > pos
+    prev = raw.unsafe_fetch(i - 1)
+    prev == 0x20_u8 || prev == 0x09_u8
+  end
+
+  # Any LF not immediately preceded by CR, or CR not immediately followed by LF — either
+  # one lets a recipient that ends a line on it see a header this CRLF-only codec cannot
+  # (see obfuscated_header?, whose contract this implements).
+  private def self.bare_cr_or_lf?(raw : Bytes) : Bool
+    i = 0
+    while i < raw.size
+      b = raw.unsafe_fetch(i)
+      if b == 0x0a_u8
+        return true if i == 0 || raw.unsafe_fetch(i - 1) != 0x0d_u8
+      elsif b == 0x0d_u8
+        return true if i + 1 >= raw.size || raw.unsafe_fetch(i + 1) != 0x0a_u8
+      end
+      i += 1
+    end
+    false
+  end
+
+  # The only header names body framing ever reads (see Body.request_framing /
+  # Body.response_framing). Obfuscation that cannot change one of these cannot move the
+  # body boundary, so it cannot desync anyone. Lowercase, for the stripped-name compare.
+  FRAMING_NAMES = {"content-length", "transfer-encoding"}
+
+  # True when a LENIENT recipient would read DIFFERENT body-framing headers out of `raw`
+  # than gori's strict CRLF-only parse did (`headers`, i.e. what parse_headers produced).
+  #
+  # This is the RESPONSE-side counterpart to obfuscated_header?, and it is deliberately
+  # narrower. request_framing rejects on ANY obfuscation because a request's peer is the
+  # operator's own browser, which never emits one — so a blunt rule costs nothing. A
+  # RESPONSE's peer is the whole internet, and the sloppy-but-harmless origins that emit a
+  # bare LF or an obs-fold on some unrelated header (embedded devices, legacy CGI) are
+  # exactly the systems a pentester points gori at. Refusing those outright would break the
+  # target's pages and read as "gori is broken". So: reject only when the ambiguity actually
+  # lands on Content-Length / Transfer-Encoding, and let everything else through byte-exact.
+  #
+  # obfuscated_header? is the cheap gate — a clean CRLF head can hide nothing, so the common
+  # path is one byte scan and no allocation at all; only a head that already looks odd pays
+  # for the two views.
+  def self.framing_ambiguous?(raw : Bytes, headers : HeaderList) : Bool
+    return false unless obfuscated_header?(raw)
+    strict_framing_view(headers) != lenient_framing_view(raw)
+  end
+
+  # The framing headers as gori's STRICT parse sees them, "name:value" in wire order.
+  # parse_headers keeps the field-name UNSTRIPPED, so `Transfer-Encoding : chunked` arrives
+  # here named "transfer-encoding " and correctly fails to match FRAMING_NAMES — that
+  # blindness is precisely what this view is measuring.
+  private def self.strict_framing_view(headers : HeaderList) : Array(String)
+    view = [] of String
+    headers.each do |h|
+      name = h.name.downcase
+      view << "#{name}:#{h.value}" if FRAMING_NAMES.includes?(name)
+    end
+    view
+  end
+
+  # The framing headers as a LENIENT recipient would see them, in the same "name:value"
+  # shape so the two views compare directly: a line ends at CR, LF *or* CRLF (not only
+  # CRLF); a line starting with SP/HTAB is an obs-fold continuation appended to the
+  # previous field-value; and the field-name is stripped before it is matched.
+  private def self.lenient_framing_view(raw : Bytes) : Array(String)
+    view = [] of String
+    pos = lenient_next_line(raw, lenient_line_end(raw, 0)) # skip the start-line
+    folds_into = -1                                        # index in `view` an obs-fold continuation would extend, or -1
+    while pos < raw.size
+      stop = lenient_line_end(raw, pos)
+      break if stop == pos # empty line → end of headers
+      line = raw[pos, stop - pos]
+      first = line.unsafe_fetch(0)
+      if first == 0x20_u8 || first == 0x09_u8 # obs-fold: continues the previous field-value
+        view[folds_into] = "#{view[folds_into]} #{String.new(line).strip}" if folds_into >= 0
+      elsif (kv = lenient_header(line)) && FRAMING_NAMES.includes?(kv[0])
+        view << "#{kv[0]}:#{kv[1]}"
+        folds_into = view.size - 1
+      else
+        folds_into = -1
+      end
+      pos = lenient_next_line(raw, stop)
+    end
+    view
+  end
+
+  # Index of the first CR or LF at/after `pos` (i.e. where a lenient recipient ends the
+  # line), or raw.size when the line runs to the end of the buffer.
+  private def self.lenient_line_end(raw : Bytes, pos : Int32) : Int32
+    i = pos
+    while i < raw.size
+      b = raw.unsafe_fetch(i)
+      break if b == 0x0d_u8 || b == 0x0a_u8
+      i += 1
+    end
+    i
+  end
+
+  # Start of the next line, stepping over the terminator at `stop`. CRLF counts as ONE
+  # terminator; a lone CR and a lone LF each end a line on their own.
+  private def self.lenient_next_line(raw : Bytes, stop : Int32) : Int32
+    return stop if stop >= raw.size
+    crlf = raw.unsafe_fetch(stop) == 0x0d_u8 && stop + 1 < raw.size && raw.unsafe_fetch(stop + 1) == 0x0a_u8
+    stop + (crlf ? 2 : 1)
+  end
+
+  # {stripped+downcased field-name, stripped field-value} of one header line, or nil when
+  # the line carries no colon (a lenient recipient has no header to read out of it either).
+  private def self.lenient_header(line : Bytes) : {String, String}?
+    colon = line.index(0x3a_u8) # ':'
+    return nil unless colon
+    {String.new(line[0, colon]).strip.downcase,
+     String.new(line[colon + 1, line.size - colon - 1]).strip}
   end
 
   private def self.parse_headers(raw : Bytes, start_crlf : Int32?) : HeaderList

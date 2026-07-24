@@ -245,6 +245,79 @@ describe Gori::Proxy::Codec::Body do
       expect_raises(Gori::Error) { Body.request_framing(req) }
     end
 
+    it "rejects a bare CR used to hide a header from the CRLF-only framing scan" do
+      # The mirror of the bare-LF case: index_crlf/parse_headers only break on the 2-byte
+      # CRLF, so a lone CR leaves the smuggled TE inside the previous field-value — while a
+      # recipient that ends a line on a lone CR reads it. CL says 0, the hidden TE says
+      # chunked: a CL.TE desync.
+      Http1.obfuscated_header?(
+        "GET / HTTP/1.1\r\nHost: h\r\nFoo: bar\rTransfer-Encoding: chunked\r\n\r\n".to_slice).should be_true
+      req = Http1.parse_request_head(
+        "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 0\r\nFoo: bar\rTransfer-Encoding: chunked\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "treats a trailing bare CR as obfuscated (a real head always ends CRLFCRLF)" do
+      Http1.obfuscated_header?("GET / HTTP/1.1\r\nHost: h\r".to_slice).should be_true
+    end
+
+    it "rejects a response whose framing header a bare LF/CR hides from the strict parse" do
+      # gori would frame by Content-Length: 0 and read the next response off a reused
+      # upstream, while an LF-lenient browser reads the hidden chunked body — so the bytes
+      # gori calls "the next response" are the bytes the browser renders as this one.
+      ["\n", "\r"].each do |sep| # %w[] would not process the escapes
+        head = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX-Foo: bar#{sep}Transfer-Encoding: chunked\r\n\r\n"
+        resp = Http1.parse_response_head(head.to_slice)
+        Http1.framing_ambiguous?(resp.raw_head, resp.headers).should be_true
+        expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+      end
+    end
+
+    it "rejects an obs-folded response Content-Length (strict sees empty, a client sees the value)" do
+      resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nContent-Length:\r\n 5\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+    end
+
+    it "rejects a response with whitespace before the Transfer-Encoding colon" do
+      # `Transfer-Encoding : chunked` misses the exact-match TE lookup, so gori frames by
+      # CL while a whitespace-tolerant client reads chunked.
+      resp = Http1.parse_response_head(
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nTransfer-Encoding : chunked\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+    end
+
+    it "checks response framing ambiguity even on bodyless statuses and HEAD" do
+      # The bodyless short-circuits (HEAD/CONNECT, 1xx/204/304) must not route around the
+      # ambiguity check — the client, not gori, decides what it reads next.
+      head = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nX-Foo: bar\nTransfer-Encoding: chunked\r\n\r\n"
+      resp = Http1.parse_response_head(head.to_slice)
+      expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+      ok = Http1.parse_response_head("HTTP/1.1 200 OK\r\nContent-Length: 42\r\n\r\n".to_slice)
+      Body.response_framing(ok, "HEAD").should eq({BodyFraming::None, 0_i64})
+    end
+
+    it "lets a sloppy-but-unambiguous response through (obfuscation off the framing headers)" do
+      # An origin that bare-LFs or obs-folds a header which CANNOT move the body boundary is
+      # sloppy, not dangerous — and embedded/legacy targets like this are exactly what a
+      # pentester points gori at, so these must still load rather than 502. Both parses agree
+      # on Content-Length, so there is nothing to desync.
+      bare_lf = Http1.parse_response_head(
+        "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nX-Foo: a\nX-Bar: b\r\n\r\n".to_slice)
+      Http1.framing_ambiguous?(bare_lf.raw_head, bare_lf.headers).should be_false
+      Body.response_framing(bare_lf, "GET").should eq({BodyFraming::Length, 5_i64})
+
+      folded = Http1.parse_response_head(
+        "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nX-Foo: bar\r\n continued\r\n\r\n".to_slice)
+      Body.response_framing(folded, "GET").should eq({BodyFraming::Length, 5_i64})
+    end
+
+    it "leaves an ordinary clean response untouched by the ambiguity check" do
+      resp = Http1.parse_response_head(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice)
+      Http1.framing_ambiguous?(resp.raw_head, resp.headers).should be_false
+      Body.response_framing(resp, "GET").should eq({BodyFraming::Chunked, 0_i64})
+    end
+
     it "leaves a response with a non-chunked Transfer-Encoding as close-delimited (not rejected)" do
       # Responses may legitimately be close-delimited under a non-chunked TE — only the
       # request path (which must know the body boundary to keep-alive) rejects.
