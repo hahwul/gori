@@ -3861,7 +3861,10 @@ module Gori::Tui
       }
       # Close BEFORE raising the palette: the reverse order would drop @active_overlay on
       # top of the modal we just opened.
-      ov.on_palette = -> { close_active_overlay; open_palette }
+      # leave_overlay, not close_active_overlay: this exit goes somewhere else entirely, so
+      # the modal is dropped WITHOUT running on_close (a pop-back would land on top of the
+      # palette). Order matters either way — closing after open_palette would drop it.
+      ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
       @notifications.mark_all_read
     end
