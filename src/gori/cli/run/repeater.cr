@@ -202,27 +202,50 @@ module Gori
       # complex) command handlers. `Repeater::Sender#send` re-checks internally, so a
       # missed call here still cannot put bytes on the wire; this exists only so the CLI
       # can refuse with its own message before printing anything.
-      private def self.abort_if_blocked!(sender : Repeater::Sender, bytes : Bytes, prefix : String) : Nil
-        return unless reason = sender.refusal(bytes)
+      private def self.abort_if_blocked!(plan : Repeater::Plan, prefix : String) : Nil
+        return unless reason = plan.refusal
         abort "#{prefix}: #{reason}"
       end
 
-      # Resolved send parameters for a saved Repeater SESSION replay — the session
-      # counterpart of FlowRequest::Built (which starts from a captured flow).
-      record RepeaterSend, bytes : Bytes, scheme : String, host : String,
-        port : Int32, http2 : Bool, sni : String?
+      # A saved repeater SESSION row IS the option set: its target, http2 toggle, SNI and
+      # auto-Content-Length switch, straight into the one builder every surface assembles
+      # through. The builder classifies the request as a WebSocket upgrade too, so the
+      # framed-exchange branch is taken off the SAME expanded bytes that go on the wire.
+      #
+      # PURE and separate from cmd_repeater_send so the row → options mapping is testable
+      # without a store, an Outbound, or a socket. It is the half a spec that builds its own
+      # `PlanOptions` cannot reach: dropping `auto_content_length: rec.auto_content_length?`
+      # here silently overwrites a `repeater create --no-auto-cl` session's hand-set
+      # Content-Length on every replay, and no `Plan`-level spec would notice.
+      private def self.session_plan_options(rec : Store::RepeaterRecord, insecure : Bool,
+                                            overrides : Gori::HostOverrides?) : Repeater::PlanOptions
+        Repeater::PlanOptions.new([rec.request],
+          default_target: rec.target, http2: rec.http2?, sni: rec.sni,
+          auto_content_length: rec.auto_content_length?, verify: !insecure,
+          overrides: overrides)
+      end
 
-      # Turn a persisted Repeater SESSION row into replayable bytes + engine settings,
-      # mirroring MCP send_request(repeater_id:) (src/gori/mcp/tools/send.cr): env-expand
-      # the request wire, recompute Content-Length ONLY when the session's
-      # auto_content_length toggle is on (so a deliberately hand-set CL survives when
-      # off), env-expand + parse the target, and carry the session's http2 flag and
-      # env-expanded SNI.
-      private def self.build_repeater_send(rec : Store::RepeaterRecord) : RepeaterSend
-        expanded = Env.expand_wire(String.new(rec.request))
-        bytes = rec.auto_content_length? ? Repeater::FlowRequest.resync_content_length(expanded) : expanded
-        scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
-        RepeaterSend.new(bytes, scheme, host, port, rec.http2?, rec.sni.try { |v| Env.expand(v) })
+      # `gori run repeater`'s wording for a builder refusal. `Repeater::Plan` reports a
+      # machine-readable `Reason` precisely so each surface can phrase it in its own idiom —
+      # the CLI names its flags, where the TUI names its hotkeys and MCP names its JSON
+      # fields. Exhaustive on `Reason` so a new builder failure cannot reach the operator as
+      # a bare exception message.
+      private def self.repeater_plan_abort(prefix : String, ex : Repeater::PlanError,
+                                           context : String? = nil) : NoReturn
+        where = context ? " for #{context}" : ""
+        detail = ex.detail
+        abort(case ex.reason
+        in Repeater::PlanError::Reason::NoRequest
+          "#{prefix}: the request is empty — nothing to send#{where}"
+        in Repeater::PlanError::Reason::NoTarget
+          # No flag named here: `repeater send` has no --target (only the single-flow replay
+          # does), so a shared "pass --target=URL" would point at a flag that command rejects.
+          "#{prefix}: no target#{where}"
+        in Repeater::PlanError::Reason::BadTarget
+          "#{prefix}: could not determine a target host#{where}#{detail ? " from #{detail.inspect}" : ""}"
+        in Repeater::PlanError::Reason::UnsupportedScheme
+          "#{prefix}: unsupported target scheme #{(detail || "").inspect} (use http:// or https://)"
+        end)
       end
 
       # Persist a repeater SESSION's last response (V11) so it survives a reopen and a later
@@ -287,19 +310,19 @@ module Gori
         # Sandbox mode's "blocks ALL out-of-scope traffic" promise lives here.
         outbound = project_outbound(project_name, db_path, false)
 
-        if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
-          cmd_repeater_send_ws(id, rec, project_name, db_path, insecure, idle_ms, ws_messages, host_overrides, outbound, format)
+        plan = begin
+          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides), outbound)
+        rescue ex : Repeater::PlanError
+          repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
+        end
+
+        if plan.websocket?
+          cmd_repeater_send_ws(id, plan, project_name, db_path, idle_ms, ws_messages, outbound, format)
           return
         end
 
-        send = build_repeater_send(rec)
-        abort "gori run repeater send: could not determine a target host for session ##{id}" if send.host.empty?
-        abort "gori run repeater send: unsupported target scheme #{send.scheme.inspect} (use http:// or https://)" unless send.scheme.in?("http", "https")
-
-        sender = Repeater::Sender.new(outbound, scheme: send.scheme, host: send.host, port: send.port,
-          http2: send.http2, verify: !insecure, sni: send.sni, overrides: host_overrides)
-        abort_if_blocked!(sender, send.bytes, "gori run repeater send")
-        result = sender.send(send.bytes)
+        abort_if_blocked!(plan, "gori run repeater send")
+        result = plan.send
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
@@ -317,22 +340,12 @@ module Gori
       # session's outbound messages (or `--message` overrides), and the inbound
       # transcript. Mirrors MCP send_websocket (src/gori/mcp/tools/send.cr) so a
       # script gets the same exchange whether it drives gori via CLI or MCP.
-      private def self.cmd_repeater_send_ws(id : Int64, rec : Store::RepeaterRecord, project_name : String?,
-                                            db_path : String?, insecure : Bool, idle_ms : Int64?,
-                                            message_override : Array(String), host_overrides : Gori::HostOverrides,
+      private def self.cmd_repeater_send_ws(id : Int64, plan : Repeater::Plan, project_name : String?,
+                                            db_path : String?, idle_ms : Int64?,
+                                            message_override : Array(String),
                                             outbound : Gori::Outbound, format : Symbol) : Nil
-        target = Env.expand(rec.target)
-        scheme, host, port = Repeater::FlowRequest.parse_target(target)
-        abort "gori run repeater send: could not determine a target host for session ##{id}" if host.empty?
+        abort_if_blocked!(plan, "gori run repeater send")
 
-        request = Env.expand_wire(String.new(rec.request))
-        sni = rec.sni.try { |v| Env.expand(v) }
-        sender = Repeater::Sender.new(outbound, scheme: scheme, host: host, port: port,
-          verify: !insecure, sni: sni, overrides: host_overrides)
-        abort_if_blocked!(sender, request, "gori run repeater send")
-
-        # host_overrides was already loaded by the caller (cmd_repeater_send) from the
-        # same store open that fetched `rec` — reuse it instead of a second table scan.
         store = open_store(resolve_read_project(project_name, db_path))
         out_messages = begin
           ws_out_messages(store, id, message_override)
@@ -341,7 +354,7 @@ module Gori
         end
 
         idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
-        result = sender.send_ws(request, out_messages, idle)
+        result = plan.send_ws(out_messages, idle)
         outbound.close
 
         # Persist ONLY on success — parity with the TUI (repeater_controller#drain_results):
@@ -453,9 +466,14 @@ module Gori
       # whole point of CL-mismatch / request-smuggling testing, so neither the auto-resync nor the
       # post-expansion resync overwrites it (parity with `repeater create --no-auto-cl` + `send`,
       # the only other path that could do this before).
+      #
+      # Returns the PRE-expansion wire plus whether an explicit CL was pinned. Env expansion and
+      # the post-expansion Content-Length resync are `Repeater::Plan`'s job — `explicit_cl` is
+      # exactly the session store's `auto_content_length` toggle inverted, so both ways of
+      # pinning a CL reach the builder as one knob instead of two open-coded branches.
       private def self.build_single_flow_request(head_bytes : Bytes, body_bytes : Bytes,
                                                  headers : Array(String), body_override : String?,
-                                                 target_override : String?) : Bytes
+                                                 target_override : String?) : {Bytes, Bool}
         head_str = String.new(head_bytes)
         first_crlf = head_str.index("\r\n") || head_str.size
         request_line = head_str[0, first_crlf]
@@ -553,13 +571,10 @@ module Gori
           io << "\r\n"
         end
 
-        final_request_bytes = new_head_str.to_slice + final_body
-
-        # Re-sync Content-Length after expansion — a `$KEY` in the body changes its length, and
-        # `build` framed CL over the pre-expansion bytes — UNLESS the user pinned an explicit
-        # `-H "Content-Length: N"` (honor the deliberately-wrong value for CL-mismatch testing).
-        expanded_wire = Env.expand_wire(String.new(final_request_bytes))
-        explicit_cl ? expanded_wire : Repeater::FlowRequest.resync_content_length(expanded_wire)
+        # The post-expansion Content-Length resync (a `$KEY` in the body changes its length, and
+        # the CL above was framed over the pre-expansion bytes) happens in `Repeater::Plan`,
+        # gated by the `explicit_cl` flag returned here.
+        {new_head_str.to_slice + final_body, explicit_cl}
       end
 
       private def self.cmd_repeater_single(args : Array(String)) : Nil
@@ -656,18 +671,19 @@ module Gori
         head_bytes = raw_bytes[0, crlf_crlf_idx + 4]
         body_bytes = raw_bytes[crlf_crlf_idx + 4..]
 
-        bytes = build_single_flow_request(head_bytes, body_bytes, headers, body_override, target_override)
-        override = target_override # copy the closured flag into a plain local so || narrows
-        target = Env.expand(override || built.target)
-        scheme, host, port = Repeater::FlowRequest.parse_target(target)
-        abort "gori run repeater: could not determine a target host" if host.empty?
-        abort "gori run repeater: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
+        wire, explicit_cl = build_single_flow_request(head_bytes, body_bytes, headers, body_override, target_override)
         outbound = project_outbound(project_name, db_path, false)
-        sender = Repeater::Sender.new(outbound,
-          scheme: scheme, host: host, port: port, http2: force_h2 || built.http2,
-          verify: !insecure, sni: sni_override.presence || built.sni, overrides: host_overrides)
-        abort_if_blocked!(sender, bytes, "gori run repeater")
-        result = sender.send(bytes)
+        plan = begin
+          Repeater::Plan.build(Repeater::PlanOptions.new([wire],
+            target: target_override, default_target: built.target,
+            http2: force_h2 || built.http2, sni: sni_override.presence || built.sni,
+            auto_content_length: !explicit_cl, verify: !insecure,
+            overrides: host_overrides), outbound)
+        rescue ex : Repeater::PlanError
+          repeater_plan_abort("gori run repeater", ex)
+        end
+        abort_if_blocked!(plan, "gori run repeater")
+        result = plan.send
         outbound.close
 
         # Decode the response body once for TEXT display (--diff / plain print); only

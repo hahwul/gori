@@ -254,42 +254,50 @@ describe "gori run probe --active" do
   end
 end
 
-# `build_repeater_send` is private CLI glue (mirrors MCP send_request(repeater_id:)) —
-# reopen the module for a bare-call wrapper, the same trick the other whitebox specs use.
+# `gori run repeater send`'s session-replay resolution used to live in a private CLI helper
+# (`build_repeater_send`). Since #356 the RESOLUTION is `Repeater::Plan.build`, asserted once
+# for all three surfaces in spec/repeater/plan_spec.cr — but the row → options MAPPING is
+# still CLI glue, and a spec that hand-builds its own `PlanOptions` never executes it. These
+# call the real `session_plan_options`, so dropping any field from it fails here.
 module Gori::CLI::Run
-  def self.build_repeater_send_for_spec(rec : Gori::Store::RepeaterRecord)
-    build_repeater_send(rec)
+  def self.session_plan_options_for_spec(rec : Gori::Store::RepeaterRecord, insecure : Bool = false)
+    session_plan_options(rec, insecure, nil)
   end
 end
 
-describe "gori run repeater send (session replay resolution)" do
-  it "resyncs Content-Length to the body when the session's auto_content_length is ON" do
-    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
-      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
-      false, true, nil, 0) # http2=false, auto_content_length=true
-    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
-    String.new(s.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello")
-    s.scheme.should eq("https")
-    s.host.should eq("api.test")
-    s.port.should eq(443)
-    s.http2.should be_false
-  end
-
-  it "preserves a hand-set Content-Length when auto_content_length is OFF (no unconditional resync)" do
-    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
-      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
-      false, false, nil, 0) # auto_content_length=false
-    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
-    String.new(s.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello")
-  end
-
-  it "carries the session's http2 flag, non-default port, and env-expanded SNI" do
+describe "gori run repeater send (session row → PlanOptions mapping)" do
+  it "maps the session's target, http2, SNI and auto-CL toggle onto the plan" do
     rec = Gori::Store::RepeaterRecord.new(1_i64, "https://h.test:8443",
-      "GET / HTTP/2\r\n\r\n".to_slice, true, true, nil, 0, sni: "front.test")
-    s = Gori::CLI::Run.build_repeater_send_for_spec(rec)
-    s.http2.should be_true
-    s.port.should eq(8443)
-    s.sni.should eq("front.test")
+      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
+      true, true, nil, 0, sni: "front.test") # http2=true, auto_content_length=true
+    plan = Gori::Repeater::Plan.build(
+      Gori::CLI::Run.session_plan_options_for_spec(rec), ungated_outbound)
+    String.new(plan.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello")
+    plan.scheme.should eq("https")
+    plan.host.should eq("h.test")
+    plan.port.should eq(8443)
+    plan.http2?.should be_true
+    plan.sni.should eq("front.test")
+  end
+
+  # The mapping a `Plan`-only spec cannot catch: if `auto_content_length:` stopped reading the
+  # row, `repeater create --no-auto-cl` would have its deliberately-wrong CL overwritten on
+  # every replay — the "fix #15" guarantee, silently gone.
+  it "carries auto_content_length=OFF from the row, preserving a hand-set Content-Length" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
+      "POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello".to_slice,
+      false, false, nil, 0) # http2=false, auto_content_length=false
+    plan = Gori::Repeater::Plan.build(
+      Gori::CLI::Run.session_plan_options_for_spec(rec), ungated_outbound)
+    String.new(plan.bytes).should eq("POST /x HTTP/1.1\r\nHost: api.test\r\nContent-Length: 999\r\n\r\nhello")
+    plan.http2?.should be_false
+  end
+
+  it "maps -k/--insecure-upstream onto the plan's verify flag" do
+    rec = Gori::Store::RepeaterRecord.new(1_i64, "https://api.test",
+      "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, false, true, nil, 0)
+    Gori::CLI::Run.session_plan_options_for_spec(rec, insecure: false).verify?.should be_true
+    Gori::CLI::Run.session_plan_options_for_spec(rec, insecure: true).verify?.should be_false
   end
 end
 

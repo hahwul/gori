@@ -55,6 +55,39 @@ describe "Repeater engines honor project host overrides (R2-1)" do
     result.ok?.should be_false
   end
 
+  # #367: every CLI/MCP tool passed `overrides:` to its sender and NO TUI tool did, so all
+  # five workbench tools silently ignored the project's HOST OVERRIDES pane. The Repeater's
+  # three TUI send paths (^R, send-group, WS) now assemble through `Repeater::Plan`, so the
+  # override reaches the dialer through the one argument the builder threads.
+  it "Repeater::Plan dials the project override IP (the TUI ^R path, #367)" do
+    server, port = loopback_responder("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+    begin
+      with_ov_store do |store|
+        ov = Gori::HostOverrides.load(store)
+        ov.add("nonexistent.invalid", "127.0.0.1").should be_true
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
+          ["GET / HTTP/1.1\r\nHost: nonexistent.invalid\r\nConnection: close\r\n\r\n".to_slice],
+          target: "http://nonexistent.invalid:#{port}", verify: false,
+          timeout: 2.seconds, overrides: ov), ungated_outbound)
+        result = plan.send
+        result.ok?.should be_true
+        result.response.not_nil!.status.should eq(200)
+      end
+    ensure
+      server.close
+    end
+  end
+
+  # The control run: the SAME plan with the overrides argument left out cannot reach the
+  # host at all. Without this, the assertion above would pass even if `overrides:` were
+  # dropped again — which is exactly how #367 went unnoticed.
+  it "Repeater::Plan WITHOUT overrides cannot reach the unresolvable host" do
+    plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
+      ["GET / HTTP/1.1\r\nHost: nonexistent.invalid\r\nConnection: close\r\n\r\n".to_slice],
+      target: "http://nonexistent.invalid", verify: false, timeout: 1.second), ungated_outbound)
+    plan.send.ok?.should be_false
+  end
+
   it "Fuzz::Sender threads the override through to the send engine (covers fuzz/mine/sequence)" do
     server, port = loopback_responder("HTTP/1.1 204 No Content\r\n\r\n")
     begin

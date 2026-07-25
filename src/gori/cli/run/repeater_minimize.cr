@@ -35,8 +35,12 @@ module Gori
         id = id_s.to_i64? || abort("gori run repeater minimize: invalid repeater id #{id_s.inspect}")
 
         store = open_store(resolve_read_project(project_name, db_path))
-        rec = begin
-          store.get_repeater(id)
+        # HostOverrides.load snapshots rows into memory, so it is safe to keep past the close.
+        # Loaded from the SAME open that fetched `rec` rather than via cli_host_overrides,
+        # which returns nil without an explicit --project/--db — a repeater session always
+        # belongs to a resolved project, so the overrides must not depend on the flag.
+        rec, host_overrides = begin
+          {store.get_repeater(id), Gori::HostOverrides.load(store)}
         ensure
           store.close
         end
@@ -56,7 +60,8 @@ module Gori
         # CappedBackend bounds total sends. Same stack the TUI builds.
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
-            !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
+            !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
+            overrides: host_overrides),
           Repeater::Minimize::SEND_CAP)
 
         meter = STDERR.tty?

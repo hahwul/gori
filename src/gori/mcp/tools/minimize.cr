@@ -37,9 +37,14 @@ module Gori
           raw = Env.expand_wire(t)
           auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
         end
+        # Minimize dials Fuzz::Sender directly (many capped probe sends) rather than through
+        # Repeater::Plan, so it needs the project's host overrides threaded by hand — without
+        # them this was the one repeater send path left resolving the target for real while
+        # every other surface honoured the operator's pin (#367).
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, rec.http2?,
-            @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
+            @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
+            overrides: HostOverrides.load(store)),
           Repeater::Minimize::SEND_CAP)
 
         report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }

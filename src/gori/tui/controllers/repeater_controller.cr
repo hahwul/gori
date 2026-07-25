@@ -12,6 +12,7 @@ require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/ws_engine"
 require "../../repeater/minimize"
+require "../../repeater/plan"
 require "../../fuzz/engine"
 
 module Gori::Tui
@@ -1194,34 +1195,26 @@ module Gori::Tui
         @host.status("repeater already in flight…")
         return
       end
-      scheme, host, port = view.parse_target
-      if host.empty?
-        @host.status("repeater: invalid target — use scheme://host[:port]/path")
-        return
-      end
       if view.ws_mode?
-        ws_repeater_send(view, scheme, host, port)
+        ws_repeater_send(view)
         return
       end
-      save_current_repeater # persist the request we're about to send (before it goes inflight)
-      verify = !@host.session.config.insecure_upstream?
-      bytes = view.request_bytes
-      http2 = view.http2?
-      sni = view.sni_override # custom TLS SNI host (nil → present the dialed host)
       results = @repeater_results
-      sender = repeater_sender(scheme, host, port, http2: http2, verify: verify, sni: sni)
-      if reason = sender.refusal(bytes)
+      return unless plan = repeater_plan(view, [view.request_bytes], http2: view.http2?)
+      save_current_repeater # persist the request we're about to send (before it goes inflight)
+      if reason = plan.refusal
         results.send({view, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)})
         @host.status("repeater: #{reason}")
         return
       end
       view.inflight = true
-      @host.status("sending → #{host}:#{port}#{sni ? " (SNI #{sni})" : ""}…")
+      sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
+      @host.status("sending → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…")
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
       spawn(name: "gori-repeater") do
-        result = sender.send(bytes)
+        result = plan.send
         # Non-blocking hand-off: if the user already left the project the channel is
         # orphaned, so drop the late result instead of blocking this fiber forever.
         select
@@ -1269,9 +1262,16 @@ module Gori::Tui
         raw = Env.expand_wire(t)
         auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
       end
+      # Minimize dials Fuzz::Sender directly (many capped probe sends) rather than through
+      # Repeater::Plan, so the two things the builder would have applied are threaded by hand:
+      # the project's host overrides (#367 — without them this path resolves the target for
+      # real while ^R honours the operator's pin), and `Env.expand` over the SNI, which the
+      # CLI and MCP minimize paths have always done and this one did not.
       backend = Fuzz::CappedBackend.new(
         Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, view.http2?,
-          !@host.session.config.insecure_upstream?, view.sni_override, timeout: 10.seconds),
+          !@host.session.config.insecure_upstream?,
+          view.sni_override.try { |s| Env.expand(s).presence }, timeout: 10.seconds,
+          overrides: @host.session.host_overrides),
         Repeater::Minimize::SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
@@ -1294,21 +1294,19 @@ module Gori::Tui
     # WebSocket repeater: re-do the handshake and fire the editor's messages off the UI
     # fiber (a round-trip can block on the drain idle-timeout), handing the transcript
     # back through @ws_results. Mirrors repeater_send's fiber/inflight discipline.
-    private def ws_repeater_send(view : RepeaterView, scheme : String, host : String, port : Int32) : Nil
-      verify = !@host.session.config.insecure_upstream?
-      upgrade = view.ws_upgrade_bytes
+    private def ws_repeater_send(view : RepeaterView) : Nil
       results = @ws_results
-      sender = repeater_sender(scheme, host, port, verify: verify, sni: view.sni_override)
-      if reason = sender.refusal(upgrade)
+      return unless plan = repeater_plan(view, [view.ws_upgrade_bytes])
+      if reason = plan.refusal
         results.send({view, Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)})
         @host.status("ws repeater: #{reason}")
         return
       end
       messages = view.ws_out_messages
       view.inflight = true
-      @host.status("ws sending → #{host}:#{port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…")
+      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…")
       spawn(name: "gori-ws-repeater") do
-        result = sender.send_ws(upgrade, messages)
+        result = plan.send_ws(messages)
         select
         when results.send({view, result})
         else
@@ -1333,35 +1331,24 @@ module Gori::Tui
         @host.status(view.http2? ? "send group is HTTP/1.1 only — ^V to switch off h2" : "send group needs plain text mode (not hex/gRPC/WS/decode)")
         return
       end
-      scheme, host, port = view.parse_target
-      if host.empty?
-        @host.status("repeater: invalid target — use scheme://host[:port]/path")
-        return
-      end
       reqs = view.pipeline_requests
-      if reqs.empty?
-        @host.status("nothing to send — the request is empty")
-        return
-      end
-      save_current_repeater
-      verify = !@host.session.config.insecure_upstream?
-      sni = view.sni_override
       labels = reqs.map(&.[0])
-      bytes = reqs.map(&.[1])
       results = @group_results
-      sender = repeater_sender(scheme, host, port, verify: verify, sni: sni)
+      return unless plan = repeater_plan(view, reqs.map(&.[1]))
+      save_current_repeater
       # Block the WHOLE pipeline if ANY request in it targets out of scope — these all ride
       # one connection, so partially sending would still reach the blocked path's origin.
-      if reason = sender.group_refusal(bytes)
+      if reason = plan.refusal
         labeled = labels.map { |l| {l, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)} }
         results.send({view, labeled})
         @host.status("send group: #{reason}")
         return
       end
       view.inflight = true
-      @host.status("send group → #{host}:#{port} · #{bytes.size} request#{bytes.size == 1 ? "" : "s"} on one connection…")
+      n = plan.requests.size
+      @host.status("send group → #{plan.host}:#{plan.port} · #{n} request#{n == 1 ? "" : "s"} on one connection…")
       spawn(name: "gori-repeater-group") do
-        rs = sender.send_group(bytes)
+        rs = plan.send_group
         labeled = labels.zip(rs)
         select
         when results.send({view, labeled})
@@ -1402,12 +1389,35 @@ module Gori::Tui
       Gori::Outbound.interactive(@host.session.scope)
     end
 
-    # A gated dialer for one Repeater target. `Repeater::Sender` takes the Outbound as a
-    # constructor argument, so no send path here can be built without a scope decision.
-    private def repeater_sender(scheme : String, host : String, port : Int32, *,
-                                verify : Bool, http2 : Bool = false, sni : String? = nil) : Repeater::Sender
-      Repeater::Sender.new(outbound, scheme: scheme, host: host, port: port,
-        http2: http2, verify: verify, sni: sni)
+    # The assembled send for the current tab, or nil after reporting the refusal in the
+    # Repeater tab's own vocabulary — the builder reports a machine-readable `Reason` and the
+    # status line names the TARGET pane's own format, where the CLI would name a flag and MCP
+    # a JSON field.
+    #
+    # `requests` is what the editor decided to put on the wire — already env-expanded and
+    # length-synced by `RepeaterView`, whose hex / gRPC / decode / §…§ modes each own their
+    # byte semantics — so the builder takes those bytes verbatim (`expand_request: false`)
+    # rather than expanding a second time.
+    private def repeater_plan(view : RepeaterView, requests : Array(Bytes), *,
+                              http2 : Bool = false) : Repeater::Plan?
+      Repeater::Plan.build(Repeater::PlanOptions.new(requests,
+        expand_request: false, auto_content_length: false,
+        target: view.target, http2: http2, sni: view.sni_override,
+        verify: !@host.session.config.insecure_upstream?,
+        # The session's LIVE instance, not a fresh `HostOverrides.load` — the proxy reads
+        # this one and the Project tab's HOST OVERRIDES pane edits it under a Mutex, so a
+        # copy taken here would miss every edit made after the tab opened (#367).
+        overrides: @host.session.host_overrides), outbound)
+    rescue ex : Repeater::PlanError
+      @host.status(case ex.reason
+      in Repeater::PlanError::Reason::NoRequest
+        "nothing to send — the request is empty"
+      in Repeater::PlanError::Reason::NoTarget, Repeater::PlanError::Reason::BadTarget
+        "repeater: invalid target — use scheme://host[:port]/path"
+      in Repeater::PlanError::Reason::UnsupportedScheme
+        "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
+      end)
+      nil
     end
 
     # Persist the current repeater tab's edits (cheap no-op when clean). Sprinkled on

@@ -6,6 +6,7 @@ require "../../rules"
 require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
+require "../../repeater/plan"
 require "../../flow_mapper"
 require "../../proxy/codec/http1"
 require "../../env"
@@ -26,15 +27,22 @@ module Gori
         issue_id = send_issue_id(h, save)
         return issue_id if issue_id.is_a?(Result)
 
-        built, http2, sni = build_send_request(h)
+        # Layer 1's policy is chosen here (`Outbound.agent`) and handed to the builder — the
+        # builder must never pick it, or MCP's strict "no scope ⇒ refuse" default would
+        # silently become whichever policy got hard-coded there (DESIGN.md §7).
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        plan = build_send_plan(h, ob)
+        return plan if plan.is_a?(Result)
         # OPT-IN Match&Replace parity (before the scope gate + History write so the
         # recorded/effective request == the wire); byte-exact by default.
-        built, applied_rules = maybe_apply_request_rules(h, built)
-        gate = send_gate(h, built, http2, sni)
+        plan, applied_rules = maybe_apply_request_rules(h, plan)
+        gate = send_gate(ob, plan)
         return gate if gate.is_a?(Result)
-        sender, sc = gate
+        sc = gate
+        built = RequestBuilder::Built.new(plan.bytes, plan.scheme, plan.host, plan.port)
+        http2 = plan.http2?
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
-        result = sender.send(built.bytes)
+        result = plan.send
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -106,29 +114,13 @@ module Gori
       # Layer 2 (`Repeater::Sender#refusal`) is Sandbox mode, a hard containment gate that
       # allow_unscoped does NOT lift — the TUI and `gori run repeater` have always enforced
       # it that way, and MCP used to let allow_unscoped:true walk straight past it.
-      private def send_gate(h, built : RequestBuilder::Built, http2 : Bool,
-                            sni : String?) : {Repeater::Sender, ScopeCheck} | Result
-        ob = outbound(bool(h, "allow_unscoped") || false)
-        sc = ob.check(request_scope_url(built), built.host)
+      private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
+        sc = ob.check(request_scope_url(plan), plan.host)
         return scope_blocked(sc) if sc.blocked?
-        verify = @verify_upstream && !(bool(h, "insecure") || false)
-        sender = send_sender(ob, built, http2, verify, sni, send_timeout(h))
-        if reason = sender.refusal(built.bytes)
-          return sandbox_blocked(reason, built.host, "url")
+        if reason = plan.refusal
+          return sandbox_blocked(reason, plan.host, "url")
         end
-        {sender, sc}
-      end
-
-      # The gated dialer for a one-shot send. `Repeater::Sender` takes the Outbound decision
-      # as a constructor argument, so this path cannot be built without one.
-      private def send_sender(ob : Outbound, built : RequestBuilder::Built, http2 : Bool,
-                              verify_upstream : Bool, sni : String? = nil,
-                              timeout : Time::Span? = nil) : Repeater::Sender
-        # Honor the project's host overrides on the direct-dial path (parity with the
-        # live proxy). nil/empty is behaviorally identical to no override.
-        Repeater::Sender.new(ob, scheme: built.scheme, host: built.host, port: built.port,
-          http2: http2, verify: verify_upstream, sni: sni, timeout: timeout,
-          overrides: HostOverrides.load(store))
+        sc
       end
 
       # Per-operation (connect + idle read/write) timeout for a one-shot send, from
@@ -242,14 +234,14 @@ module Gori
       # live-proxy parity, so run the project's enabled REQUEST-side rules over the built bytes
       # and re-sync Content-Length. Response-side rules are intentionally NOT applied. Returns
       # the (possibly rewritten) request and whether a rule actually changed the bytes.
-      private def maybe_apply_request_rules(h, built : RequestBuilder::Built) : {RequestBuilder::Built, Bool}
-        return {built, false} unless bool_arg(h, "apply_rules", false)
+      private def maybe_apply_request_rules(h, plan : Repeater::Plan) : {Repeater::Plan, Bool}
+        return {plan, false} unless bool_arg(h, "apply_rules", false)
         rules = Gori::Rules.load(store)
-        return {built, false} unless rules.active?
+        return {plan, false} unless rules.active?
         rewritten = Repeater::FlowRequest.resync_content_length(
-          rules.transform_message(String.new(built.bytes), Store::RuleTarget::Request, built.host).to_slice)
-        return {built, false} if rewritten == built.bytes
-        {RequestBuilder::Built.new(rewritten, built.scheme, built.host, built.port), true}
+          rules.transform_message(String.new(plan.bytes), Store::RuleTarget::Request, plan.host).to_slice)
+        return {plan, false} if rewritten == plan.bytes
+        {plan.with_requests([rewritten]), true}
       end
 
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
@@ -350,20 +342,21 @@ module Gori
                          end
                        end
 
-        target = Env.expand(repeater.target)
-        scheme, host, port = Repeater::FlowRequest.parse_target(target)
-        return Result.new("could not parse target for repeater #{repeater_id}", is_error: true) if host.empty? || port <= 0
         # Scope gate before the outbound handshake (same policy as send_request).
         ob = outbound(bool(h, "allow_unscoped") || false)
-        sc = ob.check("#{scheme}://#{host}/", host)
-        return scope_blocked(sc) if sc.blocked?
         verify = @verify_upstream && !(bool(h, "insecure") || false)
-        request = Env.expand_wire(repeater_request_text)
-        sni = repeater.sni.try { |value| Env.expand(value) }
-        sender = Repeater::Sender.new(ob, scheme: scheme, host: host, port: port,
-          verify: verify, sni: sni, overrides: HostOverrides.load(store))
+        plan = begin
+          Repeater::Plan.build(Repeater::PlanOptions.new([repeater.request],
+            default_target: repeater.target, sni: repeater.sni, verify: verify,
+            overrides: HostOverrides.load(store)), ob)
+        rescue ex : Repeater::PlanError
+          return send_plan_error(ex, "repeater_id")
+        end
+        host = plan.host
+        sc = ob.check("#{plan.scheme}://#{host}/", host)
+        return scope_blocked(sc) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
-        if reason = sender.refusal(request)
+        if reason = plan.refusal
           return sandbox_blocked(reason, host, "repeater_id")
         end
         # Scope passed — now it's safe to persist the issue link.
@@ -371,11 +364,11 @@ module Gori
           store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
-        result = sender.send_ws(request, out_messages, idle)
+        result = plan.send_ws(out_messages, idle)
 
         store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
           result.error, result.duration_us)
-        Log.info { "send_websocket #{scheme}://#{host}:#{port} repeater_id=#{repeater_id} -> #{result.ok? ? "ok" : result.error}" }
+        Log.info { "send_websocket #{plan.scheme}://#{host}:#{plan.port} repeater_id=#{repeater_id} -> #{result.ok? ? "ok" : result.error}" }
 
         payload = JSON.build do |j|
           j.object do
@@ -423,32 +416,58 @@ module Gori
         Result.new(ex.message || "invalid WebSocket request arguments", is_error: true)
       end
 
+      # The ready-to-send plan for one `send_request`, or the error Result to return as-is.
+      # `Repeater::Plan` owns the assembly (env expansion, the Content-Length policy, target
+      # parsing, SNI, host overrides, the gated dialer); everything left here is MCP's own
+      # argument parsing.
+      private def build_send_plan(h, ob : Outbound) : Repeater::Plan | Result
+        Repeater::Plan.build(send_plan_options(h), ob)
+      rescue ex : Repeater::PlanError
+        send_plan_error(ex, "url")
+      end
+
+      # MCP's wording for a builder refusal. Exhaustive on `Reason` so a new builder failure
+      # reaches the agent as a coded INVALID_ARGUMENT rather than a bare exception string.
+      private def send_plan_error(ex : Repeater::PlanError, field : String) : Result
+        detail = ex.detail
+        message =
+          case ex.reason
+          in Repeater::PlanError::Reason::NoRequest         then "the request is empty"
+          in Repeater::PlanError::Reason::NoTarget          then "'url' is required"
+          in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
+          in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
+          end
+        err(message, "INVALID_ARGUMENT", field: field)
+      end
+
       # Either replays a persisted repeater (repeater_id), repeaters a captured flow
-      # (flow_id), or builds from url/raw/method args. Returns {request bytes +
-      # target, use-h2, TLS SNI}.
-      private def build_send_request(h) : {RequestBuilder::Built, Bool, String?}
+      # (flow_id), or builds from url/raw/method args — normalized to the one option set
+      # `Repeater::Plan` consumes. Raises `Gori::Error` on bad arguments (`send_request`
+      # turns that into a clean message).
+      private def send_plan_options(h) : Repeater::PlanOptions
         if present?(h, "flow_id") && present?(h, "repeater_id")
           raise Gori::Error.new("pass only one of flow_id or repeater_id")
         end
+        verify = @verify_upstream && !(bool(h, "insecure") || false)
+        timeout = send_timeout(h)
+        # Honor the project's host overrides on the direct-dial path (parity with the live
+        # proxy). nil/empty is behaviorally identical to no override.
+        overrides = HostOverrides.load(store)
+
         if present?(h, "repeater_id")
           id = int(h, "repeater_id")
           raise Gori::Error.new(id_error(h, "repeater_id")) unless id
           rec = store.get_repeater(id)
           raise Gori::Error.new("no repeater with id #{id}") unless rec
-          rec_request_text = String.new(rec.request)
-          if Repeater::WsEngine.upgrade_request?(rec_request_text)
+          if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
             raise Gori::Error.new("repeater #{id} is a WebSocket upgrade — use send_websocket")
           end
-          expanded = Env.expand_wire(rec_request_text)
           # Respect the repeater's auto-Content-Length setting (the TUI Repeater does):
           # only recompute CL when it's on, so a deliberately hand-set CL is preserved.
-          bytes = rec.auto_content_length? ? Repeater::FlowRequest.resync_content_length(expanded) : expanded
-          target = Env.expand(rec.target)
-          scheme, host, port = Repeater::FlowRequest.parse_target(target)
-          raise Gori::Error.new("could not parse target for repeater #{id}") if host.empty?
-          http2 = bool_arg(h, "http2", rec.http2?)
-          sni = rec.sni.try { |v| Env.expand(v) }
-          return {RequestBuilder::Built.new(bytes, scheme, host, port), http2, sni}
+          return Repeater::PlanOptions.new([rec.request], default_target: rec.target,
+            http2: bool_arg(h, "http2", rec.http2?), sni: rec.sni,
+            auto_content_length: rec.auto_content_length?, verify: verify,
+            timeout: timeout, overrides: overrides)
         end
         if present?(h, "flow_id")
           id = int(h, "flow_id")
@@ -456,22 +475,26 @@ module Gori
           detail = store.get_flow(id)
           raise Gori::Error.new("no flow with id #{id}") unless detail
           flow = Repeater::FlowRequest.build(detail)
-          # Re-sync Content-Length after expansion (a body `$KEY` changes its length).
-          bytes = Repeater::FlowRequest.resync_content_length(Env.expand_wire(String.new(flow.bytes)))
-          target = Env.expand(flow.target)
-          scheme, host, port = Repeater::FlowRequest.parse_target(target)
-          raise Gori::Error.new("could not parse target from flow #{id}") if host.empty?
           # Default to how the flow was captured, but honor an EXPLICIT http2 either way —
           # `bool_arg` returns `flow.http2` only when the arg is absent, so `http2:false`
           # can now downgrade an h2 capture to h1 (it used to be silently ignored because
           # `false || flow.http2` kept h2). Carry the captured SNI so an origin where
           # SNI ≠ Host (domain fronting / multi-cert vhost) presents the right certificate,
           # matching `gori run repeater`.
-          http2 = bool_arg(h, "http2", flow.http2)
-          {RequestBuilder::Built.new(bytes, scheme, host, port), http2, flow.sni}
+          Repeater::PlanOptions.new([flow.bytes], default_target: flow.target,
+            http2: bool_arg(h, "http2", flow.http2), sni: flow.sni, verify: verify,
+            timeout: timeout, overrides: overrides)
         else
+          # `RequestBuilder` already expanded, framed and range-checked this one, with
+          # sharper messages than a re-parse could give — so the origin is handed over
+          # pre-resolved and the bytes are taken verbatim (a second `Env.expand_wire` would
+          # double-expand a `$KEY` whose value itself looks like a token).
           built = RequestBuilder.build(h)
-          {built, bool_arg(h, "http2", false), nil}
+          Repeater::PlanOptions.new([built.bytes], expand_request: false,
+            auto_content_length: false,
+            origin: Repeater::Origin.new(built.scheme, built.host, built.port),
+            http2: bool_arg(h, "http2", false), verify: verify,
+            timeout: timeout, overrides: overrides)
         end
       end
 
@@ -515,8 +538,8 @@ module Gori
       # The URL the scope gate evaluates, anchored on the DIAL target rather than the request
       # LINE's host. The rule itself now lives in the seam (`Outbound.scope_url`) so the sweep
       # and Repeater paths get the same absolute-form handling this used to have alone.
-      private def request_scope_url(built : RequestBuilder::Built) : String
-        Outbound.scope_url(built.scheme, built.host, request_target(built.bytes))
+      private def request_scope_url(plan : Repeater::Plan) : String
+        Outbound.scope_url(plan.scheme, plan.host, request_target(plan.bytes))
       end
 
       # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.
