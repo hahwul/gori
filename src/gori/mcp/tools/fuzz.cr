@@ -15,11 +15,12 @@ module Gori
       # --- fuzz tools (gated, async job model) --------------------------------
 
       private def fuzz_start(h) : Result
-        engine, origin, total, http2 = build_fuzz_job(h)
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        engine, origin, total, http2 = build_fuzz_job(h, ob)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
-        sc = scope_check("#{origin.scheme}://#{origin.host}/", origin.host, bool(h, "allow_unscoped") || false)
-        return scope_blocked(sc) if sc.blocked
+        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
+        return scope_blocked(sc) if sc.blocked?
         if total && total > FUZZ_MAX_REQUESTS
           return err("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", "BUDGET_EXHAUSTED")
         end
@@ -218,7 +219,7 @@ module Gori
 
       # Build a ready-to-run engine + its origin + total + effective http2 from the
       # tool args. Raises FuzzArgError (clean message) on any malformed input.
-      private def build_fuzz_job(h) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool}
+      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool}
         text, default_target, src_h2 = fuzz_template_source(h)
         text = Env.expand(text)
         default_target = default_target.try { |t| Env.expand(t) }
@@ -236,16 +237,13 @@ module Gori
         config = fuzz_config(h, mode)
         gen_sets = mode.per_position? ? sets : [sets.first]
         generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
-        sender = Fuzz::Sender.new(origin, http2: use_h2,
+        # Defense-in-depth alongside the job-start Layer-1 check: that check only covers the
+        # origin once, not a path a template mutates per-request. The Outbound re-reads the
+        # scope periodically, so a mid-run EXCLUDE / Sandbox toggle stops the sweep.
+        sender = Fuzz::Sender.new(origin, ob, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
           overrides: HostOverrides.load(store))
-        # Defense-in-depth alongside the job-start scope_check above: that check only
-        # covers the origin once, not a path a template mutates per-request.
-        # Re-read scope periodically so a mid-run EXCLUDE / Sandbox toggle is honoured —
-        # this Scope is private to the job (nothing else reloads it), unlike the TUI's
-        # shared @session.scope which the data_version poll already refreshes in place.
-        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store), reload_every: Fuzz::ScopedBackend::RELOAD_INTERVAL)
-        engine = Fuzz::Engine.new(generator, matcher, backend, config)
+        engine = Fuzz::Engine.new(generator, matcher, sender, config)
         {engine, origin, engine.total, use_h2}
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")

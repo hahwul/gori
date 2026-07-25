@@ -12,6 +12,7 @@ require "./active/crlf_injection"
 require "./active/path_normalization_bypass"
 require "./active/url_rewrite_bypass"
 require "./active/ssti"
+require "../outbound"
 require "../scope"
 require "../fuzz/engine"
 
@@ -57,24 +58,31 @@ module Gori
       end
 
       # Synchronously execute enabled Active rules against a flow (for headless / CLI scans).
-      # `scope`, when given, wraps the sender in Fuzz::ScopedBackend so a Sandbox block or an
-      # explicit exclude rule HARD-blocks the probe at the socket seam (PR #322's protection for
-      # Fuzz/Miner) even when the caller bypassed its own include gate (--allow-unscoped).
-      # `backend` overrides the default Fuzz::Sender so specs can drive the rules without a socket.
+      # `outbound` is the REQUIRED scope decision (Gori::Outbound): a Sandbox block or an
+      # explicit exclude rule HARD-blocks the probe at the socket seam even when the caller
+      # bypassed its own include gate (--allow-unscoped). Required rather than optional
+      # precisely so a new caller cannot forget it.
+      # `backend` overrides the default Fuzz::Sender so specs can drive the rules without a
+      # socket; it is wrapped in Fuzz::GatedBackend so an injected backend is gated too.
       # `opts` widens the method gate / raises caps (manual unsafe opt-in, AGGRESSIVE mode).
       # `disabled` holds the RuleInfo#ids the operator turned off in the Rules sub-tab — the same
       # set the TUI analyzer filters on before enqueueing (analyzer.cr's maybe_enqueue_active), so
       # a headless scan honours that config too instead of silently running every built-in.
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
-                       timeout : Time::Span = 10.seconds, scope : Scope? = nil,
+                       timeout : Time::Span = 10.seconds, *, outbound : Outbound,
                        backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
                        disabled : Set(String) = NO_DISABLED) : Array(Detection)
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = detail.http_version.starts_with?("HTTP/2")
-        base = backend || Fuzz::Sender.new(origin, http2, verify_upstream, timeout: timeout)
-        sender = scope ? Fuzz::ScopedBackend.new(base, scope) : base
+        # Fuzz::Sender gates itself, so it is never double-wrapped; only an injected
+        # backend needs GatedBackend to reach the same decision.
+        sender = if base = backend
+                   Fuzz::GatedBackend.new(base, outbound).as(Fuzz::Backend)
+                 else
+                   Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout)
+                 end
 
         RULES.each do |rule|
           next if disabled.includes?(rule.info.id)

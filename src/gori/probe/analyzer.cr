@@ -46,6 +46,11 @@ module Gori
 
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
                      @mode : Mode, @verify_upstream : Bool)
+        # The one scope decision this analyzer's active probes dial through. Layer 1 is the
+        # strict ALLOWLIST (maybe_enqueue_active), and — new with the Outbound seam — its
+        # sender now applies Layer 2 too, so Sandbox mode and explicit EXCLUDE rules stop a
+        # live probe exactly as they already stopped `gori run probe` / MCP probe_scan.
+        @outbound = Outbound.allowlist(@scope)
         @analyzed = Set(Int64).new
         @ws_hwm = {} of Int64 => Int64 # per-101-flow high-water-mark: max ws_message id already scanned
         # Cache each 101 flow's handshake FlowDetail — it NEVER changes frame-to-frame, but
@@ -357,10 +362,10 @@ module Gori
         row = detail.row
         url = row.url
         # Active probes only on hosts/paths covered by Project scope INCLUDE rules
-        # (matches_url? — lens-independent; requires ≥1 include so excludes-only never
-        # means "probe everything"). in_scope_url? is wrong here: it is permissive when
-        # the ⇧S display lens is off. AGGRESSIVE never widens this — same scope gate.
-        return unless @scope.matches_url?(url, row.host)
+        # (the Outbound ALLOWLIST gate — lens-independent; requires ≥1 include so
+        # excludes-only never means "probe everything"). in_scope_url? is wrong here: it is
+        # permissive when the ⇧S display lens is off. AGGRESSIVE never widens this.
+        return unless @outbound.allows?(url, row.host)
         opts = active_opts
         Active::RULES.each { |rule| enqueue_probe(rule, detail, opts) unless @disabled.includes?(rule.info.id) }
       rescue Channel::ClosedError
@@ -454,7 +459,7 @@ module Gori
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = detail.http_version.starts_with?("HTTP/2")
-        sender = Fuzz::Sender.new(origin, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
+        sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
         result = sender.send(plan.request)
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
         # only ONCE per host: a flapping origin with many distinct param sets would

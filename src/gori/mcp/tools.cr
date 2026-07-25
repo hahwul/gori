@@ -74,12 +74,11 @@ module Gori
       record BodyChunkOptions, flow_id : Int64?, repeater_id : Int64?, offset : Int64,
         limit : Int32, raw : Bool
 
-      # Outcome of the active-tool scope gate. `decision` is "in_scope",
-      # "out_of_scope", or "unscoped" (no scope rules configured). `blocked` is
-      # true only for an out-of-scope target that the caller did not override with
-      # allow_unscoped — an UNCONFIGURED scope never blocks (preserves the
-      # historical send-anywhere behavior; the send is merely flagged unscoped).
-      record ScopeCheck, decision : String, host : String, rule_id : Int64?, blocked : Bool
+      # Outcome of the active-tool scope gate, produced by the shared `Gori::Outbound` seam
+      # (src/gori/outbound.cr) rather than a per-surface check. `decision` is "in_scope",
+      # "out_of_scope", or "unscoped" (no scope rules configured); on MCP all three block
+      # unless the caller passed allow_unscoped:true.
+      alias ScopeCheck = Gori::Outbound::Verdict
 
       EMPTY_HASH = {} of String => JSON::Any
 

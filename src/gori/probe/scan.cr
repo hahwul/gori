@@ -1,5 +1,6 @@
 require "../store"
 require "../ql"
+require "../outbound"
 require "../scope"
 require "./issue"
 require "./passive"
@@ -14,11 +15,12 @@ module Gori
     # by default and — when `active` — also running the light-touch active checks. Grouping
     # (Probe.group) and rendering live in the callers; this produces only raw Detections.
     #
-    # Active scope gating mirrors the TUI/analyzer (and PR #322's Fuzz/Miner protection) in
-    # two layers: Layer-1 (active_target?) only SENDS to a flow the project scope INCLUDES
-    # (matches_url?), bypassable with allow_unscoped; Layer-2 ALWAYS passes the scope into
-    # Active.analyze so its Fuzz::ScopedBackend hard-blocks a Sandbox/exclude even under
-    # allow_unscoped.
+    # Active scope gating goes through the ONE seam every surface shares (Gori::Outbound),
+    # in its usual two layers: Layer-1 (`outbound.allows?`) only SENDS to a flow the project
+    # scope INCLUDES, bypassable with allow_unscoped; Layer-2 ALWAYS hands the same Outbound
+    # to Active.analyze, whose sender hard-blocks a Sandbox/exclude even under allow_unscoped.
+    # `scope`/`allow_unscoped` stay the public arguments (the CLI and MCP both pass them as
+    # loaded); the decision object is built once here so neither caller can build a different one.
     module Scan
       extend self
 
@@ -83,6 +85,7 @@ module Gori
                      rules : RuleConfig? = nil,
                      progress : Proc(Int32, Int32, Nil)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
+        outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
         active_sent = 0
         ids.each_with_index do |id, i|
@@ -91,8 +94,8 @@ module Gori
             ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
             # passive is request-free — NEVER capped
             detections.concat(Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom))
-            if active && active_target?(detail, scope, allow_unscoped) && !(active_limit && active_sent >= active_limit)
-              detections.concat(Active.analyze(detail, verify_upstream, scope: scope, opts: opts,
+            if active && outbound.allows?(detail.row.url, detail.row.host) && !(active_limit && active_sent >= active_limit)
+              detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
                 disabled: cfg.disabled))
               active_sent += 1
             end
@@ -108,6 +111,7 @@ module Gori
                          opts : Active::Options = Active::Options::DEFAULT,
                          rules : RuleConfig? = nil) : {Array(Detection), Int32}
         cfg = rules || RuleConfig.load(store)
+        outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
         n = 0
         store.repeaters.each do |rec|
@@ -117,8 +121,8 @@ module Gori
           Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom).each do |d|
             detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
           end
-          if active && active_target?(detail, scope, allow_unscoped)
-            Active.analyze(detail, verify_upstream, scope: scope, opts: opts, disabled: cfg.disabled).each do |d|
+          if active && outbound.allows?(detail.row.url, detail.row.host)
+            Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts, disabled: cfg.disabled).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
           end
@@ -126,11 +130,12 @@ module Gori
         {detections, n}
       end
 
-      # Layer-1 active gate (mirrors analyzer.cr's maybe_enqueue_active): send active probes
-      # only to a flow the scope INCLUDES; allow_unscoped bypasses. A nil scope (none loaded)
-      # only sends under allow_unscoped.
-      private def active_target?(detail : Store::FlowDetail, scope : Scope?, allow_unscoped : Bool) : Bool
-        allow_unscoped || !!scope.try(&.matches_url?(detail.row.url, detail.row.host))
+      # The scan's scope decision. Layer 1 is the strict ALLOWLIST (an active probe only ever
+      # goes to a flow the scope INCLUDES — nobody eyeballed these targets), waived as a
+      # NAMED Operator opt-out under allow_unscoped. A nil scope has no rules to allowlist
+      # against, so it probes nothing unless allow_unscoped — same as before, but explicit.
+      private def outbound_for(scope : Scope?, allow_unscoped : Bool) : Outbound
+        allow_unscoped ? Outbound.waived(scope, Outbound::Reason::Operator) : Outbound.allowlist(scope)
       end
     end
   end

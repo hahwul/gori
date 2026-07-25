@@ -11,9 +11,10 @@ module Gori
       # --- mine tools (gated, async job model) --------------------------------
 
       private def mine_start(h) : Result
-        engine, origin, total = build_mine_job(h)
-        sc = scope_check("#{origin.scheme}://#{origin.host}/", origin.host, bool(h, "allow_unscoped") || false)
-        return scope_blocked(sc) if sc.blocked
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        engine, origin, total = build_mine_job(h, ob)
+        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
+        return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "mn_#{@job_seq}"
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
@@ -146,18 +147,16 @@ module Gori
 
       # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
       # (clean message) on malformed input. Reuses the fuzz origin/timeout helpers.
-      private def build_mine_job(h) : {Miner::Engine, Fuzz::Origin, Int64}
+      private def build_mine_job(h, ob : Outbound) : {Miner::Engine, Fuzz::Origin, Int64}
         bytes, default_target, src_h2 = mine_request_source(h)
         use_h2 = (bool(h, "http2") || false) || src_h2
         origin = fuzz_origin(h, default_target)
-        sender = Fuzz::Sender.new(origin, http2: use_h2,
+        # Defense-in-depth alongside the job-start Layer-1 check: that check only covers the
+        # origin once, not a path mining mutates per-request. The Outbound re-reads the scope
+        # periodically, so a mid-run EXCLUDE / Sandbox toggle stops the sweep.
+        sender = Fuzz::Sender.new(origin, ob, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
           overrides: HostOverrides.load(store))
-        # Defense-in-depth alongside the job-start scope_check above: that check only
-        # covers the origin once, not a path mining mutates per-request.
-        # Re-read scope periodically so a mid-run EXCLUDE / Sandbox toggle is honoured —
-        # this Scope is private to the job (nothing else reloads it).
-        backend = Fuzz::ScopedBackend.new(sender, Scope.load(store), reload_every: Fuzz::ScopedBackend::RELOAD_INTERVAL)
         config = Miner::Config.new
         config.locations = mine_locations(h, bytes)
         raise FuzzArgError.new("no applicable locations for this request") if config.locations.empty?
@@ -173,7 +172,7 @@ module Gori
           config.locations.each { |loc| config.bucket_size[loc] = bucket }
         end
         names = Miner::Wordlist.load(config.user_wordlist)
-        engine = Miner::Engine.new(bytes, use_h2, names, backend, config)
+        engine = Miner::Engine.new(bytes, use_h2, names, sender, config)
         {engine, origin, engine.total_names}
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")

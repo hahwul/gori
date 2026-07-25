@@ -23,9 +23,10 @@ module Gori
       end
 
       private def sequence_start(h) : Result
-        engine, origin, goal, loc = build_sequence_job(h)
-        sc = scope_check("#{origin.scheme}://#{origin.host}/", origin.host, bool(h, "allow_unscoped") || false)
-        return scope_blocked(sc) if sc.blocked
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        engine, origin, goal, loc = build_sequence_job(h, ob)
+        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
+        return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "sq_#{@job_seq}"
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
@@ -132,13 +133,15 @@ module Gori
       end
 
       # Build a ready-to-run collection engine + its origin + goal + token location.
-      private def build_sequence_job(h) : {Sequencer::Engine, Fuzz::Origin, Int32, Sequencer::TokenLoc}
+      private def build_sequence_job(h, ob : Outbound) : {Sequencer::Engine, Fuzz::Origin, Int32, Sequencer::TokenLoc}
         bytes, default_target, src_h2 = mine_request_source(h)
         use_h2 = (bool(h, "http2") || false) || src_h2
         origin = fuzz_origin(h, default_target)
         loc = sequence_token_loc(h)
         goal = clamp(int(h, "count"), 500, SEQUENCE_MAX_GOAL)
-        sender = Fuzz::Sender.new(origin, http2: use_h2,
+        # The sender carries the Outbound decision, so Sandbox / EXCLUDE now hard-block a
+        # collection run per send — sequence_start used to have only the job-start check.
+        sender = Fuzz::Sender.new(origin, ob, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
           overrides: HostOverrides.load(store))
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay, token_loc: loc, goal: goal,

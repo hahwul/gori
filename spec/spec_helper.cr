@@ -15,3 +15,13 @@ ENV["GORI_HOME"] = GORI_TEST_HOME
 require "../src/gori"
 
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
+
+# The scope decision for a spec that is exercising something OTHER than the scope gate
+# (payload generation, host overrides, engine plumbing). `Gori::Outbound` is a required
+# constructor argument on every active sender — that is the whole point of the seam — so
+# specs need an explicit "no project, nothing to gate against" decision rather than a nil.
+# Specs that DO exercise the gate build a real Outbound over a real Scope; see
+# spec/outbound_spec.cr.
+def ungated_outbound : Gori::Outbound
+  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
+end

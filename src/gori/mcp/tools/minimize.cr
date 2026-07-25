@@ -16,7 +16,8 @@ module Gori
       # `Repeater::Minimize` engine as the TUI's Space→M and `gori run repeater minimize`.
       #
       # ACTIVE: sends many real outbound requests, so it is write-gated AND scope-gated
-      # (Fuzz::ScopedBackend hard-blocks a Sandbox/exclude at the socket seam).
+      # (the Gori::Outbound decision its Fuzz::Sender carries hard-blocks a Sandbox/exclude
+      # at the socket seam).
       private def minimize_repeater(h) : Result
         id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless id
@@ -24,8 +25,8 @@ module Gori
         return not_found("no repeater with id #{id}") unless rec
 
         text = String.new(rec.request)
-        scope = Scope.load(store)
-        target = minimize_target(id, rec, text, scope, bool(h, "allow_unscoped") || false)
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        target = minimize_target(id, rec, text, ob)
         return target if target.is_a?(Result)
         scheme, host, port = target
 
@@ -36,12 +37,10 @@ module Gori
           raw = Env.expand_wire(t)
           auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
         end
-        backend = Fuzz::ScopedBackend.new(
-          Fuzz::CappedBackend.new(
-            Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), rec.http2?,
-              @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
-            Repeater::Minimize::SEND_CAP),
-          scope)
+        backend = Fuzz::CappedBackend.new(
+          Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, rec.http2?,
+            @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
+          Repeater::Minimize::SEND_CAP)
 
         report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }
 
@@ -75,7 +74,7 @@ module Gori
       # The validated {scheme, host, port} to minimize against, or a refusal Result. Split out
       # of minimize_repeater to keep it under the cyclomatic-complexity bar.
       private def minimize_target(id : Int64, rec : Store::RepeaterRecord, text : String,
-                                  scope : Scope, allow_unscoped : Bool) : {String, String, Int32} | Result
+                                  ob : Outbound) : {String, String, Int32} | Result
         if Repeater::WsEngine.upgrade_request?(text)
           return err("repeater #{id} is a WebSocket upgrade — minimize works on plain HTTP requests",
             "INVALID_ARGUMENT", field: "repeater_id")
@@ -93,29 +92,27 @@ module Gori
         unless scheme.in?("http", "https")
           return err("unsupported target scheme '#{scheme}' (use http or https)", "INVALID_ARGUMENT", field: "repeater_id")
         end
-        if gate = scope_refusal(scope, scheme, host, text, allow_unscoped)
+        if gate = scope_refusal(ob, scheme, host, text)
           return gate
         end
         {scheme, host, port}
       end
 
-      # The same two-layer gate the other active tools use: refuse up front when the target
-      # is outside — or has no — configured scope, unless the caller opted out. Layer 2
-      # (ScopedBackend) still hard-blocks a Sandbox/exclude even under allow_unscoped.
-      private def scope_refusal(scope : Scope, scheme : String, host : String,
-                                text : String, allow_unscoped : Bool) : Result?
-        url = Scope.request_url(scheme, host, request_target(text.to_slice))
-        if scope.sandbox? && scope.sandbox_blocks?(url, host)
-          return err("blocked by sandbox (out of scope) — minimize refuses to send", "SCOPE_BLOCKED",
+      # The same two-layer gate the other active tools use, now expressed through the one
+      # seam: Layer 2 (Sandbox) first — it is a hard containment gate allow_unscoped does
+      # NOT lift — then Layer 1's allowlist, which allow_unscoped does. Layer 2 is applied
+      # again per send inside Fuzz::Sender; this only lets minimize refuse with a precise
+      # message before it starts.
+      private def scope_refusal(ob : Outbound, scheme : String, host : String, text : String) : Result?
+        target = Outbound.request_target(text)
+        if reason = ob.send_block(scheme, host, target)
+          return err("#{reason} — minimize refuses to send", "SCOPE_BLOCKED",
             field: "repeater_id", details: JSON.parse({"scope_decision" => "sandbox"}.to_json))
         end
-        return nil if allow_unscoped
-        unless scope.matches_url?(url, host)
-          return err("#{host} is outside — or without — a configured scope; pass allow_unscoped:true to minimize anyway",
-            "SCOPE_BLOCKED", field: "repeater_id",
-            details: JSON.parse({"scope_decision" => "unscoped", "host" => host}.to_json))
-        end
-        nil
+        return nil unless ob.check_request(scheme, host, target).blocked?
+        err("#{host} is outside — or without — a configured scope; pass allow_unscoped:true to minimize anyway",
+          "SCOPE_BLOCKED", field: "repeater_id",
+          details: JSON.parse({"scope_decision" => "unscoped", "host" => host}.to_json))
       end
     end
   end

@@ -90,17 +90,20 @@ module Gori
         config.timeout = timeout
         config.retries = retries
         config.max_requests = max_requests
-        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
-          http2: http2, verify: !insecure, sni: sni, timeout: timeout,
-          overrides: cli_host_overrides(project_name, db_path, flow_id))
-        # Scope gate — see cmd_fuzz / cli_scope: refuse an out-of-scope host unless
+        # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send. (The
         # --tokens path returned above without touching the network, so it needs none.)
-        scope = cli_scope(project_name, db_path, flow_id)
-        guard_active_scope(scope, scheme, host, request_target(bytes), allow_unscoped, "gori run sequence")
-        backend = scope ? Fuzz::ScopedBackend.new(sender, scope) : sender
-        engine = Sequencer::Engine.new(bytes, http2, backend, config)
-        run_sequence_stream(engine, scheme, host, port, token_loc, count, format)
+        outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
+        guard_outbound(outbound, scheme, host, Gori::Outbound.request_target(bytes), "gori run sequence")
+        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
+          http2: http2, verify: !insecure, sni: sni, timeout: timeout,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
+        engine = Sequencer::Engine.new(bytes, http2, sender, config)
+        begin
+          run_sequence_stream(engine, scheme, host, port, token_loc, count, format)
+        ensure
+          outbound.close
+        end
       end
 
       private def self.read_token_list(file : String) : Array(String)

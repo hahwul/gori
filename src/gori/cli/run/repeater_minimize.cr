@@ -35,15 +35,16 @@ module Gori
         id = id_s.to_i64? || abort("gori run repeater minimize: invalid repeater id #{id_s.inspect}")
 
         store = open_store(resolve_read_project(project_name, db_path))
-        rec, scope = begin
-          {store.get_repeater(id), Gori::Scope.load(store)}
+        rec = begin
+          store.get_repeater(id)
         ensure
           store.close
         end
         abort "gori run repeater minimize: no repeater session ##{id}" unless rec
+        outbound = project_outbound(project_name, db_path, false)
 
         text = String.new(rec.request)
-        scheme, host, port = minimize_target_or_abort(id, rec, text, scope)
+        scheme, host, port = minimize_target_or_abort(id, rec, text, outbound)
         auto_cl = rec.auto_content_length?
         # Mirrors the TUI's resolve: env-expand, then Content-Length resync only when the
         # session has Auto-CL on (the same gate that lets body params be removed at all).
@@ -51,14 +52,12 @@ module Gori
           raw = Env.expand_wire(t)
           auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
         end
-        # ScopedBackend is the hard gate a Sandbox/exclude rule enforces at the socket seam;
+        # Fuzz::Sender applies the Outbound gate (Sandbox / exclude) at the socket seam;
         # CappedBackend bounds total sends. Same stack the TUI builds.
-        backend = Fuzz::ScopedBackend.new(
-          Fuzz::CappedBackend.new(
-            Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), rec.http2?,
-              !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
-            Repeater::Minimize::SEND_CAP),
-          scope)
+        backend = Fuzz::CappedBackend.new(
+          Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
+            !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
+          Repeater::Minimize::SEND_CAP)
 
         meter = STDERR.tty?
         report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) do |progress|
@@ -68,6 +67,7 @@ module Gori
           end
         end
         STDERR.print "\r\e[K" if meter
+        outbound.close
 
         if apply && !report.aborted && !report.removed.empty?
           w = open_store(resolve_read_project(project_name, db_path))
@@ -85,7 +85,7 @@ module Gori
       # The validated {scheme, host, port} to minimize against, or an abort. Split out of
       # cmd_repeater_minimize to keep it under the cyclomatic-complexity bar.
       private def self.minimize_target_or_abort(id : Int64, rec : Store::RepeaterRecord,
-                                                text : String, scope : Gori::Scope) : {String, String, Int32}
+                                                text : String, outbound : Gori::Outbound) : {String, String, Int32}
         if Repeater::WsEngine.upgrade_request?(text)
           abort "gori run repeater minimize: session ##{id} is a WebSocket upgrade — minimize works on plain HTTP requests"
         end
@@ -100,7 +100,9 @@ module Gori
         scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
         abort "gori run repeater minimize: could not determine a target host for session ##{id}" if host.empty?
         abort "gori run repeater minimize: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        abort_if_sandboxed!(scope, scheme, host, request_target(text.to_slice), "gori run repeater minimize")
+        if reason = outbound.send_block(scheme, host, Gori::Outbound.request_target(text))
+          abort "gori run repeater minimize: #{reason}"
+        end
         {scheme, host, port}
       end
 

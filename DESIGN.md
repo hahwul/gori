@@ -232,8 +232,28 @@ hot path; SQL-side and in-memory evaluation are deliberately kept in parity so a
 live gate can never disagree.
 
 Active traffic (repeater, fuzz, mine, sequence, discover, active probe) is gated on the same
-rule set, but that gate is currently enforced at each call site rather than at one chokepoint,
-and the three surfaces do not agree on when the snapshot is reloaded mid-run. See issue #354.
+rule set, through one chokepoint: `Gori::Outbound` (`src/gori/outbound.cr`). The active senders
+`Fuzz::Sender` and `Repeater::Sender` take it as a **constructor argument**, so an ungated
+sender does not compile (P5). It carries two layers:
+
+- **Layer 1**, up front and once: the include/allowlist decision. Its strictness is the only
+  thing that legitimately varies per surface, and the variants are named rather than
+  re-derived at each call site: `Outbound.agent` (MCP, refusing anything not included,
+  including an unconfigured project), `Outbound.cli` (`gori run`, where an unconfigured
+  project stays permissive), `Outbound.interactive` (TUI, no up-front gate because the
+  operator typed the target).
+- **Layer 2**, per send: Sandbox mode always, plus explicit EXCLUDE rules for an automated
+  sweep. Identical on every surface, and applied even when Layer 1 was waived.
+
+Both layers judge the URL anchored on the host actually being **dialled**, not the one in the
+request line (`Outbound.scope_url`). A raw request may deliberately carry an absolute-form
+request line pointing somewhere else, which is a legitimate Host-header, cache-poisoning, or
+SSRF test and still goes out verbatim (P7); scoping on that spoofed host would let an anchored
+include rule authorise a send to a different origin.
+
+Waiving Layer 1 is only reachable through `--allow-unscoped` / `allow_unscoped:true`, or a
+genuinely absent project. Either way the result is a named `Unscoped(reason)` that shows up in
+the audit line, never a nil that silently skips the gate.
 
 <a id="s4"></a>
 
@@ -322,6 +342,36 @@ Refines: none. Issue #353.
 47 files with no definition anywhere. Restored from `ae7674a^` and re-verified against the
 tree, with the numbering kept as it was ([Numbering](#numbering)) and the layering contract in
 [§2.1](#s2-1) written as a runnable check rather than a claim.
+
+### 2026-07-25: one reload semantic for the active-traffic scope gate
+
+Refines: [P5](#p5). Issue #354.
+
+The scope gate on active traffic was enforced at roughly twenty call sites across three
+surfaces, and the three disagreed on when a running job re-read the rules. MCP re-read them on
+a throttled interval; `gori run` snapshotted at start-up and closed the store, so it could not
+re-read at all; the TUI re-read only as a side effect of its own `data_version` poll. The
+practical result was that a mid-run EXCLUDE or Sandbox toggle stopped an MCP sweep, was
+invisible to a CLI sweep, and stopped a TUI sweep by accident rather than by design.
+
+`Gori::Outbound` now owns the reload for every surface: before each Layer-2 check it re-reads
+the scope from its store, throttled to `Outbound::RELOAD_INTERVAL` (1s). A per-send DB read is
+too heavy at high concurrency, and the clock is advanced *before* the blocking reload so
+concurrent worker fibers cannot stampede the store. A failed reload is swallowed and the
+last-known rules stay in force, degrading to the old snapshot behaviour rather than to
+allow-everything.
+
+MCP's semantic won because it is the only one that honours a policy change the operator makes
+*while* a sweep is running, which is exactly when they most need it to stop. Adopting it on the
+CLI meant the read connection now lives as long as the run (`Outbound#close` releases it)
+rather than being closed immediately after the snapshot.
+
+The gate is Store-mediated rather than pushed: nothing notifies a running job of a rule change,
+the job pulls the current rules on its own schedule ([P8](#p8)). One consequence is worth
+stating, because it is a deliberate tradeoff and not an oversight: a rule written at T is
+honoured somewhere in `[T, T + RELOAD_INTERVAL]`, not at T, and sends inside that window use
+the previous decision. Making it exact would need a per-send read on the hot path, which
+[P6](#p6) rules out.
 
 ---
 

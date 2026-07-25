@@ -62,7 +62,7 @@ describe "Repeater engines honor project host overrides (R2-1)" do
         ov = Gori::HostOverrides.load(store)
         ov.add("nonexistent.invalid", "127.0.0.1").should be_true
         origin = Gori::Fuzz::Origin.new("http", "nonexistent.invalid", port)
-        sender = Gori::Fuzz::Sender.new(origin, http2: false, verify: false, timeout: 2.seconds, overrides: ov)
+        sender = Gori::Fuzz::Sender.new(origin, ungated_outbound, http2: false, verify: false, timeout: 2.seconds, overrides: ov)
         result = sender.send("GET / HTTP/1.1\r\nHost: nonexistent.invalid\r\nConnection: close\r\n\r\n".to_slice)
         result.ok?.should be_true
         result.response.not_nil!.status.should eq(204)

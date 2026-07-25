@@ -14,7 +14,8 @@ module Gori
       # PASSIVE by default (zero outbound requests): scans captured History flows (optional
       # QL filter) + Repeater tabs and returns grouped issues. active:true also runs the
       # light-touch active checks that SEND requests — gated on write access AND project scope
-      # (same two-layer model as the CLI/TUI: an include-filter per flow + Fuzz::ScopedBackend).
+      # (the same two-layer `Gori::Outbound` model as the CLI/TUI: an allowlist filter per flow
+      # + a per-send Sandbox/exclude hard block inside the sender).
       private def probe_scan(h) : Result
         filter = probe_scan_filter(h)
         return filter if filter.is_a?(Result)
@@ -346,15 +347,16 @@ module Gori
 
       # Resolve the scope for an active scan: {scope, scope_configured}. Passive → {nil, false}.
       # Refuses (Result) an active run without write access, or with no configured scope unless
-      # allow_unscoped — every captured host would otherwise be probed.
+      # allow_unscoped — every captured host would otherwise be probed. Probe::Scan turns the
+      # returned scope into the `Gori::Outbound` decision its senders dial through.
       private def probe_active_gate(active : Bool, allow_unscoped : Bool) : {Scope?, Bool} | Result
         return {nil, false} unless active
         return err("active probe scan is disabled (gori mcp --read-only); pass active:false for a passive scan", "TOOL_DISABLED") unless @allow_actions
         scope = Scope.load(store)
-        # Layer-1 (matches_url?) sends an active probe only to a scope-INCLUDED flow, so with
-        # zero include rules every flow is gated out and active mode would run nothing. Refuse
-        # up front (mirrors `gori run probe`'s include-count check) — an excludes-only scope
-        # counts as "no includes" here, not as a configured allowlist.
+        # Layer-1 (the Outbound ALLOWLIST gate) sends an active probe only to a scope-INCLUDED
+        # flow, so with zero include rules every flow is gated out and active mode would run
+        # nothing. Refuse up front (mirrors `gori run probe`'s include-count check) — an
+        # excludes-only scope counts as "no includes" here, not as a configured allowlist.
         if scope.include_count == 0 && !allow_unscoped
           return err("active probe scan needs a scope INCLUDE rule (or allow_unscoped:true); with no include rule every active probe is gated out, so outbound requests are refused by default",
             "SCOPE_BLOCKED", field: "active", details: JSON.parse({"scope_decision" => "unscoped"}.to_json))

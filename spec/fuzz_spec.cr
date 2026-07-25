@@ -647,7 +647,7 @@ describe F::Engine do
     set = F::PayloadSet.new(F::InlineList.new(["one", "two"]))
     cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 2)
     gen = F::Generator.new(tmpl, [set], cfg)
-    backend = F::Sender.new(F::Origin.new("http", "127.0.0.1", port), http2: false, verify: false)
+    backend = F::Sender.new(F::Origin.new("http", "127.0.0.1", port), ungated_outbound, http2: false, verify: false)
     engine = F::Engine.new(gen, F::Matcher.new, backend, cfg)
     results, _ = drain(engine)
 
@@ -677,34 +677,25 @@ describe Gori::CLI::Output do
   end
 end
 
-describe F::ScopedBackend do
-  # A mid-run EXCLUDE written to the store must take effect via the throttled reload,
-  # not stay a start-time snapshot (R2-9). reload_every: 0 → re-read on every send, so
-  # the change is observed deterministically without a wall-clock wait.
-  it "honours a mid-run EXCLUDE via a throttled reload" do
-    path = File.tempname("gori-fuzz-scope", ".db")
+describe F::GatedBackend do
+  # An injected backend (the Probe-Active spec path) must be gated too — the Outbound
+  # decision is the same one Fuzz::Sender applies to itself, so the two can't drift.
+  it "hard-blocks an EXCLUDEd target without touching the inner backend" do
+    path = File.tempname("gori-fuzz-gated", ".db")
     store = Gori::Store.open(path)
     begin
       scope = Gori::Scope.load(store)
+      scope.add("exclude", "host", "target.test")
       calls = 0
       inner = FakeBackend.new(F::Origin.new("http", "target.test", 80)) do |_b|
         calls += 1
         ok_result(200, "ok")
       end
-      backend = F::ScopedBackend.new(inner, scope, reload_every: Time::Span.zero)
+      backend = F::GatedBackend.new(inner, Gori::Outbound.interactive(scope))
       req = "GET / HTTP/1.1\r\nHost: target.test\r\n\r\n".to_slice
 
-      # No rules yet → allowed, reaches the inner backend.
-      backend.send(req).error.should be_nil
-      calls.should eq(1)
-      backend.blocked.should eq(0_i64)
-
-      # Operator carves the host out mid-run (writes to the SAME db).
-      store.add_scope_rule("exclude", "host", "target.test")
-
-      # Next send reloads and now blocks WITHOUT touching the inner backend.
-      backend.send(req).error.should eq(F::ScopedBackend::SCOPE_ERROR)
-      calls.should eq(1)
+      backend.send(req).error.should eq(Gori::Outbound::SCOPE_ERROR)
+      calls.should eq(0)
       backend.blocked.should eq(1_i64)
     ensure
       store.close
@@ -714,8 +705,12 @@ describe F::ScopedBackend do
     end
   end
 
-  it "keeps a start-time snapshot when no reload interval is given" do
-    path = File.tempname("gori-fuzz-scope-snap", ".db")
+  # The reload is THROTTLED to Outbound::RELOAD_INTERVAL, so a rule written moments after
+  # the decision was built is not yet visible. (That the change IS picked up once the
+  # window elapses is asserted in spec/outbound_spec.cr, which pays the wall-clock wait
+  # once for all three surfaces.)
+  it "keeps the last-known decision inside the reload window" do
+    path = File.tempname("gori-fuzz-gated-window", ".db")
     store = Gori::Store.open(path)
     begin
       scope = Gori::Scope.load(store)
@@ -724,12 +719,12 @@ describe F::ScopedBackend do
         calls += 1
         ok_result(200, "ok")
       end
-      backend = F::ScopedBackend.new(inner, scope) # reload_every defaults to nil
+      backend = F::GatedBackend.new(inner, Gori::Outbound.interactive(scope))
       req = "GET / HTTP/1.1\r\nHost: target.test\r\n\r\n".to_slice
 
       backend.send(req).error.should be_nil
       store.add_scope_rule("exclude", "host", "target.test")
-      backend.send(req).error.should be_nil # snapshot: exclude not seen
+      backend.send(req).error.should be_nil # inside the throttle window: not yet reloaded
       calls.should eq(2)
       backend.blocked.should eq(0_i64)
     ensure

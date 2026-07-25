@@ -197,30 +197,14 @@ module Gori
         end
       end
 
-      # Sandbox gate for `gori run repeater`'s direct sends — mirrors
-      # repeater_controller.cr#sandbox_block_reason (TUI) and `Fuzz::ScopedBackend`
-      # (Fuzzer/Miner): Sandbox mode's "blocks ALL out-of-scope traffic" promise didn't
-      # hold for the CLI repeater path either, since it dials Repeater::Engine/H2Engine/
-      # WsEngine directly. Returns the block reason, or nil when the send may proceed.
-      private def self.sandbox_block_reason(scope : Gori::Scope, scheme : String, host : String, target : String) : String?
-        return nil unless scope.sandbox?
-        return nil unless scope.sandbox_blocks?(Gori::Scope.request_url(scheme, host, target), host)
-        "blocked by sandbox (out of scope)"
-      end
-
-      # `abort`s with a uniform message when the Sandbox gate refuses `target` — a one-line
-      # call at each send site so the branch lives here, not in the (already-complex)
-      # command handlers.
-      private def self.abort_if_sandboxed!(scope : Gori::Scope, scheme : String, host : String, target : String, prefix : String) : Nil
-        return unless reason = sandbox_block_reason(scope, scheme, host, target)
+      # `abort`s with a uniform message when the Outbound gate refuses this request — a
+      # one-line call at each send site so the branch lives here, not in the (already
+      # complex) command handlers. `Repeater::Sender#send` re-checks internally, so a
+      # missed call here still cannot put bytes on the wire; this exists only so the CLI
+      # can refuse with its own message before printing anything.
+      private def self.abort_if_blocked!(sender : Repeater::Sender, bytes : Bytes, prefix : String) : Nil
+        return unless reason = sender.refusal(bytes)
         abort "#{prefix}: #{reason}"
-      end
-
-      # The request-target (path) from a raw request's first line — mirrors
-      # fuzz/engine.cr#request_target / mcp/tools/send.cr#request_target.
-      private def self.request_target(bytes : Bytes) : String
-        line = String.new(bytes).each_line.first? || ""
-        line.split(' ')[1]? || "/"
       end
 
       # Resolved send parameters for a saved Repeater SESSION replay — the session
@@ -292,15 +276,19 @@ module Gori
         # get_repeater_full loads the response BLOBs too (needed for --diff), so the
         # store can close before the send — same lifetime pattern as the flow path.
         store = open_store(resolve_read_project(project_name, db_path))
-        rec, host_overrides, scope = begin
-          {store.get_repeater_full(id), Gori::HostOverrides.load(store), Gori::Scope.load(store)}
+        rec, host_overrides = begin
+          {store.get_repeater_full(id), Gori::HostOverrides.load(store)}
         ensure
           store.close
         end
         abort "gori run repeater send: no repeater session ##{id}" unless rec
+        # The scope decision every active send passes through. `gori run repeater` dials
+        # Repeater::Engine/H2Engine/WsEngine directly, bypassing the proxy's own gate, so
+        # Sandbox mode's "blocks ALL out-of-scope traffic" promise lives here.
+        outbound = project_outbound(project_name, db_path, false)
 
         if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
-          cmd_repeater_send_ws(id, rec, project_name, db_path, insecure, idle_ms, ws_messages, host_overrides, scope, format)
+          cmd_repeater_send_ws(id, rec, project_name, db_path, insecure, idle_ms, ws_messages, host_overrides, outbound, format)
           return
         end
 
@@ -308,13 +296,11 @@ module Gori
         abort "gori run repeater send: could not determine a target host for session ##{id}" if send.host.empty?
         abort "gori run repeater send: unsupported target scheme #{send.scheme.inspect} (use http:// or https://)" unless send.scheme.in?("http", "https")
 
-        # Same Sandbox gate `Fuzz::ScopedBackend` applies to Fuzz/Miner and the TUI Repeater
-        # applies (repeater_controller.cr#sandbox_block_reason) — `gori run repeater send`
-        # dials Repeater::Engine/H2Engine directly too, so it needs the same gate.
-        abort_if_sandboxed!(scope, send.scheme, send.host, request_target(send.bytes), "gori run repeater send")
-
-        verify = !insecure
-        result = send.http2 ? Repeater::H2Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni, overrides: host_overrides) : Repeater::Engine.send(send.bytes, scheme: send.scheme, host: send.host, port: send.port, verify_upstream: verify, sni: send.sni, overrides: host_overrides)
+        sender = Repeater::Sender.new(outbound, scheme: send.scheme, host: send.host, port: send.port,
+          http2: send.http2, verify: !insecure, sni: send.sni, overrides: host_overrides)
+        abort_if_blocked!(sender, send.bytes, "gori run repeater send")
+        result = sender.send(send.bytes)
+        outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
         diff =
@@ -334,12 +320,16 @@ module Gori
       private def self.cmd_repeater_send_ws(id : Int64, rec : Store::RepeaterRecord, project_name : String?,
                                             db_path : String?, insecure : Bool, idle_ms : Int64?,
                                             message_override : Array(String), host_overrides : Gori::HostOverrides,
-                                            scope : Gori::Scope, format : Symbol) : Nil
+                                            outbound : Gori::Outbound, format : Symbol) : Nil
         target = Env.expand(rec.target)
         scheme, host, port = Repeater::FlowRequest.parse_target(target)
         abort "gori run repeater send: could not determine a target host for session ##{id}" if host.empty?
 
-        abort_if_sandboxed!(scope, scheme, host, request_target(Env.expand_wire(String.new(rec.request)).to_slice), "gori run repeater send")
+        request = Env.expand_wire(String.new(rec.request))
+        sni = rec.sni.try { |v| Env.expand(v) }
+        sender = Repeater::Sender.new(outbound, scheme: scheme, host: host, port: port,
+          verify: !insecure, sni: sni, overrides: host_overrides)
+        abort_if_blocked!(sender, request, "gori run repeater send")
 
         # host_overrides was already loaded by the caller (cmd_repeater_send) from the
         # same store open that fetched `rec` — reuse it instead of a second table scan.
@@ -351,11 +341,8 @@ module Gori
         end
 
         idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
-        verify = !insecure
-        request = Env.expand_wire(String.new(rec.request))
-        sni = rec.sni.try { |v| Env.expand(v) }
-        result = Repeater::WsEngine.send(request, out_messages, scheme: scheme, host: host, port: port,
-          verify_upstream: verify, sni: sni, idle: idle, overrides: host_overrides)
+        result = sender.send_ws(request, out_messages, idle)
+        outbound.close
 
         # Persist ONLY on success — parity with the TUI (repeater_controller#drain_results):
         # a later failed resend must not wipe a good stored handshake/response.
@@ -619,9 +606,9 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         # HostOverrides.load snapshots rows into memory (connect_ip never re-touches the
         # store), so it's safe to load here and use after the store closes.
-        detail, session_collision, host_overrides, scope = begin
+        detail, session_collision, host_overrides = begin
           d = store.get_flow(id)
-          {d, d ? !store.get_repeater(id).nil? : false, Gori::HostOverrides.load(store), Gori::Scope.load(store)}
+          {d, d ? !store.get_repeater(id).nil? : false, Gori::HostOverrides.load(store)}
         ensure
           store.close
         end
@@ -675,11 +662,13 @@ module Gori
         scheme, host, port = Repeater::FlowRequest.parse_target(target)
         abort "gori run repeater: could not determine a target host" if host.empty?
         abort "gori run repeater: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        abort_if_sandboxed!(scope, scheme, host, request_target(bytes), "gori run repeater")
-        use_h2 = force_h2 || built.http2
-        verify = !insecure
-        sni_val = sni_override.presence || built.sni
-        result = use_h2 ? Repeater::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val, overrides: host_overrides) : Repeater::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val, overrides: host_overrides)
+        outbound = project_outbound(project_name, db_path, false)
+        sender = Repeater::Sender.new(outbound,
+          scheme: scheme, host: host, port: port, http2: force_h2 || built.http2,
+          verify: !insecure, sni: sni_override.presence || built.sni, overrides: host_overrides)
+        abort_if_blocked!(sender, bytes, "gori run repeater")
+        result = sender.send(bytes)
+        outbound.close
 
         # Decode the response body once for TEXT display (--diff / plain print); only
         # build the diff lines when --diff asked for them (decoding the captured

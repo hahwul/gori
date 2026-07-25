@@ -13,8 +13,8 @@ module Gori
         engine, seed_url, host = build_discover_job(h)
         p = Discover::Url.parse(seed_url)
         chk_url = p ? "#{Discover::Url.origin(p)}/" : seed_url
-        sc = scope_check(chk_url, host, bool(h, "allow_unscoped") || false)
-        return scope_blocked(sc) if sc.blocked
+        sc = outbound(bool(h, "allow_unscoped") || false).check(chk_url, host)
+        return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "ds_#{@job_seq}"
         audit = JobAudit.new(seed_url, int(h, "rate").try(&.to_f64),

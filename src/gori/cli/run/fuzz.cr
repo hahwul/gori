@@ -105,21 +105,24 @@ module Gori
           retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal, keep_bodies: :none)
         gen_sets = mode.per_position? ? sets : [sets.first]
         generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
-        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
+        # Gate outbound traffic through the ONE seam every surface shares (Gori::Outbound):
+        # the up-front check refuses an out-of-scope host unless --allow-unscoped, and the
+        # sender enforces Sandbox mode + explicit exclude rules on EVERY send regardless of
+        # that flag. No project (--request/stdin) is an explicit Unscoped(NoProject), not a
+        # silently skipped gate.
+        outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
+        guard_outbound(outbound, scheme, host, Gori::Outbound.request_target(text.to_slice), "gori run fuzz")
+        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
           http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
-        # Gate outbound traffic through the project scope, like the TUI/MCP fuzzer and
-        # `gori run discover`/`repeater` (a snapshot Scope, so no store stays open): the
-        # up-front check refuses an out-of-scope host unless --allow-unscoped, and
-        # ScopedBackend enforces Sandbox mode + explicit exclude rules on every send
-        # regardless of that flag. No scope (or --request/stdin with no project) → no gate.
-        scope = cli_scope(project_name, db_path, flow_id)
-        guard_active_scope(scope, scheme, host, request_target(text.to_slice), allow_unscoped, "gori run fuzz")
-        backend = scope ? Fuzz::ScopedBackend.new(sender, scope) : sender
-        engine = Fuzz::Engine.new(generator, matcher, backend, config)
+        engine = Fuzz::Engine.new(generator, matcher, sender, config)
         engine.calibrate_baseline if auto_cal
 
-        run_fuzz_stream(engine, mode, scheme, host, port, format, force, fail_if_no_matches)
+        begin
+          run_fuzz_stream(engine, mode, scheme, host, port, format, force, fail_if_no_matches)
+        ensure
+          outbound.close
+        end
       end
 
       # {template text, default target (nil for file/stdin), http2} from the chosen source.

@@ -1,6 +1,7 @@
 require "uri"
 require "../repeater/engine"
 require "../repeater/h2_engine"
+require "../outbound"
 require "../scope"
 
 module Gori::Fuzz
@@ -16,15 +17,32 @@ module Gori::Fuzz
 
   # Production backend over the Repeater engines (fresh connection per send — there is
   # no upstream pool; worker count == max simultaneous connections).
+  #
+  # The `Gori::Outbound` decision is a REQUIRED constructor argument, not a wrapper the
+  # caller may forget: this is the one sender every automated sweep on every surface
+  # (Fuzzer, Miner, Sequencer, Repeater minimize, Probe active — TUI, `gori run`, MCP)
+  # dials through, so requiring it here is what makes "no active request leaves gori
+  # without a scope decision" a compile-time property instead of a convention. It
+  # replaces the old opt-in `ScopedBackend` wrapper, whose absence was invisible.
   class Sender < Backend
     getter origin : Origin
+    # Sends refused by the scope gate — never put on the wire.
+    getter blocked : Int64 = 0_i64
 
-    def initialize(@origin : Origin, @http2 : Bool, @verify : Bool,
+    def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil)
     end
 
     def send(bytes : Bytes) : Repeater::Result
+      # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
+      # blocked attempt never reaches the network. It still costs a request from the
+      # engine's budget, exactly as CappedBackend already charges retries and redirect
+      # hops — one accounting path, not two.
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes))
+        @blocked += 1
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
+      end
       if @http2
         Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
           port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
@@ -64,33 +82,14 @@ module Gori::Fuzz
     end
   end
 
-  # Refuses to send when the target falls outside the project's Scope (a sandbox
-  # block or an explicit exclude rule) — the same per-request gate Discover applies
-  # via `bounded_url` (discover/adapters.cr). Fuzz and Miner otherwise dial a
-  # Backend directly with no Scope awareness, so Sandbox mode's "blocks ALL
-  # out-of-scope traffic" promise didn't hold for either tool. Wrap OUTERMOST
-  # (around CappedBackend) so a blocked attempt never reaches the network — the
-  # request budget is still spent on it, same as CappedBackend already does for
-  # retries/redirects, rather than adding a second accounting path.
-  class ScopedBackend < Backend
-    SCOPE_ERROR = "blocked by scope"
-    # A running job's Scope would otherwise be a start-time snapshot: an operator's
-    # mid-run EXCLUDE (or Sandbox toggle) would never be seen. When a reload interval
-    # is given, re-read the rules from the Scope's own store at most once per interval
-    # — a per-send DB read is too heavy at high concurrency, so it is time-throttled.
-    # nil ⇒ snapshot (no reload): the caller already holds a Scope something else
-    # refreshes (the TUI's data_version poll reloads @session.scope in place), so only
-    # the MCP tools — which build a private, unshared Scope.load(store) — opt in.
-    RELOAD_INTERVAL = 1.second
-
+  # Applies the `Gori::Outbound` gate to a backend the caller INJECTED (Probe Active lets
+  # a scan drive the rules through a supplied Backend). `Sender` gates itself, so this is
+  # only for the non-Sender case — it is never stacked on one, and both use the same
+  # `Outbound#sweep_block` decision, so the gate can't drift between the two paths.
+  class GatedBackend < Backend
     getter blocked : Int64 = 0_i64
 
-    @last_reload : Time::Instant
-
-    def initialize(@inner : Backend, @scope : Gori::Scope, @reload_every : Time::Span? = nil)
-      # Seed the throttle clock now — the Scope was just loaded, so the first reload is
-      # due one interval into the run, not on the first send.
-      @last_reload = Time.instant
+    def initialize(@inner : Backend, @outbound : Gori::Outbound)
     end
 
     def origin : Origin
@@ -98,39 +97,12 @@ module Gori::Fuzz
     end
 
     def send(bytes : Bytes) : Repeater::Result
-      refresh_scope
       o = origin
-      url = "#{o.scheme}://#{o.host}#{request_target(bytes)}"
-      if @scope.sandbox_blocks?(url, o.host) || @scope.excluded?(url, o.host)
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes))
         @blocked += 1
-        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_ERROR)
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
       @inner.send(bytes)
-    end
-
-    # Throttled in-place reload of the Scope from its store, so a mid-run rule / Sandbox
-    # change is honoured within ~@reload_every. No-op when @reload_every is nil. Advances
-    # the clock BEFORE the (blocking) reload so a burst of concurrent worker fibers can't
-    # stampede the store — exactly one reload fires per window (single-thread fiber
-    # scheduler: the check→set is a non-yielding critical section). A failed reload is
-    # swallowed: the last-known scope stays in force rather than breaking the run.
-    private def refresh_scope : Nil
-      every = @reload_every
-      return unless every
-      now = Time.instant
-      return if now - @last_reload < every
-      @last_reload = now
-      @scope.reload
-    rescue
-      # keep the last-known scope on a reload failure
-    end
-
-    # The request-target (path) from the first line of a raw request, mirroring
-    # mcp/tools/send.cr#request_target — builds the scheme://host/target URL the
-    # scope string/regex rules match against.
-    private def request_target(bytes : Bytes) : String
-      line = String.new(bytes).each_line.first? || ""
-      line.split(' ')[1]? || "/"
     end
   end
 

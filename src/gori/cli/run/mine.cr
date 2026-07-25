@@ -84,16 +84,19 @@ module Gori
         rescue ex
           abort "gori run mine: wordlist error: #{ex.message}"
         end
-        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
+        # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
+        # --allow-unscoped, and enforce Sandbox + exclude rules on every send.
+        outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
+        guard_outbound(outbound, scheme, host, Gori::Outbound.request_target(bytes), "gori run mine")
+        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
           http2: http2, verify: !insecure, sni: sni, timeout: timeout,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
-        # Scope gate — see cmd_fuzz / cli_scope: refuse an out-of-scope host unless
-        # --allow-unscoped, and enforce Sandbox + exclude rules on every send.
-        scope = cli_scope(project_name, db_path, flow_id)
-        guard_active_scope(scope, scheme, host, request_target(bytes), allow_unscoped, "gori run mine")
-        backend = scope ? Fuzz::ScopedBackend.new(sender, scope) : sender
-        engine = Miner::Engine.new(bytes, http2, names, backend, config)
-        run_mine_stream(engine, scheme, host, port, config, format)
+        engine = Miner::Engine.new(bytes, http2, names, sender, config)
+        begin
+          run_mine_stream(engine, scheme, host, port, config, format)
+        ensure
+          outbound.close
+        end
       end
 
       # {request bytes (byte-exact), default target, http2} from the chosen source.

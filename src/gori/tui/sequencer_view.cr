@@ -321,17 +321,24 @@ module Gori::Tui
     end
 
     # --- engine ---
-    def build_engine(verify : Bool) : {Sequencer::Engine?, String?}
+    # `scope` becomes the interactive `Gori::Outbound` decision every collected sample is
+    # dialled through. The Sequencer used to build a bare `Fuzz::Sender` with NO gate at
+    # all, so Sandbox mode did not contain it — the exact omission the Outbound seam makes
+    # impossible (the decision is now a constructor argument).
+    def build_engine(verify : Bool, scope : Gori::Scope) : {Sequencer::Engine?, String?}
+      outbound = Gori::Outbound.interactive(scope)
       if @config.mode.manual?
         return {nil, "no tokens to analyze — paste some first"} if @config.manual_tokens.all?(&.empty?)
-        dummy = Fuzz::Sender.new(Fuzz::Origin.new("http", "localhost", 80), http2: false, verify: false)
+        # Manual mode analyzes a pasted list and never sends, but the engine still wants a
+        # backend — gate it like any other so the type system has no ungated escape hatch.
+        dummy = Fuzz::Sender.new(Fuzz::Origin.new("http", "localhost", 80), outbound, http2: false, verify: false)
         return {Sequencer::Engine.new(Bytes.empty, false, dummy, @config), nil}
       end
       scheme, host, port = Repeater::FlowRequest.parse_target(@target)
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       loc = @config.token_loc
       return {nil, "set a token location first"} if loc.selector.strip.empty? && !loc.kind.position?
-      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
+      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
         http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
       {Sequencer::Engine.new(@request, @http2, sender, @config), nil}
     rescue ex

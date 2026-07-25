@@ -271,40 +271,57 @@ module Gori
         nil
       end
 
-      # Project Scope for a CLI direct-dial command (fuzz/mine/sequence) — the missing gate
-      # that let those three fire at any host regardless of scope/Sandbox, unlike the TUI,
-      # MCP, and `gori run discover`/`repeater` which all enforce it. Loaded on the same
-      # trigger as cli_host_overrides (a project is in play). A SNAPSHOT: Scope.load reads
-      # every rule into memory, so the store can close and the read-only sandbox/exclude/
-      # include checks still work — ScopedBackend gets reload_every: nil (a short CLI run
-      # needs no mid-run reload). nil for --request/stdin with no project (nothing to gate
-      # against). A scope that fails to load must NOT silently fail OPEN (unlike overrides'
+      # The `Gori::Outbound` decision for a CLI direct-dial command (fuzz/mine/sequence/
+      # repeater) — the one seam every active send on every surface passes through, and the
+      # gate whose absence once let those tools fire at any host regardless of scope/Sandbox.
+      # Loaded on the same trigger as cli_host_overrides (a project is in play).
+      #
+      # The read connection is handed to the Outbound rather than closed, so the rules keep
+      # RELOADING for the length of the run: a mid-run EXCLUDE or Sandbox toggle (from the
+      # TUI, or another `gori run project scope add`) stops an in-flight sweep, which the
+      # previous start-time snapshot could never do. The caller releases it with
+      # `outbound.close` once the command is done.
+      #
+      # With no project at all (--request/stdin), the result is an explicit
+      # Unscoped(NoProject): permissive exactly as before, but a NAMED state instead of the
+      # `scope ? ScopedBackend.new(sender, scope) : sender` nil that silently skipped the
+      # gate entirely. A scope that fails to load must NOT fail OPEN (unlike overrides'
       # rescue-to-nil): a raise here becomes a clean fail-CLOSED abort — never a raw
       # backtrace, never a silently-unscoped run. (open_store already aborts on a bad DB.)
-      private def self.cli_scope(project_name : String?, db_path : String?, flow_id : Int64?) : Gori::Scope?
-        return nil unless flow_id || project_name || db_path
+      private def self.optional_project_outbound(project_name : String?, db_path : String?, flow_id : Int64?,
+                                                 allow_unscoped : Bool) : Gori::Outbound
+        # ONLY fuzz/mine/sequence can genuinely run project-less (--request/stdin). Every
+        # other caller reads its subject (a repeater session, a flow) out of a project and
+        # must use project_outbound, or an omitted --project would silently drop the gate.
+        return Gori::Outbound.cli(nil, allow_unscoped) unless flow_id || project_name || db_path
+        project_outbound(project_name, db_path, allow_unscoped)
+      end
+
+      # The Outbound for a command that ALWAYS has a project in play — `gori run repeater`
+      # resolves the most-recently-active project when --project/--db are omitted, so the
+      # scope must be loaded from it either way (that default is exactly the case where
+      # short-circuiting on "no --project given" would drop Sandbox containment).
+      private def self.project_outbound(project_name : String?, db_path : String?,
+                                        allow_unscoped : Bool) : Gori::Outbound
         store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        scope = begin
           Gori::Scope.load(store)
         rescue ex
           store.close
           abort "gori run: could not load project scope (refusing to send unscoped): #{ex.message}"
-        ensure
-          store.close
         end
+        Gori::Outbound.cli(scope, allow_unscoped, owns_store: store)
       end
 
-      # Up-front include-scope gate for the CLI direct-dial tools (fuzz/mine/sequence),
-      # mirroring `guard_discover_scope`: when the project HAS a configured scope and the
-      # target is outside it, refuse unless --allow-unscoped. An unconfigured scope (or no
-      # project) does NOT block here — the same permissive default as `gori run discover`.
-      # This is only the soft include boundary; Sandbox mode + explicit exclude rules are
-      # still enforced per-request by Fuzz::ScopedBackend regardless of --allow-unscoped.
-      private def self.guard_active_scope(scope : Gori::Scope?, scheme : String, host : String,
-                                          target : String, allow_unscoped : Bool, cmd : String) : Nil
-        return if allow_unscoped
-        return unless (s = scope) && s.configured?
-        return if s.matches_url?(Gori::Scope.request_url(scheme, host, target), host)
+      # Up-front (Layer-1) scope gate for the CLI direct-dial tools, with the policy owned
+      # by the seam: an unconfigured project stays permissive, a configured one refuses an
+      # out-of-scope target unless --allow-unscoped. This is only the soft include boundary;
+      # Sandbox mode + explicit exclude rules are still enforced per-request by
+      # `Fuzz::Sender`/`Repeater::Sender` regardless of --allow-unscoped.
+      private def self.guard_outbound(outbound : Gori::Outbound, scheme : String, host : String,
+                                      target : String, cmd : String) : Nil
+        return unless outbound.check_request(scheme, host, target).blocked?
+        outbound.close
         abort "#{cmd}: #{host} is out of the project scope — add a scope include rule or pass --allow-unscoped"
       end
 

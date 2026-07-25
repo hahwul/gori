@@ -922,9 +922,10 @@ module Gori::Tui
     end
 
     # --- engine assembly -----------------------------------------------------
-    # Build an engine ready to run, or {nil, error}. `scope` gates every send
-    # against Sandbox/exclude rules (ScopedBackend) — the same protection
-    # Discover already applies per-request.
+    # Build an engine ready to run, or {nil, error}. `scope` becomes the interactive
+    # `Gori::Outbound` decision the sender dials through: no up-front allowlist gate (the
+    # operator typed this target), but Sandbox mode and explicit EXCLUDE rules hard-block
+    # every send — the same protection Discover already applies per-request.
     def build_engine(verify : Bool, scope : Gori::Scope) : {Fuzz::Engine?, String?}
       commit_buffers
       if err = regex_error
@@ -939,11 +940,10 @@ module Gori::Tui
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
       gen_sets = @config.mode.per_position? ? sets : [sets.first]
       generator = Fuzz::Generator.new(template, gen_sets, @config, registry: Decoder.shared_registry)
-      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
+      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), Gori::Outbound.interactive(scope),
         http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
-      backend = Fuzz::ScopedBackend.new(sender, scope)
       @matcher.auto_calibrate = @config.auto_calibrate?
-      {Fuzz::Engine.new(generator, @matcher, backend, @config), nil}
+      {Fuzz::Engine.new(generator, @matcher, sender, @config), nil}
     rescue ex
       {nil, "config error: #{ex.message}"}
     end

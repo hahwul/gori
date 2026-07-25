@@ -30,19 +30,11 @@ module Gori
         # OPT-IN Match&Replace parity (before the scope gate + History write so the
         # recorded/effective request == the wire); byte-exact by default.
         built, applied_rules = maybe_apply_request_rules(h, built)
-        # Scope gate BEFORE any outbound byte / History write: an out-of-scope
-        # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
-        # The scope URL is anchored on the DIAL target (built.host — what Engine.send
-        # actually connects to), see request_scope_url. Deliberately spoofing the
-        # request-line/Host to a DIFFERENT host (Host-header attacks, cache poisoning,
-        # SSRF via absolute-form) is a legitimate test and is NOT blocked — we still send
-        # the bytes verbatim; we just scope on the host we dial, so a send can't reach an
-        # out-of-scope host while the gate matched the (spoofed) request-line host instead.
-        sc = scope_check(request_scope_url(built), built.host, bool(h, "allow_unscoped") || false)
-        return scope_blocked(sc) if sc.blocked
+        gate = send_gate(h, built, http2, sni)
+        return gate if gate.is_a?(Result)
+        sender, sc = gate
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
-        verify = @verify_upstream && !(bool(h, "insecure") || false)
-        result = send_built_request(built, http2, verify, sni, send_timeout(h))
+        result = sender.send(built.bytes)
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -99,19 +91,44 @@ module Gori
         issue_id
       end
 
-      private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
-                                     verify_upstream : Bool, sni : String? = nil,
-                                     timeout : Time::Span? = nil) : Repeater::Result
+      # BOTH gate layers for a one-shot send, resolved before any outbound byte or History
+      # write — a refused send records nothing. Returns the gated dialer plus the verdict to
+      # report, or the refusal Result.
+      #
+      # Layer 1 (`Outbound#check`) is the scope allowlist, waivable with allow_unscoped. The
+      # scope URL is anchored on the DIAL target (built.host — what the engine connects to),
+      # see request_scope_url: deliberately spoofing the request-line/Host to a DIFFERENT
+      # host (Host-header attacks, cache poisoning, SSRF via absolute-form) is a legitimate
+      # test and is NOT blocked — the bytes still go out verbatim; we just scope on the host
+      # we dial, so a send can't reach an out-of-scope host while the gate matched the
+      # (spoofed) request-line host instead.
+      #
+      # Layer 2 (`Repeater::Sender#refusal`) is Sandbox mode, a hard containment gate that
+      # allow_unscoped does NOT lift — the TUI and `gori run repeater` have always enforced
+      # it that way, and MCP used to let allow_unscoped:true walk straight past it.
+      private def send_gate(h, built : RequestBuilder::Built, http2 : Bool,
+                            sni : String?) : {Repeater::Sender, ScopeCheck} | Result
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        sc = ob.check(request_scope_url(built), built.host)
+        return scope_blocked(sc) if sc.blocked?
+        verify = @verify_upstream && !(bool(h, "insecure") || false)
+        sender = send_sender(ob, built, http2, verify, sni, send_timeout(h))
+        if reason = sender.refusal(built.bytes)
+          return sandbox_blocked(reason, built.host, "url")
+        end
+        {sender, sc}
+      end
+
+      # The gated dialer for a one-shot send. `Repeater::Sender` takes the Outbound decision
+      # as a constructor argument, so this path cannot be built without one.
+      private def send_sender(ob : Outbound, built : RequestBuilder::Built, http2 : Bool,
+                              verify_upstream : Bool, sni : String? = nil,
+                              timeout : Time::Span? = nil) : Repeater::Sender
         # Honor the project's host overrides on the direct-dial path (parity with the
         # live proxy). nil/empty is behaviorally identical to no override.
-        ov = HostOverrides.load(store)
-        if http2
-          Repeater::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout, overrides: ov)
-        else
-          Repeater::Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout, overrides: ov)
-        end
+        Repeater::Sender.new(ob, scheme: built.scheme, host: built.host, port: built.port,
+          http2: http2, verify: verify_upstream, sni: sni, timeout: timeout,
+          overrides: HostOverrides.load(store))
       end
 
       # Per-operation (connect + idle read/write) timeout for a one-shot send, from
@@ -337,19 +354,24 @@ module Gori
         scheme, host, port = Repeater::FlowRequest.parse_target(target)
         return Result.new("could not parse target for repeater #{repeater_id}", is_error: true) if host.empty? || port <= 0
         # Scope gate before the outbound handshake (same policy as send_request).
-        sc = scope_check("#{scheme}://#{host}/", host, bool(h, "allow_unscoped") || false)
-        return scope_blocked(sc) if sc.blocked
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        sc = ob.check("#{scheme}://#{host}/", host)
+        return scope_blocked(sc) if sc.blocked?
+        verify = @verify_upstream && !(bool(h, "insecure") || false)
+        request = Env.expand_wire(repeater_request_text)
+        sni = repeater.sni.try { |value| Env.expand(value) }
+        sender = Repeater::Sender.new(ob, scheme: scheme, host: host, port: port,
+          verify: verify, sni: sni, overrides: HostOverrides.load(store))
+        # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
+        if reason = sender.refusal(request)
+          return sandbox_blocked(reason, host, "repeater_id")
+        end
         # Scope passed — now it's safe to persist the issue link.
         if issue_id
           store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
-        verify = @verify_upstream && !(bool(h, "insecure") || false)
-        request = Env.expand_wire(repeater_request_text)
-        sni = repeater.sni.try { |value| Env.expand(value) }
-        result = Repeater::WsEngine.send(request, out_messages,
-          scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle,
-          overrides: HostOverrides.load(store))
+        result = sender.send_ws(request, out_messages, idle)
 
         store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
           result.error, result.duration_us)
@@ -453,59 +475,48 @@ module Gori
         end
       end
 
-      # Evaluate the project scope against an active request's target. Refused
-      # (blocked) unless the caller passes allow_unscoped, in two cases:
-      #   - out_of_scope: scope IS configured and the target doesn't match it
-      #     (the Probe-Active `matches_url?` test — an INCLUDE must match, no
-      #     exclude may, display-lens flag ignored).
-      #   - unscoped: NO scope is configured — the most dangerous case (no
-      #     guardrail at all), so an active request needs an explicit opt-in.
-      # in_scope requests always proceed and carry the matched rule id.
-      private def scope_check(url : String, host : String, allow_unscoped : Bool) : ScopeCheck
-        scope = Scope.load(store)
-        return ScopeCheck.new("unscoped", host, nil, !allow_unscoped) unless scope.configured?
-        if scope.matches_url?(url, host)
-          rid = scope.rules.find { |r| r.include? && r.matches?(url, host) }.try(&.id)
-          ScopeCheck.new("in_scope", host, rid, false)
-        else
-          ScopeCheck.new("out_of_scope", host, nil, !allow_unscoped)
-        end
+      # The scope decision for one active MCP request, built through the ONE seam every
+      # surface shares. `Outbound.agent` is the strict Layer-1 policy an agent-driven
+      # surface needs: a target the scope doesn't INCLUDE — or a project with no scope at
+      # all, the most dangerous case since there is no guardrail — is refused unless the
+      # caller passed allow_unscoped:true, which becomes a NAMED Unscoped(Operator) decision
+      # that still leaves Layer 2 (Sandbox / exclude) in force.
+      private def outbound(allow_unscoped : Bool) : Outbound
+        Outbound.agent(Scope.load(store), allow_unscoped)
       end
 
       # A refusal to send an active request outside (or without) scope.
       # SCOPE_BLOCKED is not retryable — the caller must add a scope include rule
       # or pass allow_unscoped:true.
       private def scope_blocked(sc : ScopeCheck) : Result
-        reason = sc.decision == "unscoped" ? "no scope is configured for this project, so active requests are refused by default" : "target host #{sc.host} is outside the project's configured scope"
+        reason = sc.unscoped? ? "no scope is configured for this project, so active requests are refused by default" : "target host #{sc.host} is outside the project's configured scope"
         err("#{reason}; add a scope include rule or pass allow_unscoped:true to override",
           "SCOPE_BLOCKED", field: "url",
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
       end
 
+      # A SANDBOX refusal at the socket seam. Distinct from `scope_blocked`: Sandbox is a
+      # HARD containment gate that allow_unscoped deliberately does NOT lift (the TUI and
+      # `gori run repeater` have always enforced it that way; MCP used to let
+      # allow_unscoped:true walk straight past it), so the message must not offer that flag
+      # as the fix.
+      private def sandbox_blocked(reason : String, host : String, field : String) : Result
+        err("#{reason} — Sandbox mode blocks every request outside the scope allowlist; turn Sandbox off or add a scope include rule",
+          "SCOPE_BLOCKED", field: field,
+          details: JSON.parse({"scope_decision" => "sandbox", "host" => host}.to_json))
+      end
+
       # The request-target (path) from the first line of a raw request, for
       # building the scheme://host/target URL the scope string/regex rules see.
       private def request_target(bytes : Bytes) : String
-        line = String.new(bytes).each_line.first? || ""
-        line.split(' ')[1]? || "/"
+        Outbound.request_target(bytes)
       end
 
-      # The URL the scope gate evaluates, ALWAYS anchored on the DIAL target (built.scheme/
-      # host — what Engine.send connects to), never the request LINE's host. A raw request
-      # may carry an absolute-form request line (`GET http://other/p HTTP/1.1`) whose host is
-      # deliberately DIFFERENT from `url` — a Host-header / cache-poisoning / SSRF test, which
-      # gori must allow. Scoping on that spoofed host would either block a legitimate test or
-      # (the bug this fixes) let a send reach an out-of-scope host while an include rule matched
-      # the spoofed host and logged scope=in_scope. So reduce an absolute-form target to its
-      # path+query and rebuild against built.host. Port is omitted to match Scope.request_url's
-      # origin-form convention (the scope lens keys on host, not port).
+      # The URL the scope gate evaluates, anchored on the DIAL target rather than the request
+      # LINE's host. The rule itself now lives in the seam (`Outbound.scope_url`) so the sweep
+      # and Repeater paths get the same absolute-form handling this used to have alone.
       private def request_scope_url(built : RequestBuilder::Built) : String
-        target = request_target(built.bytes)
-        if Store::FlowRow.absolute_form?(target)
-          uri = URI.parse(target) rescue nil
-          path = uri.try(&.path).presence || "/"
-          target = (q = uri.try(&.query)) ? "#{path}?#{q}" : path
-        end
-        Scope.request_url(built.scheme, built.host, target)
+        Outbound.scope_url(built.scheme, built.host, request_target(built.bytes))
       end
 
       # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.
