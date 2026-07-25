@@ -5,7 +5,23 @@ module Gori
       # The categories a Probe scan can emit (shared with the MCP probe_scan tool).
       PROBE_CATEGORIES = Probe::SCAN_CATEGORIES
 
+      # Triage subcommands operate on PERSISTED findings (the `probe_issues` table the live
+      # scanner fills — what the TUI Probe tab shows); a bare `gori run probe` is still the
+      # stateless rescan. These words are therefore reserved as the first positional: to scan
+      # with a QL query that starts with one, pass it via --query.
+      PROBE_SUBCOMMANDS = %w[issues dismiss promote delete rm]
+
       private def self.cmd_probe(args : Array(String)) : Nil
+        case args.first?
+        when "issues"       then cmd_probe_issues(args[1..])
+        when "dismiss"      then cmd_probe_dismiss(args[1..])
+        when "promote"      then cmd_probe_promote(args[1..])
+        when "delete", "rm" then cmd_probe_delete(args[1..])
+        else                     cmd_probe_scan(args)
+        end
+      end
+
+      private def self.cmd_probe_scan(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         query : String? = nil
@@ -26,7 +42,11 @@ module Gori
                      "params, CORS/host-header reflection, open redirect, CRLF injection, 403/path/\n" \
                      "header access-control bypass, nginx & parameter traversal, GraphQL\n" \
                      "introspection, SSTI, etc.). QL filters apply to History only; all Repeater\n" \
-                     "tabs with a stored response are scanned."
+                     "tabs with a stored response are scanned.\n\n" \
+                     "Triage the findings the live scanner already persisted (the TUI Probe tab's\n" \
+                     "list) with: probe issues · probe dismiss · probe promote · probe delete.\n" \
+                     "Those words are reserved as the first argument — to scan with a QL query\n" \
+                     "starting with one, pass it as --query."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
@@ -115,6 +135,184 @@ module Gori
         else
           groups.each { |g| puts CLI::Output.probe_group_text(g) }
         end
+      end
+
+      # --- triage over PERSISTED findings -------------------------------------------------
+
+      private def self.cmd_probe_issues(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        min_sev : Store::Severity? = nil
+        category : String? = nil
+        host : String? = nil
+        include_closed = false
+        format = :text
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run probe issues [options]\n\n" \
+                     "List the findings the scanner already persisted — the same rows the TUI Probe\n" \
+                     "tab shows, each with the id the dismiss/promote/delete subcommands take.\n" \
+                     "Shows OPEN findings only by default (the TUI's default lens)."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-a", "--all", "Also show dismissed/confirmed/resolved findings") { include_closed = true }
+          p.on("--severity=LEVEL", "Only show findings at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
+          p.on("--category=CAT", "Only show findings in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
+          p.on("--host=HOST", "Only show findings for this exact host") { |v| host = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run probe issues: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run probe issues: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        issues = begin
+          list = store.probe_issues(category, host.try(&.strip).presence, min_sev)
+          include_closed ? list : list.select(&.status.open?)
+        ensure
+          store.close
+        end
+
+        if format == :json
+          puts CLI::Output.probe_issue_array_json(issues)
+        elsif issues.empty?
+          STDERR.puts include_closed ? "no probe findings" : "no open probe findings (pass --all to include dismissed)"
+        else
+          STDERR.puts "#{issues.size} finding#{issues.size == 1 ? "" : "s"}"
+          issues.each { |i| puts CLI::Output.probe_issue_text(i) }
+        end
+      end
+
+      private def self.cmd_probe_dismiss(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        code : String? = nil
+        host : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run probe dismiss <id> | --code=CODE | --host=HOST\n\n" \
+                     "Mute findings. With <id>, TOGGLES that one finding dismissed ⇄ open; with\n" \
+                     "--code/--host, bulk-mutes every OPEN finding sharing it. Reversible —\n" \
+                     "a dismissed finding still lists under `probe issues --all`."
+          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          p.on("--code=CODE", "Bulk-dismiss every open finding with this check code") { |v| code = v }
+          p.on("--host=HOST", "Bulk-dismiss every open finding on this host") { |v| host = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run probe dismiss: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run probe dismiss: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id = parse_probe_issue_id(positional.first?, "gori run probe dismiss")
+        selectors = [id, code, host].count { |v| !v.nil? }
+        if selectors != 1
+          abort "gori run probe dismiss: pass exactly one of <id>, --code=CODE, or --host=HOST"
+        end
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          if c = code
+            n = store.probe_issues.count { |i| i.code == c && i.status.open? }
+            store.dismiss_probe_by_code(c)
+            puts "Dismissed #{n} open \"#{c}\" finding#{n == 1 ? "" : "s"}."
+          elsif hst = host
+            n = store.probe_issues.count { |i| i.host == hst && i.status.open? }
+            store.dismiss_probe_by_host(hst)
+            puts "Dismissed #{n} open finding#{n == 1 ? "" : "s"} on #{hst}."
+          elsif iid = id
+            issue = store.get_probe_issue(iid) || abort("gori run probe dismiss: no probe finding with id #{iid}")
+            landed = Probe::Triage.toggle_dismiss(store, issue)
+            puts "Finding ##{issue.id} is now #{landed.label}."
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_probe_promote(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run probe promote <id>\n\n" \
+                     "Promote a machine finding to a human-confirmed Issue (see `gori run issues`),\n" \
+                     "carrying its severity/host/sample evidence over. Marks the source finding\n" \
+                     "Confirmed so a repeat call cannot mint a duplicate."
+          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run probe promote: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run probe promote: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id = parse_probe_issue_id(positional.first?, "gori run probe promote")
+        abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          issue = store.get_probe_issue(id) || abort("gori run probe promote: no probe finding with id #{id}")
+          issue_id = Probe::Triage.promote(store, issue)
+          if issue_id
+            puts "Promoted finding ##{issue.id} to Issue ##{issue_id}."
+          else
+            puts "Finding ##{issue.id} was already promoted to an issue."
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_probe_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        all = false
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run probe delete <id> | --all\n\n" \
+                     "Hard-delete findings. A delete also SUPPRESSES that (code, host) pair so the\n" \
+                     "next scan does not immediately re-add it — prefer `probe dismiss` when you\n" \
+                     "only want it out of the default lens."
+          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          p.on("--all", "Delete EVERY probe finding in the project") { all = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run probe delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run probe delete: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id = parse_probe_issue_id(positional.first?, "gori run probe delete")
+        abort "gori run probe delete: pass <id> or --all" if id.nil? && !all
+        abort "gori run probe delete: <id> and --all are mutually exclusive" if id && all
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          if all
+            n = store.count_probe_issues
+            store.clear_probe_issues
+            puts "Deleted #{n} finding#{n == 1 ? "" : "s"}."
+          elsif iid = id
+            issue = store.get_probe_issue(iid) || abort("gori run probe delete: no probe finding with id #{iid}")
+            store.delete_probe_issue(issue.id)
+            puts "Deleted finding ##{issue.id}."
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.parse_probe_issue_id(v : String?, ctx : String) : Int64?
+        return nil unless v
+        v.to_i64? || abort("#{ctx}: invalid finding id #{v.inspect} (expected an integer — see `gori run probe issues`)")
       end
 
       # A live progress callback for Probe::Scan (an in-place "scanned i/n flows" meter,

@@ -241,6 +241,28 @@ module Gori
         end
       end
 
+      # --- persisted probe findings (triage) ----------------------------------
+
+      def self.probe_issue_array_json(issues : Array(Store::ProbeIssue)) : String
+        JSON.build { |j| j.array { issues.each { |i| Probe.issue_json(j, i) } } }
+      end
+
+      # "12   [high]      secret_in_url   api.test   ×3   open   token"
+      # Leads with the id, because every triage subcommand addresses a finding by it.
+      def self.probe_issue_text(i : Store::ProbeIssue) : String
+        String.build do |io|
+          io << i.id.to_s.ljust(5)
+          io << "[#{i.severity.label}]".ljust(11)
+          io << i.code.ljust(28)
+          io << "  " << term_safe(i.host)
+          io << "  ×" << i.hit_count
+          io << "  " << i.status.label
+          if ev = i.evidence
+            io << "  " << term_safe(ev)
+          end
+        end
+      end
+
       # "#0     admin                 200   1.2kB     142w    31ms"
       def self.fuzz_row_text(r : Fuzz::Result) : String
         String.build do |io|

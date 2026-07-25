@@ -117,22 +117,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
   def probe_promote : Nil
     return unless i = probe_controller.view.target_issue
-    # Promotion marks the source issue Confirmed; a second press would otherwise mint a
-    # duplicate Issue for the same issue. Already-Confirmed ⇒ already promoted.
-    if i.status.confirmed?
+    # Probe::Triage.promote returns nil when the source is already Confirmed (= already
+    # promoted); it marks the source Confirmed precisely so a second press cannot mint a
+    # duplicate Issue. Same call the CLI/MCP promote paths make.
+    unless Probe::Triage.promote(@session.store, i)
       @toast = "already promoted to an issue"
       return
     end
-    fid = @session.store.insert_issue(i.title, i.severity, i.host, i.sample_flow_id)
-    # Preserve Repeater-only evidence: with no source flow, link the Issue to the Repeater tab
-    # that produced the issue so the evidence pointer survives promotion (insert_issue only
-    # carries a flow id).
-    if i.sample_flow_id.nil? && (rid = i.sample_repeater_id)
-      @session.store.add_link(Store::LinkOwnerKind::Issue, fid, Store::LinkRefKind::Repeater, rid)
-    end
-    # Mark the source confirmed (= "promoted to an Issue") so it leaves the default
-    # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
-    @session.store.update_probe_issue_status(i.id, Store::Status::Confirmed)
     probe_controller.view.reload(@session.store)
     @toast = "promoted to issue — see the Issues tab"
   end

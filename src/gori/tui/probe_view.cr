@@ -308,8 +308,7 @@ module Gori::Tui
     # machine-found issues (promote handles "this is real → Issue"). Returns the new state.
     def toggle_dismiss(store : Store) : Store::Status?
       return nil unless issue = target_issue
-      next_status = issue.status.open? ? Store::Status::FalsePositive : Store::Status::Open
-      store.update_probe_issue_status(issue.id, next_status)
+      next_status = Probe::Triage.toggle_dismiss(store, issue)
       reload(store)
       next_status
     end

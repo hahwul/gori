@@ -90,6 +90,7 @@ module Gori
         "send_request", "send_websocket",
         "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop", "stop_job",
         "create_issue", "update_issue",
+        "probe_dismiss", "probe_promote", "probe_delete",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -534,6 +535,20 @@ module Gori
             s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
           end
 
+          tool j, "probe_issues",
+            "List PERSISTED probe findings — the rows the live scanner accumulated (what the TUI " \
+            "Probe tab shows), each with a stable `id` the probe_dismiss/probe_promote/probe_delete " \
+            "tools act on. This is triage state, unlike probe_scan's stateless rescan. Defaults to " \
+            "OPEN findings only, mirroring the TUI's default lens. Returns " \
+            "{issues, returned, offset, total, has_more} — not a bare array." do |s|
+            s.field "include_closed", boolprop("also return dismissed/confirmed/resolved findings (default false = open only)")
+            s.field "severity", strprop("only return findings at/above this level (info|low|medium|high|critical)")
+            s.field "category", strprop("only return findings in this category (#{Probe::SCAN_CATEGORIES.join("|")})")
+            s.field "host", strprop("only return findings for this exact host")
+            s.field "limit", intprop("max rows (default 100, max 500)")
+            s.field "offset", intprop("start row (default 0)")
+          end
+
           tool j, "list_scope", "List the project's scope include/exclude rules, plus whether the scope lens/gate and the hard-containment sandbox are enabled." { }
 
           tool j, "list_env",
@@ -967,6 +982,32 @@ module Gori
               s.field "repeater_id", intprop("optional repeater id to link to the issue")
             end
 
+            tool j, "probe_dismiss",
+              "Mute probe findings (ids come from probe_issues). Pass exactly ONE selector: `id` " \
+              "toggles a single finding dismissed ⇄ open; `code` or `host` bulk-mutes every OPEN " \
+              "finding sharing it. Reversible — a dismissed finding still appears under " \
+              "probe_issues include_closed:true." do |s|
+              s.field "id", intprop("probe finding id to toggle")
+              s.field "code", strprop("bulk-dismiss every open finding with this check code")
+              s.field "host", strprop("bulk-dismiss every open finding on this host")
+            end
+
+            tool j, "probe_promote",
+              "Promote a probe finding (id from probe_issues) to a human-confirmed Issue in the " \
+              "Issues report, carrying its severity/host/sample evidence over. Marks the source " \
+              "finding Confirmed so a repeat call cannot mint a duplicate — a second call returns " \
+              "{promoted: false} rather than erroring." do |s|
+              s.field "id", intprop("probe finding id"), required: true
+            end
+
+            tool j, "probe_delete",
+              "Hard-delete probe findings (ids from probe_issues). Deleting also SUPPRESSES that " \
+              "(code, host) pair so the next scan does not immediately re-add it — prefer " \
+              "probe_dismiss when you only want it out of the default lens." do |s|
+              s.field "id", intprop("probe finding id to delete")
+              s.field "all", boolprop("delete EVERY probe finding in the project (default false)")
+            end
+
             tool j, "fuzz_start",
               "Start a fuzz/intruder run against an origin and return a job_id " \
               "immediately (poll with fuzz_status / fuzz_results; end with fuzz_stop). " \
@@ -1284,6 +1325,7 @@ module Gori
         when "list_issues"             then list_issues(h)
         when "get_issue"               then get_issue(h)
         when "probe_scan"              then probe_scan(h)
+        when "probe_issues"            then probe_issues(h)
         when "list_scope"              then list_scope
         when "list_env"                then list_env(h)
         when "list_host_overrides"     then list_host_overrides
@@ -1337,6 +1379,9 @@ module Gori
         when "delete_repeater"         then gated { delete_repeater(h) }
         when "create_issue"            then gated { create_issue(h) }
         when "update_issue"            then gated { update_issue(h) }
+        when "probe_dismiss"           then gated { probe_dismiss(h) }
+        when "probe_promote"           then gated { probe_promote(h) }
+        when "probe_delete"            then gated { probe_delete(h) }
         when "fuzz_start"              then gated { fuzz_start(h) }
         when "fuzz_status"             then gated { fuzz_status(h) }
         when "fuzz_results"            then gated { fuzz_results(h) }

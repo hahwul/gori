@@ -3279,3 +3279,44 @@ describe "Gori::Probe::Scan rules config parity" do
     end
   end
 end
+
+# Probe::Triage is the ONE promotion/dismiss implementation the TUI, `gori run probe`, and the
+# MCP probe_* tools all call — so a finding triaged from any surface lands in the same state.
+describe "Gori::Probe::Triage" do
+  it "promotes once, marking the source Confirmed so a repeat cannot duplicate" do
+    with_store do |store|
+      store.upsert_probe_issue(Gori::Probe::Detection.new(
+        code: "secret_in_url", category: "infoleak", host: "acme.test", title: "token in URL",
+        severity: Gori::Store::Severity::High, url: "https://acme.test/x", evidence: "tok"))
+      issue = store.probe_issues.first
+
+      issue_id = Gori::Probe::Triage.promote(store, issue).not_nil!
+      created = store.get_issue(issue_id).not_nil!
+      created.title.should eq(issue.title)
+      created.severity.should eq(Gori::Store::Severity::High)
+      store.get_probe_issue(issue.id).not_nil!.status.confirmed?.should be_true
+
+      # Re-read (the in-memory `issue` still holds the pre-promotion status).
+      again = store.get_probe_issue(issue.id).not_nil!
+      Gori::Probe::Triage.promote(store, again).should be_nil
+      store.issues.size.should eq(1)
+    end
+  end
+
+  it "dismisses only an OPEN finding and re-opens anything else" do
+    with_store do |store|
+      store.upsert_probe_issue(Gori::Probe::Detection.new(
+        code: "secret_in_url", category: "infoleak", host: "acme.test", title: "t",
+        severity: Gori::Store::Severity::High, url: "https://acme.test/x"))
+      issue = store.probe_issues.first
+
+      Gori::Probe::Triage.toggle_dismiss(store, issue).false_positive?.should be_true
+      Gori::Probe::Triage.toggle_dismiss(store, store.get_probe_issue(issue.id).not_nil!).open?.should be_true
+
+      # A Confirmed (promoted) finding re-opens rather than being dismissed — the asymmetry
+      # the TUI's `c` has always had, now shared.
+      store.update_probe_issue_status(issue.id, Gori::Store::Status::Confirmed)
+      Gori::Probe::Triage.toggle_dismiss(store, store.get_probe_issue(issue.id).not_nil!).open?.should be_true
+    end
+  end
+end

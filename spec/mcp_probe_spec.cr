@@ -112,3 +112,131 @@ describe "MCP probe_scan tool" do
     end
   end
 end
+
+# Persist a probe finding the way the live Analyzer does, so triage has a row to act on.
+private def seed_probe_issue(store, code = "secret_in_url", host = "acme.test",
+                             severity = Gori::Store::Severity::High,
+                             flow_id : Int64? = nil, repeater_id : Int64? = nil) : Gori::Store::ProbeIssue
+  store.upsert_probe_issue(Gori::Probe::Detection.new(
+    code: code, category: "infoleak", host: host, title: "token in URL",
+    severity: severity, url: "https://#{host}/login", evidence: "token",
+    flow_id: flow_id, repeater_id: repeater_id))
+  store.probe_issues.find { |i| i.code == code && i.host == host }.not_nil!
+end
+
+describe "MCP probe triage tools" do
+  it "lists persisted findings open-only by default, and all under include_closed" do
+    with_store do |store|
+      issue = seed_probe_issue(store)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      res = call_json(tools, "probe_issues", "{}")
+      res["total"].as_i.should eq(1)
+      row = res["issues"].as_a.first
+      row["id"].as_i64.should eq(issue.id)
+      row["status"].as_s.should eq("open")
+      %w(id code category host title severity status hit_count sample_flow_id remediation).each do |k|
+        row.as_h.has_key?(k).should be_true
+      end
+
+      call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("false-positive")
+      call_json(tools, "probe_issues", "{}")["total"].as_i.should eq(0) # gone from the default lens
+      call_json(tools, "probe_issues", %({"include_closed":true}))["total"].as_i.should eq(1)
+    end
+  end
+
+  it "toggles a single finding dismissed then back open" do
+    with_store do |store|
+      issue = seed_probe_issue(store)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("false-positive")
+      call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("open")
+    end
+  end
+
+  it "bulk-dismisses by code and by host" do
+    with_store do |store|
+      seed_probe_issue(store, code: "secret_in_url", host: "a.test")
+      seed_probe_issue(store, code: "secret_in_url", host: "b.test")
+      seed_probe_issue(store, code: "other_code", host: "b.test")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      call_json(tools, "probe_dismiss", %({"code":"secret_in_url"}))["dismissed"].as_i.should eq(2)
+      open_now = call_json(tools, "probe_issues", "{}")["issues"].as_a
+      open_now.size.should eq(1)
+      open_now.first["code"].as_s.should eq("other_code")
+
+      call_json(tools, "probe_dismiss", %({"host":"b.test"}))["dismissed"].as_i.should eq(1)
+      call_json(tools, "probe_issues", "{}")["total"].as_i.should eq(0)
+    end
+  end
+
+  it "rejects zero or multiple dismiss selectors" do
+    with_store do |store|
+      seed_probe_issue(store)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools.call("probe_dismiss", JSON.parse("{}")).is_error.should be_true
+      tools.call("probe_dismiss", JSON.parse(%({"id":1,"code":"x"}))).is_error.should be_true
+    end
+  end
+
+  it "promotes a finding to an Issue exactly once" do
+    with_store do |store|
+      issue = seed_probe_issue(store)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      res = call_json(tools, "probe_promote", %({"id":#{issue.id}}))
+      res["promoted"].as_bool.should be_true
+      issue_id = res["issue_id"].as_i64
+      created = store.get_issue(issue_id).not_nil!
+      created.title.should eq(issue.title)
+      created.severity.should eq(Gori::Store::Severity::High)
+      created.host.should eq("acme.test")
+      store.get_probe_issue(issue.id).not_nil!.status.confirmed?.should be_true
+
+      # A second call must NOT mint a duplicate Issue.
+      again = call_json(tools, "probe_promote", %({"id":#{issue.id}}))
+      again["promoted"].as_bool.should be_false
+      store.issues.size.should eq(1)
+    end
+  end
+
+  it "carries Repeater-only evidence across a promotion as an entity link" do
+    with_store do |store|
+      rid = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, false, true, nil, 0)
+      issue = seed_probe_issue(store, repeater_id: rid)
+      issue.sample_flow_id.should be_nil
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      issue_id = call_json(tools, "probe_promote", %({"id":#{issue.id}}))["issue_id"].as_i64
+      links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
+      links.any? { |l| l.ref_kind.repeater? && l.ref_id == rid }.should be_true
+    end
+  end
+
+  it "deletes one finding and clears them all" do
+    with_store do |store|
+      a = seed_probe_issue(store, code: "secret_in_url", host: "a.test")
+      seed_probe_issue(store, code: "secret_in_url", host: "b.test")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      call_json(tools, "probe_delete", %({"id":#{a.id}}))["deleted"].as_i.should eq(1)
+      store.count_probe_issues.should eq(1)
+
+      call_json(tools, "probe_delete", %({"all":true}))["deleted"].as_i.should eq(1)
+      store.count_probe_issues.should eq(0)
+    end
+  end
+
+  it "refuses triage under --read-only" do
+    with_store do |store|
+      issue = seed_probe_issue(store)
+      ro = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      ro.call("probe_dismiss", JSON.parse(%({"id":#{issue.id}}))).is_error.should be_true
+      ro.call("probe_promote", JSON.parse(%({"id":#{issue.id}}))).is_error.should be_true
+      ro.call("probe_delete", JSON.parse(%({"id":#{issue.id}}))).is_error.should be_true
+      # …but LISTING them stays available: triage state is read-only-safe.
+      call_json(ro, "probe_issues", "{}")["total"].as_i.should eq(1)
+    end
+  end
+end
