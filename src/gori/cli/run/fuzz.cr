@@ -92,37 +92,67 @@ module Gori
 
         hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
         text, default_target, src_h2 = fuzz_source(flow_id, request_file, project_name, db_path)
-        text = Env.expand(text)
-        default_target = default_target.try { |t| Env.expand(t) }
-        template = build_fuzz_template(text, auto, marks, force_h2 || src_h2)
-        scheme, host, port = resolve_fuzz_target(target_override, default_target)
+        http2 = force_h2 || src_h2
 
-        sets = sources.map { |src| Fuzz::PayloadSet.new(src, processors) }
-        abort "gori run fuzz: no payloads — add -w/--payloads/--numbers/--null/--brute" if sets.empty?
-        matcher.auto_calibrate = auto_cal
-
-        config = Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
-          retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal, keep_bodies: :none)
-        gen_sets = mode.per_position? ? sets : [sets.first]
-        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
+        options = Fuzz::PlanOptions.new(text,
+          default_target: default_target, target: target_override,
+          auto_mark: auto, marks: marks, http2: http2,
+          sources: sources, processors: processors,
+          config: Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
+            retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal, keep_bodies: :none),
+          matcher: matcher, verify: !insecure, sni: sni,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
         # Gate outbound traffic through the ONE seam every surface shares (Gori::Outbound):
         # the up-front check refuses an out-of-scope host unless --allow-unscoped, and the
         # sender enforces Sandbox mode + explicit exclude rules on EVERY send regardless of
         # that flag. No project (--request/stdin) is an explicit Unscoped(NoProject), not a
         # silently skipped gate.
         outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
-        guard_outbound(outbound, scheme, host, Gori::Outbound.request_target(text.to_slice), "gori run fuzz")
-        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
-          http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout,
-          overrides: cli_host_overrides(project_name, db_path, flow_id))
-        engine = Fuzz::Engine.new(generator, matcher, sender, config)
+        plan = begin
+          Fuzz::Plan.build(options, outbound)
+        rescue ex : Fuzz::PlanError
+          outbound.close
+          abort "gori run fuzz: #{fuzz_plan_error(ex)}"
+        end
+        warn_fuzz_marks(plan)
+        origin = plan.origin
+        unless origin.scheme.in?("http", "https")
+          outbound.close
+          abort "gori run fuzz: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
+        end
+        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run fuzz")
         # Calibration SENDS, so it belongs inside the block that releases the read
         # connection — a raise in there would otherwise leak it.
         begin
-          engine.calibrate_baseline if auto_cal
-          run_fuzz_stream(engine, mode, scheme, host, port, format, force, fail_if_no_matches)
+          plan.engine.calibrate_baseline if auto_cal
+          run_fuzz_stream(plan.engine, mode, origin.scheme, origin.host, origin.port, format, force, fail_if_no_matches)
         ensure
           outbound.close
+        end
+      end
+
+      # `gori run fuzz`'s wording for a plan the options can't produce. The builder reports
+      # the machine-readable `reason`; the sentence (and the flags it names) is ours.
+      private def self.fuzz_plan_error(ex : Fuzz::PlanError) : String
+        case ex.reason
+        in Fuzz::PlanError::Reason::NoPositions
+          "no positions — add §…§ markers, --auto, or --mark TOKEN"
+        in Fuzz::PlanError::Reason::NoTarget
+          "--target is required for --request/stdin"
+        in Fuzz::PlanError::Reason::BadTarget
+          "could not determine a target host"
+        in Fuzz::PlanError::Reason::NoPayloads
+          "no payloads — add -w/--payloads/--numbers/--null/--brute"
+        end
+      end
+
+      # A short/common --mark TOKEN (e.g. "A") can match many spots including request
+      # headers, silently exploding the position count. Say so rather than let the run
+      # quietly become 40× bigger than intended.
+      private def self.warn_fuzz_marks(plan : Fuzz::Plan) : Nil
+        plan.mark_matches.each do |(tok, occ)|
+          next unless occ > 1
+          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} matches #{occ} positions (including any in headers)"
         end
       end
 
@@ -147,34 +177,6 @@ module Gori
         else
           abort "gori run fuzz: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end
-      end
-
-      private def self.build_fuzz_template(text : String, auto : Bool, marks : Array(String), http2 : Bool) : Fuzz::Template
-        text = Fuzz::Template.auto_mark(text) if auto
-        m = Fuzz::Template::MARKER
-        marks.each do |tok|
-          occ = mark_occurrences(text, tok)
-          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} matches #{occ} positions (including any in headers)" if occ > 1
-          text = text.gsub(tok, "#{m}#{tok}#{m}")
-        end
-        template = Fuzz::Template.parse(text, http2)
-        abort "gori run fuzz: no positions — add §…§ markers, --auto, or --mark TOKEN" if template.position_count == 0
-        template
-      end
-
-      # How many times a literal --mark TOKEN occurs in the template text — a
-      # short/common token (e.g. "A") can match many spots including request
-      # headers, silently exploding the position count. Non-overlapping count
-      # (mirrors String#gsub's own scan), so it matches exactly what gets marked.
-      private def self.mark_occurrences(text : String, tok : String) : Int32
-        return 0 if tok.empty?
-        count = 0
-        idx = 0
-        while found = text.index(tok, idx)
-          count += 1
-          idx = found + tok.size
-        end
-        count
       end
 
       private def self.run_fuzz_stream(engine : Fuzz::Engine, mode : Fuzz::Mode, scheme : String,
@@ -241,14 +243,6 @@ module Gori
       private def self.hydrate_project_env(project_name : String?, db_path : String?) : Nil
         store = open_store(resolve_read_project(project_name, db_path))
         store.close
-      end
-
-      private def self.resolve_fuzz_target(override : String?, default_target : String?) : {String, String, Int32}
-        target = Env.expand(override || default_target || abort("gori run fuzz: --target is required for --request/stdin"))
-        scheme, host, port = Repeater::FlowRequest.parse_target(target)
-        abort "gori run fuzz: could not determine a target host" if host.empty?
-        abort "gori run fuzz: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        {scheme, host, port}
       end
     end
   end

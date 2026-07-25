@@ -378,6 +378,44 @@ honoured somewhere in `[T, T + RELOAD_INTERVAL]`, not at T, and sends inside tha
 the previous decision. Making it exact would need a per-send read on the hot path, which
 [P6](#p6) rules out.
 
+### 2026-07-25: run assembly belongs to the tool, option parsing to the surface
+
+Refines: [P1](#p1). Issue #356 (fuzz, the reference implementation).
+
+Every multi-surface tool re-implemented its "assemble a run" pipeline once per surface. For the
+fuzzer, *template parse → auto-mark → payload sets → matcher → config → generator → sender →
+engine* existed three times over (TUI `build_engine`, `gori run fuzz`, MCP `build_fuzz_job`),
+and the copies had drifted on things a user can see: the TUI never applied the project's
+hostname overrides to a fuzz send, and both `gori run fuzz` and MCP ran `Env.expand` over a
+seeding flow's target *twice*, so a var whose value itself contained a `$TOKEN` resolved on
+those two surfaces and not in the TUI.
+
+`Fuzz::PlanOptions` (a plain struct) plus `Fuzz::Plan.build(options, outbound)` splits the two
+jobs that were tangled: parsing an input format is surface-specific and stays put — an
+`OptionParser` on the CLI, the args hash on MCP, view state in the TUI — while everything
+downstream of the normalized options has exactly one implementation, and `Fuzz::Engine.new` has
+exactly one call site. The same split is intended for `Miner`, `Sequencer`, `Discover` and
+`Repeater`.
+
+Three specifics worth recording, because they are choices rather than mechanics:
+
+- **The `Outbound` is an argument, never built by the builder.** Layer-1 strictness differs per
+  surface on purpose (`Outbound.agent` / `.cli` / `.interactive`, see the entry above).
+  Constructing one inside `Plan.build` would collapse that distinction into whichever policy
+  was hard-coded, which is exactly the kind of quiet unification this refactor must not do.
+- **`Env.expand` runs once, on the raw template and on the resolved target.** Twice is not a
+  no-op: expansion is a single pass, so a second pass resolves tokens that the first pass
+  *produced*. Once is the behaviour a user can reason about.
+- **The scope gate reads the template's BASELINE rendering, not its raw first line.** The TUI's
+  template arrives already marked, so the raw line would have fed `/find?term=§VAL§` into the
+  Layer-1 check there while feeding `/find?term=VAL` from the CLI and MCP — and a `§` in a path
+  position defeats an anchored include rule. Rendering each position's own default back out is
+  marker-free on all three.
+
+A surface still owns its own error wording: `Fuzz::PlanError` carries a machine-readable
+`reason`, and each surface renders the sentence naming its own flags (`--auto` / `auto:true` /
+`^A params`). Sharing the assembly must not flatten three different vocabularies into one.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

@@ -221,32 +221,39 @@ module Gori
       # tool args. Raises FuzzArgError (clean message) on any malformed input.
       private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool}
         text, default_target, src_h2 = fuzz_template_source(h)
-        text = Env.expand(text)
-        default_target = default_target.try { |t| Env.expand(t) }
         use_h2 = (bool(h, "http2") || false) || src_h2
-        text = Fuzz::Template.auto_mark(text) if bool(h, "auto") || false
-        m = Fuzz::Template::MARKER
-        fuzz_marks(h).each { |tok| text = text.gsub(tok, "#{m}#{tok}#{m}") }
-        template = Fuzz::Template.parse(text, use_h2)
-        raise FuzzArgError.new("template has no §…§ positions (add markers, or pass auto:true with a flow_id)") if template.position_count == 0
-        origin = fuzz_origin(h, default_target)
         mode = fuzz_mode(h)
-        sets = fuzz_sets(h, fuzz_processors(h))
-        raise FuzzArgError.new(%(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])) if sets.empty?
-        matcher = fuzz_matcher(h)
-        config = fuzz_config(h, mode)
-        gen_sets = mode.per_position? ? sets : [sets.first]
-        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
-        # Defense-in-depth alongside the job-start Layer-1 check: that check only covers the
-        # origin once, not a path a template mutates per-request. The Outbound re-reads the
-        # scope periodically, so a mid-run EXCLUDE / Sandbox toggle stops the sweep.
-        sender = Fuzz::Sender.new(origin, ob, http2: use_h2,
-          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
+        options = Fuzz::PlanOptions.new(text,
+          default_target: default_target, target: str(h, "url"),
+          auto_mark: bool(h, "auto") || false, marks: fuzz_marks(h), http2: use_h2,
+          sources: fuzz_sources(h), processors: fuzz_processors(h),
+          config: fuzz_config(h, mode), matcher: fuzz_matcher(h),
+          # Defense-in-depth alongside the job-start Layer-1 check: that check only covers
+          # the origin once, not a path a template mutates per-request. The Outbound re-reads
+          # the scope periodically, so a mid-run EXCLUDE / Sandbox toggle stops the sweep.
+          verify: @verify_upstream && !(bool(h, "insecure") || false),
           overrides: HostOverrides.load(store))
-        engine = Fuzz::Engine.new(generator, matcher, sender, config)
-        {engine, origin, engine.total, use_h2}
+        plan = Fuzz::Plan.build(options, ob)
+        {plan.engine, plan.origin, plan.total, use_h2}
+      rescue ex : Fuzz::PlanError
+        raise FuzzArgError.new(fuzz_plan_error(ex))
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")
+      end
+
+      # MCP's wording for a plan the args can't produce — the builder reports the
+      # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
+      private def fuzz_plan_error(ex : Fuzz::PlanError) : String
+        case ex.reason
+        in Fuzz::PlanError::Reason::NoPositions
+          "template has no §…§ positions (add markers, or pass auto:true with a flow_id)"
+        in Fuzz::PlanError::Reason::NoTarget
+          "provide a 'url' target (scheme://host) or a flow_id that carries one"
+        in Fuzz::PlanError::Reason::BadTarget
+          "could not parse a host from '#{ex.detail}'"
+        in Fuzz::PlanError::Reason::NoPayloads
+          %(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])
+        end
       end
 
       # The audit/evidence policy for a fuzz run: none (default) | matched | all.
@@ -297,25 +304,25 @@ module Gori
         arr.map { |v| v.as_s? || raise FuzzArgError.new("each 'marks' entry must be a string") }
       end
 
-      private def fuzz_sets(h, processors : Array(Fuzz::Processor)) : Array(Fuzz::PayloadSet)
+      # The payload SOURCES, in position order. `Fuzz::Plan.build` pairs each with the
+      # shared `processors` pipeline — pairing them here too would build the sets twice.
+      private def fuzz_sources(h) : Array(Fuzz::PayloadSource)
         raw = h["payloads"]?
-        return [] of Fuzz::PayloadSet unless raw
+        return [] of Fuzz::PayloadSource unless raw
         arr =
           if a = raw.as_a?
             a
           elsif s = raw.as_s?
-            return [] of Fuzz::PayloadSet if s.strip.empty?
+            return [] of Fuzz::PayloadSource if s.strip.empty?
             parsed = JSON.parse(s) rescue raise FuzzArgError.new("'payloads' must be a JSON array of sets")
             parsed.as_a? || raise FuzzArgError.new("'payloads' must be a JSON array")
           else
             raise FuzzArgError.new("'payloads' must be a JSON array of sets (not a bare string/scalar)")
           end
-        arr.map { |spec| fuzz_set_from(spec, processors) }
-      end
-
-      private def fuzz_set_from(spec : JSON::Any, processors : Array(Fuzz::Processor)) : Fuzz::PayloadSet
-        obj = spec.as_h? || raise FuzzArgError.new("each payload set must be a JSON object")
-        Fuzz::PayloadSet.new(fuzz_source_from(obj, spec), processors)
+        arr.map do |spec|
+          obj = spec.as_h? || raise FuzzArgError.new("each payload set must be a JSON object")
+          fuzz_source_from(obj, spec)
+        end
       end
 
       # The processing pipeline applied to EVERY payload set (mirrors the CLI's

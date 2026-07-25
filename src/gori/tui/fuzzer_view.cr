@@ -926,26 +926,39 @@ module Gori::Tui
     # `Gori::Outbound` decision the sender dials through: no up-front allowlist gate (the
     # operator typed this target), but Sandbox mode and explicit EXCLUDE rules hard-block
     # every send — the same protection Discover already applies per-request.
-    def build_engine(verify : Bool, scope : Gori::Scope) : {Fuzz::Engine?, String?}
+    # `overrides` is the project's hostname overrides. It defaults to nil because the
+    # Fuzzer tab has never applied them (the proxy path does, via Proxy::Upstream.dial) and
+    # closing that gap is a controller change, outside this refactor — but the parameter
+    # exists so the fix is one call-site edit rather than another re-plumbed sender.
+    def build_engine(verify : Bool, scope : Gori::Scope,
+                     overrides : Gori::HostOverrides? = nil) : {Fuzz::Engine?, String?}
       commit_buffers
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
       end
-      template = Fuzz::Template.parse(Env.expand(@editor.text), @http2)
-      @pending_template = template # committed to @run_template in begin_run (see detail_request_bytes)
-      return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
-      return {nil, "add a payload set — ^O config · + Add set (^L for a List)"} if @sets.empty?
-      scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(@target))
-      return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
-      sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
-      gen_sets = @config.mode.per_position? ? sets : [sets.first]
-      generator = Fuzz::Generator.new(template, gen_sets, @config, registry: Decoder.shared_registry)
-      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), Gori::Outbound.interactive(scope),
-        http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
-      @matcher.auto_calibrate = @config.auto_calibrate?
-      {Fuzz::Engine.new(generator, @matcher, sender, @config), nil}
+      options = Fuzz::PlanOptions.new(@editor.text, target: @target, http2: @http2,
+        sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
+        verify: verify, sni: sni_override, overrides: overrides)
+      plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
+      @pending_template = plan.template # committed to @run_template in begin_run (see detail_request_bytes)
+      {plan.engine, nil}
+    rescue ex : Fuzz::PlanError
+      {nil, fuzz_plan_error(ex)}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # The Fuzzer tab's wording for a plan this view's state can't produce. The builder
+    # reports the machine-readable `reason`; the hint (and the hotkeys it names) is ours.
+    private def fuzz_plan_error(ex : Fuzz::PlanError) : String
+      case ex.reason
+      in Fuzz::PlanError::Reason::NoPositions
+        "mark a position first — ^A params · ^K word"
+      in Fuzz::PlanError::Reason::NoTarget, Fuzz::PlanError::Reason::BadTarget
+        "invalid target — use scheme://host[:port]/path"
+      in Fuzz::PlanError::Reason::NoPayloads
+        "add a payload set — ^O config · + Add set (^L for a List)"
+      end
     end
 
     # Whether the run targets HTTP/2 — for Probe's synthetic RepeaterRecord (see
