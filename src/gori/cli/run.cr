@@ -30,6 +30,7 @@ require "../probe/passive"
 require "../probe/group"
 require "../notes"
 require "../issues_export"
+require "../links"
 require "../import"
 require "./output"
 require "./run/capture"
@@ -48,6 +49,7 @@ require "./run/notes"
 require "./run/sitemap"
 require "./run/import"
 require "./run/issues"
+require "./run/links"
 require "./run/jwt"
 require "./run/decoder"
 require "./run/rewriter"
@@ -120,6 +122,7 @@ module Gori
         case sub
         when "compare"   then cmd_compare(rest)
         when "intercept" then cmd_intercept(rest)
+        when "links"     then cmd_links(rest)
         else
           STDERR.puts "gori run: unknown subcommand '#{sub}'"
           print_help
@@ -156,6 +159,7 @@ module Gori
         {"probe mode", "Get/set the scan mode (off, passive, active, aggressive)"},
         {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, update, or delete issues (text, json, markdown)"},
+        {"links", "List/add/remove an issue's or note's evidence links"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
         {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},

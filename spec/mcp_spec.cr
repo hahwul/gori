@@ -2547,3 +2547,103 @@ describe "MCP flow deletion" do
     end
   end
 end
+
+describe "MCP entity links" do
+  it "lists an issue's evidence resolved to labels, and round-trips add/remove" do
+    with_store do |store|
+      fid = seed_flow(store, "/evidence")
+      rid = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      iid = store.insert_issue("boom", Gori::Store::Severity::High, "acme.test", nil)
+      tools = tools_for(store)
+
+      ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
+
+      res = ok_json(tools, "add_link",
+        %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))
+      res["already_linked"].as_bool.should be_false
+      ok_json(tools, "add_link",
+        %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))
+
+      listed = ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))
+      listed["total"].as_i.should eq(2)
+      kinds = listed["links"].as_a.map { |l| l["ref_kind"].as_s }
+      kinds.should contain("flow")
+      kinds.should contain("repeater")
+      listed["links"].as_a.each { |l| l["label"].as_s.empty?.should be_false }
+
+      ok_json(tools, "remove_link",
+        %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))["removed"].as_bool.should be_true
+      ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(1)
+    end
+  end
+
+  it "reports a re-link as already_linked rather than duplicating" do
+    with_store do |store|
+      fid = seed_flow(store)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      tools = tools_for(store)
+      args = %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}})
+
+      ok_json(tools, "add_link", args)["already_linked"].as_bool.should be_false
+      ok_json(tools, "add_link", args)["already_linked"].as_bool.should be_true
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).size.should eq(1)
+    end
+  end
+
+  it "marks a link whose target vanished as stale instead of hiding it" do
+    with_store do |store|
+      rid = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      tools = tools_for(store)
+      ok_json(tools, "add_link", %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))
+
+      # Deleting a repeater does NOT cascade entity_links (unlike deleting a flow), so this
+      # is the path that actually leaves a dangling pointer.
+      store.delete_repeater(rid)
+      listed = ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))
+      listed["total"].as_i.should eq(1) # still reported — "gone" is not the same as "never there"
+      listed["links"].as_a.first["stale"].as_bool.should be_true
+    end
+  end
+
+  it "drops a flow link when the flow itself is deleted (delete_flow cascades entity_links)" do
+    with_store do |store|
+      fid = seed_flow(store)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      tools = tools_for(store)
+      ok_json(tools, "add_link", %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))
+
+      ok_json(tools, "delete_flow", %({"id":#{fid}}))
+      ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
+    end
+  end
+
+  it "refuses to link either end to a row that does not exist" do
+    with_store do |store|
+      fid = seed_flow(store)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      tools = tools_for(store)
+
+      tools.call("add_link", JSON.parse(%({"owner_kind":"issue","owner_id":9999,"ref_kind":"flow","ref_id":#{fid}}))).is_error.should be_true
+      tools.call("add_link", JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":9999}))).is_error.should be_true
+      tools.call("add_link", JSON.parse(%({"owner_kind":"bogus","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))).is_error.should be_true
+      tools.call("add_link", JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"bogus","ref_id":#{fid}}))).is_error.should be_true
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).empty?.should be_true
+    end
+  end
+
+  it "refuses mutation under --read-only but still lists" do
+    with_store do |store|
+      fid = seed_flow(store)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, fid)
+      ro = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+
+      ro.call("add_link", JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))).is_error.should be_true
+      ro.call("remove_link", JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))).is_error.should be_true
+      ok_json(ro, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(1)
+    end
+  end
+end

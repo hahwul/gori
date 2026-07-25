@@ -36,6 +36,7 @@ require "./tools/import"
 require "./tools/intercept"
 require "./tools/issues"
 require "./tools/jobs"
+require "./tools/links"
 require "./tools/mine"
 require "./tools/notes"
 require "./tools/probe"
@@ -94,6 +95,7 @@ module Gori
         "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
         "delete_issue", "update_scope_rule", "set_sitemap_tag",
         "delete_flow", "clear_history",
+        "add_link", "remove_link",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -558,6 +560,15 @@ module Gori
             "List the free-text memos the operator pinned onto sitemap paths, as " \
             "[{host, path, tag}]. These are the same tags list_sitemap stamps onto its entries." do |s|
             s.field "host", strprop("only list tags on this host")
+          end
+
+          tool j, "list_links",
+            "List the evidence pointers an Issue or Note carries — to a captured Flow, a " \
+            "Repeater tab, or a Fuzz/Miner run — each resolved to a human label and URL. " \
+            "A pointer whose target was pruned comes back with stale:true rather than being " \
+            "dropped, so you can tell \"no evidence\" from \"evidence that is gone\"." do |s|
+            s.field "owner_kind", strprop("issue|note"), required: true
+            s.field "owner_id", intprop("the issue or note id"), required: true
           end
 
           tool j, "list_probe_rules",
@@ -1092,6 +1103,25 @@ module Gori
               s.field "tag", strprop("the memo; empty or absent CLEARS the tag")
             end
 
+            tool j, "add_link",
+              "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / " \
+              "Fuzz or Miner run. Idempotent — re-linking the same pair returns " \
+              "already_linked:true rather than erroring or duplicating." do |s|
+              s.field "owner_kind", strprop("issue|note"), required: true
+              s.field "owner_id", intprop("the issue or note id"), required: true
+              s.field "ref_kind", strprop("flow|repeater|fuzz|miner"), required: true
+              s.field "ref_id", intprop("id of the linked flow/repeater/fuzz/miner"), required: true
+            end
+
+            tool j, "remove_link",
+              "Detach an evidence pointer, addressed by the same (owner, ref) pair add_link " \
+              "takes — no need to look up the link row's own id first." do |s|
+              s.field "owner_kind", strprop("issue|note"), required: true
+              s.field "owner_id", intprop("the issue or note id"), required: true
+              s.field "ref_kind", strprop("flow|repeater|fuzz|miner"), required: true
+              s.field "ref_id", intprop("id of the linked flow/repeater/fuzz/miner"), required: true
+            end
+
             tool j, "delete_flow",
               "Hard-delete one captured flow from History. This cannot be undone." do |s|
               s.field "id", intprop("flow id"), required: true
@@ -1433,6 +1463,7 @@ module Gori
         when "probe_issues"            then probe_issues(h)
         when "list_probe_rules"        then list_probe_rules(h)
         when "list_sitemap_tags"       then list_sitemap_tags(h)
+        when "list_links"              then list_links(h)
         when "list_scope"              then list_scope
         when "list_env"                then list_env(h)
         when "list_host_overrides"     then list_host_overrides
@@ -1499,6 +1530,8 @@ module Gori
         when "set_sitemap_tag"         then gated { set_sitemap_tag(h) }
         when "delete_flow"             then gated { delete_flow(h) }
         when "clear_history"           then gated { clear_history(h) }
+        when "add_link"                then gated { add_entity_link(h) }
+        when "remove_link"             then gated { remove_entity_link(h) }
         when "fuzz_start"              then gated { fuzz_start(h) }
         when "fuzz_status"             then gated { fuzz_status(h) }
         when "fuzz_results"            then gated { fuzz_results(h) }
