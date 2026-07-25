@@ -38,6 +38,7 @@ require "./tools/issues"
 require "./tools/jobs"
 require "./tools/links"
 require "./tools/mine"
+require "./tools/minimize"
 require "./tools/notes"
 require "./tools/oast_providers"
 require "./tools/probe"
@@ -98,6 +99,7 @@ module Gori
         "delete_flow", "clear_history",
         "add_link", "remove_link",
         "create_oast_provider", "update_oast_provider", "set_oast_provider_enabled", "delete_oast_provider",
+        "minimize_repeater",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -1148,6 +1150,17 @@ module Gori
               s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
             end
 
+            tool j, "minimize_repeater",
+              "Strip cosmetic headers, tracking-cookie crumbs, and unused query/body params " \
+              "from a saved repeater request while keeping the response within tolerance of a " \
+              "calibrated baseline (Caido-\"squash\"-style). ACTIVE: sends MANY real outbound " \
+              "requests (capped at 250) and is scope-gated. Returns the trimmed request plus " \
+              "what was removed; pass apply:true to also save it back to the session." do |s|
+              s.field "repeater_id", intprop("repeater database id"), required: true
+              s.field "apply", boolprop("write the minimized request back into the session (default false)")
+              s.field "allow_unscoped", boolprop("minimize even when the target host is outside — or without — a configured scope (default false)")
+            end
+
             tool j, "add_link",
               "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / " \
               "Fuzz or Miner run. Idempotent — re-linking the same pair returns " \
@@ -1582,6 +1595,7 @@ module Gori
         when "update_oast_provider"      then gated { update_oast_provider(h) }
         when "set_oast_provider_enabled" then gated { set_oast_provider_enabled(h) }
         when "delete_oast_provider"      then gated { delete_oast_provider(h) }
+        when "minimize_repeater"         then gated { minimize_repeater(h) }
         when "fuzz_start"                then gated { fuzz_start(h) }
         when "fuzz_status"               then gated { fuzz_status(h) }
         when "fuzz_results"              then gated { fuzz_results(h) }

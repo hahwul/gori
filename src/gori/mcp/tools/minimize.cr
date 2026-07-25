@@ -1,0 +1,123 @@
+require "json"
+require "../../store"
+require "../../scope"
+require "../../repeater/minimize"
+require "../../repeater/flow_request"
+require "../../repeater/ws_engine"
+require "../../env"
+
+module Gori
+  module MCP
+    class Tools
+      # Bound the probe volume the same way the TUI and CLI do — a pathological request must
+      # not blast the origin (repeater_controller.cr#MINIMIZE_SEND_CAP).
+      MINIMIZE_SEND_CAP = 250_i64
+
+      # minimize_repeater — strip cosmetic headers, tracking-cookie crumbs, and unused
+      # query/body params from a saved repeater request while keeping the response within
+      # tolerance of a calibrated baseline (Caido-"squash"-style). Drives the same
+      # `Repeater::Minimize` engine as the TUI's Space→M and `gori run repeater minimize`.
+      #
+      # ACTIVE: sends many real outbound requests, so it is write-gated AND scope-gated
+      # (Fuzz::ScopedBackend hard-blocks a Sandbox/exclude at the socket seam).
+      private def minimize_repeater(h) : Result
+        id = int(h, "repeater_id")
+        return Result.new(id_error(h, "repeater_id"), is_error: true) unless id
+        rec = store.get_repeater(id)
+        return not_found("no repeater with id #{id}") unless rec
+
+        text = String.new(rec.request)
+        scope = Scope.load(store)
+        target = minimize_target(id, rec, text, scope, bool(h, "allow_unscoped") || false)
+        return target if target.is_a?(Result)
+        scheme, host, port = target
+
+        auto_cl = rec.auto_content_length?
+        # Mirrors the TUI/CLI resolve: env-expand, then Content-Length resync only when the
+        # session has Auto-CL on (the same gate that lets body params be removed at all).
+        resolve = ->(t : String) do
+          raw = Env.expand_wire(t)
+          auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
+        end
+        backend = Fuzz::ScopedBackend.new(
+          Fuzz::CappedBackend.new(
+            Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), rec.http2?,
+              @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
+            MINIMIZE_SEND_CAP),
+          scope)
+
+        report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }
+
+        applied = false
+        if (bool(h, "apply") || false) && !report.aborted && !report.removed.empty?
+          applied = store.update_repeater(id: id, target: rec.target,
+            request: report.minimized_text.to_slice, http2: rec.http2?,
+            auto_cl: auto_cl, sni: rec.sni)
+        end
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "repeater_id", id
+            j.field "aborted", report.aborted
+            j.field "note", report.note
+            j.field "sends", report.sends
+            j.field("removed") do
+              j.array do
+                report.removed.each do |r|
+                  j.object { j.field "kind", r.kind.to_s.downcase; j.field "label", r.label }
+                end
+              end
+            end
+            j.field "removed_count", report.removed.size
+            j.field "applied", applied
+            j.field "minimized_request", report.minimized_text
+          end
+        end)
+      end
+
+      # The validated {scheme, host, port} to minimize against, or a refusal Result. Split out
+      # of minimize_repeater to keep it under the cyclomatic-complexity bar.
+      private def minimize_target(id : Int64, rec : Store::RepeaterRecord, text : String,
+                                  scope : Scope, allow_unscoped : Bool) : {String, String, Int32} | Result
+        if Repeater::WsEngine.upgrade_request?(text)
+          return err("repeater #{id} is a WebSocket upgrade — minimize works on plain HTTP requests",
+            "INVALID_ARGUMENT", field: "repeater_id")
+        end
+        scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
+        return err("could not determine a target host for repeater #{id}", "INVALID_ARGUMENT", field: "repeater_id") if host.empty?
+        unless scheme.in?("http", "https")
+          return err("unsupported target scheme '#{scheme}' (use http or https)", "INVALID_ARGUMENT", field: "repeater_id")
+        end
+        if gate = scope_refusal(scope, scheme, host, text, allow_unscoped)
+          return gate
+        end
+        {scheme, host, port}
+      end
+
+      # The same two-layer gate the other active tools use: refuse up front when the target
+      # is outside — or has no — configured scope, unless the caller opted out. Layer 2
+      # (ScopedBackend) still hard-blocks a Sandbox/exclude even under allow_unscoped.
+      private def scope_refusal(scope : Scope, scheme : String, host : String,
+                                text : String, allow_unscoped : Bool) : Result?
+        url = Scope.request_url(scheme, host, request_line_target(text))
+        if scope.sandbox? && scope.sandbox_blocks?(url, host)
+          return err("blocked by sandbox (out of scope) — minimize refuses to send", "SCOPE_BLOCKED",
+            field: "repeater_id", details: JSON.parse({"scope_decision" => "sandbox"}.to_json))
+        end
+        return nil if allow_unscoped
+        unless scope.matches_url?(url, host)
+          return err("#{host} is outside — or without — a configured scope; pass allow_unscoped:true to minimize anyway",
+            "SCOPE_BLOCKED", field: "repeater_id",
+            details: JSON.parse({"scope_decision" => "unscoped", "host" => host}.to_json))
+        end
+        nil
+      end
+
+      # The request-line target of a raw request ("/a?b=1"), for the scope URL. Falls back to
+      # "/" so a malformed first line still produces a checkable URL rather than raising.
+      private def request_line_target(text : String) : String
+        (text.each_line.first?.try(&.split(' ')[1]?)) || "/"
+      end
+    end
+  end
+end

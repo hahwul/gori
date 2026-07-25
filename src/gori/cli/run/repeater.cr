@@ -13,6 +13,9 @@ module Gori
         elsif sub == "send"
           cmd_repeater_send(args[1..])
           return
+        elsif sub == "minimize"
+          cmd_repeater_minimize(args[1..])
+          return
         end
 
         cmd_repeater_single(args)

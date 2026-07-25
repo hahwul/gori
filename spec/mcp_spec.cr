@@ -2718,3 +2718,60 @@ describe "MCP saved OAST providers" do
     end
   end
 end
+
+describe "MCP minimize_repeater" do
+  it "refuses a WebSocket session, an unknown id, and a bad scheme" do
+    with_store do |store|
+      ws = store.insert_repeater("https://acme.test/",
+        "GET /ws HTTP/1.1\r\nHost: acme.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      bad = store.insert_repeater("ftp://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 1)
+      tools = tools_for(store)
+
+      tools.call("minimize_repeater", JSON.parse(%({"repeater_id":9999}))).is_error.should be_true
+      tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{ws}}))).is_error.should be_true
+      tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{bad}}))).is_error.should be_true
+    end
+  end
+
+  it "refuses an out-of-scope target before sending anything" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "other.test")
+      tools = tools_for(store)
+
+      r = tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{id}})))
+      r.is_error.should be_true
+      r.text.should contain("scope")
+    end
+  end
+
+  it "refuses a sandbox-blocked target even under allow_unscoped" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "other.test")
+      scope.enable_sandbox
+      tools = tools_for(store)
+
+      # allow_unscoped bypasses the include gate but NEVER the sandbox — same two-layer
+      # model the other active tools use.
+      r = tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true})))
+      r.is_error.should be_true
+      r.text.should contain("sandbox")
+    end
+  end
+
+  it "is refused under --read-only (it sends real requests)" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      ro = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      ro.call("minimize_repeater", JSON.parse(%({"repeater_id":#{id}}))).is_error.should be_true
+    end
+  end
+end

@@ -19,6 +19,7 @@ require "../repeater/h2_engine"
 require "../repeater/ws_engine"
 require "../repeater/flow_request"
 require "../repeater/diff"
+require "../repeater/minimize"
 require "../repeater/message_lines"
 require "../fuzz"
 require "../decoder"
@@ -37,6 +38,7 @@ require "./output"
 require "./run/capture"
 require "./run/history"
 require "./run/repeater"
+require "./run/repeater_minimize"
 require "./run/compare"
 require "./run/intercept"
 require "./run/fuzz_args"
@@ -141,6 +143,7 @@ module Gori
         {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
         {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
         {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
         {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
