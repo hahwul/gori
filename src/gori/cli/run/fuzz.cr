@@ -116,9 +116,10 @@ module Gori
           http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
         engine = Fuzz::Engine.new(generator, matcher, sender, config)
-        engine.calibrate_baseline if auto_cal
-
+        # Calibration SENDS, so it belongs inside the block that releases the read
+        # connection — a raise in there would otherwise leak it.
         begin
+          engine.calibrate_baseline if auto_cal
           run_fuzz_stream(engine, mode, scheme, host, port, format, force, fail_if_no_matches)
         ensure
           outbound.close

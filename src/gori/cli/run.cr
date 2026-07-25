@@ -293,8 +293,16 @@ module Gori
         # ONLY fuzz/mine/sequence can genuinely run project-less (--request/stdin). Every
         # other caller reads its subject (a repeater session, a flow) out of a project and
         # must use project_outbound, or an omitted --project would silently drop the gate.
-        return Gori::Outbound.cli(nil, allow_unscoped) unless flow_id || project_name || db_path
-        project_outbound(project_name, db_path, allow_unscoped)
+        return project_outbound(project_name, db_path, allow_unscoped) if flow_id || project_name || db_path
+        # Standalone run: no project context at all, the same condition on which
+        # cli_host_overrides skips loading overrides. `resolve_read_project` WOULD still
+        # resolve a default project here, so this is the one `gori run` active path where the
+        # active project's Sandbox and exclude rules do not apply. Say so on STDERR rather
+        # than letting an ungated run look gated — binding a standalone run to the ambient
+        # project instead is a product call, tracked as a follow-up on #354.
+        STDERR.puts "gori run: no project in play (--request/stdin without --project/--db) — sending UNSCOPED; " \
+                    "the active project's scope and Sandbox rules do NOT apply to this run"
+        Gori::Outbound.cli(nil, allow_unscoped)
       end
 
       # The Outbound for a command that ALWAYS has a project in play — `gori run repeater`

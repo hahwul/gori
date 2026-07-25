@@ -354,12 +354,17 @@ re-read at all; the TUI re-read only as a side effect of its own `data_version` 
 practical result was that a mid-run EXCLUDE or Sandbox toggle stopped an MCP sweep, was
 invisible to a CLI sweep, and stopped a TUI sweep by accident rather than by design.
 
-`Gori::Outbound` now owns the reload for every surface: before each Layer-2 check it re-reads
-the scope from its store, throttled to `Outbound::RELOAD_INTERVAL` (1s). A per-send DB read is
-too heavy at high concurrency, and the clock is advanced *before* the blocking reload so
-concurrent worker fibers cannot stampede the store. A failed reload is swallowed and the
-last-known rules stay in force, degrading to the old snapshot behaviour rather than to
-allow-everything.
+`Gori::Outbound` now owns the reload: before each Layer-2 check it re-reads the scope from its
+store, throttled to `Outbound::RELOAD_INTERVAL` (1s). A per-send DB read is too heavy at high
+concurrency, and the clock is advanced *before* the blocking reload so concurrent worker fibers
+cannot stampede the store. A failed reload is swallowed and the last-known rules stay in force,
+degrading to the old snapshot behaviour rather than to allow-everything.
+
+What that buys is uniform for every LONG-RUNNING job (fuzz, mine, sequence, minimize, active
+probe) on all three surfaces, which is where the divergence actually mattered. A one-shot
+Repeater send builds a fresh decision per send, so the throttle window never elapses within it
+and no reload fires; it reads whatever rules its scope already holds, which for the TUI is the
+live session scope the `data_version` poll keeps current.
 
 MCP's semantic won because it is the only one that honours a policy change the operator makes
 *while* a sweep is running, which is exactly when they most need it to stop. Adopting it on the
