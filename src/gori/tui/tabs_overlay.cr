@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./chrome"
+require "./overlay"
 require "../settings"
 
 module Gori::Tui
@@ -13,11 +14,81 @@ module Gori::Tui
   #
   #   ✓ Project      ▎ selected, shown
   #   · Miner           hidden
-  class TabsOverlay
+  class TabsOverlay < Overlay
+    # Injected at the open-site (Runner#open_settings): ^P leaves the modal stack for the
+    # command palette, `r` raises the reset confirm, and a refused hide reports through the
+    # shell's toast. ↵ persists via the base `on_commit`; esc discards by closing.
+    property on_palette : Proc(Nil)?
+    property on_reset : Proc(Nil)?
+    property on_toast : Proc(String, Nil)?
+
     def initialize
       @items = [] of {Symbol, String, Bool}
       @selected = 0
       reset
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Tabs
+    end
+
+    def title : String
+      "TAB BAR"
+    end
+
+    def hint : String
+      "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+    end
+
+    # ↑/↓ move the selection and ⇧↑/⇧↓ reorder the selected tab; ↵ saves+applies, esc
+    # discards; ^P jumps back to the palette.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        on_palette.try(&.call)
+      elsif key.escape?
+        return :cancel # discard the working copy
+      elsif key.enter?
+        return :commit
+      elsif key.up?
+        ev.shift? ? move_selected(-1) : select_move(-1)
+      elsif key.down?
+        ev.shift? ? move_selected(1) : select_move(1)
+      elsif c = ev.char
+        handle_char(c)
+      end
+      :stay
+    end
+
+    # k/j mirror ↑/↓ and K/J mirror ⇧↑/⇧↓; space toggles show/hide (refused for the last
+    # visible tab, which the shell toasts); r reverts to the factory default order and
+    # visibility, behind the injected confirm.
+    private def handle_char(c : Char) : Nil
+      case c
+      when ' '      then on_toast.try(&.call("keep at least one tab visible")) unless toggle_selected
+      when 'k'      then select_move(-1)
+      when 'K'      then move_selected(-1)
+      when 'j'      then select_move(1)
+      when 'J'      then move_selected(1)
+      when 'r', 'R' then on_reset.try(&.call)
+      end
+    end
+
+    # A click outside dismisses (discards the working copy, like esc); a row click selects
+    # it (toggle/reorder stay keyboard-driven).
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+      end
+      :stay
+    end
+
+    # ↑/↓ and the scroll wheel share the selection move (Overlay#handle_wheel calls this).
+    def move(step : Int32) : Nil
+      select_move(step)
     end
 
     # Rebuild the working copy from persisted config (called when the overlay opens),

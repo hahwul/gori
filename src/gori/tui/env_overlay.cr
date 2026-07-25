@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./highlight"
+require "./overlay"
 require "../settings"
 require "../env"
 
@@ -9,7 +10,14 @@ module Gori::Tui
   # Global environment-variable editor (settings:env). Edits a working copy of the
   # prefix sigil + {key, value} pairs; the Runner persists to Settings on every
   # mutation. Entry form: "KEY VALUE" or "KEY=value".
-  class EnvOverlay
+  class EnvOverlay < Overlay
+    # Injected at the open-site (Runner#open_settings). Like the Hostnames editor this one
+    # persists on every mutation rather than on ↵, so esc just closes and the base
+    # `on_commit` is never reached; `on_save` reports whether the write landed.
+    property on_palette : Proc(Nil)?
+    property on_save : Proc(Bool)?
+    property on_toast : Proc(String, Nil)?
+
     def initialize
       @items = [] of {String, String}
       @prefix = Settings.env_prefix
@@ -41,6 +49,142 @@ module Gori::Tui
 
     def prefix_editing? : Bool
       @prefix_editing
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Env
+    end
+
+    def title : String
+      "ENVIRONMENT"
+    end
+
+    def hint : String
+      return "type prefix · ↵ save · esc cancel" if @prefix_editing
+      return %(type "KEY VALUE" · ↵ save · esc cancel) if @adding
+      "↑/↓ select · a add · ↵/e edit · d delete · p prefix · esc close"
+    end
+
+    # a add · ↵/e edit · d delete · p edit the prefix sigil · esc close. ^P jumps back to
+    # the palette. The prefix and add/edit rows are sub-modes of this same overlay — each
+    # owns every key while open — not separate shell states.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      return handle_prefix_key(ev) if @prefix_editing
+      return handle_add_key(ev) if @adding
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        on_palette.try(&.call)
+      elsif key.escape?
+        return :cancel
+      elsif key.up? || key.lower_k?
+        select_move(-1)
+      elsif key.down? || key.lower_j?
+        select_move(1)
+      elsif key.enter?
+        edit_start
+      else
+        handle_list_char(ev.char || key.to_char)
+      end
+      :stay
+    end
+
+    private def handle_list_char(c : Char?) : Nil
+      case c
+      when 'e' then edit_start
+      when 'a' then add_start
+      when 'p' then prefix_edit_start
+      when 'd' then delete_and_persist
+      end
+    end
+
+    private def handle_prefix_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        cancel_prefix_edit
+      elsif key.enter?
+        commit_prefix_and_persist
+      elsif key.left?
+        move_cursor(-1)
+      elsif key.right?
+        move_cursor(1)
+      elsif key.backspace?
+        cancel_prefix_edit unless backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        input(c)
+        set_preedit("")
+      end
+      :stay
+    end
+
+    private def handle_add_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        cancel_add
+      elsif key.enter?
+        commit_and_persist
+      elsif key.left?
+        move_cursor(-1)
+      elsif key.right?
+        move_cursor(1)
+      elsif key.backspace?
+        cancel_add unless backspace
+      elsif key.tab?
+        input(' ') # Tab types the KEY/VALUE separator, not a focus jump
+        set_preedit("")
+      elsif c && !ev.ctrl? && !ev.alt?
+        input(c)
+        set_preedit("")
+      end
+      :stay
+    end
+
+    private def commit_prefix_and_persist : Nil
+      case commit_prefix
+      when :empty then toast("env prefix: empty")
+      when :ok
+        toast(persist ? "env prefix saved — #{@prefix.inspect}" : "prefix applied — could not save to #{Settings.path}")
+      end
+    end
+
+    private def commit_and_persist : Nil
+      case commit_entry
+      when :empty   then toast("env var: empty")
+      when :invalid then toast(%(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*))
+      when :dup     then toast("env var: KEY already defined")
+      when :ok
+        toast(persist ? "env var saved — #{@items.size} total" : "env var applied — could not save to #{Settings.path}")
+      end
+    end
+
+    private def delete_and_persist : Nil
+      return unless key_name = delete_selected
+      toast(persist ? "removed env: #{key_name}" : "removed #{key_name} — could not save to #{Settings.path}")
+    end
+
+    private def persist : Bool
+      (s = on_save) ? s.call : true
+    end
+
+    private def toast(msg : String) : Nil
+      on_toast.try(&.call(msg))
+    end
+
+    # A click outside dismisses (esc); a row click selects it (add/edit/delete stay
+    # keyboard-driven).
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+      end
+      :stay
+    end
+
+    def move(step : Int32) : Nil
+      select_move(step)
     end
 
     def select_move(d : Int32) : Nil
@@ -124,7 +268,13 @@ module Gori::Tui
       :ok
     end
 
-    def commit : Symbol
+    # NOT `commit`: that name belongs to `Overlay`, whose `commit : Bool` runs the injected
+    # on_commit closure and tells the shell whether to close. Crystal has no `override`
+    # keyword, so naming this one `commit` silently replaced the base contract — inert only
+    # because this editor never returns a :commit outcome (it persists per mutation), and a
+    # landmine the moment one is added: the shell would run this field parser instead of the
+    # closure and read its truthy Symbol as "close me". (`commit_prefix` does not collide.)
+    def commit_entry : Symbol
       text = @input.strip
       return :empty if text.empty?
       parsed = Env.parse_line(text)

@@ -182,18 +182,6 @@ module Gori::Tui
       # The "send selection to X" destination picker (space → S); same orthogonal-to-
       # @overlay lifetime as @copy_picker. Non-nil ⇔ shown (see send_to_shown?).
       @send_picker = nil.as(SendPicker?)
-      # The settings editor (palette → settings:network); @overlay is :settings.
-      @settings_view = SettingsView.new
-      @preferences = PreferencesView.new # the unified grouped settings modal (Ctrl+, / ⚙ / palette)
-      @prefs_return = false              # a dedicated editor was opened FROM the modal → return to it on close
-      # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
-      # from @tabs (the controller registry built below).
-      @tabs_overlay = TabsOverlay.new
-      # The global hostname-overrides editor (settings → "Hostname overrides"); @overlay is :hosts.
-      @hosts_overlay = HostsOverlay.new
-      @env_overlay = EnvOverlay.new
-      # The hotkey rebinder (palette → settings:hotkeys); @overlay is :hotkeys.
-      @hotkeys_overlay = HotkeysOverlay.new(@session.registry)
       # Shared background-job + notification layer (Miner is the first consumer). The
       # registries are mutated only on the main fiber (controller drains); the spinner
       # frame advances while a job is active so the bottom-bar chip animates.
@@ -893,12 +881,8 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?     then @palette.set_preedit(text)
-      when .preferences? then @preferences.set_preedit(text)
-      when .settings?    then @settings_view.set_preedit(text)
-      when .hosts?       then @hosts_overlay.set_preedit(text)
-      when .env?         then @env_overlay.set_preedit(text)
-      when .none?        then apply_preedit_body(text)
+      when .palette? then @palette.set_preedit(text)
+      when .none?    then apply_preedit_body(text)
       end
     end
 
@@ -916,9 +900,10 @@ module Gori::Tui
       # it works uniformly across tabs, editors and overlays.
       # In hotkey CAPTURE mode ^C/^D are capturable chords (reserved.cr rejects them inline
       # with "Ctrl-C/D quits gori" while staying in capture) — exclude them from the global
-      # quit-arm so a stray ^D during a rebind can't silently arm an app quit.
-      capturing_hotkey = @overlay.hotkeys? && @hotkeys_overlay.capturing?
-      if (ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)) && !capturing_hotkey
+      # quit-arm so a stray ^D during a rebind can't silently arm an app quit. The modal
+      # answers for itself (Overlay#raw_key_capture?); no other overlay claims these.
+      raw_capture = active_overlay.try(&.raw_key_capture?) || false
+      if (ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)) && !raw_capture
         if Settings.confirm_quit?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
@@ -937,7 +922,10 @@ module Gori::Tui
       @toast = nil # clear last action's feedback; a new action may set it again
       # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the
       # ^G/^F/^B guards (and everything else) so those chords can be recorded.
-      return handle_hotkeys_key(ev) if @overlay.hotkeys? && @hotkeys_overlay.capturing?
+      if raw_capture && (ov = active_overlay)
+        dispatch_overlay_key(ov, ev)
+        return
+      end
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
       return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
       return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
@@ -967,18 +955,6 @@ module Gori::Tui
       end
       return handle_palette_key(ev) if @overlay.palette?
       return handle_more_menu_key(ev) if @overlay.tabs_more?
-      return handle_preferences_key(ev) if @overlay.preferences?
-      if PREFS_SUB_EDITORS.includes?(@overlay)
-        case @overlay
-        when .settings? then handle_settings_key(ev)
-        when .tabs?     then handle_tabs_key(ev)
-        when .hosts?    then handle_hosts_key(ev)
-        when .env?      then handle_env_key(ev)
-        when .hotkeys?  then handle_hotkeys_key(ev)
-        end
-        settle_sub_editor # closing one opened from Preferences lands back in the modal
-        return
-      end
       # Migrated modals (Overlay base) dispatch generically — no per-modal handle_*_key.
       if ov = active_overlay
         dispatch_overlay_key(ov, ev)
@@ -1242,12 +1218,6 @@ module Gori::Tui
     MODAL_OVERLAYS = {
       OverlayKind::Palette,
       OverlayKind::TabsMore,
-      OverlayKind::Preferences,
-      OverlayKind::Settings,
-      OverlayKind::Tabs,
-      OverlayKind::Hosts,
-      OverlayKind::Env,
-      OverlayKind::Hotkeys,
     }
 
     private def modal_overlay? : Bool
@@ -1342,14 +1312,8 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?     then click_palette(area, mx, my)
-      when .tabs_more?   then click_more_menu(layout, mx, my)
-      when .preferences? then apply_preferences_outcome(@preferences.click(area, mx, my))
-      when .settings?    then (click_settings(area, mx, my); settle_sub_editor)
-      when .tabs?        then (click_tabs(area, mx, my); settle_sub_editor)
-      when .hosts?       then (click_hosts(area, mx, my); settle_sub_editor)
-      when .env?         then (click_env(area, mx, my); settle_sub_editor)
-      when .hotkeys?     then (click_hotkeys(area, mx, my); settle_sub_editor)
+      when .palette?   then click_palette(area, mx, my)
+      when .tabs_more? then click_more_menu(layout, mx, my)
       end
     end
 
@@ -1393,71 +1357,10 @@ module Gori::Tui
       end
     end
 
-    private def click_settings(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @settings_view.overlay_box(area)
-      return cancel_settings if dismiss_zone?(box, mx, my)
-      if idx = @settings_view.field_at(box, mx, my)
-        @settings_view.set_field(idx)
-        if opener = @settings_view.focused_opener
-          open_settings(opener) # an action row → open its sub-editor on click (mouse parity with ↵)
-        else
-          preview_theme # clicking a theme row live-previews it (no-op outside :theme)
-        end
-      end
-    end
-
-    # Tab-bar customizer: a click outside dismisses (discards the working copy, like
-    # esc); a row click selects it (toggle/reorder stay keyboard-driven).
-    private def click_tabs(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @tabs_overlay.overlay_box(area)
-      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = @tabs_overlay.row_at(box, mx, my)
-        @tabs_overlay.set_selected(idx)
-      end
-    end
-
-    # Hostname-overrides editor: a click outside dismisses (esc); a row click selects it
-    # (add/edit/delete stay keyboard-driven).
-    private def click_hosts(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @hosts_overlay.overlay_box(area)
-      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = @hosts_overlay.row_at(box, mx, my)
-        @hosts_overlay.set_selected(idx)
-      end
-    end
-
-    private def click_env(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @env_overlay.overlay_box(area)
-      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = @env_overlay.row_at(box, mx, my)
-        @env_overlay.set_selected(idx)
-      end
-    end
-
-    # Hotkey editor: a click outside dismisses (discards the working copy, like esc); a
-    # row click selects that binding (rebind/unbind/reset stay keyboard-driven).
-    private def click_hotkeys(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @hotkeys_overlay.overlay_box(area)
-      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = @hotkeys_overlay.row_at(box, mx, my)
-        @hotkeys_overlay.set_selected(idx)
-      end
-    end
-
     # True when a click should dismiss a modal: anywhere outside its box (click-away
     # is the universal close affordance — every modal also still closes on esc).
     private def dismiss_zone?(box : Rect, mx : Int32, my : Int32) : Bool
       !box.contains?(mx, my)
-    end
-
-    # Cancel the settings modal: revert any live theme preview (mirrors the esc path).
-    private def cancel_settings : Nil
-      if restore = @theme_restore
-        Theme.apply(restore)
-        @resized = true
-        @theme_restore = nil
-      end
-      @overlay = OverlayKind::None
     end
 
     # Apply the persisted Mouse setting to the live terminal (both calls are
@@ -1491,14 +1394,8 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?     then @palette.move(step)
-      when .tabs_more?   then @more_menu.try(&.move(step))
-      when .preferences? then @preferences.wheel(step)
-      when .settings?    then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
-      when .tabs?        then @tabs_overlay.select_move(step)
-      when .hosts?       then @hosts_overlay.select_move(step)
-      when .env?         then @env_overlay.select_move(step)
-      when .hotkeys?     then @hotkeys_overlay.select_move(step)
+      when .palette?   then @palette.move(step)
+      when .tabs_more? then @more_menu.try(&.move(step))
       end
     end
 
@@ -2148,110 +2045,14 @@ module Gori::Tui
       end
     end
 
-    # Settings editor (palette → settings:network): ↑/↓ pick a field, type to edit,
-    # ↵ save (persist + apply), esc close, ^P jump to the palette.
-    private def handle_settings_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-        cancel_settings # revert any live theme preview before jumping (mirrors esc); sets @overlay=:none
-        open_palette
-      elsif key.escape?
-        cancel_settings # revert any live theme preview, close
-      elsif key.enter?
-        if opener = @settings_view.focused_opener
-          # An action row (e.g. "Hostname overrides") — open its sub-editor instead of
-          # saving the section. The sub-editor persists on its own.
-          open_settings(opener)
-          return
-        end
-        # :network rebinds the live proxy; :theme swaps the palette + repaints; the
-        # rest just persist (the value is read live or only matters next session). The
-        # side effects live in apply_settings_saved so the Settings tab applies a save
-        # the same way — one seam, no drift.
-        msg = @settings_view.save
-        @toast = apply_settings_saved(@settings_view.section, msg)
-      elsif key.up?
-        @settings_view.move_field(-1)
-        preview_theme # ↑/↓ moves the theme-list selection in the :theme section
-      elsif key.down?
-        @settings_view.move_field(1)
-        preview_theme
-      elsif key.left?
-        @settings_view.toggle_or_move(-1)
-        preview_theme
-      elsif key.right?
-        @settings_view.toggle_or_move(1)
-        preview_theme
-      elsif key.backspace?
-        @settings_view.backspace
-      elsif key.delete?
-        @settings_view.delete
-      elsif ev.ctrl? && key.lower_r?
-        # ^R (not a bare letter — those are typed into the focused field) reverts the
-        # section to its factory defaults, gated behind a confirm like the tab-bar reset.
-        section = @settings_view.section
-        confirm("RESET SETTINGS",
-          "Reset the #{section.to_s.upcase} settings to their\n" \
-          "default values? Unsaved edits here are replaced.",
-          confirm_label: "reset", danger: true, return_to: :settings) do
-          @settings_view.reset_to_defaults
-          preview_theme # :theme live-previews the restored default theme
-          @toast = "#{section} settings reset to defaults — ↵ to save"
-        end
-      elsif c && !ev.ctrl? && !ev.alt?
-        @settings_view.insert(c)
-        @settings_view.set_preedit("")
-        preview_theme # space cycles the theme in the :theme section — preview it too
-      end
-    end
-
-    # The tab-bar customizer (settings:tabs). Working copy: ↵ saves+applies, esc discards.
-    # ↑/↓ (and k/j) move the selection; K/J reorder the selected tab; space toggles
-    # show/hide (refused for the last visible tab); r reverts to the factory default
-    # order/visibility. ^P jumps back to the palette.
-    private def handle_tabs_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      if ev.ctrl? && key.lower_p?
-        @overlay = OverlayKind::None
-        open_palette
-      elsif key.escape?
-        @overlay = OverlayKind::None # discard the working copy
-      elsif key.enter?
-        save_tabs
-      elsif key.up? && ev.shift?
-        @tabs_overlay.move_selected(-1)
-      elsif key.down? && ev.shift?
-        @tabs_overlay.move_selected(1)
-      elsif key.up?
-        @tabs_overlay.select_move(-1)
-      elsif key.down?
-        @tabs_overlay.select_move(1)
-      elsif (c = ev.char) && c == ' '
-        @toast = "keep at least one tab visible" unless @tabs_overlay.toggle_selected
-      elsif (c = ev.char) && (c == 'K' || c == 'k')
-        c == 'K' ? @tabs_overlay.move_selected(-1) : @tabs_overlay.select_move(-1)
-      elsif (c = ev.char) && (c == 'J' || c == 'j')
-        c == 'J' ? @tabs_overlay.move_selected(1) : @tabs_overlay.select_move(1)
-      elsif (c = ev.char) && (c == 'r' || c == 'R')
-        confirm("RESET TAB BAR",
-          "Reset the tab bar to its default order and\n" \
-          "visibility? Your current arrangement is replaced.",
-          confirm_label: "reset", danger: true, return_to: :tabs) do
-          @tabs_overlay.reset_to_defaults
-          @toast = "tabs reset to defaults — ↵ to save"
-        end
-      end
-    end
-
     # Commit the tab-bar working copy: persist once, force a full repaint (the tab set/
     # order changed behind the centered overlay), and if the active tab was just hidden
     # snap to the first visible one — committing the outgoing tab's edits first (a hidden
     # Project desc / Repeater request must not be silently dropped), mirroring focus_tab.
-    private def save_tabs : Nil
-      Settings.tab_prefs = @tabs_overlay.to_prefs
+    # Always true: the shell closes the editor on ↵ whether or not the disk write landed.
+    private def save_tabs(ov : TabsOverlay) : Bool
+      Settings.tab_prefs = ov.to_prefs
       ok = Settings.save
-      @overlay = OverlayKind::None
       @resized = true
       # Snap off a now-hidden active tab. Use the GENUINE visibility (no force:) for this
       # decision — effective_tabs force-includes the active tab, which would mask the hide.
@@ -2269,167 +2070,20 @@ module Gori::Tui
       # The layout is applied to the live session regardless (like theme/network); only the
       # disk write can fail, so say so honestly rather than implying nothing happened.
       @toast = ok ? "tabs saved" : "tabs applied — could not save to #{Settings.path}"
+      true
     end
 
-    # The global hostname-overrides editor (settings → "Hostname overrides"). Persisted on
-    # every mutation (the live proxy reads Settings.host_override_ip on the next flow), so
-    # esc just closes. a add · ↵/e edit · d delete · esc close. ^P jumps back to the palette.
-    private def handle_hosts_key(ev : Termisu::Event::Key) : Nil
-      if @hosts_overlay.adding?
-        handle_hosts_add_key(ev)
-        return
-      end
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-        @overlay = OverlayKind::None
-        open_palette
-      elsif key.escape?
-        @overlay = OverlayKind::None
-      elsif key.up? || key.lower_k?
-        @hosts_overlay.select_move(-1)
-      elsif key.down? || key.lower_j?
-        @hosts_overlay.select_move(1)
-      elsif key.enter? || c == 'e'
-        @hosts_overlay.edit_start
-      elsif c == 'a'
-        @hosts_overlay.add_start
-      elsif c == 'd'
-        if host = @hosts_overlay.delete_selected
-          ok = save_hosts
-          @toast = ok ? "removed host override: #{host}" : "removed #{host} — could not save to #{Settings.path}"
-        end
-      end
-    end
-
-    # The inline add/edit row: type "IP host", ↵ commits, ⌫ on an empty input cancels,
-    # esc cancels.
-    private def handle_hosts_add_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if key.escape?
-        @hosts_overlay.cancel_add
-      elsif key.enter?
-        case @hosts_overlay.commit
-        when :empty   then @toast = "host override: empty"
-        when :invalid then @toast = %(host override: need "IP host" — a valid IP + a hostname)
-        when :dup     then @toast = "host override: host already mapped"
-        when :ok
-          ok = save_hosts
-          @toast = ok ? "host override saved — #{@hosts_overlay.to_overrides.size} total" : "host override applied — could not save to #{Settings.path}"
-        end
-      elsif key.left?
-        @hosts_overlay.move_cursor(-1)
-      elsif key.right?
-        @hosts_overlay.move_cursor(1)
-      elsif key.backspace?
-        @hosts_overlay.cancel_add unless @hosts_overlay.backspace
-      elsif key.tab?
-        @hosts_overlay.input(' ') # Tab types the IP/host separator, not a focus jump
-        @hosts_overlay.set_preedit("")
-      elsif c && !ev.ctrl? && !ev.alt?
-        @hosts_overlay.input(c)
-        @hosts_overlay.set_preedit("")
-      end
-    end
-
-    # Returns Settings.save's success so callers can branch the toast (saved vs
-    # applied-but-not-persisted), like save_tabs/save_hotkeys.
-    private def save_hosts : Bool
-      Settings.hostname_overrides = @hosts_overlay.to_overrides.dup
+    # Persist the hostname-overrides working copy. Returns Settings.save's success so the
+    # editor can branch its toast (saved vs applied-but-not-persisted), like save_env.
+    # Called on EVERY mutation — the live proxy reads Settings.host_override_ip on the next
+    # flow — which is why that editor has no ↵-to-commit and esc just closes.
+    private def save_hosts(ov : HostsOverlay) : Bool
+      Settings.hostname_overrides = ov.to_overrides.dup
       Settings.save
     end
 
-    private def handle_env_key(ev : Termisu::Event::Key) : Nil
-      if @env_overlay.prefix_editing?
-        handle_env_prefix_key(ev)
-        return
-      end
-      if @env_overlay.adding?
-        handle_env_add_key(ev)
-        return
-      end
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-        @overlay = OverlayKind::None
-        open_palette
-      elsif key.escape?
-        @overlay = OverlayKind::None
-      elsif key.up? || key.lower_k?
-        @env_overlay.select_move(-1)
-      elsif key.down? || key.lower_j?
-        @env_overlay.select_move(1)
-      elsif key.enter? || c == 'e'
-        @env_overlay.edit_start
-      elsif c == 'a'
-        @env_overlay.add_start
-      elsif c == 'p'
-        @env_overlay.prefix_edit_start
-      elsif c == 'd'
-        if key_name = @env_overlay.delete_selected
-          ok = save_env
-          @toast = ok ? "removed env: #{key_name}" : "removed #{key_name} — could not save to #{Settings.path}"
-        end
-      end
-    end
-
-    private def handle_env_prefix_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if key.escape?
-        @env_overlay.cancel_prefix_edit
-      elsif key.enter?
-        case @env_overlay.commit_prefix
-        when :empty then @toast = "env prefix: empty"
-        when :ok
-          ok = save_env
-          @toast = ok ? "env prefix saved — #{@env_overlay.to_config[0].inspect}" : "prefix applied — could not save to #{Settings.path}"
-        end
-      elsif key.left?
-        @env_overlay.move_cursor(-1)
-      elsif key.right?
-        @env_overlay.move_cursor(1)
-      elsif key.backspace?
-        @env_overlay.cancel_prefix_edit unless @env_overlay.backspace
-      elsif c && !ev.ctrl? && !ev.alt?
-        @env_overlay.input(c)
-        @env_overlay.set_preedit("")
-      end
-    end
-
-    private def handle_env_add_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if key.escape?
-        @env_overlay.cancel_add
-      elsif key.enter?
-        case @env_overlay.commit
-        when :empty   then @toast = "env var: empty"
-        when :invalid then @toast = %(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*)
-        when :dup     then @toast = "env var: KEY already defined"
-        when :ok
-          ok = save_env
-          n = @env_overlay.to_config[1].size
-          @toast = ok ? "env var saved — #{n} total" : "env var applied — could not save to #{Settings.path}"
-        end
-      elsif key.left?
-        @env_overlay.move_cursor(-1)
-      elsif key.right?
-        @env_overlay.move_cursor(1)
-      elsif key.backspace?
-        @env_overlay.cancel_add unless @env_overlay.backspace
-      elsif key.tab?
-        @env_overlay.input(' ') # Tab types the KEY/VALUE separator, not a focus jump
-        @env_overlay.set_preedit("")
-      elsif c && !ev.ctrl? && !ev.alt?
-        @env_overlay.input(c)
-        @env_overlay.set_preedit("")
-      end
-    end
-
-    private def save_env : Bool
-      prefix, vars = @env_overlay.to_config
+    private def save_env(ov : EnvOverlay) : Bool
+      prefix, vars = ov.to_config
       Settings.env_prefix = prefix
       Settings.env_vars = vars.dup
       ok = Settings.save
@@ -2437,75 +2091,17 @@ module Gori::Tui
       ok
     end
 
-    private def env_overlay_hints : String
-      return "type prefix · ↵ save · esc cancel" if @env_overlay.prefix_editing?
-      return "type \"KEY VALUE\" · ↵ save · esc cancel" if @env_overlay.adding?
-      "↑/↓ select · a add · ↵/e edit · d delete · p prefix · esc close"
-    end
-
-    # The hotkey rebinder (settings:hotkeys). Working copy: ↵ saves+applies, esc discards.
-    # Two sub-modes — :browse navigates/edits the list, :capture records the next key as
-    # the new binding (entered via e/space on a row; the capture early-return in handle_key
-    # routes keys here so ^G/^F/^B can be bound).
-    private def handle_hotkeys_key(ev : Termisu::Event::Key) : Nil
-      @hotkeys_overlay.capturing? ? handle_hotkeys_capture(ev) : handle_hotkeys_browse(ev)
-    end
-
-    private def handle_hotkeys_capture(ev : Termisu::Event::Key) : Nil
-      if ev.key.escape?
-        @hotkeys_overlay.cancel_capture
-      elsif chord = Keybind.from_event(ev)
-        @hotkeys_overlay.apply_capture(chord) # reserved/conflict → inline error, stays in capture
-      end
-      # an unmappable key (non-ASCII / a bare modifier) is ignored — capture stays open
-    end
-
-    private def handle_hotkeys_browse(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      if ev.ctrl? && key.lower_p?
-        @overlay = OverlayKind::None
-        open_palette
-      elsif key.escape?
-        @overlay = OverlayKind::None # discard the working copy
-      elsif key.enter?
-        save_hotkeys
-      elsif key.up?
-        @hotkeys_overlay.select_move(-1)
-      elsif key.down?
-        @hotkeys_overlay.select_move(1)
-      elsif key.left?
-        @hotkeys_overlay.cycle_profile(-1)
-      elsif key.right?
-        @hotkeys_overlay.cycle_profile(1)
-      elsif key.backspace?
-        @hotkeys_overlay.unbind_selected
-      elsif c = ev.char
-        handle_hotkeys_char(c)
-      end
-    end
-
-    private def handle_hotkeys_char(c : Char) : Nil
-      case c
-      when 'e', ' ' then @hotkeys_overlay.begin_capture
-      when 'x'      then @hotkeys_overlay.unbind_selected
-      when 'r'      then @hotkeys_overlay.reset_selected
-      when 'R'      then @hotkeys_overlay.reset_all
-      when 'k'      then @hotkeys_overlay.select_move(-1)
-      when 'j'      then @hotkeys_overlay.select_move(1)
-      end
-    end
-
     # Commit the hotkey working copy: persist the overrides + profile, rebuild the live
     # keymap so dispatch reflects them immediately, close.
-    private def save_hotkeys : Nil
-      working, profile = @hotkeys_overlay.to_working
+    private def save_hotkeys(ov : HotkeysOverlay) : Bool
+      working, profile = ov.to_working
       Hotkeys.apply(working, profile)
       ok = Settings.save
       @keymap = Hotkeys.build_keymap(@session.registry)
       # Help is built from the registry at open; reload so rebound labels stay honest.
       help_controller.reload_help(@session.registry)
-      @overlay = OverlayKind::None
       @toast = ok ? "hotkeys saved" : "hotkeys applied — could not save to #{Settings.path}"
+      true
     end
 
     # A navigable sub-tab strip is showing — gates entry into :subtabs (and the strip
@@ -3089,12 +2685,6 @@ module Gori::Tui
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay.palette?
       @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay.tabs_more?
-      @preferences.render(screen, layout.body) if @overlay.preferences?
-      @settings_view.render(screen, layout.body) if @overlay.settings?
-      @tabs_overlay.render(screen, layout.body) if @overlay.tabs?
-      @hosts_overlay.render(screen, layout.body) if @overlay.hosts?
-      @env_overlay.render(screen, layout.body) if @overlay.env?
-      @hotkeys_overlay.render(screen, layout.body) if @overlay.hotkeys?
       active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
@@ -3206,14 +2796,8 @@ module Gori::Tui
         return ov.title
       end
       case @overlay
-      when .palette?     then "PALETTE"
-      when .detail?      then "DETAIL"
-      when .preferences? then "PREFERENCES"
-      when .settings?    then "SETTINGS"
-      when .tabs?        then "TAB BAR"
-      when .hosts?       then "HOSTNAME OVERRIDES"
-      when .env?         then "ENVIRONMENT"
-      when .hotkeys?     then "HOTKEYS"
+      when .palette? then "PALETTE"
+      when .detail?  then "DETAIL"
       else
         case @focus
         when :menu    then "TABS"
@@ -3244,15 +2828,9 @@ module Gori::Tui
         return ov.hint
       end
       case @overlay
-      when .palette?     then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when .tabs_more?   then "↑/↓ select · ↵ open tab · ←/esc close"
-      when .preferences? then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
-      when .settings?    then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
-      when .tabs?        then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
-      when .hosts?       then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
-      when .env?         then env_overlay_hints
-      when .hotkeys?     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when .detail?      then history_controller.body_hint(:body)
+      when .palette?   then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when .tabs_more? then "↑/↓ select · ↵ open tab · ←/esc close"
+      when .detail?    then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
         return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
@@ -4626,27 +4204,25 @@ module Gori::Tui
       open_import(:oas)
     end
 
+    # Palette / verb entry (`settings.*`): nothing to return to, so an editor opened here
+    # closes to the tab body.
     def open_settings(section : Symbol) : Nil
+      open_settings_section(section, nil)
+    end
+
+    # `back` is the Preferences modal an opener row was activated from. The editor pops
+    # back INTO it on close (Overlay#on_close) — otherwise ↵-ing into Theme and pressing
+    # esc drops you out of settings entirely, while the project picker (which does return
+    # to the modal) would behave differently.
+    private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
       when :network, :editor, :layout, :statusline, :display, :notifications, :general
-        open_preferences(section) # the unified grouped modal, positioned at this section
-      when :theme
-        @settings_view.reload(:theme) # theme keeps its dedicated swatch-list card
-        @resized = true               # an edited/removed active theme just changed → full repaint
-        @overlay = OverlayKind::Settings
-        @theme_restore = Settings.theme # baseline for live-preview revert
-      when :tabs
-        @tabs_overlay.reset # rebuild the working copy from persisted config
-        @overlay = OverlayKind::Tabs
-      when :hosts
-        @hosts_overlay.reset # rebuild the working copy from persisted overrides
-        @overlay = OverlayKind::Hosts
-      when :env
-        @env_overlay.reset
-        @overlay = OverlayKind::Env
-      when :hotkeys
-        @hotkeys_overlay.reset # rebuild the working copy from persisted overrides
-        @overlay = OverlayKind::Hotkeys
+        open_preferences(section)                       # the unified grouped modal, positioned at this section
+      when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
+      when :tabs    then open_overlay(tabs_editor(back))
+      when :hosts   then open_overlay(hosts_editor(back))
+      when :env     then open_overlay(env_editor(back))
+      when :hotkeys then open_overlay(hotkeys_editor(back))
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
@@ -4654,53 +4230,113 @@ module Gori::Tui
 
     # Open the unified Preferences modal — at a specific section (the "Settings: …" palette
     # entries) or, with no section, at the group strip (Ctrl+, / the ⚙ top-bar chip). The
-    # project picker shares the SAME PreferencesView; only in-app can reach the dedicated
-    # editors from opener rows, so the picker builds its view with allow_openers: false.
+    # project picker shares the SAME PreferencesView (wrapped here as an Overlay); only
+    # in-app can reach the dedicated editors from opener rows, so the picker builds its
+    # view with a restricted allowed_openers set.
     def open_preferences(section : Symbol? = nil) : Nil
-      section ? @preferences.open(section) : @preferences.open_default
-      @prefs_return = false # a fresh open — not a hop out to a sub-editor and back
-      @overlay = OverlayKind::Preferences
+      ov = PreferencesOverlay.new(section)
+      ov.on_palette = -> { jump_to_palette }
+      # Live-apply the saved section through the shared seam, so a save takes effect
+      # identically from the modal and the dedicated settings card — one seam, no drift.
+      ov.on_saved = ->(sec : Symbol, msg : String) { @toast = apply_settings_saved(sec, msg); nil }
+      ov.on_open_editor = ->(sec : Symbol) { open_settings_section(sec, ov) }
+      open_overlay(ov)
     end
 
-    private def handle_preferences_key(ev : Termisu::Event::Key) : Nil
-      apply_preferences_outcome(@preferences.handle_key(ev))
+    # Land back in the Preferences modal a dedicated editor was opened from. Re-pulls the
+    # Network section first: the Hostnames editor moves its "N entries" row.
+    private def resume_preferences(back : PreferencesOverlay?) : Nil
+      return unless back
+      back.refresh(:network)
+      open_overlay(back)
     end
 
-    # Act on what the modal asked for: close, jump to the palette, live-apply a save (via
-    # the shared apply_settings_saved seam), or open a dedicated editor
-    # (theme/tabs/hosts/env/hotkeys) — flagged so that editor returns INTO the modal.
-    private def apply_preferences_outcome(outcome : PreferencesView::Outcome) : Nil
-      case outcome.kind
-      when :close   then @overlay = OverlayKind::None
-      when :palette then (@overlay = OverlayKind::None; open_palette)
-      when :saved   then @toast = apply_settings_saved(outcome.section.not_nil!, outcome.message || "")
-      when :open
-        @prefs_return = true
-        open_settings(outcome.section.not_nil!)
+    # ^P from inside a modal. Leaves the whole stack WITHOUT running on_close — a nested
+    # editor's pop-back into Preferences would otherwise re-open on top of the palette.
+    private def jump_to_palette : Nil
+      leave_overlay
+      open_palette
+    end
+
+    # The dedicated theme card. Only in-app reaches it: open_settings routes every other
+    # section into the Preferences modal, so this is the THEME swatch list in practice.
+    private def theme_card(back : PreferencesOverlay?) : SettingsOverlay
+      ov = SettingsOverlay.new(:theme)
+      @resized = true                 # an edited/removed active theme just changed → full repaint
+      @theme_restore = Settings.theme # baseline for live-preview revert
+      # esc / click-away drop the live preview, exactly as ^P does before it jumps.
+      ov.on_close = -> { revert_theme_preview; resume_preferences(back) }
+      ov.on_palette = -> { revert_theme_preview; jump_to_palette }
+      ov.on_preview = -> { apply_theme_preview(ov.theme_value) }
+      ov.on_save = ->(sec : Symbol, msg : String) { @toast = apply_settings_saved(sec, msg); nil }
+      ov.on_open_editor = ->(sec : Symbol) { open_settings_section(sec, back) }
+      ov.on_reset = -> { confirm_section_reset(ov) }
+      ov
+    end
+
+    private def tabs_editor(back : PreferencesOverlay?) : TabsOverlay
+      ov = TabsOverlay.new
+      ov.on_close = -> { resume_preferences(back) }
+      ov.on_palette = -> { jump_to_palette }
+      ov.on_toast = ->(msg : String) { @toast = msg; nil }
+      ov.on_reset = -> { confirm_tabs_reset(ov) }
+      ov.on_commit = -> { save_tabs(ov) }
+      ov
+    end
+
+    private def hosts_editor(back : PreferencesOverlay?) : HostsOverlay
+      ov = HostsOverlay.new
+      ov.on_close = -> { resume_preferences(back) }
+      ov.on_palette = -> { jump_to_palette }
+      ov.on_toast = ->(msg : String) { @toast = msg; nil }
+      ov.on_save = -> { save_hosts(ov) }
+      ov
+    end
+
+    private def env_editor(back : PreferencesOverlay?) : EnvOverlay
+      ov = EnvOverlay.new
+      ov.on_close = -> { resume_preferences(back) }
+      ov.on_palette = -> { jump_to_palette }
+      ov.on_toast = ->(msg : String) { @toast = msg; nil }
+      ov.on_save = -> { save_env(ov) }
+      ov
+    end
+
+    private def hotkeys_editor(back : PreferencesOverlay?) : HotkeysOverlay
+      ov = HotkeysOverlay.new(@session.registry)
+      ov.on_close = -> { resume_preferences(back) }
+      ov.on_palette = -> { jump_to_palette }
+      ov.on_commit = -> { save_hotkeys(ov) }
+      ov
+    end
+
+    # ^R in the settings card: revert the section to its factory defaults, gated behind a
+    # confirm like the tab-bar reset. `return_to:` is what brings the card back: `confirm`
+    # captures the live overlay BEFORE `open_overlay` replaces it, and `restore_overlay`
+    # re-opens that captured object when the named kind is the one it holds. (It used to
+    # work because raising a confirm only moved @overlay and left @active_overlay alone —
+    # no longer true since ConfirmDialog moved onto the seam itself, so the capture is now
+    # the only thing holding this card.)
+    private def confirm_section_reset(ov : SettingsOverlay) : Nil
+      section = ov.section
+      confirm("RESET SETTINGS",
+        "Reset the #{section.to_s.upcase} settings to their\n" \
+        "default values? Unsaved edits here are replaced.",
+        confirm_label: "reset", danger: true, return_to: :settings) do
+        ov.reset_to_defaults
+        apply_theme_preview(ov.theme_value) # :theme live-previews the restored default theme
+        @toast = "#{section} settings reset to defaults — ↵ to save"
       end
     end
 
-    # The dedicated editors reachable from a Preferences opener row. Each closes by setting
-    # @overlay = OverlayKind::None from a handful of places, so rather than patch every close site the
-    # dispatch chokepoints below redirect that :none back INTO the modal it was opened from
-    # — otherwise ↵-ing into Theme and pressing esc drops you out of settings entirely,
-    # while the project picker (which does return to the modal) behaves differently.
-    PREFS_SUB_EDITORS = {
-      OverlayKind::Settings,
-      OverlayKind::Tabs,
-      OverlayKind::Hosts,
-      OverlayKind::Env,
-      OverlayKind::Hotkeys,
-    }
-
-    private def settle_sub_editor : Nil
-      return unless @prefs_return
-      # Still editing, chained into another editor, or raising a confirm the editor set a
-      # `return_to:` for (^R reset / tab-bar reset) — the flag has to survive all three.
-      return if PREFS_SUB_EDITORS.includes?(@overlay) || @overlay.confirm?
-      @overlay = OverlayKind::Preferences if @overlay.none? # a ^P jump to the palette still wins
-      @preferences.refresh(:network)                        # the Hostnames editor moves Network's "N entries" row
-      @prefs_return = false
+    private def confirm_tabs_reset(ov : TabsOverlay) : Nil
+      confirm("RESET TAB BAR",
+        "Reset the tab bar to its default order and\n" \
+        "visibility? Your current arrangement is replaced.",
+        confirm_label: "reset", danger: true, return_to: :tabs) do
+        ov.reset_to_defaults
+        @toast = "tabs reset to defaults — ↵ to save"
+      end
     end
 
     # Live-apply a just-saved settings section and return the toast to show. The ONE seam
@@ -4748,13 +4384,21 @@ module Gori::Tui
       save_msg
     end
 
-    # Live-apply the theme being cycled in settings so it's visible before committing;
-    # cancelling (esc) reverts to @theme_restore. No-op outside the theme section.
-    private def preview_theme : Nil
-      if name = @settings_view.theme_value
-        Theme.apply(name)
-        @resized = true
-      end
+    # Live-apply the theme being cycled in the settings card so it's visible before
+    # committing. nil (any section but :theme) is a no-op.
+    private def apply_theme_preview(name : String?) : Nil
+      return unless name
+      Theme.apply(name)
+      @resized = true
+    end
+
+    # Drop a live theme preview, restoring what was active when the card opened — the esc
+    # / click-away / ^P path. A saved theme clears @theme_restore, so this reverts nothing.
+    private def revert_theme_preview : Nil
+      return unless restore = @theme_restore
+      Theme.apply(restore)
+      @resized = true
+      @theme_restore = nil
     end
 
     # Hand the focused field's text to the external editor; on a clean change write

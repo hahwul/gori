@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../settings"
 require "../host_overrides"
 
@@ -16,7 +17,15 @@ module Gori::Tui
   # HOST OVERRIDES pane.
   #
   #   10.0.0.1     → staging.acme.test   ▎ selected
-  class HostsOverlay
+  class HostsOverlay < Overlay
+    # Injected at the open-site (Runner#open_settings). `on_save` persists the working copy
+    # and reports whether the write landed, so the toast can tell "saved" from
+    # "applied but not written". There is no ↵-to-commit here — every mutation persists
+    # immediately, so esc just closes and the base `on_commit` is never reached.
+    property on_palette : Proc(Nil)?
+    property on_save : Proc(Bool)?
+    property on_toast : Proc(String, Nil)?
+
     def initialize
       @items = [] of {String, String} # {host, ip}
       @selected = 0
@@ -43,6 +52,113 @@ module Gori::Tui
 
     def adding? : Bool
       @adding
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Hosts
+    end
+
+    def title : String
+      "HOSTNAME OVERRIDES"
+    end
+
+    def hint : String
+      return %(type "IP host" · ↵ save · esc cancel) if @adding
+      "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+    end
+
+    # a add · ↵/e edit · d delete · esc close. ^P jumps back to the palette. The add/edit
+    # row is a sub-mode of this same overlay (it owns every key while open), not a
+    # separate shell state.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      return handle_add_key(ev) if @adding
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        on_palette.try(&.call)
+      elsif key.escape?
+        return :cancel
+      elsif key.up? || key.lower_k?
+        select_move(-1)
+      elsif key.down? || key.lower_j?
+        select_move(1)
+      elsif key.enter?
+        edit_start
+      else
+        handle_list_char(ev.char || key.to_char)
+      end
+      :stay
+    end
+
+    private def handle_list_char(c : Char?) : Nil
+      case c
+      when 'e' then edit_start
+      when 'a' then add_start
+      when 'd' then delete_and_persist
+      end
+    end
+
+    # The inline add/edit row: type "IP host", ↵ commits, ⌫ on an empty input cancels,
+    # esc cancels. Never closes the overlay — it drops back to the list.
+    private def handle_add_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        cancel_add
+      elsif key.enter?
+        commit_and_persist
+      elsif key.left?
+        move_cursor(-1)
+      elsif key.right?
+        move_cursor(1)
+      elsif key.backspace?
+        cancel_add unless backspace
+      elsif key.tab?
+        input(' ') # Tab types the IP/host separator, not a focus jump
+        set_preedit("")
+      elsif c && !ev.ctrl? && !ev.alt?
+        input(c)
+        set_preedit("")
+      end
+      :stay
+    end
+
+    private def delete_and_persist : Nil
+      return unless host = delete_selected
+      toast(persist ? "removed host override: #{host}" : "removed #{host} — could not save to #{Settings.path}")
+    end
+
+    private def commit_and_persist : Nil
+      case commit_entry
+      when :empty   then toast("host override: empty")
+      when :invalid then toast(%(host override: need "IP host" — a valid IP + a hostname))
+      when :dup     then toast("host override: host already mapped")
+      when :ok
+        toast(persist ? "host override saved — #{@items.size} total" : "host override applied — could not save to #{Settings.path}")
+      end
+    end
+
+    private def persist : Bool
+      (s = on_save) ? s.call : true
+    end
+
+    private def toast(msg : String) : Nil
+      on_toast.try(&.call(msg))
+    end
+
+    # A click outside dismisses (esc); a row click selects it (add/edit/delete stay
+    # keyboard-driven).
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+      end
+      :stay
+    end
+
+    def move(step : Int32) : Nil
+      select_move(step)
     end
 
     def select_move(d : Int32) : Nil
@@ -103,7 +219,14 @@ module Gori::Tui
     # Commit the add/edit row ("IP host", /etc/hosts order). Returns :ok|:empty|:invalid|
     # :dup. On :ok the working copy is mutated (the Runner then persists). Dedupes on the
     # host (excluding the row being edited).
-    def commit : Symbol
+    #
+    # NOT `commit`: that name belongs to `Overlay`, whose `commit : Bool` runs the injected
+    # on_commit closure and tells the shell whether to close. Crystal has no `override`
+    # keyword, so naming this one `commit` silently replaced the base contract — inert only
+    # because this editor never returns a :commit outcome (it persists per mutation), and a
+    # landmine the moment one is added: the shell would run this field parser instead of the
+    # closure and read its truthy Symbol as "close me".
+    def commit_entry : Symbol
       text = @input.strip
       return :empty if text.empty?
       parsed = HostOverrides.parse_line(text)

@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./keybind"
+require "./overlay"
 require "../verb"
 require "../hotkeys"
 require "../settings"
@@ -14,9 +15,13 @@ module Gori::Tui
   # checks block a bad capture inline. An OS default profile (auto/macOS/Linux/Windows) is
   # cycled with ←/→. Reads every effective chord through Gori::Hotkeys so the view never
   # drifts from the live keymap.
-  class HotkeysOverlay
+  class HotkeysOverlay < Overlay
     # A rendered line: a scope :header or a rebindable verb :binding.
     record Row, kind : Symbol, verb_id : String, scope : Verb::Scope, title : String
+
+    # Injected at the open-site (Runner#open_settings): ^P leaves the modal stack for the
+    # command palette. ↵ persists + rebuilds the live keymap via the base `on_commit`.
+    property on_palette : Proc(Nil)?
 
     SCOPE_LABEL = {
       Verb::Scope::Global        => "GLOBAL",
@@ -85,6 +90,94 @@ module Gori::Tui
 
     def to_working : {Hash(String, Verb::Chord?), String}
       {@overrides, @profile}
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Hotkeys
+    end
+
+    def title : String
+      "HOTKEYS"
+    end
+
+    def hint : String
+      return "press a key to bind · esc cancel" if capturing?
+      "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+    end
+
+    # In :capture the shell must route EVERY key here before its own pre-filter, so a
+    # chord like ^C/^D can be recorded as a binding instead of arming the global quit
+    # (reserved.cr then rejects it inline with "Ctrl-C/D quits gori" while staying in
+    # capture). That precedence is the whole reason capture mode needs a shell carve-out.
+    def raw_key_capture? : Bool
+      capturing?
+    end
+
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      capturing? ? handle_capture_key(ev) : handle_browse_key(ev)
+    end
+
+    # :capture — the next key IS the new binding.
+    private def handle_capture_key(ev : Termisu::Event::Key) : Symbol
+      if ev.key.escape?
+        cancel_capture
+      elsif chord = Keybind.from_event(ev)
+        apply_capture(chord) # reserved/conflict → inline error, stays in capture
+      end
+      # an unmappable key (non-ASCII / a bare modifier) is ignored — capture stays open
+      :stay
+    end
+
+    # :browse — navigate/edit the list. ↵ saves+applies, esc discards the working copy.
+    private def handle_browse_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        on_palette.try(&.call)
+      elsif key.escape?
+        return :cancel # discard the working copy
+      elsif key.enter?
+        return :commit
+      elsif key.up?
+        select_move(-1)
+      elsif key.down?
+        select_move(1)
+      elsif key.left?
+        cycle_profile(-1)
+      elsif key.right?
+        cycle_profile(1)
+      elsif key.backspace?
+        unbind_selected
+      elsif c = ev.char
+        handle_char(c)
+      end
+      :stay
+    end
+
+    private def handle_char(c : Char) : Nil
+      case c
+      when 'e', ' ' then begin_capture
+      when 'x'      then unbind_selected
+      when 'r'      then reset_selected
+      when 'R'      then reset_all
+      when 'k'      then select_move(-1)
+      when 'j'      then select_move(1)
+      end
+    end
+
+    # A click outside dismisses (discards the working copy, like esc); a row click selects
+    # that binding (rebind/unbind/reset stay keyboard-driven).
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+      end
+      :stay
+    end
+
+    def move(step : Int32) : Nil
+      select_move(step)
     end
 
     private def selected_id : String

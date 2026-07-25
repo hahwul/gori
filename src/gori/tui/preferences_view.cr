@@ -2,6 +2,7 @@ require "./settings_catalog"
 require "./settings_view"
 require "./frame"
 require "./chrome"
+require "./overlay"
 
 module Gori::Tui
   # The unified Preferences modal — ONE grouped settings surface reachable everywhere:
@@ -311,7 +312,8 @@ module Gori::Tui
 
     # The centred modal card. Height fits the tallest group's content (so switching groups
     # doesn't resize the card), capped to the terminal; content scrolls when it overflows.
-    private def overlay_box(area : Rect) : Rect
+    # Public because PreferencesOverlay exposes it as the shell's click-away hit-test.
+    def overlay_box(area : Rect) : Rect
       tallest = SettingsCatalog::GROUPS.max_of { |g| height_of(g[0]) }
       w = {area.w - 4, 82}.min
       # Fit the tallest group's content but never exceed the area — on a short terminal h
@@ -539,6 +541,85 @@ module Gori::Tui
         row += 1 # spacer
       end
       nil
+    end
+  end
+
+  # The unified Preferences modal on the Overlay seam (@overlay is :preferences).
+  # PreferencesView stays a plain view because the project picker drives it too, with its
+  # own `@mode` state machine and no Overlay seam — so the modal is this thin Overlay
+  # around it, translating the view's Outcome into the shell's :stay | :commit | :cancel.
+  #
+  # Only :close ends the modal. A save or an opener row is a side effect that leaves it
+  # up: the modal stacks several sections (↵ saves the focused one) and a dedicated editor
+  # opened from an opener row returns INTO it — see Overlay#on_close, which the open-site
+  # wires for exactly that.
+  class PreferencesOverlay < Overlay
+    property on_palette : Proc(Nil)?
+    property on_saved : Proc(Symbol, String, Nil)?
+    property on_open_editor : Proc(Symbol, Nil)?
+
+    getter view : PreferencesView
+
+    # `section` positions the modal on one section (the "Settings: …" palette entries);
+    # nil lands on the group strip (Ctrl+, / the ⚙ top-bar chip).
+    def initialize(section : Symbol? = nil)
+      @view = PreferencesView.new
+      section ? @view.open(section) : @view.open_default
+    end
+
+    # Re-pull ONE section after a dedicated editor changed what a form row summarizes —
+    # the Hostnames editor moves Network's "N entries" row. Called on the way back in.
+    def refresh(section : Symbol) : Nil
+      @view.refresh(section)
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Preferences
+    end
+
+    def title : String
+      "PREFERENCES"
+    end
+
+    def hint : String
+      "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      @view.render(screen, area)
+    end
+
+    def overlay_box(area : Rect) : Rect?
+      @view.overlay_box(area)
+    end
+
+    def set_preedit(text : String) : Nil
+      @view.set_preedit(text)
+    end
+
+    def move(step : Int32) : Nil
+      @view.wheel(step)
+    end
+
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      apply(@view.handle_key(ev))
+    end
+
+    # The view hit-tests itself: a click outside the card runs the same unsaved-edits
+    # guard as esc, so a stray click can't silently drop what was typed.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      apply(@view.click(area, mx, my))
+    end
+
+    private def apply(outcome : PreferencesView::Outcome) : Symbol
+      case outcome.kind
+      when :close   then return :cancel
+      when :palette then on_palette.try(&.call)
+      when :saved   then on_saved.try(&.call(outcome.section.not_nil!, outcome.message || ""))
+      when :open    then on_open_editor.try(&.call(outcome.section.not_nil!))
+      end
+      :stay
     end
   end
 end

@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../settings"
 
 module Gori::Tui
@@ -737,6 +738,163 @@ module Gori::Tui
       hint = @section == :theme ? "↑/↓ select · ↵ apply · ^R reset · esc close" : "↑/↓ field · ↵ save · ^R reset · esc close"
       hx = {box.right - hint.size - 2, box.x + 1}.max # never start left of the box interior
       screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
+    end
+  end
+
+  # The dedicated per-section settings CARD on the Overlay seam (@overlay is :settings).
+  # SettingsView itself stays a plain form engine because three surfaces share it — this
+  # card, the Preferences modal's inline sections (render_fields_into) and the project
+  # picker's theme card — and only one of them is a Runner modal. So the modal is this
+  # thin Overlay around it rather than the engine itself.
+  #
+  # In-app only the THEME section reaches the card: open_settings routes every other
+  # section into the Preferences modal. It still drives any section, so the opener-row and
+  # save paths below are the engine's, not theme-specific.
+  #
+  # Runner coupling is injected at the open-site: a saved section is live-applied by the
+  # shell (apply_settings_saved), ^R raises the reset confirm, ↑/↓/←/→ live-preview the
+  # theme being cycled, an opener row hands off to its own editor, and ^P leaves for the
+  # command palette.
+  class SettingsOverlay < Overlay
+    property on_palette : Proc(Nil)?
+    property on_preview : Proc(Nil)?
+    property on_reset : Proc(Nil)?
+    property on_save : Proc(Symbol, String, Nil)?
+    property on_open_editor : Proc(Symbol, Nil)?
+
+    getter view : SettingsView
+
+    def initialize(section : Symbol = :theme)
+      @view = SettingsView.new
+      @view.reload(section)
+    end
+
+    def section : Symbol
+      @view.section
+    end
+
+    # The theme being previewed (nil outside :theme) — the shell's live-preview closure
+    # reads it rather than the overlay applying a theme itself.
+    def theme_value : String?
+      @view.theme_value
+    end
+
+    # Run by the ^R confirm's action, which the shell owns (the confirm outlives one key).
+    def reset_to_defaults : Nil
+      @view.reset_to_defaults
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Settings
+    end
+
+    def title : String
+      "SETTINGS"
+    end
+
+    def hint : String
+      "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      @view.render(screen, area)
+    end
+
+    # SettingsView returns an EMPTY rect where render declines to draw, so a click there
+    # falls through to !contains? and closes instead of focusing a field on an undrawn card.
+    def overlay_box(area : Rect) : Rect?
+      @view.overlay_box(area)
+    end
+
+    def set_preedit(text : String) : Nil
+      @view.set_preedit(text)
+    end
+
+    # ↑/↓ and the wheel share this — in :theme the section's single field IS the list, so
+    # this scrolls the theme selection and previews it.
+    def move(step : Int32) : Nil
+      @view.move_field(step)
+      preview
+    end
+
+    # ↑/↓ pick a field, type to edit, ↵ save (persist + apply), esc close, ^P palette.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        on_palette.try(&.call)
+      elsif ev.ctrl? && key.lower_r?
+        # ^R (not a bare letter — those are typed into the focused field) reverts the
+        # section to its factory defaults, gated behind a confirm like the tab-bar reset.
+        on_reset.try(&.call)
+      elsif key.escape?
+        return :cancel
+      elsif key.enter?
+        activate
+      else
+        handle_field_key(ev)
+      end
+      :stay
+    end
+
+    # ↑/↓ move between fields (in :theme the section IS the list, so they scroll it) and
+    # ←/→ flip a toggle, cycle a choice or move the caret — each live-previewing whatever
+    # theme it lands on. ⌫/Del and any printable edit the focused field.
+    private def handle_field_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.up?
+        move(-1)
+      elsif key.down?
+        move(1)
+      elsif key.left?
+        @view.toggle_or_move(-1)
+        preview
+      elsif key.right?
+        @view.toggle_or_move(1)
+        preview
+      elsif key.backspace?
+        @view.backspace
+      elsif key.delete?
+        @view.delete
+      elsif c && !ev.ctrl? && !ev.alt?
+        @view.insert(c)
+        @view.set_preedit("")
+        preview # space cycles the theme in the :theme section — preview it too
+      end
+    end
+
+    # A click outside dismisses; a row click focuses that field, opens an action row's
+    # sub-editor (mouse parity with ↵), or live-previews a clicked theme.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = @view.overlay_box(area)
+      return :cancel unless box.contains?(mx, my)
+      if idx = @view.field_at(box, mx, my)
+        @view.set_field(idx)
+        if opener = @view.focused_opener
+          on_open_editor.try(&.call(opener))
+        else
+          preview # clicking a theme row live-previews it (no-op outside :theme)
+        end
+      end
+      :stay
+    end
+
+    # ↵: an action row (e.g. "Hostname overrides") opens its sub-editor instead of saving
+    # the section — the sub-editor persists on its own. Any other row saves, and the shell
+    # live-applies the section through apply_settings_saved so the Preferences modal and
+    # this card can't drift.
+    private def activate : Nil
+      if opener = @view.focused_opener
+        on_open_editor.try(&.call(opener))
+        return
+      end
+      msg = @view.save
+      on_save.try(&.call(@view.section, msg))
+    end
+
+    private def preview : Nil
+      on_preview.try(&.call)
     end
   end
 end

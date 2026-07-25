@@ -183,6 +183,14 @@ module Gori::Tui
     def set_preedit(text : String) : Nil
     end
 
+    # True while the overlay is recording a RAW chord (the hotkey rebinder's capture
+    # mode). The shell then hands it every key BEFORE its own pre-filter, so ^C/^D reach
+    # the overlay as bindable chords instead of arming the global quit. Default false —
+    # no other modal wants the shell's chords, and the pre-filter must keep claiming them.
+    def raw_key_capture? : Bool
+      false
+    end
+
     # Run the injected commit closure. Returns true when the shell should close the
     # overlay (default true when no closure was supplied).
     def commit : Bool

@@ -67,6 +67,13 @@ private MIGRATED_KINDS = [
   OverlayKind::Links,
   OverlayKind::IssuePick,
   OverlayKind::NotePick,
+  # C5 — the Preferences family
+  OverlayKind::Preferences,
+  OverlayKind::Settings,
+  OverlayKind::Tabs,
+  OverlayKind::Hosts,
+  OverlayKind::Env,
+  OverlayKind::Hotkeys,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and
