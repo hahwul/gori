@@ -1,6 +1,29 @@
 require "./spec_helper"
 require "json"
 
+# What is LEFT of the old monolithic `gori run` spec.
+#
+# MOVED to spec/cli/run/<subcommand>_spec.cr, mirroring src/gori/cli/run/:
+#   history · sitemap · notes · issues · links · decoder · jwt · compare · project · import
+#   plus spec/cli/run/replay_reconstruct_spec.cr — the P7 "never reject malformed input on
+#   replay" invariant over Repeater::FlowRequest's HOSTILE inputs.
+#
+# STILL HERE, and why:
+#   • describe Gori::Repeater::FlowRequest — the WELL-FORMED reconstruct cases (absolute→
+#     origin rewrite, http2 flag, truncated-capture Content-Length/chunked re-frame).
+#   • describe Gori::CLI::Output — the probe group JSON/text rows. `gori run probe` is an
+#     active-sender subcommand, so its spec waits with the rest of them.
+#   • describe Gori::Notes — the notes ENGINE (parse/serialize/load/title/line_count), not
+#     the `gori run notes` output; spec/cli/run/notes_spec.cr covers the CLI formatting.
+#   • The active-sender subcommands: repeater send (h1/WS), fuzz/mine/sequence host
+#     overrides, intercept bridge state, probe categories. Their semantics are being
+#     changed under separate issues, so specs written against today's behaviour would be
+#     rewritten anyway — split them out with that work.
+#
+# Two more `gori run` specs predate the split and still sit at the top level:
+# spec/cli_run_oast_stop_spec.cr and spec/cli_run_sequence_tokens_spec.cr (oast / sequence,
+# also active-sender). Fold them into spec/cli/run/ when those subcommands are covered.
+
 # Builds a minimal FlowDetail without touching the DB (the structs have public
 # initializers) — enough to exercise the pure reconstruction/formatting code.
 private def flow_detail(scheme : String, host : String, port : Int32, request_head : String,
@@ -13,13 +36,6 @@ private def flow_detail(scheme : String, host : String, port : Int32, request_he
   Gori::Store::FlowDetail.new(row, http_version, request_head.to_slice, request_body,
     response_head.try(&.to_slice), response_body.try(&.to_slice),
     request_body_truncated: request_body_truncated)
-end
-
-private def flow_row(*, target : String, host : String, status : Int32?, state : Gori::Store::FlowState)
-  Gori::Store::FlowRow.new(
-    id: 42_i64, created_at: 1_700_000_000_000_000_i64, scheme: "https", method: "GET",
-    host: host, port: 443, target: target, status: status, size: 1536_i64, state: state,
-    response_size: 1400_i64, duration_us: 3000_i64, content_type: "text/html")
 end
 
 private def with_store(&)
@@ -123,173 +139,7 @@ describe Gori::Repeater::FlowRequest do
   end
 end
 
-describe Gori::Issues::Export do
-  it "serialises issues to JSON with the documented fields" do
-    issues = [
-      Gori::Store::Issue.new(1_i64, 10_i64, 20_i64, "XSS", Gori::Store::Severity::High,
-        "shop.test", 13_i64, "reflected", Gori::Store::Status::Confirmed),
-      Gori::Store::Issue.new(2_i64, 11_i64, 11_i64, "note", Gori::Store::Severity::Info,
-        nil, nil, "", Gori::Store::Status::Open),
-    ]
-    parsed = JSON.parse(Gori::Issues::Export.json(issues)).as_a
-    parsed.size.should eq(2)
-    parsed[0]["title"].as_s.should eq("XSS")
-    parsed[0]["severity"].as_s.should eq("high")
-    parsed[0]["status"].as_s.should eq("confirmed")
-    parsed[0]["flow_id"].as_i.should eq(13)
-    parsed[0]["links"].as_a.should be_empty
-    parsed[1]["host"].raw.should be_nil
-    parsed[1]["flow_id"].raw.should be_nil
-  end
-
-  it "serialises entity links in issues JSON export" do
-    with_store do |store|
-      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
-        created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
-        target: "/x", http_version: "HTTP/1.1",
-        head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice))
-      issue_id = store.insert_issue("linked", Gori::Store::Severity::Medium, "api.test", fid)
-      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
-        Gori::Store::LinkRefKind::Repeater, 9_i64)
-      parsed = JSON.parse(Gori::Issues::Export.json(store.issues, store)).as_a
-      links = parsed[0]["links"].as_a
-      links.size.should eq(1) # primary flow link is deduped from the export list
-      links[0]["kind"].as_s.should eq("repeater")
-      links[0]["ref_id"].as_i.should eq(9)
-      links[0]["label"].as_s.should_not be_empty
-    end
-  end
-
-  it "renders a Markdown report with severity/status labels and notes" do
-    with_store do |store|
-      issues = [Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "Reflected XSS",
-        Gori::Store::Severity::High, "shop.test", nil, "encode on output", Gori::Store::Status::Open)]
-      md = Gori::Issues::Export.markdown(issues, store, "demo")
-      md.should contain("# Issues — demo")
-      md.should contain("## [high] Reflected XSS")
-      md.should contain("**Severity:** high")
-      md.should contain("**Status:** open")
-      md.should contain("encode on output")
-    end
-  end
-
-  it "embeds linked-flow evidence in the Markdown report" do
-    with_store do |store|
-      req = Gori::Store::CapturedRequest.new(
-        created_at: 0_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
-        target: "/v1/debug", http_version: "HTTP/1.1",
-        head: "GET /v1/debug HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice)
-      fid = store.insert_flow(req)
-      store.flush
-      issues = [Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "leak",
-        Gori::Store::Severity::Medium, "api.test", fid, "", Gori::Store::Status::Open)]
-      md = Gori::Issues::Export.markdown(issues, store, "demo")
-      md.should contain("### Request")
-      md.should contain("GET /v1/debug HTTP/1.1")
-      md.should contain("(##{fid})")
-      # The header block's terminating CRLF CRLF is trimmed, so the last header
-      # line abuts the closing fence (no stack of blank lines inside the block).
-      md.should contain("Host: api.test\n```")
-      md.should_not contain("\r\n\r\n")
-    end
-  end
-
-  it "separates evidence headers from the body with exactly one blank line" do
-    with_store do |store|
-      req = Gori::Store::CapturedRequest.new(
-        created_at: 0_i64, scheme: "https", host: "api.test", port: 443, method: "POST",
-        target: "/login", http_version: "HTTP/1.1",
-        head: "POST /login HTTP/1.1\r\nHost: api.test\r\nContent-Length: 9\r\n\r\n".to_slice,
-        body: "user=root".to_slice)
-      fid = store.insert_flow(req)
-      store.flush
-      issues = [Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "creds in body",
-        Gori::Store::Severity::High, "api.test", fid, "", Gori::Store::Status::Open)]
-      md = Gori::Issues::Export.markdown(issues, store, "demo")
-      # one blank line between the last header and the body — not three
-      md.should contain("Content-Length: 9\n\nuser=root")
-      md.should_not contain("Content-Length: 9\n\n\nuser=root")
-    end
-  end
-end
-
-describe Gori::QL do
-  # `gori run history -q` relies on this: a query that fails to compile to any
-  # clause collapses to the match-all EMPTY filter. The CLI special-cases that so
-  # a typo like `status:>=foo` errors instead of silently dumping every flow.
-  it "collapses an un-compilable query to EMPTY (so the CLI can reject it)" do
-    Gori::QL.parse("status:>=foo").should eq(Gori::QL::EMPTY)
-    Gori::QL.parse("-status:bar").should eq(Gori::QL::EMPTY)
-    Gori::QL.parse("login").should_not eq(Gori::QL::EMPTY)
-    Gori::QL.parse("status:>=500").should_not eq(Gori::QL::EMPTY)
-  end
-end
-
 describe Gori::CLI::Output do
-  it "shows an absolute-form target as-is and prefixes an origin-form one with the host" do
-    abs = Gori::CLI::Output.flow_row_text(flow_row(target: "http://e.test/a", host: "e.test", status: 200, state: Gori::Store::FlowState::Complete))
-    abs.should contain("http://e.test/a")
-    abs.should_not contain("e.testhttp://") # no double host
-
-    rel = Gori::CLI::Output.flow_row_text(flow_row(target: "/a", host: "api.test", status: 200, state: Gori::Store::FlowState::Complete))
-    rel.should contain("api.test/a")
-  end
-
-  it "marks a pending flow with a dash status and a state tag" do
-    txt = Gori::CLI::Output.flow_row_text(flow_row(target: "/p", host: "h", status: nil, state: Gori::Store::FlowState::Pending))
-    txt.should contain("—")
-    txt.should contain("[Pending]")
-  end
-
-  it "neutralizes terminal escape sequences in an untrusted captured target" do
-    # A malicious client puts ANSI/OSC escapes in its request line; the text row must
-    # not inject them into the operator's terminal (they'd be replayed on every view).
-    evil = "/p\e[31m\r\n\e]0;pwned\a"
-    txt = Gori::CLI::Output.flow_row_text(flow_row(target: evil, host: "h", status: 200, state: Gori::Store::FlowState::Complete))
-    txt.should_not contain('\e') # no ESC
-    txt.should_not contain('\r') # no CR
-    txt.should_not contain('\a') # no BEL
-    txt.should contain("·")      # control bytes replaced with a visible marker
-  end
-
-  it "term_safe leaves ordinary UTF-8 untouched but replaces control bytes" do
-    Gori::CLI::Output.term_safe("api.test/π/데이터").should eq("api.test/π/데이터")
-    Gori::CLI::Output.term_safe("a\tb\nc").should eq("a·b·c")
-  end
-
-  it "term_safe also scrubs invalid UTF-8 (not just control bytes) so JSON output stays valid" do
-    # A captured host/path is raw bytes off the wire (see Sitemap.template_class's comment)
-    # and can be invalid UTF-8 with NO control bytes at all — the old short-circuit
-    # (`return s unless s.each_char.any?(&.control?)`) let such a value straight through
-    # unchanged, since a replacement char isn't itself "control".
-    bad = String.new(Bytes[0x68, 0x69, 0xff, 0x68, 0x69]) # "hi\xFFhi"
-    bad.valid_encoding?.should be_false
-    out = Gori::CLI::Output.term_safe(bad)
-    out.valid_encoding?.should be_true
-    out.should eq("hi�hi")
-  end
-
-  it "emits a valid JSON object with the expected keys" do
-    json = JSON.parse(Gori::CLI::Output.flow_row_json(flow_row(target: "/a", host: "h", status: 200, state: Gori::Store::FlowState::Complete)))
-    json["id"].as_i.should eq(42)
-    json["method"].as_s.should eq("GET")
-    json["status"].as_i.should eq(200)
-    json["state"].as_s.should eq("complete") # lowercased to match the MCP serializer
-  end
-
-  it "humanises sizes and durations" do
-    Gori::CLI::Output.human_size(500_i64).should eq("500B")
-    Gori::CLI::Output.human_size(1536_i64).should eq("1.5kB")
-    Gori::CLI::Output.human_us(500_i64).should eq("500µs")
-    Gori::CLI::Output.human_us(1_500_i64).should eq("1.5ms")
-  end
-
-  it "scales human_size up to GB and TB (no '1024.0MB')" do
-    Gori::CLI::Output.human_size(1_073_741_824_i64).should eq("1.0GB")     # exactly 1 GiB
-    Gori::CLI::Output.human_size(5_368_709_120_i64).should eq("5.0GB")     # 5 GiB
-    Gori::CLI::Output.human_size(2_199_023_255_552_i64).should eq("2.0TB") # 2 TiB
-  end
-
   it "serialises a probe group to JSON with the documented fields (incl. remediation)" do
     g = Gori::Probe::Group.new("secret_in_url", "infoleak", "api.test", "Secret in URL",
       Gori::Store::Severity::High, 3, ["https://api.test/a", "https://api.test/b"], "token", 7_i64)
@@ -315,201 +165,6 @@ describe Gori::CLI::Output do
     txt.should contain("×4")
     txt.should contain("https://api.test/a")
     txt.should contain("(+2 more)") # 3 affected − 1 shown
-  end
-
-  it "formats a note listing row: 1-based index, title, '*' for the active note" do
-    row = Gori::CLI::Output.note_row_text(1, "scope\nmore", current: true)
-    row.should contain("* 2")                                                           # 0-based 1 → shown as #2
-    row.should contain("scope")                                                         # title = first non-blank line
-    row.should contain("(2 lines, ")                                                    # plural
-    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain(" 1")        # no '*'
-    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain("(1 line, ") # singular
-  end
-
-  it "falls back to 'note N' in a row for a blank note" do
-    Gori::CLI::Output.note_row_text(2, "   \n\t", current: false).should contain("note 3")
-  end
-
-  it "emits a single-note JSON object with the documented fields (text only when asked)" do
-    entry = Gori::Notes::NoteEntry.new(42_i64, "Title\nbody")
-    full = JSON.parse(Gori::CLI::Output.note_object_json(0, entry, current: true, with_text: true))
-    full["id"].as_i64.should eq(42_i64)
-    full["index"].as_i.should eq(1)
-    full["title"].as_s.should eq("Title")
-    full["lines"].as_i.should eq(2)
-    full["bytes"].as_i.should eq("Title\nbody".bytesize)
-    full["current"].as_bool.should be_true
-    full["text"].as_s.should eq("Title\nbody")
-
-    summary = JSON.parse(Gori::CLI::Output.note_object_json(0, entry, current: false, with_text: false))
-    summary["text"]?.should be_nil # summary omits the body
-    summary["title"].as_s.should eq("Title")
-  end
-
-  it "emits the whole note set as a JSON array, marking the active note" do
-    doc = Gori::Notes::Doc.new(1, [
-      Gori::Notes::NoteEntry.new(1_i64, "one"),
-      Gori::Notes::NoteEntry.new(2_i64, "two"),
-    ], 3_i64)
-    arr = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: false)).as_a
-    arr.size.should eq(2)
-    arr[0]["id"].as_i64.should eq(1_i64)
-    arr[0]["index"].as_i.should eq(1)
-    arr[0]["current"].as_bool.should be_false
-    arr[1]["current"].as_bool.should be_true # cur == 1
-    arr[0]["text"]?.should be_nil            # summary array
-
-    with_text = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: true)).as_a
-    with_text[1]["text"].as_s.should eq("two")
-  end
-  it "renders the sitemap as an indented tree with counts, methods, and a path tag" do
-    hosts = Gori::Sitemap.build([
-      {"acme.test", "GET", "/"},
-      {"acme.test", "POST", "/api/orders"},
-      {"acme.test", "GET", "/api/users"},
-    ])
-    Gori::Sitemap.stamp_tags!(hosts, { {"acme.test", "/api"} => "payment flow" })
-    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
-    txt = Gori::CLI::Output.sitemap_text(hosts)
-    txt.should contain("acme.test  (3 paths)")
-    txt.should contain("├─ ") # tree guide
-    txt.should contain("orders  [POST]")
-    txt.should contain("api  # payment flow") # tag on the folder node, no methods
-  end
-
-  it "collapses a folded numeric group in the text tree with a value count" do
-    hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
-    hosts.each { |h| Gori::Sitemap.group_sequences!(h) }
-    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
-    txt = Gori::CLI::Output.sitemap_text(hosts)
-    txt.should contain("[1001, 1002, 1003 … +9]  (12 values)")
-    txt.should_not contain("1010") # a folded child is hidden in the collapsed text tree
-  end
-
-  it "shows one representative subtree under an id fold in the text tree" do
-    # A numeric fold collapses whole; an ID fold must not, or /users/<uuid>/orders and
-    # /settings — real route structure, not noise — vanish from the default report.
-    hosts = Gori::Sitemap.build([
-      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678/orders"},
-      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678/settings"},
-      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00/orders"},
-    ])
-    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
-    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
-    txt = Gori::CLI::Output.sitemap_text(hosts)
-    # No verbs on the fold: /users/<uuid> itself was never requested here, only its
-    # children were — so the fold correctly stands for a folder, not an endpoint.
-    txt.should contain("{uuid}  (2 values)\n")
-    txt.should contain("orders")   # route shape below the id survives
-    txt.should contain("settings") # ...from ONE representative child
-    txt.should_not contain("3f2a8b1c")
-  end
-
-  it "shows the verbs a fold stands in for when the ids are themselves endpoints" do
-    hosts = Gori::Sitemap.build([
-      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
-      {"h", "PATCH", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
-      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
-    ])
-    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
-    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
-    txt = Gori::CLI::Output.sitemap_text(hosts)
-    txt.should contain("{uuid}  (2 values)  [GET PATCH]")
-    txt.should contain("h  (2 paths)") # the fold did not inflate the endpoint count
-  end
-
-  it "lists every endpoint flat in the paths format (numeric folding irrelevant)" do
-    hosts = Gori::Sitemap.build([
-      {"acme.test", "GET", "/api/users"},
-      {"acme.test", "POST", "/api/users"},
-    ])
-    Gori::CLI::Output.sitemap_paths(hosts).should eq("GET,POST  acme.test/api/users\n")
-  end
-
-  it "emits the sitemap as JSON with host/endpoint/children fields and an empty array when blank" do
-    hosts = Gori::Sitemap.build([{"acme.test", "GET", "/api/users"}])
-    Gori::Sitemap.stamp_tags!(hosts, { {"acme.test", "/api"} => "memo" })
-    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
-    json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts)).as_a
-    json.size.should eq(1)
-    json[0]["host"].as_s.should eq("acme.test")
-    json[0]["endpoints"].as_i.should eq(1)
-    api = json[0]["children"].as_a.find! { |c| c["label"].as_s == "api" }
-    api["tag"].as_s.should eq("memo")
-    users = api["children"].as_a.find! { |c| c["label"].as_s == "users" }
-    users["path"].as_s.should eq("/api/users")
-    users["methods"].as_a.map(&.as_s).should eq(["GET"])
-
-    Gori::CLI::Output.sitemap_json([] of Gori::Sitemap::Node).should eq("[]")
-  end
-
-  it "marks an id fold in JSON with a template class, omits its path, and keeps children" do
-    hosts = Gori::Sitemap.build([
-      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
-      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
-    ])
-    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
-    json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts)).as_a
-    users = json[0]["children"].as_a.find! { |c| c["label"].as_s == "users" }
-    fold = users["children"].as_a.find! { |c| c["label"].as_s == "{uuid}" }
-    fold["grouped"].as_bool.should be_true
-    fold["template"].as_s.should eq("{uuid}")
-    fold["path"]?.should be_nil                         # synthetic: a fold has no path
-    fold["methods"].as_a.map(&.as_s).should eq(["GET"]) # union of its children's verbs
-    kids = fold["children"].as_a
-    kids.size.should eq(2)
-    kids.map(&.["path"].as_s).sort!.should eq([
-      "/users/3f2a8b1c-1234-5678-9abc-def012345678",
-      "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00",
-    ])
-  end
-
-  it "still lists every folded endpoint flat in the paths format" do
-    hosts = Gori::Sitemap.build([
-      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
-      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
-    ])
-    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
-    Gori::CLI::Output.sitemap_paths(hosts).should eq(
-      "GET  h/users/3f2a8b1c-1234-5678-9abc-def012345678\n" \
-      "GET  h/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00\n")
-  end
-
-  it "emits valid UTF-8 in every sitemap format (text/json/paths) when a captured host/path is invalid UTF-8" do
-    # Sitemap.template_class's own comment documents that a captured target is raw bytes off
-    # the wire and can be invalid UTF-8 (a legacy-encoded or fuzzed path). Repro: no control
-    # chars, just a raw 0xFF byte in the host and in a path segment.
-    bad_host = String.new(Bytes[0x62, 0x61, 0x64, 0xff, 0x68, 0x6f, 0x73, 0x74]) # "bad\xFFhost"
-    bad_seg = String.new(Bytes[0x70, 0x61, 0x74, 0x68, 0xff, 0x73, 0x65, 0x67])  # "path\xFFseg"
-    hosts = Gori::Sitemap.build([{bad_host, "GET", "/#{bad_seg}"}])
-    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
-
-    text = Gori::CLI::Output.sitemap_text(hosts)
-    text.valid_encoding?.should be_true
-    text.should contain("bad�host")
-    text.should contain("path�seg")
-
-    json_str = Gori::CLI::Output.sitemap_json(hosts)
-    json_str.valid_encoding?.should be_true
-    parsed = JSON.parse(json_str).as_a
-    parsed[0]["host"].as_s.valid_encoding?.should be_true
-    parsed[0]["children"].as_a[0]["label"].as_s.valid_encoding?.should be_true
-
-    paths = Gori::CLI::Output.sitemap_paths(hosts)
-    paths.valid_encoding?.should be_true
-    paths.should contain("bad�host")
-  end
-
-  it "does not leak a host tag onto a fold" do
-    # Host rows are taggable with path "" — the same value a synthetic fold carries.
-    hosts = Gori::Sitemap.build([
-      {"h", "GET", "/u/3f2a8b1c-1234-5678-9abc-def012345678"},
-      {"h", "GET", "/u/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
-    ])
-    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
-    Gori::Sitemap.stamp_tags!(hosts, { {"h", ""} => "whole host" })
-    u = hosts.first.children.find! { |c| c.label == "u" }
-    u.children.find! { |c| c.label == "{uuid}" }.tag.should be_nil
   end
 end
 
@@ -593,79 +248,6 @@ describe Gori::Notes do
   end
 end
 
-# `gori run jwt` builds its JSON output from the shared engine emitters (jwt/present.cr)
-# and its text from CLI::Output — the same pure functions tested here.
-describe "gori run jwt output" do
-  jwt = Gori::Jwt.encode(%({"typ":"JWT"}), %({"sub":"1"}), "HS256", "k")
-
-  it "decode_json carries nested header/payload objects + the signed flag" do
-    j = JSON.parse(Gori::Jwt.decode_json(jwt))
-    j["alg"].as_s.should eq("HS256")
-    j["header"]["typ"].as_s.should eq("JWT")
-    j["payload"]["sub"].as_s.should eq("1")
-    j["signed"].as_bool.should be_true
-  end
-
-  it "attacks_json is an array of {name, category, note, token}" do
-    arr = JSON.parse(Gori::Jwt.attacks_json(Gori::Jwt.attacks(jwt))).as_a
-    arr.should_not be_empty
-    arr.first["name"].as_s.should_not be_empty
-    arr.first["token"].as_s.should contain(".")
-    arr.map { |a| a["category"].as_s }.uniq.should contain("weak-secret")
-  end
-
-  it "jwt_attack_text prints the category, name, note, and token" do
-    a = Gori::Jwt.attacks(jwt).find { |x| x.name == "alg=none" }.not_nil!
-    text = Gori::CLI::Output.jwt_attack_text(a)
-    text.should contain("[none]")
-    text.should contain("alg=none")
-    text.should contain(a.token)
-  end
-end
-
-# `show_json` is `private` (CLI-command glue, not a public API) — reopen the module to
-# expose a thin bare-call wrapper for testing, same trick Crystal allows for whitebox
-# specs of private `self.` methods (a bare call from within the same type is permitted;
-# only an explicit-receiver call from outside is not).
-module Gori::CLI::Run
-  def self.show_json_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                              ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : String
-    show_json(detail, req, resp, ws_msgs)
-  end
-end
-
-# Regression for the `sse_events.truncated` field: `gori run show --format json` used to
-# hardcode it to `false` regardless of how many events were parsed, while the MCP
-# `get_flow` serializer (mcp/serialize.cr) computed it correctly from `events.size >
-# SSE_EVENTS_MAX`. The two must agree — CLI now reuses the exact same constant.
-describe "gori run show --format json sse_events.truncated" do
-  it "is false when the event count is at or under the cap" do
-    body = String.build { |io| 3.times { |i| io << "data: e#{i}\n\n" } }
-    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
-    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
-      response_head: head, response_body: body)
-    json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
-    sse = json["sse_events"]
-    sse["count"].as_i.should eq(3)
-    sse["truncated"].as_bool.should be_false
-  end
-
-  it "is true once the event count exceeds SSE_EVENTS_MAX, matching the MCP serializer" do
-    n = Gori::MCP::Serialize::SSE_EVENTS_MAX + 1
-    body = String.build { |io| n.times { |i| io << "data: e#{i}\n\n" } }
-    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
-    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
-      response_head: head, response_body: body)
-    json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
-    sse = json["sse_events"]
-    sse["count"].as_i.should eq(n)
-    sse["truncated"].as_bool.should be_true
-    # the CLI path stays unclipped (a script can read whole values) — unlike MCP, it
-    # does NOT drop events past the cap; `truncated` is a signal, not a clip.
-    sse["events"].as_a.size.should eq(n)
-  end
-end
-
 describe "gori run probe --active" do
   it "includes Category::ACTIVE in PROBE_CATEGORIES" do
     Gori::CLI::Run::PROBE_CATEGORIES.should contain(Gori::Probe::Category::ACTIVE)
@@ -711,47 +293,6 @@ describe "gori run repeater send (session replay resolution)" do
   end
 end
 
-# `import_source` / `import_result_*` are private CLI glue; reopen the module to expose
-# thin bare-call wrappers (same whitebox trick as the other *_for_spec wrappers above).
-# The abort paths (zero / two+ sources) call `exit`, so they can't be exercised in-process.
-module Gori::CLI::Run
-  def self.import_source_for_spec(har : String?, oas : String?, urls : String?) : {Symbol, String}
-    import_source(har, oas, urls)
-  end
-
-  def self.import_result_json_for_spec(kind : Symbol, path : String, result : Import::Result) : String
-    import_result_json(kind, path, result)
-  end
-
-  def self.import_result_text_for_spec(kind : Symbol, path : String, result : Import::Result) : String
-    import_result_text(kind, path, result)
-  end
-end
-
-describe "gori run import" do
-  it "import_source maps each source flag to its {kind, path}" do
-    Gori::CLI::Run.import_source_for_spec("a.har", nil, nil).should eq({:har, "a.har"})
-    Gori::CLI::Run.import_source_for_spec(nil, "api.yaml", nil).should eq({:oas, "api.yaml"})
-    Gori::CLI::Run.import_source_for_spec(nil, nil, "urls.txt").should eq({:urls, "urls.txt"})
-  end
-
-  it "import_result_json carries kind, path, count, and skipped" do
-    result = Gori::Import::Result.new(count: 12, skipped: 3)
-    json = JSON.parse(Gori::CLI::Run.import_result_json_for_spec(:har, "dump.har", result))
-    json["kind"].as_s.should eq("har")
-    json["path"].as_s.should eq("dump.har")
-    json["count"].as_i.should eq(12)
-    json["skipped"].as_i.should eq(3)
-  end
-
-  it "import_result_text mirrors the TUI toast wording, with a skipped clause only when > 0" do
-    clean = Gori::CLI::Run.import_result_text_for_spec(:oas, "api.json", Gori::Import::Result.new(count: 1))
-    clean.should eq("imported 1 flow from OpenAPI · api.json")
-    skipped = Gori::CLI::Run.import_result_text_for_spec(:urls, "u.txt", Gori::Import::Result.new(count: 5, skipped: 2))
-    skipped.should eq("imported 5 flows from URLs · u.txt (2 entries skipped)")
-  end
-end
-
 # cli_host_overrides is private CLI glue (R2-1 parity for the fuzz/mine/sequence senders);
 # reopen the module for a bare-call wrapper (same whitebox trick as the others above).
 module Gori::CLI::Run
@@ -777,25 +318,6 @@ describe "gori run fuzz/mine/sequence — project host overrides (R2-1)" do
       store.close unless closed
       File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")
     end
-  end
-end
-
-# `compare_lines` is private CLI glue (mirrors the TUI Comparer's lines_for) —
-# reopen the module for a bare-call wrapper, the same trick the other whitebox specs use.
-module Gori::CLI::Run
-  def self.compare_lines_for_spec(d : Gori::Store::FlowDetail, pane : Symbol) : Array(String)
-    compare_lines(d, pane)
-  end
-end
-
-describe "gori run compare" do
-  it "builds request lines byte-faithful (no decoding) and response lines decoded" do
-    d = flow_detail("https", "a.test", 443, "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n",
-      response_head: "HTTP/1.1 200 OK\r\n\r\n", response_body: "hello")
-    req_lines = Gori::CLI::Run.compare_lines_for_spec(d, :request)
-    req_lines.first.should eq("GET / HTTP/1.1")
-    resp_lines = Gori::CLI::Run.compare_lines_for_spec(d, :response)
-    resp_lines.should contain("hello")
   end
 end
 
@@ -863,149 +385,6 @@ describe "gori run intercept (bridge state)" do
       store.set_intercept_bridge(%({"capturing":true,"session_token":"tok","heartbeat_ms":#{stale}}))
       bridge = Gori::CLI::Run.intercept_bridge_state_for_spec(store).not_nil!
       Gori::CLI::Run.intercept_live_for_spec(bridge).should be_false
-    end
-  end
-end
-
-# `gori run project create/delete` glue is private CLI code — reopen the module for
-# bare-call wrappers (the same whitebox trick as the others above).
-module Gori::CLI::Run
-  def self.project_object_counts_for_spec(project : Gori::Project) : {Int64?, Int32?}
-    project_object_counts(project)
-  end
-
-  def self.ambiguous_project_name_for_spec(registry : Gori::ProjectRegistry, name : String) : Bool
-    ambiguous_name?(registry, name)
-  end
-end
-
-private def with_project_root(&)
-  root = File.tempname("gori-projroot")
-  begin
-    yield Gori::ProjectRegistry.new(root)
-  ensure
-    FileUtils.rm_rf(root)
-  end
-end
-
-private def seed_project_flow(store) : Int64
-  store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: 1_i64, scheme: "https", host: "ex.test", port: 443,
-    method: "GET", target: "/", http_version: "HTTP/1.1",
-    head: "GET / HTTP/1.1\r\nHost: ex.test\r\n\r\n".to_slice, body: nil))
-end
-
-# One handle, closed exactly once — Store#close is NOT idempotent (a 2nd @done.receive
-# blocks forever), so each open gets its own short block instead of a close-then-flag.
-private def with_project_store(project : Gori::Project, &)
-  store = Gori::Store.open(project.db_path)
-  begin
-    yield store
-  ensure
-    store.close
-  end
-end
-
-describe "gori run project create" do
-  it "reports created-vs-reopened from the registry, not from a name lookup" do
-    with_project_root do |registry|
-      project, created = registry.create_or_reopen("spec proj")
-      created.should be_true
-      # A name that is a PREFIX of the first project's short id: #find would resolve it to
-      # that project and call this brand-new one a reopen.
-      id = registry.id_of(project).not_nil!
-      other, other_created = registry.create_or_reopen(id[0, 4])
-      other_created.should be_true
-      other.dir.should_not eq(project.dir)
-
-      registry.create_or_reopen("spec proj")[1].should be_false # same name → reopen
-    end
-  end
-
-  it "materializes the DB so a description-less project is immediately listed" do
-    with_project_root do |registry|
-      # #list skips a directory with no DB; a lazily-created one would stay invisible to
-      # `project list` / --project until something captured into it.
-      project = registry.create("spec proj")
-      File.exists?(project.db_path).should be_true
-      registry.list.map(&.name).should eq(["spec proj"])
-    end
-  end
-
-  it "leaves an existing DB untouched when create reopens the project" do
-    with_project_root do |registry|
-      project = registry.create("spec proj")
-      with_project_store(project) { |store| seed_project_flow(store) }
-      registry.create("spec proj") # reopen path: must not recreate the DB
-      with_project_store(project, &.count.should(eq(1)))
-    end
-  end
-end
-
-describe "gori run project delete (preview)" do
-  it "counts the flows and issues that deleting would destroy" do
-    with_project_root do |registry|
-      project = registry.create("spec proj")
-      with_project_store(project) do |store|
-        2.times { seed_project_flow(store) }
-        store.insert_issue("finding", Gori::Store::Severity::Low, "ex.test", nil)
-      end
-      Gori::CLI::Run.project_object_counts_for_spec(project).should eq({2_i64, 1})
-      # The whole directory is what rm_rf takes, so the preview sizes it (DB + WAL/SHM +
-      # sidecars), never just the DB file.
-      project.disk_size.should be > project.db_size
-    end
-  end
-
-  it "reports nil counts for a project whose DB was deleted under it" do
-    with_project_root do |registry|
-      project = registry.create("empty proj")
-      File.delete(project.db_path)
-      Gori::CLI::Run.project_object_counts_for_spec(project).should eq({nil, nil})
-      project.disk_size.should be > 0 # the .name/.id sidecars still go with the directory
-    end
-  end
-
-  it "sizes a directory whose path contains glob metacharacters" do
-    root = File.tempname("gori-proj[root]") # `[...]` is a glob character class
-    begin
-      project = Gori::ProjectRegistry.new(root).create("globby")
-      project.disk_size.should be > 0
-    ensure
-      FileUtils.rm_rf(root)
-    end
-  end
-end
-
-describe "gori run project delete (resolution)" do
-  it "refuses a display name shared by two projects, and accepts either slug" do
-    root = File.tempname("gori-projroot")
-    begin
-      registry = Gori::ProjectRegistry.new(root)
-      # What create_for_workspace produces for two checkouts with the same basename:
-      # distinct slugs (my-api, my-api-2), one shared display name.
-      registry.create("My API")
-      twin = File.join(root, "my-api-2")
-      Dir.mkdir_p(twin)
-      File.write(File.join(twin, Gori::ProjectRegistry::NAME_FILE), "My API")
-      Gori::Store.open(File.join(twin, Gori::Project::DB_FILE)).close
-
-      registry.list.count { |p| p.name == "My API" }.should eq(2)
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "My API").should be_true
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "my api").should be_true # find is case-insensitive
-      # Slugs are unique, and #find resolves them before the display-name pass.
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "my-api").should be_false
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "my-api-2").should be_false
-    ensure
-      FileUtils.rm_rf(root)
-    end
-  end
-
-  it "does not call a uniquely-named project ambiguous" do
-    with_project_root do |registry|
-      registry.create("alpha")
-      registry.create("beta")
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "alpha").should be_false
     end
   end
 end
