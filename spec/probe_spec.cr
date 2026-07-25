@@ -3214,3 +3214,68 @@ describe "Gori::Probe::Active::UrlRewriteBypass" do
     end
   end
 end
+
+# The headless scan orchestrator (`gori run probe` + MCP probe_scan) must honour the SAME
+# Rules sub-tab config the TUI Analyzer does — disabled built-ins stay off, custom rules run.
+# Before this, Scan called Passive.analyze/Active.analyze with neither, so a headless scan
+# silently re-reported rules the operator had turned off and never ran a custom rule at all.
+describe "Gori::Probe::Scan rules config parity" do
+  it "honours the operator's disabled built-ins in a headless passive scan" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?token=aaaaaaaa", content_type: nil)
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+
+      before = Gori::Probe::Scan.scan_flows(store, ids, active: false)
+      before.count { |d| d.code == "secret_in_url" }.should eq(1)
+
+      store.set_probe_disabled_rules(Set{"secret_in_url"})
+      after = Gori::Probe::Scan.scan_flows(store, ids, active: false)
+      after.count { |d| d.code == "secret_in_url" }.should eq(0)
+    end
+  end
+
+  it "runs the operator's custom match rules in a headless passive scan" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a",
+        content_type: "text/html", body: "leak sk_live_abc")
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+
+      Gori::Probe::Scan.scan_flows(store, ids, active: false)
+        .any?(&.title.includes?("stripe key")).should be_false
+
+      store.insert_probe_custom_rule("stripe key", "d", "response", "body", "regex",
+        "sk_live_[a-z]+", Gori::Store::Severity::High)
+      dets = Gori::Probe::Scan.scan_flows(store, ids, active: false)
+      hit = dets.find(&.title.includes?("stripe key")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::High)
+    end
+  end
+
+  it "honours disabled built-ins for ACTIVE rules too (no probe is even planned)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      origin = Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port)
+
+      baseline = CountingBackend.new(origin)
+      Gori::Probe::Active.analyze(detail, backend: baseline)
+      baseline.sent.should be > 0
+
+      # Disabling every active rule must stop the sends at the source, not just drop findings.
+      all_ids = Gori::Probe::Active::RULES.map(&.info.id).to_set
+      muted = CountingBackend.new(origin)
+      Gori::Probe::Active.analyze(detail, backend: muted, disabled: all_ids)
+      muted.sent.should eq(0)
+    end
+  end
+
+  it "scans Repeater tabs under the same rules config as History flows" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?token=aaaaaaaa", content_type: nil)
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+      store.set_probe_disabled_rules(Set{"secret_in_url"})
+
+      dets, _ = Gori::Probe::Scan.scan_all(store, ids, active: false)
+      dets.count { |d| d.code == "secret_in_url" }.should eq(0)
+    end
+  end
+end

@@ -24,6 +24,11 @@ module Gori
       # The primary rule, reused for the registry AND the module-level facade.
       PRIMARY = ReflectedParam.new
 
+      # The empty "nothing turned off" set — a shared constant so the `disabled` default in
+      # .analyze does not allocate a Set per call. Mirrors Passive::NO_DISABLED (kept local so
+      # active.cr need not require passive.cr).
+      NO_DISABLED = Set(String).new
+
       RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new,
                NginxAliasTraversal.new, BackslashPowered.new,
                GraphqlIntrospection.new, LfiParamTraversal.new,
@@ -57,9 +62,13 @@ module Gori
       # Fuzz/Miner) even when the caller bypassed its own include gate (--allow-unscoped).
       # `backend` overrides the default Fuzz::Sender so specs can drive the rules without a socket.
       # `opts` widens the method gate / raises caps (manual unsafe opt-in, AGGRESSIVE mode).
+      # `disabled` holds the RuleInfo#ids the operator turned off in the Rules sub-tab — the same
+      # set the TUI analyzer filters on before enqueueing (analyzer.cr's maybe_enqueue_active), so
+      # a headless scan honours that config too instead of silently running every built-in.
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
                        timeout : Time::Span = 10.seconds, scope : Scope? = nil,
-                       backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT) : Array(Detection)
+                       backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
+                       disabled : Set(String) = NO_DISABLED) : Array(Detection)
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
@@ -68,6 +77,7 @@ module Gori
         sender = scope ? Fuzz::ScopedBackend.new(base, scope) : base
 
         RULES.each do |rule|
+          next if disabled.includes?(rule.info.id)
           plan = rule.plan(detail, opts)
           next unless plan
           result = sender.send(plan.request)
