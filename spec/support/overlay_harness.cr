@@ -32,6 +32,14 @@ require "./memory_backend"
 class OverlayHarness
   # The body rect the shell hands an overlay. 80x24 is the size every existing overlay
   # spec centres its card in, so box geometry matches what those specs already assert.
+  #
+  # CAVEAT: this is the whole SCREEN, not `layout.body`. On a real 80x24 terminal the shell
+  # passes Rect(2, 4, 76, 18) — 6 rows shorter and offset — so a card gets 22 usable rows
+  # here where production gives 16. Every migrated overlay's `overlay_box` bails out with
+  # `nil` below a floor (`w < 28 || h < 8`), and that nil path — where the base
+  # `handle_click` turns EVERY click into a dismiss — is therefore unreachable through this
+  # default. If your modal is tall, or you care about the small-terminal path, pass an
+  # explicit `area:` rather than trusting this.
   DEFAULT_AREA = Gori::Tui::Rect.new(0, 0, 80, 24)
 
   getter overlay : Gori::Tui::Overlay
@@ -45,31 +53,44 @@ class OverlayHarness
   # `commit` is what the injected closure reports back to the shell: true = "applied,
   # close me", false = the validation-rejected path that keeps the form up. Override it
   # mid-example with `on_commit`.
+  #
+  # An overlay that ALREADY carries a closure is wrapped, not replaced: the real open-sites
+  # (`open_scope_rule_editor` and friends) set `on_commit` before handing the modal over, so
+  # a migration spec that mirrors its open-site and then wraps it here must still be running
+  # the production closure. Silently swapping in `-> { true }` would leave the example
+  # asserting `commits == 1` while proving nothing about the code under test.
   def initialize(@overlay : Gori::Tui::Overlay, *, area : Gori::Tui::Rect = DEFAULT_AREA,
-                 commit : Bool = true)
+                 commit : Bool? = nil)
     @area = area
-    @commit_result = commit
-    install_commit
+    if existing = @overlay.on_commit
+      raise ArgumentError.new(
+        "the overlay already carries an on_commit closure; pass commit: to override it deliberately"
+      ) unless commit.nil?
+      count(&existing) # keep the production closure, just make its runs observable
+    else
+      result = commit.nil? ? true : commit
+      count { result }
+    end
   end
 
-  # Replace the commit outcome (e.g. flip to a rejecting closure part-way through).
+  # Replace the commit outcome wholesale (e.g. flip to a rejecting closure part-way
+  # through). Discards whatever closure is installed — that is the point.
   def commit_result=(ok : Bool)
-    @commit_result = ok
-    install_commit
+    count { ok }
   end
 
   # Inject a bespoke commit closure — still counted in `commits`. Use when the example
   # needs to observe the overlay's state at commit time (the real open-sites all do).
   def on_commit(&blk : -> Bool) : Nil
+    count(&blk)
+  end
+
+  # The one place a closure is installed, so `commits` counts every path uniformly.
+  private def count(&blk : -> Bool) : Nil
     @overlay.on_commit = -> {
       @commits += 1
       blk.call
     }
-  end
-
-  private def install_commit : Nil
-    ok = @commit_result
-    on_commit { ok }
   end
 
   # One key through the shell's dispatch. Returns :open or :closed — the shell-visible
@@ -111,11 +132,15 @@ class OverlayHarness
   end
 
   # A scroll-wheel notch over the modal, already ±3-scaled like Runner#handle_wheel.
+  # Guarded like press/click: once the shell has dropped the modal, `active_overlay`
+  # returns nil and neither Runner#wheel_overlay nor #apply_preedit reaches it again.
   def wheel(step : Int32) : Nil
+    live!
     @overlay.handle_wheel(step)
   end
 
   def preedit(text : String) : Nil
+    live!
     @overlay.set_preedit(text)
   end
 

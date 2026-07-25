@@ -26,14 +26,14 @@ end
 # rename. Only a literal list pins the wire names, and they are load-bearing twice over:
 # controllers compare `@host.overlay` against these symbols, and every symbol handed to
 # from_sym now RAISES if it is not a member (it used to be a silent no-op).
-EXPECTED_OVERLAY_SYMS = [
+private EXPECTED_OVERLAY_SYMS = {
   :none, :detail, :palette, :issue_new, :confirm, :browser, :choice, :tabs_more,
   :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences,
   :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :probe_rule, :rewriter_rule, :ca_import, :import, :scope_rule, :sequence_config,
   :mine_config,
-]
+}
 
 # A minimal Overlay to pin the base-class defaults the Runner leans on. Its `key` has to
 # name a real OverlayKind (that is the type), and Palette is the safe pick: the command
@@ -71,7 +71,7 @@ describe "OverlayKind — the state @overlay holds" do
   end
 
   it "spells every member exactly as the Host facade names it" do
-    OverlayKind.values.map(&.to_sym).should eq(EXPECTED_OVERLAY_SYMS)
+    OverlayKind.values.map(&.to_sym).should eq(EXPECTED_OVERLAY_SYMS.to_a)
   end
 
   it "resolves every symbol a live call-site hands to from_sym" do
@@ -117,6 +117,11 @@ describe "Overlay seam — base contract" do
     h = OverlayHarness.new(StubOverlay.new)
 
     h.box.should be_nil
+    # The no-op hooks must not raise — the Runner calls them on whatever modal is up,
+    # without asking whether the base class overrode them. Exercised BEFORE the click
+    # below, because once the shell drops a modal it stops routing to it entirely.
+    h.wheel(3)
+    h.preedit("한")
     # No box → a click can't be inside → the shell dismisses (prior close-on-click-away).
     # Assert the RAW vocabulary, not just the harness's :closed: the harness maps both
     # :cancel and a truthy :commit to :closed, so `eq(:closed)` alone would still pass if
@@ -124,9 +129,43 @@ describe "Overlay seam — base contract" do
     h.overlay.handle_click(h.area, 10, 10).should eq(:cancel)
     h.click(10, 10).should eq(:closed)
     h.commits.should eq(0) # dismissing must never run the commit closure
-    # No-op hooks must not raise (the Runner calls them unconditionally).
-    h.wheel(3)
-    h.preedit("한")
+  end
+
+  it "stops routing input once the shell has dropped the modal" do
+    # The harness's own invariant, and the reason wheel/preedit are guarded too: after a
+    # dismiss, Runner#active_overlay returns nil, so neither #wheel_overlay nor
+    # #apply_preedit reaches the overlay. An example that kept driving one would be
+    # asserting against something the user can no longer touch.
+    h = OverlayHarness.new(StubOverlay.new)
+    h.click(10, 10).should eq(:closed)
+    expect_raises(Exception, /already closed/) { h.press(Termisu::Input::Key::Escape) }
+    expect_raises(Exception, /already closed/) { h.wheel(3) }
+    expect_raises(Exception, /already closed/) { h.preedit("x") }
+  end
+
+  it "keeps a closure the overlay already carried instead of swapping in its own" do
+    # A migration spec mirrors its open-site (which sets on_commit) and THEN wraps the
+    # overlay in the harness. If the harness replaced that closure with `-> { true }`, the
+    # example would assert `commits == 1` and pass while never running the production
+    # apply — the exact vacuous-green this harness exists to prevent.
+    ov = StubOverlay.new
+    applied = 0
+    ov.on_commit = -> {
+      applied += 1
+      true
+    }
+    h = OverlayHarness.new(ov)
+    h.overlay.commit.should be_true
+    applied.should eq(1) # the REAL closure ran
+    h.commits.should eq(1)
+  end
+
+  it "refuses to silently override a pre-set closure with a commit: result" do
+    ov = StubOverlay.new
+    ov.on_commit = -> { true }
+    expect_raises(ArgumentError, /already carries an on_commit/) do
+      OverlayHarness.new(ov, commit: false)
+    end
   end
 
   it "commits with no on_commit supplied (the base-class nil branch) " do
@@ -273,7 +312,9 @@ describe "Overlay seam — SequenceConfigOverlay (hard case: 2 open-sites, no fl
     h.click_in_box(3, 8).should eq(:closed)
     h.commits.should eq(1)
 
-    OverlayHarness.new(SequenceConfigOverlay.new(seed)).click(0, 0).should eq(:closed)
+    away = OverlayHarness.new(SequenceConfigOverlay.new(seed))
+    away.click(0, 0).should eq(:closed)
+    away.commits.should eq(0) # :closed alone would also match a commit — clicking away must not START the run
   end
 
   it "routes IME preedit to the selector field (the seam's per-modal-IME promise)" do
@@ -340,6 +381,8 @@ describe "Overlay seam — MineConfigOverlay (laggard: keys were shell-owned; cl
     h.click_in_box(3, 7).should eq(:closed)
     h.commits.should eq(1)
 
-    OverlayHarness.new(MineConfigOverlay.new(mseed)).click(0, 0).should eq(:closed)
+    away = OverlayHarness.new(MineConfigOverlay.new(mseed))
+    away.click(0, 0).should eq(:closed)
+    away.commits.should eq(0) # ditto: a dismiss must not kick off the miner
   end
 end

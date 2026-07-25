@@ -62,15 +62,12 @@ module Gori::Tui
       {% end %}
     end
 
+    # `Enum.parse?` already matches on the underscored member name and already answers nil
+    # on an unknown one, so this is just its raising wrapper — no second hand-rolled name
+    # table to drift out of step with the member list. Only `to_sym` needs a macro, because
+    # Symbol literals cannot be built at runtime.
     def self.from_sym(sym : Symbol) : OverlayKind
-      {% begin %}
-        case sym
-        {% for c in @type.constants %}
-        when :{{ c.stringify.underscore.id }} then OverlayKind::{{ c }}
-        {% end %}
-        else raise ArgumentError.new("unknown overlay kind: #{sym}")
-        end
-      {% end %}
+      parse?(sym.to_s) || raise ArgumentError.new("unknown overlay kind: #{sym}")
     end
   end
 
@@ -102,9 +99,14 @@ module Gori::Tui
     # it open — e.g. a validation error keeps the form up). Supplied at the open-site.
     property on_commit : Proc(Bool)?
 
-    # The `@overlay` state this modal sets. Kept in sync by the Runner so `modal_overlay?`
-    # and any residual `@overlay ==` checks keep working while the other overlays migrate
-    # onto this base one at a time.
+    # The `@overlay` state this modal sets, written by `Runner#open_overlay`.
+    #
+    # It is NOT what makes the modal capture input: a migrated modal's member is deleted
+    # from `Runner::MODAL_OVERLAYS`, and `modal_overlay?` answers for it through
+    # `active_overlay` instead. `key`'s real job is the liveness token in that method's
+    # `@overlay == ov.key` gate — ~40 sites reset `@overlay` directly without clearing
+    # `@active_overlay`, and comparing against `key` is what makes such a reset render the
+    # overlay inert rather than leaving a zombie that keeps drawing and capturing.
     abstract def key : OverlayKind
 
     # Shell chrome: the focus-badge title (top bar) and the bottom-row key hint. These
