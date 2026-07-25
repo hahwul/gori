@@ -22,10 +22,10 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 | 범주 | 다루는 내용 |
 |----------|----------------|
-| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, 혼합 콘텐츠, 캐시 가능한 API 응답 |
+| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, 혼합 콘텐츠, 캐시 가능한 API 응답, JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음), `integrity` 없는 크로스 오리진 서브리소스 |
 | `cookies` | `Secure` / `HttpOnly` / `SameSite` 및 관련 쿠키 위생 |
 | `tech` | 기술 및 프로토콜 핑거프린트(Project 탭에도 표시) |
-| `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection |
+| `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임 |
 | `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; 액티브 origin 반사 |
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
 | `active` | light-touch 프로브로 확인됨(예: 반사되는 파라미터). TUI 액티브 스캔 전용 |

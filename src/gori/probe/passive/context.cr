@@ -140,6 +140,18 @@ module Gori
           @decoded_body = decoded || @detail.response_body
         end
 
+        # True when the shared decode filled its cap, i.e. `body_text` / `client_body_text` are a
+        # TRUNCATED prefix of the real body. A rule whose signal can only sit at the END of a
+        # large body (the source-map comment a bundler appends) uses this to decide whether it is
+        # worth decoding again to look at the tail — the raw stored size can't answer that,
+        # because a well-compressing bundle stores small and inflates past the cap. Reads the
+        # already-memoized buffer, so asking costs nothing.
+        def body_capped? : Bool
+          bytes = decoded_body
+          return false if bytes.nil?
+          bytes.size >= ((html? || js?) ? CLIENT_BODY_CAP : BODY_CAP)
+        end
+
         # Decoded, capped, scrubbed response body text — computed once and shared by the rules
         # that scan the body. nil when there is no body. Slices the shared `decoded_body` buffer
         # to its first BODY_CAP bytes.

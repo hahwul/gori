@@ -22,10 +22,10 @@ Its **active** checks are deliberately *light-touch*: a handful of safe, low-vol
 
 | Category | What it covers |
 |----------|----------------|
-| `headers` | Security headers (HSTS, CSP incl. report-only-only, XFO, Permissions-Policy, …), cleartext Basic auth, mixed content, cacheable API responses |
+| `headers` | Security headers (HSTS, CSP incl. report-only-only, XFO, Permissions-Policy, …), cleartext Basic auth, mixed content, cacheable API responses, JWT weaknesses (`alg:none`, non-standard alg, no `exp`), cross-origin subresources without `integrity` |
 | `cookies` | `Secure` / `HttpOnly` / `SameSite` and related cookie hygiene |
 | `tech` | Technology and protocol fingerprints (also surface on the Project tab) |
-| `infoleak` | Body disclosures, secrets in URLs / WS frames, GraphQL introspection |
+| `infoleak` | Body disclosures, secrets in URLs / WS frames, GraphQL introspection, source maps shipped with production scripts, directory listings, sensitive JWT claims |
 | `cors` | Wildcard / null origin / credentialed misconfigurations; active origin reflection |
 | `client` | Client-side suspicions in page and bundle scripts: DOM-based XSS (source into sink), DOM clobbering, prototype pollution, and postMessage weaknesses. Heuristic, so treat as leads to confirm |
 | `active` | Confirmed by a light-touch probe (for example reflected parameters). TUI active scan only |

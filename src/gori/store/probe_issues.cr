@@ -61,9 +61,17 @@ module Gori
     end
 
     # Codes whose evidence is a TYPE label (not a one-off sample), so a (code, host)
-    # group should list every distinct type seen rather than pin to the first.
+    # group should list every distinct type seen rather than pin to the first. `missing_sri`
+    # and `jwt_sensitive_claims` belong here for the same reason: one host's third-party hosts
+    # (and one host's sensitive claim names) are a SET that only the union describes.
     private def accumulate_evidence?(code : String) : Bool
-      code == "secret_in_body" || code == "error_stack_leak" || code == "secret_in_ws"
+      case code
+      when "secret_in_body", "error_stack_leak", "secret_in_ws",
+           "missing_sri", "jwt_sensitive_claims"
+        true
+      else
+        false
+      end
     end
 
     # Union of distinct evidence labels for one issue group, ", "-joined and capped.

@@ -10,6 +10,10 @@ require "./passive/cors"
 require "./passive/body_leaks"
 require "./passive/auth"
 require "./passive/graphql"
+require "./passive/jwt"
+require "./passive/sourcemap"
+require "./passive/sri"
+require "./passive/directory_listing"
 require "./passive/ws_payloads"
 require "./passive/secrets"
 require "./passive/js_scan"
@@ -39,6 +43,10 @@ module Gori
         BodyLeaks.new,
         Auth.new,
         GraphqlIntrospection.new,
+        JwtWeaknesses.new,
+        SourceMap.new,
+        Sri.new,
+        DirectoryListing.new,
         WsPayloads.new,
         DomXss.new,
         DomClobbering.new,
