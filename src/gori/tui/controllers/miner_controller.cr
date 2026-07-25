@@ -316,14 +316,14 @@ module Gori::Tui
     def build_seed_from_flow(id : Int64) : MineSeed?
       return nil unless detail = @host.session.store.get_flow(id)
       built = Repeater::FlowRequest.build(detail)
-      appl = Miner::Detect.detect(built.bytes)
+      appl = Miner::Plan.applicable_locations(built.bytes)
       summary = request_summary(built.bytes)
       MineSeed.new(built.target, built.bytes, built.http2, nil, id, summary, appl.applicable, appl.default)
     end
 
     def build_seed_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : MineSeed
       bytes = text_to_request(request_text)
-      appl = Miner::Detect.detect(bytes)
+      appl = Miner::Plan.applicable_locations(bytes)
       MineSeed.new(target, bytes, http2, sni, nil, request_summary(bytes), appl.applicable, appl.default)
     end
 
@@ -335,9 +335,12 @@ module Gori::Tui
     end
 
     # Normalize editor text to CRLF line endings (h2 reframing + injection boundary scan
-    # expect them); captured flows are already CRLF.
+    # expect them); captured flows are already CRLF. `$VAR` tokens are deliberately left
+    # alone: Miner::Plan expands the request at build time, so expanding here too would be
+    # a second pass, and a var whose value contains a token would resolve one level deeper
+    # for a hand-authored request than for a flow-seeded one.
     private def text_to_request(text : String) : Bytes
-      Env.expand(text).gsub(/\r?\n/, "\r\n").to_slice
+      text.gsub(/\r?\n/, "\r\n").to_slice
     end
 
     # --- start a session (called by the Runner after the config overlay confirms) ---
@@ -394,7 +397,11 @@ module Gori::Tui
     end
 
     private def start_run(view : MinerView) : Nil
-      engine, err = view.build_engine(!@host.session.config.insecure_upstream?, @host.session.scope)
+      # The session's LIVE HostOverrides instance, not a fresh HostOverrides.load(store):
+      # the proxy reads that one and the Project tab edits it (Mutex-guarded), so a second
+      # copy would freeze this run's pins at whatever they were when the tab opened (#367).
+      engine, err = view.build_engine(!@host.session.config.insecure_upstream?,
+        @host.session.scope, @host.session.host_overrides)
       unless engine
         @host.status(err || "cannot mine")
         return

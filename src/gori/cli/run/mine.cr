@@ -55,19 +55,14 @@ module Gori
         abort "gori run mine: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run mine") }
 
-        bytes, default_target, src_h2 = mine_source(flow_id, request_file, project_name, db_path)
-        scheme, host, port = resolve_mine_target(target_override, default_target)
-        http2 = force_h2 || src_h2
+        # Load the named project's env vars so `$VAR` in a --request/stdin body resolves the
+        # same way it does for a flow (whose read already hydrates them via open_store).
+        # Explicit, as in cmd_fuzz: it used to fall out of cli_host_overrides opening a
+        # store, and that helper ends in `rescue; nil`.
+        hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
+        text, default_target, src_h2 = mine_source(flow_id, request_file, project_name, db_path)
 
         config = Miner::Config.new
-        detected = Miner::Detect.detect(bytes)
-        config.locations = locations.empty? ? detected.default : locations
-        abort "gori run mine: no applicable locations for this request" if config.locations.empty?
-        unless locations.empty?
-          (config.locations - detected.applicable).each do |loc|
-            STDERR.puts "gori run mine: #{loc.label}: not applicable to this request (no matching existing body), skipping"
-          end
-        end
         config.concurrency = concurrency
         config.rps = rate
         config.throttle_ms = throttle
@@ -75,36 +70,70 @@ module Gori
         config.retries = retries
         config.max_requests = max_requests
         config.user_wordlist = wordlist
-        if b = bucket
-          config.locations.each { |loc| config.bucket_size[loc] = b }
-        end
-
-        names = begin
-          Miner::Wordlist.load(wordlist)
-        rescue ex
-          abort "gori run mine: wordlist error: #{ex.message}"
-        end
+        options = Miner::PlanOptions.new(text,
+          default_target: default_target, target: target_override,
+          http2: force_h2 || src_h2, bucket: bucket,
+          # No --locations at all ⇒ nil, so the builder auto-detects what applies to this
+          # request; an explicit but unusable list stays an error, not a silent default.
+          locations: locations.empty? ? nil : locations,
+          config: config, verify: !insecure, sni: sni,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
         # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send.
         outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
-        guard_outbound(outbound, scheme, host, Gori::Outbound.request_target(bytes), "gori run mine")
-        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
-          http2: http2, verify: !insecure, sni: sni, timeout: timeout,
-          overrides: cli_host_overrides(project_name, db_path, flow_id))
-        engine = Miner::Engine.new(bytes, http2, names, sender, config)
+        plan = begin
+          Miner::Plan.build(options, outbound)
+        rescue ex : Miner::PlanError
+          outbound.close
+          abort "gori run mine: #{mine_plan_error(ex)}"
+        end
+        warn_mine_locations(plan)
+        origin = plan.origin
+        unless origin.scheme.in?("http", "https")
+          outbound.close
+          abort "gori run mine: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
+        end
+        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run mine")
         begin
-          run_mine_stream(engine, scheme, host, port, config, format)
+          run_mine_stream(plan.engine, origin.scheme, origin.host, origin.port, plan.config, format)
         ensure
           outbound.close
         end
       end
 
-      # {request bytes (byte-exact), default target, http2} from the chosen source.
+      # `gori run mine`'s wording for a plan the options can't produce. The builder reports
+      # the machine-readable `reason`; the sentence (and the flags it names) is ours.
+      private def self.mine_plan_error(ex : Miner::PlanError) : String
+        case ex.reason
+        in Miner::PlanError::Reason::NoTarget
+          "--target is required for --request/stdin"
+        in Miner::PlanError::Reason::BadTarget
+          "could not determine a target host"
+        in Miner::PlanError::Reason::NoLocations
+          "no applicable locations for this request"
+        in Miner::PlanError::Reason::Wordlist
+          "wordlist error: #{ex.detail}"
+        in Miner::PlanError::Reason::NoNames
+          "no candidate parameter names to mine"
+        end
+      end
+
+      # A location the operator named with --locations that this request cannot carry (no
+      # matching existing body). Kept in the run rather than dropped, so say so instead of
+      # letting the name count quietly come up short.
+      private def self.warn_mine_locations(plan : Miner::Plan) : Nil
+        plan.inapplicable.each do |loc|
+          STDERR.puts "gori run mine: #{loc.label}: not applicable to this request (no matching existing body), skipping"
+        end
+      end
+
+      # {raw request text (byte-exact, BEFORE Env expansion — Miner::Plan owns that),
+      # default target, http2} from the chosen source.
       private def self.mine_source(flow_id : Int64?, request_file : String?,
-                                   project_name : String?, db_path : String?) : {Bytes, String?, Bool}
+                                   project_name : String?, db_path : String?) : {String, String?, Bool}
         if file = request_file
           abort "gori run mine: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
-          {Env.expand_wire(File.read(file)), nil, false}
+          {File.read(file), nil, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))
           detail = begin
@@ -114,20 +143,12 @@ module Gori
           end
           abort "gori run mine: no flow ##{id}" unless detail
           built = Repeater::FlowRequest.build(detail)
-          {Env.expand_wire(String.new(built.bytes)), built.target, built.http2}
+          {String.new(built.bytes), built.target, built.http2}
         elsif !STDIN.tty?
-          {Env.expand_wire(STDIN.gets_to_end), nil, false}
+          {STDIN.gets_to_end, nil, false}
         else
           abort "gori run mine: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end
-      end
-
-      private def self.resolve_mine_target(override : String?, default_target : String?) : {String, String, Int32}
-        target = Env.expand(override || default_target || abort("gori run mine: --target is required for --request/stdin"))
-        scheme, host, port = Repeater::FlowRequest.parse_target(target)
-        abort "gori run mine: could not determine a target host" if host.empty?
-        abort "gori run mine: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        {scheme, host, port}
       end
 
       private def self.parse_mine_locations(v : String) : Array(Miner::Location)

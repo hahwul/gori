@@ -2,6 +2,7 @@ require "json"
 require "./screen"
 require "./theme"
 require "./frame"
+require "../host_overrides"
 require "../store"
 require "../miner"
 require "../fuzz"
@@ -281,20 +282,42 @@ module Gori::Tui
     end
 
     # --- engine ---
-    # `scope` becomes the interactive `Gori::Outbound` decision the sender dials through:
-    # Sandbox mode and explicit EXCLUDE rules hard-block every send — the same protection
-    # Discover already applies per-request.
-    def build_engine(verify : Bool, scope : Gori::Scope) : {Miner::Engine?, String?}
-      scheme, host, port = Repeater::FlowRequest.parse_target(@target)
-      return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
-      return {nil, "no locations selected"} if @config.locations.empty?
-      names = Miner::Wordlist.load(@config.user_wordlist)
-      return {nil, "wordlist is empty"} if names.empty?
-      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), Gori::Outbound.interactive(scope),
-        http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
-      {Miner::Engine.new(@request, @http2, names, sender, @config), nil}
+    # Build an engine ready to run, or {nil, error}. `scope` becomes the interactive
+    # `Gori::Outbound` decision the sender dials through: no up-front allowlist gate (the
+    # operator typed this target), but Sandbox mode and explicit EXCLUDE rules hard-block
+    # every send — the same protection Discover already applies per-request.
+    # `overrides` is the project's hostname overrides (the Project tab's HOST OVERRIDES
+    # pane). It has NO default on purpose: the Miner tab ignored them for as long as the
+    # tab has existed (#367), which pinned a host to a staging IP everywhere except here,
+    # so a call site that forgets them again has to be a compile error.
+    def build_engine(verify : Bool, scope : Gori::Scope,
+                     overrides : Gori::HostOverrides?) : {Miner::Engine?, String?}
+      # @request / @target keep their `$VAR` tokens (that is what gets persisted and what
+      # the operator sees); Miner::Plan expands both exactly once, at build time.
+      options = Miner::PlanOptions.new(String.new(@request), target: @target, http2: @http2,
+        locations: @config.locations, config: @config, verify: verify, sni: sni_override,
+        overrides: overrides)
+      plan = Miner::Plan.build(options, Gori::Outbound.interactive(scope))
+      {plan.engine, nil}
+    rescue ex : Miner::PlanError
+      {nil, mine_plan_error(ex)}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # The Miner tab's wording for a plan this view's state can't produce. The builder
+    # reports the machine-readable `reason`; the sentence (and the pane it points at) is ours.
+    private def mine_plan_error(ex : Miner::PlanError) : String
+      case ex.reason
+      in Miner::PlanError::Reason::NoTarget, Miner::PlanError::Reason::BadTarget
+        "invalid target — use scheme://host[:port]/path"
+      in Miner::PlanError::Reason::NoLocations
+        "no locations selected"
+      in Miner::PlanError::Reason::Wordlist
+        "wordlist error: #{ex.detail}"
+      in Miner::PlanError::Reason::NoNames
+        "wordlist is empty"
+      end
     end
 
     # --- config (de)serialization (opaque JSON in miner_sessions.config) ---
