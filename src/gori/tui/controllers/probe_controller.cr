@@ -426,9 +426,9 @@ module Gori::Tui
       if id = ov.edit_id
         if ov.scope == ov.edit_scope
           if ov.scope == "global"
-            Settings.update_scan_rule(id, ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+            Settings.update_scan_rule(id, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
           else
-            store.update_probe_custom_rule(id.to_i64, ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+            store.update_probe_custom_rule(id.to_i64, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
           end
         else
           ov.edit_scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
@@ -445,9 +445,9 @@ module Gori::Tui
 
     private def insert_custom_rule(ov : CustomRuleOverlay, store : Store) : Nil
       if ov.scope == "global"
-        Settings.add_scan_rule(ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+        Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
       else
-        store.insert_probe_custom_rule(ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+        store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
       end
     end
 

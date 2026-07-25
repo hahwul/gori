@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
+require "./overlay"
 require "../store"
 require "../store/safe_regexp"
 require "../probe/custom_rule"
@@ -13,8 +14,14 @@ module Gori::Tui
   #   ←/→        cycle the selected option row (scope/side/region/match/severity)
   #   type       edit the focused text row (title / description / pattern)
   #   ↵          advance a text row (↵ on pattern or Save commits) · esc cancels
-  # The runner validates + persists on :commit (global → settings.json, project → project DB).
-  class CustomRuleOverlay
+  #
+  # On the polymorphic Overlay seam (see overlay.cr): the persist — global →
+  # settings.json, project → project DB, and the scope-change move between them — is
+  # injected as `on_commit` at the open-site (Runner#open_custom_rule_editor), which
+  # routes it to ProbeController#apply_custom_rule. An invalid form (missing title/
+  # description, or a regex that won't compile) makes that closure return false, which
+  # keeps the card up.
+  class CustomRuleOverlay < Overlay
     ROW_TITLE   = 0
     ROW_DESC    = 1
     ROW_SCOPE   = 2
@@ -73,7 +80,10 @@ module Gori::Tui
       list.index(v) || 0
     end
 
-    def title : String
+    # NOT `title`: that name belongs to the Overlay contract (the focus-badge label). The
+    # two are unrelated strings and collapsing them would silently persist every rule
+    # under the badge text.
+    def rule_title : String
       @fields[:title].value.strip
     end
 
@@ -116,8 +126,33 @@ module Gori::Tui
     # Every required field is present and, for a regex rule, the pattern compiles (the shared
     # validator the CLI/MCP write paths use too).
     def valid? : Bool
-      return false if title.empty? || description.empty?
+      return false if rule_title.empty? || description.empty?
       Probe::CustomRule.valid_pattern?(pattern, kind)
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::ProbeRule
+    end
+
+    def title : String
+      "CUSTOM RULE"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ options · type title/pattern · ↵ save · esc cancel"
+    end
+
+    # Click a field row to select it; a click on Save commits; a click outside the card
+    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_save_row?
+      end
+      :stay
     end
 
     def move(d : Int32) : Nil

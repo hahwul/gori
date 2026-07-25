@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "../support/overlay_harness"
 
 include Gori::Tui
 
@@ -72,5 +73,79 @@ describe Gori::Tui::OastProviderOverlay do
     ov.row_at(box, box.x + 3, box.y + 3).should eq(1) # scope row
     ov.row_at(box, box.x + 3, box.y + 4).should eq(2) # type row
     ov.row_at(box, box.x + 3, box.y + 7).should eq(5) # save row
+  end
+end
+
+# Post-migration surface: the Runner no longer owns handle_oast_provider_key /
+# click_oast_provider / commit_oast_provider_overlay / @oast_provider_overlay — it opens
+# this overlay with OastController#save_provider injected as on_commit and dispatches
+# generically (see spec/tui/overlay_dispatch_spec.cr for the shared contract).
+describe "Gori::Tui::OastProviderOverlay — Overlay seam" do
+  it "exposes the chrome the collapsed Runner ladders used to hard-code" do
+    OverlayHarness.new(OastProviderOverlay.adding).assert_chrome(OverlayKind::OastProvider, "OAST PROVIDER")
+  end
+
+  it "carries the global-vs-project scope field through to the commit closure" do
+    # The scope row decides settings.json vs the project DB — the one field whose loss
+    # would silently write a provider to the wrong place.
+    ov = OastProviderOverlay.adding
+    h = OverlayHarness.new(ov)
+    saved = [] of {String, String, String}
+    h.on_commit do
+      saved << {ov.provider_name, ov.scope, ov.host}
+      true
+    end
+
+    h.type("my-oast")
+    h.press(Termisu::Input::Key::Down)  # → scope
+    h.press(Termisu::Input::Key::Right) # project → global
+    3.times { h.press(Termisu::Input::Key::Down) }
+    ov.on_save_row?.should be_false # host → token → Save
+    h.press(Termisu::Input::Key::Down)
+    ov.on_save_row?.should be_true
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+
+    saved.should eq([{"my-oast", "global", "https://oast.pro"}])
+  end
+
+  it "keeps the form open when the controller rejects it (name/host required)" do
+    ov = OastProviderOverlay.adding
+    ov.valid?.should be_false # no name yet
+    h = OverlayHarness.new(ov, commit: false)
+    ov.set_selected(5) # Save row
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.commits.should eq(1) # save_provider DID run — it just returned false
+  end
+
+  it "esc cancels and a click-away dismisses — neither persists anything" do
+    h = OverlayHarness.new(OastProviderOverlay.adding)
+    h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    h.commits.should eq(0)
+
+    away = OverlayHarness.new(OastProviderOverlay.adding)
+    away.overlay.handle_click(away.area, 0, 0).should eq(:cancel) # raw: not a silent save
+    away.click(0, 0).should eq(:closed)
+    away.commits.should eq(0)
+  end
+
+  it "click selects a row, and a click on Save commits" do
+    ov = OastProviderOverlay.editing(config)
+    h = OverlayHarness.new(ov)
+    # Rows start at box.y + 2; Save is index 5.
+    h.click_in_box(3, 3).should eq(:open) # scope row
+    h.click_in_box(3, 7).should eq(:closed)
+    h.commits.should eq(1)
+  end
+
+  it "moves the selected field with the wheel" do
+    ov = OastProviderOverlay.adding
+    OverlayHarness.new(ov).wheel(2 * 3) # 6 notches down clamps onto Save
+    ov.on_save_row?.should be_true
+  end
+
+  it "routes IME preedit to the focused text row" do
+    h = OverlayHarness.new(OastProviderOverlay.adding)
+    h.preedit("preedithere")
+    h.rendered?("preedithere").should be_true
   end
 end

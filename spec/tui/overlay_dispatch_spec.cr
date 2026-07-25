@@ -35,6 +35,27 @@ private EXPECTED_OVERLAY_SYMS = {
   :mine_config,
 }
 
+# The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
+# appends its own members, one per line, when its modals move onto the Overlay seam; two
+# batches appending different lines merge cleanly, where a shared count could not. Both
+# examples below read this, so the ledger lives in exactly one place.
+private MIGRATED_KINDS = [
+  OverlayKind::ScopeRule,
+  OverlayKind::SequenceConfig,
+  OverlayKind::MineConfig,
+  # C2 — rule / provider / import forms
+  OverlayKind::OastProvider,
+  OverlayKind::ProbeRule,
+  OverlayKind::RewriterRule,
+  OverlayKind::CaImport,
+  OverlayKind::Import,
+]
+
+# Never in MODAL_OVERLAYS by design, migrated or not: neither draws a capturing card.
+# `None` is "no modal at all" and `Detail` is the History drill-in, which the Runner keeps
+# in the tab body rather than a centered card (see Runner#modal_overlay?).
+private NON_MODAL_KINDS = [OverlayKind::None, OverlayKind::Detail]
+
 # A minimal Overlay to pin the base-class defaults the Runner leans on. Its `key` has to
 # name a real OverlayKind (that is the type), and Palette is the safe pick: the command
 # palette is explicitly OUT of the migration's scope, so no production Overlay will ever
@@ -91,24 +112,26 @@ describe "OverlayKind — the state @overlay holds" do
     # A migration DELETES its member from Runner::MODAL_OVERLAYS — the migrated modal
     # answers modal_overlay? through active_overlay instead. Leaving a stale member behind
     # would make the gate true with no overlay object to route to.
-    [OverlayKind::ScopeRule, OverlayKind::SequenceConfig, OverlayKind::MineConfig].each do |k|
-      Runner::MODAL_OVERLAYS.includes?(k).should be_false
+    MIGRATED_KINDS.each do |k|
+      Runner::MODAL_OVERLAYS.includes?(k).should be_false, "#{k} migrated but kept the legacy gate"
     end
   end
 
   it "still captures input for every UNMIGRATED modal" do
-    # The other half of the gate. MODAL_OVERLAYS is the one line all five Phase 1 batches
-    # edit, and an accidental deletion is invisible: the modal still renders, but the shell
-    # stops treating it as capturing, so clicks fall through to the tab body behind the card
-    # and the wheel scrolls that body. Pin the list until each batch removes its own member.
-    unmigrated = OverlayKind.values - [
-      OverlayKind::None, OverlayKind::Detail, # not modals: no card, never capture
-      OverlayKind::ScopeRule, OverlayKind::SequenceConfig, OverlayKind::MineConfig,
-    ]
-    unmigrated.size.should eq(28)
-    unmigrated.each do |k|
-      Runner::MODAL_OVERLAYS.includes?(k).should be_true, "#{k} lost its input-capture gate"
-    end
+    # The other half of the gate, and the reason it is SET EQUALITY rather than a count.
+    #
+    # An accidental deletion from MODAL_OVERLAYS is invisible at runtime: the modal still
+    # renders, but the shell stops treating it as capturing, so clicks fall through to the
+    # tab body behind the card and the wheel scrolls that body. An accidental ADDITION is
+    # equally invisible, and a count could never catch it — only complementarity can.
+    #
+    # Both sides are derived, so this needs no edit when an OverlayKind member is added:
+    # the single per-batch edit is appending to MIGRATED_KINDS above. It used to be a
+    # hard-coded total, which put five parallel batches on one line each wanting a
+    # different integer — and resolving that conflict by keeping your own literal asserts
+    # a total that is wrong for the combined state.
+    unmigrated = OverlayKind.values - NON_MODAL_KINDS - MIGRATED_KINDS
+    unmigrated.to_set.should eq(Runner::MODAL_OVERLAYS.to_set)
   end
 end
 

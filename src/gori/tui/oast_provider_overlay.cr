@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
+require "./overlay"
 require "../oast"
 require "../oast/provider_config"
 
@@ -12,8 +13,13 @@ module Gori::Tui
   #   ←/→  cycle the scope / provider type when that row is selected
   #   type into name/host/token when focused; ↵ on Save (or a text row) commits
   #   esc cancels
-  # The runner validates + persists on :commit (global → settings.json, project → project DB).
-  class OastProviderOverlay
+  #
+  # On the polymorphic Overlay seam (see overlay.cr): the persist — global →
+  # settings.json, project → project DB, and the scope-change move between them — is
+  # injected as `on_commit` at the open-site (Runner#open_oast_provider_editor), which
+  # routes it to OastController#save_provider. An invalid form (missing name/host) makes
+  # that closure return false, which keeps the card up.
+  class OastProviderOverlay < Overlay
     ROW_NAME  = 0
     ROW_SCOPE = 1
     ROW_TYPE  = 2
@@ -95,6 +101,31 @@ module Gori::Tui
 
     def valid? : Bool
       !provider_name.empty? && !host.empty?
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::OastProvider
+    end
+
+    def title : String
+      "OAST PROVIDER"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
+    end
+
+    # Click a field row to select it; a click on Save commits; a click outside the card
+    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_save_row?
+      end
+      :stay
     end
 
     private def row_count : Int32

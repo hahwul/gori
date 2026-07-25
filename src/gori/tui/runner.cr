@@ -161,10 +161,6 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_preedit = ""
       @tag_view = nil.as(RepeaterView?)
-      # The import path popup (palette → import:har/urls/oas) — a CENTERED modal
-      # (@overlay is :import), not a bottom prompt: a path is long and the status row
-      # couldn't host it or its completion dropdown legibly. See ImportOverlay.
-      @import_overlay = nil.as(ImportOverlay?)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -263,16 +259,6 @@ module Gori::Tui
       # ladders. nil = no such modal up. (SCOPE add/edit was the first migrated — the
       # former @scope_rule_overlay ivar now lives here.)
       @active_overlay = nil.as(Overlay?)
-      @custom_rule_overlay = nil.as(CustomRuleOverlay?)
-      # Rewriter (Match & Replace) add/edit popup (a/e on the rule list). Built fresh each
-      # open; @rewriter_preview_sig gates the live match-preview rescan to real changes.
-      @rewriter_rule_overlay = nil.as(RewriterRuleOverlay?)
-      @rewriter_preview_sig = ""
-      # OAST provider add/edit popup (a/e on the Providers sub-tab). Built fresh each open.
-      @oast_provider_overlay = nil.as(OastProviderOverlay?)
-      # The "Import CA certificate" popup (palette → ca.import): collects the cert +
-      # key PEM paths, then hands off to the destructive-CA confirm. @overlay is :ca_import.
-      @ca_import_overlay = nil.as(CAImportOverlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @menu_more = false               # tab-bar focus is on the far-right ⋯ "more" affordance (only meaningful when @focus == :menu)
@@ -950,11 +936,6 @@ module Gori::Tui
       when .discover_headers? then @discover_headers_overlay.try(&.set_preedit(text))
       when .fuzz_set?         then @fuzz_set_overlay.try(&.set_preedit(text))
       when .fuzz_advanced?    then @fuzz_advanced_overlay.try(&.set_preedit(text))
-      when .oast_provider?    then @oast_provider_overlay.try(&.set_preedit(text))
-      when .probe_rule?       then @custom_rule_overlay.try(&.set_preedit(text))
-      when .rewriter_rule?    then @rewriter_rule_overlay.try(&.set_preedit(text))
-      when .ca_import?        then @ca_import_overlay.try(&.set_preedit(text))
-      when .import?           then @import_overlay.try(&.set_preedit(text))
       when .none?             then apply_preedit_body(text)
       end
     end
@@ -1056,11 +1037,6 @@ module Gori::Tui
       return handle_discover_headers_key(ev) if @overlay.discover_headers?
       return handle_fuzz_set_key(ev) if @overlay.fuzz_set?
       return handle_fuzz_advanced_key(ev) if @overlay.fuzz_advanced?
-      return handle_oast_provider_key(ev) if @overlay.oast_provider?
-      return handle_custom_rule_key(ev) if @overlay.probe_rule?
-      return handle_rewriter_rule_key(ev) if @overlay.rewriter_rule?
-      return handle_ca_import_key(ev) if @overlay.ca_import?
-      return handle_import_key(ev) if @overlay.import?
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay.none? && @focus == :body && history_controller.view.querying?
@@ -1340,11 +1316,6 @@ module Gori::Tui
       OverlayKind::DiscoverHeaders,
       OverlayKind::FuzzSet,
       OverlayKind::FuzzAdvanced,
-      OverlayKind::OastProvider,
-      OverlayKind::ProbeRule,
-      OverlayKind::RewriterRule,
-      OverlayKind::CaImport,
-      OverlayKind::Import,
     }
 
     private def modal_overlay? : Bool
@@ -1461,11 +1432,6 @@ module Gori::Tui
       when .discover_headers? then click_discover_headers(area, mx, my)
       when .fuzz_set?         then click_fuzz_set(area, mx, my)
       when .fuzz_advanced?    then click_fuzz_advanced(area, mx, my)
-      when .oast_provider?    then click_oast_provider(area, mx, my)
-      when .probe_rule?       then click_custom_rule(area, mx, my)
-      when .rewriter_rule?    then click_rewriter_rule(area, mx, my)
-      when .ca_import?        then click_ca_import(area, mx, my)
-      when .import?           then click_import(area, mx, my)
         # IssueNew is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -1556,20 +1522,6 @@ module Gori::Tui
       ov.handle_click(box, mx, my)
     end
 
-    private def click_ca_import(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @ca_import_overlay || return
-      box = ov.overlay_box(area)
-      return close_ca_import if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel (destructive: never auto-submit)
-      ov.handle_click(box, mx, my)
-    end
-
-    private def click_import(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @import_overlay || return
-      box = ov.overlay_box(area)
-      return close_import if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
-      ov.handle_click(box, mx, my)
-    end
-
     private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil
       box = @palette.overlay_box(area)
       return close_overlay if box.empty? || dismiss_zone?(box, mx, my)
@@ -1578,16 +1530,6 @@ module Gori::Tui
       if verb = @palette.selected_verb
         close_overlay
         @toast = verb.call(self) || @toast
-      end
-    end
-
-    private def click_rewriter_rule(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @rewriter_rule_overlay || return
-      box = ov.overlay_box(area)
-      return close_rewriter_rule if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        commit_rewriter_rule_overlay(ov) if ov.on_save_row?
       end
     end
 
@@ -1728,11 +1670,6 @@ module Gori::Tui
       when .discover_config? then @discover_config_overlay.try(&.move(step))
       when .fuzz_set?        then @fuzz_set_overlay.try(&.move(step))
       when .fuzz_advanced?   then @fuzz_advanced_overlay.try(&.move(step))
-      when .oast_provider?   then @oast_provider_overlay.try(&.move(step))
-      when .probe_rule?      then @custom_rule_overlay.try(&.move(step))
-      when .rewriter_rule?   then @rewriter_rule_overlay.try(&.move(step))
-      when .ca_import?       then @ca_import_overlay.try(&.move(step))
-      when .import?          then @import_overlay.try(&.move(step))
       end
     end
 
@@ -1864,33 +1801,26 @@ module Gori::Tui
       end
     end
 
-    # CA import popup: collect cert + key paths, then hand off to the destructive
-    # confirm on :submit. esc cancels without touching the CA.
-    private def handle_ca_import_key(ev : Termisu::Event::Key) : Nil
-      ov = @ca_import_overlay || return
-      case ov.handle_key(ev)
-      when :cancel then close_ca_import
-      when :submit then submit_ca_import(ov)
-      end
-    end
-
-    private def close_ca_import : Nil
-      @overlay = OverlayKind::None
-      @ca_import_overlay = nil
-    end
-
     # Validate the two paths are filled, close the overlay, then run the same danger
     # confirm as regenerate before adopting the imported CA. import! does the heavy
     # validation (pair match, CA flag) and leaves the current CA untouched on failure.
-    private def submit_ca_import(ov : CAImportOverlay) : Nil
+    #
+    # The CAImportOverlay commit closure (Runner#import_ca), and the ONE closure in this
+    # batch that closes itself. The rule the others follow — return true and let the shell
+    # close you (see submit_import) — does not work here: the shell's post-commit close
+    # unconditionally resets @overlay, which would wipe the confirm this opens one line
+    # after opening it. So it closes first and returns false, meaning "already handled,
+    # keep your hands off @overlay". The missing-path branch returns false for the ordinary
+    # reason: keep the form up so it can be corrected.
+    private def submit_ca_import(ov : CAImportOverlay) : Bool
       cert = ov.cert_path
       key = ov.key_path
       if cert.empty? || key.empty?
         @toast = "CA import: both certificate and key paths are required"
-        return
+        return false
       end
       path = @session.ca.ca_cert_path
-      close_ca_import
+      close_active_overlay
       confirm("IMPORT CA",
         "Replace the current root CA with the imported one?\n\n" \
         "The old CA becomes untrusted — re-trust the imported\n" \
@@ -1906,104 +1836,7 @@ module Gori::Tui
           @toast = "CA import failed: #{ex.message}"
         end
       end
-    end
-
-    # OAST provider add/edit popup: same interaction as the scope-rule form. Commit persists
-    # via the controller; an invalid form (missing name/host) keeps the popup open.
-    private def handle_oast_provider_key(ev : Termisu::Event::Key) : Nil
-      ov = @oast_provider_overlay || return
-      case ov.handle_key(ev)
-      when :cancel then close_oast_provider
-      when :commit then commit_oast_provider_overlay(ov)
-      end
-    end
-
-    private def click_oast_provider(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @oast_provider_overlay || return
-      box = ov.overlay_box(area)
-      return close_oast_provider if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        commit_oast_provider_overlay(ov) if ov.on_save_row?
-      end
-    end
-
-    private def commit_oast_provider_overlay(ov : OastProviderOverlay) : Nil
-      return unless oast_controller.save_provider(ov)
-      close_oast_provider
-    end
-
-    private def close_oast_provider : Nil
-      @overlay = OverlayKind::None
-      @oast_provider_overlay = nil
-    end
-
-    # Probe custom-rule popup: same interaction as the scope-rule form. Commit persists via the
-    # controller (returns false → keep the form open, e.g. an incomplete/invalid pattern).
-    private def handle_custom_rule_key(ev : Termisu::Event::Key) : Nil
-      ov = @custom_rule_overlay || return
-      case ov.handle_key(ev)
-      when :cancel then close_custom_rule
-      when :commit then commit_custom_rule_overlay(ov)
-      end
-    end
-
-    private def commit_custom_rule_overlay(ov : CustomRuleOverlay) : Nil
-      return unless probe_controller.apply_custom_rule(ov)
-      close_custom_rule
-    end
-
-    private def close_custom_rule : Nil
-      @overlay = OverlayKind::None
-      @custom_rule_overlay = nil
-    end
-
-    private def click_custom_rule(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @custom_rule_overlay || return
-      box = ov.overlay_box(area)
-      return close_custom_rule if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        commit_custom_rule_overlay(ov) if ov.on_save_row?
-      end
-    end
-
-    # Rewriter (Match & Replace) add/edit popup: same interaction as the custom-rule form,
-    # plus a live match PREVIEW refreshed after each key (only rescanning when the
-    # match-relevant fields actually changed). Commit persists via the controller.
-    private def handle_rewriter_rule_key(ev : Termisu::Event::Key) : Nil
-      ov = @rewriter_rule_overlay || return
-      case ov.handle_key(ev)
-      when :cancel then close_rewriter_rule
-      when :commit then commit_rewriter_rule_overlay(ov)
-      else              refresh_rewriter_preview(ov)
-      end
-    end
-
-    # Recompute the "N of M recent flows" preview when the candidate rule's match-relevant
-    # fields changed. Bounded so a keystroke stays responsive; nothing is written.
-    private def refresh_rewriter_preview(ov : RewriterRuleOverlay) : Nil
-      sig = ov.preview_signature
-      return if sig == @rewriter_preview_sig
-      @rewriter_preview_sig = sig
-      if ov.pattern.empty?
-        ov.set_preview("enter a #{ov.header_op? ? "header name" : "pattern"} to preview")
-        return
-      end
-      pv = @session.rules.preview(ov.candidate_rule, 200)
-      more = pv.total > pv.scanned ? " (of #{pv.total})" : ""
-      ov.set_preview("affects #{pv.matched} of #{pv.scanned} recent flows#{more}")
-    end
-
-    private def commit_rewriter_rule_overlay(ov : RewriterRuleOverlay) : Nil
-      return unless rewriter_controller.apply_rewriter_rule(ov)
-      close_rewriter_rule
-    end
-
-    private def close_rewriter_rule : Nil
-      @overlay = OverlayKind::None
-      @rewriter_rule_overlay = nil
-      @rewriter_preview_sig = ""
+      false
     end
 
     private def apply_close_fuzz_set(ov : FuzzSetOverlay) : Nil
@@ -3832,11 +3665,6 @@ module Gori::Tui
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay.fuzz_set?
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay.fuzz_advanced?
       active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
-      @oast_provider_overlay.try(&.render(screen, layout.body)) if @overlay.oast_provider?
-      @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay.probe_rule?
-      @rewriter_rule_overlay.try(&.render(screen, layout.body)) if @overlay.rewriter_rule?
-      @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay.ca_import?
-      @import_overlay.try(&.render(screen, layout.body)) if @overlay.import?
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -3967,10 +3795,6 @@ module Gori::Tui
       when .discover_headers? then "CUSTOM HEADERS"
       when .fuzz_set?         then "PAYLOAD SET"
       when .fuzz_advanced?    then "ADVANCED"
-      when .rewriter_rule?    then "REWRITER RULE"
-      when .oast_provider?    then "OAST PROVIDER"
-      when .ca_import?        then "IMPORT CA"
-      when .import?           then "IMPORT #{@import_overlay.try(&.label) || "FILE"}"
       else
         case @focus
         when :menu    then "TABS"
@@ -4023,10 +3847,6 @@ module Gori::Tui
       when .discover_headers? then "one header per line · Host/Connection ignored · esc saves & closes"
       when .fuzz_set?         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when .fuzz_advanced?    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
-      when .rewriter_rule?    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
-      when .oast_provider?    then "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
-      when .ca_import?        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
-      when .import?           then "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
       when .detail?           then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
@@ -4428,35 +4248,22 @@ module Gori::Tui
     # --- Import path popup (palette → import:har/urls/oas) -------------------
 
     private def open_import(kind : Symbol) : Nil
-      @import_overlay = ImportOverlay.new(kind)
-      @overlay = OverlayKind::Import
+      ov = ImportOverlay.new(kind)
+      ov.on_commit = -> { submit_import(ov) }
+      open_overlay(ov)
     end
 
-    private def close_import : Nil
-      @overlay = OverlayKind::None
-      @import_overlay = nil
-    end
-
-    private def handle_import_key(ev : Termisu::Event::Key) : Nil
-      ov = @import_overlay || return
-      case ov.handle_key(ev)
-      when :cancel then close_import
-      when :submit then submit_import(ov)
-      end
-    end
-
-    # Read the path off the popup, close it, THEN import — so the card is gone before a
-    # slow parse blocks the loop, and the resulting toast isn't drawn behind the modal.
-    private def submit_import(ov : ImportOverlay) : Nil
-      path = ov.path
-      label = ov.label
-      kind = ov.kind
-      close_import
-      if path.empty?
+    # The ImportOverlay commit closure. Returns true so the SHELL closes the card — no
+    # frame is drawn between this returning and that close, so the card is still gone
+    # before the parse's toast is painted, which the pre-seam early close was for. An
+    # empty path is a no-op cancel, not a correctable error, so it closes too.
+    private def submit_import(ov : ImportOverlay) : Bool
+      if ov.path.empty?
         @toast = "import cancelled — path is empty"
-        return
+      else
+        apply_import(ov.kind, ov.label, ov.path)
       end
-      apply_import(kind, label, path)
+      true
     end
 
     private def apply_import(kind : Symbol, label : String, path : String) : Nil
@@ -5119,23 +4926,38 @@ module Gori::Tui
       open_overlay(ov)
     end
 
-    # Host: open the OAST provider add/edit popup (nil = add a new provider).
+    # Host: open the OAST provider add/edit popup (nil = add a new provider). Saving is
+    # the controller's (global → settings.json, project → project DB); false keeps the
+    # form up on an invalid entry.
     def open_oast_provider_editor(provider : Oast::ProviderConfig?) : Nil
-      @oast_provider_overlay = provider ? OastProviderOverlay.editing(provider) : OastProviderOverlay.adding
-      @overlay = OverlayKind::OastProvider
+      ov = provider ? OastProviderOverlay.editing(provider) : OastProviderOverlay.adding
+      ov.on_commit = -> { oast_controller.save_provider(ov) }
+      open_overlay(ov)
     end
 
     # Host: open the Probe custom-rule popup (nil rule = add; else edit the given rule).
     def open_custom_rule_editor(rule : Probe::CustomRule?) : Nil
-      @custom_rule_overlay = rule ? CustomRuleOverlay.editing(rule) : CustomRuleOverlay.adding
-      @overlay = OverlayKind::ProbeRule
+      ov = rule ? CustomRuleOverlay.editing(rule) : CustomRuleOverlay.adding
+      ov.on_commit = -> { probe_controller.apply_custom_rule(ov) }
+      open_overlay(ov)
     end
 
     # Host: open the Rewriter (Match & Replace) rule popup (nil rule = add; else edit).
+    # The form asks for its live match preview through on_preview (it decides WHEN — only
+    # when a match-relevant field actually changed).
     def open_rewriter_rule_editor(rule : Store::MatchRule?) : Nil
-      @rewriter_rule_overlay = rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding
-      @rewriter_preview_sig = ""
-      @overlay = OverlayKind::RewriterRule
+      ov = rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding
+      ov.on_preview = ->rewriter_preview_text(Store::MatchRule)
+      ov.on_commit = -> { rewriter_controller.apply_rewriter_rule(ov) }
+      open_overlay(ov)
+    end
+
+    # The "N of M recent flows" line under the Rewriter form. Bounded so a keystroke stays
+    # responsive; nothing is written.
+    private def rewriter_preview_text(candidate : Store::MatchRule) : String
+      pv = @session.rules.preview(candidate, 200)
+      more = pv.total > pv.scanned ? " (of #{pv.total})" : ""
+      "affects #{pv.matched} of #{pv.scanned} recent flows#{more}"
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is
@@ -5196,8 +5018,9 @@ module Gori::Tui
     # cert + key PEM paths. The destructive swap happens later, on submit, behind
     # the same confirm as regenerate (see submit_ca_import).
     def import_ca : Nil
-      @ca_import_overlay = CAImportOverlay.new
-      @overlay = OverlayKind::CaImport
+      ov = CAImportOverlay.new
+      ov.on_commit = -> { submit_ca_import(ov) }
+      open_overlay(ov)
     end
 
     # --- browser (open a pre-trusted system browser) ---

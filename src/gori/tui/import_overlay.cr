@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./text_field"
 require "./path_complete"
+require "./overlay"
 
 module Gori::Tui
   # Centered popup collecting the source path for palette → "Import: HAR / URLs /
@@ -15,9 +16,16 @@ module Gori::Tui
   # the row (`rect.y - 9`) because there was nothing below it. Centered, the path gets a
   # full card width and the dropdown hangs under the field where it belongs.
   #
-  # Surfaces used by the Runner: `handle_key` returns :submit on ↵, :cancel on esc,
-  # :stay otherwise. On :submit the Runner reads `path` and runs the import.
-  class ImportOverlay
+  # On the polymorphic Overlay seam (see overlay.cr): the Runner dispatches key/click/
+  # wheel/preedit/render/title/hint here generically, and the import itself is injected
+  # as `on_commit` at the open-site (Runner#open_import), which reads `path`/`kind`.
+  #
+  # It defines no handle_click: the base default (click inside → stay, outside → dismiss)
+  # already IS this form's behaviour, since the one field is always focused and there is
+  # nothing else to select. Picking a dropdown row by mouse would mean inverting
+  # PathComplete's private scroll window; it is keyboard-only in the CA import popup too,
+  # so this stays consistent rather than special-casing one call site of a shared widget.
+  class ImportOverlay < Overlay
     getter kind : Symbol
 
     def initialize(@kind : Symbol)
@@ -49,8 +57,23 @@ module Gori::Tui
       end
     end
 
+    # --- Overlay contract (see overlay.cr) -----------------------------------
+    def key : OverlayKind
+      OverlayKind::Import
+    end
+
+    # The focus badge names the SOURCE FORMAT, not just "IMPORT" — the same `label` the
+    # card title and the result toast read, so the three can't disagree.
+    def title : String
+      "IMPORT #{label}"
+    end
+
+    def hint : String
+      "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
+    end
+
     # --- input ---------------------------------------------------------------
-    # :submit when the user commits, :cancel on esc, else :stay.
+    # :commit when the user submits, :cancel on esc, else :stay.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
 
@@ -90,11 +113,11 @@ module Gori::Tui
           @path_complete.refresh(insert)
         else
           @path_complete.close
-          return :submit if key.enter?
+          return :commit if key.enter?
         end
         return :stay
       end
-      key.enter? ? :submit : :stay
+      key.enter? ? :commit : :stay
     end
 
     def set_preedit(text : String) : Nil
@@ -160,17 +183,6 @@ module Gori::Tui
 
     private def value_x(box : Rect) : Int32
       box.x + 2 + LABEL_W
-    end
-
-    # --- mouse ---------------------------------------------------------------
-    # A click inside the card is inert but CONSUMED — there's one field and it already
-    # holds focus, so there's nothing to select; returning true just stops the Runner
-    # reading it as a click-away dismiss. (Picking a dropdown row by mouse would mean
-    # inverting PathComplete's private scroll window; it's keyboard-only there for the
-    # CA import popup too, so this stays consistent rather than special-casing one call
-    # site of a shared widget.)
-    def handle_click(box : Rect, mx : Int32, my : Int32) : Bool
-      box.contains?(mx, my)
     end
   end
 end

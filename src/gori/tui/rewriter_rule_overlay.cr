@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
+require "./overlay"
 require "../store"
 require "../store/safe_regexp"
 
@@ -12,9 +13,13 @@ module Gori::Tui
   #   ←/→         cycle the selected option row (target / op / match / part)
   #   type        edit the focused text row (name / host / find / value)
   #   ↵           advance a text row (↵ on value or Save commits) · esc cancels
-  # The runner refreshes a live match PREVIEW after each key and persists on :commit
-  # through the shared Rules engine (which the proxy reads live).
-  class RewriterRuleOverlay
+  #
+  # On the polymorphic Overlay seam (see overlay.cr). BOTH domain couplings are injected
+  # at the open-site (Runner#open_rewriter_rule_editor): `on_commit` persists through the
+  # shared Rules engine (which the proxy reads live), and `on_preview` scans recent flows
+  # for the live match PREVIEW. The form owns only WHEN to ask for that preview — see
+  # refresh_preview.
+  class RewriterRuleOverlay < Overlay
     ROW_NAME   = 0
     ROW_TARGET = 1
     ROW_OP     = 2
@@ -34,12 +39,18 @@ module Gori::Tui
 
     getter edit_id : Int64?
 
+    # Renders the "affects N of M recent flows" line under the form. Injected at the
+    # open-site because it READS TRAFFIC — the form itself stays store-free.
+    property on_preview : Proc(Store::MatchRule, String)?
+
     @target_i : Int32
     @op_i : Int32
     @match_i : Int32
     @part_i : Int32
     @sel : Int32
     @preview : String = ""
+    # Last previewed field set; gates the rescan to real changes (see refresh_preview).
+    @preview_sig : String = ""
 
     def initialize(*, name : String = "", target : String = "request", op : String = "replace",
                    match : String = "literal", part : String = "head", host : String = "",
@@ -127,13 +138,30 @@ module Gori::Tui
       false
     end
 
-    def set_preview(text : String) : Nil
-      @preview = text
+    # The preview line as last computed — "" until the first key that changes a
+    # match-relevant field (opening an edit form does NOT scan).
+    getter preview
+
+    # The fields a match preview depends on — only rescan when this changes.
+    private def preview_signature : String
+      "#{@target_i}|#{@op_i}|#{@match_i}|#{@part_i}|#{host}|#{pattern}|#{replacement}"
     end
 
-    # The fields a match preview depends on — the runner only rescans when this changes.
-    def preview_signature : String
-      "#{@target_i}|#{@op_i}|#{@match_i}|#{@part_i}|#{host}|#{pattern}|#{replacement}"
+    # Recompute the preview when the candidate rule's match-relevant fields changed.
+    # Selection moves and caret keys therefore cost nothing, which is what keeps typing
+    # responsive: the injected scan is the expensive part. An empty pattern never scans —
+    # it would match everything — and says so in the preview slot instead.
+    private def refresh_preview : Nil
+      sig = preview_signature
+      return if sig == @preview_sig
+      @preview_sig = sig
+      if pattern.empty?
+        @preview = "enter a #{header_op? ? "header name" : "pattern"} to preview"
+        return
+      end
+      if src = @on_preview
+        @preview = src.call(candidate_rule)
+      end
     end
 
     # The rule as currently edited (id 0 when adding) — used for the live preview.
@@ -173,8 +201,41 @@ module Gori::Tui
       end
     end
 
-    # :stay | :commit | :cancel
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::RewriterRule
+    end
+
+    def title : String
+      "REWRITER RULE"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
+    end
+
+    # :stay | :commit | :cancel. A key that leaves the form open also refreshes the match
+    # preview (only the :stay path — there is nothing to preview once it closes).
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      out = edit_key(ev)
+      refresh_preview if out == :stay
+      out
+    end
+
+    # Click a field row to select it; a click on Save commits; a click outside the card
+    # cancels. Mirrors the ↑/↓ + ↵ keyboard model. No preview refresh: selecting a row
+    # can't change a match-relevant field.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_save_row?
+      end
+      :stay
+    end
+
+    private def edit_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
       if key.up? || key.back_tab?

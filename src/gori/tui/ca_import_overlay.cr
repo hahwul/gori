@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./text_field"
 require "./path_complete"
+require "./overlay"
 
 module Gori::Tui
   # Full-area popup collecting an externally-created root CA's certificate + private
@@ -10,11 +11,12 @@ module Gori::Tui
   # fields with an inline PathComplete dropdown, modeled on FuzzSetOverlay's
   # field+dropdown pattern but far simpler (no payload grammar).
   #
-  # Surfaces used by the Runner: handle_key returns :submit when the user commits
-  # (↵ on the Key row), :cancel on esc, :stay otherwise. On :submit the Runner reads
-  # cert_path / key_path and runs the destructive-CA confirm before calling
-  # CertAuthority#import!. set_preedit routes composing (IME) text to the focused row.
-  class CAImportOverlay
+  # On the polymorphic Overlay seam (see overlay.cr): the Runner dispatches key/click/
+  # wheel/preedit/render/title/hint here generically, and the destructive half — read
+  # cert_path / key_path, then run the same danger confirm as regenerate before calling
+  # CertAuthority#import! — is injected as `on_commit` at the open-site (Runner#import_ca).
+  # This form never touches the CA itself.
+  class CAImportOverlay < Overlay
     ROWS = [:cert, :key]
 
     def initialize
@@ -42,8 +44,21 @@ module Gori::Tui
       @sel == ROWS.size - 1
     end
 
+    # --- Overlay contract (see overlay.cr) -----------------------------------
+    def key : OverlayKind
+      OverlayKind::CaImport
+    end
+
+    def title : String
+      "IMPORT CA"
+    end
+
+    def hint : String
+      "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
+    end
+
     # --- input ---------------------------------------------------------------
-    # :submit when the user commits (↵ on the last row), :cancel on esc, else :stay.
+    # :commit when the user submits (↵ on the last row), :cancel on esc, else :stay.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
 
@@ -64,7 +79,7 @@ module Gori::Tui
       elsif key.back_tab? || key.up?
         move_row(-1); return :stay
       elsif key.enter?
-        return :submit if on_last_row?
+        return :commit if on_last_row?
         move_row(1); return :stay
       end
 
@@ -144,15 +159,17 @@ module Gori::Tui
     end
 
     # --- mouse ---------------------------------------------------------------
-    # Focus the field row under a click. Returns true when the click was inside the box.
-    def handle_click(box : Rect, mx : Int32, my : Int32) : Bool
-      return false unless box.contains?(mx, my)
+    # Focus the field row under a click. A click outside the card cancels — never a
+    # submit, since the CA swap behind it is destructive.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
       i = my - (box.y + 3)
       if 0 <= i < ROWS.size
         @sel = i
         @path_complete.close
       end
-      true
+      :stay
     end
   end
 end
