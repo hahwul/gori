@@ -1,31 +1,30 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./picker_overlay"
 require "../notes"
 
 module Gori::Tui
   # Pick a note sub-tab to attach the current workbench ref to. A pinned
   # "+ New note…" row (always first) creates a blank note and links it.
-  class NotePicker
+  #
+  # A dumb form object on the Overlay seam: which ref gets attached, and the
+  # create-and-link path, are both the injected `on_commit` (Runner#link_to_note).
+  class NotePicker < FilterPickerOverlay
     CREATE_LABEL = "+ New note…"
+    IDLE_HINT    = "type to filter · ↑/↓ select · ↵ link · esc cancel"
+    # The card's own hint row names the create row too; the shell's bottom row does not.
+    CARD_HINT = "type to filter · ↑/↓ select · ↵ link / create · esc cancel"
 
     record Row, id : Int64, label : String, detail : String
 
-    getter selected : Int32
     @indexed : Array({Row, String})
 
     def initialize(@rows : Array(Row))
-      @query = ""
-      @preedit = ""
       @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail}".downcase} }
       @filtered = @rows
       # Prefer the first existing note when present (create is always index 0).
       @selected = @rows.empty? ? 0 : 1
-      @scroll = 0
-    end
-
-    def set_preedit(text : String) : Nil
-      @preedit = text
     end
 
     # Total navigable rows: create action + filtered notes.
@@ -42,33 +41,20 @@ module Gori::Tui
       @filtered[@selected - 1]?
     end
 
-    def move(delta : Int32) : Nil
-      n = entry_count
-      return if n == 0
-      @selected = (@selected + delta).clamp(0, n - 1)
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::NotePick
     end
 
-    def set_selected(idx : Int32) : Nil
-      n = entry_count
-      return if n == 0
-      @selected = idx.clamp(0, n - 1)
+    def title : String
+      "PICK NOTE"
     end
 
-    def query_char(ch : Char) : Nil
-      return if ch.control?
-      @preedit = ""
-      @query += ch
-      refilter
+    def hint : String
+      IDLE_HINT
     end
 
-    def backspace : Nil
-      return if @query.empty?
-      @preedit = ""
-      @query = @query[0, @query.size - 1]
-      refilter
-    end
-
-    private def refilter : Nil
+    protected def refilter : Nil
       terms = @query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       @selected = @filtered.empty? ? 0 : 1
@@ -85,9 +71,8 @@ module Gori::Tui
     end
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
-      i = my - list_top
+      list_h = list_height(box)
+      i = my - (box.y + LIST_OFFSET)
       return nil if i < 0 || i >= list_h
       return nil if mx < box.x + 1 || mx >= box.right - 1
       ri = @scroll + i
@@ -97,18 +82,9 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       return unless box
-      Frame.card(screen, box, "PICK NOTE", border: Theme.border_focus)
-      if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link / create · esc cancel",
-          Theme.muted, Theme.panel, width: box.w - 4)
-      else
-        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
-          Theme.panel, width: {box.right - 1 - px, 1}.max)
-      end
-      Frame.tee_divider(screen, box, box.y + 2)
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
+      Frame.card(screen, box, title, border: Theme.border_focus)
+      list_top = render_filter(screen, box, CARD_HINT)
+      list_h = list_height(box)
       ensure_visible(list_h)
       (0...list_h).each do |i|
         ri = @scroll + i
@@ -135,13 +111,6 @@ module Gori::Tui
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
       screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
       screen.text(box.x + 3, ry, row.label, fg, bg, width: box.w - 5)
-    end
-
-    private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {entry_count - list_h, 0}.max)
     end
   end
 end

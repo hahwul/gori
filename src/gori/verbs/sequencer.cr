@@ -6,7 +6,8 @@ module Gori
     # History detail, Repeater, and Sitemap) opens a small config popup, then the token
     # collection runs in the BACKGROUND. run/stop/configure act on the focused Sequencer
     # session. The "Send selection to → Sequencer" destination is wired separately
-    # (send_menu.cr + apply_send_to), so it isn't a verb here.
+    # (send_menu.cr + the SendPicker commit closure in Runner#send_to_open), so it isn't a
+    # verb here.
     def self.register_sequencer(r : Verb::Registry) : Nil
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_sequencer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }

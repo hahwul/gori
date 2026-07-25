@@ -3,65 +3,56 @@ require "./theme"
 require "./frame"
 require "./url"
 require "./flow_status"
+require "./picker_overlay"
 require "../store"
 
 module Gori::Tui
   # The Comparer's flow picker overlay (a/b → choose a flow for slot A/B). Lists a
   # snapshot of recent flows with a type-to-filter bar (in-memory substring match —
-  # no per-keystroke SQL) and returns the highlighted row. Pure state + rendering;
-  # the Runner owns the @overlay lifecycle (open/key/click/wheel/render), mirroring
-  # BrowserPicker. `target` is the slot the chosen flow fills.
-  class FlowPicker
+  # no per-keystroke SQL) and returns the highlighted row.
+  #
+  # A dumb form object on the Overlay seam: what happens to the pick is the injected
+  # `on_commit`, so the SAME picker serves the Comparer (load the flow into slot A/B,
+  # Runner#comparer_pick) and the entity-link flow (attach the flow to an issue/note,
+  # opened as a child of LinksOverlay) with no mode flag here. `target` survives only
+  # as the card's heading.
+  class FlowPicker < FilterPickerOverlay
+    IDLE_HINT = "type to filter · ↑/↓ select · ↵ choose · esc cancel"
+
     getter target : Symbol
-    getter selected : Int32
     @indexed : Array({Store::FlowRow, String}) # each row paired with its precomputed filter haystack
 
     def initialize(@rows : Array(Store::FlowRow), @target : Symbol)
-      @query = ""
-      @preedit = "" # live IME composition (e.g. Hangul jamo) shown under the filter caret
       # Precompute each row's filter haystack ONCE (not per keystroke) so typing into
       # a 2000-row snapshot doesn't rebuild 2000 strings on every character.
       @indexed = @rows.map { |row| {row, haystack(row)} }
       @filtered = @rows
-      @selected = 0
-      @scroll = 0
-    end
-
-    def set_preedit(text : String) : Nil
-      @preedit = text
     end
 
     def selected_row : Store::FlowRow?
       @filtered[@selected]?
     end
 
-    def move(delta : Int32) : Nil
-      return if @filtered.empty?
-      @selected = (@selected + delta).clamp(0, @filtered.size - 1)
+    def entry_count : Int32
+      @filtered.size
     end
 
-    def set_selected(idx : Int32) : Nil
-      return if @filtered.empty?
-      @selected = idx.clamp(0, @filtered.size - 1)
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::ComparerPick
     end
 
-    def query_char(ch : Char) : Nil
-      return if ch.control?
-      @preedit = "" # a committed char ends any in-progress composition
-      @query += ch
-      refilter
+    def title : String
+      "PICK FLOW"
     end
 
-    def backspace : Nil
-      return if @query.empty?
-      @preedit = ""
-      @query = @query[0, @query.size - 1]
-      refilter
+    def hint : String
+      IDLE_HINT
     end
 
     # Recompute the visible rows from the precomputed haystacks: every whitespace-
     # separated term must appear (case-insensitive). Resets the cursor to the top.
-    private def refilter : Nil
+    protected def refilter : Nil
       terms = @query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       @selected = 0
@@ -85,9 +76,8 @@ module Gori::Tui
 
     # Row index under (mx, my), mirroring render's list loop; nil outside the list.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
-      i = my - list_top
+      list_h = list_height(box)
+      i = my - (box.y + LIST_OFFSET)
       return nil if i < 0 || i >= list_h
       return nil if mx < box.x + 1 || mx >= box.right - 1
       ri = @scroll + i
@@ -102,20 +92,8 @@ module Gori::Tui
       end
       Frame.card(screen, box, "PICK FLOW #{@target.to_s.upcase}", border: Theme.border_focus)
 
-      if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ choose · esc cancel",
-          Theme.muted, Theme.panel, width: box.w - 4)
-      else
-        # Live filter input — input_line shows committed text + IME preedit (underline)
-        # + a caret, and syncs the terminal cursor so Hangul/CJK composition shows.
-        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
-          Theme.panel, width: {box.right - 1 - px, 1}.max)
-      end
-      Frame.tee_divider(screen, box, box.y + 2)
-
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
+      list_top = render_filter(screen, box, IDLE_HINT)
+      list_h = list_height(box)
       ensure_visible(list_h)
 
       if @filtered.empty?
@@ -146,14 +124,6 @@ module Gori::Tui
       screen.text(host_x, ry, "#{row.host}#{Url.origin_path(row.target)}", fg, bg, width: host_w)
       status, scolor = FlowStatus.cell(row)
       screen.text(status_x, ry, status, scolor, bg, width: 4)
-    end
-
-    # Keep the selection on-screen (selection-follow scroll), like the History list.
-    private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {@filtered.size - list_h, 0}.max)
     end
   end
 end

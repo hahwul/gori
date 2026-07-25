@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "../support/overlay_harness"
 
 include Gori::Tui
 
@@ -73,5 +74,74 @@ describe Gori::Tui::IssuePicker do
     backend.contains?("+ New issue…").should be_true
     backend.contains?("Reflected XSS").should be_true
     backend.contains?("SQL injection").should be_true
+  end
+end
+
+# --- Overlay seam (issue #355, batch C4) ------------------------------------------
+describe "IssuePicker — Overlay contract" do
+  it "carries the chrome the Runner's ladder arms used to hard-code" do
+    OverlayHarness.new(sample_picker).assert_chrome(OverlayKind::IssuePick, "PICK ISSUE")
+    # The bottom row says "link"; the card's own hint row also names the create action.
+    sample_picker.hint.should eq("type to filter · ↑/↓ select · ↵ link · esc cancel")
+    OverlayHarness.new(sample_picker).rendered?("↵ link / create").should be_true
+  end
+
+  it "keeps the pinned create row out of the filtered count (the off-by-one)" do
+    ov = sample_picker
+    OverlayHarness.new(ov).type("sql")
+    ov.entry_count.should eq(2) # "+ New issue…" plus the one match
+    ov.selected.should eq(1)
+    ov.selected_create?.should be_false
+    ov.selected_issue.try(&.id).should eq(2_i64)
+    ov.move(-1)
+    ov.selected_create?.should be_true
+    ov.selected_issue.should be_nil
+  end
+
+  it "lands on the create row when nothing matches" do
+    ov = sample_picker
+    OverlayHarness.new(ov).type("zzzz")
+    ov.entry_count.should eq(1)
+    ov.selected_create?.should be_true
+  end
+
+  it "↵ on an existing issue commits it to the injected closure" do
+    ov = sample_picker
+    h = OverlayHarness.new(ov)
+    linked = [] of Int64
+    h.on_commit { linked << ov.selected_issue.not_nil!.id; true }
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    linked.should eq([1_i64])
+  end
+
+  it "↵ on the create row is still a plain :commit — the closure decides what create means" do
+    # Runner#link_picked_issue answers that :commit by opening the NEW ISSUE form and
+    # reporting FALSE, because close_active_overlay would otherwise wipe the @overlay that
+    # form just claimed. Mirrored here: the overlay must not special-case the create row.
+    ov = IssuePicker.new([] of Gori::Store::Issue)
+    ov.selected_create?.should be_true
+    h = OverlayHarness.new(ov)
+    creates = 0
+    h.on_commit do
+      creates += 1 if ov.selected_create?
+      false # "I put my own modal up — do not close me"
+    end
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    creates.should eq(1)
+  end
+
+  it "esc cancels; a row click commits; a click away dismisses" do
+    esc = OverlayHarness.new(sample_picker)
+    esc.press(Termisu::Input::Key::Escape).should eq(:closed)
+    esc.commits.should eq(0)
+
+    ov = sample_picker
+    click = OverlayHarness.new(ov)
+    click.click_in_box(3, 4).should eq(:closed) # list starts at box.y + 3 → second row
+    ov.selected.should eq(1)
+    click.commits.should eq(1)
+
+    away = OverlayHarness.new(sample_picker)
+    away.overlay.handle_click(away.area, 0, 0).should eq(:cancel)
   end
 end

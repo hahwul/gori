@@ -1,30 +1,29 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./picker_overlay"
 require "../store"
 
 module Gori::Tui
   # Pick an issue to attach the current workbench ref to. Mirrors FlowPicker's
-  # in-memory filter; the Runner owns the overlay lifecycle. A pinned
-  # "+ New issue…" row (always first) opens create-and-link via the issue form.
-  class IssuePicker
+  # in-memory filter. A pinned "+ New issue…" row (always first) hands off to the
+  # NEW ISSUE form for create-and-link.
+  #
+  # A dumb form object on the Overlay seam: which ref gets attached, and what the
+  # create row does, are both the injected `on_commit` (Runner#link_to_issue).
+  class IssuePicker < FilterPickerOverlay
     CREATE_LABEL = "+ New issue…"
+    IDLE_HINT    = "type to filter · ↑/↓ select · ↵ link · esc cancel"
+    # The card's own hint row names the create row too; the shell's bottom row does not.
+    CARD_HINT = "type to filter · ↑/↓ select · ↵ link / create · esc cancel"
 
-    getter selected : Int32
     @indexed : Array({Store::Issue, String})
 
     def initialize(@rows : Array(Store::Issue))
-      @query = ""
-      @preedit = ""
       @indexed = @rows.map { |f| {f, haystack(f)} }
       @filtered = @rows
       # Prefer the first existing issue when present (create is always index 0).
       @selected = @rows.empty? ? 0 : 1
-      @scroll = 0
-    end
-
-    def set_preedit(text : String) : Nil
-      @preedit = text
     end
 
     # Total navigable rows: create action + filtered issues.
@@ -41,33 +40,20 @@ module Gori::Tui
       @filtered[@selected - 1]?
     end
 
-    def move(delta : Int32) : Nil
-      n = entry_count
-      return if n == 0
-      @selected = (@selected + delta).clamp(0, n - 1)
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::IssuePick
     end
 
-    def set_selected(idx : Int32) : Nil
-      n = entry_count
-      return if n == 0
-      @selected = idx.clamp(0, n - 1)
+    def title : String
+      "PICK ISSUE"
     end
 
-    def query_char(ch : Char) : Nil
-      return if ch.control?
-      @preedit = ""
-      @query += ch
-      refilter
+    def hint : String
+      IDLE_HINT
     end
 
-    def backspace : Nil
-      return if @query.empty?
-      @preedit = ""
-      @query = @query[0, @query.size - 1]
-      refilter
-    end
-
-    private def refilter : Nil
+    protected def refilter : Nil
       terms = @query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       # Keep create at 0; land on first match when any, else the create row.
@@ -89,9 +75,8 @@ module Gori::Tui
     end
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
-      i = my - list_top
+      list_h = list_height(box)
+      i = my - (box.y + LIST_OFFSET)
       return nil if i < 0 || i >= list_h
       return nil if mx < box.x + 1 || mx >= box.right - 1
       ri = @scroll + i
@@ -101,18 +86,9 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       return unless box
-      Frame.card(screen, box, "PICK ISSUE", border: Theme.border_focus)
-      if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link / create · esc cancel",
-          Theme.muted, Theme.panel, width: box.w - 4)
-      else
-        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
-          Theme.panel, width: {box.right - 1 - px, 1}.max)
-      end
-      Frame.tee_divider(screen, box, box.y + 2)
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
+      Frame.card(screen, box, title, border: Theme.border_focus)
+      list_top = render_filter(screen, box, CARD_HINT)
+      list_h = list_height(box)
       ensure_visible(list_h)
       (0...list_h).each do |i|
         ri = @scroll + i
@@ -140,13 +116,6 @@ module Gori::Tui
       screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
       label = "##{f.id} [#{f.severity.label}] #{f.title}"
       screen.text(box.x + 3, ry, label, fg, bg, width: box.w - 5)
-    end
-
-    private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {entry_count - list_h, 0}.max)
     end
   end
 end

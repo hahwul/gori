@@ -174,22 +174,14 @@ module Gori::Tui
       # The "copy as X" format picker (Repeater/History detail → space Y). ORTHOGONAL to
       # @overlay (like @space_menu_open) so it floats over whatever's underneath — the
       # Repeater body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
-      # without disturbing that state. Non-nil ⇔ shown (see copy_as_shown?).
+      # without disturbing that state. Non-nil ⇔ shown (see copy_as_shown?). Both these
+      # pickers are Overlays and dispatch through the same :stay/:commit/:cancel
+      # vocabulary, but they keep their own slots instead of @active_overlay: they must
+      # float over @overlay rather than replace it, and claim keys before the ^G/^F guards.
       @copy_picker = nil.as(CopyPicker?)
       # The "send selection to X" destination picker (space → S); same orthogonal-to-
       # @overlay lifetime as @copy_picker. Non-nil ⇔ shown (see send_to_shown?).
       @send_picker = nil.as(SendPicker?)
-      # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
-      @flow_picker = nil.as(FlowPicker?)
-      # The Repeater sub-tab search picker (space → s); @overlay is :repeater_subtab.
-      @subtab_picker = nil.as(SubtabPicker?)
-      # Entity links overlay (Issues/Notes → space l) and pickers for add/link-to.
-      @links_overlay = nil.as(LinksOverlay?)
-      @issue_picker = nil.as(IssuePicker?)
-      @note_picker = nil.as(NotePicker?)
-      @link_pending_ref = nil.as({Store::LinkRefKind, Int64}?)
-      @link_add_owner = nil.as({Store::LinkOwnerKind, Int64}?)
-      @link_add_ref_kind = nil.as(Store::LinkRefKind?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
       @preferences = PreferencesView.new # the unified grouped settings modal (Ctrl+, / ⚙ / palette)
@@ -901,16 +893,12 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?         then @palette.set_preedit(text)
-      when .comparer_pick?   then @flow_picker.try(&.set_preedit(text))
-      when .repeater_subtab? then @subtab_picker.try(&.set_preedit(text))
-      when .issue_pick?      then @issue_picker.try(&.set_preedit(text))
-      when .note_pick?       then @note_picker.try(&.set_preedit(text))
-      when .preferences?     then @preferences.set_preedit(text)
-      when .settings?        then @settings_view.set_preedit(text)
-      when .hosts?           then @hosts_overlay.set_preedit(text)
-      when .env?             then @env_overlay.set_preedit(text)
-      when .none?            then apply_preedit_body(text)
+      when .palette?     then @palette.set_preedit(text)
+      when .preferences? then @preferences.set_preedit(text)
+      when .settings?    then @settings_view.set_preedit(text)
+      when .hosts?       then @hosts_overlay.set_preedit(text)
+      when .env?         then @env_overlay.set_preedit(text)
+      when .none?        then apply_preedit_body(text)
       end
     end
 
@@ -979,11 +967,6 @@ module Gori::Tui
       end
       return handle_palette_key(ev) if @overlay.palette?
       return handle_more_menu_key(ev) if @overlay.tabs_more?
-      return handle_flow_picker_key(ev) if @overlay.comparer_pick?
-      return handle_subtab_picker_key(ev) if @overlay.repeater_subtab?
-      return handle_links_key(ev) if @overlay.links?
-      return handle_issue_picker_key(ev) if @overlay.issue_pick?
-      return handle_note_picker_key(ev) if @overlay.note_pick?
       return handle_preferences_key(ev) if @overlay.preferences?
       if PREFS_SUB_EDITORS.includes?(@overlay)
         case @overlay
@@ -1259,11 +1242,6 @@ module Gori::Tui
     MODAL_OVERLAYS = {
       OverlayKind::Palette,
       OverlayKind::TabsMore,
-      OverlayKind::ComparerPick,
-      OverlayKind::RepeaterSubtab,
-      OverlayKind::Links,
-      OverlayKind::IssuePick,
-      OverlayKind::NotePick,
       OverlayKind::Preferences,
       OverlayKind::Settings,
       OverlayKind::Tabs,
@@ -1364,19 +1342,14 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?         then click_palette(area, mx, my)
-      when .tabs_more?       then click_more_menu(layout, mx, my)
-      when .comparer_pick?   then click_flow_picker(area, mx, my)
-      when .repeater_subtab? then click_subtab_picker(area, mx, my)
-      when .links?           then click_links(area, mx, my)
-      when .issue_pick?      then click_issue_picker(area, mx, my)
-      when .note_pick?       then click_note_picker(area, mx, my)
-      when .preferences?     then apply_preferences_outcome(@preferences.click(area, mx, my))
-      when .settings?        then (click_settings(area, mx, my); settle_sub_editor)
-      when .tabs?            then (click_tabs(area, mx, my); settle_sub_editor)
-      when .hosts?           then (click_hosts(area, mx, my); settle_sub_editor)
-      when .env?             then (click_env(area, mx, my); settle_sub_editor)
-      when .hotkeys?         then (click_hotkeys(area, mx, my); settle_sub_editor)
+      when .palette?     then click_palette(area, mx, my)
+      when .tabs_more?   then click_more_menu(layout, mx, my)
+      when .preferences? then apply_preferences_outcome(@preferences.click(area, mx, my))
+      when .settings?    then (click_settings(area, mx, my); settle_sub_editor)
+      when .tabs?        then (click_tabs(area, mx, my); settle_sub_editor)
+      when .hosts?       then (click_hosts(area, mx, my); settle_sub_editor)
+      when .env?         then (click_env(area, mx, my); settle_sub_editor)
+      when .hotkeys?     then (click_hotkeys(area, mx, my); settle_sub_editor)
       end
     end
 
@@ -1500,8 +1473,10 @@ module Gori::Tui
     private def handle_wheel(layout : Layout, mx : Int32, my : Int32, dir : Int32) : Nil
       step = dir * 3
       return @space_menu.move(step) if @space_menu_open
-      return @copy_picker.try(&.move(step)) if copy_as_shown?
-      return @send_picker.try(&.move(step)) if send_to_shown?
+      # Through handle_wheel, not move, so these two honour the same Overlay hook the
+      # five @active_overlay modals get (the base routes it to move by default).
+      return @copy_picker.try(&.handle_wheel(step)) if copy_as_shown?
+      return @send_picker.try(&.handle_wheel(step)) if send_to_shown?
       return wheel_overlay(step) if modal_overlay?
       return unless layout.body.contains?(mx, my)
       # Pass the pointer + body rect so a multi-pane tab (Project) scrolls the pane
@@ -1516,19 +1491,14 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?         then @palette.move(step)
-      when .tabs_more?       then @more_menu.try(&.move(step))
-      when .comparer_pick?   then @flow_picker.try(&.move(step))
-      when .repeater_subtab? then @subtab_picker.try(&.move(step))
-      when .links?           then @links_overlay.try(&.move(step))
-      when .issue_pick?      then @issue_picker.try(&.move(step))
-      when .note_pick?       then @note_picker.try(&.move(step))
-      when .preferences?     then @preferences.wheel(step)
-      when .settings?        then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
-      when .tabs?            then @tabs_overlay.select_move(step)
-      when .hosts?           then @hosts_overlay.select_move(step)
-      when .env?             then @env_overlay.select_move(step)
-      when .hotkeys?         then @hotkeys_overlay.select_move(step)
+      when .palette?     then @palette.move(step)
+      when .tabs_more?   then @more_menu.try(&.move(step))
+      when .preferences? then @preferences.wheel(step)
+      when .settings?    then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
+      when .tabs?        then @tabs_overlay.select_move(step)
+      when .hosts?       then @hosts_overlay.select_move(step)
+      when .env?         then @env_overlay.select_move(step)
+      when .hotkeys?     then @hotkeys_overlay.select_move(step)
       end
     end
 
@@ -1743,6 +1713,13 @@ module Gori::Tui
       !@copy_picker.nil?
     end
 
+    # Whichever prompt-tier picker is up (at most one — both open from the space menu,
+    # which closes on the verb). The chrome ladders read it the way they read
+    # active_overlay, so these two name and hint themselves like any migrated modal.
+    private def prompt_picker : Overlay?
+      @copy_picker || @send_picker
+    end
+
     # "Copy as X" (space → Y): open a centered picker of the focused HTTP message's
     # copy formats (url/headers/body/cookies/curl/raw), built from the active tab's
     # current focus. Falls back to the plain smart-copy when the context has no format
@@ -1753,7 +1730,20 @@ module Gori::Tui
         # No format variants here — degrade to the existing "Copy" behaviour.
         return read_copy
       end
-      @copy_picker = CopyPicker.new(title, options)
+      cp = CopyPicker.new(title, options)
+      # Place the picked format on the clipboard, reporting the label + bytes and
+      # flagging a clip when the 64KB cap truncated the payload. Always closes: a
+      # copy is one-shot, so there is no validation path that keeps the card up.
+      cp.on_commit = -> {
+        if opt = cp.selected_option
+          written = Clipboard.copy(opt.text)
+          msg = "copied #{opt.label.downcase} (#{written}b)"
+          msg += " — clipped from #{opt.text.bytesize}b (64KB cap)" if written < opt.text.bytesize
+          @toast = msg
+        end
+        true
+      }
+      @copy_picker = cp
     end
 
     # The focus-aware option set for the active context (empty ⇒ no copy-as variants).
@@ -1768,64 +1758,31 @@ module Gori::Tui
       end
     end
 
-    # Copy-as picker input: ↑/↓ move, ↵ or a row mnemonic copies, esc cancels (mirrors
-    # the choice picker so the two feel identical).
+    # The prompt-tier twin of dispatch_overlay_key: same :stay/:commit/:cancel contract,
+    # but closing drops only the picker's own slot — @overlay is left exactly as it was,
+    # so the Repeater body or History detail drill-in underneath is undisturbed and the
+    # user returns precisely where they invoked it.
     private def handle_copy_as_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      p = @copy_picker
-      return close_copy_picker unless p
-      case
-      when key.escape? then close_copy_picker
-      when key.up?     then p.move(-1)
-      when key.down?   then p.move(1)
-      when key.enter?  then apply_copy_as
-      else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          if idx = p.index_for(c)
-            p.set_selected(idx)
-            apply_copy_as
-          elsif c == 'j'
-            p.move(1)
-          elsif c == 'k'
-            p.move(-1)
-          end
-        end
+      cp = @copy_picker
+      return close_copy_picker unless cp
+      case cp.handle_key(ev)
+      when :cancel then close_copy_picker
+      when :commit then close_copy_picker if cp.commit
       end
     end
 
     # Always consumes the click (returns true) so it never leaks to the pane below —
     # a click on a row copies, a click outside dismisses.
     private def click_copy_as(area : Rect, mx : Int32, my : Int32) : Bool
-      p = @copy_picker
-      box = p.try(&.overlay_box(area))
-      if p.nil? || box.nil? || dismiss_zone?(box, mx, my)
-        close_copy_picker
-        return true
-      end
-      if idx = p.row_at(box, mx, my)
-        p.set_selected(idx)
-        apply_copy_as
+      cp = @copy_picker
+      return (close_copy_picker; true) unless cp
+      case cp.handle_click(area, mx, my)
+      when :cancel then close_copy_picker
+      when :commit then close_copy_picker if cp.commit
       end
       true
     end
 
-    # Place the picked format on the clipboard, then close. Reports the label + bytes,
-    # and flags a clip when the 64KB cap truncated the payload.
-    private def apply_copy_as : Nil
-      p = @copy_picker
-      return close_copy_picker unless p
-      if opt = p.selected_option
-        written = Clipboard.copy(opt.text)
-        msg = "copied #{opt.label.downcase} (#{written}b)"
-        msg += " — clipped from #{opt.text.bytesize}b (64KB cap)" if written < opt.text.bytesize
-        @toast = msg
-      end
-      close_copy_picker
-    end
-
-    # Orthogonal to @overlay — closing just drops the picker; whatever was underneath
-    # (Repeater body or the History detail drill-in) is untouched, so the user returns
-    # exactly where they invoked it.
     private def close_copy_picker : Nil
       @copy_picker = nil
     end
@@ -1846,262 +1803,153 @@ module Gori::Tui
         @toast = "nothing selected to send"
         return
       end
-      @send_picker = SendPicker.new("Send selection to", payload, SendMenu.destinations)
+      sp = SendPicker.new("Send selection to", payload, SendMenu.destinations)
+      # Route the captured selection to the chosen destination. Each destination
+      # controller owns the seeding (a new pre-filled session + goto_tab), so adding a
+      # target is a `when` branch here plus a SendMenu.destinations entry.
+      sp.on_commit = -> {
+        if dest = sp.selected_destination
+          case dest.tab
+          when :decoder   then decoder_controller.decoder_from_text(sp.payload)
+          when :jwt       then jwt_controller.jwt_from_text(sp.payload)
+          when :sequencer then sequencer_controller.sequence_from_text(sp.payload)
+          end
+        end
+        true
+      }
+      @send_picker = sp
     end
 
-    # Send-to picker input: ↑/↓ move, ↵ or a row mnemonic sends, esc cancels (mirrors
-    # the copy-as picker so the two feel identical).
+    # Prompt-tier dispatch, same as the copy-as picker above.
     private def handle_send_to_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      p = @send_picker
-      return close_send_picker unless p
-      case
-      when key.escape? then close_send_picker
-      when key.up?     then p.move(-1)
-      when key.down?   then p.move(1)
-      when key.enter?  then apply_send_to
-      else
-        # Mnemonic → immediate send. No j/k vim fallback: destination mnemonics now
-        # include 'j' (JWT), so a j/k nav fallback both shadowed that mnemonic and was
-        # asymmetric (k moved up, j sent). Arrows handle navigation.
-        if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = p.index_for(c))
-          p.set_selected(idx)
-          apply_send_to
-        end
+      sp = @send_picker
+      return close_send_picker unless sp
+      case sp.handle_key(ev)
+      when :cancel then close_send_picker
+      when :commit then close_send_picker if sp.commit
       end
     end
 
     # Always consumes the click (returns true) so it never leaks to the pane below —
     # a click on a row sends, a click outside dismisses.
     private def click_send_to(area : Rect, mx : Int32, my : Int32) : Bool
-      p = @send_picker
-      box = p.try(&.overlay_box(area))
-      if p.nil? || box.nil? || dismiss_zone?(box, mx, my)
-        close_send_picker
-        return true
-      end
-      if idx = p.row_at(box, mx, my)
-        p.set_selected(idx)
-        apply_send_to
+      sp = @send_picker
+      return (close_send_picker; true) unless sp
+      case sp.handle_click(area, mx, my)
+      when :cancel then close_send_picker
+      when :commit then close_send_picker if sp.commit
       end
       true
     end
 
-    # Route the captured selection to the chosen destination, then close. Each
-    # destination controller owns the seeding (a new pre-filled session + goto_tab), so
-    # adding a target is a `when` branch here plus a SendMenu.destinations entry.
-    private def apply_send_to : Nil
-      p = @send_picker
-      return close_send_picker unless p
-      if dest = p.selected_destination
-        payload = p.payload
-        case dest.tab
-        when :decoder   then decoder_controller.decoder_from_text(payload)
-        when :jwt       then jwt_controller.jwt_from_text(payload)
-        when :sequencer then sequencer_controller.sequence_from_text(payload)
-        end
-      end
-      close_send_picker
-    end
-
-    # Orthogonal to @overlay — closing just drops the picker; whatever was underneath
-    # is untouched, so the user returns exactly where they invoked it.
     private def close_send_picker : Nil
       @send_picker = nil
     end
 
-    # Comparer flow picker (a/b → choose flow A/B): type to filter, ↑/↓ select,
-    # ↵ choose (load into the slot), esc cancel.
-    private def handle_flow_picker_key(ev : Termisu::Event::Key) : Nil
-      fp = @flow_picker
-      return close_flow_picker if fp.nil?
-      key = ev.key
-      case
-      when key.escape?    then close_flow_picker
-      when key.up?        then fp.move(-1)
-      when key.down?      then fp.move(1)
-      when key.enter?     then commit_flow_picker
-      when key.backspace? then fp.backspace
-      else
-        fp.query_char(ev.char.not_nil!) if ev.char
-      end
-    end
-
-    # Load the highlighted flow into the picker's target slot and close.
-    private def commit_flow_picker : Nil
-      fp = @flow_picker
-      return close_flow_picker if fp.nil?
-      if row = fp.selected_row
-        if fp.target == :link
-          commit_link_add(Store::LinkRefKind::Flow, row.id)
-          @flow_picker = nil
-          return
-        elsif detail = @session.store.get_flow(row.id)
-          comparer_controller.view.set_slot(fp.target, detail)
-          @toast = "comparer: set #{fp.target.to_s.upcase} — #{row.method} #{row.host}"
-        else
-          @toast = "flow no longer available"
-        end
-      end
-      close_flow_picker
-    end
-
-    private def click_flow_picker(area : Rect, mx : Int32, my : Int32) : Nil
-      fp = @flow_picker
-      box = fp.try(&.overlay_box(area))
-      return close_flow_picker if fp.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = fp.row_at(box, mx, my)
-        fp.set_selected(idx)
-        commit_flow_picker
-      end
-    end
-
-    private def close_flow_picker : Nil
-      owner = @link_add_owner
-      @overlay = OverlayKind::None
-      @flow_picker = nil
-      @link_add_owner = nil
-      @link_add_ref_kind = nil
-      if owner
-        owner_kind, owner_id = owner
-        open_links_overlay(owner_kind, owner_id)
-      end
-    end
-
-    # Repeater sub-tab search (space → s): type to filter the open sessions, ↑/↓
-    # select, ↵ jump to the highlighted one, esc cancel.
-    private def handle_subtab_picker_key(ev : Termisu::Event::Key) : Nil
-      sp = @subtab_picker
-      return close_subtab_picker if sp.nil?
-      key = ev.key
-      case
-      when key.escape?    then close_subtab_picker
-      when key.up?        then sp.move(-1)
-      when key.down?      then sp.move(1)
-      when key.enter?     then commit_subtab_picker
-      when key.backspace? then sp.backspace
-      else
-        sp.query_char(ev.char.not_nil!) if ev.char
-      end
-    end
-
-    # Jump to the highlighted sub-tab and close. The picker hands back the absolute
-    # index; jump_subtab clamps + saves the outgoing tab, so a stale index (the
-    # cross-session reconcile reordered behind the modal) is a safe no-op.
-    private def commit_subtab_picker : Nil
-      sp = @subtab_picker
-      return close_subtab_picker if sp.nil?
-      if @link_add_owner
-        if idx = sp.selected_index
-          ref_kind = @link_add_ref_kind
-          ref_id = if rk = ref_kind
-                     case rk
-                     when .repeater? then repeater_controller.db_id_at(idx)
-                     when .fuzz?     then fuzzer_controller.db_id_at(idx)
-                     when .miner?    then miner_controller.db_id_at(idx)
-                     else                 nil
-                     end
-                   end
-          if rid = ref_id
-            commit_link_add(ref_kind.not_nil!, rid)
-          else
-            @toast = "session not persisted"
-            close_subtab_picker
-          end
-        else
-          close_subtab_picker
-        end
-        @subtab_picker = nil
-        return
-      end
-      if idx = sp.selected_index
-        @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Repeater/Fuzzer/Notes/Decoder)
-        @focus = :body                              # land on the chosen session's content
-      end
-      close_subtab_picker
-    end
-
-    private def click_subtab_picker(area : Rect, mx : Int32, my : Int32) : Nil
-      sp = @subtab_picker
-      box = sp.try(&.overlay_box(area))
-      return close_subtab_picker if sp.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = sp.row_at(box, mx, my)
-        sp.set_selected(idx)
-        commit_subtab_picker
-      end
-    end
-
-    private def close_subtab_picker : Nil
-      owner = @link_add_owner
-      @subtab_picker = nil
-      @link_add_ref_kind = nil
-      @link_add_owner = nil
-      if owner
-        owner_kind, owner_id = owner
-        open_links_overlay(owner_kind, owner_id)
-      else
-        @overlay = OverlayKind::None
-      end
-    end
-
     # --- entity links overlay ------------------------------------------------
 
-    private def handle_links_key(ev : Termisu::Event::Key) : Nil
-      lo = @links_overlay
-      return close_links_overlay unless lo
-      key = ev.key
-      c = ev.char || key.to_char
-      if lo.adding?
-        case c
-        when 'f' then open_link_add_flow_picker(lo)
-        when 'r' then open_link_add_repeater_picker(lo)
-        when 'z' then open_link_add_fuzz_picker(lo)
-        when 'm' then open_link_add_miner_picker(lo)
-        when nil
-        else
-          lo.stop_add if key.escape?
-        end
-        return
-      end
-      case
-      when key.escape?             then close_links_overlay
-      when key.up?, key.lower_k?   then lo.move(-1)
-      when key.down?, key.lower_j? then lo.move(1)
-      when key.enter?              then open_selected_link(lo)
-      when c == 'o'                then open_selected_link(lo)
-      when c == 'd'                then remove_selected_link(lo)
-      when c == 'a'                then lo.start_add
-      end
-    end
-
-    private def click_links(area : Rect, mx : Int32, my : Int32) : Nil
-      lo = @links_overlay
-      box = lo.try(&.overlay_box(area))
-      return close_links_overlay if lo.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = lo.row_at(box, mx, my)
-        lo.set_selected(idx)
-        open_selected_link(lo)
-      end
-    end
-
-    private def close_links_overlay : Nil
-      @overlay = OverlayKind::None
-      @links_overlay = nil
-      @link_add_owner = nil
-      @link_add_ref_kind = nil
-    end
-
-    def open_links_overlay(owner_kind : Store::LinkOwnerKind, owner_id : Int64) : Nil
+    # Opened from an Issue/Note (space → l). Every domain edge is injected: opening a
+    # link, removing one, and the add hand-off. The add round-trip rides the base's
+    # nested-modal seam (Overlay#on_close) rather than any shell-side flag, so the three
+    # @link_add_* ivars this used to need are gone.
+    # `cursor` restores the selection when the card is rebuilt for a reason the user did
+    # not ask for (a source with nothing to link); the ordinary pop-back after a
+    # sub-picker leaves it at the top, which is what the pre-seam rebuild did.
+    def open_links_overlay(owner_kind : Store::LinkOwnerKind, owner_id : Int64,
+                           cursor : Int32? = nil) : Nil
       lo = LinksOverlay.new(owner_kind, owner_id)
       lo.reload(@session.store)
-      @links_overlay = lo
-      @overlay = OverlayKind::Links
+      lo.set_selected(cursor) if cursor
+      opening = nil.as(Store::EntityLink?)
+      # ↵/o: record what to open and let the shell drop the card. The navigation itself
+      # must run AFTER that drop — navigate_link_ref sets its own @overlay for a flow (the
+      # History DETAIL drill-in), which close_active_overlay would otherwise wipe. A ↵
+      # with nothing selected reports false and leaves the card up, as it always did.
+      lo.on_commit = -> {
+        if res = lo.selected_link
+          opening = res.link
+          true
+        else
+          false
+        end
+      }
+      lo.on_remove = -> { remove_selected_link(lo) }
+      # Runs after the shell has dropped this card (see Overlay#on_close). At most one of
+      # the two is armed: a source key sets pending_add, ↵/o sets `opening`, esc neither.
+      lo.on_close = -> {
+        if kind = lo.pending_add
+          open_link_add_picker(lo, kind)
+        elsif link = opening
+          navigate_link_ref(link.ref_kind, link.ref_id)
+        end
+      }
+      open_overlay(lo)
     end
 
-    private def open_selected_link(lo : LinksOverlay) : Nil
-      return unless res = lo.selected_link
-      close_links_overlay
-      navigate_link_ref(res.link.ref_kind, res.link.ref_id)
+    # Put the chosen add sub-picker up in the links card's place. Whichever way it exits —
+    # a pick, esc, or click-away — its own on_close pops back to a FRESH links card, which
+    # is what the pre-seam close_flow_picker/close_subtab_picker pair did by rebuilding the
+    # overlay. "Nothing to pick" (already toasted) pops straight back.
+    private def open_link_add_picker(lo : LinksOverlay, kind : Char) : Nil
+      owner_kind, owner_id = lo.owner_kind, lo.owner_id
+      picker = build_link_add_picker(lo, kind)
+      unless picker
+        # Nothing to link (already toasted). The user never left the list, so put them
+        # back on the row they were on rather than snapping to the top.
+        open_links_overlay(owner_kind, owner_id, cursor: lo.selected)
+        return
+      end
+      picker.on_close = -> { open_links_overlay(owner_kind, owner_id) }
+      open_overlay(picker)
+    end
+
+    # The add sub-picker for a source key, with its commit wired to attach the pick to
+    # THIS overlay's owner — that closure is what used to be @link_add_owner /
+    # @link_add_ref_kind on the Runner. nil means the source had nothing to offer.
+    private def build_link_add_picker(lo : LinksOverlay, kind : Char) : PickerOverlay?
+      case kind
+      when 'f' then link_add_flow_picker(lo)
+      when 'r' then link_add_subtab_picker(lo, "PICK REPEATER", repeater_controller.subtab_search_rows,
+        Store::LinkRefKind::Repeater, "no repeater sessions to link") { |i| repeater_controller.db_id_at(i) }
+      when 'z' then link_add_subtab_picker(lo, "PICK FUZZ", fuzz_subtab_rows,
+        Store::LinkRefKind::Fuzz, "no fuzz sessions to link") { |i| fuzzer_controller.db_id_at(i) }
+      when 'm' then link_add_subtab_picker(lo, "PICK MINER", miner_subtab_rows,
+        Store::LinkRefKind::Miner, "no miner sessions to link") { |i| miner_controller.db_id_at(i) }
+      end
+    end
+
+    private def link_add_flow_picker(lo : LinksOverlay) : PickerOverlay
+      fp = FlowPicker.new(@session.store.recent_flows(500), :link)
+      fp.on_commit = -> {
+        if row = fp.selected_row
+          commit_link_to_owner(lo.owner_kind, lo.owner_id, Store::LinkRefKind::Flow, row.id)
+        end
+        true
+      }
+      fp
+    end
+
+    # One builder for the three session pickers (repeater / fuzz / miner): they differ
+    # only by heading, row source, link kind and how a sub-tab index resolves to a DB id.
+    private def link_add_subtab_picker(lo : LinksOverlay, title : String, rows : Array(SubtabPicker::Row),
+                                       ref_kind : Store::LinkRefKind, empty_toast : String,
+                                       &db_id : Int32 -> Int64?) : PickerOverlay?
+      if rows.empty?
+        @toast = empty_toast
+        return nil
+      end
+      sp = SubtabPicker.new(title, rows, action: "link")
+      sp.on_commit = -> {
+        if idx = sp.selected_index
+          if rid = db_id.call(idx)
+            commit_link_to_owner(lo.owner_kind, lo.owner_id, ref_kind, rid)
+          else
+            @toast = "session not persisted"
+          end
+        end
+        true
+      }
+      sp
     end
 
     private def remove_selected_link(lo : LinksOverlay) : Nil
@@ -2121,45 +1969,6 @@ module Gori::Tui
       end
     end
 
-    private def open_link_add_flow_picker(lo : LinksOverlay) : Nil
-      @link_add_owner = {lo.owner_kind, lo.owner_id}
-      @link_add_ref_kind = Store::LinkRefKind::Flow
-      rows = @session.store.recent_flows(500)
-      @flow_picker = FlowPicker.new(rows, :link)
-      @overlay = OverlayKind::ComparerPick
-      lo.stop_add
-    end
-
-    private def open_link_add_repeater_picker(lo : LinksOverlay) : Nil
-      rows = repeater_controller.subtab_search_rows
-      return (@toast = "no repeater sessions to link"; lo.stop_add) if rows.empty?
-      @link_add_owner = {lo.owner_kind, lo.owner_id}
-      @link_add_ref_kind = Store::LinkRefKind::Repeater
-      @subtab_picker = SubtabPicker.new("PICK REPEATER", rows, action: "link")
-      @overlay = OverlayKind::RepeaterSubtab
-      lo.stop_add
-    end
-
-    private def open_link_add_fuzz_picker(lo : LinksOverlay) : Nil
-      rows = fuzz_subtab_rows
-      return (@toast = "no fuzz sessions to link"; lo.stop_add) if rows.empty?
-      @link_add_owner = {lo.owner_kind, lo.owner_id}
-      @link_add_ref_kind = Store::LinkRefKind::Fuzz
-      @subtab_picker = SubtabPicker.new("PICK FUZZ", rows, action: "link")
-      @overlay = OverlayKind::RepeaterSubtab
-      lo.stop_add
-    end
-
-    private def open_link_add_miner_picker(lo : LinksOverlay) : Nil
-      rows = miner_subtab_rows
-      return (@toast = "no miner sessions to link"; lo.stop_add) if rows.empty?
-      @link_add_owner = {lo.owner_kind, lo.owner_id}
-      @link_add_ref_kind = Store::LinkRefKind::Miner
-      @subtab_picker = SubtabPicker.new("PICK MINER", rows, action: "link")
-      @overlay = OverlayKind::RepeaterSubtab
-      lo.stop_add
-    end
-
     private def fuzz_subtab_rows : Array(SubtabPicker::Row)
       fuzzer_controller.subtab_labels.map_with_index do |label, i|
         detail = @session.store.fuzz_sessions[i]?.try(&.target) || ""
@@ -2174,55 +1983,26 @@ module Gori::Tui
       end
     end
 
-    private def commit_link_add(ref_kind : Store::LinkRefKind, ref_id : Int64) : Nil
-      return unless owner = @link_add_owner
-      owner_kind, owner_id = owner
-      commit_link_to_owner(owner_kind, owner_id, ref_kind, ref_id)
-      open_links_overlay(owner_kind, owner_id)
-      @link_add_owner = nil
-      @link_add_ref_kind = nil
+    # ↵ on the issue picker: "+ New issue…" hands off to the NEW ISSUE form, any other
+    # row takes the link. The create row arms on_close rather than opening the form here,
+    # because the form claims @overlay and the shell's close would tear it straight back
+    # down; on_close runs after the drop, so the form is the last write (see Overlay).
+    private def link_picked_issue(ip : IssuePicker, ref : {Store::LinkRefKind, Int64}) : Bool
+      if ip.selected_create?
+        ip.on_close = -> { open_issue_form_for_link(ref) }
+        return true
+      end
+      if f = ip.selected_issue
+        commit_link_to_owner(Store::LinkOwnerKind::Issue, f.id, ref[0], ref[1])
+      end
+      true
     end
 
-    private def handle_issue_picker_key(ev : Termisu::Event::Key) : Nil
-      fp = @issue_picker
-      return close_issue_picker if fp.nil?
-      key = ev.key
-      case
-      when key.escape?    then close_issue_picker
-      when key.up?        then fp.move(-1)
-      when key.down?      then fp.move(1)
-      when key.enter?     then commit_issue_picker
-      when key.backspace? then fp.backspace
-      else
-        fp.query_char(ev.char.not_nil!) if ev.char
-      end
-    end
-
-    private def commit_issue_picker : Nil
-      fp = @issue_picker
-      return close_issue_picker if fp.nil?
-      if fp.selected_create?
-        open_issue_form_for_link
-        return
-      end
-      if f = fp.selected_issue
-        if ref = @link_pending_ref
-          commit_link_to_owner(Store::LinkOwnerKind::Issue, f.id, ref[0], ref[1])
-        end
-      end
-      close_issue_picker
-    end
-
-    # Transition from the issue picker into NEW ISSUE form while keeping the
-    # pending workbench ref so form ↵ creates + links without leaving the tab.
-    # Ownership of the ref MOVES into the form: dropping the form (esc, click-away) now
-    # drops the pending link with it, so a cancelled create-and-link can no longer leave a
-    # stale ref for a later standalone create to silently attach.
-    private def open_issue_form_for_link : Nil
-      ref = @link_pending_ref
-      @link_pending_ref = nil
-      @issue_picker = nil
-      if ref && ref[0].flow?
+    # Transition from the issue picker into the NEW ISSUE form. Ownership of the ref moves
+    # INTO the form (C3's `link_ref:`), so dropping the form — esc, click-away — drops the
+    # pending link with it; nothing is parked on the Runner.
+    private def open_issue_form_for_link(ref : {Store::LinkRefKind, Int64}) : Nil
+      if ref[0].flow?
         if row = @session.store.flow_row(ref[1])
           open_issue_form(IssueForm.new("#{row.method} #{row.target}", row.host, ref[1], link_ref: ref))
           return
@@ -2231,61 +2011,25 @@ module Gori::Tui
       open_issue_form(IssueForm.new(link_ref: ref))
     end
 
-    private def click_issue_picker(area : Rect, mx : Int32, my : Int32) : Nil
-      fp = @issue_picker
-      box = fp.try(&.overlay_box(area))
-      return close_issue_picker if fp.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = fp.row_at(box, mx, my)
-        fp.set_selected(idx)
-        commit_issue_picker
-      end
-    end
-
-    private def close_issue_picker : Nil
-      @overlay = OverlayKind::None
-      @issue_picker = nil
-      @link_pending_ref = nil
-    end
-
-    private def handle_note_picker_key(ev : Termisu::Event::Key) : Nil
-      np = @note_picker
-      return close_note_picker if np.nil?
-      key = ev.key
-      case
-      when key.escape?    then close_note_picker
-      when key.up?        then np.move(-1)
-      when key.down?      then np.move(1)
-      when key.enter?     then commit_note_picker
-      when key.backspace? then np.backspace
-      else
-        np.query_char(ev.char.not_nil!) if ev.char
-      end
-    end
-
-    private def commit_note_picker : Nil
-      np = @note_picker
-      return close_note_picker if np.nil?
+    # ↵ on the note picker: "+ New note…" creates a blank note and links to it, any
+    # other row links to the note picked. Same on_close hand-off as the issue picker —
+    # create_note_and_link ends on the open-vs-stay confirm, which claims @overlay.
+    private def link_picked_note(np : NotePicker, ref : {Store::LinkRefKind, Int64}) : Bool
       if np.selected_create?
-        create_note_and_link
-        return
+        np.on_close = -> { create_note_and_link(ref) }
+        return true
       end
       if row = np.selected_row
-        if ref = @link_pending_ref
-          commit_link_to_owner(Store::LinkOwnerKind::Note, row.id, ref[0], ref[1])
-        end
+        commit_link_to_owner(Store::LinkOwnerKind::Note, row.id, ref[0], ref[1])
       end
-      close_note_picker
+      true
     end
 
-    # Blank note + link the pending workbench ref, then ask open vs stay.
-    private def create_note_and_link : Nil
-      ref = @link_pending_ref
-      return close_note_picker if ref.nil?
+    # Blank note + link the workbench ref, then ask open vs stay.
+    private def create_note_and_link(ref : {Store::LinkRefKind, Int64}) : Nil
       note_id = notes_controller.create_blank_note_id
       commit_link_to_owner(Store::LinkOwnerKind::Note, note_id, ref[0], ref[1])
       @toast = "note created and linked"
-      @note_picker = nil
-      @link_pending_ref = nil
       offer_open_created(:note, note_id)
     end
 
@@ -2333,22 +2077,6 @@ module Gori::Tui
       else
         @toast = "note created"
       end
-    end
-
-    private def click_note_picker(area : Rect, mx : Int32, my : Int32) : Nil
-      np = @note_picker
-      box = np.try(&.overlay_box(area))
-      return close_note_picker if np.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = np.row_at(box, mx, my)
-        np.set_selected(idx)
-        commit_note_picker
-      end
-    end
-
-    private def close_note_picker : Nil
-      @overlay = OverlayKind::None
-      @note_picker = nil
-      @link_pending_ref = nil
     end
 
     private def commit_link_to_owner(owner_kind : Store::LinkOwnerKind, owner_id : Int64,
@@ -3361,11 +3089,6 @@ module Gori::Tui
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay.palette?
       @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay.tabs_more?
-      @flow_picker.try(&.render(screen, layout.body)) if @overlay.comparer_pick?
-      @subtab_picker.try(&.render(screen, layout.body)) if @overlay.repeater_subtab?
-      @links_overlay.try(&.render(screen, layout.body)) if @overlay.links?
-      @issue_picker.try(&.render(screen, layout.body)) if @overlay.issue_pick?
-      @note_picker.try(&.render(screen, layout.body)) if @overlay.note_pick?
       @preferences.render(screen, layout.body) if @overlay.preferences?
       @settings_view.render(screen, layout.body) if @overlay.settings?
       @tabs_overlay.render(screen, layout.body) if @overlay.tabs?
@@ -3473,26 +3196,24 @@ module Gori::Tui
     # always knows which region the keys drive: an open overlay wins, else the
     # tab bar (TABS) vs the content pane (BODY).
     private def focus_label : String
-      return "SPACE" if @space_menu_open                              # orthogonal to @overlay — floats over it
-      return @copy_picker.try(&.title) || "COPY AS" if copy_as_shown? # ditto
-      return "SEND TO" if send_to_shown?                              # ditto
-      if ov = active_overlay                                          # migrated modals name themselves (Overlay seam)
+      return "SPACE" if @space_menu_open # orthogonal to @overlay — floats over it
+      # The prompt-tier pickers self-name exactly like a migrated modal; they just live
+      # in their own slots rather than @active_overlay (see copy_as_shown?).
+      if pt = prompt_picker
+        return pt.title
+      end
+      if ov = active_overlay # migrated modals name themselves (Overlay seam)
         return ov.title
       end
       case @overlay
-      when .palette?         then "PALETTE"
-      when .detail?          then "DETAIL"
-      when .comparer_pick?   then "PICK FLOW"
-      when .repeater_subtab? then @subtab_picker.try(&.title) || "FIND SUB-TAB"
-      when .links?           then @links_overlay.try(&.title) || "LINKS"
-      when .issue_pick?      then "PICK ISSUE"
-      when .note_pick?       then "PICK NOTE"
-      when .preferences?     then "PREFERENCES"
-      when .settings?        then "SETTINGS"
-      when .tabs?            then "TAB BAR"
-      when .hosts?           then "HOSTNAME OVERRIDES"
-      when .env?             then "ENVIRONMENT"
-      when .hotkeys?         then "HOTKEYS"
+      when .palette?     then "PALETTE"
+      when .detail?      then "DETAIL"
+      when .preferences? then "PREFERENCES"
+      when .settings?    then "SETTINGS"
+      when .tabs?        then "TAB BAR"
+      when .hosts?       then "HOSTNAME OVERRIDES"
+      when .env?         then "ENVIRONMENT"
+      when .hotkeys?     then "HOTKEYS"
       else
         case @focus
         when :menu    then "TABS"
@@ -3516,26 +3237,22 @@ module Gori::Tui
     # under their fingers do right now).
     private def key_hints : String
       return "press a key · ↑/↓ select · ↵ run · esc close" if @space_menu_open
-      return "↑/↓ select · ↵ copy · key picks · esc cancel" if copy_as_shown?
-      return "↑/↓ select · ↵ send · key picks · esc cancel" if send_to_shown?
+      if pt = prompt_picker # prompt-tier Overlays carry their own hint too
+        return pt.hint
+      end
       if ov = active_overlay # migrated modals carry their own hint (Overlay seam)
         return ov.hint
       end
       case @overlay
-      when .palette?         then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when .tabs_more?       then "↑/↓ select · ↵ open tab · ←/esc close"
-      when .comparer_pick?   then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when .repeater_subtab? then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
-      when .links?           then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
-      when .issue_pick?      then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when .note_pick?       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when .preferences?     then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
-      when .settings?        then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
-      when .tabs?            then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
-      when .hosts?           then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
-      when .env?             then env_overlay_hints
-      when .hotkeys?         then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when .detail?          then history_controller.body_hint(:body)
+      when .palette?     then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when .tabs_more?   then "↑/↓ select · ↵ open tab · ←/esc close"
+      when .preferences? then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
+      when .settings?    then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      when .tabs?        then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+      when .hosts?       then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+      when .env?         then env_overlay_hints
+      when .hotkeys?     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when .detail?      then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
         return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
@@ -4307,18 +4024,18 @@ module Gori::Tui
         @toast = "linked to issue ##{f.id}: #{link_title_snip(f.title)}" if commit_link_to_owner(Store::LinkOwnerKind::Issue, f.id, ref[0], ref[1])
         return
       end
-      @link_pending_ref = ref
-      @issue_picker = IssuePicker.new(@session.store.issues)
-      @overlay = OverlayKind::IssuePick
+      ip = IssuePicker.new(@session.store.issues)
+      ip.on_commit = -> { link_picked_issue(ip, ref) }
+      open_overlay(ip)
     end
 
     def link_to_note : Nil
       ref = current_link_ref
       return (@toast = "nothing to link") unless ref
       notes_controller.save_notes
-      @link_pending_ref = ref
-      @note_picker = NotePicker.new(note_picker_rows)
-      @overlay = OverlayKind::NotePick
+      np = NotePicker.new(note_picker_rows)
+      np.on_commit = -> { link_picked_note(np, ref) }
+      open_overlay(np)
     end
 
     # Trim an issue title for a one-line toast (avoid a wall of text on wide titles).
@@ -4448,14 +4165,24 @@ module Gori::Tui
     end
 
     # Generic sub-tab search — opens the fuzzy picker over the ACTIVE tab's sub-tabs
-    # (Repeater/Fuzzer/Notes/Decoder). commit_subtab_picker jumps on the active controller,
-    # so one path serves every strip. Gives Fuzzer/Notes/Decoder a search-and-jump that
-    # doesn't rely on Ctrl+digit (undeliverable on many terminals).
+    # (Repeater/Fuzzer/Notes/Decoder). The commit jumps on the active controller, so one
+    # path serves every strip. Gives Fuzzer/Notes/Decoder a search-and-jump that doesn't
+    # rely on Ctrl+digit (undeliverable on many terminals).
     def subtab_search_open : Nil
       rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
       return @toast = "no other sub-tab to search" if rows.size < 2
-      @subtab_picker = SubtabPicker.new("FIND SUB-TAB", rows)
-      @overlay = OverlayKind::RepeaterSubtab
+      sp = SubtabPicker.new("FIND SUB-TAB", rows)
+      # The picker hands back the ABSOLUTE index; jump_subtab clamps + saves the outgoing
+      # tab, so a stale index (the cross-session reconcile reordered behind the modal) is
+      # a safe no-op.
+      sp.on_commit = -> {
+        if idx = sp.selected_index
+          @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Repeater/Fuzzer/Notes/Decoder)
+          @focus = :body                              # land on the chosen session's content
+        end
+        true
+      }
+      open_overlay(sp)
     end
 
     def subtab_search_count : Int32

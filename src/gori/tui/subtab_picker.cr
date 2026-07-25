@@ -1,36 +1,36 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./picker_overlay"
 
 module Gori::Tui
   # A type-to-filter picker over a tab's sub-tabs — search the open sessions by
   # their chip label / request line, ↑/↓ select, ↵ jump to the chosen one. The
   # structural twin of FlowPicker (in-memory substring filter, IME preedit,
   # selection-follow scroll, mouse hit-test) but lists sub-tabs instead of flows.
-  # Pure state + rendering; the Runner owns the @overlay lifecycle and applies the
-  # pick. Generic over any sub-tab strip (only Repeater wires it today).
-  class SubtabPicker
+  # Generic over any sub-tab strip (only Repeater wires it today).
+  #
+  # A dumb form object on the Overlay seam: the pick's effect is the injected
+  # `on_commit`, so one picker serves both sub-tab search (jump to the session,
+  # Runner#subtab_search_open) and the entity-link flow (attach the repeater/fuzz/miner
+  # session to an issue or note, opened as a child of LinksOverlay).
+  class SubtabPicker < FilterPickerOverlay
     # `index` is the sub-tab's absolute position — the value handed back on commit;
     # `label` is the chip text, `detail` the dim searchable request line.
     record Row, index : Int32, label : String, detail : String
 
+    # Doubles as `Overlay#title` on purpose: the pre-seam `focus_label` read this field
+    # (`@subtab_picker.try(&.title)`), so "FIND SUB-TAB" / "PICK REPEATER" is both the card
+    # heading and the focus badge. Intended here — but a field quietly satisfying an
+    # abstract method is a real hazard in Crystal (no `override`), so it is spelled out.
     getter title : String
-    getter action : String # verb shown in the ↵ hint ("jump" for search, "link" when picking a link target)
-    getter selected : Int32
+    getter action : String          # verb shown in the ↵ hint ("jump" for search, "link" when picking a link target)
     @indexed : Array({Row, String}) # each row paired with its precomputed filter haystack
 
     def initialize(@title : String, @rows : Array(Row), @action : String = "jump")
-      @query = ""
-      @preedit = "" # live IME composition (e.g. Hangul jamo) shown under the filter caret
       # Precompute each row's filter haystack ONCE (not per keystroke).
       @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail}".downcase} }
       @filtered = @rows
-      @selected = 0
-      @scroll = 0
-    end
-
-    def set_preedit(text : String) : Nil
-      @preedit = text
     end
 
     # The absolute sub-tab index of the highlighted row (nil when nothing matches).
@@ -38,33 +38,28 @@ module Gori::Tui
       @filtered[@selected]?.try(&.index)
     end
 
-    def move(delta : Int32) : Nil
-      return if @filtered.empty?
-      @selected = (@selected + delta).clamp(0, @filtered.size - 1)
+    def entry_count : Int32
+      @filtered.size
     end
 
-    def set_selected(idx : Int32) : Nil
-      return if @filtered.empty?
-      @selected = idx.clamp(0, @filtered.size - 1)
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::RepeaterSubtab
     end
 
-    def query_char(ch : Char) : Nil
-      return if ch.control?
-      @preedit = "" # a committed char ends any in-progress composition
-      @query += ch
-      refilter
+    def hint : String
+      idle_hint
     end
 
-    def backspace : Nil
-      return if @query.empty?
-      @preedit = ""
-      @query = @query[0, @query.size - 1]
-      refilter
+    # The ↵ verb varies with the open-site ("jump" vs "link"), so the card's own hint row
+    # and the shell's bottom row read the same string.
+    private def idle_hint : String
+      "type to filter · ↑/↓ select · ↵ #{@action} · esc cancel"
     end
 
     # Recompute the visible rows from the precomputed haystacks: every whitespace-
     # separated term must appear (case-insensitive). Resets the cursor to the top.
-    private def refilter : Nil
+    protected def refilter : Nil
       terms = @query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       @selected = 0
@@ -84,9 +79,8 @@ module Gori::Tui
 
     # Row index under (mx, my), mirroring render's list loop; nil outside the list.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
-      i = my - list_top
+      list_h = list_height(box)
+      i = my - (box.y + LIST_OFFSET)
       return nil if i < 0 || i >= list_h
       return nil if mx < box.x + 1 || mx >= box.right - 1
       ri = @scroll + i
@@ -101,18 +95,8 @@ module Gori::Tui
       end
       Frame.card(screen, box, @title, border: Theme.border_focus)
 
-      if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ #{@action} · esc cancel",
-          Theme.muted, Theme.panel, width: box.w - 4)
-      else
-        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
-          Theme.panel, width: {box.right - 1 - px, 1}.max)
-      end
-      Frame.tee_divider(screen, box, box.y + 2)
-
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
+      list_top = render_filter(screen, box, idle_hint)
+      list_h = list_height(box)
       ensure_visible(list_h)
 
       if @filtered.empty?
@@ -143,14 +127,6 @@ module Gori::Tui
       screen.text(num_x, ry, "#{row.index + 1}", Theme.accent, bg, width: 3)
       screen.text(label_x, ry, row.label, fg, bg, Attribute::Bold, width: label_w)
       screen.text(detail_x, ry, row.detail, Theme.muted, bg, width: detail_w)
-    end
-
-    # Keep the selection on-screen (selection-follow scroll), like the History list.
-    private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {@filtered.size - list_h, 0}.max)
     end
   end
 end

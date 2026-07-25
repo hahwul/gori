@@ -32,7 +32,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :probe_rule, :rewriter_rule, :ca_import, :import, :scope_rule, :sequence_config,
-  :mine_config,
+  :mine_config, :copy_as, :send_to,
 }
 
 # The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
@@ -61,12 +61,26 @@ private MIGRATED_KINDS = [
   OverlayKind::Confirm,
   OverlayKind::Browser,
   OverlayKind::Choice,
+  # C4 — pickers
+  OverlayKind::ComparerPick,
+  OverlayKind::RepeaterSubtab,
+  OverlayKind::Links,
+  OverlayKind::IssuePick,
+  OverlayKind::NotePick,
 ]
 
-# Never in MODAL_OVERLAYS by design, migrated or not: neither draws a capturing card.
-# `None` is "no modal at all" and `Detail` is the History drill-in, which the Runner keeps
-# in the tab body rather than a centered card (see Runner#modal_overlay?).
-private NON_MODAL_KINDS = [OverlayKind::None, OverlayKind::Detail]
+# Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and
+# `Detail` is the History drill-in, which the Runner keeps in the tab body rather than a
+# centered card (see Runner#modal_overlay?). `CopyAs`/`SendTo` (C4) DO draw a card, but the
+# Runner holds those two in their own slots so they float OVER `@overlay` instead of
+# replacing it — listing either would make `modal_overlay?` true while `@overlay` still
+# says `:detail`, routing clicks into a modal that is not the one on screen.
+private NON_MODAL_KINDS = [
+  OverlayKind::None,
+  OverlayKind::Detail,
+  OverlayKind::CopyAs,
+  OverlayKind::SendTo,
+]
 
 # A minimal Overlay to pin the base-class defaults the Runner leans on. Its `key` has to
 # name a real OverlayKind (that is the type), and Palette is the safe pick: the command

@@ -1,12 +1,12 @@
 module Gori::Tui
   # The catalog of destinations the "Send selection to…" picker (space → S) offers:
   # string-handling tools that accept a raw selected string as their input. The
-  # SendPicker overlay renders these rows; the Runner routes the chosen one's `tab`
-  # to that controller's seeding method (apply_send_to). No TUI/state deps, so the
+  # SendPicker overlay renders these rows; the picker's injected commit routes the
+  # chosen one's `tab` to that controller's seeding method. No TUI/state deps, so the
   # list stays a single trivially-extensible source of truth.
   #
-  # Adding a target later (e.g. a Sequencer or Encryption tab) is one line here plus
-  # a `when :<tab>` branch in Runner#apply_send_to — no other wiring.
+  # Adding a target later (e.g. an Encryption tab) is one line here plus a `when :<tab>`
+  # branch in the commit closure at Runner#send_to_open — no other wiring.
   module SendMenu
     # One offered destination: the row `label`, its mnemonic `key` (unique within the
     # list — the picker dispatches on it), the `tab` symbol the Runner routes to, and

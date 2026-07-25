@@ -51,6 +51,14 @@ module Gori::Tui
     ScopeRule
     SequenceConfig
     MineConfig
+    # Prompt-tier pickers. These two name a modal that `@overlay` NEVER holds: copy-as
+    # and send-to float over whatever is underneath (a tab body OR the History detail
+    # drill-in) without disturbing it, and are claimed before the ^G/^F/^B guards, so the
+    # Runner keeps them in their own slots (see Runner#copy_as_shown?). They are members
+    # anyway because `Overlay#key` is how a modal names itself, and a picker on the seam
+    # must answer it honestly rather than borrow `None`.
+    CopyAs
+    SendTo
 
     def to_sym : Symbol
       {% begin %}

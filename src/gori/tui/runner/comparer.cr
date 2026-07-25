@@ -2,10 +2,25 @@
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Open the flow picker to choose the flow for slot :a / :b. Snapshots recent
-  # flows; the picker filters them in memory.
+  # flows; the picker filters them in memory. Loading the pick into the slot is the
+  # injected commit, so the same picker also serves the entity-link flow (see
+  # Runner#build_link_add_picker) with no mode flag in the picker itself.
   def comparer_pick(slot : Symbol) : Nil
-    @flow_picker = FlowPicker.new(@session.store.recent_flows(2000), slot)
-    @overlay = OverlayKind::ComparerPick
+    fp = FlowPicker.new(@session.store.recent_flows(2000), slot)
+    fp.on_commit = -> { comparer_load_slot(fp, slot) }
+    open_overlay(fp)
+  end
+
+  private def comparer_load_slot(fp : FlowPicker, slot : Symbol) : Bool
+    if row = fp.selected_row
+      if detail = @session.store.get_flow(row.id)
+        comparer_controller.view.set_slot(slot, detail)
+        @toast = "comparer: set #{slot.to_s.upcase} — #{row.method} #{row.host}"
+      else
+        @toast = "flow no longer available"
+      end
+    end
+    true
   end
 
   def comparer_swap : Nil

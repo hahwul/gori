@@ -3,39 +3,41 @@ require "./theme"
 require "./frame"
 require "./fmt"
 require "./copy_menu"
+require "./picker_overlay"
 
 module Gori::Tui
   # A small centered picker for the "copy as X" action (space → Y): pick which slice
   # of the focused HTTP message to copy — url / headers / body / cookies / curl / raw.
-  # Structurally a twin of ChoicePicker (pure state + rendering; the Runner owns
-  # open/close and performs the clipboard write), but each row carries the payload
-  # `text` outright and shows its byte size rather than a "current" marker — there's
-  # no persisted value here, just a one-shot copy. Rows are fronted by a mnemonic key.
-  class CopyPicker
-    getter selected : Int32
+  # Structurally a twin of ChoicePicker, but each row carries the payload `text`
+  # outright and shows its byte size rather than a "current" marker — there's no
+  # persisted value here, just a one-shot copy. Rows are fronted by a mnemonic key.
+  #
+  # PROMPT-TIER on the Overlay seam: the clipboard write is the injected `on_commit`
+  # (Runner#copy_as_open) like any migrated modal, but the Runner keeps this in its own
+  # slot rather than @active_overlay, because the picker must float over the History
+  # detail drill-in without collapsing it and must claim keys before the ^G/^F guards.
+  class CopyPicker < PickerOverlay
+    # DELIBERATELY doubles as `Overlay#title`, the shell's focus badge — the pre-seam
+    # `focus_label` read this very field (`@copy_picker.try(&.title)`), so the badge and
+    # the card heading have always been one string. Crystal has no `override` keyword, so
+    # a field silently satisfying an abstract method is easy to do BY ACCIDENT and wrong
+    # most of the time (see SendPicker, whose heading is a sentence, not a region name).
+    # Here it is intended; the spec pins both.
     getter title : String
 
     def initialize(@title : String, @options : Array(CopyMenu::Option))
-      @selected = 0
-      @scroll = 0
     end
 
     def empty? : Bool
       @options.empty?
     end
 
-    def move(delta : Int32) : Nil
-      return if @options.empty?
-      @selected = (@selected + delta).clamp(0, @options.size - 1)
+    def entry_count : Int32
+      @options.size
     end
 
     def selected_option : CopyMenu::Option?
       @options[@selected]?
-    end
-
-    def set_selected(idx : Int32) : Nil
-      return if @options.empty?
-      @selected = idx.clamp(0, @options.size - 1)
     end
 
     # The row whose mnemonic matches `c` (case-insensitive), or nil for a miss.
@@ -44,10 +46,49 @@ module Gori::Tui
       @options.index { |o| o.key.downcase == lc }
     end
 
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::CopyAs
+    end
+
+    def hint : String
+      "↑/↓ select · ↵ copy · key picks · esc cancel"
+    end
+
+    # ↑/↓ move, ↵ or a row mnemonic copies, esc cancels — j/k fall back to vim-style nav
+    # only when they aren't themselves a mnemonic, so the reflex keystroke moves the
+    # highlight instead of being ignored (mirrors ChoicePicker so the two feel identical).
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      case
+      when key.escape? then return :cancel
+      when key.up?     then move(-1)
+      when key.down?   then move(1)
+      when key.enter?  then return :commit
+      else
+        if (c = ev.char) && !ev.ctrl? && !ev.alt?
+          if idx = index_for(c)
+            set_selected(idx)
+            return :commit
+          elsif c == 'j'
+            move(1)
+          elsif c == 'k'
+            move(-1)
+          end
+        end
+      end
+      :stay
+    end
+
     # Centered card geometry over `area` — inverse of render's offset math. nil when
     # render would draw nothing (mirrors the w/h guard). Width leaves room for the
     # right-aligned size hint.
     def overlay_box(area : Rect) : Rect?
+      # content_w is a max_of over the rows, which raises on an empty list. Unreachable
+      # today (both open-sites refuse to open an empty picker), but PickerOverlay#handle_click
+      # calls this for EVERY click, so a nil here is the difference between the base's
+      # "a click outside dismisses" promise and an exception out of the event loop.
+      return nil if @options.empty?
       w = {area.w - 4, content_w + 10}.min
       h = {@options.size + 2, area.h - 2}.min
       return nil if w < 18 || area.h < 5
@@ -66,13 +107,6 @@ module Gori::Tui
       return nil if mx <= box.x || mx >= box.right - 1
       ci = @scroll + i
       ci < @options.size ? ci : nil
-    end
-
-    private def ensure_visible(rows : Int32) : Nil
-      return if rows <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - rows + 1 if @selected >= @scroll + rows
-      @scroll = @scroll.clamp(0, {@options.size - rows, 0}.max)
     end
 
     def render(screen : Screen, area : Rect) : Nil

@@ -1,23 +1,53 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./picker_overlay"
 require "../store"
 require "../links"
 
 module Gori::Tui
-  # Manage entity_links for a Issue or Note: list, select, add (via Runner sub-pickers),
-  # open, and remove. Pure state + rendering; the Runner owns @overlay lifecycle.
-  class LinksOverlay
+  # Manage entity_links for an Issue or Note: list, select, open, remove, and add.
+  #
+  # Adding is a two-step flow (`a` arms it, then f/r/z/m picks a source) that opens a
+  # SECOND modal — the flow or sub-tab picker. Pre-seam that round-trip lived in the
+  # Runner as three ivars (@link_add_owner / @link_add_ref_kind plus the picker itself)
+  # and a pair of close methods that rebuilt this overlay from scratch on every exit.
+  # It now rides the base's nested-modal seam: a source key reports :cancel with
+  # `pending_add` set, and the injected `on_close` puts the sub-picker up in this card's
+  # place — the sub-picker's own `on_close` pops back to a fresh LINKS card, whichever
+  # way it exits. The owner is already ours (`owner_kind`/`owner_id`), so none of that
+  # pending-link state survives in Runner.
+  #
+  # Domain edges are injected at the open-site (Runner#open_links_overlay): `on_commit`
+  # opens the selected link, `on_remove` deletes it, `on_close` drives the add hand-off.
+  class LinksOverlay < PickerOverlay
+    # The card's own hint row and the shell's bottom row say DIFFERENT things on purpose:
+    # the card has the width to spell out what each source key means, the status bar does
+    # not. Collapsing them onto the terse pair loses the only place that tells the user
+    # z is fuzz and m is miner.
+    CARD_ADD_HINT    = "add: f flow · r repeater · z fuzz · m miner · esc back"
+    CARD_BROWSE_HINT = "↑/↓ select · ↵/o open · a add · d remove · esc close"
+    ADD_HINT         = "f/r/z/m pick type · esc back"
+    BROWSE_HINT      = "↑/↓ · ↵/o open · a add · d remove · esc close"
+    # The link sources, as the keys the adding-mode hint advertises.
+    ADD_KEYS = "frzm"
+
     getter owner_kind : Store::LinkOwnerKind
     getter owner_id : Int64
-    getter selected : Int32
     getter? adding : Bool
+    # The source key chosen while adding, read by `on_close` once the shell has dropped
+    # this card. nil for every other exit, which is what keeps `on_close` inert when the
+    # user merely opened a link or pressed esc.
+    getter pending_add : Char?
+
+    # Deletes the highlighted link and reloads. Stays open — removing is a repeatable
+    # edit, not a dismissal.
+    property on_remove : Proc(Nil)?
 
     def initialize(@owner_kind : Store::LinkOwnerKind, @owner_id : Int64)
       @resolved = [] of Links::Resolved
-      @selected = 0
-      @scroll = 0
       @adding = false
+      @pending_add = nil
     end
 
     def reload(store : Store) : Nil
@@ -39,22 +69,16 @@ module Gori::Tui
       @resolved.size
     end
 
+    def entry_count : Int32
+      @resolved.size
+    end
+
     def selected_link : Links::Resolved?
       @resolved[@selected]?
     end
 
     def selected_entity_link : Store::EntityLink?
       @resolved[@selected]?.try(&.link)
-    end
-
-    def move(delta : Int32) : Nil
-      return if @resolved.empty?
-      @selected = (@selected + delta).clamp(0, @resolved.size - 1)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      return if @resolved.empty?
-      @selected = idx.clamp(0, @resolved.size - 1)
     end
 
     def start_add : Nil
@@ -65,9 +89,36 @@ module Gori::Tui
       @adding = false
     end
 
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Links
+    end
+
     def title : String
       owner = @owner_kind.issue? ? "ISSUE ##{@owner_id}" : "NOTE ##{@owner_id}"
       "LINKS — #{owner}"
+    end
+
+    def hint : String
+      adding? ? ADD_HINT : BROWSE_HINT
+    end
+
+    # Browse: ↑/↓ (or k/j) select · ↵/o open · a arms add · d removes · esc closes.
+    # Adding: f/r/z/m choose the source, which hands off through on_close.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      ch = ev.char || key.to_char
+      return handle_add_key(key, ch) if adding?
+      case
+      when key.escape?             then return :cancel
+      when key.up?, key.lower_k?   then move(-1)
+      when key.down?, key.lower_j? then move(1)
+      when key.enter?              then return :commit
+      when ch == 'o'               then return :commit
+      when ch == 'd'               then on_remove.try(&.call)
+      when ch == 'a'               then start_add
+      end
+      :stay
     end
 
     def overlay_box(area : Rect) : Rect?
@@ -97,12 +148,8 @@ module Gori::Tui
       end
       Frame.card(screen, box, title, border: Theme.border_focus)
 
-      hint = if @adding
-               "add: f flow · r repeater · z fuzz · m miner · esc back"
-             else
-               "↑/↓ select · ↵/o open · a add · d remove · esc close"
-             end
-      screen.text(box.x + 2, box.y + 1, hint, Theme.muted, Theme.panel, width: box.w - 4)
+      card_hint = adding? ? CARD_ADD_HINT : CARD_BROWSE_HINT
+      screen.text(box.x + 2, box.y + 1, card_hint, Theme.muted, Theme.panel, width: box.w - 4)
       Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
@@ -125,6 +172,26 @@ module Gori::Tui
       end
     end
 
+    # A source key arms the hand-off and drops this card, so `on_close` can put the
+    # sub-picker up in its place (the shell holds exactly one modal). esc backs out to
+    # browse; anything else is swallowed so a stray key can't leave the flow half-armed.
+    #
+    # The esc branch is load-bearing and easy to lose: the pre-seam shell reached it
+    # through `case (ev.char || key.to_char) … else stop_add if key.escape?`, which reads
+    # like dead code because termisu's `Key#to_char` has no mapping for Escape. It is not
+    # dead — gori enables the Kitty keyboard protocol unconditionally (app.cr), and under
+    # it Escape arrives as `CSI 27 u`, which the parser turns into `char: '\e'`. So `c`
+    # was non-nil and `stop_add` ran. Adding mode has no other keyboard exit, so dropping
+    # this traps the user in the card whenever the mouse is off.
+    private def handle_add_key(key : Termisu::Input::Key, ch : Char?) : Symbol
+      if ch && ADD_KEYS.includes?(ch)
+        @pending_add = ch
+        return :cancel
+      end
+      stop_add if key.escape?
+      :stay
+    end
+
     private def draw_row(screen : Screen, box : Rect, ry : Int32, res : Links::Resolved, active : Bool) : Nil
       bg = active ? Theme.accent_bg : Theme.panel
       fg = res.stale? ? Theme.muted : (active ? Theme.text_bright : Theme.text)
@@ -132,13 +199,6 @@ module Gori::Tui
       screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
       line = res.line
       screen.text(box.x + 3, ry, line, fg, bg, width: box.w - 5)
-    end
-
-    private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {@resolved.size - list_h, 0}.max)
     end
   end
 end
