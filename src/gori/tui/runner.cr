@@ -121,7 +121,9 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :sequence_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :rewriter_rule | :ca_import | :import
+      # Which modal (if any) is up. The value set is OverlayKind (see overlay.cr) — it was a
+      # bare Symbol until Phase 0 of #355, where a mistyped state was a silent no-op.
+      @overlay = OverlayKind::None
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -170,12 +172,12 @@ module Gori::Tui
       # seeded from the persisted default, propagated to History/Repeater each frame.
       @pretty = Settings.pretty_bodies_default
       # A destructive-action guard (delete project / close a sub-tab). When set,
-      # @overlay is :confirm; accepting runs @confirm_action. @confirm_return is the
-      # overlay to restore on close — :none for palette-launched confirms, or the parent
-      # overlay (e.g. :tabs) when the confirm is raised from inside another modal.
+      # @overlay is Confirm; accepting runs @confirm_action. @confirm_return is the
+      # overlay to restore on close — None for palette-launched confirms, or the parent
+      # overlay (e.g. Tabs) when the confirm is raised from inside another modal.
       @confirm = nil.as(ConfirmDialog?)
       @confirm_action = nil.as(Proc(Nil)?)
-      @confirm_return = :none
+      @confirm_return = OverlayKind::None
       # The "open browser" picker (palette → browser.open); @overlay is :browser
       # while it's up.
       @browser_picker = nil.as(BrowserPicker?)
@@ -935,25 +937,25 @@ module Gori::Tui
         return
       end
       case @overlay
-      when :palette          then @palette.set_preedit(text)
-      when :issue_new        then @issue_form.set_preedit(text)
-      when :comparer_pick    then @flow_picker.try(&.set_preedit(text))
-      when :repeater_subtab  then @subtab_picker.try(&.set_preedit(text))
-      when :issue_pick       then @issue_picker.try(&.set_preedit(text))
-      when :note_pick        then @note_picker.try(&.set_preedit(text))
-      when :preferences      then @preferences.set_preedit(text)
-      when :settings         then @settings_view.set_preedit(text)
-      when :hosts            then @hosts_overlay.set_preedit(text)
-      when :env              then @env_overlay.set_preedit(text)
-      when :discover_headers then @discover_headers_overlay.try(&.set_preedit(text))
-      when :fuzz_set         then @fuzz_set_overlay.try(&.set_preedit(text))
-      when :fuzz_advanced    then @fuzz_advanced_overlay.try(&.set_preedit(text))
-      when :oast_provider    then @oast_provider_overlay.try(&.set_preedit(text))
-      when :probe_rule       then @custom_rule_overlay.try(&.set_preedit(text))
-      when :rewriter_rule    then @rewriter_rule_overlay.try(&.set_preedit(text))
-      when :ca_import        then @ca_import_overlay.try(&.set_preedit(text))
-      when :import           then @import_overlay.try(&.set_preedit(text))
-      when :none             then apply_preedit_body(text)
+      when .palette?          then @palette.set_preedit(text)
+      when .issue_new?        then @issue_form.set_preedit(text)
+      when .comparer_pick?    then @flow_picker.try(&.set_preedit(text))
+      when .repeater_subtab?  then @subtab_picker.try(&.set_preedit(text))
+      when .issue_pick?       then @issue_picker.try(&.set_preedit(text))
+      when .note_pick?        then @note_picker.try(&.set_preedit(text))
+      when .preferences?      then @preferences.set_preedit(text)
+      when .settings?         then @settings_view.set_preedit(text)
+      when .hosts?            then @hosts_overlay.set_preedit(text)
+      when .env?              then @env_overlay.set_preedit(text)
+      when .discover_headers? then @discover_headers_overlay.try(&.set_preedit(text))
+      when .fuzz_set?         then @fuzz_set_overlay.try(&.set_preedit(text))
+      when .fuzz_advanced?    then @fuzz_advanced_overlay.try(&.set_preedit(text))
+      when .oast_provider?    then @oast_provider_overlay.try(&.set_preedit(text))
+      when .probe_rule?       then @custom_rule_overlay.try(&.set_preedit(text))
+      when .rewriter_rule?    then @rewriter_rule_overlay.try(&.set_preedit(text))
+      when .ca_import?        then @ca_import_overlay.try(&.set_preedit(text))
+      when .import?           then @import_overlay.try(&.set_preedit(text))
+      when .none?             then apply_preedit_body(text)
       end
     end
 
@@ -972,13 +974,13 @@ module Gori::Tui
       # In hotkey CAPTURE mode ^C/^D are capturable chords (reserved.cr rejects them inline
       # with "Ctrl-C/D quits gori" while staying in capture) — exclude them from the global
       # quit-arm so a stray ^D during a rebind can't silently arm an app quit.
-      capturing_hotkey = @overlay == :hotkeys && @hotkeys_overlay.capturing?
+      capturing_hotkey = @overlay.hotkeys? && @hotkeys_overlay.capturing?
       if (ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)) && !capturing_hotkey
         if Settings.confirm_quit?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
           confirm("QUIT GORI", "Quit gori? (pending edits are committed first)",
-            confirm_label: "quit", danger: true) { quit! } unless @overlay == :confirm
+            confirm_label: "quit", danger: true) { quit! } unless @overlay.confirm?
         elsif @quit_armed
           quit!
         else
@@ -992,7 +994,7 @@ module Gori::Tui
       @toast = nil # clear last action's feedback; a new action may set it again
       # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the
       # ^G/^F/^B guards (and everything else) so those chords can be recorded.
-      return handle_hotkeys_key(ev) if @overlay == :hotkeys && @hotkeys_overlay.capturing?
+      return handle_hotkeys_key(ev) if @overlay.hotkeys? && @hotkeys_overlay.capturing?
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
       return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
       return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
@@ -1000,7 +1002,7 @@ module Gori::Tui
       # The ^F find prompt is modal while up — EXCEPT under its own replace confirm,
       # which must get the keys (the prompt stays open behind it so cancelling doesn't
       # cost you the query you just typed).
-      return handle_search_key(ev) if @search_open && @overlay != :confirm
+      return handle_search_key(ev) if @search_open && !@overlay.confirm?
       return handle_rename_key(ev) if @rename_open     # the sub-tab rename prompt is modal while up
       return handle_tag_edit_key(ev) if @tag_edit_open # the Repeater tag editor is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
@@ -1020,83 +1022,83 @@ module Gori::Tui
         toggle_reveal
         return
       end
-      return handle_palette_key(ev) if @overlay == :palette
-      return handle_issue_new_key(ev) if @overlay == :issue_new
-      return handle_confirm_key(ev) if @overlay == :confirm
-      return handle_browser_key(ev) if @overlay == :browser
-      return handle_choice_key(ev) if @overlay == :choice
-      return handle_more_menu_key(ev) if @overlay == :tabs_more
-      return handle_flow_picker_key(ev) if @overlay == :comparer_pick
-      return handle_subtab_picker_key(ev) if @overlay == :repeater_subtab
-      return handle_links_key(ev) if @overlay == :links
-      return handle_issue_picker_key(ev) if @overlay == :issue_pick
-      return handle_note_picker_key(ev) if @overlay == :note_pick
-      return handle_preferences_key(ev) if @overlay == :preferences
+      return handle_palette_key(ev) if @overlay.palette?
+      return handle_issue_new_key(ev) if @overlay.issue_new?
+      return handle_confirm_key(ev) if @overlay.confirm?
+      return handle_browser_key(ev) if @overlay.browser?
+      return handle_choice_key(ev) if @overlay.choice?
+      return handle_more_menu_key(ev) if @overlay.tabs_more?
+      return handle_flow_picker_key(ev) if @overlay.comparer_pick?
+      return handle_subtab_picker_key(ev) if @overlay.repeater_subtab?
+      return handle_links_key(ev) if @overlay.links?
+      return handle_issue_picker_key(ev) if @overlay.issue_pick?
+      return handle_note_picker_key(ev) if @overlay.note_pick?
+      return handle_preferences_key(ev) if @overlay.preferences?
       if PREFS_SUB_EDITORS.includes?(@overlay)
         case @overlay
-        when :settings then handle_settings_key(ev)
-        when :tabs     then handle_tabs_key(ev)
-        when :hosts    then handle_hosts_key(ev)
-        when :env      then handle_env_key(ev)
-        when :hotkeys  then handle_hotkeys_key(ev)
+        when .settings? then handle_settings_key(ev)
+        when .tabs?     then handle_tabs_key(ev)
+        when .hosts?    then handle_hosts_key(ev)
+        when .env?      then handle_env_key(ev)
+        when .hotkeys?  then handle_hotkeys_key(ev)
         end
         settle_sub_editor # closing one opened from Preferences lands back in the modal
         return
       end
-      return handle_notifications_key(ev) if @overlay == :notifications
+      return handle_notifications_key(ev) if @overlay.notifications?
       # Migrated modals (Overlay base) dispatch generically — no per-modal handle_*_key.
       if ov = active_overlay
         dispatch_overlay_key(ov, ev)
         return
       end
-      return handle_probe_active_key(ev) if @overlay == :probe_active
-      return handle_discover_config_key(ev) if @overlay == :discover_config
-      return handle_discover_headers_key(ev) if @overlay == :discover_headers
-      return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
-      return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
-      return handle_oast_provider_key(ev) if @overlay == :oast_provider
-      return handle_custom_rule_key(ev) if @overlay == :probe_rule
-      return handle_rewriter_rule_key(ev) if @overlay == :rewriter_rule
-      return handle_ca_import_key(ev) if @overlay == :ca_import
-      return handle_import_key(ev) if @overlay == :import
+      return handle_probe_active_key(ev) if @overlay.probe_active?
+      return handle_discover_config_key(ev) if @overlay.discover_config?
+      return handle_discover_headers_key(ev) if @overlay.discover_headers?
+      return handle_fuzz_set_key(ev) if @overlay.fuzz_set?
+      return handle_fuzz_advanced_key(ev) if @overlay.fuzz_advanced?
+      return handle_oast_provider_key(ev) if @overlay.oast_provider?
+      return handle_custom_rule_key(ev) if @overlay.probe_rule?
+      return handle_rewriter_rule_key(ev) if @overlay.rewriter_rule?
+      return handle_ca_import_key(ev) if @overlay.ca_import?
+      return handle_import_key(ev) if @overlay.import?
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
-      if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
+      if @active_tab == :history && @overlay.none? && @focus == :body && history_controller.view.querying?
         return if history_controller.handle_query_key(ev)
       end
-      if @active_tab == :target && target_controller.sitemap_active? && @overlay == :none && @focus == :body && sitemap_controller.view.querying?
+      if @active_tab == :target && target_controller.sitemap_active? && @overlay.none? && @focus == :body && sitemap_controller.view.querying?
         return if sitemap_controller.handle_query_key(ev)
       end
-      if @active_tab == :target && target_controller.sitemap_active? && @overlay == :none && @focus == :body && sitemap_controller.view.tagging?
+      if @active_tab == :target && target_controller.sitemap_active? && @overlay.none? && @focus == :body && sitemap_controller.view.tagging?
         return if sitemap_controller.handle_tag_key(ev)
       end
-      if @active_tab == :intercept && @overlay == :none && @focus == :body && intercept_controller.querying?
+      if @active_tab == :intercept && @overlay.none? && @focus == :body && intercept_controller.querying?
         return if intercept_controller.handle_query_key(ev)
       end
-      if @active_tab == :issues && @overlay == :none && @focus == :body && issues_controller.view.querying?
+      if @active_tab == :issues && @overlay.none? && @focus == :body && issues_controller.view.querying?
         return if issues_controller.handle_query_key(ev)
       end
-      if @active_tab == :probe && @overlay == :none && @focus == :body && probe_controller.view.querying?
+      if @active_tab == :probe && @overlay.none? && @focus == :body && probe_controller.view.querying?
         return if probe_controller.handle_query_key(ev)
       end
-      if @active_tab == :oast && @overlay == :none && @focus == :body && oast_controller.cb_filter_editing?
+      if @active_tab == :oast && @overlay.none? && @focus == :body && oast_controller.cb_filter_editing?
         return if oast_controller.handle_cb_filter_key(ev)
       end
       # Sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc. Opened
       # from the strip (not the body), so it's not gated on @focus. Generic across the
       # workbench tabs — only the active tab's controller can be in filter-edit mode.
-      if @overlay == :none && (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
+      if @overlay.none? && (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
         ctl.handle_subtab_filter_key(ev)
         return
       end
-      if @active_tab == :issues && @overlay == :none && @focus == :body && issues_controller.view.detail_open?
+      if @active_tab == :issues && @overlay.none? && @focus == :body && issues_controller.view.detail_open?
         return if issues_controller.handle_detail_key(ev)
       end
       # History detail drill-in: shift+arrows select, space opens the action menu.
-      if @active_tab == :history && @overlay == :detail && @focus == :body
+      if @active_tab == :history && @overlay.detail? && @focus == :body
         return if history_controller.handle_detail_key(ev)
         # PageUp/PageDown/Home/End page the open response/request body (the :detail
-        # overlay is outside the @overlay == :none body-nav path below, so route here).
+        # overlay is outside the @overlay.none? body-nav path below, so route here).
         if delta = page_nav_delta(ev.key)
           history_controller.scroll_detail(delta)
           return
@@ -1104,25 +1106,25 @@ module Gori::Tui
       end
       # The Decoder chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
       # before the focus ring claims Tab. Non-popup keys fall through (return false).
-      if @active_tab == :decoder && @overlay == :none && @focus == :body && decoder_controller.completing?
+      if @active_tab == :decoder && @overlay.none? && @focus == :body && decoder_controller.completing?
         return if decoder_controller.handle_complete_key(ev)
       end
       # The $ENV autocomplete popup in an editor (Repeater request, Fuzzer template) owns
       # Tab/↵/↑/↓/Esc while open — before the focus ring claims Tab, so Tab accepts the
       # suggestion. Non-popup keys fall through (return false) so editing + refilter flow on.
-      if @overlay == :none && @focus == :body && (ac = @tabs[@active_tab]?) && ac.editor_completing?
+      if @overlay.none? && @focus == :body && (ac = @tabs[@active_tab]?) && ac.editor_completing?
         return if ac.handle_editor_complete_key(ev)
       end
       # Editor-style Tab: while actively typing in a text editor, forward Tab inserts a tab
       # (or accepts a suggestion) instead of advancing the focus ring. Shift-Tab (back_tab)
       # is left to the focus ring below, so there's always a keyboard way out of the pane.
-      if @overlay == :none && @focus == :body && ev.key.tab? && (at = @tabs[@active_tab]?) && at.editor_captures_tab?
+      if @overlay.none? && @focus == :body && ev.key.tab? && (at = @tabs[@active_tab]?) && at.editor_captures_tab?
         return if at.handle_editor_tab(ev)
       end
       # Focusable sub-tab strip (Repeater/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
       # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the
       # strip owns Tab and its own ^N. @focus is only ever :subtabs for Repeater/Notes.
-      return handle_subtabs_key(ev) if @overlay == :none && @focus == :subtabs
+      return handle_subtabs_key(ev) if @overlay.none? && @focus == :subtabs
 
       # Unified focus ring: Tab / Shift-Tab move focus across the tab bar and the
       # current tab's panes (tab-bar ▸ pane1 ▸ pane2 ▸ tab-bar). Claimed here so it
@@ -1130,7 +1132,7 @@ module Gori::Tui
       # termisu decodes Shift-Tab as the distinct BackTab key (not Tab+shift).
       # The scope add/edit row owns Tab while open (it stays inert) so a stray ↹ can't
       # strand a half-composed rule over the description editor.
-      if @overlay == :none && (ev.key.tab? || ev.key.back_tab?) &&
+      if @overlay.none? && (ev.key.tab? || ev.key.back_tab?) &&
          !(@active_tab == :project && @focus == :body && project_controller.scope_adding?)
         focus_advance(ev.key.back_tab? || ev.shift? ? -1 : 1)
         return
@@ -1138,27 +1140,27 @@ module Gori::Tui
 
       # Ctrl+, opens the unified Preferences modal from anywhere in-app (mirrors the
       # picker's Ctrl+,). Claimed before the keymap so the chord always reaches settings.
-      if @overlay == :none && ev.ctrl? && ev.key.comma?
+      if @overlay.none? && ev.ctrl? && ev.key.comma?
         open_preferences
         return
       end
 
       # ^N opens a new blank repeater whenever the Repeater tab is active — body OR
       # tab-bar focus — so the advertised empty-state shortcut is never a dead key.
-      if @active_tab == :repeater && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+      if @active_tab == :repeater && @overlay.none? && ev.ctrl? && ev.key.lower_n?
         repeater_controller.repeater_new
         return
       end
 
       # ^N opens a new fuzz session from the Fuzzer tab (body OR tab-bar focus).
-      if @active_tab == :fuzzer && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+      if @active_tab == :fuzzer && @overlay.none? && ev.ctrl? && ev.key.lower_n?
         fuzzer_controller.fuzz_new
         return
       end
 
       # ^N opens a new note from the Notes tab (body OR tab-bar focus), mirroring
       # Repeater's new-request shortcut so it's never a dead key.
-      if @active_tab == :notes && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+      if @active_tab == :notes && @overlay.none? && ev.ctrl? && ev.key.lower_n?
         notes_controller.notes_new
         return
       end
@@ -1166,7 +1168,7 @@ module Gori::Tui
       # ^E opens the focused multi-line field in the external editor ($EDITOR /
       # settings:editor). A Body-scope verb would be shadowed by the per-tab handlers
       # below, so claim it inline here. Each target is gated to where it's editable.
-      if @overlay == :none && @focus == :body && ev.ctrl? && ev.key.lower_e?
+      if @overlay.none? && @focus == :body && ev.ctrl? && ev.key.lower_e?
         if @active_tab == :repeater && (v = repeater_controller.current_view) && v.focus == :request
           v.toggle_request_hex if v.request_hex?                                             # commit + drop the hex buffer (external editor is text)
           run_external_editor(v.edit_buffer_text, :request) { |t| v.replace_edit_buffer(t) } # active sub-pane (envelope/decoded)
@@ -1186,7 +1188,7 @@ module Gori::Tui
 
       # Migrated tabs: the controller claims body keys (true = handled). An unmigrated
       # tab is absent from @tabs and falls through to the verb keymap / space menu below.
-      if @overlay == :none && @focus == :body && (c = @tabs[@active_tab]?)
+      if @overlay.none? && @focus == :body && (c = @tabs[@active_tab]?)
         return if c.handle_body_key(ev)
         # PageUp/PageDown/Home/End: page/jump the focused list or read-only pane. These
         # keys never reach the verb keymap (Keybind.from_event doesn't encode them), so
@@ -1277,7 +1279,7 @@ module Gori::Tui
         close_tag_edit if @tag_edit_open
         return
       end
-      return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
+      return unless renameable_subtabs? && @overlay.none? && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
       sub_rect = BodyChrome.strip_rect(layout.body, strip: true, strip_divider: subtab_strip_divider?)
       return unless sub_rect && sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
@@ -1309,13 +1311,45 @@ module Gori::Tui
       click_body(layout.body, mx, my) if layout.body.contains?(mx, my)
     end
 
-    # The overlays that fully capture input (a centered card); :detail and :none do not.
+    # The overlays that fully capture input (a centered card); Detail and None do not.
+    # Migrated modals are absent: they answer through `active_overlay` instead (Overlay seam),
+    # so a migration DELETES its member here. One member per line on purpose — this is the
+    # input-capture gate every migration batch edits, and five parallel batches deleting from
+    # a single packed line would conflict on every merge.
+    MODAL_OVERLAYS = {
+      OverlayKind::Palette,
+      OverlayKind::IssueNew,
+      OverlayKind::Confirm,
+      OverlayKind::Browser,
+      OverlayKind::Choice,
+      OverlayKind::TabsMore,
+      OverlayKind::ComparerPick,
+      OverlayKind::RepeaterSubtab,
+      OverlayKind::Links,
+      OverlayKind::IssuePick,
+      OverlayKind::NotePick,
+      OverlayKind::Preferences,
+      OverlayKind::Settings,
+      OverlayKind::Tabs,
+      OverlayKind::Hosts,
+      OverlayKind::Env,
+      OverlayKind::Hotkeys,
+      OverlayKind::Notifications,
+      OverlayKind::ProbeActive,
+      OverlayKind::DiscoverConfig,
+      OverlayKind::DiscoverHeaders,
+      OverlayKind::FuzzSet,
+      OverlayKind::FuzzAdvanced,
+      OverlayKind::OastProvider,
+      OverlayKind::ProbeRule,
+      OverlayKind::RewriterRule,
+      OverlayKind::CaImport,
+      OverlayKind::Import,
+    }
+
     private def modal_overlay? : Bool
       return true if active_overlay # migrated modals capture input via the Overlay seam
-      case @overlay
-      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider, :probe_rule, :rewriter_rule, :ca_import, :import then true
-      else                                                                                                                                                                                                                                                                                                                                                                false
-      end
+      MODAL_OVERLAYS.includes?(@overlay)
     end
 
     # Click the top tab bar: switch to the clicked tab and land focus on the bar
@@ -1405,34 +1439,34 @@ module Gori::Tui
         return
       end
       case @overlay
-      when :palette          then click_palette(area, mx, my)
-      when :browser          then click_browser(area, mx, my)
-      when :choice           then click_choice(area, mx, my)
-      when :tabs_more        then click_more_menu(layout, mx, my)
-      when :comparer_pick    then click_flow_picker(area, mx, my)
-      when :repeater_subtab  then click_subtab_picker(area, mx, my)
-      when :links            then click_links(area, mx, my)
-      when :issue_pick       then click_issue_picker(area, mx, my)
-      when :note_pick        then click_note_picker(area, mx, my)
-      when :confirm          then click_confirm(area, mx, my)
-      when :preferences      then apply_preferences_outcome(@preferences.click(area, mx, my))
-      when :settings         then (click_settings(area, mx, my); settle_sub_editor)
-      when :tabs             then (click_tabs(area, mx, my); settle_sub_editor)
-      when :hosts            then (click_hosts(area, mx, my); settle_sub_editor)
-      when :env              then (click_env(area, mx, my); settle_sub_editor)
-      when :hotkeys          then (click_hotkeys(area, mx, my); settle_sub_editor)
-      when :notifications    then click_notifications(area, mx, my)
-      when :probe_active     then click_probe_active(area, mx, my)
-      when :discover_config  then click_discover_config(area, mx, my)
-      when :discover_headers then click_discover_headers(area, mx, my)
-      when :fuzz_set         then click_fuzz_set(area, mx, my)
-      when :fuzz_advanced    then click_fuzz_advanced(area, mx, my)
-      when :oast_provider    then click_oast_provider(area, mx, my)
-      when :probe_rule       then click_custom_rule(area, mx, my)
-      when :rewriter_rule    then click_rewriter_rule(area, mx, my)
-      when :ca_import        then click_ca_import(area, mx, my)
-      when :import           then click_import(area, mx, my)
-        # :issue_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
+      when .palette?          then click_palette(area, mx, my)
+      when .browser?          then click_browser(area, mx, my)
+      when .choice?           then click_choice(area, mx, my)
+      when .tabs_more?        then click_more_menu(layout, mx, my)
+      when .comparer_pick?    then click_flow_picker(area, mx, my)
+      when .repeater_subtab?  then click_subtab_picker(area, mx, my)
+      when .links?            then click_links(area, mx, my)
+      when .issue_pick?       then click_issue_picker(area, mx, my)
+      when .note_pick?        then click_note_picker(area, mx, my)
+      when .confirm?          then click_confirm(area, mx, my)
+      when .preferences?      then apply_preferences_outcome(@preferences.click(area, mx, my))
+      when .settings?         then (click_settings(area, mx, my); settle_sub_editor)
+      when .tabs?             then (click_tabs(area, mx, my); settle_sub_editor)
+      when .hosts?            then (click_hosts(area, mx, my); settle_sub_editor)
+      when .env?              then (click_env(area, mx, my); settle_sub_editor)
+      when .hotkeys?          then (click_hotkeys(area, mx, my); settle_sub_editor)
+      when .notifications?    then click_notifications(area, mx, my)
+      when .probe_active?     then click_probe_active(area, mx, my)
+      when .discover_config?  then click_discover_config(area, mx, my)
+      when .discover_headers? then click_discover_headers(area, mx, my)
+      when .fuzz_set?         then click_fuzz_set(area, mx, my)
+      when .fuzz_advanced?    then click_fuzz_advanced(area, mx, my)
+      when .oast_provider?    then click_oast_provider(area, mx, my)
+      when .probe_rule?       then click_custom_rule(area, mx, my)
+      when .rewriter_rule?    then click_rewriter_rule(area, mx, my)
+      when .ca_import?        then click_ca_import(area, mx, my)
+      when .import?           then click_import(area, mx, my)
+        # IssueNew is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
 
@@ -1467,7 +1501,7 @@ module Gori::Tui
 
     private def click_notifications(area : Rect, mx : Int32, my : Int32) : Nil
       box = @notifications_overlay.overlay_box(area)
-      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
       if idx = @notifications_overlay.row_at(box, mx, my)
         @notifications_overlay.set_selected(idx)
         open_notification_goto
@@ -1595,7 +1629,7 @@ module Gori::Tui
     # esc); a row click selects it (toggle/reorder stay keyboard-driven).
     private def click_tabs(area : Rect, mx : Int32, my : Int32) : Nil
       box = @tabs_overlay.overlay_box(area)
-      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
       if idx = @tabs_overlay.row_at(box, mx, my)
         @tabs_overlay.set_selected(idx)
       end
@@ -1605,7 +1639,7 @@ module Gori::Tui
     # (add/edit/delete stay keyboard-driven).
     private def click_hosts(area : Rect, mx : Int32, my : Int32) : Nil
       box = @hosts_overlay.overlay_box(area)
-      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
       if idx = @hosts_overlay.row_at(box, mx, my)
         @hosts_overlay.set_selected(idx)
       end
@@ -1613,7 +1647,7 @@ module Gori::Tui
 
     private def click_env(area : Rect, mx : Int32, my : Int32) : Nil
       box = @env_overlay.overlay_box(area)
-      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
       if idx = @env_overlay.row_at(box, mx, my)
         @env_overlay.set_selected(idx)
       end
@@ -1623,7 +1657,7 @@ module Gori::Tui
     # row click selects that binding (rebind/unbind/reset stay keyboard-driven).
     private def click_hotkeys(area : Rect, mx : Int32, my : Int32) : Nil
       box = @hotkeys_overlay.overlay_box(area)
-      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
       if idx = @hotkeys_overlay.row_at(box, mx, my)
         @hotkeys_overlay.set_selected(idx)
       end
@@ -1642,7 +1676,7 @@ module Gori::Tui
         @resized = true
         @theme_restore = nil
       end
-      @overlay = :none
+      @overlay = OverlayKind::None
     end
 
     # Apply the persisted Mouse setting to the live terminal (both calls are
@@ -1674,31 +1708,31 @@ module Gori::Tui
         return
       end
       case @overlay
-      when :palette         then @palette.move(step)
-      when :browser         then @browser_picker.try(&.move(step))
-      when :choice          then @choice_picker.try(&.move(step))
-      when :tabs_more       then @more_menu.try(&.move(step))
-      when :comparer_pick   then @flow_picker.try(&.move(step))
-      when :repeater_subtab then @subtab_picker.try(&.move(step))
-      when :links           then @links_overlay.try(&.move(step))
-      when :issue_pick      then @issue_picker.try(&.move(step))
-      when :note_pick       then @note_picker.try(&.move(step))
-      when :preferences     then @preferences.wheel(step)
-      when :settings        then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
-      when :tabs            then @tabs_overlay.select_move(step)
-      when :hosts           then @hosts_overlay.select_move(step)
-      when :env             then @env_overlay.select_move(step)
-      when :hotkeys         then @hotkeys_overlay.select_move(step)
-      when :notifications   then @notifications_overlay.select_move(step)
-      when :probe_active    then @probe_active_overlay.try(&.move(step))
-      when :discover_config then @discover_config_overlay.try(&.move(step))
-      when :fuzz_set        then @fuzz_set_overlay.try(&.move(step))
-      when :fuzz_advanced   then @fuzz_advanced_overlay.try(&.move(step))
-      when :oast_provider   then @oast_provider_overlay.try(&.move(step))
-      when :probe_rule      then @custom_rule_overlay.try(&.move(step))
-      when :rewriter_rule   then @rewriter_rule_overlay.try(&.move(step))
-      when :ca_import       then @ca_import_overlay.try(&.move(step))
-      when :import          then @import_overlay.try(&.move(step))
+      when .palette?         then @palette.move(step)
+      when .browser?         then @browser_picker.try(&.move(step))
+      when .choice?          then @choice_picker.try(&.move(step))
+      when .tabs_more?       then @more_menu.try(&.move(step))
+      when .comparer_pick?   then @flow_picker.try(&.move(step))
+      when .repeater_subtab? then @subtab_picker.try(&.move(step))
+      when .links?           then @links_overlay.try(&.move(step))
+      when .issue_pick?      then @issue_picker.try(&.move(step))
+      when .note_pick?       then @note_picker.try(&.move(step))
+      when .preferences?     then @preferences.wheel(step)
+      when .settings?        then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
+      when .tabs?            then @tabs_overlay.select_move(step)
+      when .hosts?           then @hosts_overlay.select_move(step)
+      when .env?             then @env_overlay.select_move(step)
+      when .hotkeys?         then @hotkeys_overlay.select_move(step)
+      when .notifications?   then @notifications_overlay.select_move(step)
+      when .probe_active?    then @probe_active_overlay.try(&.move(step))
+      when .discover_config? then @discover_config_overlay.try(&.move(step))
+      when .fuzz_set?        then @fuzz_set_overlay.try(&.move(step))
+      when .fuzz_advanced?   then @fuzz_advanced_overlay.try(&.move(step))
+      when .oast_provider?   then @oast_provider_overlay.try(&.move(step))
+      when .probe_rule?      then @custom_rule_overlay.try(&.move(step))
+      when .rewriter_rule?   then @rewriter_rule_overlay.try(&.move(step))
+      when .ca_import?       then @ca_import_overlay.try(&.move(step))
+      when .import?          then @import_overlay.try(&.move(step))
       end
     end
 
@@ -1707,10 +1741,10 @@ module Gori::Tui
       key = ev.key
       c = ev.char
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        @overlay = OverlayKind::None
         open_palette
       elsif key.escape?
-        @overlay = :none
+        @overlay = OverlayKind::None
       elsif key.up?
         @notifications_overlay.select_move(-1)
       elsif key.down?
@@ -1798,7 +1832,7 @@ module Gori::Tui
 
     private def close_active_overlay : Nil
       @active_overlay = nil
-      @overlay = :none
+      @overlay = OverlayKind::None
     end
 
     # The active migrated modal, but ONLY while @overlay still names it. @overlay is the
@@ -1806,7 +1840,7 @@ module Gori::Tui
     # (dismiss, tab jump, confirm return, …) without touching @active_overlay. Gating every
     # read here means such a reset makes the overlay inert (no render, no input capture) —
     # the pre-seam fail-safe — instead of a zombie that keeps drawing/capturing with
-    # @overlay == :none. Not reachable today (a live modal captures all input), but the
+    # @overlay.none?. Not reachable today (a live modal captures all input), but the
     # render/modal_overlay?/dispatch reads are authoritative, so this keeps the invariant
     # honest by construction rather than by convention.
     private def active_overlay : Overlay?
@@ -1841,7 +1875,7 @@ module Gori::Tui
     end
 
     private def close_ca_import : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @ca_import_overlay = nil
     end
 
@@ -1900,7 +1934,7 @@ module Gori::Tui
     end
 
     private def close_oast_provider : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @oast_provider_overlay = nil
     end
 
@@ -1920,7 +1954,7 @@ module Gori::Tui
     end
 
     private def close_custom_rule : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @custom_rule_overlay = nil
     end
 
@@ -1967,20 +2001,20 @@ module Gori::Tui
     end
 
     private def close_rewriter_rule : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @rewriter_rule_overlay = nil
       @rewriter_preview_sig = ""
     end
 
     private def apply_close_fuzz_set(ov : FuzzSetOverlay) : Nil
       fuzzer_controller.apply_fuzz_set(ov.edit_index, ov.build_spec)
-      @overlay = :none
+      @overlay = OverlayKind::None
       @fuzz_set_overlay = nil
     end
 
     private def apply_close_fuzz_advanced(ov : FuzzAdvancedOverlay) : Nil
       fuzzer_controller.apply_fuzz_advanced(ov.snapshot)
-      @overlay = :none
+      @overlay = OverlayKind::None
       @fuzz_advanced_overlay = nil
     end
 
@@ -1993,7 +2027,7 @@ module Gori::Tui
         # Drop a pending link-from-picker ref so a later standalone create doesn't
         # silently attach the stale workbench item.
         @link_pending_ref = nil
-        @overlay = :none
+        @overlay = OverlayKind::None
       when key.enter?     then create_issue_from_form
       when key.tab?       then @issue_form.severity_cycle(1)
       when key.back_tab?  then @issue_form.severity_cycle(-1)
@@ -2029,14 +2063,16 @@ module Gori::Tui
     # vs stay after create-and-link). `return_to` is the overlay restored on
     # close — leave it :none for a palette-launched confirm, or pass the parent
     # modal (e.g. :tabs) when raising the confirm from inside another overlay.
+    # It stays a Symbol because it is part of the Host facade (tab_controller.cr), which
+    # controllers still speak; from_sym is the total, loud-on-typo bridge to OverlayKind.
     def confirm(title : String, message : String, *, confirm_label : String = "delete",
                 cancel_label : String = "cancel",
                 danger : Bool = true, return_to : Symbol = :none, &action : -> Nil) : Nil
       @confirm = ConfirmDialog.new(title, message, confirm_label: confirm_label,
         cancel_label: cancel_label, danger: danger)
       @confirm_action = action
-      @confirm_return = return_to
-      @overlay = :confirm
+      @confirm_return = OverlayKind.from_sym(return_to)
+      @overlay = OverlayKind::Confirm
     end
 
     private def run_confirm : Nil
@@ -2049,7 +2085,7 @@ module Gori::Tui
       @overlay = @confirm_return
       @confirm = nil
       @confirm_action = nil
-      @confirm_return = :none
+      @confirm_return = OverlayKind::None
     end
 
     # "Open browser" overlay: ↑/↓ pick, ↵ launch the selected browser, esc cancel.
@@ -2064,7 +2100,7 @@ module Gori::Tui
     end
 
     private def close_browser_picker : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @browser_picker = nil
     end
 
@@ -2141,7 +2177,7 @@ module Gori::Tui
     end
 
     private def close_choice_picker : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @choice_picker = nil
     end
 
@@ -2169,7 +2205,7 @@ module Gori::Tui
       when :repeater
         repeater_controller.copy_as_menu
       when :history
-        @overlay == :detail ? history_controller.detail_copy_as_menu : {"COPY AS", [] of CopyMenu::Option}
+        @overlay.detail? ? history_controller.detail_copy_as_menu : {"COPY AS", [] of CopyMenu::Option}
       else
         {"COPY AS", [] of CopyMenu::Option}
       end
@@ -2365,7 +2401,7 @@ module Gori::Tui
 
     private def close_flow_picker : Nil
       owner = @link_add_owner
-      @overlay = :none
+      @overlay = OverlayKind::None
       @flow_picker = nil
       @link_add_owner = nil
       @link_add_ref_kind = nil
@@ -2447,7 +2483,7 @@ module Gori::Tui
         owner_kind, owner_id = owner
         open_links_overlay(owner_kind, owner_id)
       else
-        @overlay = :none
+        @overlay = OverlayKind::None
       end
     end
 
@@ -2492,7 +2528,7 @@ module Gori::Tui
     end
 
     private def close_links_overlay : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @links_overlay = nil
       @link_add_owner = nil
       @link_add_ref_kind = nil
@@ -2502,7 +2538,7 @@ module Gori::Tui
       lo = LinksOverlay.new(owner_kind, owner_id)
       lo.reload(@session.store)
       @links_overlay = lo
-      @overlay = :links
+      @overlay = OverlayKind::Links
     end
 
     private def open_selected_link(lo : LinksOverlay) : Nil
@@ -2533,7 +2569,7 @@ module Gori::Tui
       @link_add_ref_kind = Store::LinkRefKind::Flow
       rows = @session.store.recent_flows(500)
       @flow_picker = FlowPicker.new(rows, :link)
-      @overlay = :comparer_pick
+      @overlay = OverlayKind::ComparerPick
       lo.stop_add
     end
 
@@ -2543,7 +2579,7 @@ module Gori::Tui
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Repeater
       @subtab_picker = SubtabPicker.new("PICK REPEATER", rows, action: "link")
-      @overlay = :repeater_subtab
+      @overlay = OverlayKind::RepeaterSubtab
       lo.stop_add
     end
 
@@ -2553,7 +2589,7 @@ module Gori::Tui
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Fuzz
       @subtab_picker = SubtabPicker.new("PICK FUZZ", rows, action: "link")
-      @overlay = :repeater_subtab
+      @overlay = OverlayKind::RepeaterSubtab
       lo.stop_add
     end
 
@@ -2563,7 +2599,7 @@ module Gori::Tui
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Miner
       @subtab_picker = SubtabPicker.new("PICK MINER", rows, action: "link")
-      @overlay = :repeater_subtab
+      @overlay = OverlayKind::RepeaterSubtab
       lo.stop_add
     end
 
@@ -2628,12 +2664,12 @@ module Gori::Tui
       if ref && ref[0].flow?
         if row = @session.store.flow_row(ref[1])
           @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, ref[1])
-          @overlay = :issue_new
+          @overlay = OverlayKind::IssueNew
           return
         end
       end
       @issue_form = IssueForm.new
-      @overlay = :issue_new
+      @overlay = OverlayKind::IssueNew
     end
 
     private def click_issue_picker(area : Rect, mx : Int32, my : Int32) : Nil
@@ -2647,7 +2683,7 @@ module Gori::Tui
     end
 
     private def close_issue_picker : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @issue_picker = nil
       @link_pending_ref = nil
     end
@@ -2712,14 +2748,14 @@ module Gori::Tui
           navigate_to_created_note(id)
         end
       else
-        @overlay = :none
+        @overlay = OverlayKind::None
       end
     end
 
     private def navigate_to_created_issue(id : Int64) : Nil
       @active_tab = :issues
       @focus = :body
-      @overlay = :none
+      @overlay = OverlayKind::None
       if issues_controller.view.open_by_id(@session.store, id)
         @toast = "opened issue ##{id}"
       else
@@ -2731,7 +2767,7 @@ module Gori::Tui
     private def navigate_to_created_note(id : Int64) : Nil
       @active_tab = :notes
       @focus = :body
-      @overlay = :none
+      @overlay = OverlayKind::None
       if notes_controller.view.switch_note_by_id(id)
         notes_controller.refresh_link_preview
         @toast = "opened note"
@@ -2751,7 +2787,7 @@ module Gori::Tui
     end
 
     private def close_note_picker : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @note_picker = nil
       @link_pending_ref = nil
     end
@@ -2774,7 +2810,7 @@ module Gori::Tui
         if history_controller.view.open_detail_id(ref_id, @session.store)
           @active_tab = :history
           @focus = :body
-          @overlay = :detail
+          @overlay = OverlayKind::Detail
         else
           @toast = "flow no longer captured"
         end
@@ -2890,10 +2926,10 @@ module Gori::Tui
     private def handle_tabs_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        @overlay = OverlayKind::None
         open_palette
       elsif key.escape?
-        @overlay = :none # discard the working copy
+        @overlay = OverlayKind::None # discard the working copy
       elsif key.enter?
         save_tabs
       elsif key.up? && ev.shift?
@@ -2928,7 +2964,7 @@ module Gori::Tui
     private def save_tabs : Nil
       Settings.tab_prefs = @tabs_overlay.to_prefs
       ok = Settings.save
-      @overlay = :none
+      @overlay = OverlayKind::None
       @resized = true
       # Snap off a now-hidden active tab. Use the GENUINE visibility (no force:) for this
       # decision — effective_tabs force-includes the active tab, which would mask the hide.
@@ -2959,10 +2995,10 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        @overlay = OverlayKind::None
         open_palette
       elsif key.escape?
-        @overlay = :none
+        @overlay = OverlayKind::None
       elsif key.up? || key.lower_k?
         @hosts_overlay.select_move(-1)
       elsif key.down? || key.lower_j?
@@ -3029,10 +3065,10 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        @overlay = OverlayKind::None
         open_palette
       elsif key.escape?
-        @overlay = :none
+        @overlay = OverlayKind::None
       elsif key.up? || key.lower_k?
         @env_overlay.select_move(-1)
       elsif key.down? || key.lower_j?
@@ -3140,10 +3176,10 @@ module Gori::Tui
     private def handle_hotkeys_browse(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        @overlay = OverlayKind::None
         open_palette
       elsif key.escape?
-        @overlay = :none # discard the working copy
+        @overlay = OverlayKind::None # discard the working copy
       elsif key.enter?
         save_hotkeys
       elsif key.up?
@@ -3181,7 +3217,7 @@ module Gori::Tui
       @keymap = Hotkeys.build_keymap(@session.registry)
       # Help is built from the registry at open; reload so rebound labels stay honest.
       help_controller.reload_help(@session.registry)
-      @overlay = :none
+      @overlay = OverlayKind::None
       @toast = ok ? "hotkeys saved" : "hotkeys applied — could not save to #{Settings.path}"
     end
 
@@ -3359,7 +3395,7 @@ module Gori::Tui
           @toast = "issue created"
         end
       end
-      @overlay = :none
+      @overlay = OverlayKind::None
     end
 
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
@@ -3426,8 +3462,8 @@ module Gori::Tui
     # Which focused multi-line view ^G/^F jumps, or nil if the context has none. The
     # detail drill-in is shell state (@overlay); the rest is each controller's call.
     private def goto_target : Symbol?
-      return :detail if @overlay == :detail
-      return nil unless @overlay == :none && @focus == :body
+      return :detail if @overlay.detail?
+      return nil unless @overlay.none? && @focus == :body
       @tabs[@active_tab]?.try(&.goto_symbol)
     end
 
@@ -3646,9 +3682,9 @@ module Gori::Tui
 
     private def current_scope : Verb::Scope
       case @overlay
-      when :palette
+      when .palette?
         Verb::Scope::PaletteOpen
-      when :detail
+      when .detail?
         Verb::Scope::HistoryDetail
       else
         return Verb::Scope::Sidebar if @focus == :menu
@@ -3664,7 +3700,7 @@ module Gori::Tui
     # @overlay is always :none or :detail — every other overlay handles its own
     # keys earlier in handle_key and returns before space is ever checked.
     private def space_menu_context : {Verb::Scope, Symbol}
-      if @overlay == :detail
+      if @overlay.detail?
         {Verb::Scope::HistoryDetail, :common}
       else
         scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
@@ -3772,35 +3808,35 @@ module Gori::Tui
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
         activity: activity_chip, resource: @resource.label, time: clock_label)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
-      @palette.render(screen, layout.body) if @overlay == :palette
-      @issue_form.render(screen, layout.body) if @overlay == :issue_new
-      @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
-      @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
-      @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
-      @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay == :tabs_more
-      @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
-      @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :repeater_subtab
-      @links_overlay.try(&.render(screen, layout.body)) if @overlay == :links
-      @issue_picker.try(&.render(screen, layout.body)) if @overlay == :issue_pick
-      @note_picker.try(&.render(screen, layout.body)) if @overlay == :note_pick
-      @preferences.render(screen, layout.body) if @overlay == :preferences
-      @settings_view.render(screen, layout.body) if @overlay == :settings
-      @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
-      @hosts_overlay.render(screen, layout.body) if @overlay == :hosts
-      @env_overlay.render(screen, layout.body) if @overlay == :env
-      @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
-      @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
-      @probe_active_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_active
-      @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_config
-      @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_headers
-      @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
-      @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
+      @palette.render(screen, layout.body) if @overlay.palette?
+      @issue_form.render(screen, layout.body) if @overlay.issue_new?
+      @confirm.try(&.render(screen, layout.body)) if @overlay.confirm?
+      @browser_picker.try(&.render(screen, layout.body)) if @overlay.browser?
+      @choice_picker.try(&.render(screen, layout.body)) if @overlay.choice?
+      @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay.tabs_more?
+      @flow_picker.try(&.render(screen, layout.body)) if @overlay.comparer_pick?
+      @subtab_picker.try(&.render(screen, layout.body)) if @overlay.repeater_subtab?
+      @links_overlay.try(&.render(screen, layout.body)) if @overlay.links?
+      @issue_picker.try(&.render(screen, layout.body)) if @overlay.issue_pick?
+      @note_picker.try(&.render(screen, layout.body)) if @overlay.note_pick?
+      @preferences.render(screen, layout.body) if @overlay.preferences?
+      @settings_view.render(screen, layout.body) if @overlay.settings?
+      @tabs_overlay.render(screen, layout.body) if @overlay.tabs?
+      @hosts_overlay.render(screen, layout.body) if @overlay.hosts?
+      @env_overlay.render(screen, layout.body) if @overlay.env?
+      @hotkeys_overlay.render(screen, layout.body) if @overlay.hotkeys?
+      @notifications_overlay.render(screen, layout.body) if @overlay.notifications?
+      @probe_active_overlay.try(&.render(screen, layout.body)) if @overlay.probe_active?
+      @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay.discover_config?
+      @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay.discover_headers?
+      @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay.fuzz_set?
+      @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay.fuzz_advanced?
       active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
-      @oast_provider_overlay.try(&.render(screen, layout.body)) if @overlay == :oast_provider
-      @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_rule
-      @rewriter_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :rewriter_rule
-      @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay == :ca_import
-      @import_overlay.try(&.render(screen, layout.body)) if @overlay == :import
+      @oast_provider_overlay.try(&.render(screen, layout.body)) if @overlay.oast_provider?
+      @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay.probe_rule?
+      @rewriter_rule_overlay.try(&.render(screen, layout.body)) if @overlay.rewriter_rule?
+      @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay.ca_import?
+      @import_overlay.try(&.render(screen, layout.body)) if @overlay.import?
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -3908,33 +3944,33 @@ module Gori::Tui
         return ov.title
       end
       case @overlay
-      when :palette          then "PALETTE"
-      when :issue_new        then "ISSUE"
-      when :detail           then "DETAIL"
-      when :confirm          then "CONFIRM"
-      when :browser          then "BROWSER"
-      when :choice           then @choice_picker.try(&.title) || "CHOOSE"
-      when :comparer_pick    then "PICK FLOW"
-      when :repeater_subtab  then @subtab_picker.try(&.title) || "FIND SUB-TAB"
-      when :links            then @links_overlay.try(&.title) || "LINKS"
-      when :issue_pick       then "PICK ISSUE"
-      when :note_pick        then "PICK NOTE"
-      when :preferences      then "PREFERENCES"
-      when :settings         then "SETTINGS"
-      when :tabs             then "TAB BAR"
-      when :hosts            then "HOSTNAME OVERRIDES"
-      when :env              then "ENVIRONMENT"
-      when :hotkeys          then "HOTKEYS"
-      when :notifications    then "NOTIFICATIONS"
-      when :probe_active     then "ACTIVE SCAN"
-      when :discover_config  then "DISCOVER"
-      when :discover_headers then "CUSTOM HEADERS"
-      when :fuzz_set         then "PAYLOAD SET"
-      when :fuzz_advanced    then "ADVANCED"
-      when :rewriter_rule    then "REWRITER RULE"
-      when :oast_provider    then "OAST PROVIDER"
-      when :ca_import        then "IMPORT CA"
-      when :import           then "IMPORT #{@import_overlay.try(&.label) || "FILE"}"
+      when .palette?          then "PALETTE"
+      when .issue_new?        then "ISSUE"
+      when .detail?           then "DETAIL"
+      when .confirm?          then "CONFIRM"
+      when .browser?          then "BROWSER"
+      when .choice?           then @choice_picker.try(&.title) || "CHOOSE"
+      when .comparer_pick?    then "PICK FLOW"
+      when .repeater_subtab?  then @subtab_picker.try(&.title) || "FIND SUB-TAB"
+      when .links?            then @links_overlay.try(&.title) || "LINKS"
+      when .issue_pick?       then "PICK ISSUE"
+      when .note_pick?        then "PICK NOTE"
+      when .preferences?      then "PREFERENCES"
+      when .settings?         then "SETTINGS"
+      when .tabs?             then "TAB BAR"
+      when .hosts?            then "HOSTNAME OVERRIDES"
+      when .env?              then "ENVIRONMENT"
+      when .hotkeys?          then "HOTKEYS"
+      when .notifications?    then "NOTIFICATIONS"
+      when .probe_active?     then "ACTIVE SCAN"
+      when .discover_config?  then "DISCOVER"
+      when .discover_headers? then "CUSTOM HEADERS"
+      when .fuzz_set?         then "PAYLOAD SET"
+      when .fuzz_advanced?    then "ADVANCED"
+      when .rewriter_rule?    then "REWRITER RULE"
+      when .oast_provider?    then "OAST PROVIDER"
+      when .ca_import?        then "IMPORT CA"
+      when .import?           then "IMPORT #{@import_overlay.try(&.label) || "FILE"}"
       else
         case @focus
         when :menu    then "TABS"
@@ -3964,34 +4000,34 @@ module Gori::Tui
         return ov.hint
       end
       case @overlay
-      when :palette          then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when :issue_new        then "type title · ↵ create · esc cancel"
-      when :confirm          then "←/→ choose · y confirm · n/esc cancel · ↵ select"
-      when :browser          then "↑/↓ select · ↵ open · esc cancel"
-      when :choice           then "↑/↓ select · ↵ set · key picks · esc cancel"
-      when :tabs_more        then "↑/↓ select · ↵ open tab · ←/esc close"
-      when :comparer_pick    then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :repeater_subtab  then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
-      when :links            then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
-      when :issue_pick       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when :note_pick        then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when :preferences      then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
-      when :settings         then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
-      when :tabs             then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
-      when :hosts            then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
-      when :env              then env_overlay_hints
-      when :hotkeys          then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when :notifications    then "↑/↓ select · ↵ open · c clear · esc close"
-      when :probe_active     then "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
-      when :discover_config  then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
-      when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
-      when :fuzz_set         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
-      when :fuzz_advanced    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
-      when :rewriter_rule    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
-      when :oast_provider    then "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
-      when :ca_import        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
-      when :import           then "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
-      when :detail           then history_controller.body_hint(:body)
+      when .palette?          then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when .issue_new?        then "type title · ↵ create · esc cancel"
+      when .confirm?          then "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      when .browser?          then "↑/↓ select · ↵ open · esc cancel"
+      when .choice?           then "↑/↓ select · ↵ set · key picks · esc cancel"
+      when .tabs_more?        then "↑/↓ select · ↵ open tab · ←/esc close"
+      when .comparer_pick?    then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
+      when .repeater_subtab?  then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
+      when .links?            then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
+      when .issue_pick?       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when .note_pick?        then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when .preferences?      then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
+      when .settings?         then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      when .tabs?             then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+      when .hosts?            then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+      when .env?              then env_overlay_hints
+      when .hotkeys?          then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when .notifications?    then "↑/↓ select · ↵ open · c clear · esc close"
+      when .probe_active?     then "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
+      when .discover_config?  then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
+      when .discover_headers? then "one header per line · Host/Connection ignored · esc saves & closes"
+      when .fuzz_set?         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
+      when .fuzz_advanced?    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
+      when .rewriter_rule?    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
+      when .oast_provider?    then "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
+      when .ca_import?        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
+      when .import?           then "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
+      when .detail?           then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
         return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
@@ -4028,7 +4064,7 @@ module Gori::Tui
       # out (see TrafficEmptyState.suppressed?). Every overlay but the ⋯ dropdown centres
       # itself in this same rect; tabs_more is anchored to its tab-bar chip and doesn't
       # cover the card, so it keeps it.
-      TrafficEmptyState.suppressed = @overlay != :none && @overlay != :tabs_more
+      TrafficEmptyState.suppressed = !@overlay.none? && !@overlay.tabs_more?
       # Every catalog tab has a controller that owns its body render; the `?` guard is
       # defensive (a blank body beats a crash if the active tab ever lacks one).
       @tabs[@active_tab]?.try(&.render_body(screen, rect, @focus))
@@ -4060,7 +4096,7 @@ module Gori::Tui
 
     def leave_project : Nil
       confirm("LEAVE PROJECT", "Close this project and return to the picker?",
-        confirm_label: "leave", danger: false, return_to: @overlay) do
+        confirm_label: "leave", danger: false, return_to: @overlay.to_sym) do
         commit_pending_edits
         @outcome = :back
       end
@@ -4085,12 +4121,12 @@ module Gori::Tui
     end
 
     def open_palette : Nil
-      @overlay = :palette
+      @overlay = OverlayKind::Palette
       @palette.reset(self)
     end
 
     def close_overlay : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
     end
 
     # Emergency full repaint (palette-only). `@resized` routes the next flush through the
@@ -4107,8 +4143,13 @@ module Gori::Tui
     # Thin wrappers over the existing shell setters so a controller never writes
     # @overlay/@focus/@active_tab directly. `status` (above) already satisfies Host.
 
+    # The Host facade still speaks Symbol (tab_controller.cr), so these two are the ONE
+    # place a Symbol crosses into @overlay's OverlayKind. Both directions are total:
+    # from_sym raises on an unknown name rather than silently landing on None, and to_sym
+    # is an exhaustive case the compiler checks — so the enum's guarantee survives the
+    # bridge. Retyping the facade itself is a follow-up (it touches the controllers).
     def request_overlay(kind : Symbol) : Nil
-      @overlay = kind
+      @overlay = OverlayKind.from_sym(kind)
     end
 
     def request_focus(pane : Symbol) : Nil
@@ -4132,7 +4173,7 @@ module Gori::Tui
       flush_active_tab_edits # cross-tab "open this and land in it" jumps must persist the outgoing edit too
       @active_tab = tab
       @focus = :body
-      @overlay = :none # clear any launching overlay (e.g. History :detail) so the destination
+      @overlay = OverlayKind::None # clear any launching overlay (e.g. History :detail) so the destination
       #                  tab's body keys/scope aren't deadened by a stale overlay gate
     end
 
@@ -4141,7 +4182,7 @@ module Gori::Tui
     end
 
     def overlay : Symbol
-      @overlay
+      @overlay.to_sym
     end
 
     def active_tab : Symbol
@@ -4173,7 +4214,7 @@ module Gori::Tui
     # Open the notification center (the app.notifications verb + the clickable top-bar
     # badge). Marks everything read, clearing the unread badge.
     def open_notifications : Nil
-      @overlay = :notifications
+      @overlay = OverlayKind::Notifications
       @notifications_overlay.reset
       @notifications.mark_all_read
     end
@@ -4181,7 +4222,7 @@ module Gori::Tui
     # Run the selected note's "jump to result" target, then close the center.
     private def open_notification_goto : Nil
       note = @notifications_overlay.selected_note
-      @overlay = :none
+      @overlay = OverlayKind::None
       run_goto(note.goto) if note
     end
 
@@ -4388,11 +4429,11 @@ module Gori::Tui
 
     private def open_import(kind : Symbol) : Nil
       @import_overlay = ImportOverlay.new(kind)
-      @overlay = :import
+      @overlay = OverlayKind::Import
     end
 
     private def close_import : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @import_overlay = nil
     end
 
@@ -4505,7 +4546,7 @@ module Gori::Tui
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
       @menu_more = false # any focus change lands on a real tab, not the ⋯ affordance
-      @overlay = :none
+      @overlay = OverlayKind::None
       view_focus_first if pane == :body
     end
 
@@ -4542,7 +4583,7 @@ module Gori::Tui
       @active_tab = tab
       @focus = focus
       @menu_more = false
-      @overlay = :none
+      @overlay = OverlayKind::None
       on_enter_tab
       view_focus_first
     end
@@ -4572,7 +4613,7 @@ module Gori::Tui
       idx = tabs.index { |(s, _)| s == @active_tab } || 0
       @active_tab = tabs[(idx + delta) % tabs.size][0]
       @menu_more = false
-      @overlay = :none
+      @overlay = OverlayKind::None
       on_enter_tab
       # Switching tabs on the bar (menu focus) just moves the highlight; switching
       # while in the body drops into the new tab's first pane.
@@ -4638,13 +4679,13 @@ module Gori::Tui
       @focus = :menu
       @menu_more = true
       @more_menu = MoreMenu.new(items)
-      @overlay = :tabs_more
+      @overlay = OverlayKind::TabsMore
     end
 
     # Dismiss the dropdown back to the ⋯ affordance (esc / ← / click-outside). Focus
     # stays on the bar with @menu_more set, so ←/→ keep navigating from there.
     private def close_more_menu : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @more_menu = nil
     end
 
@@ -4730,7 +4771,7 @@ module Gori::Tui
 
     def link_flow_id : Int64?
       return unless @active_tab == :history
-      if @overlay == :detail
+      if @overlay.detail?
         history_controller.view.detail_flow_id
       else
         history_controller.view.selected_id
@@ -4742,7 +4783,7 @@ module Gori::Tui
     # while the detail overlay stays on its flow, so detail.* verbs (repeater/issue/fuzz/mine/
     # comparer/copy/scope) must read the detail, not the cursor — or they act on the wrong flow.
     def history_target_flow_id : Int64?
-      @overlay == :detail ? history_controller.view.detail_flow_id : history_controller.selected_flow_id
+      @overlay.detail? ? history_controller.view.detail_flow_id : history_controller.selected_flow_id
     end
 
     def link_repeater_id : Int64?
@@ -4768,7 +4809,7 @@ module Gori::Tui
       end
       @link_pending_ref = ref
       @issue_picker = IssuePicker.new(@session.store.issues)
-      @overlay = :issue_pick
+      @overlay = OverlayKind::IssuePick
     end
 
     def link_to_note : Nil
@@ -4777,7 +4818,7 @@ module Gori::Tui
       notes_controller.save_notes
       @link_pending_ref = ref
       @note_picker = NotePicker.new(note_picker_rows)
-      @overlay = :note_pick
+      @overlay = OverlayKind::NotePick
     end
 
     # Trim an issue title for a one-line toast (avoid a wall of text on wide titles).
@@ -4815,7 +4856,7 @@ module Gori::Tui
         return
       end
       @probe_active_overlay = ProbeActiveOverlay.new(detail, est_safe, est_unsafe, repeater_id)
-      @overlay = :probe_active
+      @overlay = OverlayKind::ProbeActive
     end
 
     # Confirm the popup: run the probes in the BACKGROUND (mode-independent), persist the chosen
@@ -4840,7 +4881,7 @@ module Gori::Tui
     end
 
     private def close_probe_active : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @probe_active_overlay = nil
     end
 
@@ -4915,7 +4956,7 @@ module Gori::Tui
       rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
       return @toast = "no other sub-tab to search" if rows.size < 2
       @subtab_picker = SubtabPicker.new("FIND SUB-TAB", rows)
-      @overlay = :repeater_subtab
+      @overlay = OverlayKind::RepeaterSubtab
     end
 
     def subtab_search_count : Int32
@@ -5002,7 +5043,7 @@ module Gori::Tui
         return
       end
       @discover_config_overlay = DiscoverConfigOverlay.new(seed)
-      @overlay = :discover_config
+      @overlay = OverlayKind::DiscoverConfig
     end
 
     # Confirm the popup: launch the BACKGROUND run and switch to the Discover sub-tab so
@@ -5021,14 +5062,14 @@ module Gori::Tui
     end
 
     private def close_discover_config : Nil
-      @overlay = :none
+      @overlay = OverlayKind::None
       @discover_config_overlay = nil
     end
 
     # --- Discover custom-headers editor (opened from the config popup's headers row) ---
     private def open_discover_headers(ov : DiscoverConfigOverlay) : Nil
       @discover_headers_overlay = DiscoverHeadersOverlay.new(ov.headers)
-      @overlay = :discover_headers
+      @overlay = OverlayKind::DiscoverHeaders
     end
 
     # esc / click-away: parse the edited lines back onto the config popup and reopen it.
@@ -5037,7 +5078,7 @@ module Gori::Tui
         ov.set_headers(hov.headers)
       end
       @discover_headers_overlay = nil
-      @overlay = :discover_config
+      @overlay = OverlayKind::DiscoverConfig
     end
 
     private def handle_discover_headers_key(ev : Termisu::Event::Key) : Nil
@@ -5055,13 +5096,13 @@ module Gori::Tui
         else
           FuzzSetOverlay.for_list
         end
-      @overlay = :fuzz_set
+      @overlay = OverlayKind::FuzzSet
     end
 
     def open_fuzz_advanced_editor : Nil
       return unless v = fuzzer_controller.current_view
       @fuzz_advanced_overlay = FuzzAdvancedOverlay.new(v.advanced_snapshot)
-      @overlay = :fuzz_advanced
+      @overlay = OverlayKind::FuzzAdvanced
     end
 
     # Host: open the Project SCOPE rule popup (nil edit_id = add a new rule). The apply is
@@ -5081,20 +5122,20 @@ module Gori::Tui
     # Host: open the OAST provider add/edit popup (nil = add a new provider).
     def open_oast_provider_editor(provider : Oast::ProviderConfig?) : Nil
       @oast_provider_overlay = provider ? OastProviderOverlay.editing(provider) : OastProviderOverlay.adding
-      @overlay = :oast_provider
+      @overlay = OverlayKind::OastProvider
     end
 
     # Host: open the Probe custom-rule popup (nil rule = add; else edit the given rule).
     def open_custom_rule_editor(rule : Probe::CustomRule?) : Nil
       @custom_rule_overlay = rule ? CustomRuleOverlay.editing(rule) : CustomRuleOverlay.adding
-      @overlay = :probe_rule
+      @overlay = OverlayKind::ProbeRule
     end
 
     # Host: open the Rewriter (Match & Replace) rule popup (nil rule = add; else edit).
     def open_rewriter_rule_editor(rule : Store::MatchRule?) : Nil
       @rewriter_rule_overlay = rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding
       @rewriter_preview_sig = ""
-      @overlay = :rewriter_rule
+      @overlay = OverlayKind::RewriterRule
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is
@@ -5156,7 +5197,7 @@ module Gori::Tui
     # the same confirm as regenerate (see submit_ca_import).
     def import_ca : Nil
       @ca_import_overlay = CAImportOverlay.new
-      @overlay = :ca_import
+      @overlay = OverlayKind::CaImport
     end
 
     # --- browser (open a pre-trusted system browser) ---
@@ -5169,7 +5210,7 @@ module Gori::Tui
         return
       end
       @browser_picker = BrowserPicker.new(found, Browser.certutil_available?)
-      @overlay = :browser
+      @overlay = OverlayKind::Browser
     end
 
     # --- comparer (diff two arbitrary flows) ---
@@ -5200,7 +5241,7 @@ module Gori::Tui
       when :issues   then issues_controller.issues_notes_selection_active?
       when :project  then project_controller.project_desc_selection_active?
       when :history
-        @overlay == :detail && history_controller.detail_selection_active?
+        @overlay.detail? && history_controller.detail_selection_active?
       else
         false
       end
@@ -5220,7 +5261,7 @@ module Gori::Tui
       when :issues   then issues_controller.issues_notes_selection_text
       when :project  then project_controller.project_desc_selection_text
       when :history
-        @overlay == :detail ? history_controller.detail_selection_text : ""
+        @overlay.detail? ? history_controller.detail_selection_text : ""
       else
         ""
       end
@@ -5236,7 +5277,7 @@ module Gori::Tui
       when :issues   then issues_controller.issues_notes_select_line
       when :project  then project_controller.project_desc_select_line
       when :history
-        history_controller.detail_select_line if @overlay == :detail
+        history_controller.detail_select_line if @overlay.detail?
       end
     end
 
@@ -5250,7 +5291,7 @@ module Gori::Tui
       when :issues   then issues_controller.issues_notes_clear_selection
       when :project  then project_controller.project_desc_clear_selection
       when :history
-        history_controller.detail_clear_selection if @overlay == :detail
+        history_controller.detail_clear_selection if @overlay.detail?
       end
     end
 
@@ -5270,12 +5311,12 @@ module Gori::Tui
       when :history
         # No whole-rendered-pane delegator exists for the detail text pane — both
         # branches fall back to the selection-or-current-line copy.
-        detail_copy_selection if @overlay == :detail
+        detail_copy_selection if @overlay.detail?
       end
     end
 
     def detail_navigable? : Bool
-      @active_tab == :history && @overlay == :detail && history_controller.view.detail_navigable?
+      @active_tab == :history && @overlay.detail? && history_controller.view.detail_navigable?
     end
 
     # --- settings (config control) ---
@@ -5349,20 +5390,20 @@ module Gori::Tui
       when :theme
         @settings_view.reload(:theme) # theme keeps its dedicated swatch-list card
         @resized = true               # an edited/removed active theme just changed → full repaint
-        @overlay = :settings
+        @overlay = OverlayKind::Settings
         @theme_restore = Settings.theme # baseline for live-preview revert
       when :tabs
         @tabs_overlay.reset # rebuild the working copy from persisted config
-        @overlay = :tabs
+        @overlay = OverlayKind::Tabs
       when :hosts
         @hosts_overlay.reset # rebuild the working copy from persisted overrides
-        @overlay = :hosts
+        @overlay = OverlayKind::Hosts
       when :env
         @env_overlay.reset
-        @overlay = :env
+        @overlay = OverlayKind::Env
       when :hotkeys
         @hotkeys_overlay.reset # rebuild the working copy from persisted overrides
-        @overlay = :hotkeys
+        @overlay = OverlayKind::Hotkeys
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
@@ -5375,7 +5416,7 @@ module Gori::Tui
     def open_preferences(section : Symbol? = nil) : Nil
       section ? @preferences.open(section) : @preferences.open_default
       @prefs_return = false # a fresh open — not a hop out to a sub-editor and back
-      @overlay = :preferences
+      @overlay = OverlayKind::Preferences
     end
 
     private def handle_preferences_key(ev : Termisu::Event::Key) : Nil
@@ -5387,8 +5428,8 @@ module Gori::Tui
     # (theme/tabs/hosts/env/hotkeys) — flagged so that editor returns INTO the modal.
     private def apply_preferences_outcome(outcome : PreferencesView::Outcome) : Nil
       case outcome.kind
-      when :close   then @overlay = :none
-      when :palette then (@overlay = :none; open_palette)
+      when :close   then @overlay = OverlayKind::None
+      when :palette then (@overlay = OverlayKind::None; open_palette)
       when :saved   then @toast = apply_settings_saved(outcome.section.not_nil!, outcome.message || "")
       when :open
         @prefs_return = true
@@ -5397,19 +5438,25 @@ module Gori::Tui
     end
 
     # The dedicated editors reachable from a Preferences opener row. Each closes by setting
-    # @overlay = :none from a handful of places, so rather than patch every close site the
+    # @overlay = OverlayKind::None from a handful of places, so rather than patch every close site the
     # dispatch chokepoints below redirect that :none back INTO the modal it was opened from
     # — otherwise ↵-ing into Theme and pressing esc drops you out of settings entirely,
     # while the project picker (which does return to the modal) behaves differently.
-    PREFS_SUB_EDITORS = {:settings, :tabs, :hosts, :env, :hotkeys}
+    PREFS_SUB_EDITORS = {
+      OverlayKind::Settings,
+      OverlayKind::Tabs,
+      OverlayKind::Hosts,
+      OverlayKind::Env,
+      OverlayKind::Hotkeys,
+    }
 
     private def settle_sub_editor : Nil
       return unless @prefs_return
       # Still editing, chained into another editor, or raising a confirm the editor set a
       # `return_to:` for (^R reset / tab-bar reset) — the flag has to survive all three.
-      return if PREFS_SUB_EDITORS.includes?(@overlay) || @overlay == :confirm
-      @overlay = :preferences if @overlay == :none # a ^P jump to the palette still wins
-      @preferences.refresh(:network)               # the Hostnames editor moves Network's "N entries" row
+      return if PREFS_SUB_EDITORS.includes?(@overlay) || @overlay.confirm?
+      @overlay = OverlayKind::Preferences if @overlay.none? # a ^P jump to the palette still wins
+      @preferences.refresh(:network)                        # the Hostnames editor moves Network's "N entries" row
       @prefs_return = false
     end
 

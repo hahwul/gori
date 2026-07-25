@@ -85,8 +85,8 @@ module Gori::Tui
     end
 
     # --- Overlay contract (see overlay.cr) ---
-    def key : Symbol
-      :sequence_config
+    def key : OverlayKind
+      OverlayKind::SequenceConfig
     end
 
     def title : String

@@ -28,7 +28,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Open the MODE picker (a shell overlay); apply_choice applies it to the analyzer.
   def probe_set_mode : Nil
     @choice_picker = ChoicePicker.for_probe_mode(@session.probe.mode.value)
-    @overlay = :choice
+    @overlay = OverlayKind::Choice
   end
 
   def probe_dismiss : Nil
@@ -55,7 +55,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       if history_controller.view.open_detail_id(fid, @session.store)
         @active_tab = :history
         @focus = :body
-        @overlay = :detail
+        @overlay = OverlayKind::Detail
       else
         @toast = "evidence no longer captured (pruned)"
       end

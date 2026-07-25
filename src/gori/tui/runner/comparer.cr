@@ -5,7 +5,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # flows; the picker filters them in memory.
   def comparer_pick(slot : Symbol) : Nil
     @flow_picker = FlowPicker.new(@session.store.recent_flows(2000), slot)
-    @overlay = :comparer_pick
+    @overlay = OverlayKind::ComparerPick
   end
 
   def comparer_swap : Nil

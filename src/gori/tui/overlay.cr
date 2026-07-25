@@ -3,6 +3,77 @@ require "./screen"
 require "./geometry"
 
 module Gori::Tui
+  # Every modal state the shell's `@overlay` can hold. This was a bare `Symbol` with 33
+  # values compared ~96 times across runner.cr, where one mistyped `:probe_rules` was a
+  # silent no-op — an overlay that never opened, never rendered and never captured a key,
+  # with no compiler help. As an enum the same typo is a compile error.
+  #
+  # Members keep the names the symbols had, so the mapping stays obvious: `ProbeRule` is the
+  # Probe custom-rule editor and `Tabs` the tab-bar customizer. `None` is "no modal"; `Detail`
+  # is the History drill-in, which is NOT a capturing modal (see Runner#modal_overlay?).
+  #
+  # `to_sym`/`from_sym` bridge the still-`Symbol` Host facade (TabController's
+  # `request_overlay` / `overlay` / `confirm(return_to:)`). Both are TOTAL: `to_sym` is an
+  # exhaustive `case … in`, so adding a member here fails to compile until it is mapped, and
+  # `from_sym` raises rather than silently landing on `None` — a bad symbol at that seam must
+  # be loud, since silence is the exact failure mode the enum exists to kill.
+  enum OverlayKind
+    None
+    Detail
+    Palette
+    IssueNew
+    Confirm
+    Browser
+    Choice
+    TabsMore
+    ComparerPick
+    RepeaterSubtab
+    Links
+    IssuePick
+    NotePick
+    Preferences
+    Settings
+    Tabs
+    Hosts
+    Env
+    Hotkeys
+    Notifications
+    ProbeActive
+    DiscoverConfig
+    DiscoverHeaders
+    FuzzSet
+    FuzzAdvanced
+    OastProvider
+    ProbeRule
+    RewriterRule
+    CaImport
+    Import
+    ScopeRule
+    SequenceConfig
+    MineConfig
+
+    def to_sym : Symbol
+      {% begin %}
+        case self
+        {% for c in @type.constants %}
+        in OverlayKind::{{ c }} then :{{ c.stringify.underscore.id }}
+        {% end %}
+        end
+      {% end %}
+    end
+
+    def self.from_sym(sym : Symbol) : OverlayKind
+      {% begin %}
+        case sym
+        {% for c in @type.constants %}
+        when :{{ c.stringify.underscore.id }} then OverlayKind::{{ c }}
+        {% end %}
+        else raise ArgumentError.new("unknown overlay kind: #{sym}")
+        end
+      {% end %}
+    end
+  end
+
   # A centered modal overlay the shell floats above the tab body. The Runner owns ONE
   # active overlay (`@active_overlay`) and dispatches to it polymorphically — the same
   # move TabController made for tab bodies, now extended to modals.
@@ -31,10 +102,10 @@ module Gori::Tui
     # it open — e.g. a validation error keeps the form up). Supplied at the open-site.
     property on_commit : Proc(Bool)?
 
-    # The `@overlay` state symbol this modal sets. Kept in sync by the Runner so
-    # `modal_overlay?` and any residual `@overlay ==` checks keep working while the other
-    # overlays migrate onto this base one at a time.
-    abstract def key : Symbol
+    # The `@overlay` state this modal sets. Kept in sync by the Runner so `modal_overlay?`
+    # and any residual `@overlay ==` checks keep working while the other overlays migrate
+    # onto this base one at a time.
+    abstract def key : OverlayKind
 
     # Shell chrome: the focus-badge title (top bar) and the bottom-row key hint. These
     # used to be `case @overlay` entries in the Runner; they now live with the overlay so

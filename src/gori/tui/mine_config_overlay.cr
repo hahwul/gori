@@ -82,8 +82,8 @@ module Gori::Tui
     end
 
     # --- Overlay contract (see overlay.cr) ---
-    def key : Symbol
-      :mine_config
+    def key : OverlayKind
+      OverlayKind::MineConfig
     end
 
     def title : String

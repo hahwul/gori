@@ -52,8 +52,8 @@ module Gori::Tui
     end
 
     # --- Overlay contract (see overlay.cr) ---
-    def key : Symbol
-      :scope_rule
+    def key : OverlayKind
+      OverlayKind::ScopeRule
     end
 
     def title : String

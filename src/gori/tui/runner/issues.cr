@@ -6,13 +6,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return unless id
     if row = @session.store.flow_row(id)
       @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, id)
-      @overlay = :issue_new
+      @overlay = OverlayKind::IssueNew
     end
   end
 
   def issues_new : Nil
     @issue_form = IssueForm.new
-    @overlay = :issue_new
+    @overlay = OverlayKind::IssueNew
   end
 
   def issues_query : Nil
@@ -48,13 +48,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def issue_set_severity : Nil
     return unless f = issues_controller.view.detail_issue
     @choice_picker = ChoicePicker.for_severity(f.severity.value)
-    @overlay = :choice
+    @overlay = OverlayKind::Choice
   end
 
   def issue_set_status : Nil
     return unless f = issues_controller.view.detail_issue
     @choice_picker = ChoicePicker.for_status(f.status.value)
-    @overlay = :choice
+    @overlay = OverlayKind::Choice
   end
 
   def issue_edit_notes : Nil
@@ -83,7 +83,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def issue_edit_title : Nil
     return unless f = issues_controller.view.detail_issue
     @issue_form = IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE")
-    @overlay = :issue_new
+    @overlay = OverlayKind::IssueNew
   end
 
   # Jump from an issue to its linked flow's request/response in History. CROSS-TAB
@@ -94,7 +94,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     if history_controller.view.open_detail_id(fid, @session.store)
       @active_tab = :history
       @focus = :body
-      @overlay = :detail
+      @overlay = OverlayKind::Detail
     else
       @toast = "evidence no longer captured (pruned)"
     end
