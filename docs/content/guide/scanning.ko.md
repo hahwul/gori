@@ -13,7 +13,9 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 **Probe**는 보안 이슈를 유형과 심각도로 묶습니다. 패시브 체크는 브라우징하는 동안 실행되며(추가 요청은 전혀 없이) **History** 플로우와 **Repeater** 전송 결과를 검사합니다.
 
-**액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 아무것도 나가지 않습니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
+**액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 아무것도 나가지 않습니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
+
+안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합). 두 경우 모두 프로젝트 스코프 안에서만 동작하므로 스코프를 벗어난 호스트는 절대 건드리지 않습니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/probe.svg" alt="심각도와 범주로 묶인 패시브 이슈를 나열하는 gori Probe 스캐너: 허용적 CORS, 누락된 CSP와 HSTS, 쿠키 플래그 문제, 캐시 가능한 응답, 각각 영향받는 호스트 표시">
@@ -37,6 +39,8 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 ```bash
 gori run probe                       # passive issues
 gori run probe --active              # include active checks (sends probe requests)
+gori run probe --active --unsafe     # also re-send unsafe methods (may mutate server data)
+gori run probe --active --aggressive # wider caps + unsafe methods (authorized targets only)
 gori run probe --severity high       # only high-severity
 gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)

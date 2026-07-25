@@ -13,7 +13,9 @@ gori includes automated analysis that runs alongside your manual testing. **Prob
 
 **Probe** groups security issues by type and severity. Its passive checks run as you browse (with zero extra requests), inspecting **History** flows and **Repeater** send results.
 
-Its **active** checks are deliberately *light-touch*: a handful of safe, low-volume probes over traffic you've already captured. Only safe methods (`GET` / `HEAD`) are probed, each unique surface is tested once, and nothing goes out until you arm active mode. It's built to confirm a quick hunch (a parameter reflects, an origin is honored) while keeping your footprint quiet.
+Its **active** checks are deliberately *light-touch*: a handful of safe, low-volume probes over traffic you've already captured. By default only safe methods (`GET` / `HEAD`) are probed, each unique surface is tested once, and nothing goes out until you arm active mode. It's built to confirm a quick hunch (a parameter reflects, an origin is honored) while keeping your footprint quiet.
+
+Re-sending an unsafe method (`POST` / `PUT` / `PATCH` / `DELETE`) can mutate server state, so it is always opt-in. Tick **unsafe methods** in the per-flow *Run active scan* popup for a single deliberate re-send, or switch Probe to **AGGRESSIVE** mode, which also probes unsafe methods automatically and raises the per-rule caps (wider param sets, a wider forbidden-bypass header set). Both stay inside your project scope, so an out-of-scope host is never touched.
 
 <figure class="tui-shot">
   <img src="/images/tui/probe.svg" alt="gori Probe scanner listing passive issues grouped by severity and category: permissive CORS, missing CSP and HSTS, cookie flag issues, and cacheable responses, each with an affected host">
@@ -37,6 +39,8 @@ Run analysis headless. By default it reads what's already captured (History + Re
 ```bash
 gori run probe                       # passive issues
 gori run probe --active              # include active checks (sends probe requests)
+gori run probe --active --unsafe     # also re-send unsafe methods (may mutate server data)
+gori run probe --active --aggressive # wider caps + unsafe methods (authorized targets only)
 gori run probe --severity high       # only high-severity
 gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)

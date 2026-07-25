@@ -70,6 +70,7 @@ gori run <subcommand> [options]
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project scope` | 스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화 |
+| `project sandbox` | 하드 컨테인먼트 샌드박스 게이트 조회 / 설정 (`status`, `on`, `off`) |
 | `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$KEY` 치환) |
 
 읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`).
@@ -202,6 +203,8 @@ gori run probe -a
 ```
 
 `--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`입니다. 기본적으로 패시브 검사를 수행하며, `-a`/`--active` 옵션을 사용하여 액티브 프로브 검사를 포함할 수 있습니다. `-q`/`--query`로 QL 필터를 겁니다.
+
+`--active`와 함께: `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓힙니다(그리고 `--unsafe`를 함의합니다). 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. 인가된 대상에만 사용하세요.
 
 ### run discover {#run-discover}
 
@@ -386,6 +389,25 @@ gori run project scope disable
 | `add` | `--kind=include\|exclude`, `--type=host\|string\|regex`, `--pattern=…` |
 | `delete <rule-id>` | id로 규칙 제거 |
 | `enable` / `disable` | 스코프 필터링 적용 여부 토글 |
+
+#### project sandbox {#run-project-sandbox}
+
+**하드 컨테인먼트** 샌드박스 게이트를 조회하거나 설정합니다. TUI Project NETWORK 토글의 헤드리스 등가물입니다. 켜면 캡처 프록시가 스코프가 허용하는 요청만 전달하고 나머지는 모두 차단합니다. 표시 렌즈일 뿐인 `project scope enable`과는 다릅니다.
+
+```bash
+gori run project sandbox                 # show the current state (status is the default)
+gori run project sandbox status --format json
+gori run project sandbox on              # start blocking out-of-scope traffic
+gori run project sandbox off             # stop blocking
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) / `status` | 게이트 상태 표시; `--format`은 `text` 또는 `json` |
+| `on` / `enable` | 스코프가 허용하지 않는 모든 요청 차단 |
+| `off` / `disable` | 차단 중지 |
+
+> include 규칙이 없으면 샌드박스를 켤 때 규칙을 추가하기 전까지 **모든** 캡처 트래픽이 차단됩니다(`gori run project scope add …`). 이 명령은 경고 후 진행하므로 CI에서 컨테인먼트를 부트스트랩할 수 있습니다.
 
 #### project env {#run-project-env}
 

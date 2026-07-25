@@ -70,6 +70,7 @@ gori run <subcommand> [options]
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `project [list]` | List known projects |
 | `project scope` | List / add / delete / enable / disable scope rules |
+| `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
 | `project env` | List / set / delete project env vars (`$KEY` substitution) |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`).
@@ -202,6 +203,8 @@ gori run probe -a
 ```
 
 `--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`; `-a`/`--active` includes light-touch active checks; `-q`/`--query` filters with QL.
+
+With `--active`: `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`), whose re-sends may mutate server data; `--aggressive` raises the per-rule caps and widens the forbidden-bypass header set (and implies `--unsafe`). Both stay scope-gated unless you also pass `--allow-unscoped`. Use them only against authorized targets.
 
 ### run discover
 
@@ -386,6 +389,25 @@ gori run project scope disable
 | `add` | `--kind=include\|exclude`, `--type=host\|string\|regex`, `--pattern=…` |
 | `delete <rule-id>` | Remove a rule by id |
 | `enable` / `disable` | Toggle whether scope filtering is applied |
+
+#### project sandbox
+
+Get or set the **hard-containment** sandbox gate, the headless equivalent of the TUI Project NETWORK toggle. When on, the capture proxy forwards only requests the scope allows and blocks everything else. This is distinct from `project scope enable`, which is only the display lens.
+
+```bash
+gori run project sandbox                 # show the current state (status is the default)
+gori run project sandbox status --format json
+gori run project sandbox on              # start blocking out-of-scope traffic
+gori run project sandbox off             # stop blocking
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) / `status` | Show the gate state; `--format` is `text` or `json` |
+| `on` / `enable` | Block every request the scope does not allow |
+| `off` / `disable` | Stop blocking |
+
+> With no include rule, turning the sandbox on blocks **all** captured traffic until you add one (`gori run project scope add …`). The command warns and proceeds, so it can bootstrap containment for CI.
 
 #### project env
 
