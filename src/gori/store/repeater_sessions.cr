@@ -97,12 +97,12 @@ module Gori
       list = [] of RepeaterRecord
       @db.query(
         "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, " \
-        "name, response_head, response_error, response_duration_us FROM repeaters ORDER BY position, id") do |rs|
+        "name, tags, response_head, response_error, response_duration_us FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            sni: rs.read(String?), name: rs.read(String?),
+            sni: rs.read(String?), name: rs.read(String?), tags: rs.read(String?),
             response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?))
         end
       end

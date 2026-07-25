@@ -3,6 +3,80 @@ module Gori
   module CLI
     module Run
       private def self.cmd_sitemap(args : Array(String)) : Nil
+        # `tag` is reserved as the first positional; a QL query starting with it goes
+        # through --query (same convention as `gori run probe`'s subcommands).
+        return cmd_sitemap_tag(args[1..]) if args.first? == "tag"
+        cmd_sitemap_tree(args)
+      end
+
+      # Pin (or clear) a free-text memo on one path — the TUI Sitemap tab's `t`. The tree
+      # already READ tags (stamp_tags! below); this is the write side.
+      private def self.cmd_sitemap_tag(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        host : String? = nil
+        path : String? = nil
+        tag : String? = nil
+        clear = false
+        list = false
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run sitemap tag --host=H --path=P --tag=TEXT\n" \
+                     "       gori run sitemap tag --list [--host=H]\n\n" \
+                     "Pin a free-text memo onto one sitemap path (the same tags the TUI Sitemap\n" \
+                     "tab shows). --path is the path AS THE TREE SHOWS IT, including any query\n" \
+                     "string — that is the key a tag is stored under."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--host=HOST", "Host the path belongs to") { |v| host = v }
+          p.on("--path=PATH", "URL path, e.g. /api/users") { |v| path = v }
+          p.on("--tag=TEXT", "The memo to pin") { |v| tag = v }
+          p.on("--clear", "Remove the tag on --host/--path") { clear = true }
+          p.on("--list", "List existing tags instead of setting one") { list = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run sitemap tag: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run sitemap tag: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          if list
+            rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
+            rows = rows.select { |(k, _)| k[0] == host } if host
+            STDERR.puts "no tags" if rows.empty?
+            rows.each { |(k, t)| puts "#{k[0]}#{k[1]}\t#{t}" }
+            return
+          end
+          # Copy into plain locals first: `host`/`path`/`tag` are captured by the OptionParser
+          # blocks, so Crystal keeps them nilable and `x || abort` does not narrow them.
+          h = host
+          pth = path
+          t = tag
+          abort "gori run sitemap tag: --host is required" if h.nil?
+          abort "gori run sitemap tag: --path is required" if pth.nil?
+          abort "gori run sitemap tag: pass --tag=TEXT or --clear" if t.nil? && !clear
+          abort "gori run sitemap tag: --tag and --clear are mutually exclusive" if t && clear
+          key = sitemap_tag_path(pth)
+          text = clear ? "" : t.to_s
+          store.set_sitemap_tag(h, key, text)
+          puts text.empty? ? "Tag cleared on #{h}#{key}." : "Tagged #{h}#{key}: #{text}"
+        ensure
+          store.close
+        end
+      end
+
+      # A tag's key is the node path the tree stamps, which Sitemap.normalize_path produces —
+      # and that KEEPS the query string ("/login?a=1" is a distinct node from "/login").
+      # Normalizing through the same function is what makes a tag set here the one the TUI
+      # Sitemap tab shows; stripping the query would file it under a key no node ever has.
+      private def self.sitemap_tag_path(target : String) : String
+        path = Sitemap.normalize_path(target.strip)
+        return "/" if path.empty?
+        path.starts_with?('/') || path.starts_with?("http") ? path : "/#{path}"
+      end
+
+      private def self.cmd_sitemap_tree(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         query : String? = nil

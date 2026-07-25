@@ -2038,7 +2038,6 @@ describe Gori::MCP::Serialize do
     text.valid_encoding?.should be_true
     text.should contain("A")
   end
-
 end
 
 describe Gori::MCP::RequestBuilder do
@@ -2370,6 +2369,127 @@ describe "MCP env reload (R2-3)" do
       ensure
         Gori::Settings.project_env_vars = [] of {String, String}
       end
+    end
+  end
+end
+
+# Small CRUD gaps that used to be TUI-only: issue delete, scope-rule edit-in-place,
+# sitemap tags, and repeater tags.
+private def tools_for(store) : Gori::MCP::Tools
+  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+end
+
+private def ok_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any
+  r = tools.call(name, JSON.parse(args))
+  fail "tool #{name} errored: #{r.text}" if r.is_error
+  JSON.parse(r.text)
+end
+
+describe "MCP delete_issue" do
+  it "removes the issue and its entity links" do
+    with_store do |store|
+      rid = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      id = store.insert_issue("boom", Gori::Store::Severity::High, "acme.test", nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, id, Gori::Store::LinkRefKind::Repeater, rid)
+      tools = tools_for(store)
+
+      ok_json(tools, "delete_issue", %({"id":#{id}}))["deleted"].as_bool.should be_true
+      store.get_issue(id).should be_nil
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, id).empty?.should be_true
+
+      tools.call("delete_issue", JSON.parse(%({"id":#{id}}))).is_error.should be_true # already gone
+    end
+  end
+end
+
+describe "MCP update_scope_rule" do
+  it "edits a rule in place, keeping its id and defaulting unspecified fields" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "old.test")
+      id = Gori::Scope.load(store).rules.first.id
+      tools = tools_for(store)
+
+      res = ok_json(tools, "update_scope_rule", %({"id":#{id},"pattern":"new.test"}))
+      res["id"].as_i64.should eq(id) # same rule, not delete + re-add
+      res["kind"].as_s.should eq("include")
+      res["match_type"].as_s.should eq("host")
+
+      rule = Gori::Scope.load(store).rules.first
+      rule.id.should eq(id)
+      rule.pattern.should eq("new.test")
+      rule.kind.should eq("include")
+    end
+  end
+
+  it "rejects an unknown id and an invalid field" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "a.test")
+      id = Gori::Scope.load(store).rules.first.id
+      tools = tools_for(store)
+      tools.call("update_scope_rule", JSON.parse(%({"id":9999,"pattern":"x"}))).is_error.should be_true
+      tools.call("update_scope_rule", JSON.parse(%({"id":#{id},"kind":"bogus"}))).is_error.should be_true
+      # An invalid regex must not land in the gate.
+      tools.call("update_scope_rule", JSON.parse(%({"id":#{id},"match_type":"regex","pattern":"[bad"}))).is_error.should be_true
+      Gori::Scope.load(store).rules.first.pattern.should eq("a.test")
+    end
+  end
+end
+
+describe "MCP sitemap tags" do
+  it "sets, lists, clears, and stamps a tag onto the matching list_sitemap entry" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/login?a=1", http_version: "HTTP/1.1",
+        head: "GET /login?a=1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      tools = tools_for(store)
+
+      res = ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/login?a=1","tag":"auth entry"}))
+      res["tag"].as_s.should eq("auth entry")
+
+      tags = ok_json(tools, "list_sitemap_tags", "{}").as_a
+      tags.size.should eq(1)
+      tags.first["path"].as_s.should eq("/login?a=1")
+
+      entry = ok_json(tools, "list_sitemap", "{}").as_a.first
+      entry["tag"].as_s.should eq("auth entry")
+
+      ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/login?a=1"}))["cleared"].as_bool.should be_true
+      ok_json(tools, "list_sitemap_tags", "{}").as_a.empty?.should be_true
+    end
+  end
+
+  it "keys tags on the path INCLUDING the query, matching the Sitemap tree" do
+    with_store do |store|
+      tools = tools_for(store)
+      ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/login?a=1","tag":"with-query"}))
+      ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/login","tag":"bare"}))
+      # Two DISTINCT nodes — stripping the query would collapse them and file the tag
+      # under a key the tree never looks up.
+      store.sitemap_tags[{"acme.test", "/login?a=1"}]?.should eq("with-query")
+      store.sitemap_tags[{"acme.test", "/login"}]?.should eq("bare")
+    end
+  end
+end
+
+describe "MCP repeater tags" do
+  it "sets and clears tags through update_repeater, and lists them back" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      tools = tools_for(store)
+
+      ok_json(tools, "update_repeater", %({"id":#{id},"tags":"auth prod"}))
+      # repeaters_mcp is the loader every listing surface reads — it must SELECT tags,
+      # or a stored tag reads back as nil everywhere but the TUI.
+      store.repeaters_mcp.first.tags.should eq("auth prod")
+
+      ok_json(tools, "update_repeater", %({"id":#{id},"tags":""}))
+      store.repeaters_mcp.first.tags.should be_nil
     end
   end
 end

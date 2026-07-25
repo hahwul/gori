@@ -221,6 +221,7 @@ module Gori
           j.field "auto_content_length", r.auto_content_length?
           j.field "flow_id", r.flow_id if r.flow_id
           j.field "name", r.name if r.name
+          j.field "tags", r.tags if r.tags
           j.field "sni", r.sni if r.sni
           r_request_text = String.new(r.request).scrub
           emit_capped_text(j, "request", Serialize.redact_head(r_request_text, include_sensitive)) if include_content

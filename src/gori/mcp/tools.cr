@@ -92,6 +92,7 @@ module Gori
         "create_issue", "update_issue",
         "probe_dismiss", "probe_promote", "probe_delete",
         "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
+        "delete_issue", "update_scope_rule", "set_sitemap_tag",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -496,8 +497,10 @@ module Gori
             "Distinct endpoints discovered in capture, keyed by TRANSPORT " \
             "(scheme, host, port, http_version, method, target) so the same path over " \
             "http vs https vs HTTP/2 stays separate — each with its observed status set, " \
-            "success/error counts, and first/last-seen. Pass collapse_transport:true for " \
-            "the legacy host/method/target-only view. Optional QL `query` filter." do |s|
+            "success/error counts, and first/last-seen. An entry also carries a `tag` field " \
+            "when the operator pinned a memo on that path (see set_sitemap_tag). Pass " \
+            "collapse_transport:true for the legacy host/method/target-only view. " \
+            "Optional QL `query` filter." do |s|
             s.field "query", strprop("gori QL filter")
             s.field "limit", intprop("max entries (default 200, max 5000)")
             s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
@@ -548,6 +551,12 @@ module Gori
             s.field "host", strprop("only return findings for this exact host")
             s.field "limit", intprop("max rows (default 100, max 500)")
             s.field "offset", intprop("start row (default 0)")
+          end
+
+          tool j, "list_sitemap_tags",
+            "List the free-text memos the operator pinned onto sitemap paths, as " \
+            "[{host, path, tag}]. These are the same tags list_sitemap stamps onto its entries." do |s|
+            s.field "host", strprop("only list tags on this host")
           end
 
           tool j, "list_probe_rules",
@@ -967,6 +976,7 @@ module Gori
               s.field "auto_content_length", boolprop("auto-calculate Content-Length")
               s.field "sni", strprop("TLS SNI override")
               s.field "name", strprop("custom name for the repeater tab")
+              s.field "tags", strprop("free-text tags for grouping tabs (the TUI subtab label); empty string clears them")
               s.field "ws_out_messages", arr_or_str_prop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
             end
 
@@ -1054,6 +1064,31 @@ module Gori
             tool j, "delete_probe_rule",
               "Delete a project custom rule. A built-in can only be DISABLED, never deleted." do |s|
               s.field "id", strprop("custom rule id from list_probe_rules (custom_p_…)"), required: true
+            end
+
+            tool j, "delete_issue",
+              "Delete an issue outright, along with its entity links. Distinct from setting " \
+              "status resolved/false-positive, which KEEPS it in the report." do |s|
+              s.field "id", intprop("issue id"), required: true
+            end
+
+            tool j, "update_scope_rule",
+              "Edit an existing scope rule in place (ids from list_scope). Every field defaults " \
+              "to the rule's current value, so you can change just the pattern. Prefer this over " \
+              "delete + re-add, which changes the id and briefly drops the rule from the gate." do |s|
+              s.field "id", intprop("scope rule id"), required: true
+              s.field "kind", strprop("include|exclude (default: unchanged)")
+              s.field "match_type", strprop("host|string|regex (default: unchanged)")
+              s.field "pattern", strprop("new pattern (default: unchanged)")
+            end
+
+            tool j, "set_sitemap_tag",
+              "Pin a free-text memo onto one sitemap endpoint, or clear it with an empty/absent " \
+              "`tag`. Keyed by the URL PATH (no query string) exactly as the Sitemap tree stamps " \
+              "it, so a tag set here is the one the TUI Sitemap tab shows." do |s|
+              s.field "host", strprop("host the path belongs to"), required: true
+              s.field "path", strprop("URL path, e.g. /api/users (query string is ignored)"), required: true
+              s.field "tag", strprop("the memo; empty or absent CLEARS the tag")
             end
 
             tool j, "set_probe_mode",
@@ -1384,6 +1419,7 @@ module Gori
         when "probe_scan"              then probe_scan(h)
         when "probe_issues"            then probe_issues(h)
         when "list_probe_rules"        then list_probe_rules(h)
+        when "list_sitemap_tags"       then list_sitemap_tags(h)
         when "list_scope"              then list_scope
         when "list_env"                then list_env(h)
         when "list_host_overrides"     then list_host_overrides
@@ -1445,6 +1481,9 @@ module Gori
         when "update_probe_rule"       then gated { update_probe_rule(h) }
         when "delete_probe_rule"       then gated { delete_probe_rule(h) }
         when "set_probe_mode"          then gated { set_probe_mode(h) }
+        when "delete_issue"            then gated { delete_issue(h) }
+        when "update_scope_rule"       then gated { update_scope_rule(h) }
+        when "set_sitemap_tag"         then gated { set_sitemap_tag(h) }
         when "fuzz_start"              then gated { fuzz_start(h) }
         when "fuzz_status"             then gated { fuzz_status(h) }
         when "fuzz_results"            then gated { fuzz_results(h) }

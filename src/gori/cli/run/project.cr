@@ -315,6 +315,8 @@ module Gori
         case sub
         when "add"
           cmd_scope_add(args[1..])
+        when "update", "edit"
+          cmd_scope_update(args[1..])
         when "delete", "rm"
           cmd_scope_delete(args[1..])
         when "enable"
@@ -389,6 +391,61 @@ module Gori
               end
             end
           end
+        ensure
+          store.close
+        end
+      end
+
+      # Edit a rule in place (the TUI scope list's `e`). Without this the only fix for a typo'd
+      # pattern was delete + re-add, which changes the rule's id and briefly drops it from the
+      # gate that decides what traffic may be probed.
+      private def self.cmd_scope_update(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        kind : String? = nil
+        match_type : String? = nil
+        pattern : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project scope update <id> [options]\n\n" \
+                     "Change an existing scope rule. Every field keeps its current value unless\n" \
+                     "you pass it, so you can edit just the pattern."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude") { |v| kind = v }
+          p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex") { |v| match_type = v }
+          p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match") { |v| pattern = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run project scope update: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project scope update: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id_s = positional.first? || abort("gori run project scope update: <id> is required (see `gori run project scope list`)")
+        id = id_s.to_i64? || abort("gori run project scope update: invalid rule id #{id_s.inspect}")
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          existing = scope.rules.find { |r| r.id == id } ||
+                     abort("gori run project scope update: no scope rule with id #{id}")
+          # `kind`/`match_type`/`pattern` are captured by the OptionParser blocks, so Crystal
+          # keeps them nilable and `x || fallback` does not narrow — force a String each.
+          new_kind = (kind || existing.kind).to_s
+          new_type = (match_type || existing.match_type).to_s
+          new_pattern = (pattern.try(&.strip).presence || existing.pattern).to_s
+          abort "gori run project scope update: invalid kind '#{new_kind}' (must be include or exclude)" unless new_kind.in?(Scope::KINDS)
+          abort "gori run project scope update: invalid type '#{new_type}' (must be host, string, or regex)" unless new_type.in?(Scope::TYPES)
+          if err = Scope.validation_error(new_type, new_pattern)
+            abort "gori run project scope update: #{err}"
+          end
+          unless store.update_scope_rule(id, new_kind, new_type, new_pattern)
+            abort "gori run project scope update: rule NOT updated (store busy or unwritable); it is unchanged and still gates traffic"
+          end
+          puts "Scope rule ##{id} updated: #{new_kind} #{new_type} #{new_pattern}"
         ensure
           store.close
         end

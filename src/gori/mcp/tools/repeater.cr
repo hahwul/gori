@@ -187,6 +187,13 @@ module Gori
           store.set_repeater_name(id, name)
         end
 
+        # Tags are the TUI's subtab labels (the `t` key) — the grouping a human uses to keep a
+        # long session navigable. An explicit blank clears them.
+        if present?(h, "tags")
+          tags = str(h, "tags").try { |t| Env.mask_secrets(t).strip }
+          store.set_repeater_tags(id, tags.presence)
+        end
+
         # WebSocket messages handling
         if present?(h, "ws_out_messages")
           messages = [] of String

@@ -46,6 +46,7 @@ module Gori
                     j.field "id", r.id
                     j.field "position", r.position
                     j.field "name", r.name || "Untitled"
+                    j.field "tags", r.tags
                     j.field "target", r.target
                     j.field "http2", r.http2?
                     j.field "auto_content_length", r.auto_content_length?
@@ -73,6 +74,14 @@ module Gori
         end
       end
 
+      # The optional post-insert labels (insert_repeater takes neither). Split out of
+      # cmd_repeater_create, which is already over the cyclomatic-complexity bar.
+      private def self.apply_repeater_metadata(store : Store, id : Int64,
+                                               name : String?, tags : String?) : Nil
+        store.set_repeater_name(id, Env.mask_secrets(name)) if name
+        store.set_repeater_tags(id, Env.mask_secrets(tags).strip.presence) if tags
+      end
+
       private def self.cmd_repeater_create(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -80,6 +89,7 @@ module Gori
         request_file : String? = nil
         request_raw : String? = nil
         name : String? = nil
+        tags : String? = nil
         http2 = false
         http2_given = false
         auto_cl = true
@@ -94,6 +104,7 @@ module Gori
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
+          p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI subtab label)") { |v| tags = v }
           p.on("--http2", "Use HTTP/2 (default: false)") { http2 = true; http2_given = true }
           p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
           p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v, "gori run repeater create") }
@@ -171,9 +182,7 @@ module Gori
 
           abort "gori run repeater create: failed to create repeater session" if id == 0
 
-          if n = name
-            store.set_repeater_name(id, Env.mask_secrets(n))
-          end
+          apply_repeater_metadata(store, id, name, tags)
 
           if is_ws && !ws_messages.empty?
             store.update_repeater_ws_messages(id, ws_messages)

@@ -33,6 +33,40 @@ module Gori
         end)
       end
 
+      # Edit an existing rule in place (the TUI's `e` on the scope list). Without this, the only
+      # way to fix a typo'd pattern was delete + re-add, which changes the rule's id and — for a
+      # moment — leaves the scope gate without it.
+      private def update_scope_rule(h) : Result
+        id = int(h, "id")
+        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        scope = Scope.load(store)
+        existing = scope.rules.find { |r| r.id == id }
+        return not_found("no scope rule with id #{id}") unless existing
+
+        # Every field defaults to the rule's CURRENT value, so a caller can change just the
+        # pattern without restating kind/match_type.
+        kind = str(h, "kind").try(&.strip.downcase) || existing.kind
+        return err("invalid 'kind' (expected include|exclude)", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
+        match_type = str(h, "match_type").try(&.strip.downcase) || existing.match_type
+        return err("invalid 'match_type' (expected host|string|regex)", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
+        pattern = str(h, "pattern").try(&.strip).presence || existing.pattern
+        if e = Scope.validation_error(match_type, pattern)
+          return err(e, "INVALID_ARGUMENT", field: "pattern")
+        end
+
+        unless store.update_scope_rule(id, kind, match_type, pattern)
+          return busy("scope rule NOT updated (store busy or unwritable); it is unchanged and still gates traffic")
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "kind", kind
+            j.field "match_type", match_type
+            j.field "pattern", pattern
+          end
+        end)
+      end
+
       private def delete_scope_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id

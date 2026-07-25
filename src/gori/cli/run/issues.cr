@@ -2,15 +2,19 @@
 module Gori
   module CLI
     module Run
+      # Subcommand dispatch only — the listing/export body lives in cmd_issues_list so this
+      # `case` can grow without pushing the (already large) list command over the
+      # cyclomatic-complexity bar.
       private def self.cmd_issues(args : Array(String)) : Nil
-        if args.first? == "create"
-          cmd_issues_create(args[1..])
-          return
-        elsif args.first? == "update"
-          cmd_issues_update(args[1..])
-          return
+        case args.first?
+        when "create"       then cmd_issues_create(args[1..])
+        when "update"       then cmd_issues_update(args[1..])
+        when "delete", "rm" then cmd_issues_delete(args[1..])
+        else                     cmd_issues_list(args)
         end
+      end
 
+      private def self.cmd_issues_list(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         format = :text
@@ -20,7 +24,8 @@ module Gori
           p.banner = "Usage: gori run issues [options]\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run issues create [options]\n" \
-                     "  gori run issues update <issue-id> [options]"
+                     "  gori run issues update <issue-id> [options]\n" \
+                     "  gori run issues delete <issue-id>"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json | markdown") { |v| format = parse_format(v, [:text, :json, :markdown]) }
@@ -106,6 +111,39 @@ module Gori
           id = store.insert_issue(masked_title, severity, masked_host, flow_id)
           abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
           puts "Issue ##{id} created successfully."
+        ensure
+          store.close
+        end
+      end
+
+      # Remove an issue outright. Distinct from `update --status=resolved|false-positive`,
+      # which KEEPS it in the report — this drops it and its entity links.
+      private def self.cmd_issues_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run issues delete <id>\n\n" \
+                     "Delete an issue and its links. To keep it in the report but mark it closed,\n" \
+                     "use `gori run issues update <id> --status=resolved` instead."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run issues delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run issues delete: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id_s = positional.first? || abort("gori run issues delete: <id> is required")
+        id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          abort "gori run issues delete: no issue with id #{id}" unless store.get_issue(id)
+          abort "gori run issues delete: issue NOT deleted (store busy or unwritable)" unless store.delete_issue(id)
+          puts "Issue ##{id} deleted."
         ensure
           store.close
         end

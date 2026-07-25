@@ -125,6 +125,17 @@ module Gori
           end
         end)
       end
+
+      # Remove an issue outright (the TUI Issues tab's delete). Distinct from status
+      # "resolved"/"false-positive", which keep it in the report — this drops it, along with
+      # its entity links (Store#delete_issue clears those in the same transaction).
+      private def delete_issue(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        return not_found("no issue with id #{id}") unless store.get_issue(id)
+        return busy("issue NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_issue(id)
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+      end
     end
   end
 end
