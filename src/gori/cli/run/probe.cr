@@ -23,8 +23,10 @@ module Gori
                      "Scan captured History flows AND Repeater responses for issues —\n" \
                      "the headless equivalent of the TUI Probe tab. By default runs passive checks\n" \
                      "(zero outbound requests). Pass --active to also run active checks (reflected\n" \
-                     "params, CORS reflection, 403 bypass, nginx traversal, etc.). QL filters\n" \
-                     "apply to History only; all Repeater tabs with a stored response are scanned."
+                     "params, CORS/host-header reflection, open redirect, CRLF injection, 403/path/\n" \
+                     "header access-control bypass, nginx & parameter traversal, GraphQL\n" \
+                     "introspection, SSTI, etc.). QL filters apply to History only; all Repeater\n" \
+                     "tabs with a stored response are scanned."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }

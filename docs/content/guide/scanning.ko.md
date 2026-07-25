@@ -30,7 +30,7 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 | `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임 |
 | `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; 액티브 origin 반사 |
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
-| `active` | light-touch 프로브로 확인됨(예: 반사되는 파라미터). TUI 액티브 스캔 전용 |
+| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI). GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록) |
 
 심각도는 `info`, `low`, `medium`, `high`, `critical` 순입니다. 헤드리스 `gori run probe`는 기본적으로 **패시브** 체크를 실행하며, `--active` 플래그를 추가하면 액티브 체크도 함께 수행합니다.
 

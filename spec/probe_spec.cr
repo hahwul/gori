@@ -16,6 +16,19 @@ private class CountingBackend < Gori::Fuzz::Backend
   end
 end
 
+# A backend that returns one fixed response for every probe, so an Active.analyze integration test
+# can drive the full plan → send → detections dispatch without a socket.
+private class FixedBackend < Gori::Fuzz::Backend
+  getter origin : Gori::Fuzz::Origin
+
+  def initialize(@origin : Gori::Fuzz::Origin, @head : String, @body : String = "")
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    Gori::Repeater::Result.new(@head.to_slice, @body.empty? ? Bytes.empty : @body.to_slice, nil, 1_i64)
+  end
+end
+
 private def with_store(&)
   path = File.tempname("gori-probe", ".db")
   store = Gori::Store.open(path)
@@ -2329,9 +2342,11 @@ describe "Gori::Probe::Active (manual run estimate)" do
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       est = a.active_estimate(detail)
-      est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "reflected_param"])
-      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤7 for one param) = 9
-      est.sum { |e| e.requests.end }.should eq(9)
+      # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection and ssti,
+      # which reuse the same reflectable-query-param gate.
+      est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "ssti"])
+      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤7) + crlf_injection (1) + ssti (2) = 12
+      est.sum { |e| e.requests.end }.should eq(12)
     end
   end
 
@@ -2343,8 +2358,9 @@ describe "Gori::Probe::Active (manual run estimate)" do
         target: "/search?q=hi")
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
-      # RULES order: reflected_param, then backslash_powered (cors_reflection is disabled).
-      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered"])
+      # RULES order (cors_reflection disabled): reflected_param, backslash_powered, then the other
+      # reflectable-query-param rules crlf_injection and ssti.
+      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "crlf_injection", "ssti"])
     end
   end
 
@@ -2565,5 +2581,636 @@ describe "Gori::Probe::Passive::JsScan (ASCII fast path)" do
       "el.innerHTML = location.hash;\n// el.innerHTML = document.cookie;\n")
     Gori::Probe::Passive::JsScan.source_sink_pairs(code)
       .should eq([{"location.hash", "innerHTML"}])
+  end
+end
+
+describe "Gori::Probe::Active.url_authority" do
+  ua = ->(s : String) { Gori::Probe::Active.url_authority(s) }
+
+  it "parses an absolute URL's host (and port), lower-cased" do
+    ua.call("https://gori-redir-probe.example").should eq({"gori-redir-probe.example", nil})
+    ua.call("https://gori-redir-probe.example/x?y=1").should eq({"gori-redir-probe.example", nil})
+    ua.call("https://gori-redir-probe.example:8443/x").should eq({"gori-redir-probe.example", 8443})
+    ua.call("http://HOST.TEST/").should eq({"host.test", nil})
+    ua.call("//scheme-relative.test/x").should eq({"scheme-relative.test", nil})
+    ua.call("http://[::1]:9000/").should eq({"::1", 9000})
+  end
+
+  it "returns the host AFTER userinfo (rejects the user@host redirect trick)" do
+    ua.call("https://gori-redir-probe.example@evil.test/").should eq({"evil.test", nil})
+    ua.call("https://gori-redir-probe.example:pass@evil.test:81/").should eq({"evil.test", 81})
+  end
+
+  it "is nil for a relative value — even one carrying :// inside the query" do
+    ua.call("/go?next=https://evil.test").should be_nil
+    ua.call("relative/path").should be_nil
+    ua.call("/account").should be_nil
+    ua.call("").should be_nil
+  end
+end
+
+describe "Gori::Probe::Active::GraphqlIntrospection" do
+  probe = Gori::Probe::Active::GraphqlIntrospection.new
+  resp = ->(status : Int32, ct : String, body : String) do
+    head = "HTTP/1.1 #{status} X\r\nContent-Type: #{ct}\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, body.empty? ? Bytes.empty : body.to_slice, nil, 1_i64)
+  end
+
+  it "re-POSTs a read-only introspection body when the captured flow was a GraphQL POST" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql", method: "POST",
+        req_headers: "Content-Type: application/json\r\n", req_body: %({"query":"{me{id}}"}))
+      plan = probe.plan(detail).not_nil!
+      req = String.new(plan.request)
+      req.should contain("POST /graphql ")
+      req.should contain("Content-Type: application/json")
+      req.should contain(%({"query":"{__schema{queryType{name}}}"}))
+      req.should_not contain("{me{id}}") # NEVER replays the captured body
+    end
+  end
+
+  it "strips Transfer-Encoding from a chunked source so the POST probe is well-framed" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql", method: "POST",
+        req_headers: "Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n", req_body: "1\r\nx\r\n0\r\n\r\n")
+      req = String.new(probe.plan(detail).not_nil!.request)
+      req.downcase.should_not contain("transfer-encoding")
+      req.should contain("Content-Length:")
+      req.should contain(%({"query":"{__schema{queryType{name}}}"}))
+    end
+  end
+
+  it "sends a GET introspection query for a GET graphql endpoint" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql?x=1", method: "GET")
+      req = String.new(probe.plan(detail).not_nil!.request)
+      req.should contain("GET /graphql?query=%7B__schema")
+      req.should_not contain("x=1") # the original query is replaced, not appended
+    end
+  end
+
+  it "detects introspection from the `\"__schema\":{` result envelope" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql", method: "POST",
+        req_headers: "Content-Type: application/json\r\n", req_body: %({"query":"{me{id}}"}))
+      plan = probe.plan(detail).not_nil!
+      body = %({"data":{"__schema":{"queryType":{"name":"Query"}}}})
+      dets = probe.detections(plan, resp.call(200, "application/json", body), detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("graphql_introspection")
+      dets.first.category.should eq(Gori::Probe::Category::INFOLEAK)
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  it "does not fire on a disabled-introspection error, nor on a query echo" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql?x=1", method: "GET")
+      plan = probe.plan(detail).not_nil!
+      probe.detections(plan, resp.call(200, "application/json",
+        %({"errors":[{"message":"introspection is disabled"}]})), detail).should be_empty
+      # A response that merely echoes the query has `__schema` UNQUOTED — the anchor rejects it.
+      probe.detections(plan, resp.call(200, "application/json",
+        %({"data":null,"query":"{ __schema { queryType { name } } }"})), detail).should be_empty
+    end
+  end
+
+  it "plans nothing for a non-GraphQL flow" do
+    with_store do |store|
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api/users")).should be_nil
+      # A POST with a non-GraphQL JSON body (query is an object, not a string) is not GraphQL.
+      es = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/search", method: "POST",
+        req_headers: "Content-Type: application/json\r\n", req_body: %({"query":{"match_all":{}}}))
+      probe.plan(es).should be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      [{"/graphql", "GET"}, {"/graphql?x=1", "GET"}, {"/api/graphql", "POST"}, {"/graphql", "HEAD"},
+       {"http://acme.test/graphql", "GET"}, {"/users", "GET"}].each do |(t, m)|
+        detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t, method: m)
+        probe.dedup_key(detail).should eq(probe.plan(detail).try(&.dedup_key))
+      end
+      # GET and HEAD both probe with GET → the SAME dedup key (folded).
+      g = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql", method: "GET")
+      h = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/graphql", method: "HEAD")
+      probe.dedup_key(g).should eq(probe.dedup_key(h))
+    end
+  end
+end
+
+describe "Gori::Probe::Active::LfiParamTraversal" do
+  probe = Gori::Probe::Active::LfiParamTraversal.new
+  resp = ->(status : Int32, body : String) do
+    head = "HTTP/1.1 #{status} X\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, body.empty? ? Bytes.empty : body.to_slice, nil, 1_i64)
+  end
+
+  it "plans a fold + encoded-fold + control for a path-like parameter" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "X")
+      plan = probe.plan(detail).not_nil!
+      plan.followups.size.should eq(2)
+      String.new(plan.request).should contain("file=x/../doc.pdf")
+      String.new(plan.followups[0]).should contain("file=x/%2e%2e/doc.pdf")
+      String.new(plan.followups[1]).should contain("file=x/zzznope/doc.pdf")
+    end
+  end
+
+  it "flags High when a folded `..` returns byte-identical content and the control differs" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "PDFDATA")
+      plan = probe.plan(detail).not_nil!
+      dets = probe.detections_all(plan, [resp.call(200, "PDFDATA"), resp.call(200, "PDFDATA"), resp.call(404, "nope")], detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("lfi_param_traversal")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+      dets.first.evidence.not_nil!.should contain("file")
+    end
+  end
+
+  it "fires on the encoded-fold variant when the literal fold is blocked" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "PDFDATA")
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, [resp.call(403, "blocked"), resp.call(200, "PDFDATA"), resp.call(404, "nope")], detail)
+        .size.should eq(1)
+    end
+  end
+
+  it "does not fire on a catch-all where the control also matches the baseline" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "PDFDATA")
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, [resp.call(200, "PDFDATA"), resp.call(200, "PDFDATA"), resp.call(200, "PDFDATA")], detail)
+        .should be_empty
+    end
+  end
+
+  it "does not fire when the folded value returns different content" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "PDFDATA")
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, [resp.call(200, "OTHER"), resp.call(200, "OTHER"), resp.call(404, "nope")], detail)
+        .should be_empty
+    end
+  end
+
+  it "gates on a path-like param, 2xx, a body, and a safe method" do
+    with_store do |store|
+      # Not path-like (no `/`, no extension, unknown name).
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", body: "X")).should be_nil
+      # A known file-ish name qualifies even without an extension.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=secret", body: "X")).should_not be_nil
+      # Captured non-2xx / no body / value already traversing / unsafe method → nil.
+      probe.plan(capture_flow(store, "HTTP/1.1 404 NF\r\n\r\n", target: "/dl?file=doc.pdf", body: "X", status: 404)).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=../etc/passwd", body: "X")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "X", method: "POST")).should be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/dl?file=doc.pdf", "/dl?file=secret", "/s?q=hi", "/dl?file=../x",
+       "/p?page=home.html&x=1", "http://acme.test/dl?file=a.pdf"].each do |t|
+        detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t, body: "X")
+        probe.dedup_key(detail).should eq(probe.plan(detail).try(&.dedup_key))
+      end
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "X", method: "POST")
+      probe.dedup_key(post).should be_nil
+      probe.plan(post).should be_nil
+    end
+  end
+end
+
+describe "Gori::Probe::Active::OpenRedirect" do
+  probe = Gori::Probe::Active::OpenRedirect.new
+  resp = ->(status : Int32, location : String) do
+    head = location.empty? ? "HTTP/1.1 #{status} X\r\n\r\n" : "HTTP/1.1 #{status} X\r\nLocation: #{location}\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, Bytes.empty, nil, 1_i64)
+  end
+
+  it "plans a probe replacing the redirect-driving parameter with the probe host" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 302 Found\r\nLocation: https://acme.test/cb\r\n\r\n",
+        target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)
+      plan = probe.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["next"])
+      String.new(plan.request).should contain("next=https%3A%2F%2Fgori-redir-probe.example")
+    end
+  end
+
+  it "mirrors the captured value's encoding (literal :// gets a literal probe URL)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 302 Found\r\nLocation: https://acme.test/cb\r\n\r\n",
+        target: "/login?next=https://acme.test/cb", status: 302)
+      req = String.new(probe.plan(detail).not_nil!.request)
+      req.should contain("next=https://gori-redir-probe.example")
+    end
+  end
+
+  it "flags High when the probe Location follows to the probe host" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 302 Found\r\nLocation: https://acme.test/cb\r\n\r\n",
+        target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)
+      plan = probe.plan(detail).not_nil!
+      dets = probe.detections(plan, resp.call(302, "https://gori-redir-probe.example/cb"), detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("open_redirect")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+    end
+  end
+
+  it "does not fire on a relative Location, the userinfo trick, or a non-redirect" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 302 Found\r\nLocation: https://acme.test/cb\r\n\r\n",
+        target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)
+      plan = probe.plan(detail).not_nil!
+      probe.detections(plan, resp.call(302, "/dashboard"), detail).should be_empty
+      probe.detections(plan, resp.call(302, "https://gori-redir-probe.example@evil.test/"), detail).should be_empty
+      probe.detections(plan, resp.call(200, ""), detail).should be_empty
+    end
+  end
+
+  it "gates on a 3xx whose Location authority a parameter drives" do
+    with_store do |store|
+      # Captured 200 → not a redirect.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n",
+        target: "/login?next=https%3A%2F%2Facme.test%2Fcb")).should be_nil
+      # Redirect to a relative Location → no absolute target for a param to drive.
+      probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /home\r\n\r\n",
+        target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)).should be_nil
+      # Redirect present but no parameter matches its authority.
+      probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: https://acme.test/cb\r\n\r\n",
+        target: "/login?foo=bar", status: 302)).should be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/login?next=https%3A%2F%2Facme.test%2Fcb", "/go?u=https%3A%2F%2Facme.test%2Fx&t=1",
+       "/login?foo=bar"].each do |t|
+        detail = capture_flow(store, "HTTP/1.1 302 F\r\nLocation: https://acme.test/cb\r\n\r\n",
+          target: t, status: 302)
+        probe.dedup_key(detail).should eq(probe.plan(detail).try(&.dedup_key))
+      end
+      plain = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/login?next=https%3A%2F%2Facme.test%2Fcb")
+      probe.dedup_key(plain).should be_nil
+    end
+  end
+
+  it "surfaces through the full Active.analyze dispatch (plan → send → detections)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 302 Found\r\nLocation: https://acme.test/cb\r\n\r\n",
+        target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)
+      backend = FixedBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443),
+        "HTTP/1.1 302 Found\r\nLocation: https://gori-redir-probe.example/cb\r\n\r\n")
+      Gori::Probe::Active.analyze(detail, backend: backend).map(&.code).should contain("open_redirect")
+    end
+  end
+end
+
+describe "Gori::Probe::Active::HostHeaderInjection" do
+  probe = Gori::Probe::Active::HostHeaderInjection.new
+  body_resp = ->(body : String) do
+    Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, body.to_slice, nil, 1_i64)
+  end
+  loc_resp = ->(location : String) do
+    Gori::Repeater::Result.new("HTTP/1.1 302 F\r\nLocation: #{location}\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+  end
+
+  it "plans one authoritative X-Forwarded-Host, dropping any the browser sent" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public, max-age=600\r\n\r\n",
+        target: "/page", req_headers: "X-Forwarded-Host: original.test\r\n")
+      req = String.new(probe.plan(detail).not_nil!.request)
+      req.should contain("X-Forwarded-Host: gori-host-probe.example")
+      req.should_not contain("original.test")
+    end
+  end
+
+  it "flags Medium when the probe host is reflected as an absolute-URL authority" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public, max-age=600\r\n\r\n", target: "/page")
+      plan = probe.plan(detail).not_nil!
+      dets = probe.detections(plan, body_resp.call("<a href='https://gori-host-probe.example/reset?token=abc'>x</a>"), detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("host_header_injection")
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
+      probe.detections(plan, loc_resp.call("https://gori-host-probe.example/x"), detail).size.should eq(1)
+    end
+  end
+
+  it "does not fire on a bare mention, a path segment, or a longer hostname" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public\r\n\r\n", target: "/page")
+      plan = probe.plan(detail).not_nil!
+      probe.detections(plan, body_resp.call("see /gori-host-probe.example/ and gori-host-probe.example.evil.com"), detail)
+        .should be_empty
+    end
+  end
+
+  it "gates on a host-reflection-prone captured response" do
+    with_store do |store|
+      # Cacheable → prone.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public, max-age=600\r\n\r\n", target: "/p")).should_not be_nil
+      # Self-referential (body reflects own Host as an authority) → prone.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", body: "<a href='https://acme.test/x'>x</a>")).should_not be_nil
+      # Neither cacheable nor self-referential → nil.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\n\r\n", target: "/p", body: "no urls")).should be_nil
+      # A cacheable NON-HTML asset (JS/CSS/image) is not a host-reflection surface → not probed.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public, max-age=600\r\n\r\n", target: "/app.js", content_type: "application/javascript")).should be_nil
+      # A redirect that reflects its own Host is prone regardless of content type.
+      probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: https://acme.test/next\r\n\r\n", target: "/r", status: 302, content_type: nil)).should_not be_nil
+      # Unsafe method not probed by default.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public\r\n\r\n", target: "/p", method: "POST")).should be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/page", "/a?x=1", "http://acme.test/b"].each do |t|
+        d = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public\r\n\r\n", target: t)
+        probe.dedup_key(d).should eq(probe.plan(d).try(&.dedup_key))
+      end
+      none = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\n\r\n", target: "/p", body: "nope")
+      probe.dedup_key(none).should be_nil
+      probe.plan(none).should be_nil
+    end
+  end
+end
+
+describe "Gori::Probe::Active::CrlfInjection" do
+  probe = Gori::Probe::Active::CrlfInjection.new
+
+  it "injects an encoded CRLF + per-parameter canary into every query value" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi&r=yo")
+      plan = probe.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["q", "r"])
+      req = String.new(plan.request)
+      req.should contain("q=hi%0d%0aGori-Probe:%20gq")
+      req.should contain("r=yo%0d%0aGori-Probe:%20gq")
+    end
+  end
+
+  it "flags only the parameter whose canary comes back as a real response header" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi&r=yo")
+      plan = probe.plan(detail).not_nil!
+      qc = plan.params.find { |p| p.name == "q" }.not_nil!.canary
+      result = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nGori-Probe: #{qc}\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      dets = probe.detections(plan, result, detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("crlf_injection")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+      dets.first.evidence.not_nil!.should eq("q")
+    end
+  end
+
+  it "matches a canary reflected with a trailing suffix (mid-header reflection)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      qc = plan.params.first.canary
+      # The param was reflected mid-header, so the split header carries the canary + a suffix.
+      result = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nGori-Probe: #{qc}/dashboard\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, result, detail).size.should eq(1)
+    end
+  end
+
+  it "does not fire on a missing or a static (non-canary) Gori-Probe header" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      probe.detections(plan, Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64), detail).should be_empty
+      probe.detections(plan, Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nGori-Probe: 1\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64), detail).should be_empty
+    end
+  end
+
+  it "gates on a safe method with at least one query parameter" do
+    with_store do |store|
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")).should be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/s?q=1", "/s?a=1&b=2", "/s?flag&x=9", "/s"].each do |t|
+        detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t)
+        probe.dedup_key(detail).should eq(probe.plan(detail).try(&.dedup_key))
+      end
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")
+      probe.dedup_key(post).should be_nil
+      probe.plan(post).should be_nil
+    end
+  end
+end
+
+describe "Gori::Probe::Active::PathNormalizationBypass" do
+  probe = Gori::Probe::Active::PathNormalizationBypass.new
+  resp = ->(status : Int32) { Gori::Repeater::Result.new("HTTP/1.1 #{status} X\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64) }
+
+  it "plans a deterministic set of normalization variants that resolve to the original path" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      plan.params.size.should eq(5)
+      plan.followups.size.should eq(4)
+      String.new(plan.request).should contain("/admin/..;/admin ")
+      # None of the variants collapse to the bare `/admin/` (a known false-positive vector).
+      plan.params.map(&.name).should_not contain("double-slash")
+      req_all = ([plan.request] + plan.followups).map { |b| String.new(b) }.join
+      req_all.should_not contain("/admin// ")
+      req_all.should_not contain("/admin/. ")
+    end
+  end
+
+  it "flags Medium and names the trick when a variant flips to 2xx" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      # Variant index 1 is `leading-dot-slash`.
+      results = [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403)]
+      dets = probe.detections_all(plan, results, detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("path_normalization_bypass")
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
+      dets.first.evidence.not_nil!.should contain("leading-dot-slash")
+    end
+  end
+
+  it "does not fire when every variant stays denied, or a variant is 3xx" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, Array.new(5) { resp.call(403) }, detail).should be_empty
+      redir = [resp.call(302), resp.call(403), resp.call(403), resp.call(403), resp.call(403)]
+      probe.detections_all(plan, redir, detail).should be_empty
+    end
+  end
+
+  it "widens the variant set under aggressive opts (still <= 7), with a distinct dedup key" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
+      aggr = Gori::Probe::Active::Options.new(aggressive: true)
+      probe.plan(detail, aggr).not_nil!.params.size.should eq(6)
+      # The aggressive key must differ so an ACTIVE->AGGRESSIVE re-arm actually sends the extra variant.
+      probe.dedup_key(detail, aggr).should_not eq(probe.dedup_key(detail))
+    end
+  end
+
+  it "gates on a safe method, a 401/403 status, and a non-root, non-degenerate path" do
+    with_store do |store|
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/admin")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/", status: 403)).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403, method: "POST")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/a/../b", status: 403)).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 401 F\r\n\r\n", target: "/admin", status: 401)).should_not be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/admin", "/admin?x=1", "/a/b/c", "http://acme.test/admin"].each do |t|
+        d = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: t, status: 403)
+        probe.dedup_key(d).should eq(probe.plan(d).try(&.dedup_key))
+      end
+      ok = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/admin")
+      probe.dedup_key(ok).should be_nil
+      probe.plan(ok).should be_nil
+    end
+  end
+end
+
+describe "Gori::Probe::Active::Ssti" do
+  probe = Gori::Probe::Active::Ssti.new
+  resp = ->(body : String) { Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, body.to_slice, nil, 1_i64) }
+
+  it "plans two canary-wrapped polyglot probes (49 and 56), URL-encoded" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["q"])
+      plan.followups.size.should eq(1)
+      req_a = String.new(plan.request)
+      req_a.should contain(plan.params.first.canary)
+      req_a.should_not contain("{{")                     # the markers are URL-encoded
+      req_a.should_not eq(String.new(plan.followups[0])) # A (7*7) and B (7*8) differ
+    end
+  end
+
+  it "flags High only when BOTH products evaluate inside the parameter's canary region" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      c = plan.params.first.canary
+      dets = probe.detections_all(plan, [resp.call("x#{c}49#{c}y"), resp.call("x#{c}56#{c}y")], detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("ssti")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+      dets.first.evidence.not_nil!.should eq("q")
+    end
+  end
+
+  it "does not fire on verbatim reflection, a single product, or a stray number outside the region" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      c = plan.params.first.canary
+      # Verbatim echo: the region carries the literal markers, never the products.
+      probe.detections_all(plan, [resp.call("#{c}{{7*7}}#{c}"), resp.call("#{c}{{7*8}}#{c}")], detail).should be_empty
+      # Only 49 evaluated (B lacks 56) → not confirmed.
+      probe.detections_all(plan, [resp.call("#{c}49#{c}"), resp.call("#{c}{{7*8}}#{c}")], detail).should be_empty
+      # 49/56 present only OUTSIDE the canary region → ignored.
+      probe.detections_all(plan, [resp.call("49 56 #{c}safe#{c} 49"), resp.call("49 56 #{c}safe#{c} 56")], detail).should be_empty
+    end
+  end
+
+  it "gates on a body-comparable method with query params (POST only under allow_unsafe)" do
+    with_store do |store|
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "HEAD")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")).should be_nil
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST"), unsafe).should_not be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/s?q=1", "/s?a=1&b=2", "/s?flag&x=9", "/s"].each do |t|
+        detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t)
+        probe.dedup_key(detail).should eq(probe.plan(detail).try(&.dedup_key))
+      end
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")
+      probe.dedup_key(post).should be_nil
+      probe.plan(post).should be_nil
+    end
+  end
+end
+
+describe "Gori::Probe::Active::UrlRewriteBypass" do
+  probe = Gori::Probe::Active::UrlRewriteBypass.new
+  resp = ->(status : Int32, body : String) do
+    Gori::Repeater::Result.new("HTTP/1.1 #{status} X\r\n\r\n".to_slice, body.empty? ? Bytes.empty : body.to_slice, nil, 1_i64)
+  end
+
+  it "plans a `GET /` probe (with rewrite headers) plus a clean control" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      req = String.new(plan.request)
+      req.should contain("GET / ")
+      req.should contain("X-Original-URL: /admin")
+      req.should contain("X-Rewrite-URL: /admin")
+      plan.followups.size.should eq(1)
+      String.new(plan.followups[0]).should_not contain("X-Original-URL")
+    end
+  end
+
+  it "flags Medium when the probe serves different content than the root control" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      dets = probe.detections_all(plan, [resp.call(200, "ADMINPAGE"), resp.call(404, "nf")], detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("url_rewrite_bypass")
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  it "does not fire when the header is ignored (probe == root) or stays denied" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, [resp.call(200, "HOME"), resp.call(200, "HOME")], detail).should be_empty
+      probe.detections_all(plan, [resp.call(403, "denied"), resp.call(200, "HOME")], detail).should be_empty
+    end
+  end
+
+  it "gates on a body-comparable method and a 401/403/404 non-root path" do
+    with_store do |store|
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/admin")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/", status: 403)).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403, method: "HEAD")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403, method: "POST")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 404 NF\r\n\r\n", target: "/secret", status: 404)).should_not be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/admin", "/admin?x=1", "/a/b", "http://acme.test/admin"].each do |t|
+        d = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: t, status: 403)
+        probe.dedup_key(d).should eq(probe.plan(d).try(&.dedup_key))
+      end
+      ok = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/admin")
+      probe.dedup_key(ok).should be_nil
+      probe.plan(ok).should be_nil
+    end
   end
 end

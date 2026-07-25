@@ -4,6 +4,14 @@ require "./active/cors_reflection"
 require "./active/forbidden_bypass"
 require "./active/nginx_alias_traversal"
 require "./active/backslash_powered"
+require "./active/graphql_introspection"
+require "./active/lfi_param_traversal"
+require "./active/open_redirect"
+require "./active/host_header_injection"
+require "./active/crlf_injection"
+require "./active/path_normalization_bypass"
+require "./active/url_rewrite_bypass"
+require "./active/ssti"
 require "../scope"
 require "../fuzz/engine"
 
@@ -17,7 +25,11 @@ module Gori
       PRIMARY = ReflectedParam.new
 
       RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new,
-               NginxAliasTraversal.new, BackslashPowered.new] of Rule
+               NginxAliasTraversal.new, BackslashPowered.new,
+               GraphqlIntrospection.new, LfiParamTraversal.new,
+               OpenRedirect.new, HostHeaderInjection.new,
+               CrlfInjection.new, PathNormalizationBypass.new,
+               UrlRewriteBypass.new, Ssti.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.

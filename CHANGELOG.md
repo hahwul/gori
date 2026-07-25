@@ -2,6 +2,7 @@
 
 ## v0.1.4
 
+- Probe: add active-scan rules — open redirect, CRLF/response-header injection, host-header (X-Forwarded-Host) injection, access-control bypass via path normalization and via X-Original-URL/X-Rewrite-URL, NGINX-style parameter path traversal, active GraphQL introspection, and SSTI (#299)
 - Proxy: fix HTTPS blank pages / empty History — reflect origin ALPN so h1-only origins load, resolve the system CA trust store for upstream verification, and report TLS-verify failures separately from connect failures (#332, #333, #334, #336)
 - Proxy: stop an upstream RST leaving a flow stuck Pending forever (#330)
 - Scope-gate every outbound path so Sandbox mode holds: Repeater, Fuzzer, Miner, Sequencer (CLI and TUI), with `--allow-unscoped` opt-out (#322, #330, #339)

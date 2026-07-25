@@ -517,8 +517,10 @@ module Gori
             "Scan captured History flows (optional QL filter) + Repeater tabs for issues — the " \
             "MCP equivalent of `gori run probe`. PASSIVE by default (zero outbound requests). " \
             "active:true also runs light-touch active checks that SEND requests (reflected " \
-            "params, CORS reflection, 403 bypass, nginx traversal) — requires write access and " \
-            "is scope-gated (per-flow scope include + a Sandbox/exclude hard-block). Returns " \
+            "params, CORS/host-header reflection, open redirect, CRLF injection, 403/path/header " \
+            "access-control bypass, nginx & parameter traversal, GraphQL introspection, SSTI) — " \
+            "requires write access and is scope-gated (per-flow scope include + a Sandbox/exclude " \
+            "hard-block). Returns " \
             "{flows_scanned, repeaters_scanned, issue_count, issues:[{code, category, host, " \
             "title, severity, hit_count, affected, affected_count, evidence, sample_flow_id, " \
             "sample_repeater_id, remediation}]}, highest-severity first. Writes nothing." do |s|

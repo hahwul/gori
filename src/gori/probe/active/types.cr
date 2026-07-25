@@ -68,6 +68,70 @@ module Gori
         seg.starts_with?('/') ? seg : "/#{seg}"
       end
 
+      # The true authority HOST (lower-cased) and optional port of an absolute
+      # (`scheme://[user@]host[:port]/…`) or scheme-relative (`//host[:port]/…`) URL — nil for a
+      # relative path, an unparseable value, or an empty authority. This is the SECURITY-CRITICAL
+      # guard the open-redirect / host-header rules confirm against: it must return the host AFTER
+      # any `user@` userinfo, so `https://gori-probe.example@evil.test/` reports `evil.test` (the
+      # real redirect target) — NOT our probe host — and the rule does not false-fire.
+      #
+      # Two subtleties, both deliberate:
+      #   * `://` is honored ONLY when the text before it is a valid scheme (letter, then
+      #     letter/digit/+/-/.), so a RELATIVE `Location: /go?next=https://x` — where `://` sits in
+      #     the query — is correctly read as relative (nil), not as a redirect to `x`.
+      #   * `String#scrub` first: a captured Location/body value can carry a non-UTF-8 byte, which
+      #     would make the Char scans raise; scrub keeps this total (the byte-safety convention).
+      def self.url_authority(s : String) : {String, Int32?}?
+        str = s.scrub.strip
+        authority =
+          if (se = str.index("://")) && valid_scheme?(str[0...se])
+            str[(se + 3)..]
+          elsif str.starts_with?("//")
+            str[2..]
+          else
+            return nil
+          end
+        # Authority ends at the first '/', '?' or '#'.
+        cut = [authority.index('/'), authority.index('?'), authority.index('#')].compact.min?
+        authority = authority[0...cut] if cut
+        # Drop userinfo up to and including the LAST '@' — the host is what follows.
+        if at = authority.rindex('@')
+          authority = authority[(at + 1)..]
+        end
+        return nil if authority.empty?
+        host, port = split_host_port(authority)
+        return nil if host.empty?
+        {host.downcase, port}
+      end
+
+      # A valid URI scheme: a leading letter then letter/digit/'+'/'-'/'.' (RFC 3986). Empty or a
+      # value carrying '/','?','#',… (i.e. text before a `://` that sits inside a path/query) fails.
+      private def self.valid_scheme?(s : String) : Bool
+        return false if s.empty?
+        s.each_char_with_index do |c, i|
+          if i == 0
+            return false unless c.ascii_letter?
+          else
+            return false unless c.ascii_alphanumeric? || c == '+' || c == '-' || c == '.'
+          end
+        end
+        true
+      end
+
+      # Split "host[:port]" (host may be a "[::1]" IPv6 literal) into {host, port?}.
+      private def self.split_host_port(authority : String) : {String, Int32?}
+        if authority.starts_with?('[')
+          close = authority.index(']') || return {authority, nil}
+          host = authority[1...close]
+          rest = authority[(close + 1)..]
+          return {host, rest.starts_with?(':') ? rest[1..].to_i? : nil}
+        end
+        if (colon = authority.rindex(':')) && (p = authority[(colon + 1)..].to_i?)
+          return {authority[0...colon], p}
+        end
+        {authority, nil}
+      end
+
       # An active rule: build a probe for one flow (nil if nothing to test), then turn the
       # probe's response into Detections. The analyzer owns the send between the two calls.
       abstract class Rule
