@@ -209,17 +209,30 @@ module Gori
     def self.parse(query : String) : Node?
       lexemes = lex(query)
       return nil if lexemes.empty?
-      pos = 0
-      node, _ = parse_or(lexemes, pos)
+      node, _ = parse_or(lexemes, 0, 0)
       node
     end
 
-    private def self.parse_or(lx : Array(Lexeme), pos : Int32) : {Node?, Int32}
-      node, pos = parse_and(lx, pos)
+    # Deepest paren/NOT nesting the recursive descent will follow before it stops
+    # recursing. No real query nests more than a handful of levels; a fuzzed or hostile one
+    # (`((((…))))` / `NOT NOT NOT …` thousands deep) used to recurse one native stack frame
+    # per level and SIGSEGV the process — and every filter surface (History QL, Probe,
+    # Sitemap, Issues, the TUI filter bar, MCP) parses through here, so it was the widest
+    # crash. Past the cap the descent degrades FORGIVINGLY: an over-deep group parses as if
+    # empty, exactly like the existing `()` handling, so `parse_and` flattens the excess
+    # parens and still picks up any real term underneath rather than crashing or blanking.
+    MAX_PARSE_DEPTH = 256
+
+    # `depth` counts only the recursion that actually deepens the tree — a `(` group or a
+    # `NOT` — since the parse_or→parse_and→parse_unary→parse_primary cycle stays at one
+    # level. Bounding it bounds the native stack.
+    private def self.parse_or(lx : Array(Lexeme), pos : Int32, depth : Int32) : {Node?, Int32}
+      return {nil, pos} if depth > MAX_PARSE_DEPTH
+      node, pos = parse_and(lx, pos, depth)
       children = node ? [node] : [] of Node
       while pos < lx.size && lx[pos].tok.or?
         pos += 1
-        rhs, pos = parse_and(lx, pos)
+        rhs, pos = parse_and(lx, pos, depth)
         children << rhs if rhs
       end
       return {nil, pos} if children.empty?
@@ -228,7 +241,7 @@ module Gori
 
     # AND binds tighter than OR. The operator is optional: adjacent terms combine with
     # AND, which is what whitespace has always meant here.
-    private def self.parse_and(lx : Array(Lexeme), pos : Int32) : {Node?, Int32}
+    private def self.parse_and(lx : Array(Lexeme), pos : Int32, depth : Int32) : {Node?, Int32}
       children = [] of Node
       loop do
         while pos < lx.size && lx[pos].tok.and? # explicit AND, or a stray one
@@ -236,7 +249,7 @@ module Gori
         end
         break if pos >= lx.size || lx[pos].tok.or? || lx[pos].tok.r_paren?
         before = pos
-        node, pos = parse_unary(lx, pos)
+        node, pos = parse_unary(lx, pos, depth)
         if node
           children << node
         elsif pos == before
@@ -255,21 +268,22 @@ module Gori
       {children.size == 1 ? children.first : AndNode.new(children), pos}
     end
 
-    private def self.parse_unary(lx : Array(Lexeme), pos : Int32) : {Node?, Int32}
+    private def self.parse_unary(lx : Array(Lexeme), pos : Int32, depth : Int32) : {Node?, Int32}
+      return {nil, pos} if depth > MAX_PARSE_DEPTH
       if pos < lx.size && lx[pos].tok.not?
-        node, pos = parse_unary(lx, pos + 1)
+        node, pos = parse_unary(lx, pos + 1, depth + 1)
         return {nil, pos} unless node
         # A lone term flips its own flag; only a group needs a wrapper.
         return {node.is_a?(TermNode) ? TermNode.new(node.term.negated) : NotNode.new(node), pos}
       end
-      parse_primary(lx, pos)
+      parse_primary(lx, pos, depth)
     end
 
-    private def self.parse_primary(lx : Array(Lexeme), pos : Int32) : {Node?, Int32}
+    private def self.parse_primary(lx : Array(Lexeme), pos : Int32, depth : Int32) : {Node?, Int32}
       return {nil, pos} if pos >= lx.size
       lexeme = lx[pos]
       if lexeme.tok.l_paren?
-        node, pos = parse_or(lx, pos + 1)
+        node, pos = parse_or(lx, pos + 1, depth + 1)
         pos += 1 if pos < lx.size && lx[pos].tok.r_paren? # tolerate the unclosed group
         return {node, pos}
       end

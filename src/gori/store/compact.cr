@@ -105,7 +105,11 @@ class Gori::Store
   def self.compact(path : String, plan : CompactPlan) : CompactResult?
     return nil unless File.exists?(path)
     dir = File.dirname(path)
-    lock = CaptureLock.try(dir)
+    # Probe the SAME capture lock a live session would hold: keyed on the DB file for an
+    # arbitrary `--db` database, or the legacy per-directory lock for the canonical registry
+    # db — so compaction of a `--db` file being captured into is still correctly refused.
+    lock_path = File.basename(path) == Project::DB_FILE ? CaptureLock.path(dir) : "#{path}.capture.lock"
+    lock = CaptureLock.try_at(lock_path)
     return nil unless lock # another live instance is capturing into this project
     begin
       before = File.info(path).size

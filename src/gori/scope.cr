@@ -36,6 +36,7 @@ module Gori
       getter pattern : String
       @regex : Regex?
       @pattern_down : String
+      @pattern_host : String
 
       def initialize(@id : Int64, @kind : String, @match_type : String, @pattern : String)
         # The pattern is immutable (a Rule is rebuilt, never edited in place), so its
@@ -43,6 +44,10 @@ module Gori
         # of a Scope-filtered reload and per host of a Sitemap reload — is computed ONCE
         # here rather than re-allocated on each `matches?` call (mirrors @regex).
         @pattern_down = @pattern.downcase
+        # The bare, bracket-free host form ("[::1]" → "::1"), likewise precomputed. Host
+        # matching compares against this so an IPv6 rule matches whether the flow host was
+        # captured bracketed (some URL paths) or bare (the CONNECT/tunnel path).
+        @pattern_host = Scope.bare_host(@pattern_down)
         # Compile the regex once. An invalid pattern degrades to nil → never-match,
         # rather than unwinding through SQLite's C REGEXP callback or a proxy fiber.
         # Persisted patterns are validated on add/update; this is defense-in-depth.
@@ -90,7 +95,7 @@ module Gori
       end
 
       private def host_match?(host : String) : Bool
-        h = host.downcase
+        h = Scope.bare_host(host.downcase) # normalize "[::1]" → "::1" (see @pattern_host)
         if @pattern.includes?('*')
           # File.match? raises on a malformed glob; treat as non-matching so it can't
           # unwind onto the proxy hot path (mirrors SQLite GLOB's tolerance → keeps
@@ -101,7 +106,7 @@ module Gori
             false
           end
         else
-          h == @pattern_down || h.ends_with?(".#{@pattern_down}")
+          h == @pattern_host || h.ends_with?(".#{@pattern_host}")
         end
       end
     end
@@ -427,14 +432,25 @@ module Gori
       pattern[(i + 1)..].each_char.all?(&.ascii_number?)
     end
 
-    # The pattern with its :PORT stripped, for the rejection message (only called when a
-    # port is present). "[::1]:9091" → "[::1]"; "127.0.0.1:9091" → "127.0.0.1".
+    # A host / host-pattern reduced to the bare, bracket-free form the CONNECT/tunnel
+    # path stores ("[::1]" → "::1"). IPv6 flow hosts arrive bracketed via some URL-parsing
+    # paths but bare via the dominant HTTPS-MITM CONNECT path; peeling surrounding brackets
+    # on BOTH the rule pattern and the flow host lets "[::1]" and "::1" match interchangeably
+    # (Rule#host_match? / host_cond) and keeps the suggested form the one actually stored.
+    def self.bare_host(host : String) : String
+      (host.starts_with?('[') && host.ends_with?(']')) ? host[1...-1] : host
+    end
+
+    # The pattern with its :PORT stripped AND surrounding brackets peeled, for the
+    # rejection message (only called when a port is present). "[::1]:9091" → "::1";
+    # "127.0.0.1:9091" → "127.0.0.1". The bare form is the one host matching stores/compares,
+    # so following the suggestion yields a rule that actually matches.
     private def self.host_without_port(pattern : String) : String
       if pattern.starts_with?('[') && (close = pattern.index(']'))
-        return pattern[0..close]
+        return bare_host(pattern[0..close])
       end
       i = pattern.rindex(':')
-      i ? pattern[0...i] : pattern
+      bare_host(i ? pattern[0...i] : pattern)
     end
 
     # Regex compiles? (the historical `valid?` body, now a helper of validation_error.)
@@ -498,6 +514,9 @@ module Gori
     end
 
     private def host_cond(pattern : String) : {String, Array(DB::Any)}
+      # Peel brackets so a "[::1]" rule compares against the bare "::1" the host column
+      # stores — matches Rule#host_match?'s @pattern_host normalization (keeps SQL parity).
+      pattern = Scope.bare_host(pattern)
       if pattern.includes?('*')
         {"lower(host) GLOB ?", [pattern.downcase] of DB::Any}
       else

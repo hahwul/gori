@@ -231,4 +231,23 @@ describe Gori::Discover::Engine do
     urls.should contain("http://t/app/inner")
     urls.should_not contain("http://t/outside")
   end
+
+  it "confines on path-SEGMENT boundaries, not a raw string prefix (no sibling-prefix bypass)" do
+    # Seed /api (no trailing slash). The old confine used p.path.starts_with?("/api"), so a
+    # SIBLING like /api-internal (which merely shares the string prefix) leaked into scope. The
+    # segment-boundary check keeps /api and /api/… in-subtree while excluding /api-internal/….
+    cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
+    findings, _ = run_discover("http://t/api", %w(), cfg) do |t|
+      case t
+      when "/api"                 then html(%(<a href="/api/inner">in</a> <a href="/api-internal/secret">sibling</a>))
+      when "/api/inner"           then html("inside the api subtree")
+      when "/api-internal/secret" then html("a sibling that only shares the string prefix")
+      else                             notfound
+      end
+    end
+    urls = findings.map(&.url)
+    urls.should contain("http://t/api")                     # the seed path itself (== base) stays in-subtree
+    urls.should contain("http://t/api/inner")               # a genuine child under base/
+    urls.should_not contain("http://t/api-internal/secret") # sibling prefix — must be excluded
+  end
 end

@@ -63,8 +63,15 @@ module Gori
         status = resp["status"]?.try(&.as_i).try(&.to_i32) || 0
         reason = resp["statusText"]?.to_s.presence || status_reason(status)
         resp_headers = headers_list(resp["headers"]?)
-        resp_body, content_type = response_body(resp)
-        content_type ||= resp_headers.find { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }.try(&.[1])
+        resp_body, mime_type = response_body(resp)
+        # Prefer the ACTUAL Content-Type response HEADER over HAR content.mimeType, matching how
+        # a live-captured flow derives content_type from the real header. A HAR whose mimeType
+        # disagrees with the header (e.g. mimeType `text/html` but a real `application/json`
+        # header) must not store the mimeType, or `run probe` fires HTML-only findings
+        # (missing_csp, missing_x_frame_options, …) on a pure JSON body. mimeType stays a
+        # fallback for entries that carry no Content-Type header.
+        header_ct = resp_headers.find { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }.try(&.[1])
+        content_type = header_ct.presence || mime_type
 
         Builder.complete_flow(
           created_at, url, method, req_headers, req_body, http_version,

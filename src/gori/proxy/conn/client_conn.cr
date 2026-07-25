@@ -60,6 +60,25 @@ module Gori::Proxy
       @copy_buf ||= Bytes.new(Codec::Body::BUFSIZE)
     end
 
+    # One-shot teardown claim shared between a relaxed-stream copy and its client-abort watcher
+    # (see stream_response_body). Deliberately a REFERENCE type: both fibers must see the SAME
+    # flag, but the watcher is started with `spawn watch_client_abort(upstream, latch)` (the call
+    # form, to avoid loop-var capture), which COPIES its arguments — a captured `Atomic` STRUCT
+    # would be duplicated per fiber and the two would never agree (the ConnCounter hazard called
+    # out in concurrency_reuse_spec). Whoever calls `claim?` first owns teardown: the watcher
+    # closes upstream only if it wins, the copy raises (→ Aborted) only if it lost.
+    private class TeardownLatch
+      def initialize
+        @claimed = Atomic(Int32).new(0)
+      end
+
+      # True to the FIRST caller only; false to every caller after. Non-blocking, so on the
+      # single proxy thread a claim never interleaves with the other fiber's.
+      def claim? : Bool
+        @claimed.compare_and_set(0, 1)[1]
+      end
+    end
+
     def run : Nil
       loop do
         # Re-arm the client read/write timeout at the START of every keep-alive request, so a
@@ -172,13 +191,25 @@ module Gori::Proxy
       # a rule actually changes something do we capture the modified bytes (the
       # user's chosen semantics); otherwise the original client bytes are kept
       # byte-exact (P7). Body framing always uses the original request.
+      #
+      # `sent_head`/`sent_req` is the ORIGIN-FORM head/projection put on the wire —
+      # resolve_forward already normalized an absolute-form forward-proxy target
+      # (`GET http://h/p`) to origin-form (`GET /p`). What we RECORD must instead
+      # preserve the CLIENT's original request-line form, so `record_req` re-applies
+      # the same rewrite on top of `req.raw_head` (the client's original bytes): an
+      # unrelated rule (e.g. add_header) then leaves the original absolute-form request
+      # line byte-intact in History, while a rule that DOES target the request line still
+      # shows its intended change. The wire request stays origin-form (unchanged).
       sent_req = req
       sent_head = forward_head
+      record_req = req
       if rw = @rewriter
         rewritten = rw.rewrite_request(forward_head, host)
         if rewritten != forward_head
           sent_head = rewritten
           sent_req = Codec::Http1.parse_request_head(rewritten)
+          record_head = rw.rewrite_request(req.raw_head, host)
+          record_req = Codec::Http1.parse_request_head(record_head) unless record_head == req.raw_head
         end
       end
 
@@ -250,7 +281,7 @@ module Gori::Proxy
         return false
       end
       req_body = req_framing.none? ? nil : req_capture.to_slice
-      flow_id = @sink.on_request(FlowMapper.request(sent_req,
+      flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: req_body,
         body_truncated: req_capture.truncated?, body_size: req_capture.total))
       unless req_complete # client cut the request body short — don't reuse the connection
@@ -448,14 +479,15 @@ module Gori::Proxy
           scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
-      relax_for_streaming_response(resp, resp_framing, upstream)
+      relaxed = relax_for_streaming_response(resp, resp_framing, upstream)
 
       # Non-hold path: stream the response body byte-for-byte (P6) and record the
       # flow. `completed` is true only when the whole body was delivered cleanly; a
       # client abort or upstream truncation is recorded Aborted (see the helper).
+      # `relaxed` streams also run a concurrent client-abort watcher (see the helper).
       resp_capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(resp_framing, resp_len))
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
-        resp_framing, resp_len, resp_capture, flow_id, ttfb, started)
+        resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed)
 
       if completed && resp.status == 101
         # A 101 Switching Protocols turns the connection into a bidirectional tunnel of the
@@ -486,6 +518,17 @@ module Gori::Proxy
       # end-of-response instead of waiting for the missing bytes while we read its
       # next keep-alive request.
       unless completed
+        release_upstream
+        return false
+      end
+      # A relaxed (close-delimited/SSE) stream ran a concurrent client-abort watcher that
+      # may still be parked on @io.read (see stream_response_body). Do NOT keep this client
+      # connection alive: closing it (return false) is what lets `run`'s ensure unblock and
+      # end that watcher, and it keeps a lingering @io read from colliding with a next reused
+      # request. Close-delimited already never keep-alives; forcing the same for chunked/Length
+      # SSE is the safe price of watching them (closing after a complete response is always
+      # valid), and the upstream isn't parked for reuse since this connection is ending.
+      if relaxed
         release_upstream
         return false
       end
@@ -568,11 +611,12 @@ module Gori::Proxy
     private def stream_nonhold_response(upstream : IO, sent_resp : Codec::RawResponse,
                                         sent_resp_head : Bytes, resp_framing : Codec::BodyFraming,
                                         resp_len : Int64, resp_capture : Codec::CaptureBuffer,
-                                        flow_id : Int64, ttfb : Int64, started : Time::Instant) : Bool
+                                        flow_id : Int64, ttfb : Int64, started : Time::Instant,
+                                        relaxed : Bool = false) : Bool
       begin
         @io.write(sent_resp_head)
         @io.flush
-        resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture, copy_buf)
+        resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed)
       rescue
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
           state: Store::FlowState::Aborted, error: "connection closed mid-response")
@@ -582,6 +626,54 @@ module Gori::Proxy
         state: resp_complete ? Store::FlowState::Complete : Store::FlowState::Aborted,
         error: resp_complete ? nil : "upstream closed before response body complete")
       resp_complete
+    end
+
+    # Copies the response body upstream→@io. For a normal (timed) response this is just
+    # `Codec::Body.stream`. For a RELAXED (close-delimited/SSE) stream both legs' timeouts
+    # were cleared, so the copy can block on an idle-origin read indefinitely — and would
+    # only notice the CLIENT already went away on its NEXT write to @io, which an idle origin
+    # never triggers. That leaks this fiber + both sockets for every aborted SSE/long-poll
+    # flow (and pins the flow Pending forever). So run a concurrent watcher on the client leg:
+    # on a client FIN/reset it closes `upstream`, unblocking the copy's read; the copy then
+    # raises and the caller records the flow Aborted (mirroring the failed-client-write abort).
+    #
+    # A one-shot `teardown` latch makes the copy and the watcher race to OWN the close, so a
+    # normal completion isn't mistaken for an abort and neither double-closes. A legitimately-
+    # idle-but-connected client keeps its write half open, so the watcher's @io.read simply
+    # BLOCKS (no EOF) and the stream flows indefinitely — only a client that closed its side
+    # trips teardown. A relaxed stream never keep-alives (handle_response closes it after), so a
+    # watcher still parked on @io.read is safely ended when `run`'s ensure closes @io, with no
+    # risk of colliding with a next reused request on this connection.
+    private def stream_response_body(upstream : IO, resp_framing : Codec::BodyFraming,
+                                     resp_len : Int64, resp_capture : Codec::CaptureBuffer,
+                                     relaxed : Bool) : Bool
+      return Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture, copy_buf) unless relaxed
+      latch = TeardownLatch.new
+      spawn watch_client_abort(upstream, latch)
+      begin
+        Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture, copy_buf)
+      ensure
+        # Claim teardown so a still-parked watcher can't close `upstream` after we hand it back.
+        # Losing the claim means the watcher already fired (client gone, upstream closed under the
+        # copy) — surface that as an abort so the caller records Aborted, not a clean/half read.
+        # (claim? is non-blocking, so it can't interleave with the watcher's on the single thread.)
+        raise IO::Error.new("client disconnected mid-stream") unless latch.claim?
+      end
+    end
+
+    # The client-leg watcher for a relaxed streaming response (see stream_response_body). Blocks
+    # reading @io: a 0-byte read (clean FIN) or any read error (reset) means the client closed
+    # its side, so — if it wins the one-shot `latch` — it closes `upstream` to unblock the copy
+    # loop. Bytes arriving from the client mid-stream are unusual for SSE/close-delimited (no
+    # keep-alive follows) and are NOT proof the client left, so it just keeps watching.
+    private def watch_client_abort(upstream : IO, latch : TeardownLatch) : Nil
+      buf = Bytes.new(1)
+      while @io.read(buf) > 0
+      end
+    rescue
+      # client reset / read error → treat as gone (fall through to teardown)
+    ensure
+      upstream.close rescue nil if latch.claim?
     end
 
     private def record_streamed_response(sent_resp : Codec::RawResponse, resp_framing : Codec::BodyFraming,
@@ -758,10 +850,13 @@ module Gori::Proxy
     # relax BOTH legs' read/write timeouts so a legitimately-idle stream isn't torn down mid-flight
     # (keepalive reaps a genuinely dead peer). A normal Length/chunked response keeps the baseline
     # timeout, and the `run`/`acquire_and_send` re-arm restores it for any later keep-alive request.
-    private def relax_for_streaming_response(resp : Codec::RawResponse, resp_framing : Codec::BodyFraming, upstream : IO) : Nil
-      return unless resp_framing.close_delimited? || sse?(resp)
+    # Returns whether it relaxed — the caller then streams with a concurrent client-abort watcher
+    # (an un-timed upstream read can't otherwise notice a gone client) and won't keep-alive after.
+    private def relax_for_streaming_response(resp : Codec::RawResponse, resp_framing : Codec::BodyFraming, upstream : IO) : Bool
+      return false unless resp_framing.close_delimited? || sse?(resp)
       SocketTuning.relax(@io)
       SocketTuning.relax(upstream)
+      true
     end
 
     # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the

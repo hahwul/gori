@@ -1669,6 +1669,26 @@ describe Gori::MCP::Server do
         resp["structuredContent"]["error_code"].as_s.should eq("NOT_FOUND")
       end
     end
+
+    it "toggles the sandbox gate on/off, flags block-all, and reflects it in list_scope" do
+      with_store do |store|
+        listed0 = tool_payload(drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_scope"}}))[0])
+        listed0["sandbox"].as_bool.should be_false
+
+        on = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"set_sandbox","arguments":{"enabled":true}}})
+        payload = tool_payload(drive(store, on)[0])
+        payload["sandbox"].as_bool.should be_true
+        payload["blocks_all"].as_bool.should be_true # no include rules yet ⇒ blocks everything
+        store.setting(Gori::Scope::SETTING_SANDBOX).should eq("1")
+
+        listed1 = tool_payload(drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_scope"}}))[0])
+        listed1["sandbox"].as_bool.should be_true
+
+        off = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"set_sandbox","arguments":{"enabled":false}}})
+        tool_payload(drive(store, off)[0])["sandbox"].as_bool.should be_false
+        store.setting(Gori::Scope::SETTING_SANDBOX).should eq("0")
+      end
+    end
   end
 
   describe "env var tools" do

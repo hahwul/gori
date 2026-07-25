@@ -473,7 +473,14 @@ module Gori::Sequencer
         sx2 += xs[i] * xs[i]
         sy2 += ys[i] * ys[i]
       end
-      den = Math.sqrt((m * sx2 - sx * sx) * (m * sy2 - sy * sy))
+      # Each factor is a variance (scaled by m) and mathematically can't be negative, but
+      # floating-point cancellation can land it just below 0 for a constant/near-constant
+      # series — clamp before the product so sqrt never sees a negative radicand and
+      # returns NaN. A clamped-to-0 factor means (near-)zero variance, so den == 0 below
+      # still catches it and correlation falls back to the intended 0.0.
+      vx = {0.0, m * sx2 - sx * sx}.max
+      vy = {0.0, m * sy2 - sy * sy}.max
+      den = Math.sqrt(vx * vy)
       den == 0 ? 0.0 : (m * sxy - sx * sy) / den
     end
 

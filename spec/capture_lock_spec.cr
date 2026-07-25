@@ -33,4 +33,46 @@ describe Gori::CaptureLock do
       FileUtils.rm_rf(parent) if Dir.exists?(parent)
     end
   end
+
+  it "keys the lock on the DB FILE so two --db files sharing a directory don't collide" do
+    dir = File.tempname("gori-lock-db")
+    Dir.mkdir_p(dir)
+    begin
+      pa = Gori::Project.new("a", File.join(dir, "a.db"))
+      pb = Gori::Project.new("b", File.join(dir, "b.db"))
+      # Distinct db files ⇒ distinct lock files (the bug: they shared <dir>/.capture.lock).
+      pa.capture_lock_path.should_not eq(pb.capture_lock_path)
+
+      la = Gori::CaptureLock.try_at(pa.capture_lock_path)
+      la.should_not be_nil
+      # A DIFFERENT database in the SAME directory must still acquire its own lock — no false
+      # serialization (previously this failed with "another instance holds this ... lock").
+      lb = Gori::CaptureLock.try_at(pb.capture_lock_path)
+      lb.should_not be_nil
+      # A second holder of the SAME database is still denied.
+      Gori::CaptureLock.try_at(pa.capture_lock_path).should be_nil
+
+      la.not_nil!.close
+      lb.not_nil!.close
+    ensure
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+    end
+  end
+
+  it "keeps the canonical registry db on the legacy per-directory lock (dir-based held? still works)" do
+    dir = File.tempname("gori-lock-reg")
+    begin
+      proj = Gori::Project.new("reg", File.join(dir, Gori::Project::DB_FILE)) # gori.db
+      # The canonical db keeps <dir>/.capture.lock, so the registry's dir-based held? guards
+      # (delete/rename, project picker, mcp) keep detecting a live capturer — no regression.
+      proj.capture_lock_path.should eq(Gori::CaptureLock.path(dir))
+      lock = Gori::CaptureLock.try_at(proj.capture_lock_path)
+      lock.should_not be_nil
+      Gori::CaptureLock.held?(dir).should be_true # dir-based probe sees the db-keyed acquire
+      lock.not_nil!.close
+      Gori::CaptureLock.held?(dir).should be_false
+    ensure
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+    end
+  end
 end

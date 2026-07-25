@@ -74,6 +74,7 @@ module Gori::Fuzz
 
     def size : Int64?
       unless @counted
+        ensure_readable
         n = 0_i64
         File.each_line(@path) { n += 1 }
         @count = n
@@ -83,7 +84,18 @@ module Gori::Fuzz
     end
 
     def open_iterator : SetIterator
+      ensure_readable
       LineIterator.new(@path)
+    end
+
+    # Turn a missing / directory / unreadable wordlist path into a clean Gori::Error
+    # (surfaced by the caller as "gori run fuzz: wordlist …") instead of leaking a raw
+    # `File::NotFoundError: Error opening file with mode 'r'` backtrace out of the
+    # File.each_line / File.open below.
+    private def ensure_readable : Nil
+      raise Gori::Error.new("wordlist not found: #{@path}") unless File.exists?(@path)
+      raise Gori::Error.new("wordlist is a directory, not a file: #{@path}") if File.directory?(@path)
+      raise Gori::Error.new("wordlist not readable: #{@path}") unless File::Info.readable?(@path)
     end
 
     private class LineIterator < SetIterator

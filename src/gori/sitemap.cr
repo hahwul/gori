@@ -199,6 +199,31 @@ module Gori
       node.children.each { |c| stamp_node_tags(c, host, tags) }
     end
 
+    # Visit every node in `root`'s subtree exactly once, each node AFTER its whole subtree
+    # (post-order), WITHOUT native recursion. The tree transforms below used to recurse one
+    # stack frame per tree level, which a single very deep captured/imported path (tens of
+    # thousands of segments) overflowed — SIGSEGV — on both the TUI Sitemap poll and
+    # `gori run sitemap`; an explicit work-list has no such ceiling. Collect nodes
+    # parent-before-child, then yield them in REVERSE — every node precedes its ancestors,
+    # so it is handed to the block only after its whole subtree, matching the old
+    # `children.each { recurse }; <body>` order. A transform may therefore reshape a node's
+    # OWN children when yielded (wrap them in a fold): its descendants are already done, and
+    # the new fold node is not in the collected list, so it is never re-visited.
+    private def self.post_order(root : Node, & : Node ->) : Nil
+      order = [root]
+      i = 0
+      while i < order.size
+        order[i].children.each { |c| order << c }
+        i += 1
+      end
+      # Index iteration (not `reverse_each`) keeps `yield` out of a block, which the compiler bars.
+      i = order.size - 1
+      while i >= 0
+        yield order[i]
+        i -= 1
+      end
+    end
+
     # Fold a node's opaque-id children into one collapsed node per class
     # (`{uuid}`/`{hex}`/`{date}`); siblings that aren't ids stay put. Same synthetic-
     # wrapper shape as `group_sequences!` — the real children keep their literal `path`,
@@ -207,9 +232,17 @@ module Gori
     # Runs BEFORE group_sequences!. Numerics are deliberately not classified here, so
     # the two passes partition the work instead of competing for the same children.
     def self.fold_templates!(node : Node) : Nil
-      node.children.each { |c| fold_templates!(c) }
-      # Descend THROUGH a fold — its children are real and may hide further ids — but
-      # never re-fold a fold's OWN children. This is what makes the pass idempotent.
+      # Iterative post-order (see post_order): the old
+      # `node.children.each { |c| fold_templates!(c) }` recursed one frame per tree level and
+      # overflowed the native stack on a pathologically deep path. Each node is still folded
+      # only after its subtree, so it sees a fully-folded child set exactly as before.
+      post_order(node) { |n| fold_templates_node!(n) }
+    end
+
+    # Fold ONE node's opaque-id children (see fold_templates!). Descend THROUGH a fold — its
+    # children are real and may hide further ids — but never re-fold a fold's OWN children,
+    # which is what makes the pass idempotent.
+    private def self.fold_templates_node!(node : Node) : Nil
       return if node.grouped
       buckets = {} of String => Array(Node)
       node.children.each do |c|
@@ -296,14 +329,21 @@ module Gori
     end
 
     # Fold a node's pure-numeric children into one collapsed `[1, 2, 3 … +N]` group
-    # when they exceed the threshold; non-numeric siblings stay put. Recurses first
-    # so nested sequences fold too. Sorting by (length, lexicographic) is numeric
-    # order without parsing (handles arbitrarily long ids, no overflow).
+    # when they exceed the threshold; non-numeric siblings stay put. Visits deepest-first
+    # (post_order) so nested sequences fold too. Sorting by (length, lexicographic) is
+    # numeric order without parsing (handles arbitrarily long ids, no overflow).
     def self.group_sequences!(node : Node) : Nil
-      node.children.each { |c| group_sequences!(c) }
-      # Same idempotency guard as fold_templates! — recurse through a fold, never re-fold
-      # its own children (without this, a {hex} fold of long numerics grows a nested
-      # [1000… +N] inside it, and a second call nests one more level).
+      # Iterative post-order (see post_order): the old
+      # `node.children.each { |c| group_sequences!(c) }` recursion SIGSEGV'd on a very deep
+      # tree. Same shared work-list, same per-node transform below.
+      post_order(node) { |n| group_sequences_node!(n) }
+    end
+
+    # Group ONE node's pure-numeric children (see group_sequences!). Same idempotency guard
+    # as fold_templates! — descend through a fold, never re-fold its own children (without
+    # this, a {hex} fold of long numerics grows a nested [1000… +N] inside it, and a second
+    # call nests one more level).
+    private def self.group_sequences_node!(node : Node) : Nil
       return if node.grouped
       # Count first, materialise second. The overwhelming majority of nodes have no numeric
       # children at all, and `select` used to allocate the result Array for every one of them

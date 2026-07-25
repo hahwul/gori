@@ -84,7 +84,7 @@ module Gori
         # all read the store / dial upstream directly and don't need the listener.
         bind_error =
           begin
-            lock = CaptureLock.try(project.dir)
+            lock = CaptureLock.try_at(project.capture_lock_path)
             if lock
               begin
                 proxy.start(fallback: bind_fallback)
@@ -97,7 +97,7 @@ module Gori
                 ex.message || "could not bind #{config.listen}:#{config.port}"
               end
             else
-              "another gori instance already holds this directory's capture lock"
+              "another gori instance already holds this database's capture lock"
             end
           rescue ex
             # CaptureLock.try itself failed (can't create/open the lock file) — not a
@@ -185,10 +185,10 @@ module Gori
           @proxy.stop
           false
         else
-          @capture_lock ||= CaptureLock.try(@project.dir) # reuse if held, else try to take over
-          return false unless @capture_lock               # still held by another instance
-          @probe.start                                    # we now hold the lock → run the scanner (idempotent if already running)
-          @proxy.start(fallback: true)                    # cover a DIFFERENT project's port on resume
+          @capture_lock ||= CaptureLock.try_at(@project.capture_lock_path) # reuse if held, else try to take over
+          return false unless @capture_lock                                # still held by another instance
+          @probe.start                                                     # we now hold the lock → run the scanner (idempotent if already running)
+          @proxy.start(fallback: true)                                     # cover a DIFFERENT project's port on resume
           true
         end
       sync_capture_status!

@@ -187,4 +187,22 @@ describe Gori::Miner::Engine do
     mine(backend, names, c)
     backend.sent.should be <= 12 # was ~cap + 2*concurrency
   end
+
+  it "does not count max-requests cap refusals as errors (fix #19)" do
+    # Regression: process_bucket used to count EVERY raw.error as @errors, including
+    # CappedBackend's post-cap refusal — buckets already dispatched into the buffered
+    # worker channel before the cap check fired. Under concurrency, that inflated
+    # "errors" with pure cap-refusals rather than real network failures.
+    backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), reflect: ["secret"])
+    c = cfg
+    c.concurrency = 8
+    c.max_requests = 5_i64 # far below what baseline + mining 80 names would need
+    names = (1..80).map { |i| "p#{i}" } + ["secret"]
+    base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: c)
+    done_progress = nil.as(M::Progress?)
+    engine.run { |ev| done_progress = ev.progress if ev.is_a?(M::DoneEvent) }
+    done_progress.should_not be_nil
+    done_progress.not_nil!.errors.should eq(0)
+  end
 end

@@ -685,6 +685,82 @@ describe Gori::Import do
       File.delete?(har)
     end
   end
+
+  # --- content_type derivation (real header wins over HAR content.mimeType) ----------------
+  it "stores the real Content-Type response HEADER, not a disagreeing HAR content.mimeType" do
+    # A HAR whose mimeType lies (`text/html`) about a real `application/json` response must
+    # store the header's type as a live-captured flow would — else `run probe` fires HTML-only
+    # findings (missing_csp, missing_x_frame_options, …) on a pure JSON body (false positives).
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, {log: {entries: [
+        {startedDateTime: "2026-06-01T12:00:00Z",
+         request:         {method: "GET", url: "https://api.test/data", httpVersion: "HTTP/1.1"},
+         response:        {status: 200, statusText: "OK", httpVersion: "HTTP/1.1",
+                    headers: [{name: "Content-Type", value: "application/json"}],
+                    content: {mimeType: "text/html", text: %({"ok":true})}}},
+      ]}}.to_json)
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        store.search(Gori::QL::EMPTY, 1).first.content_type.should eq("application/json")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  it "falls back to HAR content.mimeType for content_type when there is no Content-Type header" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, {log: {entries: [
+        {startedDateTime: "2026-06-01T12:00:00Z",
+         request:         {method: "GET", url: "https://api.test/x", httpVersion: "HTTP/1.1"},
+         response:        {status: 200, statusText: "OK", httpVersion: "HTTP/1.1",
+                    content: {mimeType: "application/json", text: "{}"}}},
+      ]}}.to_json)
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        store.search(Gori::QL::EMPTY, 1).first.content_type.should eq("application/json")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  # --- host validation / IPv6 normalization ------------------------------------------------
+  it "skips a --urls line that is non-URL garbage with spaces (never stored as a host)" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "not a url at all\nhttps://good.test/ok\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(1)   # only the real URL imported
+        result.skipped.should eq(1) # the space-laden garbage skipped, not stored
+        hosts = store.search(Gori::QL::EMPTY, 10).map(&.host)
+        hosts.should eq(["good.test"])
+        hosts.each { |h| h.should_not contain(' ') }
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "stores an imported IPv6 host bracket-free (matching the CONNECT path), port kept" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "https://[::1]:9443/probe\n")
+      with_store do |store|
+        Gori::Import.import_file(store, :urls, urls).count.should eq(1)
+        row = store.search(Gori::QL::EMPTY, 1).first
+        row.host.should eq("::1") # not "[::1]"
+        row.port.should eq(9443)
+        # the Host header line stays RFC 7230 bracketed even though the stored host is bare
+        String.new(store.get_flow(row.id).not_nil!.request_head).should contain("Host: [::1]")
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
 end
 
 describe Gori::Import::Builder do
@@ -719,5 +795,18 @@ describe Gori::Import::Builder do
     headers << {"X-Foo", "a\tb"}
     head = String.new(Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "h.test", headers, nil))
     head.should contain("X-Foo: a\tb")
+  end
+
+  it "rejects a host containing a space (non-URL garbage), consistent with bad-scheme skips" do
+    expect_raises(Gori::Error, /bad host/) do
+      Gori::Import::Builder.endpoint("not a url at all")
+    end
+  end
+
+  it "stores an IPv6 host bracket-free but re-brackets it in the Host header line" do
+    pair = Gori::Import::Builder.pending_request(0_i64, "https://[::1]:9443/probe")
+    pair.request.host.should eq("::1") # bare, matching the CONNECT path
+    pair.request.port.should eq(9443)
+    String.new(pair.request.head).should contain("Host: [::1]") # RFC 7230 §5.4 valid
   end
 end

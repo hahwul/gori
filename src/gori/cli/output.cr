@@ -382,55 +382,85 @@ module Gori
       # (which collapses a numeric fold and shows one representative under an ID fold),
       # JSON always keeps every child nested — the complete tree, with `grouped` as the
       # hint so a consumer can collapse it itself.
+      #
+      # Emitted by hand to an IO rather than through JSON::Builder: the tree nests one
+      # object + one "children" array per path segment (~2 JSON levels each), and
+      # JSON::Builder hard-caps nesting at 100, so a captured path ~45 segments deep tore
+      # the whole report down with `JSON::Error: Nesting of 100 is too deep`. A security
+      # tool must not silently truncate the endpoint tree, so we drop the artificial
+      # ceiling instead — String#to_json still does every value's escaping, so the bytes
+      # are identical to what the builder produced for shallow trees.
       def self.sitemap_json(hosts : Array(Sitemap::Node)) : String
-        JSON.build do |j|
-          j.array { hosts.each { |h| sitemap_host_json(j, h) } }
+        String.build do |io|
+          io << '['
+          hosts.each_with_index do |h, i|
+            io << ',' if i > 0
+            sitemap_host_json(io, h)
+          end
+          io << ']'
         end
       end
 
-      private def self.sitemap_host_json(j : JSON::Builder, host : Sitemap::Node) : Nil
-        j.object do
-          # host.label/tag are captured/user data and can be invalid UTF-8 (see
-          # Sitemap.template_class) — term_safe scrubs that (and strips control bytes),
-          # so this stays valid UTF-8 JSON like the text/paths formats already are.
-          j.field "host", term_safe(host.label)
-          j.field "endpoints", host.endpoints
-          if t = host.tag
-            j.field "tag", term_safe(t)
-          end
-          sitemap_children_json(j, host)
+      private def self.sitemap_host_json(io : IO, host : Sitemap::Node) : Nil
+        io << '{'
+        # host.label/tag are captured/user data and can be invalid UTF-8 (see
+        # Sitemap.template_class) — term_safe scrubs that (and strips control bytes),
+        # so this stays valid UTF-8 JSON like the text/paths formats already are.
+        io << %("host":)
+        term_safe(host.label).to_json(io)
+        io << %(,"endpoints":)
+        host.endpoints.to_json(io)
+        if t = host.tag
+          io << %(,"tag":)
+          term_safe(t).to_json(io)
         end
+        sitemap_children_json(io, host)
+        io << '}'
       end
 
-      private def self.sitemap_node_json(j : JSON::Builder, node : Sitemap::Node) : Nil
-        j.object do
-          j.field "label", term_safe(node.label)
-          # A fold is synthetic — its `path` is always "" and carries no meaning, so it is
-          # omitted rather than emitted as an empty string. `template` names the id class
-          # so a consumer can tell an id fold from a numeric run without parsing labels.
-          if node.grouped
-            j.field "grouped", true
-            j.field "template", node.label if node.template? # one of TEMPLATE_LABELS: always plain ASCII
-          else
-            j.field "path", term_safe(node.path)
+      private def self.sitemap_node_json(io : IO, node : Sitemap::Node) : Nil
+        io << '{'
+        io << %("label":)
+        term_safe(node.label).to_json(io)
+        # A fold is synthetic — its `path` is always "" and carries no meaning, so it is
+        # omitted rather than emitted as an empty string. `template` names the id class
+        # so a consumer can tell an id fold from a numeric run without parsing labels.
+        if node.grouped
+          io << %(,"grouped":true)
+          if node.template? # one of TEMPLATE_LABELS: always plain ASCII
+            io << %(,"template":)
+            node.label.to_json(io)
           end
-          # On a fold these are the union of its children's verbs, not its own.
-          verbs = node.grouped ? node.fold_methods : node.methods
-          unless verbs.empty?
-            j.field("methods") { j.array { verbs.each { |m| j.string(term_safe(m)) } } }
-          end
-          if t = node.tag
-            j.field "tag", term_safe(t)
-          end
-          sitemap_children_json(j, node)
+        else
+          io << %(,"path":)
+          term_safe(node.path).to_json(io)
         end
+        # On a fold these are the union of its children's verbs, not its own.
+        verbs = node.grouped ? node.fold_methods : node.methods
+        unless verbs.empty?
+          io << %(,"methods":[)
+          verbs.each_with_index do |m, i|
+            io << ',' if i > 0
+            term_safe(m).to_json(io)
+          end
+          io << ']'
+        end
+        if t = node.tag
+          io << %(,"tag":)
+          term_safe(t).to_json(io)
+        end
+        sitemap_children_json(io, node)
+        io << '}'
       end
 
-      private def self.sitemap_children_json(j : JSON::Builder, node : Sitemap::Node) : Nil
+      private def self.sitemap_children_json(io : IO, node : Sitemap::Node) : Nil
         return if node.children.empty?
-        j.field "children" do
-          j.array { node.children.each { |c| sitemap_node_json(j, c) } }
+        io << %(,"children":[)
+        node.children.each_with_index do |c, i|
+          io << ',' if i > 0
+          sitemap_node_json(io, c)
         end
+        io << ']'
       end
 
       def self.human_size(bytes : Int64) : String

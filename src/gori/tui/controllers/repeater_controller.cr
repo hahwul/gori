@@ -1058,10 +1058,16 @@ module Gori::Tui
       if detail.row.status == 101
         # WebSocket: seed the editor with recorded client→server TEXT messages. The
         # tab is session-only (db_id nil) — WS transcripts aren't persisted/synced.
-        out_msgs = @host.session.store.ws_messages(id).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }
+        all_out = @host.session.store.ws_messages(id).select { |m| m.direction == "out" }
+        out_msgs = all_out.select(&.text?).map { |m| String.new(m.payload).scrub }
         view.load_ws(detail, out_msgs)
         @repeaters << RepeaterTab.new(view, id, nil)
-        @host.status("ws repeater: #{view.summary} — edit messages (one per line) · ^R send · esc back")
+        # The WS message editor is text-only (one message per line), so binary outbound frames
+        # can't be represented/edited and are omitted from the seed — say so in the status line
+        # rather than letting them vanish from the replay without a trace.
+        dropped = all_out.size - out_msgs.size
+        omitted = dropped > 0 ? " — #{dropped} binary frame#{dropped == 1 ? "" : "s"} omitted (text editor can't replay them)" : ""
+        @host.status("ws repeater: #{view.summary} — edit messages (one per line)#{omitted} · ^R send · esc back")
       elsif grpc_flow?(detail)
         # gRPC: head editable as text; a unary call's message payload is hex-editable (^X)
         # and reframed on send. Session-only (db_id nil) — the binary body can't round-trip

@@ -208,7 +208,20 @@ module Gori
           abort "gori run capture: --db parent directory does not exist: #{parent}" unless Dir.exists?(parent)
           return Project.new(File.basename(parent), path)
         end
-        ProjectRegistry.new(Paths.projects_dir).create(project_name || "default")
+        # create() rejects a name that slugifies to nothing (blank / punctuation-only)
+        # with a Gori::Error, and Dir.mkdir_p raises a File::Error for an unusable slug
+        # (e.g. longer than the filesystem's name limit). Surface both as a clean
+        # `gori run capture:` message, like every other resolve_* path, instead of a raw
+        # backtrace. (Non-ASCII names like "日本語" now get a hashed fallback slug in
+        # ProjectRegistry#slugify, so they no longer land here.)
+        name = project_name || "default"
+        begin
+          ProjectRegistry.new(Paths.projects_dir).create(name)
+        rescue ex : Gori::Error
+          abort "gori run capture: #{ex.message} (#{name.inspect})"
+        rescue ex : File::Error
+          abort "gori run capture: could not create project #{name.inspect}: #{ex.message}"
+        end
       end
 
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;

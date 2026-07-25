@@ -168,6 +168,14 @@ describe Gori::Scope do
       err.should contain("127.0.0.1") # bare-host suggestion (port stripped)
       err.should_not contain("9091")
 
+      # A bracketed IPv6 + port is rejected too, and the suggestion points at the BARE
+      # stored form ("::1"), NOT the bracketed one — following the old bracketed advice
+      # produced a rule that could never match the bare host the tunnel path stores.
+      err6 = Gori::Scope.validation_error("host", "[::1]:9091").not_nil!
+      err6.should contain("::1")
+      err6.should_not contain("[::1]") # bare form recommended, not bracketed
+      err6.should_not contain("9091")
+
       scope.add("include", "host", "127.0.0.1:9091").should be_false
       store.scope_rules.should be_empty
 
@@ -186,6 +194,24 @@ describe Gori::Scope do
       Gori::Scope.valid?("host", "*.acme.test:8080").should be_false # host glob + port
       Gori::Scope.valid?("string", "acme.test:8080").should be_true  # port fine in string/regex
       Gori::Scope.valid?("regex", ":8080$").should be_true
+    end
+  end
+
+  it "normalizes IPv6 brackets so [::1] and ::1 match a host rule interchangeably" do
+    # The CONNECT/tunnel path (the dominant HTTPS-MITM case) stores the flow host bare,
+    # so a bracketed rule (the form the old suggestion recommended) must still match it —
+    # and a bare rule must match a bracketed flow host.
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "[::1]").should be_true # bracketed rule
+      scope.host_in_scope?("::1").should be_true           # matches the bare stored host
+      scope.host_in_scope?("::2").should be_false          # negative control (still precise)
+    end
+
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "::1").should be_true # bare rule
+      scope.host_in_scope?("[::1]").should be_true       # matches a bracketed flow host
     end
   end
 

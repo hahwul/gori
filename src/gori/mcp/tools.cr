@@ -94,7 +94,7 @@ module Gori
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
         "oast_start", "oast_stop",
-        "add_scope_rule", "delete_scope_rule", "set_scope_enabled",
+        "add_scope_rule", "delete_scope_rule", "set_scope_enabled", "set_sandbox",
         "set_env_var", "delete_env_var",
         "add_host_override", "update_host_override", "delete_host_override",
         "import_flows",
@@ -530,7 +530,7 @@ module Gori
             s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
           end
 
-          tool j, "list_scope", "List the project's scope include/exclude rules, plus whether the scope lens/gate is enabled." { }
+          tool j, "list_scope", "List the project's scope include/exclude rules, plus whether the scope lens/gate and the hard-containment sandbox are enabled." { }
 
           tool j, "list_env",
             "List the project's env vars (used for $KEY substitution in outbound requests — see " \
@@ -748,6 +748,15 @@ module Gori
             tool j, "set_scope_enabled",
               "Turn the scope lens/gate on or off (the rules themselves are untouched)." do |s|
               s.field "enabled", boolprop("true = filter to in-scope; false = show/allow everything"), required: true
+            end
+
+            tool j, "set_sandbox",
+              "Turn the HARD-CONTAINMENT sandbox gate on or off — the headless equivalent of the " \
+              "TUI Project NETWORK pane toggle. When ON, the capture proxy forwards ONLY requests " \
+              "the scope allows and BLOCKS everything else; with NO include rule it blocks ALL " \
+              "captured traffic (reported as blocks_all). Distinct from set_scope_enabled, which is " \
+              "only the display lens. See list_scope for the current state." do |s|
+              s.field "enabled", boolprop("true = block every request the scope does not allow; false = stop blocking"), required: true
             end
 
             tool j, "set_env_var",
@@ -1312,6 +1321,7 @@ module Gori
         when "add_scope_rule"          then gated { add_scope_rule(h) }
         when "delete_scope_rule"       then gated { delete_scope_rule(h) }
         when "set_scope_enabled"       then gated { set_scope_enabled(h) }
+        when "set_sandbox"             then gated { set_sandbox(h) }
         when "set_env_var"             then gated { set_env_var(h) }
         when "delete_env_var"          then gated { delete_env_var(h) }
         when "add_host_override"       then gated { add_host_override(h) }

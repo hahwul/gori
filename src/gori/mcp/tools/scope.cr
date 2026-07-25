@@ -53,6 +53,30 @@ module Gori
         return busy("scope enable/disable NOT persisted (store busy or unwritable); the gate is unchanged") unless committed
         Result.new(JSON.build { |j| j.object { j.field "enabled", enabled } })
       end
+
+      # Turn the HARD-CONTAINMENT sandbox gate on or off (the headless equivalent of the
+      # TUI Project NETWORK pane toggle, and `gori run project sandbox on|off`). Distinct
+      # from set_scope_enabled (the display lens): the sandbox BLOCKS every request the
+      # scope does not allow — with no include rule it blocks ALL captured traffic
+      # (reported as blocks_all).
+      private def set_sandbox(h) : Result
+        enabled = bool(h, "enabled")
+        return err("missing required 'enabled' (true or false)", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
+        scope = Scope.load(store)
+        # Scope's sandbox setters persist through the SAME settings write the TUI uses but
+        # return Nil, so confirm the flag committed by reading it back — a busy/locked store
+        # must not report success (mirrors set_scope_enabled's committed check).
+        enabled ? scope.enable_sandbox : scope.disable_sandbox
+        unless store.setting(Scope::SETTING_SANDBOX) == (enabled ? "1" : "0")
+          return busy("sandbox enable/disable NOT persisted (store busy or unwritable); the gate is unchanged")
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "sandbox", enabled
+            j.field "blocks_all", enabled && scope.include_count == 0
+          end
+        end)
+      end
     end
   end
 end

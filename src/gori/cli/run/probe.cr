@@ -53,7 +53,7 @@ module Gori
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
           # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
           if !q.strip.empty? && parsed == QL::EMPTY
-            abort "gori run probe: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+            abort "gori run probe: query #{truncate_query(q).inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
           end
           filter = parsed
         end
@@ -70,7 +70,7 @@ module Gori
           ids = begin
             Probe::Scan.flow_ids(store, filter)
           rescue ex
-            abort "gori run probe: query #{query.inspect} failed: #{ex.message}"
+            abort "gori run probe: query #{truncate_query(query).inspect} failed: #{ex.message}"
           end
           meter = STDERR.tty?
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
@@ -120,6 +120,15 @@ module Gori
           end
           nil
         end
+      end
+
+      # A malformed QL query can be arbitrarily large (a raw regex term, say) — don't dump
+      # the whole thing into an error message. Keep enough to identify the query, not replay it.
+      QUERY_ECHO_LIMIT = 200
+
+      private def self.truncate_query(q : String?) : String?
+        return q unless q && q.size > QUERY_ECHO_LIMIT
+        "#{q[0, QUERY_ECHO_LIMIT]}…"
       end
 
       private def self.parse_severity(v : String) : Store::Severity

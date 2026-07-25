@@ -158,7 +158,7 @@ module Gori
         if format == :json
           puts CLI::Output.note_object_json(idx, entry, current: doc.cur == idx, with_text: true)
         else
-          STDOUT.puts text
+          STDOUT.puts Issues::Export.scrub_controls(text)
         end
       end
 

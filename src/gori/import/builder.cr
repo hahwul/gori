@@ -37,6 +37,15 @@ module Gori
       # caller's existing skip-a-bad-entry rescue handles it identically to those checks.
       CONTROL_CHAR = /[\x00-\x1f\x7f]/
 
+      # URI.parse copies a reg-name authority into `host` VERBATIM without validating it — a
+      # `--urls`/HAR line like `not a url at all` becomes a stored "host" of literal spaces
+      # instead of being skipped the way `ftp://…` and empty URLs already are. A real host
+      # (reg-name, IPv4/IPv6 literal, punycode) never contains a space or other C0/DEL byte —
+      # userinfo, port and the `://` sit outside `uri.host` — so reject one in `endpoint`, at
+      # the same raise-to-skip point the scheme/shape checks use. Space (0x20) is what
+      # CONTROL_CHAR misses, so this widens the range to include it.
+      HOST_INVALID = /[\x00-\x20\x7f]/
+
       def self.normalize_url(url : String) : String
         u = url.strip
         raise Gori::Error.new("invalid URL (control character): #{url.inspect}") if u.matches?(CONTROL_CHAR)
@@ -49,6 +58,11 @@ module Gori
         uri = URI.parse(normalize_url(url))
         scheme = uri.scheme.not_nil!
         host = uri.host.presence || raise Gori::Error.new("URL missing host: #{url}")
+        raise Gori::Error.new("invalid URL (bad host): #{url.inspect}") if host.matches?(HOST_INVALID)
+        # URI.parse keeps the brackets on an IPv6 literal (`[::1]`); the CONNECT/tunnel path
+        # stores the bare inner address (`::1`). Strip the brackets so an imported IPv6 target
+        # matches that canonical bracket-free form and Scope host rules see ONE target, not two.
+        host = host[1..-2] if host.starts_with?('[') && host.ends_with?(']')
         port = uri.port || (scheme == "https" ? 443 : 80)
         path = uri.path.presence || "/"
         target = uri.query ? "#{path}?#{uri.query}" : path
@@ -93,7 +107,10 @@ module Gori
         reject_header_injection!(headers)
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
-          b << "Host: " << host << "\r\n"
+          # `host` is stored bracket-free (matching the CONNECT path); an IPv6 literal must be
+          # re-bracketed in the Host header line to stay RFC 7230 §5.4 valid (`Host: [::1]`).
+          # A reg-name/IPv4 host never contains `:` (userinfo/port live outside `uri.host`).
+          b << "Host: " << (host.includes?(':') ? "[#{host}]" : host) << "\r\n"
           # One pass, allocation-free case-insensitive compares. Skip BOTH the Host line and any
           # incoming Content-Length: the stored head must agree with the body we actually build
           # and store, but a HAR postData.params entry (no `text`) rebuilds a fresh urlencoded

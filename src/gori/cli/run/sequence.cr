@@ -105,7 +105,11 @@ module Gori
 
       private def self.read_token_list(file : String) : Array(String)
         raw = file == "-" ? STDIN.gets_to_end : (File.exists?(file) && !File.directory?(file) ? File.read(file) : abort("gori run sequence: not a readable file: #{file}"))
-        raw.split(/\r?\n/).map(&.strip).reject(&.empty?)
+        # Token lists are usually text, but a stray non-UTF-8 byte (0xff/0xfe) makes the
+        # PCRE2 regex split raise "Regex match error: UTF-8 error" and kill the run. Scrub
+        # to valid UTF-8 first (bad bytes → U+FFFD) so a lone junk byte doesn't abort the
+        # whole analysis; a normal UTF-8 file is unchanged.
+        raw.scrub.split(/\r?\n/).map(&.strip).reject(&.empty?)
       end
 
       private def self.build_token_loc(kind : Sequencer::ExtractKind, selector : String, cmd : String) : Sequencer::TokenLoc

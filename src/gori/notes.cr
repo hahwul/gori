@@ -1,5 +1,6 @@
 require "json"
 require "./store"
+require "./issues_export" # Issues::Export.scrub_controls — the shared terminal-safety helper
 
 module Gori
   # Shared reader/writer for the Notes tab's persisted documents. The TUI
@@ -28,9 +29,14 @@ module Gori
         notes.size
       end
 
-      # Note bodies in tab order (CLI listing).
+      # Note bodies in tab order, sanitized for terminal display — this is the CLI listing
+      # accessor (`gori run notes` prints these straight to STDOUT). Control characters a TTY
+      # would treat as escape sequences (ESC/BEL/OSC/CSI, other C0/C1) are stripped while
+      # newlines/tabs are preserved, so a note body carrying an OSC "set window title" /
+      # clipboard-write can't drive the terminal. The stored NoteEntry text is left untouched,
+      # so persistence and TUI editing still see the raw bytes.
       def texts : Array(String)
-        notes.map(&.text)
+        notes.map { |n| Issues::Export.scrub_controls(n.text) }
       end
 
       def note_id(idx : Int32) : Int64?

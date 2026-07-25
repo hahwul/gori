@@ -219,4 +219,29 @@ describe Gori::FilterAst do
       end
     end
   end
+
+  # Regression for the recursive-descent depth guard (FilterAst::MAX_PARSE_DEPTH). Filter
+  # parsing is reached from History QL, Probe, Sitemap, Issues, the TUI filter bar and MCP;
+  # the parse_or→parse_and→parse_unary→parse_primary descent had no nesting cap, so a fuzzed
+  # or hostile `((((…))))` / `NOT NOT NOT …` thousands deep recursed one native stack frame
+  # per level and SIGSEGV'd the process. The guard must not change any normal parse.
+  describe "deep nesting (recursion depth guard)" do
+    it "does not overflow the stack on thousands of nested parentheses" do
+      q = "#{"(" * 8000}host:evil#{")" * 8000}"
+      # The crash was here (unbounded recursion). Past the cap the descent degrades like the
+      # existing empty-`()` handling and still recovers the real term rather than crashing.
+      Gori::FilterAst.terms(Gori::FilterAst.parse(q)).map(&.text).should contain("host:evil")
+    end
+
+    it "does not overflow the stack on a very long NOT chain" do
+      Gori::FilterAst.parse("#{"NOT " * 8000}host:x").should_not be_nil
+    end
+
+    it "parses normal shallow nesting exactly as before the guard" do
+      # A handful of levels is far under the cap, so these stay byte-for-byte unchanged.
+      parse("((a OR b) c) OR d").should eq("(or (and (or a b) c) d)")
+      parse("NOT (host:cdn OR host:static)").should eq("(not (or host:cdn host:static))")
+      parse("(host:a OR host:b) -method:GET").should eq("(and (or host:a host:b) -method:GET)")
+    end
+  end
 end

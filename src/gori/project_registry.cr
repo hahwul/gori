@@ -1,4 +1,5 @@
 require "file_utils"
+require "digest/sha256"
 require "./project"
 require "./store"
 require "./capture_lock"
@@ -281,7 +282,18 @@ module Gori
     # ("." / ".." / "...") collapses to "" and is rejected by create() — otherwise
     # File.join(@root, slug) would resolve to @root or its parent (traversal).
     private def slugify(name : String) : String
-      name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip("-.")
+      slug = name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip("-.")
+      return slug unless slug.empty?
+      # An all-non-ASCII display name (e.g. "日本語") has no [a-z0-9] to slugify and would
+      # otherwise collapse to "" and be rejected as "invalid project name" — leaving such
+      # projects completely unusable via --project. When the name carries real (non-ASCII)
+      # content, derive a stable, filesystem-safe fallback slug from its hash so it round-
+      # trips (same name → same dir). Only reached when the ASCII slug is empty, so no
+      # existing (non-empty-slug) project's directory name ever changes. A purely-ASCII-
+      # punctuation name (".", "..", "---", blank) still yields "" and stays rejected — a
+      # dot-run must never become a path (traversal).
+      return slug unless name.each_char.any? { |c| c.ord > 127 }
+      "project-#{Digest::SHA256.hexdigest(name)[0, 10]}"
     end
   end
 end

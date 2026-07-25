@@ -303,6 +303,33 @@ describe Gori::Decoder do
       out.should contain "UNSIGNED"
       out.should contain "signature: absent"
     end
+
+    it "still decodes header/payload/signature exactly as before for a plain 3-part token (no regression)" do
+      token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." \
+              "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.abc"
+      out = conv("jwt-decode", token)
+      out.should_not contain "WARNING"
+      out.should_not contain "extra segment"
+    end
+
+    it "surfaces segments beyond the 3rd instead of silently dropping them (fix #22)" do
+      # a.b.c.d.e — a naive parts[0..2] read would decode this as if it were a plain
+      # 3-part JWT and silently drop "d" and "e", hiding smuggled/obfuscated trailing data.
+      out = conv("jwt-decode", "a.b.c.d.e")
+      out.should contain "WARNING"
+      out.should contain "5 dot-separated parts"
+      out.should contain "JWE-shaped"
+      out.should contain "[3] d"
+      out.should contain "[4] e"
+    end
+
+    it "flags a non-5-part extra-segment token generically, still showing the raw extras" do
+      out = conv("jwt-decode", "a.b.c.d")
+      out.should contain "WARNING"
+      out.should contain "4 dot-separated parts"
+      out.should contain "not a standard JWT"
+      out.should contain "[3] d"
+    end
   end
 
   describe ".run (chain executor)" do

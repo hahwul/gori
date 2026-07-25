@@ -98,6 +98,17 @@ module Gori
         puts payload
         STDERR.puts "waiting for callbacks (Ctrl-C to stop)…" unless once
         seen = Set(String).new
+        # Ctrl-C used to do nothing here: the poll loop trapped no signals, so despite the
+        # "Ctrl-C to stop" hint only SIGTERM/SIGKILL ended the listener. Trap INT+TERM into
+        # a buffered channel (matching gori run discover / App#install_signal_traps) and let
+        # oast_wait_or_stop wake on it, so the interval sleep is interrupted promptly rather
+        # than only at the next tick. (--once polls exactly once and returns, so it keeps the
+        # default Ctrl-C = immediate-exit behavior and installs no trap.)
+        stop = Channel(Nil).new(1)
+        unless once
+          Signal::INT.trap { stop.send(nil) rescue nil }
+          Signal::TERM.trap { stop.send(nil) rescue nil }
+        end
         loop do
           interactions = begin
             prov.poll(http, session)
@@ -116,9 +127,22 @@ module Gori
             STDOUT.flush
           end
           break if once
-          sleep interval.seconds
+          break if oast_wait_or_stop(stop, interval.seconds)
         end
         prov.deregister(http, session) if once
+      end
+
+      # Block up to `interval`, returning true the instant a stop arrives (Ctrl-C via the
+      # INT/TERM trap sends to `stop`) so the poll loop breaks promptly, or false on timeout
+      # to poll again. Split out both to keep oast_listen readable and to be unit-testable
+      # without delivering a real signal.
+      private def self.oast_wait_or_stop(stop : Channel(Nil), interval : Time::Span) : Bool
+        select
+        when stop.receive
+          true
+        when timeout(interval)
+          false
+        end
       end
     end
   end

@@ -400,6 +400,16 @@ module Gori::Decoder
         if (alg = jwt_alg(parts[0])) && alg.downcase == "none"
           io << "\n\n// WARNING: alg=none — this token is UNSIGNED and can be forged by anyone; never trust it as authentication."
         end
+        # >3 segments isn't a plain JWT (JWS) — most commonly a 5-part JWE (header,
+        # encrypted key, IV, ciphertext, tag), but could just as well be smuggled/obfuscated
+        # data riding after a valid-looking JWS prefix. Either way, silently decoding only
+        # parts[0..2] would hide it. Surface the extra segments rather than dropping them.
+        if parts.size > 3
+          extra = parts[3..]
+          shape = parts.size == 5 ? "JWE-shaped (5 parts: header.key.iv.ciphertext.tag) — not JOSE/JWS-decodable" : "not a standard JWT"
+          io << "\n\n// WARNING: #{parts.size} dot-separated parts (#{shape}); #{extra.size} extra segment(s) beyond header.payload.signature, shown raw:\n"
+          extra.each_with_index(3) { |seg, i| io << "//   [#{i}] #{seg}\n" }
+        end
       end
     end
 

@@ -179,6 +179,16 @@ describe Gori::Sequencer::Stats do
     report.sequential.should be_false          # identical leading bytes → r = 0
   end
 
+  it "never reports a NaN correlation for a constant leading-byte series (fix #16)" do
+    # Regression: pearson's den = Math.sqrt((m*sx2-sx*sx)*(m*sy2-sy*sy)) can see
+    # floating-point cancellation drive the y-variance factor slightly NEGATIVE for a
+    # constant/near-constant series, making the radicand negative and Math.sqrt return
+    # NaN — which used to leak into the detail text as "corr=NaN" even though ys here is
+    # exactly constant (identical leading 8 bytes) and the correlation should read 0.
+    big = ["9999999999999999999", "9999999999999999998", "9999999999999999997"]
+    seq_detail(big).should_not contain("NaN")
+  end
+
   # ── detect_sequential: general (leading-byte correlation) path ───────────────────
 
   it "flags non-numeric tokens whose leading byte increases monotonically as sequential" do

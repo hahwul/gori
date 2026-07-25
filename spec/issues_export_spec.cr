@@ -70,6 +70,29 @@ describe Gori::Issues::Export do
     end
   end
 
+  describe ".scrub_controls" do
+    it "strips terminal escape sequences (ESC/BEL/OSC/CSI, C0/C1) but preserves newlines and tabs" do
+      # An OSC "set window title" (ESC ] 0 ; … BEL) printed raw to a TTY would drive the terminal.
+      # scrub_controls removes the control BYTES (defanging the sequence) while keeping the note's
+      # own newlines/tabs so a multi-line value stays intact.
+      esc = 27.chr                             # ESC 0x1B
+      bel = 7.chr                              # BEL 0x07 (OSC terminator)
+      raw = "a#{esc}]0;INJECTED#{bel}b\r\n\tc" # ESC-introduced OSC + BEL, a bare CR, then \n\t
+      out = Gori::Issues::Export.scrub_controls(raw)
+      out.includes?(esc).should be_false  # ESC gone
+      out.includes?(bel).should be_false  # BEL gone
+      out.includes?('\r').should be_false # lone CR gone (cursor-overwrite defanged)
+      out.should contain("INJECTED")      # the payload TEXT remains, only the control bytes go
+      out.should contain("\n\tc")         # newline + tab preserved (multi-line structure intact)
+    end
+
+    it "leaves ordinary text untouched and does not raise on invalid UTF-8" do
+      Gori::Issues::Export.scrub_controls("plain\nmulti-line\ttext").should eq("plain\nmulti-line\ttext")
+      out = Gori::Issues::Export.scrub_controls(String.new(Bytes[0x61, 0x80, 0x62])) # invalid byte
+      out.valid_encoding?.should be_true
+    end
+  end
+
   describe ".markdown" do
     it "keeps an attacker-controlled body (``` + headings) inside its code fence" do
       with_store do |store|
@@ -203,6 +226,22 @@ describe Gori::Issues::Export do
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.valid_encoding?.should be_true
         md.should contain("l1�\nl2") # newline preserved, invalid byte scrubbed to U+FFFD
+      end
+    end
+    it "neutralizes terminal escape sequences in an issue's notes field (markdown printed to a TTY)" do
+      # notes routes through scrub_controls: an OSC "set window title" (ESC ] 0 ; … BEL) embedded
+      # in a notes field would otherwise reach the terminal when `gori run issues --format markdown`
+      # prints the report to STDOUT. The payload TEXT survives (defanged); the ESC/BEL bytes go.
+      with_store do |store|
+        id = store.insert_issue("clean title", Gori::Store::Severity::Low, "clean.host", nil)
+        store.update_issue(id, notes: "before#{27.chr}]0;pwn#{7.chr}after")
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.includes?(27.chr).should be_false # ESC stripped
+        md.includes?(7.chr).should be_false  # BEL stripped
+        md.should contain("before")
+        md.should contain("pwn") # payload text remains, defanged
+        md.should contain("after")
       end
     end
   end

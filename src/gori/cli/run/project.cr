@@ -14,6 +14,8 @@ module Gori
           cmd_project_list(args[1..])
         when "scope"
           cmd_project_scope(args[1..])
+        when "sandbox"
+          cmd_project_sandbox(args[1..])
         when "env"
           cmd_project_env(args[1..])
         when "host-override", "host-overrides"
@@ -39,12 +41,14 @@ module Gori
         Subcommands:
           list               List known projects (default when no subcommand)
           scope              Manage scope rules (list, add, delete, enable/disable)
+          sandbox            Get/set the hard-containment sandbox gate (status, on, off)
           env                Manage project env vars ($KEY substitution)
           host-override      Manage host overrides (list, add, update, delete)
 
         Examples:
           gori run project --format json
           gori run project scope add --kind=include --type=host --pattern=api.example.com
+          gori run project sandbox on
           gori run project env set TOKEN=secret
           gori run project host-override add --host=api.example.com --ip=10.0.0.1
 
@@ -280,6 +284,113 @@ module Gori
             abort "gori run project scope #{enable ? "enable" : "disable"}: project is busy (write did not commit) — try again"
           end
           puts enable ? "Scope filtering enabled." : "Scope filtering disabled."
+        ensure
+          store.close
+        end
+      end
+
+      # `gori run project sandbox` — get/set the HARD-CONTAINMENT sandbox gate (Scope's
+      # blocking policy, distinct from the ⇧S display lens). Until now this could only be
+      # toggled from the interactive TUI (Project NETWORK pane); this is the headless
+      # bootstrap so a CI / authorized-testing run can enable containment without the UI.
+      private def self.cmd_project_sandbox(args : Array(String)) : Nil
+        sub = args.first?
+        case sub
+        when "on", "enable"
+          cmd_sandbox_set(true, args[1..])
+        when "off", "disable"
+          cmd_sandbox_set(false, args[1..])
+        when "status"
+          cmd_sandbox_status(args[1..])
+        when nil
+          cmd_sandbox_status(args)
+        else
+          if (s = sub) && s.starts_with?('-')
+            cmd_sandbox_status(args)
+          else
+            STDERR.puts "gori run project sandbox: unknown subcommand '#{sub}'"
+            STDERR.puts "Usage: gori run project sandbox [status options] | on|enable | off|disable"
+            exit 1
+          end
+        end
+      end
+
+      private def self.cmd_sandbox_status(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project sandbox [options]\n\n" \
+                     "Show the hard-containment sandbox gate: when ON, the capture proxy forwards\n" \
+                     "ONLY requests the scope allows and BLOCKS everything else (see\n" \
+                     "'gori run project scope'). Or set it:\n" \
+                     "  gori run project sandbox on|enable\n" \
+                     "  gori run project sandbox off|disable"
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run project sandbox: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project sandbox: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          if format == :json
+            puts(JSON.build do |j|
+              j.object do
+                j.field "sandbox", scope.sandbox?
+              end
+            end)
+          else
+            puts "Sandbox: #{scope.sandbox? ? "ENABLED" : "DISABLED"}"
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_sandbox_set(enable : Bool, args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        action = enable ? "on" : "off"
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project sandbox #{action} [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run project sandbox #{action}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project sandbox #{action}: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          # Enabling with NO include rule turns the proxy into a black hole (every captured
+          # request blocked). The TUI danger-confirms this; a headless run can't prompt, so
+          # it warns and proceeds (the whole point is to bootstrap containment for CI).
+          if enable && scope.include_count == 0
+            STDERR.puts "gori run project sandbox on: warning — the scope has no include rules, " \
+                        "so the sandbox will BLOCK ALL captured traffic until you add one " \
+                        "(gori run project scope add ...)"
+          end
+          # Scope's sandbox setters persist through the SAME settings-table write the TUI uses
+          # (set_sandbox_unlocked → Store#set_setting) but return Nil, so confirm the flag
+          # committed by reading it back — a busy/locked store must not report success
+          # (mirrors scope enable/disable's committed check).
+          enable ? scope.enable_sandbox : scope.disable_sandbox
+          unless store.setting(Scope::SETTING_SANDBOX) == (enable ? "1" : "0")
+            store.close
+            abort "gori run project sandbox #{action}: project is busy (write did not commit) — try again"
+          end
+          puts enable ? "Sandbox enabled." : "Sandbox disabled."
         ensure
           store.close
         end

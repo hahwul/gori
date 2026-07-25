@@ -187,7 +187,11 @@ module Gori::Discover
       @setup_error = sp ? nil : "invalid seed url: #{seed_url}"
       @seed_parts = sp || Url::Parts.new("http", "invalid.invalid", 80, "/", nil)
       # A path-scoped run (seed path deeper than "/") confines discovery to that subtree.
-      @confine_path = @seed_parts.path == "/" ? nil : @seed_parts.path
+      # Store the base with any single trailing slash stripped so bounded_url can test
+      # containment on PATH-SEGMENT boundaries. The old raw-string-prefix check let a sibling
+      # like /api-internal leak into an /api-scoped run (they share the "/api" prefix); a
+      # trailing-slash target already excluded it, proving the leak was prefix- not segment-based.
+      @confine_path = @seed_parts.path == "/" ? nil : @seed_parts.path.rchop('/')
       @capped = CappedBackend.new(backend, @config.max_requests)
       conc = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @concurrency = conc
@@ -568,7 +572,10 @@ module Gori::Discover
     # confine before normalizing anything.
     private def bounded_url(p : Url::Parts) : String?
       if cp = @confine_path
-        return nil unless p.path.starts_with?(cp)
+        # Segment-boundary confinement: in-subtree iff the path IS the base or sits under
+        # "base/". A bare starts_with?(base) would also admit sibling prefixes (/api-internal
+        # for an /api seed, /prefix-test-evil for /prefix-test) — the scope bypass this guards.
+        return nil unless p.path == cp || p.path.starts_with?("#{cp}/")
       end
       url = Url.normalize(p)
       return nil unless @scope.allowed?(url, p.host) # excludes/sandbox — every mode

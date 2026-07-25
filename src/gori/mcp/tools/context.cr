@@ -8,9 +8,11 @@ module Gori
   module MCP
     class Tools
       private def list_scope : Result
+        scope = Scope.load(store)
         Result.new(JSON.build do |j|
           j.object do
-            j.field "enabled", Scope.load(store).enabled?
+            j.field "enabled", scope.enabled?
+            j.field "sandbox", scope.sandbox?
             j.field "rules" do
               j.array do
                 store.scope_rules.each do |(id, kind, match_type, pattern)|

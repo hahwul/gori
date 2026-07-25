@@ -62,7 +62,13 @@ module Gori
           end
           STDERR.puts "exported #{count} issue#{count == 1 ? "" : "s"} → #{path}"
         else
-          puts content
+          # Neutralize terminal escape sequences before writing to STDOUT/a TTY: the markdown
+          # report embeds attacker-controlled evidence bodies (proxied traffic) and free-text
+          # notes that can carry raw ESC/OSC/BEL — a bare `puts` would let them drive the
+          # terminal (window-title spoof, OSC 52 clipboard write). Newlines/tabs are preserved,
+          # so structure is intact. File export (above) keeps the bytes verbatim — a saved file
+          # is not a live terminal, and stripping would corrupt captured evidence.
+          puts Issues::Export.scrub_controls(content)
         end
       end
 

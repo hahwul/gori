@@ -133,6 +133,18 @@ module Gori
           return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
           resp = Proxy::Codec::Http1.parse_response_head(head)
         end
+        # A reply whose status-line can't be parsed (no HTTP-version, or a non-numeric status —
+        # garbage/non-HTTP, or an h2 stack answering this h1 request) is flagged `malformed?` by
+        # parse_response_head but was otherwise returned as {ok:true,status:0} — a false success,
+        # and precisely the desync/smuggling anomaly send_pipeline exists to surface. Report it as
+        # a failure with a descriptive error, but keep the raw head + parsed projection so the
+        # workbench still shows the bytes that came back. No body is read: with no valid framing
+        # anything after the head is unstructured, and (in a group) `error` already retires the
+        # socket so the next request won't be misframed against these leftovers.
+        if resp.malformed?
+          return Result.new(head, nil, resp, elapsed(started),
+            error: "malformed/non-HTTP response from #{host}:#{port} (status line unparseable)")
+        end
         begin
           framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
           # Cap the capture read at CAPTURE_READ_MAX (parity with the h2 engine's MAX_BODY):

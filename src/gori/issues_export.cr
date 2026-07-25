@@ -36,10 +36,11 @@ module Gori
               end
             end
             append_related_links(io, f, store)
-            # notes is multi-line by design (free text) — scrub_only fixes invalid UTF-8
-            # (the same captured-data class title/host carry) without collapsing its newlines,
-            # unlike one_line above, which would flatten it into a single unreadable line.
-            io << "\n" << scrub_only(f.notes) << "\n" unless f.notes.strip.empty?
+            # notes is multi-line by design (free text) — scrub_controls fixes invalid UTF-8
+            # AND strips terminal escape sequences (ESC/BEL/OSC/CSI) so a notes value carrying
+            # an OSC "set window title" can't drive a TTY when the report is printed/`cat`d,
+            # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
+            io << "\n" << scrub_controls(f.notes) << "\n" unless f.notes.strip.empty?
             if flow
               append_evidence(io, "Request", flow.request_head, flow.request_body)
               append_evidence(io, "Response", flow.response_head, flow.response_body)
@@ -86,6 +87,19 @@ module Gori
       # later PCRE gsub over it.
       def self.scrub_only(s : String) : String
         s.scrub
+      end
+
+      # Terminal-safety sibling of `one_line`: neutralize the control characters a TTY would
+      # interpret as escape sequences — ESC (0x1B), BEL (0x07), the CSI/OSC introducers, and
+      # every other C0/C1 control — while PRESERVING newlines and tabs so a multi-line value
+      # (an issue's free-text `notes`, a note body) keeps its structure. Stripping the control
+      # BYTES defangs OSC/CSI sequences without modelling the full grammar: an OSC "set window
+      # title" or OSC 52 clipboard-write can no longer reach the terminal. Use this for text
+      # printed to STDOUT/a TTY — unlike one_line it does NOT collapse to a single line, and
+      # unlike scrub_only it does NOT leave ESC/BEL intact. (scrub first: a captured value can
+      # be invalid UTF-8, which would make the following per-char walk operate on U+FFFD safely.)
+      def self.scrub_controls(s : String) : String
+        scrub_only(s).gsub { |ch| ch.control? && ch != '\n' && ch != '\t' ? "" : ch }
       end
 
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with

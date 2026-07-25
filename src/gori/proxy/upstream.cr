@@ -413,10 +413,21 @@ module Gori::Proxy
       {nil, TlsDialError::Tls}
     end
 
+    # A bare (unbracketed) IPv6 literal. The charset guard scrubs and rejects anything
+    # outside the v6 alphabet before valid_v6? (mirrors cert_builder's ipv6?), so an
+    # invalid-UTF-8 / otherwise odd authority can't raise on this parse path.
+    private def self.valid_ipv6?(host : String) : Bool
+      return false unless (host.scrub =~ /\A[0-9A-Fa-f:.]+\z/) != nil
+      Socket::IPAddress.valid_v6?(host)
+    end
+
     # Splits an "host:port" / "host" authority. Falls back to default_port.
     # Handles bracketed IPv6 ("[::1]" / "[::1]:8080") by returning the bare inner
-    # address; an unbracketed IPv6 literal ("::1") is treated as a bare host (a
-    # port can't be disambiguated from the address colons without brackets).
+    # address; an unbracketed authority is a whole IPv6 host ONLY when it is a valid
+    # v6 literal ("::1") — a port can't be disambiguated from the address colons
+    # without brackets. A multi-colon authority that is NOT a valid v6 literal
+    # ("127.0.0.1:19110:bogus") is split on the LAST colon so host:port semantics win
+    # and a real port isn't silently swallowed into the host.
     def self.split_host_port(authority : String, default_port : Int32) : {String, Int32}
       if authority.starts_with?('[')
         if close = authority.index(']')
@@ -426,10 +437,10 @@ module Gori::Proxy
           return {host, port}
         end
       end
+      return {authority, default_port} if valid_ipv6?(authority) # unbracketed IPv6 literal
       idx = authority.rindex(':')
       return {authority, default_port} unless idx
       host = authority[0...idx]
-      return {authority, default_port} if host.includes?(':') # unbracketed IPv6
       port = authority[(idx + 1)..].to_i? || default_port
       {host, port}
     end

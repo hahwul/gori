@@ -143,7 +143,15 @@ module Gori
 
             if detail.row.status == 101
               is_ws = true
-              ws_messages = store.ws_messages(fid).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }
+              out_frames = store.ws_messages(fid).select { |m| m.direction == "out" }
+              ws_messages = out_frames.select(&.text?).map { |m| String.new(m.payload).scrub }
+              # A repeater SESSION persists outbound messages as editable text lines
+              # (update_repeater_ws_messages stores Array(String) as opcode 1), so a binary
+              # outbound frame can't round-trip through the session store and would vanish from
+              # every later `repeater send` replay — warn instead of dropping it silently.
+              if (dropped = out_frames.size - ws_messages.size) > 0
+                STDERR.puts "gori run repeater create: #{dropped} binary outbound WebSocket frame#{dropped == 1 ? "" : "s"} dropped — the repeater session store keeps text messages only, so #{dropped == 1 ? "it is" : "they are"} not replayable"
+              end
             end
           end
 
@@ -430,6 +438,131 @@ module Gori
         end
       end
 
+      # Build the final single-flow replay request wire from the captured head + body and the CLI
+      # overrides (-H headers, -b body, --target Host sync). PURE: no store, no network, no exit —
+      # the testable core of cmd_repeater_single's request mutation.
+      #
+      # Edits the head as RAW LINES so the request line and every header stay byte-exact except
+      # where a flag overrides them. The old path rebuilt the request line from split
+      # method/target/version tokens, which corrupted any line with a raw space in the target
+      # (fuzzer/smuggling captures split into >3 tokens: the version was dropped and the path
+      # truncated); it also re-emitted only parse_headers' output, silently dropping any colon-less
+      # header line. Both are exactly the payloads this tool exists to replay faithfully, so we
+      # never reconstruct them from parsed tokens.
+      #
+      # An explicit `-H "Content-Length: N"` is honored VERBATIM: a deliberately-wrong CL is the
+      # whole point of CL-mismatch / request-smuggling testing, so neither the auto-resync nor the
+      # post-expansion resync overwrites it (parity with `repeater create --no-auto-cl` + `send`,
+      # the only other path that could do this before).
+      private def self.build_single_flow_request(head_bytes : Bytes, body_bytes : Bytes,
+                                                 headers : Array(String), body_override : String?,
+                                                 target_override : String?) : Bytes
+        head_str = String.new(head_bytes)
+        first_crlf = head_str.index("\r\n") || head_str.size
+        request_line = head_str[0, first_crlf]
+        # Header lines between the request line and the terminating blank line, each verbatim.
+        raw_lines = head_str[first_crlf..].split("\r\n").reject(&.empty?)
+
+        # -H overrides: lower-name → value, plus the flag-cased name in flag order for appends.
+        custom_headers = {} of String => String
+        custom_order = [] of {String, String}
+        headers.each do |h_str|
+          next unless h_str.includes?(':')
+          name, _, val = h_str.partition(':')
+          next if name.strip.empty?
+          lname = name.strip.downcase
+          custom_order << {lname, name.strip} unless custom_headers.has_key?(lname)
+          custom_headers[lname] = val.strip
+        end
+
+        # The header NAME of a raw line (bytes before the first colon), or "" for a
+        # colon-less line — those are kept verbatim, never treated as a header to edit.
+        line_name = ->(line : String) do
+          c = line.index(':')
+          c && c > 0 ? line[0, c] : ""
+        end
+
+        # Replace the FIRST occurrence of an overridden header (DROP later duplicates so an
+        # h2 request's repeated cookie:/set-cookie: lines aren't left half-overridden), and
+        # keep every other line — including colon-less ones — byte-exact.
+        applied = Set(String).new
+        new_lines = [] of String
+        raw_lines.each do |line|
+          name = line_name.call(line)
+          lname = name.strip.downcase
+          if !lname.empty? && custom_headers.has_key?(lname)
+            next if applied.includes?(lname)
+            applied << lname
+            new_lines << "#{name}: #{custom_headers[lname]}"
+          else
+            new_lines << line
+          end
+        end
+        custom_order.each do |(lname, orig)|
+          next if applied.includes?(lname)
+          new_lines << "#{orig}: #{custom_headers[lname]}"
+        end
+
+        final_body = if b_over = body_override
+                       b_over.to_slice
+                     else
+                       body_bytes
+                     end
+
+        has_te = new_lines.any? { |l| line_name.call(l).compare("Transfer-Encoding", case_insensitive: true) == 0 }
+        # RFC 7230 §3.3.3 forbids sending Transfer-Encoding and Content-Length together.
+        # When the original request was chunked (TE present, no override), keep its wire
+        # framing byte-exact and don't inject a Content-Length. When the body is replaced
+        # via -b, drop Transfer-Encoding and self-frame the new bytes with Content-Length.
+        if has_te && body_override
+          new_lines.reject! { |l| line_name.call(l).compare("Transfer-Encoding", case_insensitive: true) == 0 }
+          has_te = false
+        end
+        # An explicit `-H "Content-Length: N"` is an intentional CL, so it is honored VERBATIM.
+        # When present, skip BOTH the auto-resync below and the post-expansion resync so neither
+        # overwrites the user's value — the header the override loop already wrote into new_lines
+        # stands.
+        explicit_cl = custom_headers.has_key?("content-length")
+        has_cl = new_lines.any? { |l| line_name.call(l).compare("Content-Length", case_insensitive: true) == 0 }
+        if !explicit_cl && !has_te && (body_override || has_cl || final_body.size > 0)
+          cl_idx = new_lines.index { |l| line_name.call(l).compare("Content-Length", case_insensitive: true) == 0 }
+          if cl_idx
+            new_lines[cl_idx] = "#{line_name.call(new_lines[cl_idx])}: #{final_body.size}"
+          else
+            new_lines << "Content-Length: #{final_body.size}"
+          end
+        end
+
+        # Sync Host from --target, UNLESS the user set an explicit `-H "Host: …"` — a
+        # host-header-confusion / vhost test deliberately pairs --target (where to connect)
+        # with a different claimed Host, so that override must win.
+        if (override = target_override) && !custom_headers.has_key?("host")
+          scheme_part, host_part, port_part = Repeater::FlowRequest.parse_target(override)
+          default_port = scheme_part == "https" ? 443 : 80
+          host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
+          host_idx = new_lines.index { |l| line_name.call(l).compare("Host", case_insensitive: true) == 0 }
+          if host_idx
+            new_lines[host_idx] = "#{line_name.call(new_lines[host_idx])}: #{host_hdr_val}"
+          else
+            new_lines << "Host: #{host_hdr_val}"
+          end
+        end
+
+        new_head_str = String.build do |io|
+          io << request_line << "\r\n"
+          new_lines.each { |l| io << l << "\r\n" }
+          io << "\r\n"
+        end
+
+        final_request_bytes = new_head_str.to_slice + final_body
+
+        # Re-sync Content-Length after expansion — a `$KEY` in the body changes its length, and
+        # `build` framed CL over the pre-expansion bytes — UNLESS the user pinned an explicit
+        # `-H "Content-Length: N"` (honor the deliberately-wrong value for CL-mismatch testing).
+        expanded_wire = Env.expand_wire(String.new(final_request_bytes))
+        explicit_cl ? expanded_wire : Repeater::FlowRequest.resync_content_length(expanded_wire)
+      end
+
       private def self.cmd_repeater_single(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -457,7 +590,7 @@ module Gori
           p.on("--sni=HOST", "TLS SNI override") { |v| sni_override = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
-          p.on("-HHEADER", "--header=HEADER", "Custom header to overwrite/add (repeatable)") { |v| headers << v }
+          p.on("-HHEADER", "--header=HEADER", "Custom header to overwrite/add (repeatable). An explicit Content-Length is honored verbatim (no auto-resync) for CL-mismatch testing") { |v| headers << v }
           p.on("-bBODY", "--body=BODY", "Request body override") { |v| body_override = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -524,111 +657,8 @@ module Gori
         head_bytes = raw_bytes[0, crlf_crlf_idx + 4]
         body_bytes = raw_bytes[crlf_crlf_idx + 4..]
 
-        # Edit the head as RAW LINES so the request line and every header stay byte-exact
-        # except where a flag overrides them. The old path rebuilt the request line from
-        # split method/target/version tokens, which corrupted any line with a raw space in
-        # the target (fuzzer/smuggling captures split into >3 tokens: the version was dropped
-        # and the path truncated); it also re-emitted only parse_headers' output, silently
-        # dropping any colon-less header line. Both are exactly the payloads this tool exists
-        # to replay faithfully, so we never reconstruct them from parsed tokens.
-        head_str = String.new(head_bytes)
-        first_crlf = head_str.index("\r\n") || head_str.size
-        request_line = head_str[0, first_crlf]
-        # Header lines between the request line and the terminating blank line, each verbatim.
-        raw_lines = head_str[first_crlf..].split("\r\n").reject(&.empty?)
-
-        # -H overrides: lower-name → value, plus the flag-cased name in flag order for appends.
-        custom_headers = {} of String => String
-        custom_order = [] of {String, String}
-        headers.each do |h_str|
-          next unless h_str.includes?(':')
-          name, _, val = h_str.partition(':')
-          next if name.strip.empty?
-          lname = name.strip.downcase
-          custom_order << {lname, name.strip} unless custom_headers.has_key?(lname)
-          custom_headers[lname] = val.strip
-        end
-
-        # The header NAME of a raw line (bytes before the first colon), or "" for a
-        # colon-less line — those are kept verbatim, never treated as a header to edit.
-        line_name = ->(line : String) do
-          c = line.index(':')
-          c && c > 0 ? line[0, c] : ""
-        end
-
-        # Replace the FIRST occurrence of an overridden header (DROP later duplicates so an
-        # h2 request's repeated cookie:/set-cookie: lines aren't left half-overridden), and
-        # keep every other line — including colon-less ones — byte-exact.
-        applied = Set(String).new
-        new_lines = [] of String
-        raw_lines.each do |line|
-          name = line_name.call(line)
-          lname = name.strip.downcase
-          if !lname.empty? && custom_headers.has_key?(lname)
-            next if applied.includes?(lname)
-            applied << lname
-            new_lines << "#{name}: #{custom_headers[lname]}"
-          else
-            new_lines << line
-          end
-        end
-        custom_order.each do |(lname, orig)|
-          next if applied.includes?(lname)
-          new_lines << "#{orig}: #{custom_headers[lname]}"
-        end
-
-        final_body = if b_over = body_override
-                       b_over.to_slice
-                     else
-                       body_bytes
-                     end
-
-        has_te = new_lines.any? { |l| line_name.call(l).compare("Transfer-Encoding", case_insensitive: true) == 0 }
-        # RFC 7230 §3.3.3 forbids sending Transfer-Encoding and Content-Length together.
-        # When the original request was chunked (TE present, no override), keep its wire
-        # framing byte-exact and don't inject a Content-Length. When the body is replaced
-        # via -b, drop Transfer-Encoding and self-frame the new bytes with Content-Length.
-        if has_te && body_override
-          new_lines.reject! { |l| line_name.call(l).compare("Transfer-Encoding", case_insensitive: true) == 0 }
-          has_te = false
-        end
-        has_cl = new_lines.any? { |l| line_name.call(l).compare("Content-Length", case_insensitive: true) == 0 }
-        if !has_te && (body_override || has_cl || final_body.size > 0)
-          cl_idx = new_lines.index { |l| line_name.call(l).compare("Content-Length", case_insensitive: true) == 0 }
-          if cl_idx
-            new_lines[cl_idx] = "#{line_name.call(new_lines[cl_idx])}: #{final_body.size}"
-          else
-            new_lines << "Content-Length: #{final_body.size}"
-          end
-        end
-
-        # Sync Host from --target, UNLESS the user set an explicit `-H "Host: …"` — a
-        # host-header-confusion / vhost test deliberately pairs --target (where to connect)
-        # with a different claimed Host, so that override must win.
-        if (override = target_override) && !custom_headers.has_key?("host")
-          scheme_part, host_part, port_part = Repeater::FlowRequest.parse_target(override)
-          default_port = scheme_part == "https" ? 443 : 80
-          host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
-          host_idx = new_lines.index { |l| line_name.call(l).compare("Host", case_insensitive: true) == 0 }
-          if host_idx
-            new_lines[host_idx] = "#{line_name.call(new_lines[host_idx])}: #{host_hdr_val}"
-          else
-            new_lines << "Host: #{host_hdr_val}"
-          end
-        end
-
-        new_head_str = String.build do |io|
-          io << request_line << "\r\n"
-          new_lines.each { |l| io << l << "\r\n" }
-          io << "\r\n"
-        end
-
-        final_request_bytes = new_head_str.to_slice + final_body
-
+        bytes = build_single_flow_request(head_bytes, body_bytes, headers, body_override, target_override)
         override = target_override # copy the closured flag into a plain local so || narrows
-        # Re-sync Content-Length after expansion — a `$KEY` in the body changes its length,
-        # and `build` framed CL over the pre-expansion bytes.
-        bytes = Repeater::FlowRequest.resync_content_length(Env.expand_wire(String.new(final_request_bytes)))
         target = Env.expand(override || built.target)
         scheme, host, port = Repeater::FlowRequest.parse_target(target)
         abort "gori run repeater: could not determine a target host" if host.empty?

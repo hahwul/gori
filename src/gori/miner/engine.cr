@@ -181,7 +181,8 @@ module Gori::Miner
       pairs = task.names.map { |n| {n, Canary.fresh} }
       raw = send_with_retries(Inject.apply(@base, task.location, pairs, @config.add_content_length_when_missing?))
       if raw.error
-        @errors += 1
+        # A max-requests cap refusal isn't a network error — don't let it inflate @errors.
+        @errors += 1 unless raw.error == Fuzz::CappedBackend::CAP_ERROR
         mark_done(task.names.size) # keep the bar monotonic; this bucket is inconclusive
         return [] of Task
       end

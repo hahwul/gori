@@ -99,7 +99,8 @@ module Gori::Tui
             v.render(screen, body, body_focused)
           else
             screen.text(body.x + 1, body.y,
-              "no sequencer sessions — from History/Repeater press space → \"Send to Sequencer\", or select a token and use \"Send selection to\"", Theme.muted)
+              "no sequencer sessions — from History/Repeater press space → \"Send to Sequencer\", or select a token and use \"Send selection to\"", Theme.muted,
+              width: body.w - 2)
           end
         end
       end

@@ -105,7 +105,8 @@ module Gori::Tui
             v.render(screen, body, body_focused)
           else
             screen.text(body.x + 1, body.y,
-              "no mining sessions — from History/Repeater press space → \"Mine parameters\"", Theme.muted)
+              "no mining sessions — from History/Repeater press space → \"Mine parameters\"", Theme.muted,
+              width: body.w - 2)
           end
         end
       end

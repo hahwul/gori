@@ -95,6 +95,16 @@ describe Gori::Proxy::Upstream do
     it "treats an unbracketed IPv6 literal as a bare host" do
       Gori::Proxy::Upstream.split_host_port("::1", 443).should eq({"::1", 443})
     end
+
+    it "does not swallow the port for a malformed multi-colon authority (regression #13)" do
+      # Was: host="127.0.0.1:19110:bogus", port=80 — a non-v6 multi-colon authority was
+      # treated as a whole IPv6 host and the real port was silently dropped.
+      host, _ = Gori::Proxy::Upstream.split_host_port("127.0.0.1:19110:bogus", 80)
+      host.should_not eq("127.0.0.1:19110:bogus") # the whole authority is NOT the host
+      # host:port semantics win — split on the LAST colon.
+      Gori::Proxy::Upstream.split_host_port("127.0.0.1:19110:bogus", 80).should eq({"127.0.0.1:19110", 80})
+      Gori::Proxy::Upstream.split_host_port("127.0.0.1:80", 443).should eq({"127.0.0.1", 80})
+    end
   end
 
   # The self-page / self-loop detection. The interesting case is a WILDCARD bind
