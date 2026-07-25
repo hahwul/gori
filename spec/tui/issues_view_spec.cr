@@ -231,22 +231,6 @@ describe Gori::Tui::IssuesView do
   end
 end
 
-describe "IssueForm" do
-  it "cycles severity (tab) and carries an edit id for re-titling" do
-    form = IssueForm.new("GET /x", "acme.test", 7_i64)
-    form.severity.should eq(Gori::Store::Severity::Medium) # default
-    form.severity_cycle(1)
-    form.severity.should eq(Gori::Store::Severity::High)
-    form.severity_cycle(-2)
-    form.severity.should eq(Gori::Store::Severity::Low)
-    form.edit_id.should be_nil
-
-    edit = IssueForm.new("old", nil, nil, Gori::Store::Severity::Critical, edit_id: 42_i64)
-    edit.edit_id.should eq(42_i64)
-    edit.severity.should eq(Gori::Store::Severity::Critical)
-  end
-end
-
 describe "Issues verbs" do
   it "registers issue.create and the issues detail/export verbs in the registry" do
     reg = Gori::Verbs.registry

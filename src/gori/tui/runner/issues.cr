@@ -5,14 +5,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     id = history_target_flow_id
     return unless id
     if row = @session.store.flow_row(id)
-      @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, id)
-      @overlay = OverlayKind::IssueNew
+      open_issue_form(IssueForm.new("#{row.method} #{row.target}", row.host, id))
     end
   end
 
   def issues_new : Nil
-    @issue_form = IssueForm.new
-    @overlay = OverlayKind::IssueNew
+    open_issue_form(IssueForm.new)
   end
 
   def issues_query : Nil
@@ -43,18 +41,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issue_status(delta)
   end
 
-  # Open the colour pickers for the issue currently in the detail view. The
-  # picker (a shell overlay) applies the chosen value on commit (apply_choice).
+  # Open the colour pickers for the issue currently in the detail view. The picker (a
+  # shell overlay) writes the chosen value to the open issue on commit.
   def issue_set_severity : Nil
     return unless f = issues_controller.view.detail_issue
-    @choice_picker = ChoicePicker.for_severity(f.severity.value)
-    @overlay = OverlayKind::Choice
+    open_choice_picker(ChoicePicker.for_severity(f.severity.value)) { |p| apply_issue_choice(p) }
   end
 
   def issue_set_status : Nil
     return unless f = issues_controller.view.detail_issue
-    @choice_picker = ChoicePicker.for_status(f.status.value)
-    @overlay = OverlayKind::Choice
+    open_choice_picker(ChoicePicker.for_status(f.status.value)) { |p| apply_issue_choice(p) }
   end
 
   def issue_edit_notes : Nil
@@ -82,8 +78,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Stays in the shell: it opens the issue-form OVERLAY (shell-owned).
   def issue_edit_title : Nil
     return unless f = issues_controller.view.detail_issue
-    @issue_form = IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE")
-    @overlay = OverlayKind::IssueNew
+    open_issue_form(IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE"))
   end
 
   # Jump from an issue to its linked flow's request/response in History. CROSS-TAB

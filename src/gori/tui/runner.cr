@@ -39,6 +39,7 @@ require "./rewriter_rule_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
+require "./issue_form"
 require "./more_menu"
 require "./copy_picker"
 require "./send_picker"
@@ -114,7 +115,6 @@ module Gori::Tui
       @backend = TermisuBackend.new(@term).as(Backend)
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       @scope = @session.scope
-      @issue_form = IssueForm.new
       @palette = PaletteState.new(@session.registry)
       @space_menu = SpaceMenu.new(@session.registry)
       # Land on the home tab, but never on a hidden one (settings:tabs may hide Project;
@@ -167,18 +167,6 @@ module Gori::Tui
       # Pretty-print bodies (JSON/XML/form/…) toggle — global view pref like reveal,
       # seeded from the persisted default, propagated to History/Repeater each frame.
       @pretty = Settings.pretty_bodies_default
-      # A destructive-action guard (delete project / close a sub-tab). When set,
-      # @overlay is Confirm; accepting runs @confirm_action. @confirm_return is the
-      # overlay to restore on close — None for palette-launched confirms, or the parent
-      # overlay (e.g. Tabs) when the confirm is raised from inside another modal.
-      @confirm = nil.as(ConfirmDialog?)
-      @confirm_action = nil.as(Proc(Nil)?)
-      @confirm_return = OverlayKind::None
-      # The "open browser" picker (palette → browser.open); @overlay is :browser
-      # while it's up.
-      @browser_picker = nil.as(BrowserPicker?)
-      # The severity/status value picker (Issues detail → space); @overlay is :choice.
-      @choice_picker = nil.as(ChoicePicker?)
       # The tab-bar "more" dropdown (the ⋯ affordance → ↵/↓): lists the settings-hidden
       # tabs (Miner by default). @overlay is :tabs_more while it's open; built fresh each
       # time from the current hidden set.
@@ -914,7 +902,6 @@ module Gori::Tui
       end
       case @overlay
       when .palette?         then @palette.set_preedit(text)
-      when .issue_new?       then @issue_form.set_preedit(text)
       when .comparer_pick?   then @flow_picker.try(&.set_preedit(text))
       when .repeater_subtab? then @subtab_picker.try(&.set_preedit(text))
       when .issue_pick?      then @issue_picker.try(&.set_preedit(text))
@@ -991,10 +978,6 @@ module Gori::Tui
         return
       end
       return handle_palette_key(ev) if @overlay.palette?
-      return handle_issue_new_key(ev) if @overlay.issue_new?
-      return handle_confirm_key(ev) if @overlay.confirm?
-      return handle_browser_key(ev) if @overlay.browser?
-      return handle_choice_key(ev) if @overlay.choice?
       return handle_more_menu_key(ev) if @overlay.tabs_more?
       return handle_flow_picker_key(ev) if @overlay.comparer_pick?
       return handle_subtab_picker_key(ev) if @overlay.repeater_subtab?
@@ -1275,10 +1258,6 @@ module Gori::Tui
     # a single packed line would conflict on every merge.
     MODAL_OVERLAYS = {
       OverlayKind::Palette,
-      OverlayKind::IssueNew,
-      OverlayKind::Confirm,
-      OverlayKind::Browser,
-      OverlayKind::Choice,
       OverlayKind::TabsMore,
       OverlayKind::ComparerPick,
       OverlayKind::RepeaterSubtab,
@@ -1386,22 +1365,18 @@ module Gori::Tui
       end
       case @overlay
       when .palette?         then click_palette(area, mx, my)
-      when .browser?         then click_browser(area, mx, my)
-      when .choice?          then click_choice(area, mx, my)
       when .tabs_more?       then click_more_menu(layout, mx, my)
       when .comparer_pick?   then click_flow_picker(area, mx, my)
       when .repeater_subtab? then click_subtab_picker(area, mx, my)
       when .links?           then click_links(area, mx, my)
       when .issue_pick?      then click_issue_picker(area, mx, my)
       when .note_pick?       then click_note_picker(area, mx, my)
-      when .confirm?         then click_confirm(area, mx, my)
       when .preferences?     then apply_preferences_outcome(@preferences.click(area, mx, my))
       when .settings?        then (click_settings(area, mx, my); settle_sub_editor)
       when .tabs?            then (click_tabs(area, mx, my); settle_sub_editor)
       when .hosts?           then (click_hosts(area, mx, my); settle_sub_editor)
       when .env?             then (click_env(area, mx, my); settle_sub_editor)
       when .hotkeys?         then (click_hotkeys(area, mx, my); settle_sub_editor)
-        # IssueNew is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
 
@@ -1443,27 +1418,6 @@ module Gori::Tui
         close_overlay
         @toast = verb.call(self) || @toast
       end
-    end
-
-    private def click_browser(area : Rect, mx : Int32, my : Int32) : Nil
-      bp = @browser_picker
-      box = bp.try(&.overlay_box(area))
-      return close_browser_picker if bp.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = bp.row_at(box, mx, my)
-        bp.set_selected(idx)
-        launch_selected_browser
-      end
-    end
-
-    private def click_confirm(area : Rect, mx : Int32, my : Int32) : Nil
-      cd = @confirm
-      return close_confirm if cd.nil?
-      box = cd.overlay_box(area)
-      return close_confirm if dismiss_zone?(box, mx, my)
-      case cd.button_at(box, mx, my)
-      when :confirm then run_confirm
-      when :cancel  then close_confirm
-      end # a click in the box but off the buttons keeps it open
     end
 
     private def click_settings(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1563,8 +1517,6 @@ module Gori::Tui
       end
       case @overlay
       when .palette?         then @palette.move(step)
-      when .browser?         then @browser_picker.try(&.move(step))
-      when .choice?          then @choice_picker.try(&.move(step))
       when .tabs_more?       then @more_menu.try(&.move(step))
       when .comparer_pick?   then @flow_picker.try(&.move(step))
       when .repeater_subtab? then @subtab_picker.try(&.move(step))
@@ -1687,43 +1639,17 @@ module Gori::Tui
       false
     end
 
-    # New-issue form: type a title; ↵ create, esc cancel.
-    private def handle_issue_new_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-      when key.escape?
-        # Drop a pending link-from-picker ref so a later standalone create doesn't
-        # silently attach the stale workbench item.
-        @link_pending_ref = nil
-        @overlay = OverlayKind::None
-      when key.enter?     then create_issue_from_form
-      when key.tab?       then @issue_form.severity_cycle(1)
-      when key.back_tab?  then @issue_form.severity_cycle(-1)
-      when key.left?      then @issue_form.move(-1)
-      when key.right?     then @issue_form.move(1)
-      when key.backspace? then @issue_form.backspace
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @issue_form.insert(c)
-          @issue_form.set_preedit("") # commit any preedit
-        end
-      end
-    end
+    # --- issue_new / confirm / browser / choice (Overlay seam, see overlay.cr) ---
+    # All four are `Overlay` subclasses now: dumb form objects whose domain action rides
+    # in as the `on_commit` closure their open-site injects. What is left in the Runner is
+    # those open-sites and the applies they inject — key / click / wheel / preedit /
+    # render / title / hint all route through the ONE generic dispatch instead.
 
-    # Destructive-action confirmation modal: ←/→ or Tab move between [confirm]
-    # and [cancel]; `y` confirms, `n`/esc cancels, ↵ acts on the selection
-    # (which defaults to cancel). Other keys are swallowed so nothing leaks to the
-    # view behind it.
-    private def handle_confirm_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.escape?, key.n?                            then close_confirm
-      when key.y?                                         then run_confirm
-      when key.left?, key.right?, key.tab?, key.back_tab? then @confirm.try(&.move)
-      when key.enter?
-        @confirm.try(&.confirm_selected?) ? run_confirm : close_confirm
-      end
+    # Open the NEW / EDIT ISSUE form. The store write stays in the shell (the form never
+    # touches the Store), so the same card serves create, create-and-link, and re-title.
+    def open_issue_form(form : IssueForm) : Nil
+      form.on_commit = -> { create_issue_from_form(form) }
+      open_overlay(form)
     end
 
     # Open the confirmation modal; `action` runs only if the user accepts.
@@ -1737,104 +1663,56 @@ module Gori::Tui
     def confirm(title : String, message : String, *, confirm_label : String = "delete",
                 cancel_label : String = "cancel",
                 danger : Bool = true, return_to : Symbol = :none, &action : -> Nil) : Nil
-      @confirm = ConfirmDialog.new(title, message, confirm_label: confirm_label,
+      ov = ConfirmDialog.new(title, message, confirm_label: confirm_label,
         cancel_label: cancel_label, danger: danger)
-      @confirm_action = action
-      @confirm_return = OverlayKind.from_sym(return_to)
-      @overlay = OverlayKind::Confirm
+      back = OverlayKind.from_sym(return_to)
+      # Capture the parent BEFORE open_overlay: that call overwrites @active_overlay, and
+      # this is the only reference to the modal the confirm was raised from.
+      parent = active_overlay
+      accepted = false
+      ov.on_commit = -> {
+        accepted = true
+        true # let the shell close normally — the action runs from on_close, after the restore
+      }
+      ov.on_close = -> {
+        restore_overlay(back, parent)
+        # Restore FIRST, act second — the pre-seam `run_confirm` order, and load-bearing
+        # twice over. history_controller's delete reads `@host.overlay == :detail` to decide
+        # whether the drill-in should close now the flow is gone, so an action running
+        # before the restore would read the DIALOG's state, never fire that guard, and the
+        # pop-back would re-open the detail on a deleted flow. And an action that opens its
+        # own modal — offer_open_created chains a second confirm — needs this one already
+        # dropped, which `close_active_overlay` has done by the time on_close runs.
+        action.call if accepted
+      }
+      open_overlay(ov)
     end
 
-    private def run_confirm : Nil
-      action = @confirm_action
-      close_confirm
-      action.try(&.call)
+    # Put back the modal a confirm was raised from. A parent that has migrated onto the
+    # Overlay seam has to be re-opened as an OBJECT — setting @overlay alone would name a
+    # modal with nothing behind it, which neither renders nor takes keys.
+    private def restore_overlay(kind : OverlayKind, parent : Overlay?) : Nil
+      return open_overlay(parent) if parent && parent.key == kind
+      # No object to restore. Setting @overlay alone is right for a parent the shell still
+      # routes BY STATE — an unmigrated modal, or the non-modal None/Detail. For a MIGRATED
+      # kind it would be a phantom: nothing renders or takes keys, and since a migrated kind
+      # is deleted from MODAL_OVERLAYS, modal_overlay? answers false too, so clicks fall
+      # through to the tab body behind a card that was never drawn. No `return_to:` names a
+      # migrated modal today, but that changes the moment Settings / Tabs / DiscoverConfig
+      # migrate — so land on the bare body, which the user can at least act from.
+      restorable = kind.none? || kind.detail? || MODAL_OVERLAYS.includes?(kind)
+      @overlay = restorable ? kind : OverlayKind::None
     end
 
-    private def close_confirm : Nil
-      @overlay = @confirm_return
-      @confirm = nil
-      @confirm_action = nil
-      @confirm_return = OverlayKind::None
+    # Open a value picker (Issues detail → space → s/c, Probe → m). Each open-site injects
+    # what the pick applies to, so the shell keeps no "which kind is up" flag.
+    private def open_choice_picker(p : ChoicePicker, &apply : ChoicePicker -> Nil) : Nil
+      p.on_commit = -> { apply.call(p); true }
+      open_overlay(p)
     end
 
-    # "Open browser" overlay: ↑/↓ pick, ↵ launch the selected browser, esc cancel.
-    private def handle_browser_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.escape?             then close_browser_picker
-      when key.up?, key.lower_k?   then @browser_picker.try(&.move(-1))
-      when key.down?, key.lower_j? then @browser_picker.try(&.move(1))
-      when key.enter?              then launch_selected_browser
-      end
-    end
-
-    private def close_browser_picker : Nil
-      @overlay = OverlayKind::None
-      @browser_picker = nil
-    end
-
-    # Severity/status value picker (Issues detail → space → s/c): ↑/↓ pick, ↵
-    # set, a printable matching a row's mnemonic sets it directly, esc cancels.
-    private def handle_choice_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      p = @choice_picker
-      return close_choice_picker unless p
-      case
-      when key.escape? then close_choice_picker
-      when key.up?     then p.move(-1)
-      when key.down?   then p.move(1)
-      when key.enter?  then apply_choice
-      else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          # A row mnemonic sets it directly (wins); j/k fall back to vim-style nav
-          # only when they aren't themselves a mnemonic, so the reflex keystroke moves
-          # the highlight instead of being ignored.
-          if idx = p.index_for(c)
-            p.set_selected(idx)
-            apply_choice
-          elsif c == 'j'
-            p.move(1)
-          elsif c == 'k'
-            p.move(-1)
-          end
-        end
-        # any other key is ignored (the picker stays up — a value pick is deliberate)
-      end
-    end
-
-    private def click_choice(area : Rect, mx : Int32, my : Int32) : Nil
-      p = @choice_picker
-      box = p.try(&.overlay_box(area))
-      return close_choice_picker if p.nil? || box.nil? || dismiss_zone?(box, mx, my)
-      if idx = p.row_at(box, mx, my)
-        p.set_selected(idx)
-        apply_choice
-      end
-    end
-
-    # Persist the picked value to the open issue, then close. The detail issue
-    # can't change while the modal is up, so reading it at commit is safe.
-    private def apply_choice : Nil
-      p = @choice_picker
-      return close_choice_picker unless p
-      case p.kind
-      when :severity, :status then apply_issue_choice(p)
-      when :probe_mode
-        @session.probe.set_mode(Probe::Mode.new(p.selected_value))
-        probe_controller.view.reload(@session.store)
-        mode = @session.probe.mode
-        @toast = case mode
-                 when .aggressive?
-                   "Probe mode: AGGRESSIVE — deeper in-scope probing, incl. unsafe methods (authorized targets only)"
-                 when .active?
-                   "Probe mode: ACTIVE — light-touch probes over recent in-scope traffic"
-                 else
-                   "Probe mode: #{mode.title}"
-                 end
-      end
-      close_choice_picker
-    end
-
+    # Persist the picked severity/status to the open issue. The detail issue can't change
+    # while the modal is up, so reading it at commit is safe.
     private def apply_issue_choice(p : ChoicePicker) : Nil
       return unless f = issues_controller.view.detail_issue
       store = @session.store
@@ -1845,9 +1723,19 @@ module Gori::Tui
       issues_controller.view.resync(store)
     end
 
-    private def close_choice_picker : Nil
-      @overlay = OverlayKind::None
-      @choice_picker = nil
+    # Apply the picked Probe scan MODE to the analyzer and re-read the findings list.
+    private def apply_probe_mode(p : ChoicePicker) : Nil
+      @session.probe.set_mode(Probe::Mode.new(p.selected_value))
+      probe_controller.view.reload(@session.store)
+      mode = @session.probe.mode
+      @toast = case mode
+               when .aggressive?
+                 "Probe mode: AGGRESSIVE — deeper in-scope probing, incl. unsafe methods (authorized targets only)"
+               when .active?
+                 "Probe mode: ACTIVE — light-touch probes over recent in-scope traffic"
+               else
+                 "Probe mode: #{mode.title}"
+               end
     end
 
     # Non-nil ⇔ the copy-as picker is up (orthogonal to @overlay, mirrors @space_menu_open).
@@ -2327,18 +2215,20 @@ module Gori::Tui
 
     # Transition from the issue picker into NEW ISSUE form while keeping the
     # pending workbench ref so form ↵ creates + links without leaving the tab.
+    # Ownership of the ref MOVES into the form: dropping the form (esc, click-away) now
+    # drops the pending link with it, so a cancelled create-and-link can no longer leave a
+    # stale ref for a later standalone create to silently attach.
     private def open_issue_form_for_link : Nil
       ref = @link_pending_ref
+      @link_pending_ref = nil
       @issue_picker = nil
       if ref && ref[0].flow?
         if row = @session.store.flow_row(ref[1])
-          @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, ref[1])
-          @overlay = OverlayKind::IssueNew
+          open_issue_form(IssueForm.new("#{row.method} #{row.target}", row.host, ref[1], link_ref: ref))
           return
         end
       end
-      @issue_form = IssueForm.new
-      @overlay = OverlayKind::IssueNew
+      open_issue_form(IssueForm.new(link_ref: ref))
     end
 
     private def click_issue_picker(area : Rect, mx : Int32, my : Int32) : Nil
@@ -3024,18 +2914,9 @@ module Gori::Tui
       end
     end
 
-    # Project tab body editor for the description field (live like Notes, but
-    # coexists with the static metadata above it in the same tab).
-    # True while the Project SCOPE pane's inline add/edit row is composing — Tab stays
-    # inert then (the row owns it) instead of switching panes.
-    # The Intercept queue. Not editing: navigate + decide. Editing: typing edits
-    # the held bytes (Repeater-style): type to edit, `^R` forwards the edited bytes,
-    # `esc` leaves editing. While editing, EVERY letter is literal (incl. f/d) —
-    # the queue's f/F/d shortcuts only apply when not editing, exactly like the
-    # Repeater editor reserves actions for modifier chords.
-    private def create_issue_from_form : Nil
-      form = @issue_form
-      title = form.title.strip
+    # The IssueForm's injected commit. Returns true when the shell should close the form.
+    private def create_issue_from_form(form : IssueForm) : Bool
+      title = form.issue_title.strip
       title = "untitled issue" if title.empty?
       if id = form.edit_id
         # editing an existing issue's title + severity (from its detail view)
@@ -3044,7 +2925,7 @@ module Gori::Tui
         @toast = "issue updated"
       else
         new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id)
-        if ref = @link_pending_ref
+        if ref = form.link_ref
           # insert_issue already entity-links flow when form.flow_id matches; other
           # ref kinds (repeater/fuzz/miner) still need an explicit add_link.
           already_flow = ref[0].flow? && form.flow_id == ref[1]
@@ -3052,11 +2933,12 @@ module Gori::Tui
             commit_link_to_owner(Store::LinkOwnerKind::Issue, new_id, ref[0], ref[1])
           end
           @toast = "issue ##{new_id} created and linked"
-          @link_pending_ref = nil
-          # Ask open-vs-stay (default stay). Do not fall through to @overlay=:none —
-          # offer_open_created sets :confirm.
+          # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
+          # put a confirm up, and "close the overlay" would be asking the shell to close a
+          # form it is no longer holding. close_active_overlay's identity check would make
+          # that inert anyway; saying false states the intent rather than relying on it.
           offer_open_created(:issue, new_id)
-          return
+          return false
         else
           @active_tab = :issues
           @focus = :body
@@ -3064,7 +2946,7 @@ module Gori::Tui
           @toast = "issue created"
         end
       end
-      @overlay = OverlayKind::None
+      true
     end
 
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
@@ -3478,10 +3360,6 @@ module Gori::Tui
         activity: activity_chip, resource: @resource.label, time: clock_label)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay.palette?
-      @issue_form.render(screen, layout.body) if @overlay.issue_new?
-      @confirm.try(&.render(screen, layout.body)) if @overlay.confirm?
-      @browser_picker.try(&.render(screen, layout.body)) if @overlay.browser?
-      @choice_picker.try(&.render(screen, layout.body)) if @overlay.choice?
       @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay.tabs_more?
       @flow_picker.try(&.render(screen, layout.body)) if @overlay.comparer_pick?
       @subtab_picker.try(&.render(screen, layout.body)) if @overlay.repeater_subtab?
@@ -3603,11 +3481,7 @@ module Gori::Tui
       end
       case @overlay
       when .palette?         then "PALETTE"
-      when .issue_new?       then "ISSUE"
       when .detail?          then "DETAIL"
-      when .confirm?         then "CONFIRM"
-      when .browser?         then "BROWSER"
-      when .choice?          then @choice_picker.try(&.title) || "CHOOSE"
       when .comparer_pick?   then "PICK FLOW"
       when .repeater_subtab? then @subtab_picker.try(&.title) || "FIND SUB-TAB"
       when .links?           then @links_overlay.try(&.title) || "LINKS"
@@ -3649,10 +3523,6 @@ module Gori::Tui
       end
       case @overlay
       when .palette?         then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when .issue_new?       then "type title · ↵ create · esc cancel"
-      when .confirm?         then "←/→ choose · y confirm · n/esc cancel · ↵ select"
-      when .browser?         then "↑/↓ select · ↵ open · esc cancel"
-      when .choice?          then "↑/↓ select · ↵ set · key picks · esc cancel"
       when .tabs_more?       then "↑/↓ select · ↵ open tab · ←/esc close"
       when .comparer_pick?   then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when .repeater_subtab? then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
@@ -4854,8 +4724,9 @@ module Gori::Tui
         @toast = "no supported browser found (Chrome/Chromium/Brave/Edge/Vivaldi/Firefox)"
         return
       end
-      @browser_picker = BrowserPicker.new(found, Browser.certutil_available?)
-      @overlay = OverlayKind::Browser
+      ov = BrowserPicker.new(found, Browser.certutil_available?)
+      ov.on_commit = -> { launch_browser(ov.selected_browser); true }
+      open_overlay(ov)
     end
 
     # --- comparer (diff two arbitrary flows) ---
@@ -5195,11 +5066,11 @@ module Gori::Tui
       end
     end
 
-    # Launch the highlighted browser pre-trusting gori's CA + routed through the
-    # proxy. Closes the overlay first so a slow spawn never blocks the next frame.
-    private def launch_selected_browser : Nil
-      browser = @browser_picker.try(&.selected_browser)
-      close_browser_picker
+    # Launch the picked browser pre-trusting gori's CA + routed through the proxy. Runs as
+    # the BrowserPicker's injected commit, so the shell drops the modal right after — a
+    # slow spawn still can't hold a frame, since none is drawn until the key is fully
+    # handled either way.
+    private def launch_browser(browser : Browser::Found?) : Nil
       return unless browser
       spec = Browser::LaunchSpec.new(
         proxy_host: @session.proxy.host,

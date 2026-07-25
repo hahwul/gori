@@ -25,10 +25,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     probe_controller.probe_delete
   end
 
-  # Open the MODE picker (a shell overlay); apply_choice applies it to the analyzer.
+  # Open the MODE picker (a shell overlay); its injected commit applies it to the analyzer.
   def probe_set_mode : Nil
-    @choice_picker = ChoicePicker.for_probe_mode(@session.probe.mode.value)
-    @overlay = OverlayKind::Choice
+    open_choice_picker(ChoicePicker.for_probe_mode(@session.probe.mode.value)) { |p| apply_probe_mode(p) }
   end
 
   def probe_dismiss : Nil

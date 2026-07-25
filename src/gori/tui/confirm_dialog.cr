@@ -1,22 +1,79 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 
 module Gori::Tui
   # A centered yes/no confirmation modal for destructive actions — deleting a
-  # project, closing a Repeater/Notes sub-tab. Pure state + rendering: the host
-  # (the Runner's overlay, the ProjectPicker's mode) drives it and decides what a
-  # confirmation actually does. Selection defaults to Cancel — the safe choice —
-  # so a reflexive ↵ never destroys anything; the operator must move to (or press
-  # `y` for) the danger button on purpose.
-  class ConfirmDialog
-    getter title : String
+  # project, closing a Repeater/Notes sub-tab. Selection defaults to Cancel — the safe
+  # choice — so a reflexive ↵ never destroys anything; the operator must move to (or
+  # press `y` for) the danger button on purpose.
+  #
+  # The archetype the Overlay seam was modelled on: WHAT a confirmation does is injected
+  # as the `on_commit` closure at the open-site (Runner#confirm), so the dialog itself
+  # only knows which button is lit. `on_close` (Overlay) carries the other half the Runner
+  # used to hold in `@confirm_return`: a confirm raised from inside another modal lands
+  # back in it, on cancel and on accept alike.
+  #
+  # ALSO used outside the Runner, by ProjectPicker, which drives it as a plain state +
+  # rendering object through its own `:confirm` mode and ignores the Overlay hooks.
+  class ConfirmDialog < Overlay
+    # The card's heading (`DELETE ISSUE`), NOT the shell's focus badge — that is `title`
+    # below, which is the constant "CONFIRM" for every confirmation.
+    getter heading : String
     getter message : String
 
-    def initialize(@title : String, @message : String, *,
+    def initialize(@heading : String, @message : String, *,
                    @confirm_label : String = "confirm", @cancel_label : String = "cancel",
                    @danger : Bool = true)
       @selected = :cancel # safe default
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Confirm
+    end
+
+    def title : String
+      "CONFIRM"
+    end
+
+    def hint : String
+      "←/→ choose · y confirm · n/esc cancel · ↵ select"
+    end
+
+    # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the
+    # selection (which defaults to cancel). EVERY other key is swallowed so nothing leaks
+    # to the view behind the card.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      case
+      when key.escape?, key.n? then :cancel
+      when key.y?              then :commit
+      when key.left?, key.right?, key.tab?, key.back_tab?
+        move
+        :stay
+      when key.enter? then confirm_selected? ? :commit : :cancel
+      else                 :stay
+      end
+    end
+
+    # A click on a button acts; a click outside the card dismisses. A click inside the
+    # card but off both buttons keeps it open — a destructive action needs the button.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel unless box.contains?(mx, my)
+      case button_at(box, mx, my)
+      when :confirm then :commit
+      when :cancel  then :cancel
+      else               :stay
+      end
+    end
+
+    # Inert on purpose. The base default routes a wheel notch to `move`, which here FLIPS
+    # the lit button — a stray scroll must never re-aim a destructive choice onto it. The
+    # pre-seam shell had no wheel arm for :confirm either.
+    def handle_wheel(step : Int32) : Nil
     end
 
     # Toggle between the two buttons (←/→ or Tab). With only two choices the
@@ -43,7 +100,7 @@ module Gori::Tui
       lines = @message.split('\n')
       return if area.w < 18 || area.h < lines.size + 6
       box = overlay_box(area)
-      Frame.card(screen, box, @title, border: Theme.border_focus)
+      Frame.card(screen, box, @heading, border: Theme.border_focus)
 
       lines.each_with_index do |line, i|
         screen.text(box.x + 3, box.y + 2 + i, line, Theme.text, Theme.panel, width: box.w - 6)
@@ -59,7 +116,7 @@ module Gori::Tui
       # falls through dismiss_zone?/!contains? and closes instead of acting on a
       # phantom box (e.g. firing the destructive button on an undrawn modal).
       return Rect.new(area.x, area.y, 0, 0) if area.w < 18 || area.h < lines.size + 6
-      content = {longest(lines), @title.size + 2, button_row_width}.max
+      content = {longest(lines), @heading.size + 2, button_row_width}.max
       h = lines.size + 6
       w = (content + 6).clamp(16, {area.w - 2, 60}.min)
       x = area.x + (area.w - w) // 2

@@ -1,19 +1,24 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../store"
 
 module Gori::Tui
   # A small centered value-picker overlay — pick one option from a short coloured
-  # list (an issue's severity or triage status). Structurally a twin of
-  # BrowserPicker: pure state + rendering, while the Runner owns opening/closing
-  # and applying the choice. Each row is fronted by a mnemonic key (helix feel)
-  # and the value currently set on the issue is marked "● current".
-  class ChoicePicker
+  # list (an issue's severity or triage status, the Probe scan mode). Structurally a twin
+  # of BrowserPicker: a dumb list, while WHAT the pick applies to rides in as the
+  # `on_commit` closure each open-site injects. Each row is fronted by a mnemonic key
+  # (helix feel) and the value currently set is marked "● current".
+  class ChoicePicker < Overlay
     record Choice, label : String, key : Char, color : Color, value : Int32
 
     getter selected : Int32
-    getter kind : Symbol # :severity | :status — the Runner branches on this to apply
+    # :severity | :status | :probe_mode. The severity/status open-sites share ONE apply
+    # closure (both write the open issue), so that closure still branches on this.
+    getter kind : Symbol
+    # Doubles as the Overlay focus-badge title — the card heading IS the badge here
+    # ("SET SEVERITY"), which is what the pre-seam ladder read off this same getter.
     getter title : String
 
     def initialize(@title : String, @choices : Array(Choice), @current : Int32, @kind : Symbol)
@@ -52,6 +57,57 @@ module Gori::Tui
         Choice.new("ACTIVE — passive + light-touch probes (in-scope)", 'a', Theme.orange, 2),
         Choice.new("AGGRESSIVE — deeper probing incl. unsafe methods (authorized, in-scope)", 'g', Theme.red, 3),
       ], current, :probe_mode)
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Choice
+    end
+
+    def hint : String
+      "↑/↓ select · ↵ set · key picks · esc cancel"
+    end
+
+    # ↑/↓ pick, ↵ sets, esc cancels. A printable matching a row's mnemonic sets that row
+    # DIRECTLY (one keystroke, no ↵); j/k fall back to vim-style nav only when they aren't
+    # themselves a mnemonic, so the reflex keystroke moves the highlight instead of being
+    # ignored. Anything else is swallowed — the picker stays up, a value pick is deliberate.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      case
+      when key.escape? then :cancel
+      when key.up?
+        move(-1)
+        :stay
+      when key.down?
+        move(1)
+        :stay
+      when key.enter? then :commit
+      else
+        if (c = ev.char) && !ev.ctrl? && !ev.alt?
+          if idx = index_for(c)
+            set_selected(idx)
+            return :commit
+          elsif c == 'j'
+            move(1)
+          elsif c == 'k'
+            move(-1)
+          end
+        end
+        :stay
+      end
+    end
+
+    # A click on a row selects AND applies it (matching the mnemonic model); a click
+    # outside the card dismisses; a click inside but off any row keeps it open.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit
+      end
+      :stay
     end
 
     def move(delta : Int32) : Nil

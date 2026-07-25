@@ -56,6 +56,11 @@ private MIGRATED_KINDS = [
   OverlayKind::DiscoverHeaders,
   OverlayKind::FuzzSet,
   OverlayKind::FuzzAdvanced,
+  # C3 — small modals
+  OverlayKind::IssueNew,
+  OverlayKind::Confirm,
+  OverlayKind::Browser,
+  OverlayKind::Choice,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not: neither draws a capturing card.

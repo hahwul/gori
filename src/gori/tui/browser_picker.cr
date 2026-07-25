@@ -1,14 +1,15 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../browser"
 
 module Gori::Tui
   # The "Open browser" overlay (palette → browser.open). Lists the browsers
   # detected on this system; ↵ launches the highlighted one pre-trusted (gori's
-  # CA trusted + proxy set). Pure state + rendering — the Runner owns detection,
-  # opening/closing, and the actual launch.
-  class BrowserPicker
+  # CA trusted + proxy set). A dumb list: the Runner owns detection, and the launch
+  # itself rides in as the `on_commit` closure at the open-site.
+  class BrowserPicker < Overlay
     getter selected : Int32
 
     # `certutil_available` is resolved once by the caller (Runner) rather than probed
@@ -16,6 +17,48 @@ module Gori::Tui
     def initialize(@browsers : Array(Browser::Found), @certutil_available : Bool = true)
       @selected = 0
       @scroll = 0
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Browser
+    end
+
+    def title : String
+      "BROWSER"
+    end
+
+    def hint : String
+      "↑/↓ select · ↵ open · esc cancel"
+    end
+
+    # ↑/↓ (or k/j) pick, ↵ launches the highlighted browser, esc cancels. Any other key
+    # is swallowed — the list stays up.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      case
+      when key.escape? then :cancel
+      when key.up?, key.lower_k?
+        move(-1)
+        :stay
+      when key.down?, key.lower_j?
+        move(1)
+        :stay
+      when key.enter? then :commit
+      else                 :stay
+      end
+    end
+
+    # A click on a row selects AND launches it (matching the ↵ model); a click outside
+    # the card dismisses; a click inside but off any row keeps it open.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit
+      end
+      :stay
     end
 
     def move(delta : Int32) : Nil
