@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../probe/analyzer"
 require "../miner/types"
 require "../store"
@@ -12,9 +13,10 @@ module Gori::Tui
   # mode cycler (‹/›, mirroring the Mine popup), an OPTIONAL "unsafe methods" opt-in cycler (shown
   # only when unsafe-method probing would add checks the safe scan can't run — i.e. the flow is a
   # POST/PUT/PATCH/DELETE, or a rule that only runs on non-GET bodies would apply), and a Run row.
-  # The Runner reads notify_mode + allow_unsafe? + detail/repeater_id on Run and persists the notify
-  # choice. Pure state + render.
-  class ProbeActiveOverlay
+  # The injected commit closure reads notify_mode + allow_unsafe? + detail/repeater_id on Run and
+  # persists the notify choice. Pure state + render; migrated onto the polymorphic Overlay seam
+  # (see overlay.cr).
+  class ProbeActiveOverlay < Overlay
     NOTIFY_CHOICES = Miner::NotifyMode.values
 
     getter detail : Store::FlowDetail
@@ -91,6 +93,53 @@ module Gori::Tui
 
     def on_run_row? : Bool
       @selected == run_row
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::ProbeActive
+    end
+
+    def title : String
+      "ACTIVE SCAN"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
+    end
+
+    # Formerly Runner#handle_probe_active_key: ↑/↓ move, ←/→ adjust the cyclers, ␣/↵ toggles a
+    # row or commits on Run (the open-site's closure fires the scan and reports whether the
+    # options actually send anything — a no-op selection keeps the popup up).
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      k = ev.key
+      return :cancel if k.escape?
+      if k.up?
+        move(-1)
+      elsif k.down?
+        move(1)
+      elsif k.left?
+        adjust(-1)
+      elsif k.right?
+        adjust(1)
+      elsif k.enter? || k.space?
+        return :commit if on_run_row?
+        toggle
+      end
+      :stay
+    end
+
+    # Click a row to select it; Run commits, any other row toggles; outside the card cancels.
+    # Mirrors the prior Runner#click_probe_active exactly.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_run_row?
+        toggle
+      end
+      :stay
     end
 
     def move(d : Int32) : Nil

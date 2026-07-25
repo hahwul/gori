@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "./text_field"
 
 module Gori::Tui
@@ -18,8 +19,10 @@ module Gori::Tui
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
   # no more ←/→-cycle-vs-caret overload): ↑/↓/⇥ move rows, ←/→ moves the caret on a
   # text row or flips a toggle row, esc applies + closes. Modeled on the same row
-  # idiom as MineConfigOverlay/FuzzSetOverlay.
-  class FuzzAdvancedOverlay
+  # idiom as MineConfigOverlay/FuzzSetOverlay, and like them it rides the polymorphic
+  # Overlay seam (see overlay.cr) — where "apply" IS :commit, so there is no cancel:
+  # esc and click-away both write the snapshot back through the injected closure.
+  class FuzzAdvancedOverlay < Overlay
     # {field key, label, kind(:text|:toggle)} in display order.
     ROWS = [
       {:conc, "Concurrency", :text},
@@ -64,10 +67,29 @@ module Gori::Tui
       ROWS[@sel]
     end
 
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::FuzzAdvanced
+    end
+
+    def title : String
+      "ADVANCED"
+    end
+
+    def hint : String
+      "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
+    end
+
     # --- input --------------------------------------------------------------
+    # PRE-EXISTING (kept as-is by the Overlay migration, which is behaviour-preserving):
+    # the `case` value is discarded, so handle_text's commit-on-the-last-row never reaches
+    # the shell — ↵ there is a no-op, not an apply. Only esc and a click-away apply. The
+    # rendered hint already says "esc applies" and does not promise ↵, so this is a lost
+    # convenience rather than a broken advertised key; fixing it is a behaviour change and
+    # belongs in its own patch.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      return :apply if key.escape?
+      return :commit if key.escape?
       case
       when key.tab?, key.down?    then @sel = (@sel + 1).clamp(0, ROWS.size - 1)
       when key.back_tab?, key.up? then @sel = (@sel - 1).clamp(0, ROWS.size - 1)
@@ -86,7 +108,10 @@ module Gori::Tui
 
     private def handle_text(ev : Termisu::Event::Key) : Symbol
       if ev.key.enter?
-        return :apply if @sel == ROWS.size - 1
+        # handle_key drops this :commit (see the note there), but the early return is still
+        # load-bearing: without it @sel would step past the last row and `current` would
+        # index ROWS out of range.
+        return :commit if @sel == ROWS.size - 1
         @sel += 1
       else
         @fields[current[0]].handle_edit_key(ev)
@@ -166,12 +191,15 @@ module Gori::Tui
       end
     end
 
-    def handle_click(box : Rect, mx : Int32, my : Int32) : Bool
-      return false unless box.contains?(mx, my)
+    # Focus the row under a click; a click outside the card APPLIES (esc semantics), the
+    # same dismissal the shell used to run through apply_close_fuzz_advanced.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :commit if box.nil? || !box.contains?(mx, my)
       i = my - (box.y + 1)
       ri = @scroll + i
       @sel = ri if 0 <= i && 0 <= ri < ROWS.size
-      true
+      :stay
     end
   end
 end

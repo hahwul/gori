@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "./text_area"
 require "../discover"
 
@@ -10,7 +11,11 @@ module Gori::Tui
   # esc saves (parsing the lines, dropping malformed ones) and returns to the popup.
   # Host/Connection are always emitted by the engine, so entering them here is a
   # no-op (dropped on parse).
-  class DiscoverHeadersOverlay
+  #
+  # A SUB-EDITOR on the Overlay seam (see overlay.cr): it has no cancel path at all, so
+  # both esc and click-away commit, and the injected closure writes the parsed headers
+  # back onto the Discover popup and re-opens it.
+  class DiscoverHeadersOverlay < Overlay
     def initialize(headers : Array({String, String}))
       text = headers.map { |name, value| "#{name}: #{value}" }.join("\n")
       @editor = TextArea.new(text)
@@ -19,6 +24,26 @@ module Gori::Tui
     # Current headers parsed from the editor buffer (invalid/forced lines dropped).
     def headers : Array({String, String})
       Discover::Headers.parse_lines(@editor.text.split('\n'))
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::DiscoverHeaders
+    end
+
+    def title : String
+      "CUSTOM HEADERS"
+    end
+
+    def hint : String
+      "one header per line · Host/Connection ignored · esc saves & closes"
+    end
+
+    # There is nothing to cancel INTO — the user is still inside the Discover popup — so a
+    # click outside the card saves exactly like esc, which is what the shell did before.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      (box.nil? || !box.contains?(mx, my)) ? :commit : :stay
     end
 
     # esc = save & close (:commit); every other key edits the buffer (:stay).

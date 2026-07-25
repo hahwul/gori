@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "../discover"
 require "../settings"
 
@@ -15,8 +16,9 @@ module Gori::Tui
 
   # The config popup shown before a discovery run: a start-target chooser, spider/bruteforce
   # checkboxes, a max-depth cycler, a containment cycler, a concurrency cycler, and a Start row.
-  # No text field (so no IME plumbing). Mirrors MineConfigOverlay's shape.
-  class DiscoverConfigOverlay
+  # No text field (so no IME plumbing). Mirrors MineConfigOverlay's shape, and like it
+  # rides the polymorphic Overlay seam (see overlay.cr).
+  class DiscoverConfigOverlay < Overlay
     DEPTHS       = [1, 2, 3, 4, 5, 6, 8]
     CONCS        = [10, 20, 40, 80]
     CONTAINMENTS = [Discover::Containment::ScopeAware, Discover::Containment::SameOrigin, Discover::Containment::HostAndSubdomains]
@@ -37,6 +39,11 @@ module Gori::Tui
     # Custom request headers ({name, value}) prefilled from a History flow and/or
     # edited in the headers overlay. NOT persisted to prefs — they can carry secrets.
     getter headers : Array({String, String}) = [] of {String, String}
+
+    # ↵ on the headers row raises the CUSTOM HEADERS sub-editor. Injected because opening
+    # a second modal (and landing back here on its close) is the shell's job — see
+    # Runner#open_discover_headers.
+    property on_edit_headers : Proc(Nil)?
 
     def initialize(@seed : DiscoverSeed)
       @target_idx = 0
@@ -87,6 +94,56 @@ module Gori::Tui
 
     def on_start_row? : Bool
       @selected == ROW_START
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::DiscoverConfig
+    end
+
+    def title : String
+      "DISCOVER"
+    end
+
+    def hint : String
+      "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
+    end
+
+    # Formerly Runner#handle_discover_config_key: ↑/↓ move, ←/→ adjust the cyclers, ␣/↵
+    # commits on Start, opens the headers sub-editor on the headers row, else toggles.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      k = ev.key
+      return :cancel if k.escape?
+      if k.up?
+        move(-1)
+      elsif k.down?
+        move(1)
+      elsif k.left?
+        adjust(-1)
+      elsif k.right?
+        adjust(1)
+      elsif k.enter? || k.space?
+        return :commit if on_start_row?
+        activate_row
+      end
+      :stay
+    end
+
+    # Click a row to select it, then act on it exactly as ↵ would; outside the card cancels.
+    # Mirrors the prior Runner#click_discover_config.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_start_row?
+        activate_row
+      end
+      :stay
+    end
+
+    private def activate_row : Nil
+      on_headers_row? ? @on_edit_headers.try(&.call) : toggle
     end
 
     def move(d : Int32) : Nil

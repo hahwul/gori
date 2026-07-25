@@ -1,18 +1,28 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "./notifications"
 
 module Gori::Tui
   # The notification center: a centered overlay listing recent notifications (newest
-  # first). Pure state (@selected) + render; the Runner owns open/close and runs a
-  # note's `goto`. Reads the live store, so a note pushed by a drain while the center
-  # is open appears at once. Chosen over a persistent "Activity" tab — lighter, and it
-  # reuses the existing modal-overlay machinery.
+  # first). Pure state (@selected) + render; the injected closures run a note's `goto`
+  # and the palette hop. Reads the live store, so a note pushed by a drain while the
+  # center is open appears at once. Chosen over a persistent "Activity" tab — lighter,
+  # and it reuses the existing modal-overlay machinery.
   #
   #   ▎ ✓ Miner: 3 params found on GET /api/x          3s
   #     ⚠ Repeater: upstream timeout                      5m
-  class NotificationsOverlay
+  #
+  # Migrated onto the polymorphic Overlay seam (see overlay.cr). `c` clears the store
+  # this overlay was handed, so it stays a plain key case; the two actions that belong
+  # to the SHELL (jump to a note's result, hop to the palette) are injected closures.
+  class NotificationsOverlay < Overlay
+    # ^P leaves the center for the command palette. Injected because raising another
+    # modal is the shell's job — and it must close this one FIRST, or the shell's own
+    # close would land on top of the palette. See Runner#open_notifications.
+    property on_palette : Proc(Nil)?
+
     def initialize(@store : Notifications)
       @selected = 0
     end
@@ -25,7 +35,54 @@ module Gori::Tui
       @store.all
     end
 
-    def select_move(d : Int32) : Nil
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::Notifications
+    end
+
+    def title : String
+      "NOTIFICATIONS"
+    end
+
+    def hint : String
+      "↑/↓ select · ↵ open · c clear · esc close"
+    end
+
+    # Formerly Runner#handle_notifications_key. ↵ commits (the open-site's closure jumps
+    # to the selected note's result); `c` empties the store in place and stays open.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      k = ev.key
+      c = ev.char
+      if ev.ctrl? && k.lower_p?
+        @on_palette.try(&.call)
+      elsif k.escape?
+        return :cancel
+      elsif k.up?
+        move(-1)
+      elsif k.down?
+        move(1)
+      elsif k.enter?
+        return :commit
+      elsif c == 'c'
+        @store.clear
+        reset
+      end
+      :stay
+    end
+
+    # A click on a row selects it and opens it (same as ↵); a click elsewhere inside the
+    # card does nothing; a click outside dismisses. Mirrors Runner#click_notifications.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit
+      end
+      :stay
+    end
+
+    def move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {notes.size - 1, 0}.max)
     end
 

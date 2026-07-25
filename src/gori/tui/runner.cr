@@ -219,7 +219,6 @@ module Gori::Tui
       # frame advances while a job is active so the bottom-bar chip animates.
       @jobs = Jobs.new
       @notifications = Notifications.new
-      @notifications_overlay = NotificationsOverlay.new(@notifications)
       # #123: high-water-mark of intercept_commands drained + applied to the live interceptor
       # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
       # session never replays a prior command; advances monotonically as commands are consumed.
@@ -245,15 +244,6 @@ module Gori::Tui
       # to reconfigure the current session) rides the Overlay seam (@active_overlay). The
       # new-vs-reconfigure distinction that used to need a @sequence_reconfigure flag now
       # lives in each open-site's injected commit closure.
-      @discover_config_overlay = nil.as(DiscoverConfigOverlay?)
-      @discover_headers_overlay = nil.as(DiscoverHeadersOverlay?)
-      # :probe_active while the "Run active scan" popup is up (holds the seed flow + estimate).
-      @probe_active_overlay = nil.as(ProbeActiveOverlay?)
-      # The Fuzzer config overlays (CONFIG pane → ↵ on a set / Add / Advanced): a payload-set
-      # editor and the advanced-settings form. @overlay is :fuzz_set / :fuzz_advanced while up;
-      # built fresh from the current fuzz session each time they open.
-      @fuzz_set_overlay = nil.as(FuzzSetOverlay?)
-      @fuzz_advanced_overlay = nil.as(FuzzAdvancedOverlay?)
       # The one active polymorphic modal (see overlay.cr). Overlays migrated onto the
       # Overlay base flow through here instead of a per-modal typed ivar + `case @overlay`
       # ladders. nil = no such modal up. (SCOPE add/edit was the first migrated — the
@@ -923,20 +913,17 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?          then @palette.set_preedit(text)
-      when .issue_new?        then @issue_form.set_preedit(text)
-      when .comparer_pick?    then @flow_picker.try(&.set_preedit(text))
-      when .repeater_subtab?  then @subtab_picker.try(&.set_preedit(text))
-      when .issue_pick?       then @issue_picker.try(&.set_preedit(text))
-      when .note_pick?        then @note_picker.try(&.set_preedit(text))
-      when .preferences?      then @preferences.set_preedit(text)
-      when .settings?         then @settings_view.set_preedit(text)
-      when .hosts?            then @hosts_overlay.set_preedit(text)
-      when .env?              then @env_overlay.set_preedit(text)
-      when .discover_headers? then @discover_headers_overlay.try(&.set_preedit(text))
-      when .fuzz_set?         then @fuzz_set_overlay.try(&.set_preedit(text))
-      when .fuzz_advanced?    then @fuzz_advanced_overlay.try(&.set_preedit(text))
-      when .none?             then apply_preedit_body(text)
+      when .palette?         then @palette.set_preedit(text)
+      when .issue_new?       then @issue_form.set_preedit(text)
+      when .comparer_pick?   then @flow_picker.try(&.set_preedit(text))
+      when .repeater_subtab? then @subtab_picker.try(&.set_preedit(text))
+      when .issue_pick?      then @issue_picker.try(&.set_preedit(text))
+      when .note_pick?       then @note_picker.try(&.set_preedit(text))
+      when .preferences?     then @preferences.set_preedit(text)
+      when .settings?        then @settings_view.set_preedit(text)
+      when .hosts?           then @hosts_overlay.set_preedit(text)
+      when .env?             then @env_overlay.set_preedit(text)
+      when .none?            then apply_preedit_body(text)
       end
     end
 
@@ -1026,17 +1013,11 @@ module Gori::Tui
         settle_sub_editor # closing one opened from Preferences lands back in the modal
         return
       end
-      return handle_notifications_key(ev) if @overlay.notifications?
       # Migrated modals (Overlay base) dispatch generically — no per-modal handle_*_key.
       if ov = active_overlay
         dispatch_overlay_key(ov, ev)
         return
       end
-      return handle_probe_active_key(ev) if @overlay.probe_active?
-      return handle_discover_config_key(ev) if @overlay.discover_config?
-      return handle_discover_headers_key(ev) if @overlay.discover_headers?
-      return handle_fuzz_set_key(ev) if @overlay.fuzz_set?
-      return handle_fuzz_advanced_key(ev) if @overlay.fuzz_advanced?
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay.none? && @focus == :body && history_controller.view.querying?
@@ -1310,12 +1291,6 @@ module Gori::Tui
       OverlayKind::Hosts,
       OverlayKind::Env,
       OverlayKind::Hotkeys,
-      OverlayKind::Notifications,
-      OverlayKind::ProbeActive,
-      OverlayKind::DiscoverConfig,
-      OverlayKind::DiscoverHeaders,
-      OverlayKind::FuzzSet,
-      OverlayKind::FuzzAdvanced,
     }
 
     private def modal_overlay? : Bool
@@ -1410,28 +1385,22 @@ module Gori::Tui
         return
       end
       case @overlay
-      when .palette?          then click_palette(area, mx, my)
-      when .browser?          then click_browser(area, mx, my)
-      when .choice?           then click_choice(area, mx, my)
-      when .tabs_more?        then click_more_menu(layout, mx, my)
-      when .comparer_pick?    then click_flow_picker(area, mx, my)
-      when .repeater_subtab?  then click_subtab_picker(area, mx, my)
-      when .links?            then click_links(area, mx, my)
-      when .issue_pick?       then click_issue_picker(area, mx, my)
-      when .note_pick?        then click_note_picker(area, mx, my)
-      when .confirm?          then click_confirm(area, mx, my)
-      when .preferences?      then apply_preferences_outcome(@preferences.click(area, mx, my))
-      when .settings?         then (click_settings(area, mx, my); settle_sub_editor)
-      when .tabs?             then (click_tabs(area, mx, my); settle_sub_editor)
-      when .hosts?            then (click_hosts(area, mx, my); settle_sub_editor)
-      when .env?              then (click_env(area, mx, my); settle_sub_editor)
-      when .hotkeys?          then (click_hotkeys(area, mx, my); settle_sub_editor)
-      when .notifications?    then click_notifications(area, mx, my)
-      when .probe_active?     then click_probe_active(area, mx, my)
-      when .discover_config?  then click_discover_config(area, mx, my)
-      when .discover_headers? then click_discover_headers(area, mx, my)
-      when .fuzz_set?         then click_fuzz_set(area, mx, my)
-      when .fuzz_advanced?    then click_fuzz_advanced(area, mx, my)
+      when .palette?         then click_palette(area, mx, my)
+      when .browser?         then click_browser(area, mx, my)
+      when .choice?          then click_choice(area, mx, my)
+      when .tabs_more?       then click_more_menu(layout, mx, my)
+      when .comparer_pick?   then click_flow_picker(area, mx, my)
+      when .repeater_subtab? then click_subtab_picker(area, mx, my)
+      when .links?           then click_links(area, mx, my)
+      when .issue_pick?      then click_issue_picker(area, mx, my)
+      when .note_pick?       then click_note_picker(area, mx, my)
+      when .confirm?         then click_confirm(area, mx, my)
+      when .preferences?     then apply_preferences_outcome(@preferences.click(area, mx, my))
+      when .settings?        then (click_settings(area, mx, my); settle_sub_editor)
+      when .tabs?            then (click_tabs(area, mx, my); settle_sub_editor)
+      when .hosts?           then (click_hosts(area, mx, my); settle_sub_editor)
+      when .env?             then (click_env(area, mx, my); settle_sub_editor)
+      when .hotkeys?         then (click_hotkeys(area, mx, my); settle_sub_editor)
         # IssueNew is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -1463,63 +1432,6 @@ module Gori::Tui
       when :settings then open_preferences
       end
       true
-    end
-
-    private def click_notifications(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @notifications_overlay.overlay_box(area)
-      return (@overlay = OverlayKind::None) if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = @notifications_overlay.row_at(box, mx, my)
-        @notifications_overlay.set_selected(idx)
-        open_notification_goto
-      end
-    end
-
-    private def click_probe_active(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @probe_active_overlay
-      return unless ov
-      box = ov.overlay_box(area)
-      return close_probe_active if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        ov.on_run_row? ? start_probe_active(ov) : ov.toggle
-      end
-    end
-
-    private def click_discover_config(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @discover_config_overlay
-      return unless ov
-      box = ov.overlay_box(area)
-      return close_discover_config if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = ov.row_at(box, mx, my)
-        ov.set_selected(idx)
-        if ov.on_start_row?
-          start_discover(ov)
-        elsif ov.on_headers_row?
-          open_discover_headers(ov)
-        else
-          ov.toggle
-        end
-      end
-    end
-
-    private def click_discover_headers(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @discover_headers_overlay || return
-      box = ov.overlay_box(area)
-      commit_discover_headers if box.nil? || dismiss_zone?(box, mx, my) # click-away saves (esc semantics)
-    end
-
-    private def click_fuzz_set(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @fuzz_set_overlay || return
-      box = ov.overlay_box(area)
-      return apply_close_fuzz_set(ov) if box.nil? || dismiss_zone?(box, mx, my) # click-away applies (esc semantics)
-      ov.handle_click(box, mx, my)
-    end
-
-    private def click_fuzz_advanced(area : Rect, mx : Int32, my : Int32) : Nil
-      ov = @fuzz_advanced_overlay || return
-      box = ov.overlay_box(area)
-      return apply_close_fuzz_advanced(ov) if box.nil? || dismiss_zone?(box, mx, my)
-      ov.handle_click(box, mx, my)
     end
 
     private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1665,95 +1577,7 @@ module Gori::Tui
       when .hosts?           then @hosts_overlay.select_move(step)
       when .env?             then @env_overlay.select_move(step)
       when .hotkeys?         then @hotkeys_overlay.select_move(step)
-      when .notifications?   then @notifications_overlay.select_move(step)
-      when .probe_active?    then @probe_active_overlay.try(&.move(step))
-      when .discover_config? then @discover_config_overlay.try(&.move(step))
-      when .fuzz_set?        then @fuzz_set_overlay.try(&.move(step))
-      when .fuzz_advanced?   then @fuzz_advanced_overlay.try(&.move(step))
       end
-    end
-
-    # Notification center: ↑/↓ select · ↵ jump to the result · c clear · ^P palette · esc.
-    private def handle_notifications_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char
-      if ev.ctrl? && key.lower_p?
-        @overlay = OverlayKind::None
-        open_palette
-      elsif key.escape?
-        @overlay = OverlayKind::None
-      elsif key.up?
-        @notifications_overlay.select_move(-1)
-      elsif key.down?
-        @notifications_overlay.select_move(1)
-      elsif key.enter?
-        open_notification_goto
-      elsif c == 'c'
-        @notifications.clear
-        @notifications_overlay.reset
-      end
-    end
-
-    # Miner config popup: ↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel.
-    # Run-active-scan popup: ↑/↓ field · ←/→ notify · ↵ run · esc cancel.
-    private def handle_probe_active_key(ev : Termisu::Event::Key) : Nil
-      ov = @probe_active_overlay
-      return unless ov
-      key = ev.key
-      if key.escape?
-        close_probe_active
-      elsif key.up?
-        ov.move(-1)
-      elsif key.down?
-        ov.move(1)
-      elsif key.left?
-        ov.adjust(-1)
-      elsif key.right?
-        ov.adjust(1)
-      elsif key.enter? || key.space?
-        ov.on_run_row? ? start_probe_active(ov) : ov.toggle
-      end
-    end
-
-    # Sequencer config popup: ↑/↓ field · type to edit the selector · ←/→ cycle · ↵ start.
-    # The selector row is a text field, so printable/caret keys route there first; every
-    # other row uses the ←/→ cycler nav.
-    private def handle_discover_config_key(ev : Termisu::Event::Key) : Nil
-      ov = @discover_config_overlay
-      return unless ov
-      key = ev.key
-      if key.escape?
-        close_discover_config
-      elsif key.up?
-        ov.move(-1)
-      elsif key.down?
-        ov.move(1)
-      elsif key.left?
-        ov.adjust(-1)
-      elsif key.right?
-        ov.adjust(1)
-      elsif key.enter? || key.space?
-        if ov.on_start_row?
-          start_discover(ov)
-        elsif ov.on_headers_row?
-          open_discover_headers(ov)
-        else
-          ov.toggle
-        end
-      end
-    end
-
-    # Fuzzer payload-set / advanced overlays. Each owns ALL its keys (incl. Tab + its
-    # own wordlist autocomplete) while open; :apply (esc / ↵ on the last field / a
-    # click-away) writes the edit back into the fuzz session and closes.
-    private def handle_fuzz_set_key(ev : Termisu::Event::Key) : Nil
-      ov = @fuzz_set_overlay || return
-      apply_close_fuzz_set(ov) if ov.handle_key(ev) == :apply
-    end
-
-    private def handle_fuzz_advanced_key(ev : Termisu::Event::Key) : Nil
-      ov = @fuzz_advanced_overlay || return
-      apply_close_fuzz_advanced(ov) if ov.handle_key(ev) == :apply
     end
 
     # Project SCOPE rule popup: ↑/↓ field · ←/→ kind/type · type pattern · ↵ save · esc cancel.
@@ -1837,18 +1661,6 @@ module Gori::Tui
         end
       end
       false
-    end
-
-    private def apply_close_fuzz_set(ov : FuzzSetOverlay) : Nil
-      fuzzer_controller.apply_fuzz_set(ov.edit_index, ov.build_spec)
-      @overlay = OverlayKind::None
-      @fuzz_set_overlay = nil
-    end
-
-    private def apply_close_fuzz_advanced(ov : FuzzAdvancedOverlay) : Nil
-      fuzzer_controller.apply_fuzz_advanced(ov.snapshot)
-      @overlay = OverlayKind::None
-      @fuzz_advanced_overlay = nil
     end
 
     # New-issue form: type a title; ↵ create, esc cancel.
@@ -3658,12 +3470,6 @@ module Gori::Tui
       @hosts_overlay.render(screen, layout.body) if @overlay.hosts?
       @env_overlay.render(screen, layout.body) if @overlay.env?
       @hotkeys_overlay.render(screen, layout.body) if @overlay.hotkeys?
-      @notifications_overlay.render(screen, layout.body) if @overlay.notifications?
-      @probe_active_overlay.try(&.render(screen, layout.body)) if @overlay.probe_active?
-      @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay.discover_config?
-      @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay.discover_headers?
-      @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay.fuzz_set?
-      @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay.fuzz_advanced?
       active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
@@ -3772,29 +3578,23 @@ module Gori::Tui
         return ov.title
       end
       case @overlay
-      when .palette?          then "PALETTE"
-      when .issue_new?        then "ISSUE"
-      when .detail?           then "DETAIL"
-      when .confirm?          then "CONFIRM"
-      when .browser?          then "BROWSER"
-      when .choice?           then @choice_picker.try(&.title) || "CHOOSE"
-      when .comparer_pick?    then "PICK FLOW"
-      when .repeater_subtab?  then @subtab_picker.try(&.title) || "FIND SUB-TAB"
-      when .links?            then @links_overlay.try(&.title) || "LINKS"
-      when .issue_pick?       then "PICK ISSUE"
-      when .note_pick?        then "PICK NOTE"
-      when .preferences?      then "PREFERENCES"
-      when .settings?         then "SETTINGS"
-      when .tabs?             then "TAB BAR"
-      when .hosts?            then "HOSTNAME OVERRIDES"
-      when .env?              then "ENVIRONMENT"
-      when .hotkeys?          then "HOTKEYS"
-      when .notifications?    then "NOTIFICATIONS"
-      when .probe_active?     then "ACTIVE SCAN"
-      when .discover_config?  then "DISCOVER"
-      when .discover_headers? then "CUSTOM HEADERS"
-      when .fuzz_set?         then "PAYLOAD SET"
-      when .fuzz_advanced?    then "ADVANCED"
+      when .palette?         then "PALETTE"
+      when .issue_new?       then "ISSUE"
+      when .detail?          then "DETAIL"
+      when .confirm?         then "CONFIRM"
+      when .browser?         then "BROWSER"
+      when .choice?          then @choice_picker.try(&.title) || "CHOOSE"
+      when .comparer_pick?   then "PICK FLOW"
+      when .repeater_subtab? then @subtab_picker.try(&.title) || "FIND SUB-TAB"
+      when .links?           then @links_overlay.try(&.title) || "LINKS"
+      when .issue_pick?      then "PICK ISSUE"
+      when .note_pick?       then "PICK NOTE"
+      when .preferences?     then "PREFERENCES"
+      when .settings?        then "SETTINGS"
+      when .tabs?            then "TAB BAR"
+      when .hosts?           then "HOSTNAME OVERRIDES"
+      when .env?             then "ENVIRONMENT"
+      when .hotkeys?         then "HOTKEYS"
       else
         case @focus
         when :menu    then "TABS"
@@ -3824,30 +3624,24 @@ module Gori::Tui
         return ov.hint
       end
       case @overlay
-      when .palette?          then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when .issue_new?        then "type title · ↵ create · esc cancel"
-      when .confirm?          then "←/→ choose · y confirm · n/esc cancel · ↵ select"
-      when .browser?          then "↑/↓ select · ↵ open · esc cancel"
-      when .choice?           then "↑/↓ select · ↵ set · key picks · esc cancel"
-      when .tabs_more?        then "↑/↓ select · ↵ open tab · ←/esc close"
-      when .comparer_pick?    then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when .repeater_subtab?  then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
-      when .links?            then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
-      when .issue_pick?       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when .note_pick?        then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when .preferences?      then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
-      when .settings?         then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
-      when .tabs?             then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
-      when .hosts?            then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
-      when .env?              then env_overlay_hints
-      when .hotkeys?          then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when .notifications?    then "↑/↓ select · ↵ open · c clear · esc close"
-      when .probe_active?     then "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
-      when .discover_config?  then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
-      when .discover_headers? then "one header per line · Host/Connection ignored · esc saves & closes"
-      when .fuzz_set?         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
-      when .fuzz_advanced?    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
-      when .detail?           then history_controller.body_hint(:body)
+      when .palette?         then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when .issue_new?       then "type title · ↵ create · esc cancel"
+      when .confirm?         then "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      when .browser?         then "↑/↓ select · ↵ open · esc cancel"
+      when .choice?          then "↑/↓ select · ↵ set · key picks · esc cancel"
+      when .tabs_more?       then "↑/↓ select · ↵ open tab · ←/esc close"
+      when .comparer_pick?   then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
+      when .repeater_subtab? then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
+      when .links?           then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
+      when .issue_pick?      then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when .note_pick?       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when .preferences?     then "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
+      when .settings?        then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      when .tabs?            then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+      when .hosts?           then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+      when .env?             then env_overlay_hints
+      when .hotkeys?         then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when .detail?          then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
         return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
@@ -4034,16 +3828,18 @@ module Gori::Tui
     # Open the notification center (the app.notifications verb + the clickable top-bar
     # badge). Marks everything read, clearing the unread badge.
     def open_notifications : Nil
-      @overlay = OverlayKind::Notifications
-      @notifications_overlay.reset
+      ov = NotificationsOverlay.new(@notifications)
+      # The jump itself lands on the target tab, and focus_tab already clears @overlay —
+      # so the shell's close-on-commit is a no-op after it, not a second dismissal.
+      ov.on_commit = -> {
+        run_goto(ov.selected_note.try(&.goto))
+        true
+      }
+      # Close BEFORE raising the palette: the reverse order would drop @active_overlay on
+      # top of the modal we just opened.
+      ov.on_palette = -> { close_active_overlay; open_palette }
+      open_overlay(ov)
       @notifications.mark_all_read
-    end
-
-    # Run the selected note's "jump to result" target, then close the center.
-    private def open_notification_goto : Nil
-      note = @notifications_overlay.selected_note
-      @overlay = OverlayKind::None
-      run_goto(note.goto) if note
     end
 
     private def run_goto(g : Jobs::Goto?) : Nil
@@ -4662,20 +4458,22 @@ module Gori::Tui
         @toast = "no active checks apply (needs a request with reflectable params, or a CORS response)"
         return
       end
-      @probe_active_overlay = ProbeActiveOverlay.new(detail, est_safe, est_unsafe, repeater_id)
-      @overlay = OverlayKind::ProbeActive
+      ov = ProbeActiveOverlay.new(detail, est_safe, est_unsafe, repeater_id)
+      ov.on_commit = -> { start_probe_active(ov) }
+      open_overlay(ov)
     end
 
     # Confirm the popup: run the probes in the BACKGROUND (mode-independent), persist the chosen
     # notify mode as the next default, and toast the request count. Findings land in the Probe tab
     # via the usual probe_generation poll + event drain. The unsafe-methods opt-in threads through
     # to run_active_now so a deliberately-selected POST/PUT/… flow is actually re-sent.
-    private def start_probe_active(ov : ProbeActiveOverlay) : Nil
+    # Returns whether the popup should close (the Overlay seam's commit contract).
+    private def start_probe_active(ov : ProbeActiveOverlay) : Bool
       # Selected options send nothing (e.g. a POST with the unsafe opt-in still off) — hint, don't
       # fire a no-op scan or close the popup.
       if ov.estimate_empty?
         @toast = "nothing to send — enable unsafe methods to probe this #{ov.detail.row.method}"
-        return
+        return false
       end
       notify = ov.notify_mode
       Settings.save_probe_active_notify(notify.token)
@@ -4684,12 +4482,7 @@ module Gori::Tui
         allow_unsafe: ov.allow_unsafe?, notify: notify)
       unsafe_note = ov.allow_unsafe? ? " (incl. unsafe methods)" : ""
       @toast = "active scan → #{host}: #{ov.total_label} sent#{unsafe_note} (see the Probe tab)"
-      close_probe_active
-    end
-
-    private def close_probe_active : Nil
-      @overlay = OverlayKind::None
-      @probe_active_overlay = nil
+      true
     end
 
     # Host-facade alias so a TabController (the Project settings pane's lens row + click) flips
@@ -4738,7 +4531,9 @@ module Gori::Tui
     private def offer_flow_headers(id : Int64, request_head : Bytes) : Nil
       hdrs = Discover::Headers.from_flow(request_head)
       return if hdrs.empty?
-      ov = @discover_config_overlay
+      # The popup open_discover_config just raised — the confirm below leaves @active_overlay
+      # alone and `return_to:` restores @overlay, so it is live again when the closure runs.
+      ov = active_overlay.as?(DiscoverConfigOverlay)
       names = hdrs.first(3).map { |n, _| n }.join(", ")
       names += ", …" if hdrs.size > 3
       confirm("Use this flow's headers?",
@@ -4849,67 +4644,67 @@ module Gori::Tui
         @toast = "cannot discover from here"
         return
       end
-      @discover_config_overlay = DiscoverConfigOverlay.new(seed)
-      @overlay = OverlayKind::DiscoverConfig
+      ov = DiscoverConfigOverlay.new(seed)
+      ov.on_commit = -> { start_discover(ov) }
+      ov.on_edit_headers = -> { open_discover_headers(ov) }
+      open_overlay(ov)
     end
 
     # Confirm the popup: launch the BACKGROUND run and switch to the Discover sub-tab so
     # its live results are visible (we're already under the Target tab if launched here).
-    private def start_discover(ov : DiscoverConfigOverlay) : Nil
+    # Returns whether the popup should close (the Overlay seam's commit contract).
+    private def start_discover(ov : DiscoverConfigOverlay) : Bool
       unless ov.valid?
         @toast = "enable spider or bruteforce"
-        return
+        return false
       end
       ov.save_prefs
       discover_controller.start_session(ov.selected_target, ov.build_config)
-      close_discover_config
       switch_tab(:target)
       target_controller.select_discover
       @focus = :body
-    end
-
-    private def close_discover_config : Nil
-      @overlay = OverlayKind::None
-      @discover_config_overlay = nil
+      true
     end
 
     # --- Discover custom-headers editor (opened from the config popup's headers row) ---
-    private def open_discover_headers(ov : DiscoverConfigOverlay) : Nil
-      @discover_headers_overlay = DiscoverHeadersOverlay.new(ov.headers)
-      @overlay = OverlayKind::DiscoverHeaders
-    end
-
-    # esc / click-away: parse the edited lines back onto the config popup and reopen it.
-    private def commit_discover_headers : Nil
-      if (hov = @discover_headers_overlay) && (ov = @discover_config_overlay)
-        ov.set_headers(hov.headers)
-      end
-      @discover_headers_overlay = nil
-      @overlay = OverlayKind::DiscoverConfig
-    end
-
-    private def handle_discover_headers_key(ev : Termisu::Event::Key) : Nil
-      ov = @discover_headers_overlay || return
-      commit_discover_headers if ov.handle_key(ev) == :commit
+    # A sub-editor: esc / click-away parses the edited lines back onto the config popup and
+    # RETURNS to it. The closure restores the parent itself and reports false so the shell's
+    # close-on-commit doesn't immediately drop the popup we just put back.
+    private def open_discover_headers(cfg : DiscoverConfigOverlay) : Nil
+      hov = DiscoverHeadersOverlay.new(cfg.headers)
+      hov.on_commit = -> {
+        cfg.set_headers(hov.headers)
+        open_overlay(cfg)
+        false
+      }
+      open_overlay(hov)
     end
 
     # Host: open the Fuzzer payload-set editor (nil = add, else edit that index) and
     # the advanced-settings editor, each built from the current fuzz session.
     def open_fuzz_set_editor(edit_index : Int32?) : Nil
       return unless v = fuzzer_controller.current_view
-      @fuzz_set_overlay =
+      ov =
         if (i = edit_index) && (spec = v.set_specs[i]?)
           FuzzSetOverlay.editing(spec, i)
         else
           FuzzSetOverlay.for_list
         end
-      @overlay = OverlayKind::FuzzSet
+      ov.on_commit = -> {
+        fuzzer_controller.apply_fuzz_set(ov.edit_index, ov.build_spec)
+        true
+      }
+      open_overlay(ov)
     end
 
     def open_fuzz_advanced_editor : Nil
       return unless v = fuzzer_controller.current_view
-      @fuzz_advanced_overlay = FuzzAdvancedOverlay.new(v.advanced_snapshot)
-      @overlay = OverlayKind::FuzzAdvanced
+      ov = FuzzAdvancedOverlay.new(v.advanced_snapshot)
+      ov.on_commit = -> {
+        fuzzer_controller.apply_fuzz_advanced(ov.snapshot)
+        true
+      }
+      open_overlay(ov)
     end
 
     # Host: open the Project SCOPE rule popup (nil edit_id = add a new rule). The apply is

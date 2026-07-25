@@ -49,6 +49,13 @@ private MIGRATED_KINDS = [
   OverlayKind::RewriterRule,
   OverlayKind::CaImport,
   OverlayKind::Import,
+  # C1 — scan/fuzz config forms
+  OverlayKind::Notifications,
+  OverlayKind::ProbeActive,
+  OverlayKind::DiscoverConfig,
+  OverlayKind::DiscoverHeaders,
+  OverlayKind::FuzzSet,
+  OverlayKind::FuzzAdvanced,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not: neither draws a capturing card.

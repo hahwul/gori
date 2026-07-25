@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./overlay"
 require "./text_area"
 require "./text_field"
 require "./path_complete"
@@ -21,10 +22,11 @@ module Gori::Tui
   # with text fields, so it also carries IME (set_preedit) plumbing and, for the
   # wordlist Path field, an inline PathComplete dropdown.
   #
-  # Surfaces used by the Runner: handle_key returns :apply when the user commits
-  # (esc, or ↵ on the last field) so the Runner writes build_spec back into @sets;
-  # :stay otherwise. overlay_box centers the box; set_preedit routes composing text.
-  class FuzzSetOverlay
+  # Rides the polymorphic Overlay seam (see overlay.cr). handle_key returns :commit when
+  # the user applies (esc, ↵ on the last field, or a click-away) and the injected closure
+  # writes build_spec back into @sets; :stay otherwise. There is no cancel: every exit
+  # applies, which is what the shell's apply_close_fuzz_set did on all three paths.
+  class FuzzSetOverlay < Overlay
     PTYPES = [:list, :numbers, :wordlist, :null, :brute]
 
     getter edit_index : Int32?
@@ -118,8 +120,22 @@ module Gori::Tui
       @sel == rows.size - 1
     end
 
+    # --- Overlay contract (see overlay.cr) ---
+    def key : OverlayKind
+      OverlayKind::FuzzSet
+    end
+
+    def title : String
+      "PAYLOAD SET"
+    end
+
+    def hint : String
+      "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
+    end
+
     # --- input ---------------------------------------------------------------
-    # Returns :apply when the user commits (Runner writes build_spec back), else :stay.
+    # Returns :commit when the user applies (the injected closure writes build_spec
+    # back), else :stay.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       f = focused
@@ -135,7 +151,7 @@ module Gori::Tui
         end
       end
 
-      return :apply if key.escape?
+      return :commit if key.escape?
       if key.tab?
         move_row(1); return :stay
       elsif key.back_tab?
@@ -204,7 +220,7 @@ module Gori::Tui
       case
       when key.up?    then move_row(-1)
       when key.down?  then move_row(1)
-      when key.enter? then return :apply if on_last_row?; move_row(1)
+      when key.enter? then return :commit if on_last_row?; move_row(1)
       else
         tf.handle_edit_key(ev)
         refresh_path(f) # keep the wordlist dropdown in lockstep with the field
@@ -329,10 +345,12 @@ module Gori::Tui
         screen.text(area.x + 1, area.y, "payload set editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
         return
       end
-      title = @edit_index ? "PAYLOAD SET · edit" : "PAYLOAD SET · new"
+      # Not `title` — that is now the Overlay chrome method, and a local of the same name
+      # shadowing it inside render is the collision C2 hit (Crystal has no `override`).
+      card_title = @edit_index ? "PAYLOAD SET · edit" : "PAYLOAD SET · new"
       # bg: Theme.bg (not the card default panel) so the embedded List TextArea, which
       # always paints on Theme.bg, doesn't two-tone against the card interior.
-      Frame.card(screen, box, title, bg: Theme.bg, border: Theme.border_focus)
+      Frame.card(screen, box, card_title, bg: Theme.bg, border: Theme.border_focus)
       render_meta(screen, box)
       render_type_row(screen, box)
       Frame.tee_divider(screen, box, box.y + 2, Theme.bg)
@@ -413,9 +431,11 @@ module Gori::Tui
 
     # --- mouse ---------------------------------------------------------------
     # Focus the row under a click; place the List caret when the click lands in the
-    # editor. Returns true when the click was inside the box (consumed).
-    def handle_click(box : Rect, mx : Int32, my : Int32) : Bool
-      return false unless box.contains?(mx, my)
+    # editor. A click outside the card APPLIES (esc semantics) — the same dismissal the
+    # shell used to run through apply_close_fuzz_set.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :commit if box.nil? || !box.contains?(mx, my)
       if my == box.y + 1
         @sel = 0
         sync_path_complete
@@ -427,7 +447,7 @@ module Gori::Tui
         @sel = (i + 1).clamp(1, rows.size - 1) if 0 <= i < field_rows.size
         sync_path_complete
       end
-      true
+      :stay
     end
 
     def move(d : Int32) : Nil
