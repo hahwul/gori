@@ -3861,7 +3861,7 @@ module Gori::Tui
       }
       # Close BEFORE raising the palette: the reverse order would drop @active_overlay on
       # top of the modal we just opened.
-      ov.on_palette = -> { close_active_overlay; open_palette }
+      ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
       @notifications.mark_all_read
     end
