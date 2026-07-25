@@ -153,6 +153,161 @@ module Gori
         Result.new({"deleted" => 1, "id" => id}.to_json)
       end
 
+      # --- scan rules + mode (parity with the TUI Probe tab's Rules sub-tab) -----------------
+
+      # list_probe_rules — every built-in (passive + active) and custom rule, with its enabled
+      # state. The ids here are what set_probe_rule_enabled / delete_probe_rule take.
+      private def list_probe_rules(h) : Result
+        kind = str(h, "kind").try(&.strip.downcase).presence
+        if kind && !%w[passive active custom].includes?(kind)
+          return err("invalid kind '#{kind}' (passive|active|custom)", "INVALID_ARGUMENT", field: "kind")
+        end
+        entries = Probe::RuleCatalog.load(store)
+        entries = entries.select { |e| e.kind == kind } if kind
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "mode", store.probe_mode.label
+            j.field("rules") { j.array { entries.each { |e| Probe::RuleCatalog.entry_json(j, e) } } }
+            j.field "total", entries.size
+            j.field "disabled_count", entries.count { |e| !e.enabled }
+          end
+        end)
+      end
+
+      # set_probe_rule_enabled — turn one rule on/off. Built-ins live in the project's
+      # disabled-id set; a custom rule carries its own enabled flag (project rules only —
+      # a GLOBAL custom rule lives in the user's settings.json, outside this project).
+      private def set_probe_rule_enabled(h) : Result
+        id = str(h, "id").try(&.strip).presence
+        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        enabled = bool(h, "enabled")
+        return err("missing required 'enabled'", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
+
+        entry = Probe::RuleCatalog.load(store).find { |e| e.id == id }
+        return not_found("no scan rule with id '#{id}' (see list_probe_rules)") unless entry
+
+        if entry.kind == "custom"
+          if entry.scope == "global"
+            return err("'#{id}' is a GLOBAL custom rule (stored in settings.json, shared across projects) — it cannot be toggled per project",
+              "INVALID_ARGUMENT", field: "id")
+          end
+          row_id = custom_rule_row_id(id)
+          return err("malformed custom rule id '#{id}'", "INVALID_ARGUMENT", field: "id") unless row_id
+          store.set_probe_custom_rule_enabled(row_id, enabled)
+        else
+          disabled = store.probe_disabled_rules
+          enabled ? disabled.delete(id) : disabled.add(id)
+          store.set_probe_disabled_rules(disabled)
+        end
+        Result.new({"id" => id, "enabled" => enabled, "kind" => entry.kind}.to_json)
+      end
+
+      # create_probe_rule — add a PROJECT custom match rule (string/regex over one region of a
+      # flow). Global rules are a settings.json concern and are not writable here.
+      private def create_probe_rule(h) : Result
+        fields = custom_rule_fields(h)
+        return fields if fields.is_a?(Result)
+        title, description, side, region, kind, pattern, severity = fields
+        id = store.insert_probe_custom_rule(title, description, side, region, kind, pattern, severity)
+        return err("failed to persist the rule (store busy or unwritable)", "STORE_ERROR") if id == 0
+        Result.new({"id" => "custom_p_#{id}", "row_id" => id, "title" => title}.to_json)
+      end
+
+      private def update_probe_rule(h) : Result
+        id = str(h, "id").try(&.strip).presence
+        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        row_id = custom_rule_row_id(id)
+        return err("'#{id}' is not a project custom rule (only project custom rules are editable)",
+          "INVALID_ARGUMENT", field: "id") unless row_id
+        return not_found("no custom rule with id '#{id}'") unless store.probe_custom_rules.any? { |r| r.id == row_id }
+
+        fields = custom_rule_fields(h)
+        return fields if fields.is_a?(Result)
+        title, description, side, region, kind, pattern, severity = fields
+        store.update_probe_custom_rule(row_id, title, description, side, region, kind, pattern, severity)
+        Result.new({"id" => id, "title" => title}.to_json)
+      end
+
+      private def delete_probe_rule(h) : Result
+        id = str(h, "id").try(&.strip).presence
+        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        row_id = custom_rule_row_id(id)
+        return err("'#{id}' is not a project custom rule — a built-in can only be DISABLED (set_probe_rule_enabled), never deleted",
+          "INVALID_ARGUMENT", field: "id") unless row_id
+        return not_found("no custom rule with id '#{id}'") unless store.probe_custom_rules.any? { |r| r.id == row_id }
+        store.delete_probe_custom_rule(row_id)
+        Result.new({"deleted" => 1, "id" => id}.to_json)
+      end
+
+      # set_probe_mode — the per-project scan mode. Raising it to active/aggressive arms the
+      # AUTOMATIC probe pipeline for a live capture, so it is gated like any outbound action.
+      private def set_probe_mode(h) : Result
+        label = str(h, "mode").try(&.strip.downcase).presence
+        return err("missing required 'mode' (off|passive|active|aggressive)", "INVALID_ARGUMENT", field: "mode") unless label
+        # Mode.from_setting silently falls back to Passive on an unknown label — that would
+        # report success for a typo, so validate against the labels first.
+        valid = Probe::Mode.values.map(&.label)
+        unless valid.includes?(label)
+          return err("invalid mode '#{label}' (#{valid.join("|")})", "INVALID_ARGUMENT", field: "mode")
+        end
+        mode = Probe::Mode.from_setting(label)
+        store.set_probe_mode(mode)
+        Result.new({"mode" => mode.label, "scanning" => mode.scanning?,
+                    "probes_actively" => mode.probes_actively?}.to_json)
+      end
+
+      # "custom_p_12" → 12. Returns nil for a built-in id or a GLOBAL custom rule ("custom_g_…"),
+      # neither of which is a project DB row.
+      private def custom_rule_row_id(id : String) : Int64?
+        return nil unless id.starts_with?("custom_p_")
+        id[9..].to_i64?
+      end
+
+      # Validate + normalize the shared create/update field set.
+      private def custom_rule_fields(h) : {String, String, String, String, String, String, Store::Severity} | Result
+        title = str(h, "title").try(&.strip).presence
+        return err("missing required 'title'", "INVALID_ARGUMENT", field: "title") unless title
+        pattern = str(h, "pattern").try(&.strip).presence
+        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") unless pattern
+
+        spec = custom_rule_match_spec(h, pattern)
+        return spec if spec.is_a?(Result)
+        side, region, kind = spec
+
+        sev_s = str(h, "severity")
+        if e = bad_severity(sev_s)
+          return e
+        end
+        {title, str(h, "description").try(&.strip) || "", side, region, kind, pattern,
+         severity_from(sev_s) || Store::Severity::Info}
+      end
+
+      # The {side, region, match_kind} triple, each defaulted and checked against its allowed
+      # set, plus the pattern's own compile check. Split out of custom_rule_fields to stay
+      # under the cyclomatic-complexity bar.
+      private def custom_rule_match_spec(h, pattern : String) : {String, String, String} | Result
+        side = (str(h, "side").try(&.strip.downcase).presence || "response")
+        unless Probe::CustomRule::SIDES.includes?(side)
+          return err("invalid side '#{side}' (#{Probe::CustomRule::SIDES.join("|")})", "INVALID_ARGUMENT", field: "side")
+        end
+        region = (str(h, "region").try(&.strip.downcase).presence || "body")
+        unless Probe::CustomRule::REGIONS.includes?(region)
+          return err("invalid region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})", "INVALID_ARGUMENT", field: "region")
+        end
+        kind = (str(h, "match_kind").try(&.strip.downcase).presence || "string")
+        unless Probe::CustomRule::KINDS.includes?(kind)
+          return err("invalid match_kind '#{kind}' (#{Probe::CustomRule::KINDS.join("|")})", "INVALID_ARGUMENT", field: "match_kind")
+        end
+        # A regex that PCRE rejects would match nothing forever while reporting success (the
+        # rule's own #matches? rescues to false) — refuse it here instead, the same way the
+        # TUI's rule overlay validates before it saves. SafeRegexp.compile RAISES on a bad
+        # pattern, it does not return nil.
+        unless Probe::CustomRule.valid_pattern?(pattern, kind)
+          return err("invalid regex pattern (PCRE rejected it)", "INVALID_ARGUMENT", field: "pattern")
+        end
+        {side, region, kind}
+      end
+
       # The QL filter (History only; blank/absent → nil = scan all), or a QUERY_SYNTAX Result.
       private def probe_scan_filter(h) : QL::Filter? | Result
         query = str(h, "query").try(&.strip).presence

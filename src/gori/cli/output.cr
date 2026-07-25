@@ -263,6 +263,27 @@ module Gori
         end
       end
 
+      # --- scan rule catalog --------------------------------------------------
+
+      # "[on ] passive  secret_in_url    Secret in URL          infoleak"
+      # A disabled rule reads "[off]" so the state is scannable down the left edge.
+      def self.probe_rule_text(e : Probe::RuleCatalog::Entry) : String
+        String.build do |io|
+          io << (e.enabled ? "[on ] " : "[off] ")
+          io << e.kind.ljust(8)
+          io << term_safe(e.id).ljust(26)
+          io << "  " << term_safe(e.name).ljust(30)
+          io << "  " << e.category
+          if est = e.estimate
+            io << " · " << est
+          end
+          if e.kind == "custom"
+            io << " · " << (e.scope == "global" ? "GLOBAL" : "PROJECT")
+            io << " · " << e.side << "/" << e.region << " · " << e.match_kind
+          end
+        end
+      end
+
       # "#0     admin                 200   1.2kB     142w    31ms"
       def self.fuzz_row_text(r : Fuzz::Result) : String
         String.build do |io|

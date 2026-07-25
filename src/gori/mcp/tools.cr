@@ -91,6 +91,7 @@ module Gori
         "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop", "stop_job",
         "create_issue", "update_issue",
         "probe_dismiss", "probe_promote", "probe_delete",
+        "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -547,6 +548,14 @@ module Gori
             s.field "host", strprop("only return findings for this exact host")
             s.field "limit", intprop("max rows (default 100, max 500)")
             s.field "offset", intprop("start row (default 0)")
+          end
+
+          tool j, "list_probe_rules",
+            "List every scan rule — built-in passive, built-in active, and custom match rules — " \
+            "with whether the operator has each enabled, plus the project's current scan `mode`. " \
+            "The `id` of each row is what set_probe_rule_enabled / update_probe_rule / " \
+            "delete_probe_rule take. Both a scan here and one in the TUI honour this config." do |s|
+            s.field "kind", strprop("only list rules of this kind (passive|active|custom)")
           end
 
           tool j, "list_scope", "List the project's scope include/exclude rules, plus whether the scope lens/gate and the hard-containment sandbox are enabled." { }
@@ -1008,6 +1017,54 @@ module Gori
               s.field "all", boolprop("delete EVERY probe finding in the project (default false)")
             end
 
+            tool j, "set_probe_rule_enabled",
+              "Turn one scan rule on or off for this project (ids from list_probe_rules). " \
+              "Disabling a built-in stops NEW detections; findings it already produced stay. " \
+              "A GLOBAL custom rule lives in the user's settings.json and cannot be toggled here." do |s|
+              s.field "id", strprop("rule id from list_probe_rules"), required: true
+              s.field "enabled", boolprop("true to enable, false to disable"), required: true
+            end
+
+            tool j, "create_probe_rule",
+              "Add a PROJECT custom match rule — a string or regex tested against one region of " \
+              "each captured flow, emitting a finding on a hit. A regex PCRE rejects is refused " \
+              "rather than silently never matching." do |s|
+              s.field "title", strprop("short rule name (shown as the finding title)"), required: true
+              s.field "pattern", strprop("the string to look for, or a regex when match_kind=regex"), required: true
+              s.field "description", strprop("what the rule is for (default empty)")
+              s.field "side", strprop("request|response (default response)")
+              s.field "region", strprop("whole|header|body (default body)")
+              s.field "match_kind", strprop("string|regex (default string)")
+              s.field "severity", strprop("info|low|medium|high|critical (default info)")
+            end
+
+            tool j, "update_probe_rule",
+              "Replace a project custom rule's fields (same shape as create_probe_rule). " \
+              "Built-ins are not editable — disable them with set_probe_rule_enabled instead." do |s|
+              s.field "id", strprop("custom rule id from list_probe_rules (custom_p_…)"), required: true
+              s.field "title", strprop("short rule name"), required: true
+              s.field "pattern", strprop("the string or regex to match"), required: true
+              s.field "description", strprop("what the rule is for")
+              s.field "side", strprop("request|response (default response)")
+              s.field "region", strprop("whole|header|body (default body)")
+              s.field "match_kind", strprop("string|regex (default string)")
+              s.field "severity", strprop("info|low|medium|high|critical (default info)")
+            end
+
+            tool j, "delete_probe_rule",
+              "Delete a project custom rule. A built-in can only be DISABLED, never deleted." do |s|
+              s.field "id", strprop("custom rule id from list_probe_rules (custom_p_…)"), required: true
+            end
+
+            tool j, "set_probe_mode",
+              "Set the project's scan mode. off = no analysis; passive = zero-request checks on " \
+              "captured traffic (default); active = passive plus light-touch probes that SEND " \
+              "requests to scope-included targets; aggressive = active with raised caps, wider " \
+              "bypass sets, and UNSAFE methods (POST/PUT/PATCH/DELETE) — authorized targets only. " \
+              "This arms the AUTOMATIC pipeline for live captures, not just one scan." do |s|
+              s.field "mode", strprop("off|passive|active|aggressive"), required: true
+            end
+
             tool j, "fuzz_start",
               "Start a fuzz/intruder run against an origin and return a job_id " \
               "immediately (poll with fuzz_status / fuzz_results; end with fuzz_stop). " \
@@ -1326,6 +1383,7 @@ module Gori
         when "get_issue"               then get_issue(h)
         when "probe_scan"              then probe_scan(h)
         when "probe_issues"            then probe_issues(h)
+        when "list_probe_rules"        then list_probe_rules(h)
         when "list_scope"              then list_scope
         when "list_env"                then list_env(h)
         when "list_host_overrides"     then list_host_overrides
@@ -1382,6 +1440,11 @@ module Gori
         when "probe_dismiss"           then gated { probe_dismiss(h) }
         when "probe_promote"           then gated { probe_promote(h) }
         when "probe_delete"            then gated { probe_delete(h) }
+        when "set_probe_rule_enabled"  then gated { set_probe_rule_enabled(h) }
+        when "create_probe_rule"       then gated { create_probe_rule(h) }
+        when "update_probe_rule"       then gated { update_probe_rule(h) }
+        when "delete_probe_rule"       then gated { delete_probe_rule(h) }
+        when "set_probe_mode"          then gated { set_probe_mode(h) }
         when "fuzz_start"              then gated { fuzz_start(h) }
         when "fuzz_status"             then gated { fuzz_status(h) }
         when "fuzz_results"            then gated { fuzz_results(h) }

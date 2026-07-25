@@ -113,14 +113,11 @@ module Gori::Tui
       @sel == ROW_SAVE
     end
 
-    # Every required field is present and, for a regex rule, the pattern compiles.
+    # Every required field is present and, for a regex rule, the pattern compiles (the shared
+    # validator the CLI/MCP write paths use too).
     def valid? : Bool
-      return false if title.empty? || description.empty? || pattern.empty?
-      return true unless kind == "regex"
-      SafeRegexp.compile(pattern)
-      true
-    rescue
-      false
+      return false if title.empty? || description.empty?
+      Probe::CustomRule.valid_pattern?(pattern, kind)
     end
 
     def move(d : Int32) : Nil

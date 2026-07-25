@@ -240,3 +240,141 @@ describe "MCP probe triage tools" do
     end
   end
 end
+
+describe "MCP probe rules + mode tools" do
+  it "lists built-in and custom rules with their enabled state and the project mode" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      res = call_json(tools, "list_probe_rules", "{}")
+      res["mode"].as_s.should eq("passive") # the fresh-project default
+      res["disabled_count"].as_i.should eq(0)
+      rules = res["rules"].as_a
+      rules.size.should be > 0
+      kinds = rules.map { |r| r["kind"].as_s }.uniq
+      kinds.should contain("passive")
+      kinds.should contain("active")
+      # An active rule advertises its per-flow request cost; a passive one sends nothing.
+      active = rules.find { |r| r["kind"].as_s == "active" }.not_nil!
+      active.as_h.has_key?("requests_per_flow").should be_true
+      rules.find { |r| r["kind"].as_s == "passive" }.not_nil!.as_h.has_key?("requests_per_flow").should be_false
+    end
+  end
+
+  it "filters the catalog by kind" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      res = call_json(tools, "list_probe_rules", %({"kind":"active"}))
+      res["rules"].as_a.map { |r| r["kind"].as_s }.uniq.should eq(["active"])
+      tools.call("list_probe_rules", JSON.parse(%({"kind":"bogus"}))).is_error.should be_true
+    end
+  end
+
+  it "disables a built-in and the change is what a scan actually honours" do
+    with_store do |store|
+      seed_secret_flow(store)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      before = call_json(tools, "probe_scan", "{}")["issues"].as_a.map { |g| g["code"].as_s }
+      before.should contain("secret_in_url")
+
+      call_json(tools, "set_probe_rule_enabled", %({"id":"secret_in_url","enabled":false}))["enabled"].as_bool.should be_false
+      call_json(tools, "list_probe_rules", "{}")["disabled_count"].as_i.should eq(1)
+
+      after = call_json(tools, "probe_scan", "{}")["issues"].as_a.map { |g| g["code"].as_s }
+      after.should_not contain("secret_in_url")
+
+      call_json(tools, "set_probe_rule_enabled", %({"id":"secret_in_url","enabled":true}))
+      call_json(tools, "probe_scan", "{}")["issues"].as_a.map { |g| g["code"].as_s }.should contain("secret_in_url")
+    end
+  end
+
+  it "creates a custom rule that a subsequent scan runs" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+        body: "leak sk_live_abc".to_slice, content_type: "text/html"))
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      created = call_json(tools, "create_probe_rule",
+        %({"title":"stripe key","pattern":"sk_live_[a-z]+","match_kind":"regex","severity":"high"}))
+      rule_id = created["id"].as_s
+      rule_id.should start_with("custom_p_")
+
+      found = call_json(tools, "probe_scan", "{}")["issues"].as_a.find { |g| g["code"].as_s == rule_id }.not_nil!
+      found["severity"].as_s.should eq("high")
+      found["title"].as_s.should eq("stripe key")
+
+      call_json(tools, "set_probe_rule_enabled", %({"id":"#{rule_id}","enabled":false}))
+      call_json(tools, "probe_scan", "{}")["issues"].as_a
+        .none? { |g| g["code"].as_s == rule_id }.should be_true
+
+      call_json(tools, "delete_probe_rule", %({"id":"#{rule_id}"}))["deleted"].as_i.should eq(1)
+      store.probe_custom_rules.empty?.should be_true
+    end
+  end
+
+  it "refuses a regex PCRE rejects instead of saving a rule that can never match" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      r = tools.call("create_probe_rule", JSON.parse(%({"title":"x","pattern":"[unclosed","match_kind":"regex"})))
+      r.is_error.should be_true
+      store.probe_custom_rules.empty?.should be_true
+    end
+  end
+
+  it "refuses to delete a built-in (disable is the only option)" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools.call("delete_probe_rule", JSON.parse(%({"id":"secret_in_url"}))).is_error.should be_true
+      tools.call("set_probe_rule_enabled", JSON.parse(%({"id":"no_such_rule","enabled":false}))).is_error.should be_true
+    end
+  end
+
+  it "updates a custom rule's fields" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
+      call_json(tools, "update_probe_rule",
+        %({"id":"#{id}","title":"b","pattern":"BBB","side":"request","region":"header","severity":"low"}))
+      row = store.probe_custom_rules.first
+      row.title.should eq("b")
+      row.pattern.should eq("BBB")
+      row.side.should eq("request")
+      row.region.should eq("header")
+      row.severity.should eq(Gori::Store::Severity::Low)
+    end
+  end
+
+  it "round-trips the scan mode and rejects an unknown label" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      store.probe_mode.passive?.should be_true
+
+      res = call_json(tools, "set_probe_mode", %({"mode":"aggressive"}))
+      res["mode"].as_s.should eq("aggressive")
+      res["probes_actively"].as_bool.should be_true
+      store.probe_mode.aggressive?.should be_true
+
+      call_json(tools, "set_probe_mode", %({"mode":"off"}))["scanning"].as_bool.should be_false
+
+      # Mode.from_setting falls back to Passive on an unknown label — a typo must NOT be
+      # reported as a successful mode change.
+      tools.call("set_probe_mode", JSON.parse(%({"mode":"agressive"}))).is_error.should be_true
+      store.probe_mode.off?.should be_true
+    end
+  end
+
+  it "refuses rule/mode mutation under --read-only but still lists" do
+    with_store do |store|
+      ro = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      ro.call("set_probe_rule_enabled", JSON.parse(%({"id":"secret_in_url","enabled":false}))).is_error.should be_true
+      ro.call("create_probe_rule", JSON.parse(%({"title":"x","pattern":"y"}))).is_error.should be_true
+      ro.call("set_probe_mode", JSON.parse(%({"mode":"off"}))).is_error.should be_true
+      call_json(ro, "list_probe_rules", "{}")["rules"].as_a.size.should be > 0
+    end
+  end
+end

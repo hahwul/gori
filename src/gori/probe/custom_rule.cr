@@ -32,6 +32,19 @@ module Gori
       REGIONS = %w[whole header body]
       KINDS   = %w[string regex]
 
+      # Whether a would-be rule's pattern is usable. A regex PCRE rejects would match nothing
+      # forever while every surface reported the rule saved fine (#matches? rescues to false),
+      # so all three write paths validate through here before persisting. SafeRegexp.compile
+      # RAISES on a bad pattern rather than returning nil.
+      def self.valid_pattern?(pattern : String, kind : String) : Bool
+        return false if pattern.empty?
+        return true unless kind == "regex"
+        SafeRegexp.compile(pattern)
+        true
+      rescue
+        false
+      end
+
       # Stable finding code so (code, host) groups per rule per host. scope[0] ('g'/'p') keeps
       # a global and a project rule that happen to share an id from colliding.
       def code : String

@@ -149,6 +149,8 @@ module Gori
         {"probe dismiss", "Mute a finding by id, or bulk by --code / --host"},
         {"probe promote", "Promote a finding to a human-confirmed Issue"},
         {"probe delete", "Hard-delete a finding (or --all)"},
+        {"probe rules", "List/enable/disable scan rules; add or delete custom ones"},
+        {"probe mode", "Get/set the scan mode (off, passive, active, aggressive)"},
         {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, or update issues (text, json, markdown)"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
