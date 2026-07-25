@@ -242,7 +242,7 @@ module Gori
       end
     end
 
-    # A human-confirmed issue (DESIGN.md: the final output). Optionally linked
+    # A human-confirmed issue (DESIGN.md §6: the final output). Optionally linked
     # to a captured flow. One per project DB.
     struct Issue
       getter id : Int64

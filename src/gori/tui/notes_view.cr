@@ -12,7 +12,7 @@ require "../settings"
 require "./subtab_clone"
 
 module Gori::Tui
-  # The Notes tab (DESIGN.md: notes/report — the running scratchpad/report).
+  # The Notes tab (DESIGN.md §6: notes/report — the running scratchpad/report).
   # Multiple free-form, per-project documents kept as sub-tabs (like Repeater):
   # `^N` opens a new note, `^W` closes the current one, `^1-9` switches. Each
   # note defaults to READ (navigate/select/copy); i/↵ enters INS to type. The whole set

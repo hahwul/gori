@@ -46,6 +46,12 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 (`repeater`, `fuzz`, `miner`, `sequencer`, `discover`, `oast`, `probe`, `decoder`).
 Specs under `spec/` mirror the source tree.
 
+[DESIGN.md](DESIGN.md) covers the *why*: the P0 to P8 principles that source comments
+cite inline (`(P4)`, `(P6/P7)`), the layering contract those directories have to honour,
+and the Scope / QL / rendering / data-model sections that comments cite as `DESIGN.md §N`.
+Read it before adding a subsystem, and if your change makes a section wrong, fix the
+section in the same PR.
+
 ## Licensing
 
 By contributing you agree that your contributions are licensed under the project's

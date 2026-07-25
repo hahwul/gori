@@ -12,7 +12,7 @@ require "../issues_query"
 require "../links"
 
 module Gori::Tui
-  # The Issues tab (DESIGN.md: the final output — human-confirmed vulns). A
+  # The Issues tab (DESIGN.md §6: the final output — human-confirmed vulns). A
   # severity-sorted list + a detail with inline-editable notes and a severity
   # control. Created from a flow (History `F`) or blank (`n`).
   class IssuesView

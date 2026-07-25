@@ -8,7 +8,9 @@ module Gori
   # and the headless `gori run sitemap`. Keeping the tree-building in ONE place
   # means the CLI report has the same shape (path normalisation, id folding,
   # path tags, endpoint counts) as the interactive tab. No terminal/Screen deps
-  # here — pure values over the Store read-model.
+  # here — pure values over the Store read-model. Every distinct segment keeps its
+  # own node; folding is an explicit, reversible view choice (P3), never a
+  # parse-time assumption.
   module Sitemap
     # Pure-numeric siblings beyond this count under one parent fold into a single
     # `[1, 2, 3 … +N]` group node (path-param explosion like /users/1,2,3…).
