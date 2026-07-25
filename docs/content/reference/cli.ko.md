@@ -69,6 +69,8 @@ gori run <subcommand> [options]
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `project [list]` | 알려진 프로젝트 목록 |
+| `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
+| `project delete <name>` | 프로젝트와 그 안에 캡처된 모든 것 삭제 (`--yes`로 확인) |
 | `project scope` | 스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화 |
 | `project sandbox` | 하드 컨테인먼트 샌드박스 게이트 조회 / 설정 (`status`, `on`, `off`) |
 | `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$KEY` 치환) |
@@ -362,12 +364,50 @@ gori run rewriter rm 3
 
 ### run project {#run-project}
 
-알려진 프로젝트 목록, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수, 호스트 오버라이드) 관리:
+프로젝트 목록/생성/삭제, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수, 호스트 오버라이드) 관리:
 
 ```bash
 gori run project --format json
 gori run project list
 ```
+
+#### project create {#project-create}
+
+트래픽을 캡처하지 않고 프로젝트를 만듭니다. `gori run capture --project=NAME`도 필요할 때 만들어 주지만, 이 명령은 요청을 보내지 않으므로 프록시를 띄우기 전에 스코프와 env를 미리 구성할 수 있습니다.
+
+```bash
+gori run project create "API test"
+gori run project create api-test --description="staging sweep"
+gori run project create api-test --format json
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| `<name>` | 표시 이름. 공백이 들어가면 따옴표로 감쌉니다 |
+| `--description=TEXT` | 프로젝트 설정에 저장됩니다 |
+| `--format=FMT` | `text`(기본) 또는 `json` |
+
+이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 마지막 create의 대소문자로 갱신되고, `--description`을 주면 기존 설명을 덮어씁니다.
+
+#### project delete {#project-delete}
+
+프로젝트 디렉터리와 그 안에 캡처된 모든 것(플로우, 이슈, 노트, 스코프, 규칙)을 삭제합니다. 되돌릴 수 없으므로 두 단계로 동작합니다. `--yes` 없이 실행하면 대상만 출력하고 0이 아닌 코드로 종료합니다.
+
+```bash
+gori run project delete api-test              # preview only, nothing is removed
+gori run project delete api-test --format json
+gori run project rm api-test --yes            # actually delete
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| `<name>` | 짧은 id, id 접두사, 디렉터리 slug, 표시 이름 중 하나로 지정 |
+| `--yes` | 실제로 삭제. 없으면 아무것도 지우지 않습니다 |
+| `--format=FMT` | `text`(기본) 또는 `json` |
+
+미리보기는 플로우/이슈 개수, 디스크 사용량, 캡처가 살아 있는지를 함께 보여 줍니다. 다른 gori 인스턴스가 캡처 중인 프로젝트는 삭제를 거부하므로, 그 캡처를 먼저 중지해야 합니다.
+
+표시 이름은 유일하지 않습니다(같은 basename을 쓰는 두 워크스페이스는 이름을 공유합니다). 이름이 여러 프로젝트에 걸리면 삭제를 거부하고 각각의 slug를 보여 줍니다. 잘못 고르면 되돌릴 수 없기 때문입니다. slug와 짧은 id는 유일하므로 언제나 하나로 확정됩니다.
 
 #### project scope {#run-project-scope}
 

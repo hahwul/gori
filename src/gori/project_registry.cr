@@ -125,25 +125,40 @@ module Gori
     # `description` is optional and persisted immediately into the project's
     # settings (so it is available on first open in the Project tab).
     def create(name : String, description : String = "") : Project
+      create_or_reopen(name, description)[0]
+    end
+
+    # #create, plus WHICH of the two it did: `true` = a new project, `false` = reopened one
+    # that already existed under that name. Only the registry can answer that honestly — it
+    # is the one that resolves the slug — so every caller that reports "created" (CLI, MCP)
+    # reads it from here instead of guessing beforehand with #find, which also matches a
+    # short-id prefix and would call a brand-new project a reopen.
+    def create_or_reopen(name : String, description : String = "") : {Project, Bool}
       display = name.strip
       slug = slugify(display)
       raise Gori::Error.new("invalid project name") if slug.empty?
       slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
       dir = File.join(@root, slug)
+      db_path = File.join(dir, Project::DB_FILE)
+      # A DB at the resolved path is the same thing #list calls an existing project.
+      reopened = File.exists?(db_path)
       Paths.ensure_dir(dir) # 0700 — the project dir holds a DB of captured secrets
       # Persist the verbatim display name so a later `list` shows "My Project", not
       # the lossy slug "my-project".
       File.write(File.join(dir, NAME_FILE), display) rescue nil
       write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
-      proj = Project.new(display, File.join(dir, Project::DB_FILE))
-      desc = description.strip
-      unless desc.empty?
-        # First open creates the DB + runs migrations (including settings table).
-        s = Store.open(proj.db_path)
-        s.set_setting("description", desc)
+      proj = Project.new(display, db_path)
+      # Open once even with no description: this creates the DB + runs migrations, and #list
+      # SKIPS a directory without one. Leaving it lazy made a freshly created project
+      # invisible to `gori run project list` / --project until something captured into it.
+      s = Store.open(proj.db_path)
+      begin
+        desc = description.strip
+        s.set_setting("description", desc) unless desc.empty?
+      ensure
         s.close
       end
-      proj
+      {proj, !reopened}
     end
 
     # Resolve or create the project for a source workspace. Exact path binding

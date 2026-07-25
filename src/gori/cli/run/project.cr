@@ -1,4 +1,4 @@
-# `gori run project` — list known projects, or manage project-scoped config:
+# `gori run project` — list/create/delete projects, or manage project-scoped config:
 # scope rules, env vars ($KEY substitution), and host overrides.
 module Gori
   module CLI
@@ -12,6 +12,10 @@ module Gori
           print_project_help
         when "list"
           cmd_project_list(args[1..])
+        when "create"
+          cmd_project_create(args[1..])
+        when "delete", "rm"
+          cmd_project_delete(args[1..])
         when "scope"
           cmd_project_scope(args[1..])
         when "sandbox"
@@ -34,12 +38,14 @@ module Gori
 
       private def self.print_project_help : Nil
         puts <<-HELP
-        gori run project — list projects, or manage project-scoped config
+        gori run project — list/create/delete projects, or manage project-scoped config
 
         Usage: gori run project [<subcommand>] [options]
 
         Subcommands:
           list               List known projects (default when no subcommand)
+          create <name>      Create (or reopen) a project by name
+          delete|rm <name>   Delete a project and everything captured in it
           scope              Manage scope rules (list, add, delete, enable/disable)
           sandbox            Get/set the hard-containment sandbox gate (status, on, off)
           env                Manage project env vars ($KEY substitution)
@@ -47,6 +53,8 @@ module Gori
 
         Examples:
           gori run project --format json
+          gori run project create "API test" --description="staging sweep"
+          gori run project delete api-test --yes
           gori run project scope add --kind=include --type=host --pattern=api.example.com
           gori run project sandbox on
           gori run project env set TOKEN=secret
@@ -94,6 +102,212 @@ module Gori
             puts "#{pr.name.ljust(24)}  #{id.ljust(8)}  #{ts}  #{CLI::Output.human_size(pr.db_size)}"
           end
         end
+      end
+
+      # `gori run project create` — make a project without capturing into it first.
+      # `gori run capture --project=NAME` already creates on demand, but that is the only
+      # headless way to get one today: every other run subcommand aborts on an unknown
+      # --project. This is the explicit, traffic-free door (CLI parity with MCP
+      # create_project). Reopening by name is not an error — it mirrors both.
+      private def self.cmd_project_create(args : Array(String)) : Nil
+        description = ""
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project create <name> [options]\n\n" \
+                     "Create a project, or reopen the existing one with that name."
+          p.on("--description=TEXT", "Description stored in the project's settings") { |v| description = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run project create: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project create: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run project create: missing <name>" if positional.empty?
+        abort "gori run project create: too many arguments (quote a name that contains spaces)" if positional.size > 1
+        name = positional[0]
+
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        project, created = create_project_entry(registry, name, description)
+
+        if format == :json
+          puts(JSON.build do |j|
+            j.object do
+              j.field "name", project.name
+              j.field "id", registry.id_of(project)
+              j.field "slug", registry.slug_of(project)
+              j.field "db_path", project.db_path
+              j.field "created", created # false = reopened an existing same-name project
+            end
+          end)
+        elsif created
+          puts "Project #{project.name.inspect} created (#{project.db_path})."
+        else
+          puts "Project #{project.name.inspect} already exists — reopened (#{project.db_path})."
+        end
+      end
+
+      # create_or_reopen rejects a name that slugifies to nothing (blank / punctuation-only)
+      # with a Gori::Error, and it both makes the directory and opens the DB — so a full,
+      # read-only or otherwise unusable projects root surfaces as File::Error/IO::Error or a
+      # driver error. Every one of them becomes a clean `gori run project create:` message
+      # (the TUI picker's safe_create rescues the same four).
+      private def self.create_project_entry(registry : ProjectRegistry, name : String,
+                                            description : String) : {Project, Bool}
+        registry.create_or_reopen(name, description)
+      rescue ex : Gori::Error
+        abort "gori run project create: #{ex.message} (#{name.inspect})"
+      rescue ex : File::Error | IO::Error
+        abort "gori run project create: could not create project #{name.inspect}: #{ex.message}"
+      rescue ex : DB::Error | SQLite3::Exception
+        abort "gori run project create: could not initialize the database for #{name.inspect}: #{ex.message}"
+      end
+
+      # `gori run project delete` — remove a project directory and everything in it. Until
+      # now this lived only in the TUI picker (confirm modal) and MCP delete_project
+      # (dry-run + token). Irreversible, so the headless form keeps the same two steps:
+      # without --yes it prints what would go and exits non-zero.
+      private def self.cmd_project_delete(args : Array(String)) : Nil
+        yes = false
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project delete|rm <name> [options]\n\n" \
+                     "Permanently removes the project directory: captured flows, issues,\n" \
+                     "notes, scope, everything. Without --yes it only previews the target.\n" \
+                     "<name> matches a short id, id prefix, directory slug, or display name."
+          p.on("--yes", "Actually delete (without it, nothing is removed)") { yes = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run project delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project delete: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run project delete: missing <name>" if positional.empty?
+        abort "gori run project delete: too many arguments (expected one <name>)" if positional.size > 1
+        name = positional[0]
+
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        project = registry.find(name) || abort_unknown_project(registry, name)
+        abort_ambiguous_project(registry, name) if ambiguous_name?(registry, name)
+        print_delete_preview(registry, project, format) unless yes # NoReturn
+
+        # Read the sidecars while they still exist — rm_rf takes them with the directory.
+        id = registry.id_of(project)
+        slug = registry.slug_of(project)
+        begin
+          registry.delete(project) # refuses while another live instance holds the capture lock
+        rescue ex : Gori::Error
+          abort "gori run project delete: #{ex.message}"
+        rescue ex : File::Error | IO::Error
+          abort "gori run project delete: could not remove #{project.dir}: #{ex.message}"
+        end
+
+        if format == :json
+          puts(JSON.build do |j|
+            j.object do
+              j.field "deleted", true
+              j.field "name", project.name
+              j.field "id", id
+              j.field "slug", slug
+              j.field "dir", project.dir
+              j.field "db_path", project.db_path
+            end
+          end)
+        else
+          puts "Project #{project.name.inspect} deleted (#{project.dir})."
+        end
+      end
+
+      private def self.abort_unknown_project(registry : ProjectRegistry, name : String) : NoReturn
+        projects = registry.list
+        have = projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"
+        abort "gori run project delete: no project matching '#{name}'#{have}"
+      end
+
+      # Display names are deliberately NOT unique (two workspaces sharing a basename get the
+      # same name, e.g. slugs `api` and `api-2`), and #find resolves a name to the
+      # most-recently-active match. Good enough for a read; not for an rm_rf. Refuse and make
+      # the caller name the slug or short id — which, being unique, resolve before the name
+      # pass in #find, so an exact one of those is never called ambiguous.
+      private def self.ambiguous_name?(registry : ProjectRegistry, name : String) : Bool
+        q = name.strip.downcase
+        projects = registry.list
+        return false if projects.any? { |p| registry.slug_of(p).downcase == q || registry.id_of(p).try(&.downcase) == q }
+        projects.count { |p| p.name.downcase == q } > 1
+      end
+
+      private def self.abort_ambiguous_project(registry : ProjectRegistry, name : String) : NoReturn
+        q = name.strip.downcase
+        candidates = registry.list.select { |p| p.name.downcase == q }
+        listed = candidates.map { |p| "#{registry.slug_of(p)} (id #{registry.id_of(p) || "—"})" }.join(", ")
+        abort "gori run project delete: '#{name}' matches #{candidates.size} projects — " \
+              "delete by slug or short id instead: #{listed}"
+      end
+
+      # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script
+      # that forgot --yes must not read a 0 as "it's gone".
+      private def self.print_delete_preview(registry : ProjectRegistry, project : Project, format : Symbol) : NoReturn
+        flows, issues = project_object_counts(project)
+        locked = capture_running?(project)
+        if format == :json
+          puts(JSON.build do |j|
+            j.object do
+              j.field "dry_run", true
+              j.field "deleted", false
+              j.field "name", project.name
+              j.field "id", registry.id_of(project)
+              j.field "slug", registry.slug_of(project)
+              j.field "dir", project.dir
+              j.field "db_path", project.db_path
+              j.field "flows", flows
+              j.field "issues", issues
+              j.field "db_size", project.db_size
+              j.field "disk_size", project.disk_size
+              j.field "capture_lock_held", locked
+            end
+          end)
+        else
+          puts "Project:  #{project.name}  (id #{registry.id_of(project) || "—"}, slug #{registry.slug_of(project)})"
+          puts "Dir:      #{project.dir}"
+          puts "Flows:    #{flows || "—"}"
+          puts "Issues:   #{issues || "—"}"
+          puts "On disk:  #{CLI::Output.human_size(project.disk_size)}"
+          puts "Capture:  #{locked ? "RUNNING in another gori instance" : "not running"}"
+        end
+        abort "gori run project delete: nothing deleted — re-run with --yes to remove #{project.dir}"
+      end
+
+      # Is another live instance capturing into this project? CaptureLock.held? probes by
+      # ACQUIRING the lock (it creates the lock file and re-raises anything that is not
+      # contention), so a project directory this user can read but not write would blow up a
+      # command that promised to only look. Unknown reads as "not running" here; the delete
+      # itself re-probes through ProjectRegistry#delete, which is where being wrong matters.
+      private def self.capture_running?(project : Project) : Bool
+        CaptureLock.held?(project.dir)
+      rescue
+        false
+      end
+
+      # Flow + issue counts for the delete preview, from a short-lived handle of its own.
+      # Best-effort: a locked or corrupt DB reports nil rather than failing the preview
+      # (mirrors MCP delete_project's dry run).
+      private def self.project_object_counts(project : Project) : {Int64?, Int32?}
+        return {nil, nil} unless File.exists?(project.db_path)
+        store = Store.open(project.db_path)
+        begin
+          {store.count, store.count_issues}
+        ensure
+          store.close
+        end
+      rescue
+        {nil, nil}
       end
 
       private def self.cmd_project_scope(args : Array(String)) : Nil

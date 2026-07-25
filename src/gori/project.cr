@@ -39,6 +39,43 @@ module Gori
       File.exists?(@db_path) ? File.info(@db_path).size : 0_i64
     end
 
+    # Total bytes of every file under the project directory (DB + WAL/SHM + the dotfile
+    # sidecars), for the "this is what you are deleting" previews. Walks with Dir.children
+    # rather than Dir.glob: a glob pattern is built from the projects ROOT, so a home
+    # directory holding `[`, `*` or `?` would silently match nothing and report 0 bytes for
+    # a multi-GB capture — the one number an operator reads before confirming an
+    # irreversible delete. Best-effort otherwise: anything that vanishes or is unreadable
+    # mid-walk is skipped rather than raising.
+    #
+    # Meaningful only for a REGISTRY project, whose `dir` is its own workspace. A Project
+    # built from an explicit `--db PATH` borrows an arbitrary parent directory, and walking
+    # that is neither cheap nor meaningful.
+    def disk_size : Int64
+      d = dir
+      return 0_i64 unless Dir.exists?(d)
+      total = 0_i64
+      pending = [d]
+      while current = pending.pop?
+        children = begin
+          Dir.children(current)
+        rescue
+          next # a directory that vanished or became unlistable mid-walk
+        end
+        children.each do |child|
+          path = File.join(current, child)
+          info = File.info(path, follow_symlinks: false)
+          if info.directory?
+            pending << path
+          else
+            total += info.size
+          end
+        rescue
+          # skip anything that vanished / is unreadable mid-walk
+        end
+      end
+      total
+    end
+
     # Best-effort project creation time (project dir mtime from mkdir in registry;
     # falls back to earliest flow activity inside the Project tab view).
     def created : Time?

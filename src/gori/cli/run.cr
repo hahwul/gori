@@ -151,7 +151,10 @@ module Gori
         {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},
         {"project [list]", "List known projects"},
+        {"project create", "Create (or reopen) a project by name"},
+        {"project delete", "Delete a project and everything captured in it"},
         {"project scope", "Manage scope rules (list, add, delete, enable/disable)"},
+        {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
         {"project env", "Manage project env vars ($KEY substitution)"},
         {"project host-override", "Manage host overrides (list, add, update, delete)"},
       ]

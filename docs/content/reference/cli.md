@@ -69,6 +69,8 @@ gori run <subcommand> [options]
 | `issues` · `create` · `update` | List / export issues, or write issues |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `project [list]` | List known projects |
+| `project create <name>` | Create (or reopen) a project by name |
+| `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
 | `project scope` | List / add / delete / enable / disable scope rules |
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
 | `project env` | List / set / delete project env vars (`$KEY` substitution) |
@@ -362,12 +364,50 @@ Body rules re-sync `Content-Length` and de-chunk as needed, and an enabled rule 
 
 ### run project
 
-List known projects, or manage project-scoped config (scope rules, env vars, host overrides):
+List, create, or delete projects, or manage project-scoped config (scope rules, env vars, host overrides):
 
 ```bash
 gori run project --format json
 gori run project list
 ```
+
+#### project create
+
+Create a project without capturing into it first. `gori run capture --project=NAME` also creates on demand; this is the traffic-free way to do it, so scripts can set up scope and env before the proxy starts.
+
+```bash
+gori run project create "API test"
+gori run project create api-test --description="staging sweep"
+gori run project create api-test --format json
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| `<name>` | Display name. Quote it if it contains spaces |
+| `--description=TEXT` | Stored in the project's settings |
+| `--format=FMT` | `text` (default) or `json` |
+
+A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when `--description` is given.
+
+#### project delete
+
+Delete a project directory and everything captured in it (flows, issues, notes, scope, rules). Irreversible, so it takes two steps: without `--yes` it only prints the target and exits non-zero.
+
+```bash
+gori run project delete api-test              # preview only, nothing is removed
+gori run project delete api-test --format json
+gori run project rm api-test --yes            # actually delete
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| `<name>` | Matches a short id, id prefix, directory slug, or display name |
+| `--yes` | Perform the delete. Without it the command removes nothing |
+| `--format=FMT` | `text` (default) or `json` |
+
+The preview reports flow and issue counts, on-disk size, and whether a capture is live. Deleting a project another gori instance is capturing into is refused: stop that capture first.
+
+Display names are not unique (two workspaces with the same basename share one). When a name matches more than one project, delete refuses and lists their slugs, since the wrong guess is unrecoverable. Slugs and short ids are unique, so either always resolves.
 
 #### project scope
 

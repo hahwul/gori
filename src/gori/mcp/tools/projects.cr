@@ -61,11 +61,11 @@ module Gori
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.strip.empty?
         description = str(h, "description") || ""
         reg = registry
-        existed = !reg.find(name).nil?
-        proj = reg.create(name, description)
-        # Materialize the DB (create+migrate) so the project is immediately visible
-        # to list_projects/switch_project even when no description was supplied.
-        Store.open(proj.db_path).close unless File.exists?(proj.db_path)
+        # The registry reports created-vs-reopened (and materializes the DB, so the project
+        # is immediately visible to list_projects/switch_project). Asking #find beforehand
+        # instead would call a brand-new project a reopen whenever its name happens to be a
+        # prefix of another project's short id.
+        proj, created = reg.create_or_reopen(name, description)
 
         # First-run UX: when the server has no project yet, bind immediately so the
         # agent can use traffic tools without a separate switch_project call.
@@ -82,7 +82,7 @@ module Gori
             j.field "id", reg.id_of(proj)
             j.field "slug", reg.slug_of(proj)
             j.field "db_path", proj.db_path
-            j.field "created", !existed # false = reopened an existing same-name project
+            j.field "created", created # false = reopened an existing same-name project
             j.field "switched", auto_bound
           end
         end)
@@ -171,7 +171,7 @@ module Gori
             j.field "flows", flows
             j.field "issues", issues
             j.field "db_size", proj.db_size
-            j.field "disk_size", dir_size(proj.dir)
+            j.field "disk_size", proj.disk_size
             j.field "capture_lock_held", CaptureLock.held?(proj.dir)
             j.field "confirmation_token", token
             j.field "token_expires_in_seconds", DELETE_TOKEN_TTL
@@ -219,17 +219,6 @@ module Gori
         end
       rescue
         {nil, nil}
-      end
-
-      private def dir_size(dir : String) : Int64
-        return 0_i64 unless Dir.exists?(dir)
-        total = 0_i64
-        Dir.glob(File.join(dir, "**", "*")).each do |f|
-          total += File.info(f).size if File.file?(f)
-        rescue
-          # skip anything that vanished / is unreadable mid-walk
-        end
-        total
       end
     end
   end
