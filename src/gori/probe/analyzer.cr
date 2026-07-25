@@ -117,7 +117,10 @@ module Gori
         prev = @mode
         @mode = m
         @store.set_probe_mode(m)
-        arm_active_backfill if m.active? && !prev.active?
+        # Re-arm when entering an actively-probing mode from one that wasn't (OFF/PASSIVE), OR when
+        # switching between ACTIVE and AGGRESSIVE — the wider AGGRESSIVE opts (unsafe methods,
+        # raised caps) produce new dedup keys, so recent in-scope traffic should be re-swept.
+        arm_active_backfill if m.probes_actively? && (!prev.probes_actively? || prev != m)
       end
 
       def start : Nil
@@ -128,9 +131,9 @@ module Gori
         spawn(name: "gori-probe") { passive_loop }
         spawn(name: "gori-probe-active") { active_loop }
         spawn(name: "gori-probe-catchup") { catch_up_loop }
-        # Project already set to Active (persisted) — probe recent in-scope History now,
-        # not only traffic that arrives after this open.
-        arm_active_backfill if @mode.active?
+        # Project already in an actively-probing mode (persisted) — probe recent in-scope History
+        # now, not only traffic that arrives after this open.
+        arm_active_backfill if @mode.probes_actively?
       end
 
       # Winds the analyzer down BEFORE the store/channels close: stop accepting active work,
@@ -165,10 +168,11 @@ module Gori
       # active rule that applies to `detail` (dedup_key non-nil ⇔ plan non-nil, per the equivalence
       # spec), with the requests it sends. Cheap — dedup_key never builds canaries and nothing is
       # sent — so it's safe on the render path. Matches exactly what run_active_now will fire.
-      def active_estimate(detail : Store::FlowDetail) : Array(ActiveEstimate)
+      def active_estimate(detail : Store::FlowDetail,
+                          opts : Active::Options = Active::Options::DEFAULT) : Array(ActiveEstimate)
         Active::RULES.compact_map do |rule|
           next if @disabled.includes?(rule.info.id)
-          next unless rule.dedup_key(detail)
+          next unless rule.dedup_key(detail, opts)
           ActiveEstimate.new(rule.info, rule.requests_per_flow)
         end
       end
@@ -181,17 +185,21 @@ module Gori
       # usual upsert (probe_generation poll) + IssueEvent notification path. `repeater_id` stamps
       # detections for evidence linking back to a Repeater tab. `notify` (the run popup's choice)
       # gates the tray: Off is silent, WhenFound posts per finding, Always also posts a completion
-      # note when the scan came back clean.
+      # note when the scan came back clean. `allow_unsafe` (the run popup's off-by-default opt-in)
+      # widens the rule gate to unsafe methods (POST/PUT/PATCH/DELETE) for this deliberate, single-
+      # flow re-send — the automatic pipeline only sets it in AGGRESSIVE mode (via active_opts).
       def run_active_now(detail : Store::FlowDetail, *, repeater_id : Int64? = nil,
+                         allow_unsafe : Bool = false,
                          notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Nil
         return if @stopped
+        opts = Active::Options.new(allow_unsafe: allow_unsafe)
         spawn(name: "gori-probe-active-manual") do
           found = 0
           errored = false
           Active::RULES.each do |rule|
             break if @stopped
             next if @disabled.includes?(rule.info.id)
-            plan = rule.plan(detail)
+            plan = rule.plan(detail, opts)
             next unless plan
             if wrote = execute_active(rule, plan, detail, repeater_id: repeater_id, notify: notify)
               found += wrote
@@ -345,30 +353,38 @@ module Gori
 
       private def maybe_enqueue_active(detail : Store::FlowDetail) : Nil
         return if @stopped
-        return unless @mode.active?
+        return unless @mode.probes_actively?
         row = detail.row
         url = row.url
         # Active probes only on hosts/paths covered by Project scope INCLUDE rules
         # (matches_url? — lens-independent; requires ≥1 include so excludes-only never
         # means "probe everything"). in_scope_url? is wrong here: it is permissive when
-        # the ⇧S display lens is off.
+        # the ⇧S display lens is off. AGGRESSIVE never widens this — same scope gate.
         return unless @scope.matches_url?(url, row.host)
-        Active::RULES.each { |rule| enqueue_probe(rule, detail) unless @disabled.includes?(rule.info.id) }
+        opts = active_opts
+        Active::RULES.each { |rule| enqueue_probe(rule, detail, opts) unless @disabled.includes?(rule.info.id) }
       rescue Channel::ClosedError
+      end
+
+      # The Active::Options the AUTOMATIC pipeline runs with, derived from the live mode. ACTIVE
+      # keeps the historic safe-method, base-cap defaults; AGGRESSIVE widens to unsafe methods and
+      # raises caps / bypass sets (still scope-gated by maybe_enqueue_active).
+      private def active_opts : Active::Options
+        @mode.aggressive? ? Active::Options.new(allow_unsafe: true, aggressive: true) : Active::Options::DEFAULT
       end
 
       # Fire-and-forget: walk recent History and enqueue active probes for in-scope surfaces.
       # Dedup via @active_seen keeps this cheap when called more than once.
       private def arm_active_backfill : Nil
         return if @stopped
-        return unless @mode.active?
+        return unless @mode.probes_actively?
         return unless @running # queue consumer must be up (start) or about to be (set_mode mid-session)
         spawn(name: "gori-probe-active-backfill") { active_backfill }
       end
 
       private def active_backfill : Nil
         @store.recent_flows(ACTIVE_BACKFILL).each do |row|
-          break if @stopped || !@mode.active?
+          break if @stopped || !@mode.probes_actively?
           next unless row.state.complete?
           detail = @store.get_flow(row.id)
           next unless detail
@@ -378,13 +394,13 @@ module Gori
       rescue Channel::ClosedError
       end
 
-      private def enqueue_probe(rule : Active::Rule, detail : Store::FlowDetail) : Nil
+      private def enqueue_probe(rule : Active::Rule, detail : Store::FlowDetail, opts : Active::Options) : Nil
         # Cheap dedup key FIRST: a repeat surface (the norm in steady browsing) is rejected here
         # WITHOUT the full plan build (canary generation, JSON re-serialize, request rebuild).
-        key = rule.dedup_key(detail)
+        key = rule.dedup_key(detail, opts)
         return unless key
         return if @active_seen.includes?(key)
-        plan = rule.plan(detail)
+        plan = rule.plan(detail, opts)
         return unless plan
         select
         when @active_jobs.send(ActiveTask.new(rule, plan, detail))
@@ -415,8 +431,8 @@ module Gori
         # — so the consumer MUST re-check the live mode, or buffered canary/CORS probes keep hitting
         # the target after Active was turned off. RELEASE the dedup key when dropping for this
         # reason: it was recorded at enqueue, and keeping it would suppress the surface forever if
-        # Active is re-enabled (arm_active_backfill would skip it as already-seen).
-        unless @mode.active?
+        # active probing is re-enabled (arm_active_backfill would skip it as already-seen).
+        unless @mode.probes_actively?
           @active_seen.delete(task.plan.dedup_key)
           return
         end

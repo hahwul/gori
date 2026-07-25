@@ -645,9 +645,10 @@ module Gori::Tui
 
     private def mode_color(m : Probe::Mode) : Color
       case m
-      in Probe::Mode::Off     then Theme.muted
-      in Probe::Mode::Passive then Theme.accent
-      in Probe::Mode::Active  then Theme.orange
+      in Probe::Mode::Off        then Theme.muted
+      in Probe::Mode::Passive    then Theme.accent
+      in Probe::Mode::Active     then Theme.orange
+      in Probe::Mode::Aggressive then Theme.red
       end
     end
 

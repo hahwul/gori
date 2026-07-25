@@ -314,6 +314,41 @@ describe Gori::Probe::Active do
     end
   end
 
+  # The equivalence invariant must hold PER-opts: threading allow_unsafe/aggressive into plan and
+  # dedup_key together keeps them from drifting, and the widened method gate / raised caps make the
+  # previously-nil POST + over-cap flows non-nil (so both paths must agree on the SAME non-nil key).
+  it "dedup_key equals plan.dedup_key under allow_unsafe / aggressive opts (both rules)" do
+    with_store do |store|
+      cors_resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://app.example\r\n\r\n"
+      plain_resp = "HTTP/1.1 200 OK\r\n\r\n"
+      many = (0..50).map { |i| "p#{i}=v" }.join("&") # 51 params: > MAX_PARAMS, < MAX_PARAMS_AGGRESSIVE
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+      aggr = Gori::Probe::Active::Options.new(allow_unsafe: true, aggressive: true)
+
+      reflected = Gori::Probe::Active::ReflectedParam.new
+      cors = Gori::Probe::Active::CorsReflection.new
+
+      post = capture_flow(store, plain_resp, host: "t.example", target: "/a?x=1&y=2", method: "POST")
+      put = capture_flow(store, cors_resp, host: "t.example", target: "/cors", method: "PUT")
+      wide = capture_flow(store, plain_resp, host: "t.example", target: "/many?#{many}", method: "POST")
+
+      # allow_unsafe widens the method gate: a POST/PUT is now planned, and both paths agree.
+      reflected.plan(post, unsafe).should_not be_nil
+      reflected.dedup_key(post, unsafe).should eq(reflected.plan(post, unsafe).try(&.dedup_key))
+      cors.plan(put, unsafe).should_not be_nil
+      cors.dedup_key(put, unsafe).should eq(cors.plan(put, unsafe).try(&.dedup_key))
+
+      # A 51-param POST: nil under allow_unsafe alone (over MAX_PARAMS), non-nil under aggressive.
+      reflected.plan(wide, unsafe).should be_nil
+      reflected.plan(wide, aggr).should_not be_nil
+      reflected.dedup_key(wide, aggr).should eq(reflected.plan(wide, aggr).try(&.dedup_key))
+
+      # Default opts leave the POST unprobed (automatic-pipeline behaviour unchanged).
+      reflected.plan(post).should be_nil
+      cors.plan(put).should be_nil
+    end
+  end
+
   it "normalizes an absolute-form target to origin-form, preserving a query on a PATHLESS URI" do
     # The authority ends at the first '/', '?' or '#': a pathless absolute-URI carrying a query
     # must keep it (was collapsed to "/", silently dropping the reflectable surface), and a '/'
@@ -364,6 +399,35 @@ describe Gori::Probe::Analyzer do
       b = Gori::Probe::Analyzer.new(store, scope, feed2, Gori::Probe::Mode::Passive, true)
       b.start
       b.set_mode(Gori::Probe::Mode::Active)
+      sleep 50.milliseconds
+      b.stop
+    end
+  end
+
+  # AGGRESSIVE drives the SAME automatic pipeline as ACTIVE (probes_actively?), but with widened
+  # Options (unsafe methods + raised caps). It stays scope-gated. No network assert — the queue may
+  # drop and sends to acme.test won't resolve; this verifies the pipeline re-arms and persists the
+  # mode without raising over an in-scope unsafe-method (POST) flow.
+  it "AGGRESSIVE mode re-arms the pipeline + persists over an in-scope POST flow" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        target: "/submit?q=hi", method: "POST", body: "<p>hi</p>")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+
+      # start already in AGGRESSIVE (persisted project) — backfill path over the POST
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Aggressive, true)
+      a.start
+      sleep 50.milliseconds
+      a.stop
+
+      # ACTIVE → AGGRESSIVE transition mid-session re-arms and persists the new mode.
+      feed2 = Channel(Gori::Store::FlowEvent).new(8)
+      b = Gori::Probe::Analyzer.new(store, scope, feed2, Gori::Probe::Mode::Active, true)
+      b.start
+      b.set_mode(Gori::Probe::Mode::Aggressive)
+      store.probe_mode.should eq(Gori::Probe::Mode::Aggressive)
       sleep 50.milliseconds
       b.stop
     end
@@ -539,8 +603,25 @@ describe Gori::Probe::Mode do
   it "round-trips its label and cycles" do
     Gori::Probe::Mode.from_setting("off").should eq(Gori::Probe::Mode::Off)
     Gori::Probe::Mode.from_setting(nil).should eq(Gori::Probe::Mode::Passive)
+    Gori::Probe::Mode.from_setting("aggressive").should eq(Gori::Probe::Mode::Aggressive)
     Gori::Probe::Mode::Off.cycle.should eq(Gori::Probe::Mode::Passive)
-    Gori::Probe::Mode::Active.cycle.should eq(Gori::Probe::Mode::Off)
+    # OFF → PASSIVE → ACTIVE → AGGRESSIVE → OFF
+    Gori::Probe::Mode::Active.cycle.should eq(Gori::Probe::Mode::Aggressive)
+    Gori::Probe::Mode::Aggressive.cycle.should eq(Gori::Probe::Mode::Off)
+  end
+
+  it "persists and reloads Aggressive" do
+    with_store do |store|
+      store.set_probe_mode(Gori::Probe::Mode::Aggressive)
+      store.probe_mode.should eq(Gori::Probe::Mode::Aggressive)
+    end
+  end
+
+  it "probes_actively? covers Active and Aggressive only" do
+    Gori::Probe::Mode::Off.probes_actively?.should be_false
+    Gori::Probe::Mode::Passive.probes_actively?.should be_false
+    Gori::Probe::Mode::Active.probes_actively?.should be_true
+    Gori::Probe::Mode::Aggressive.probes_actively?.should be_true
   end
 end
 
@@ -1412,10 +1493,29 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
       probe.plan(forbidden).should_not be_nil
       unauth = capture_flow(store, "HTTP/1.1 401 Unauthorized\r\n\r\n", target: "/admin", status: 401, content_type: nil)
       probe.plan(unauth).should_not be_nil
-      # A POST is never probed (no auto state mutation) even when denied.
+      # A POST is never probed (no auto state mutation) even when denied…
       post = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403,
         method: "POST", content_type: nil)
       probe.plan(post).should be_nil
+      # …unless the caller opts into unsafe methods (manual per-flow scan / AGGRESSIVE mode).
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+      probe.plan(post, unsafe).should_not be_nil
+      probe.dedup_key(post, unsafe).should eq(probe.plan(post, unsafe).try(&.dedup_key))
+    end
+  end
+
+  it "uses the wider bypass-header set under aggressive opts (still one request)" do
+    with_store do |store|
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
+      base = String.new(probe.plan(forbidden).not_nil!.request)
+      aggr = String.new(probe.plan(forbidden, Gori::Probe::Active::Options.new(aggressive: true)).not_nil!.request)
+      # The extra headers appear only in the aggressive probe; the base set is present in both.
+      Gori::Probe::Active::ForbiddenBypass::BYPASS_HEADERS_EXTRA.each do |name|
+        base.should_not contain("\r\n#{name}: ")
+        aggr.scan("\r\n#{name}: 127.0.0.1").size.should eq(1), "expected exactly one #{name} (aggressive)"
+      end
+      # Still a single request (a wider header set, not more probes).
+      probe.plan(forbidden, Gori::Probe::Active::Options.new(aggressive: true)).not_nil!.followups.should be_empty
     end
   end
 
@@ -1586,14 +1686,31 @@ describe "Gori::Probe::Active::NginxAliasTraversal" do
       end
     end
   end
+
+  it "widens to non-GET body methods under allow_unsafe, but never HEAD" do
+    with_store do |store|
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "t.example",
+        target: "/static/main.css", method: "POST", status: 200, content_type: "text/css")
+      probe.plan(post).should be_nil             # GET-only by default
+      probe.plan(post, unsafe).should_not be_nil # body-differential still works on a POST
+      probe.dedup_key(post, unsafe).should eq(probe.plan(post, unsafe).try(&.dedup_key))
+      # HEAD has no body to diff — excluded even with allow_unsafe.
+      head = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "t.example",
+        target: "/static/main.css", method: "HEAD", status: 200, content_type: "text/css")
+      probe.plan(head, unsafe).should be_nil
+    end
+  end
 end
 
 describe "Gori::Probe::Active (safety + coverage)" do
-  it "does not probe mutating methods (POST), only safe ones (GET)" do
+  it "does not probe mutating methods (POST) by default, but opts-in widens it" do
     with_store do |store|
       post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/comment", method: "POST",
         req_headers: "Content-Type: application/x-www-form-urlencoded\r\n", req_body: "text=hi", content_type: nil)
-      Gori::Probe::Active.plan(post).should be_nil
+      Gori::Probe::Active.plan(post).should be_nil # automatic pipeline (default opts) never mutates
+      # The manual opt-in / AGGRESSIVE mode probes the reflectable form params on the POST.
+      Gori::Probe::Active.plan(post, Gori::Probe::Active::Options.new(allow_unsafe: true)).should_not be_nil
       get = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
       Gori::Probe::Active.plan(get).should_not be_nil
     end
@@ -2235,12 +2352,16 @@ describe "Gori::Probe::Active (manual run estimate)" do
     with_store do |store|
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
-      # POST is never probed (no safe method).
+      # POST is never probed under the default (safe-only) estimate…
       post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/x?q=1", method: "POST")
       a.active_estimate(post).should be_empty
-      # GET with no params + no ACAO has nothing to test.
+      # …but the allow_unsafe estimate (the run popup's opt-in) surfaces the reflectable-param check.
+      unsafe_est = a.active_estimate(post, Gori::Probe::Active::Options.new(allow_unsafe: true))
+      unsafe_est.map(&.info.id).should contain("reflected_param")
+      # GET with no params + no ACAO has nothing to test, opt-in or not.
       bare = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/nothing")
       a.active_estimate(bare).should be_empty
+      a.active_estimate(bare, Gori::Probe::Active::Options.new(allow_unsafe: true)).should be_empty
     end
   end
 
@@ -2256,6 +2377,9 @@ describe "Gori::Probe::Active (manual run estimate)" do
         # Every notify mode; sends to acme.test won't resolve, so the error is swallowed and the
         # Always completion is suppressed (errored run — verified by not raising).
         Gori::Miner::NotifyMode.values.each { |n| a.run_active_now(detail, notify: n) }
+        # The unsafe-method opt-in path must also run without raising (a POST manual scan).
+        post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/x?q=1", method: "POST")
+        a.run_active_now(post, allow_unsafe: true)
         sleep 50.milliseconds
         a.stop
       end
@@ -2298,6 +2422,28 @@ describe "Gori::Probe::Active::BackslashPowered" do
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")).should be_nil
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "HEAD")).should be_nil
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s")).should be_nil
+    end
+  end
+
+  it "plans a POST query param under allow_unsafe, but never HEAD (no body to diff)" do
+    with_store do |store|
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")
+      probe.plan(post, unsafe).not_nil!.params.map(&.name).should eq(["q"])
+      probe.dedup_key(post, unsafe).should eq(probe.plan(post, unsafe).try(&.dedup_key))
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "HEAD"), unsafe).should be_nil
+      # A paramless request still has nothing to inject even under the opt-in.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s", method: "POST"), unsafe).should be_nil
+    end
+  end
+
+  it "raises the param cap under aggressive opts" do
+    with_store do |store|
+      wide = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?" + (0...6).map { |i| "p#{i}=v" }.join("&"))
+      # Default: capped at MAX_PROBE_PARAMS (3).
+      probe.plan(wide).not_nil!.params.size.should eq(Gori::Probe::Active::BackslashPowered::MAX_PROBE_PARAMS)
+      # Aggressive: all 6 params probed (< MAX_PROBE_PARAMS_AGGRESSIVE).
+      probe.plan(wide, Gori::Probe::Active::Options.new(aggressive: true)).not_nil!.params.size.should eq(6)
     end
   end
 

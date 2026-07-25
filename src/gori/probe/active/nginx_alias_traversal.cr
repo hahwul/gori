@@ -25,8 +25,10 @@ module Gori
       # the confirmation, so a normal 404/redirect/different-page can't produce a false positive.
       #
       # Gated hard to stay quiet and low-FP:
-      #   * GET only — the confirmation compares response BODIES, and HEAD returns none. (A safe,
-      #     idempotent re-read of a resource the browser already fetched — never a mutation.)
+      #   * GET by default — the confirmation compares response BODIES, and HEAD returns none (a
+      #     safe, idempotent re-read of a resource the browser already fetched). An explicit opt-in
+      #     (Options#allow_unsafe: manual per-flow scan / AGGRESSIVE) widens to other body-bearing
+      #     methods; HEAD stays out regardless.
       #   * 2xx captured status — there must be a real served resource to re-fetch.
       #   * Non-HTML content type — a SPA / framework catch-all returns the SAME index.html for
       #     ANY path, so an HTML baseline could byte-match the traversal path WITHOUT any alias
@@ -43,13 +45,13 @@ module Gori
 
         # The dedup key WITHOUT rebuilding the probe — same gates as `plan`, same key (nil in
         # exactly the same cases). Both funnel through `gate`, so the two paths cannot drift.
-        def dedup_key(detail : Store::FlowDetail) : String?
-          g = gate(detail) || return nil
+        def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
+          g = gate(detail, opts) || return nil
           key_string(detail, g[0], g[1])
         end
 
-        def plan(detail : Store::FlowDetail) : Plan?
-          g = gate(detail) || return nil
+        def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
+          g = gate(detail, opts) || return nil
           method_up, path_key = g
           # Rebuild from the ORIGIN-FORM target (query kept, so we re-fetch the exact resource);
           # `traversal_target` re-derives the same leading segment `gate` validated.
@@ -86,11 +88,14 @@ module Gori
         # The shared gate both `plan` and `dedup_key` funnel through, returning
         # {method_upcase, path-without-query} or nil. Cheap: only the start line + FlowRow fields
         # (status / content_type), no header re-parse.
-        private def gate(detail : Store::FlowDetail) : {String, String}?
+        private def gate(detail : Store::FlowDetail, opts : Options) : {String, String}?
           method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
           return nil if malformed
           method_up = method.upcase
-          return nil unless method_up == "GET" # need a body to byte-compare; HEAD has none
+          # Body-differential: need a body to byte-compare, so HEAD is always out. By default GET
+          # only; opts.allow_unsafe (manual per-flow scan / AGGRESSIVE) widens to any body-bearing
+          # method — a static asset gated behind POST/etc. can still leak via the alias boundary.
+          return nil unless diff_method_allowed?(method_up, opts)
           status = detail.row.status
           return nil unless status && (200..299).includes?(status)
           ct = detail.row.content_type

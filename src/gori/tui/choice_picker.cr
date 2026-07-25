@@ -44,12 +44,13 @@ module Gori::Tui
     end
 
     # Probe scan MODE picker (kind :probe_mode — the Runner applies it to the analyzer).
-    # Values match Probe::Mode (Off=0, Passive=1, Active=2).
+    # Values match Probe::Mode (Off=0, Passive=1, Active=2, Aggressive=3).
     def self.for_probe_mode(current : Int32) : ChoicePicker
       new("SET PROBE MODE", [
         Choice.new("OFF — no scanning", 'o', Theme.muted, 0),
         Choice.new("PASSIVE — observe only", 'p', Theme.accent, 1),
         Choice.new("ACTIVE — passive + light-touch probes (in-scope)", 'a', Theme.orange, 2),
+        Choice.new("AGGRESSIVE — deeper probing incl. unsafe methods (authorized, in-scope)", 'g', Theme.red, 3),
       ], current, :probe_mode)
     end
 

@@ -14,6 +14,8 @@ module Gori
         format = :text
         active = false
         allow_unscoped = false
+        unsafe = false
+        aggressive = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -30,6 +32,8 @@ module Gori
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("-a", "--active", "Include light-touch active checks (sends probe requests)") { active = true }
           p.on("--allow-unscoped", "With --active, probe flows even when outside the project scope (default: only scope-included hosts)") { allow_unscoped = true }
+          p.on("--unsafe", "With --active, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data") { unsafe = true }
+          p.on("--aggressive", "With --active, raise per-rule caps + wider bypass sets (implies --unsafe)") { aggressive = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -73,8 +77,10 @@ module Gori
             abort "gori run probe: query #{truncate_query(query).inspect} failed: #{ex.message}"
           end
           meter = STDERR.tty?
+          # --aggressive implies --unsafe (it also raises caps + widens bypass sets).
+          opts = Probe::Active::Options.new(allow_unsafe: unsafe || aggressive, aggressive: aggressive)
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
-            allow_unscoped: allow_unscoped, progress: probe_progress_meter(meter))
+            allow_unscoped: allow_unscoped, opts: opts, progress: probe_progress_meter(meter))
           STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
           {Probe.group(dets), ids.size, rn}
         ensure

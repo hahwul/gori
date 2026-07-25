@@ -88,6 +88,19 @@ describe "MCP probe_scan tool" do
     end
   end
 
+  it "accepts unsafe/aggressive params, inert (not echoed) under a passive scan" do
+    with_store do |store|
+      seed_secret_flow(store)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      # active defaults false → the two knobs parse but do nothing and are not echoed.
+      res = call_json(tools, "probe_scan", %({"unsafe":true,"aggressive":true}))
+      res["active"].as_bool.should be_false
+      res.as_h.has_key?("active_unsafe_methods").should be_false
+      res.as_h.has_key?("active_aggressive").should be_false
+      res["issue_count"].as_i.should be > 0 # passive scan still runs normally
+    end
+  end
+
   it "refuses an active scan with an excludes-only scope (no include rule would send anything)" do
     with_store do |store|
       seed_secret_flow(store)

@@ -21,12 +21,12 @@ module Gori
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
-      def self.dedup_key(detail : Store::FlowDetail) : String?
-        PRIMARY.dedup_key(detail)
+      def self.dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
+        PRIMARY.dedup_key(detail, opts)
       end
 
-      def self.plan(detail : Store::FlowDetail) : Plan?
-        PRIMARY.plan(detail)
+      def self.plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
+        PRIMARY.plan(detail, opts)
       end
 
       def self.detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
@@ -44,9 +44,10 @@ module Gori
       # explicit exclude rule HARD-blocks the probe at the socket seam (PR #322's protection for
       # Fuzz/Miner) even when the caller bypassed its own include gate (--allow-unscoped).
       # `backend` overrides the default Fuzz::Sender so specs can drive the rules without a socket.
+      # `opts` widens the method gate / raises caps (manual unsafe opt-in, AGGRESSIVE mode).
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
                        timeout : Time::Span = 10.seconds, scope : Scope? = nil,
-                       backend : Fuzz::Backend? = nil) : Array(Detection)
+                       backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT) : Array(Detection)
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
@@ -55,7 +56,7 @@ module Gori
         sender = scope ? Fuzz::ScopedBackend.new(base, scope) : base
 
         RULES.each do |rule|
-          plan = rule.plan(detail)
+          plan = rule.plan(detail, opts)
           next unless plan
           result = sender.send(plan.request)
           next unless result.ok?

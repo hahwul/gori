@@ -14,13 +14,19 @@ module Gori
     # Per-project scanning mode. Off = no analysis at all; Passive = zero-request checks on
     # observed traffic (the safe default); Active = Passive plus a set of light-touch probes
     # (reflected params today) over hosts/paths covered by Project scope rules only — the ⇧S
-    # display lens need not be on; one probe per unique target. Keep active DELIBERATELY quiet:
-    # any new check must stay safe-method + low-volume (a handful of confirming probes), never a
-    # Burp-style flood of attack payloads.
+    # display lens need not be on; one probe per unique target. Keep Active DELIBERATELY quiet:
+    # safe-method only, low-volume (a handful of confirming probes), one probe per unique target.
+    #
+    # Aggressive = Active's sanctioned louder tier for AUTHORIZED targets: raised per-rule caps
+    # (wider param sets), a wider bypass-header set, and — unlike Active — it also probes
+    # UNSAFE methods (POST/PUT/PATCH/DELETE), so an in-scope endpoint can be state-mutated by the
+    # automatic pipeline. It is still Project-scope-gated (never widens scope) and still "more of
+    # the same probes with relaxed caps", NOT an unbounded flood of attack payloads.
     enum Mode
       Off
       Passive
       Active
+      Aggressive
 
       def label : String
         to_s.downcase
@@ -30,28 +36,36 @@ module Gori
         to_s.upcase
       end
 
-      # Any analysis at all (Passive OR Active). `passive?`/`active?`/`off?` are the
-      # auto-generated exact-member predicates.
+      # Any analysis at all (Passive OR Active OR Aggressive). `passive?`/`active?`/`aggressive?`/
+      # `off?` are the auto-generated exact-member predicates.
       def scanning? : Bool
         !off?
+      end
+
+      # Whether this mode drives the AUTOMATIC active-probe pipeline (enqueue + backfill). Active
+      # and Aggressive both do; the difference is the Options they run with, not whether they run.
+      def probes_actively? : Bool
+        active? || aggressive?
       end
 
       # Parse a stored label back to a Mode; unknown/nil → Passive (the safe, zero-request
       # default so a fresh project scans passively out of the box).
       def self.from_setting(value : String?) : Mode
         case value
-        when "off"    then Off
-        when "active" then Active
-        else               Passive
+        when "off"        then Off
+        when "active"     then Active
+        when "aggressive" then Aggressive
+        else                   Passive
         end
       end
 
-      # Next mode in the OFF → Passive → Active → OFF cycle (the `m` key affordance).
+      # Next mode in the OFF → Passive → Active → Aggressive → OFF cycle (the `m` key affordance).
       def cycle : Mode
         case self
-        in Off     then Passive
-        in Passive then Active
-        in Active  then Off
+        in Off        then Passive
+        in Passive    then Active
+        in Active     then Aggressive
+        in Aggressive then Off
         end
       end
     end

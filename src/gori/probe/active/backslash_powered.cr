@@ -28,13 +28,17 @@ module Gori
       #
       # This is the active scanner's first DIFFERENTIAL (multi-probe) rule: `plan` builds a baseline
       # plus a `\`/`\\` pair per param into `Plan.followups`, the analyzer sends them all, and
-      # `detections_all` compares the responses. Gated to GET (the differential compares BODIES, so
-      # HEAD is out, and POST/PUT/… are never auto-probed — they mutate state) and capped at
-      # MAX_PROBE_PARAMS params so a wide query can't blow up the request count.
+      # `detections_all` compares the responses. The differential compares BODIES, so HEAD is always
+      # out; by default GET only (POST/PUT/… are never auto-probed — they mutate state), but an
+      # explicit opt-in (Options#allow_unsafe: the manual per-flow scan or AGGRESSIVE mode) widens
+      # it to any body-bearing method. Capped at MAX_PROBE_PARAMS params (raised under AGGRESSIVE)
+      # so a wide query can't blow up the request count.
       class BackslashPowered < Rule
         # Probe at most this many params per flow (in query order). Bounds the request count and
         # keeps the automatic scan light-touch; a wider query is still covered for its first params.
-        MAX_PROBE_PARAMS = 3
+        # AGGRESSIVE (opts.aggressive) raises the cap for deeper coverage on an authorized target.
+        MAX_PROBE_PARAMS            =  3
+        MAX_PROBE_PARAMS_AGGRESSIVE = 10
 
         # Appended (URL-encoded, so it decodes to a real backslash server-side) to a param's value.
         SINGLE = "%5C"    # one backslash  →  value\
@@ -57,15 +61,15 @@ module Gori
         # Dedup key WITHOUT rebuilding probes — derived from the same `injectables` gate `plan` uses,
         # so it is byte-identical to `plan(detail).dedup_key` and nil in exactly the same cases
         # (verified by the equivalence spec).
-        def dedup_key(detail : Store::FlowDetail) : String?
-          g = injectables(detail)
+        def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
+          g = injectables(detail, opts)
           return nil unless g
           method_up, path, pairs, probe = g
           build_dedup_key(detail, method_up, path, probe.map { |i| decode_name(pair_name(pairs[i])) })
         end
 
-        def plan(detail : Store::FlowDetail) : Plan?
-          g = injectables(detail)
+        def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
+          g = injectables(detail, opts)
           return nil unless g
           method_up, path, pairs, probe = g
           body = detail.request_body
@@ -124,15 +128,18 @@ module Gori
         # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
         # Returns {METHOD, path, all query pairs verbatim, indices of the first ≤MAX_PROBE_PARAMS
         # pairs that are real k=v params} for a GET carrying ≥1 such param, else nil.
-        private def injectables(detail : Store::FlowDetail) : {String, String, Array(String), Array(Int32)}?
+        private def injectables(detail : Store::FlowDetail, opts : Options) : {String, String, Array(String), Array(Int32)}?
           method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
           return nil if malformed
           method_up = method.upcase
-          # GET only: the differential compares response bodies (HEAD has none) and the active scan
-          # never auto-re-sends a state-changing method (SAFE_METHODS is GET/HEAD; we keep GET).
-          return nil unless method_up == "GET"
+          # Body-differential gate: the comparison reads response BODIES (HEAD has none), so HEAD is
+          # always out. By default GET only — the automatic scan never auto-re-sends a state-changing
+          # method — but opts.allow_unsafe (manual per-flow scan / AGGRESSIVE mode) widens to
+          # POST/PUT/PATCH/DELETE, whose query params can still be interpreted server-side.
+          return nil unless diff_method_allowed?(method_up, opts)
           path, query = split_target(Active.origin_form(target))
           return nil if query.empty?
+          cap = opts.aggressive ? MAX_PROBE_PARAMS_AGGRESSIVE : MAX_PROBE_PARAMS
           pairs = query.split('&')
           probe = [] of Int32
           pairs.each_with_index do |pair, i|
@@ -141,7 +148,7 @@ module Gori
             next unless eq
             next if pair[0...eq].empty?
             probe << i
-            break if probe.size >= MAX_PROBE_PARAMS
+            break if probe.size >= cap
           end
           return nil if probe.empty?
           {method_up, path, pairs, probe}

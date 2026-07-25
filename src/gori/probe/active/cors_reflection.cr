@@ -29,12 +29,12 @@ module Gori
 
         # The dedup key WITHOUT rebuilding the probe request — same gates as `plan` (safe method,
         # response already did CORS), same key. nil exactly when `plan` returns nil.
-        def dedup_key(detail : Store::FlowDetail) : String?
+        def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           # Request headers are never needed here (the key is method + target only), so parse
           # just the start-line. The RESPONSE head parse below IS required and stays.
           method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
           return nil if malformed
-          return nil unless SAFE_METHODS.includes?(method.upcase)
+          return nil unless method_allowed?(method.upcase, opts)
           rhead = detail.response_head
           return nil unless rhead
           resp = Proxy::Codec::Http1.parse_response_head(rhead)
@@ -42,10 +42,10 @@ module Gori
           key_string(detail, method.upcase, target)
         end
 
-        def plan(detail : Store::FlowDetail) : Plan?
+        def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
-          return nil unless SAFE_METHODS.includes?(req.method.upcase)
+          return nil unless method_allowed?(req.method.upcase, opts)
           # Only probe endpoints that demonstrably do CORS (response already carried an ACAO).
           rhead = detail.response_head
           return nil unless rhead

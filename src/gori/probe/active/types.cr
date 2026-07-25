@@ -9,14 +9,35 @@ module Gori
     # body decoder, and the Fuzz sender — no Store/TUI. One rule per file under `active/`;
     # register new ones in `Active::RULES` (active.cr).
     module Active
-      BODY_CAP   = 64 * 1024
-      MAX_PARAMS = 50 # don't probe pathological param sets (request-size / canary budget)
+      BODY_CAP = 64 * 1024
 
-      # Only methods WITHOUT side effects are probed. The active scan runs automatically over
-      # captured traffic, so re-sending a POST/PUT/PATCH/DELETE with canary values would cause
-      # real server-side mutations (duplicate records, messages, deletions). Reflected-XSS via
-      # query parameters — the common case — is fully covered by GET/HEAD.
+      # Per-flow param budget. The default keeps the automatic scan light (request-size / canary
+      # budget); AGGRESSIVE (opts.aggressive) probes wider param sets on an authorized target.
+      MAX_PARAMS            =  50 # don't probe pathological param sets
+      MAX_PARAMS_AGGRESSIVE = 150 # AGGRESSIVE mode: cover wide queries/forms too
+
+      # Methods WITHOUT side effects — probed by default. The active scan normally runs
+      # automatically over captured traffic, so re-sending a POST/PUT/PATCH/DELETE with canary
+      # values would cause real server-side mutations (duplicate records, messages, deletions).
+      # Reflected-XSS via query parameters — the common case — is fully covered by GET/HEAD.
+      # Unsafe methods are probed ONLY when the caller opts in (Options#allow_unsafe): the manual
+      # per-flow "Run active scan" or AGGRESSIVE mode over in-scope traffic.
       SAFE_METHODS = Set{"GET", "HEAD"}
+
+      # Per-scan knobs threaded into every rule's `plan`/`dedup_key`, so a rule stays a pure
+      # function of (flow, opts). The DEFAULT (both false) reproduces the historic safe-method,
+      # base-cap behaviour, so any 1-arg caller is unchanged.
+      #   allow_unsafe — widen the method gate beyond SAFE_METHODS (re-sends POST/PUT/PATCH/DELETE).
+      #   aggressive   — raise per-rule caps (MAX_PARAMS_AGGRESSIVE, MAX_PROBE_PARAMS_AGGRESSIVE)
+      #                  and use the wider bypass-header set.
+      record Options, allow_unsafe : Bool = false, aggressive : Bool = false do
+        DEFAULT = new
+
+        # The param budget for this scan (aggressive raises it).
+        def max_params : Int32
+          aggressive ? MAX_PARAMS_AGGRESSIVE : MAX_PARAMS
+        end
+      end
 
       record Param, location : String, name : String, canary : String
 
@@ -55,9 +76,23 @@ module Gori
         # BEFORE calling `plan`, so a repeat surface (the common case in steady browsing) skips
         # the expensive canary generation + request rebuild that `plan` does. MUST stay identical
         # to the key `plan` produces or the seen-set would re-probe / skip (see the equivalence spec).
-        abstract def dedup_key(detail : Store::FlowDetail) : String?
-        abstract def plan(detail : Store::FlowDetail) : Plan?
+        abstract def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
+        abstract def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
         abstract def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
+
+        # Whether METHOD (already upcased) is eligible for a rule gated to SAFE_METHODS. Unsafe
+        # methods pass only under an explicit opt-in (manual per-flow scan / AGGRESSIVE mode).
+        protected def method_allowed?(method_upcase : String, opts : Options) : Bool
+          opts.allow_unsafe || SAFE_METHODS.includes?(method_upcase)
+        end
+
+        # Whether METHOD (already upcased) is eligible for a BODY-DIFFERENTIAL rule (compares
+        # response bodies, so HEAD is always out). By default GET only; opts.allow_unsafe widens
+        # to any body-bearing method (POST/PUT/PATCH/DELETE) but never HEAD.
+        protected def diff_method_allowed?(method_upcase : String, opts : Options) : Bool
+          return false if method_upcase == "HEAD"
+          opts.allow_unsafe || method_upcase == "GET"
+        end
 
         # Interpret ALL of a plan's probe responses at once: the primary (`plan.request`) first,
         # then one per `plan.followups` entry, in the SAME order they were built. The analyzer calls

@@ -34,18 +34,20 @@ module Gori
       # limiting the request-free PASSIVE scan — nil means no active cap (the CLI).
       def scan_all(store : Store, ids : Array(Int64), *, active : Bool,
                    verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
-                   active_limit : Int32? = nil, progress : Proc(Int32, Int32, Nil)? = nil) : {Array(Detection), Int32}
+                   active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
+                   progress : Proc(Int32, Int32, Nil)? = nil) : {Array(Detection), Int32}
         detections = scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, active_limit: active_limit, progress: progress)
+          scope: scope, allow_unscoped: allow_unscoped, active_limit: active_limit, opts: opts, progress: progress)
         repeater_dets, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped)
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts)
         detections.concat(repeater_dets)
         {detections, repeater_n}
       end
 
       def scan_flows(store : Store, ids : Array(Int64), *, active : Bool,
                      verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
-                     active_limit : Int32? = nil, progress : Proc(Int32, Int32, Nil)? = nil) : Array(Detection)
+                     active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
+                     progress : Proc(Int32, Int32, Nil)? = nil) : Array(Detection)
         detections = [] of Detection
         active_sent = 0
         ids.each_with_index do |id, i|
@@ -54,7 +56,7 @@ module Gori
             ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
             detections.concat(Passive.analyze(detail, ws)) # passive is request-free — NEVER capped
             if active && active_target?(detail, scope, allow_unscoped) && !(active_limit && active_sent >= active_limit)
-              detections.concat(Active.analyze(detail, verify_upstream, scope: scope))
+              detections.concat(Active.analyze(detail, verify_upstream, scope: scope, opts: opts))
               active_sent += 1
             end
           end
@@ -65,7 +67,8 @@ module Gori
 
       # Scan Repeater tabs. Stamps sample_repeater_id.
       def scan_repeaters(store : Store, *, active : Bool, verify_upstream : Bool = true,
-                         scope : Scope? = nil, allow_unscoped : Bool = false) : {Array(Detection), Int32}
+                         scope : Scope? = nil, allow_unscoped : Bool = false,
+                         opts : Active::Options = Active::Options::DEFAULT) : {Array(Detection), Int32}
         detections = [] of Detection
         n = 0
         store.repeaters.each do |rec|
@@ -76,7 +79,7 @@ module Gori
             detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
           end
           if active && active_target?(detail, scope, allow_unscoped)
-            Active.analyze(detail, verify_upstream, scope: scope).each do |d|
+            Active.analyze(detail, verify_upstream, scope: scope, opts: opts).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
           end

@@ -27,21 +27,25 @@ module Gori
 
         active = bool(h, "active") || false
         allow_unscoped = bool(h, "allow_unscoped") || false
+        # --aggressive implies unsafe (it also raises caps + widens bypass sets).
+        aggressive = bool(h, "aggressive") || false
+        unsafe = (bool(h, "unsafe") || false) || aggressive
         gate = probe_active_gate(active, allow_unscoped)
         return gate if gate.is_a?(Result)
         scope, scope_configured = gate
 
+        opts = Probe::Active::Options.new(allow_unsafe: unsafe, aggressive: aggressive)
         ids = Probe::Scan.flow_ids(store, filter)
         # Cap only the ACTIVE sends (network volume); the request-free PASSIVE scan always
         # covers every flow. (An earlier version truncated `ids`, which silently dropped
         # passive coverage of the newest flows under active:true.)
         capped = active && ids.size > PROBE_ACTIVE_MAX_FLOWS
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: @verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, active_limit: active ? PROBE_ACTIVE_MAX_FLOWS : nil)
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_limit: active ? PROBE_ACTIVE_MAX_FLOWS : nil)
 
         groups = probe_filter_groups(Probe.group(dets), severity_from(str(h, "severity")), category.as(String?))
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
-          scope_configured, capped, clamp(int(h, "limit"), 200, 2000)))
+          scope_configured, capped, unsafe, aggressive, clamp(int(h, "limit"), 200, 2000)))
       end
 
       # The QL filter (History only; blank/absent → nil = scan all), or a QUERY_SYNTAX Result.
@@ -86,7 +90,7 @@ module Gori
 
       private def probe_scan_json(groups : Array(Probe::Group), flows_scanned : Int32, repeater_n : Int32,
                                   active : Bool, allow_unscoped : Bool, scope_configured : Bool,
-                                  capped : Bool, limit : Int32) : String
+                                  capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32) : String
         JSON.build do |j|
           j.object do
             j.field "flows_scanned", flows_scanned
@@ -96,6 +100,8 @@ module Gori
               j.field "scope_configured", scope_configured
               j.field "active_scope_gated", !allow_unscoped # per-flow include-filter applied unless bypassed
               j.field "active_flows_capped", true if capped
+              j.field "active_unsafe_methods", true if unsafe # POST/PUT/PATCH/DELETE re-sent
+              j.field "active_aggressive", true if aggressive # raised caps + wider bypass sets
             end
             j.field "issue_count", groups.size
             j.field("issues") { j.array { groups.first(limit).each { |g| Probe.group_json(j, g) } } }

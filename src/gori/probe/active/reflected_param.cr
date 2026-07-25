@@ -27,15 +27,15 @@ module Gori
         # the key is byte-identical to `plan(detail).dedup_key`. Returns nil in exactly the cases
         # `plan` does (malformed / unsafe method / no params / too many). Verified against `plan`
         # by the equivalence spec.
-        def dedup_key(detail : Store::FlowDetail) : String?
-          # Start-line-only fast path: the key needs only method + target, so a non-safe method
+        def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
+          # Start-line-only fast path: the key needs only method + target, so a non-eligible method
           # or malformed head is rejected WITHOUT allocating the whole header block. The dominant
           # bodyless GET/HEAD never parses headers; only a request that actually carries a body
           # falls through to a full parse (for Content-Type). Byte-identical to plan's key.
           method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
           return nil if malformed
           method_up = method.upcase
-          return nil unless SAFE_METHODS.includes?(method_up)
+          return nil unless method_allowed?(method_up, opts)
           path, query = split_target(Active.origin_form(target))
           names = [] of {String, String} # {name, location}, matching Param.{name, location}
           each_param_name(query) { |raw| names << {decode_name(raw), "query"} }
@@ -51,15 +51,15 @@ module Gori
               each_json_string_key(body) { |k| names << {k, "json"} }
             end
           end
-          return nil if names.empty? || names.size > MAX_PARAMS
+          return nil if names.empty? || names.size > opts.max_params
           build_dedup_key(detail, method_up, path, names)
         end
 
         # Build a probe from a captured flow, or nil if there is nothing reflectable.
-        def plan(detail : Store::FlowDetail) : Plan?
+        def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
-          return nil unless SAFE_METHODS.includes?(req.method.upcase)
+          return nil unless method_allowed?(req.method.upcase, opts)
           # A plaintext forward-proxy flow is captured ABSOLUTE-form ("GET http://h/p"); the
           # probe is sent DIRECT to the origin (Fuzz::Sender → Repeater::Engine, no rewrite),
           # so normalize to origin-form here the way the regular repeater path (FlowRequest)
@@ -87,7 +87,7 @@ module Gori
             end
           end
 
-          return nil if params.empty? || params.size > MAX_PARAMS
+          return nil if params.empty? || params.size > opts.max_params
           request = rebuild(detail.request_head, path, new_query, new_body)
           # Same key builder `dedup_key` uses, fed the built params — so the pre-build dedup key
           # and this one can't drift.

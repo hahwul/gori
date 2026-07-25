@@ -2118,7 +2118,10 @@ module Gori::Tui
         @session.probe.set_mode(Probe::Mode.new(p.selected_value))
         probe_controller.view.reload(@session.store)
         mode = @session.probe.mode
-        @toast = if mode.active?
+        @toast = case mode
+                 when .aggressive?
+                   "Probe mode: AGGRESSIVE — deeper in-scope probing, incl. unsafe methods (authorized targets only)"
+                 when .active?
                    "Probe mode: ACTIVE — light-touch probes over recent in-scope traffic"
                  else
                    "Probe mode: #{mode.title}"
@@ -3979,7 +3982,7 @@ module Gori::Tui
       when :env              then env_overlay_hints
       when :hotkeys          then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications    then "↑/↓ select · ↵ open · c clear · esc close"
-      when :probe_active     then "↑/↓ field · ←/→ notify · ↵ run · esc cancel"
+      when :probe_active     then "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
       when :discover_config  then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
       when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
       when :fuzz_set         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
@@ -4801,27 +4804,38 @@ module Gori::Tui
     # request count before anything is sent.
 
     # Estimate the active-scan request count for `detail`, then open the "Run active scan" popup
-    # (per-rule breakdown + total + a notification-mode cycler). Running is deferred to
-    # start_probe_active so the operator can pick the notify mode first.
+    # (per-rule breakdown + total + a notification-mode cycler + an off-by-default unsafe-methods
+    # opt-in). Running is deferred to start_probe_active so the operator can pick the options first.
     private def open_probe_active_overlay(detail : Store::FlowDetail, repeater_id : Int64? = nil) : Nil
-      est = @session.probe.active_estimate(detail)
-      if est.empty?
-        @toast = "no active checks apply (needs a GET/HEAD with reflectable params, or a CORS response)"
+      est_safe = @session.probe.active_estimate(detail)
+      est_unsafe = @session.probe.active_estimate(detail, Probe::Active::Options.new(allow_unsafe: true))
+      # Nothing applies even with unsafe methods allowed — no popup to show.
+      if est_unsafe.empty?
+        @toast = "no active checks apply (needs a request with reflectable params, or a CORS response)"
         return
       end
-      @probe_active_overlay = ProbeActiveOverlay.new(detail, est, repeater_id)
+      @probe_active_overlay = ProbeActiveOverlay.new(detail, est_safe, est_unsafe, repeater_id)
       @overlay = :probe_active
     end
 
     # Confirm the popup: run the probes in the BACKGROUND (mode-independent), persist the chosen
     # notify mode as the next default, and toast the request count. Findings land in the Probe tab
-    # via the usual probe_generation poll + event drain.
+    # via the usual probe_generation poll + event drain. The unsafe-methods opt-in threads through
+    # to run_active_now so a deliberately-selected POST/PUT/… flow is actually re-sent.
     private def start_probe_active(ov : ProbeActiveOverlay) : Nil
+      # Selected options send nothing (e.g. a POST with the unsafe opt-in still off) — hint, don't
+      # fire a no-op scan or close the popup.
+      if ov.estimate_empty?
+        @toast = "nothing to send — enable unsafe methods to probe this #{ov.detail.row.method}"
+        return
+      end
       notify = ov.notify_mode
       Settings.save_probe_active_notify(notify.token)
       host = ov.detail.row.host
-      @session.probe.run_active_now(ov.detail, repeater_id: ov.repeater_id, notify: notify)
-      @toast = "active scan → #{host}: #{ov.total_label} sent (see the Probe tab)"
+      @session.probe.run_active_now(ov.detail, repeater_id: ov.repeater_id,
+        allow_unsafe: ov.allow_unsafe?, notify: notify)
+      unsafe_note = ov.allow_unsafe? ? " (incl. unsafe methods)" : ""
+      @toast = "active scan → #{host}: #{ov.total_label} sent#{unsafe_note} (see the Probe tab)"
       close_probe_active
     end
 

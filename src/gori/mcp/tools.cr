@@ -527,6 +527,8 @@ module Gori
             s.field "severity", strprop("only return issues at/above this level (info|low|medium|high|critical)")
             s.field "category", strprop("only return issues in this category (#{Probe::SCAN_CATEGORIES.join("|")})")
             s.field "allow_unscoped", boolprop("with active:true, run even when a target host is outside — or without — a configured scope (default false)")
+            s.field "unsafe", boolprop("with active:true, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data (default false)")
+            s.field "aggressive", boolprop("with active:true, raise per-rule caps + use wider bypass sets (implies unsafe) — authorized targets only (default false)")
             s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
           end
 

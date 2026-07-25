@@ -52,27 +52,48 @@ module Gori
           X-Custom-IP-Authorization
         ]
 
-        # Downcased names, for dropping any the browser already sent (so we insert exactly one of
-        # each and the forged value can't be diluted by a second header line).
-        BYPASS_HEADER_SET = BYPASS_HEADERS.map(&.downcase).to_set
+        # Additional client-IP / host-claim headers used ONLY in AGGRESSIVE mode (opts.aggressive):
+        # a wider set trades noise for coverage on an authorized target. Still sent in the SAME
+        # single request (1 req/flow) — a wider set, not more requests. Every entry sensibly carries
+        # BYPASS_VALUE (127.0.0.1) as a bare IP/host claim, so this rule's one flat value stays
+        # valid — path-rewrite headers (X-Original-URL, …) belong to a different probe, not here.
+        BYPASS_HEADERS_EXTRA = %w[
+          X-Forwarded-Host
+          X-Host
+          X-Forwarded-Server
+          CF-Connecting-IP
+          Fastly-Client-IP
+          X-Azure-ClientIP
+          X-Azure-SocketIP
+          X-Appengine-User-Ip
+        ]
 
-        # The dedup key WITHOUT rebuilding the probe — same gates as `plan` (safe method, response
-        # was 401/403), same key. nil exactly when `plan` returns nil. Both gates read
+        # The aggressive superset (base + extra), in a stable order for deterministic probes.
+        BYPASS_HEADERS_AGGRESSIVE = BYPASS_HEADERS + BYPASS_HEADERS_EXTRA
+
+        # Downcased names, for dropping any the browser already sent (so we insert exactly one of
+        # each and the forged value can't be diluted by a second header line). One set per header
+        # list; the rebuild drops EXACTLY the set it is about to insert (never a header it won't).
+        BYPASS_HEADER_SET            = BYPASS_HEADERS.map(&.downcase).to_set
+        BYPASS_HEADER_SET_AGGRESSIVE = BYPASS_HEADERS_AGGRESSIVE.map(&.downcase).to_set
+
+        # The dedup key WITHOUT rebuilding the probe — same gates as `plan` (eligible method,
+        # response was 401/403), same key. nil exactly when `plan` returns nil. Both gates read
         # detail.row.status (not a header re-parse), so the two paths cannot drift.
-        def dedup_key(detail : Store::FlowDetail) : String?
+        def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
           return nil if malformed
-          return nil unless SAFE_METHODS.includes?(method.upcase)
+          return nil unless method_allowed?(method.upcase, opts)
           return nil unless denied_status?(detail.row.status)
           key_string(detail, method.upcase, target)
         end
 
-        def plan(detail : Store::FlowDetail) : Plan?
+        def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
-          return nil unless SAFE_METHODS.includes?(req.method.upcase)
+          return nil unless method_allowed?(req.method.upcase, opts)
           return nil unless denied_status?(detail.row.status)
-          request = rebuild_with_bypass_headers(detail.request_head, detail.request_body)
+          request = rebuild_with_bypass_headers(detail.request_head, detail.request_body, opts.aggressive)
           Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target))
         end
 
@@ -126,8 +147,10 @@ module Gori
         # Rebuild the request with the full IP-spoofing header set inserted right after the request
         # line: first drop any of those headers the browser already sent (so exactly one authoritative
         # copy of each remains), then insert ours. The body is untouched — none of the inserted names
-        # is Content-Length — so no resync is needed.
-        private def rebuild_with_bypass_headers(head : Bytes, body : Bytes?) : Bytes
+        # is Content-Length — so no resync is needed. `aggressive` selects the wider header set.
+        private def rebuild_with_bypass_headers(head : Bytes, body : Bytes?, aggressive : Bool) : Bytes
+          headers = aggressive ? BYPASS_HEADERS_AGGRESSIVE : BYPASS_HEADERS
+          drop_set = aggressive ? BYPASS_HEADER_SET_AGGRESSIVE : BYPASS_HEADER_SET
           combined = if body && !body.empty?
                        io = IO::Memory.new(head.size + body.size)
                        io.write(head)
@@ -140,7 +163,7 @@ module Gori
           lines = String.new(hbytes).split(eol)
           kept = [] of String
           lines.each_with_index do |l, i|
-            next if i > 0 && bypass_header?(l) # request line (i == 0) is normalized below
+            next if i > 0 && bypass_header?(l, drop_set) # request line (i == 0) is normalized below
             kept << l
           end
           # Normalize an absolute-form (forward-proxy) request line to origin-form: like the other
@@ -150,7 +173,7 @@ module Gori
           unless kept.empty?
             rl = kept[0].split(' ')
             kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-            BYPASS_HEADERS.each_with_index { |name, i| kept.insert(1 + i, "#{name}: #{BYPASS_VALUE}") }
+            headers.each_with_index { |name, i| kept.insert(1 + i, "#{name}: #{BYPASS_VALUE}") }
           end
           io = IO::Memory.new
           io << kept.join(eol) << eol << eol
@@ -158,8 +181,8 @@ module Gori
           io.to_slice
         end
 
-        private def bypass_header?(line : String) : Bool
-          (c = line.index(':')) ? BYPASS_HEADER_SET.includes?(line[0...c].strip.downcase) : false
+        private def bypass_header?(line : String, drop_set : Set(String)) : Bool
+          (c = line.index(':')) ? drop_set.includes?(line[0...c].strip.downcase) : false
         end
       end
     end
