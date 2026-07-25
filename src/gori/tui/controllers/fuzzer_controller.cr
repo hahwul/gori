@@ -855,7 +855,8 @@ module Gori::Tui
       # would otherwise apply the stale event to the NEW run's job (premature/wrong
       # "done", orphaned bottom-bar spinner). Draining now settles the old job first.
       drain_events
-      engine, err = v.build_engine(!@host.session.config.insecure_upstream?, @host.session.scope)
+      engine, err = v.build_engine(!@host.session.config.insecure_upstream?,
+        @host.session.scope, @host.session.host_overrides)
       unless engine
         @host.status(err || "cannot run")
         return
