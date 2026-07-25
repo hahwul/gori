@@ -62,6 +62,22 @@ gori mints per-host leaf certificates from the root on demand, so you trust the 
 
 > gori's private key is a machine secret, written with `0600` permissions, and never leaves your machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
 
+### Option C: Install the CA on a phone or tablet
+
+A phone can't read the CA off your filesystem, so gori serves it over the network instead.
+
+1. Bind the proxy so the device can reach it, and note your machine's LAN IP:
+
+   ```bash
+   gori --listen 0.0.0.0 --port 8070
+   ```
+
+2. On the device, set the WiFi HTTP **and** HTTPS proxy to `<your-LAN-IP>:8070`.
+3. Open a browser there and go to **`http://gori.proxy/`** (`http://gori/` works too).
+4. Download the certificate and trust it. On iOS that is two steps: install the profile, then enable it under **Settings → General → About → Certificate Trust Settings**. On Android, install it under **Settings → Security → Encryption & credentials → Install a certificate → CA certificate**.
+
+`gori.proxy` is a reserved name gori answers for itself, so it works once the proxy is configured and never reaches the network. If you'd rather not configure the proxy first, browse straight to `http://<your-LAN-IP>:8070/` instead and you'll get the same page.
+
 **Checkpoint.** Switch to **History** (press `3`). You should see at least one row: your `GET https://example.com/` request with a `200` status. If History is empty, capture isn't reaching gori: recheck the proxy setting (Option B) or use **Open browser** (Option A).
 
 ## 3. Learn the two discovery surfaces

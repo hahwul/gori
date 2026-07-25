@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "socket"
+require "openssl"
 require "file_utils"
 
 # Records captured flows in memory so the proxy can be driven without a DB. A
@@ -77,6 +78,42 @@ describe Gori::Proxy::SelfPage do
       Gori::Proxy::SelfPage.route("/ca.crt").should eq(:der)
       Gori::Proxy::SelfPage.route("/favicon.ico").should eq(:favicon)
       Gori::Proxy::SelfPage.route("/nope").should eq(:not_found)
+    end
+
+    # A proxy-configured client sends the ABSOLUTE form, so the authority reaches `route`
+    # too. Without the strip every magic-host request 404s instead of serving the cert.
+    it "routes an absolute-form target by its path (a proxy-configured client)" do
+      Gori::Proxy::SelfPage.route("http://gori.proxy/").should eq(:index)
+      Gori::Proxy::SelfPage.route("http://gori.proxy").should eq(:index) # no path at all
+      Gori::Proxy::SelfPage.route("http://gori.proxy/ca.pem").should eq(:pem)
+      Gori::Proxy::SelfPage.route("http://gori.proxy/ca.der?x=1").should eq(:der)
+      Gori::Proxy::SelfPage.route("https://gori.proxy/ca.crt").should eq(:der)
+      Gori::Proxy::SelfPage.route("http://127.0.0.1:8070/ca.pem").should eq(:pem)
+      Gori::Proxy::SelfPage.route("http://gori.proxy/nope").should eq(:not_found)
+    end
+
+    # The query strip runs first, so a '/' inside the query can't be read as the path.
+    it "does not mistake a slash inside the query for the path" do
+      Gori::Proxy::SelfPage.route("http://gori.proxy?next=/ca.der").should eq(:index)
+    end
+  end
+
+  describe ".magic_host?" do
+    it "matches the reserved names, case-insensitively and with a trailing dot" do
+      Gori::Proxy::SelfPage.magic_host?("gori.proxy").should be_true
+      Gori::Proxy::SelfPage.magic_host?("GORI.PROXY").should be_true
+      Gori::Proxy::SelfPage.magic_host?("gori.proxy.").should be_true # fully-qualified
+      Gori::Proxy::SelfPage.magic_host?("gori").should be_true
+      Gori::Proxy::SelfPage.magic_host?("gori.").should be_true
+    end
+
+    it "does not match a lookalike that a real origin could own" do
+      Gori::Proxy::SelfPage.magic_host?("gori.proxy.com").should be_false
+      Gori::Proxy::SelfPage.magic_host?("evil.gori.proxy").should be_false
+      Gori::Proxy::SelfPage.magic_host?("agori").should be_false
+      Gori::Proxy::SelfPage.magic_host?("gori.local").should be_false
+      Gori::Proxy::SelfPage.magic_host?("example.com").should be_false
+      Gori::Proxy::SelfPage.magic_host?("").should be_false
     end
   end
 
@@ -222,6 +259,177 @@ describe "direct listener access (self-page)" do
       done.receive
       sink.responses.size.should eq(1)
       sink.responses.first.state.should eq(Gori::Store::FlowState::Error)
+    end
+  end
+
+  # #280: the client set the proxy FIRST and then typed the listener address, so the request
+  # arrives absolute-form. Before, that was refused as a self-loop and the cert stayed out of
+  # reach; it is aimed at us, not at an origin, so there is nothing to loop.
+  it "serves the info page for an absolute-form GET aimed at its own listener" do
+    with_landing_proxy(serve_landing: true) do |proxy, ca, sink, _done|
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET http://127.0.0.1:#{proxy.port}/ca.pem HTTP/1.1\r\nHost: 127.0.0.1:#{proxy.port}\r\n\r\n"
+      client.flush
+      head, body = split_response(read_all(client))
+      client.close
+
+      head.should contain("application/x-pem-file")
+      String.new(body).should eq(ca.ca_cert_pem)
+      sink.responses.size.should eq(0)
+    end
+  end
+end
+
+# #280: the mitm.it-style entry point. A client that already has gori configured as its
+# proxy sends absolute-form (or CONNECT), so it can never match the direct-hit test above —
+# a reserved hostname is the only unambiguous way to hand it the CA.
+describe "magic host (proxy-configured client)" do
+  it "serves the info page for an absolute-form GET to the reserved host" do
+    with_landing_proxy(serve_landing: true) do |proxy, _ca, sink, _done|
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET http://gori.proxy/ HTTP/1.1\r\nHost: gori.proxy\r\n\r\n"
+      client.flush
+      resp = String.new(read_all(client))
+      client.close
+
+      resp.should contain("200 OK")
+      resp.should contain("text/html")
+      sink.responses.size.should eq(0) # a local UI hit is never captured as a flow
+    end
+  end
+
+  it "serves the CA on /ca.der over the reserved host" do
+    with_landing_proxy(serve_landing: true) do |proxy, ca, _sink, _done|
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET http://gori.proxy/ca.der HTTP/1.1\r\nHost: gori.proxy\r\n\r\n"
+      client.flush
+      head, body = split_response(read_all(client))
+      client.close
+
+      head.should contain("application/x-x509-ca-cert")
+      body.should eq(ca.ca_cert_der)
+    end
+  end
+
+  # A transparent/redirecting proxy hands us origin-form with the name in Host. The
+  # port-gated addresses_self? can't see that (Host carries no port -> 80), so this proves
+  # the name test covers the shape too.
+  it "serves the info page for origin-form with the reserved name in Host" do
+    with_landing_proxy(serve_landing: true) do |proxy, _ca, sink, _done|
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET / HTTP/1.1\r\nHost: gori\r\n\r\n"
+      client.flush
+      resp = String.new(read_all(client))
+      client.close
+
+      resp.should contain("200 OK")
+      resp.should contain("text/html")
+      sink.responses.size.should eq(0)
+    end
+  end
+
+  # The reserved name must NEVER reach Upstream.dial: bare "gori" resolves on any network
+  # with a DNS search domain, so a fall-through would ship the request to a stranger. Both
+  # non-servable shapes below must refuse locally instead.
+  it "refuses a non-GET to the reserved host without dialing it" do
+    with_landing_proxy(serve_landing: true) do |proxy, _ca, sink, done|
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "POST http://gori.proxy/ HTTP/1.1\r\nHost: gori.proxy\r\nContent-Length: 0\r\n\r\n"
+      client.flush
+      String.new(read_all(client)).should contain("502")
+      client.close
+
+      done.receive
+      sink.responses.size.should eq(1)
+      resp = sink.responses.first
+      resp.state.should eq(Gori::Store::FlowState::Error)
+      # names the reserved host, NOT "upstream connect failed" — proof we never dialed
+      resp.error.not_nil!.should contain("reserved host")
+    end
+  end
+
+  it "refuses the reserved host when the info page is disabled, without dialing it" do
+    with_landing_proxy(serve_landing: false) do |proxy, _ca, sink, done|
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET http://gori.proxy/ HTTP/1.1\r\nHost: gori.proxy\r\n\r\n"
+      client.flush
+      String.new(read_all(client)).should contain("502")
+      client.close
+
+      done.receive
+      sink.responses.first.error.not_nil!.should contain("reserved host")
+    end
+  end
+
+  # https://gori.proxy/ — the HTTPS-First shape. gori answers the CONNECT itself and serves
+  # the page under its own leaf. Verification is left ON here so a broken SAN for the
+  # reserved name fails the test rather than passing silently.
+  it "MITMs a CONNECT to the reserved host and serves the page under its own leaf" do
+    with_landing_proxy(serve_landing: true) do |proxy, ca, sink, _done|
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT gori.proxy:443 HTTP/1.1\r\nHost: gori.proxy:443\r\n\r\n"
+      raw.flush
+      String.new(Gori::Proxy::Codec::Http1.read_head(raw).not_nil!).should contain("200")
+
+      ctx = OpenSSL::SSL::Context::Client.new
+      ctx.ca_certificates = ca.ca_cert_path.not_nil!
+      tls = OpenSSL::SSL::Socket::Client.new(raw, context: ctx, sync_close: true, hostname: "gori.proxy")
+      tls << "GET /ca.der HTTP/1.1\r\nHost: gori.proxy\r\n\r\n"
+      tls.flush
+      head, body = split_response(read_all(tls))
+      tls.close
+
+      head.should contain("application/x-x509-ca-cert")
+      body.should eq(ca.ca_cert_der)
+      sink.responses.size.should eq(0) # still not proxied traffic
+    end
+  end
+
+  it "answers 405 rather than hanging on a non-GET inside the CONNECT tunnel" do
+    with_landing_proxy(serve_landing: true) do |proxy, ca, _sink, _done|
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT gori.proxy:443 HTTP/1.1\r\nHost: gori.proxy:443\r\n\r\n"
+      raw.flush
+      Gori::Proxy::Codec::Http1.read_head(raw).not_nil!
+
+      ctx = OpenSSL::SSL::Context::Client.new
+      ctx.ca_certificates = ca.ca_cert_path.not_nil!
+      tls = OpenSSL::SSL::Socket::Client.new(raw, context: ctx, sync_close: true, hostname: "gori.proxy")
+      tls << "POST / HTTP/1.1\r\nHost: gori.proxy\r\nContent-Length: 0\r\n\r\n"
+      tls.flush
+      resp = String.new(read_all(tls))
+      tls.close
+
+      resp.should contain("405")
+    end
+  end
+
+  # CONNECT to :80 then plaintext (curl --proxytunnel). No ClientHello arrives, so forcing a
+  # TLS handshake would just hang the client; the peek falls it back to serving in the clear.
+  it "serves in the clear when a CONNECT tunnel carries plaintext, not TLS" do
+    with_landing_proxy(serve_landing: true) do |proxy, _ca, _sink, _done|
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT gori.proxy:80 HTTP/1.1\r\nHost: gori.proxy:80\r\n\r\n"
+      raw.flush
+      Gori::Proxy::Codec::Http1.read_head(raw).not_nil!
+
+      raw << "GET / HTTP/1.1\r\nHost: gori.proxy\r\n\r\n"
+      raw.flush
+      resp = String.new(read_all(raw))
+      raw.close
+
+      resp.should contain("200 OK")
+      resp.should contain("text/html")
+    end
+  end
+
+  it "refuses a CONNECT to the reserved host when the info page is disabled" do
+    with_landing_proxy(serve_landing: false) do |proxy, _ca, _sink, _done|
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT gori.proxy:443 HTTP/1.1\r\nHost: gori.proxy:443\r\n\r\n"
+      raw.flush
+      String.new(read_all(raw)).should contain("502")
+      raw.close
     end
   end
 end

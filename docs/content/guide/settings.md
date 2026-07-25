@@ -81,7 +81,7 @@ The Theme row previews the current theme inline, showing its name and a swatch o
 
 | Section | Fields |
 |---------|--------|
-| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page on direct access, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), Hostname overrides (opener) |
+| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), Hostname overrides (opener) |
 | **Tabs** | Opener: show/hide and reorder the top tab bar |
 
 Network here is the **global default**. A project can pin its own bind address, port, and upstream from the **Project** tab, and those win for that project. See [Configuration](/getting-started/configuration/#network) for the full precedence order.

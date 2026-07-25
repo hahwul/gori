@@ -166,14 +166,20 @@ module Gori::Proxy
         return false
       end
 
-      # A browser pointed STRAIGHT at the listener (origin-form request to gori's own
-      # address, no proxy configured) gets the self-serve welcome + CA-download page
-      # instead of the 502 self-loop refusal below — but only for a plain GET/HEAD and
-      # only while the setting is on. Origin-form only: an absolute-form request (a
-      # proxy-configured browser) that targets self is a genuine loop and still 502s.
+      # A RESERVED host (http://gori.proxy/) — the mitm.it-style entry point for a client
+      # that already has gori configured as its proxy. Answered here or refused here, never
+      # forwarded.
+      return false if handle_reserved_host(req, scheme, host, port, created_at)
+
+      # A browser pointed STRAIGHT at the listener gets the self-serve welcome +
+      # CA-download page instead of the 502 self-loop refusal below — for a plain GET/HEAD,
+      # while the setting is on. Both request forms qualify: origin-form is the no-proxy
+      # device that typed the IP, absolute-form is the one that configured the proxy FIRST
+      # and then typed it (#280) — that request is aimed at us, not at an origin, so there
+      # is nothing to loop. Non-GET/HEAD still falls through to the refusal below.
       # Not recorded as a flow — it's a local UI hit, not proxied traffic.
       if (sa = @self_addr) && (tls = @tls) && tls.serve_landing? &&
-         origin_form?(req) && get_or_head?(req) && Upstream.addresses_self?(host, port, sa, @local_host)
+         get_or_head?(req) && Upstream.addresses_self?(host, port, sa, @local_host)
         serve_self_page(req, tls, sa)
         return false
       end
@@ -897,22 +903,7 @@ module Gori::Proxy
     private def handle_connect(req : Codec::RawRequest) : Bool
       host, port = Upstream.split_host_port(req.target, 443)
 
-      # A CONNECT whose (override-resolved) authority is gori's own listener would
-      # loop the proxy into itself — refuse before answering 200 / starting MITM.
-      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa, @local_host)
-        write_gateway_error
-        return false
-      end
-
-      # Sandbox: refuse to even open a tunnel to a host that CAN'T be in scope (safe-testing:
-      # don't handshake with an out-of-scope origin at all). A host that MIGHT be in scope —
-      # e.g. only url/path rules narrow it — IS tunnelled and MITM'd; the Tunnel forces it to
-      # h1 so ClientConn can block the out-of-scope requests precisely, per request. Answered
-      # before the 200 so the client sees the CONNECT itself refused.
-      if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
-        write_sandbox_block
-        return false
-      end
+      return false if connect_answered_locally?(host, port)
 
       if tls = @tls
         @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
@@ -954,6 +945,94 @@ module Gori::Proxy
         end
       end
       false # the connection has been consumed by the tunnel
+    end
+
+    # Everything decided BEFORE answering 200 to a CONNECT: cases gori handles or refuses
+    # itself rather than opening a tunnel. True when the connection has been dealt with.
+    private def connect_answered_locally?(host : String, port : Int32) : Bool
+      # A RESERVED host — a proxy-configured client that browsed to `https://gori.proxy/`
+      # (or was upgraded there by HTTPS-First). Answered locally under gori's own leaf: the
+      # client won't trust it yet, which is exactly what it came here to fix, so the warning
+      # is expected and clicking through reaches the CA download. Terminal like the plaintext
+      # branch — a reserved name is never dialed. Deliberately ahead of the sandbox gate
+      # below: this reaches no origin and no network, so the safe-testing contract ("don't
+      # handshake with an out-of-scope ORIGIN") is untouched, and a scope that happens not to
+      # cover the setup page must not strand the CA download.
+      if reserved_self_host?(host)
+        serve_self_page_connect(host)
+        return true
+      end
+
+      # A CONNECT whose (override-resolved) authority is gori's own listener would
+      # loop the proxy into itself — refuse before answering 200 / starting MITM.
+      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa, @local_host)
+        write_gateway_error
+        return true
+      end
+
+      # Sandbox: refuse to even open a tunnel to a host that CAN'T be in scope (safe-testing:
+      # don't handshake with an out-of-scope origin at all). A host that MIGHT be in scope —
+      # e.g. only url/path rules narrow it — IS tunnelled and MITM'd; the Tunnel forces it to
+      # h1 so ClientConn can block the out-of-scope requests precisely, per request. Answered
+      # before the 200 so the client sees the CONNECT itself refused.
+      if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
+        write_sandbox_block
+        return true
+      end
+
+      false
+    end
+
+    # A hostname gori answers for ITSELF instead of proxying — the mitm.it-style entry point
+    # for a client that already has gori configured as its proxy, and therefore sends
+    # absolute-form (or CONNECT) and can never match the direct-hit test in
+    # Upstream.addresses_self?. An explicit host override on the name is the escape hatch,
+    # for the rare LAN that has a real box called "gori"; that mirrors why addresses_self?
+    # skips override resolution — a mapping the user wrote down is a statement of intent.
+    private def reserved_self_host?(host : String) : Bool
+      SelfPage.magic_host?(host) && @host_overrides.try(&.connect_ip(host)).nil?
+    end
+
+    # The plaintext half of the reserved-host route. Returns true when the request was
+    # dealt with here — which is EVERY reserved-host request, servable or not. That is the
+    # point: we must never fall through to Upstream.dial, because bare "gori" resolves on
+    # any network with a DNS search domain and the request would go to a stranger.
+    private def handle_reserved_host(req : Codec::RawRequest, scheme : String, host : String,
+                                     port : Int32, created_at : Int64) : Bool
+      return false unless reserved_self_host?(host)
+      if (sa = @self_addr) && (tls = @tls) && tls.serve_landing? && get_or_head?(req)
+        serve_self_page(req, tls, sa)
+      else
+        record_error(req, scheme, host, port, created_at, "reserved host, not proxied: #{host}")
+        write_gateway_error
+      end
+      true
+    end
+
+    # The CONNECT half of the reserved-host route (see handle_connect). Answers 200, then
+    # peeks one byte exactly as handle_connect does: a TLS ClientHello (0x16) goes to the
+    # TlsMitm seam, anything else is a plaintext CONNECT tunnel (`curl --proxytunnel` at
+    # port 80) and is served in the clear rather than forced into a doomed handshake.
+    private def serve_self_page_connect(host : String) : Nil
+      sa = @self_addr
+      tls = @tls
+      unless sa && tls && tls.serve_landing?
+        # Same shape as the CONNECT self-loop refusal: refuse before the 200, record nothing
+        # (CONNECT is never a captured flow), and above all never dial the reserved name.
+        return write_gateway_error
+      end
+
+      @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
+      @io.flush
+      first = @io.read_byte
+      return if first.nil?
+      stream = PrefixIO.new(Bytes[first], @io)
+      listen = listen_display(sa)
+      if first == 0x16_u8
+        tls.intercept_self_page(host, stream, listen)
+      else
+        tls.serve_self_page_once(stream, listen)
+      end
     end
 
     # Resolves {host, port, scheme, forward_head}. Absolute-form request targets
@@ -1193,33 +1272,27 @@ module Gori::Proxy
     rescue
     end
 
-    # An origin-form request-target (path-only, e.g. `/` or `/ca.pem`) — i.e. a browser
-    # that hit us DIRECTLY, not via a proxy config (which sends an absolute-form URI).
-    private def origin_form?(req : Codec::RawRequest) : Bool
-      t = req.target
-      !t.starts_with?("http://") && !t.starts_with?("https://")
-    end
-
     private def get_or_head?(req : Codec::RawRequest) : Bool
       req.method.compare("GET", case_insensitive: true) == 0 ||
         req.method.compare("HEAD", case_insensitive: true) == 0
     end
 
-    # Serve the direct-access welcome + CA-download page (see the guard in handle_request).
+    # Serve the welcome + CA-download page (see the two guards in handle_request: a direct
+    # hit on the listener, or a request for the reserved host).
     # The CA bytes/fingerprint/path come through the TlsMitm seam so this stays decoupled
     # from the FFI cert code; a HEAD request gets headers only. Best-effort — a write error
     # just drops the connection like every other canned response here.
     private def serve_self_page(req : Codec::RawRequest, tls : TlsMitm, self_addr : {String, Int32}) : Nil
-      head_only = req.method.compare("HEAD", case_insensitive: true) == 0
-      # Show the concrete address the device actually reached us on rather than a
-      # wildcard "0.0.0.0" — under a wildcard bind that's the friendlier, truthful value.
-      listen = (lh = @local_host) ? {lh, self_addr[1]} : self_addr
-      resp = SelfPage.respond(req.target,
-        pem: tls.ca_cert_pem, der: tls.ca_cert_der, spki: tls.ca_spki_sha256,
-        ca_path: tls.ca_cert_path, listen: listen, version: Gori::VERSION, head_only: head_only)
-      @io.write(resp)
+      @io.write(tls.self_page_reply(req.method, req.target, listen_display(self_addr)))
       @io.flush
     rescue
+    end
+
+    # The address to PRINT on the page: the concrete one the device actually reached us on
+    # rather than a wildcard "0.0.0.0" — under a wildcard bind that's the friendlier,
+    # truthful value.
+    private def listen_display(self_addr : {String, Int32}) : {String, Int32}
+      (lh = @local_host) ? {lh, self_addr[1]} : self_addr
     end
 
     private def keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,

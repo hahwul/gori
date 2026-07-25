@@ -81,7 +81,7 @@ Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 
 
 | 섹션 | 필드 |
 |------|------|
-| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page on direct access, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), Hostname overrides(오프너) |
+| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), Hostname overrides(오프너) |
 | **Tabs** | 오프너: 상단 탭 바 표시/숨김과 순서 변경 |
 
 여기의 Network는 **전역 기본값**입니다. 프로젝트는 **Project** 탭에서 자체 바인드 주소, 포트, 업스트림을 고정할 수 있고 그 프로젝트에서는 그쪽이 우선합니다. 전체 우선순위는 [설정](/ko/getting-started/configuration/#network)을 참고하세요.

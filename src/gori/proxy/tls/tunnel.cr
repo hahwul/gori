@@ -68,6 +68,28 @@ module Gori::Proxy::Tls
       @ca.spki_sha256_base64
     end
 
+    # `https://gori.proxy/` — a CONNECT to a reserved host, answered entirely locally.
+    # Deliberately NOT `intercept`: there is no origin here, so no ALPN-reflection probe
+    # (which would burn H2_PROBE_CONNECT_TIMEOUT dialing a name that cannot resolve), no
+    # upstream, no ClientConn, and nothing captured. advertise_h2: false keeps the client on
+    # HTTP/1.1 so the one-shot serve below is the whole protocol.
+    #
+    # The handshake FAILING is the expected common path: the client is here precisely
+    # because it does not trust this CA yet. Rescued and closed like `intercept`.
+    def intercept_self_page(host : String, client : IO, listen : {String, Int32}) : Nil
+      server_ctx = @ca.context_for(host, advertise_h2: false)
+      # sync_close: true for a different reason than in `intercept` (no relay, so no
+      # cross-fiber close race): it keeps shutdown write-only instead of blocking on a
+      # close_notify from a browser that hit "back" at the certificate warning.
+      client_tls = OpenSSL::SSL::Socket::Server.new(client, server_ctx, sync_close: true, accept: true)
+      client_tls.sync = true
+      serve_self_page_once(client_tls, listen)
+    rescue
+      # Client refused our cert (the untrusted-CA warning) — nothing to serve.
+    ensure
+      client_tls.try(&.close) rescue nil
+    end
+
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink) : Nil
       # ALPN reflection (#323): advertise h2 to the client only when the ORIGIN speaks it. A
       # non-nil result is a live upstream already confirmed h2 (reflect_origin_h2 dials it and
@@ -99,6 +121,10 @@ module Gori::Proxy::Tls
       else
         upstream.try(&.close) rescue nil # client took h1: an h2 probe socket can't serve it
         upstream = nil
+        # NOTE: no `tls:`, no `self_addr:`, no `local_host:` — deliberately. Those three are
+        # what arm the self-page / self-loop guards in ClientConn, and inside a tunnel every
+        # request resolves to the pinned CONNECT authority (resolve_forward short-circuits on
+        # @fixed_host), so arming them here would test the wrong host on every request.
         Proxy::ClientConn.new(
           client_tls, "https", sink,
           fixed_host: host, fixed_port: port,

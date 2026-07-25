@@ -42,7 +42,7 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
 | `upstream_proxy` | string | `""` | Global default upstream (`host:port`); empty = direct. Project `net.upstream_proxy` wins when set |
 | `verify_upstream` | bool | `true` | Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`); if none is found, HTTPS verification fails — set `SSL_CERT_FILE` or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
-| `serve_landing` | bool | `true` | Serve the built-in info / CA-download page when the listen address is hit directly instead of proxied |
+| `serve_landing` | bool | `true` | Serve the built-in info / CA-download page, both when the listen address is hit directly and at the reserved host `http://gori.proxy/` (or `http://gori/`) for a client already pointed at the proxy |
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
 | `io_timeout_secs` | integer | `30` | Upstream read / write idle timeout in seconds (minimum `1`) |
 | `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |

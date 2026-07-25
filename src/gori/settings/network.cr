@@ -31,10 +31,12 @@ module Gori::Settings
   # settings:network editor toggles it live via Session#set_verify_upstream. Global-only
   # (no per-project override). CLI `run`/MCP paths keep their own --insecure-upstream flag.
   class_property? verify_upstream : Bool = DEFAULT_VERIFY_UPSTREAM
-  # Whether a browser that hits the proxy listener DIRECTLY (origin-form, no proxy
-  # config) gets the gori welcome + CA-download page instead of the 502 self-loop
-  # refusal. Global-only; the settings:network editor toggles it live via
-  # Session#set_serve_landing (pushed to the TLS tunnel, read per-request).
+  # Whether a browser gets the gori welcome + CA-download page instead of the 502
+  # self-loop refusal. Covers both ways in: hitting the listen address itself (no proxy
+  # configured yet), and the reserved host http://gori.proxy/ (already proxied, so the
+  # request can only arrive absolute-form). Global-only; the settings:network editor
+  # toggles it live via Session#set_serve_landing (pushed to the TLS tunnel, read
+  # per-request).
   class_property? serve_landing : Bool = DEFAULT_SERVE_LANDING
   # Outbound dial timeouts, stored in seconds; read live by Upstream.dial (and the repeater/
   # fuzz/discover engines) via the connect_timeout/io_timeout helpers below. Global-only.

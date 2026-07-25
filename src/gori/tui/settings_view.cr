@@ -26,7 +26,7 @@ module Gori::Tui
       Field.new("Bind Port", "global default port (0-65535) — project overrides win when set"),
       Field.new("Upstream proxy", "host:port — blank = connect directly; projects may override"),
       Field.new("Verify upstream TLS", "check the upstream server's certificate — off accepts any cert (MITM/testing); ←/→/space toggles", bool: true),
-      Field.new("Info page on direct access", "serve a gori welcome + CA-download page to browsers that hit the listen address directly — ←/→/space toggles", bool: true),
+      Field.new("Info page and CA download", "serve a gori welcome + CA-download page to browsers that hit the listen address, or http://gori.proxy/ when already proxied — ←/→/space toggles", bool: true),
       Field.new("Connect timeout (s)", "how long an upstream TCP/proxy connect may take before giving up — seconds (min 1)"),
       Field.new("Idle timeout (s)", "initial read/write timeout on the upstream socket — seconds (min 1)"),
       Field.new("Capture body limit (MiB)", "max body bytes captured + stored per flow — MiB (min 1); applies to NEW flows only"),

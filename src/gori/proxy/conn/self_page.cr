@@ -19,6 +19,30 @@ module Gori::Proxy
     # paired with a visually-hidden "gori" so assistive tech reads it correctly.
     WORDMARK = %(<span aria-hidden="true">𝓰𝓸𝓻𝓲</span><span class="sr">gori</span>)
 
+    # The hostnames that serve this page to a client which ALREADY has gori configured
+    # as its proxy — mitmproxy's `mitm.it`, Burp's `http://burp`. Such a client sends the
+    # ABSOLUTE form, so it can never match Upstream.addresses_self? (that test asks "did
+    # you hit our listener directly"), and its Host has to be a name we agree to answer
+    # for. `gori.proxy` is the documented one; bare `gori` is the short thing you can
+    # actually type on a phone keyboard.
+    #
+    # This lives here, beside the routes it serves, rather than in Upstream: unlike
+    # addresses_self?/loops_to_self? it classifies a NAME, not an address — no port gate,
+    # no IP parsing, no host-override resolution.
+    MAGIC_HOSTS = {"gori.proxy", "gori"}
+
+    # What we tell people to type. Used in the page's own copy and the docs.
+    MAGIC_URL = "http://gori.proxy/"
+
+    # Allocation-free on purpose. addresses_self? can afford `downcase` because its
+    # `port == self_addr[1]` gate short-circuits almost every request; this predicate has
+    # no such gate and runs on every GET/HEAD the proxy sees, so it compares in place.
+    # `MAGIC_HOSTS.any?` unrolls at compile time (Tuple#each is a macro loop).
+    def self.magic_host?(host : String) : Bool
+      h = host.chomp('.') # a fully-qualified "gori.proxy." names the same host
+      MAGIC_HOSTS.any? { |name| h.compare(name, case_insensitive: true) == 0 }
+    end
+
     # Map a request-target path to the resource it serves. Query/fragment are
     # stripped so `/ca.pem?x=1` still downloads. Unknown paths 404 (so a browser's
     # incidental probes don't masquerade as certs).
@@ -30,6 +54,7 @@ module Gori::Proxy
       if h = path.index('#')
         path = path[0, h]
       end
+      path = strip_authority(path)
       case path
       when "", "/"                   then :index
       when "/ca.pem", "/gori-ca.pem" then :pem
@@ -38,6 +63,23 @@ module Gori::Proxy
       when "/favicon.ico" then :favicon
       else                     :not_found
       end
+    end
+
+    # A proxy-configured client sends the ABSOLUTE form — `GET http://gori.proxy/ca.der`
+    # — so the request-target carries a scheme and authority the route table above would
+    # never match, silently 404ing every download. Reduce it to the path. Runs AFTER the
+    # query strip, so a '/' inside a query string can't be mistaken for the path start.
+    # No path at all ("http://gori.proxy") is the index, matching the "" case above.
+    private def self.strip_authority(target : String) : String
+      prefix = if target.starts_with?("http://")
+                 7
+               elsif target.starts_with?("https://")
+                 8
+               else
+                 return target
+               end
+      slash = target.index('/', prefix)
+      slash ? target[slash..] : "/"
     end
 
     # Build the complete HTTP/1.1 response bytes for `target`. `pem`/`der` are nil
@@ -94,6 +136,16 @@ module Gori::Proxy
     # 204 carries no body by definition — no Content-Type/Length.
     private def self.no_content : Bytes
       "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_slice
+    end
+
+    # The magic-host TLS tunnel has no origin to fall back on, so a non-GET/HEAD there
+    # gets an explicit refusal rather than a silent EOF. (The plaintext path never needs
+    # this: its non-GET/HEAD requests fall through to the 502 refusal in ClientConn.)
+    def self.method_not_allowed(head_only : Bool) : Bytes
+      build(405, "Method Not Allowed", "text/html; charset=utf-8",
+        simple_html("Method not allowed",
+          "This is gori's local info page — only GET and HEAD are served here.").to_slice,
+        head_only)
     end
 
     private def self.unavailable(head_only : Bool) : Bytes
@@ -169,6 +221,7 @@ module Gori::Proxy
 
           <div class="meta">
             <div><span class="k">Listening on</span><code>#{listen_s}</code></div>
+            <div><span class="k">Also at</span><code>#{MAGIC_URL}</code></div>
             <div><span class="k">CA file</span><code>#{path}</code></div>
             #{fingerprint}
             <div><span class="k">Version</span><code>v#{ver}</code></div>
