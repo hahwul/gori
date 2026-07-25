@@ -99,6 +99,29 @@ module Gori::Tui
     # it open — e.g. a validation error keeps the form up). Supplied at the open-site.
     property on_commit : Proc(Bool)?
 
+    # What the shell runs AFTER this overlay closes, whether it committed or cancelled.
+    #
+    # This is the NESTED-MODAL seam. A modal opened FROM another supplies
+    # `-> { open_overlay(parent) }` here, so closing pops back into the parent instead of
+    # dropping the user on the bare tab body: ↵-ing into the Theme editor from Preferences
+    # and pressing esc must land back in Preferences, not on the tab underneath. The shell
+    # used to express exactly ONE such relationship, with a `@prefs_return` flag plus a
+    # `settle_sub_editor` call at each dispatch chokepoint; as a per-overlay closure it
+    # composes, so a modal can nest inside a modal that is itself nested.
+    #
+    # A proc rather than a parent reference, because the restore is not always just
+    # "re-open the parent". Returning from the Hostnames editor has to re-pull the
+    # Preferences modal's Network section first, whose "N entries" row that editor just
+    # moved. A `return_to : Overlay?` cannot say that; a closure can.
+    #
+    # ORDERING, which is load-bearing: the shell drops the modal FIRST and runs this
+    # after (see `Runner#close_active_overlay`), so a closure that calls `open_overlay` is
+    # the last write and the shell really is holding the parent when it returns. An exit
+    # that goes somewhere else entirely — ^P to the command palette — deliberately uses
+    # `Runner#leave_overlay`, which skips this, so the pop-back can't re-open on top of
+    # where the user asked to go.
+    property on_close : Proc(Nil)?
+
     # The `@overlay` state this modal sets, written by `Runner#open_overlay`.
     #
     # It is NOT what makes the modal capture input: a migrated modal's member is deleted

@@ -1767,7 +1767,31 @@ module Gori::Tui
       @overlay = ov.key
     end
 
-    private def close_active_overlay : Nil
+    # Close `ov` and run its on_close — the nested-modal seam (overlay.cr). A modal opened
+    # from another pops back INTO it here, so the shell needs no per-family "return to"
+    # flag of its own.
+    #
+    # The order matters: the modal is dropped BEFORE the closure runs, so a pop-back's
+    # `open_overlay` is the last write and the shell is holding the parent when this
+    # returns. Running on_close first would have the drop undo it.
+    #
+    # `ov` is checked against what the shell CURRENTLY holds because a handler is allowed
+    # to change that mid-key: a Preferences opener row opens its own editor, and ^P calls
+    # `leave_overlay` on the way to the palette. Both must return :stay — and this makes a
+    # wrong return inert instead of user-visible, since otherwise the shell would drop the
+    # editor that had just appeared (running ITS pop-back), or blank the palette ^P had
+    # just opened.
+    private def close_active_overlay(ov : Overlay) : Nil
+      cur = @active_overlay
+      return unless cur && cur.same?(ov)
+      leave_overlay
+      ov.on_close.try(&.call)
+    end
+
+    # Drop the active modal WITHOUT running its on_close. For an exit that goes somewhere
+    # else entirely — the ^P jump to the command palette — where a nested modal's pop-back
+    # would otherwise re-open on top of the destination.
+    private def leave_overlay : Nil
       @active_overlay = nil
       @overlay = OverlayKind::None
     end
@@ -1789,15 +1813,15 @@ module Gori::Tui
     # closes iff it returns true (a validation failure keeps the form up).
     private def dispatch_overlay_key(ov : Overlay, ev : Termisu::Event::Key) : Nil
       case ov.handle_key(ev)
-      when :cancel then close_active_overlay
-      when :commit then close_active_overlay if ov.commit
+      when :cancel then close_active_overlay(ov)
+      when :commit then close_active_overlay(ov) if ov.commit
       end
     end
 
     private def dispatch_overlay_click(ov : Overlay, area : Rect, mx : Int32, my : Int32) : Nil
       case ov.handle_click(area, mx, my)
-      when :cancel then close_active_overlay
-      when :commit then close_active_overlay if ov.commit
+      when :cancel then close_active_overlay(ov)
+      when :commit then close_active_overlay(ov) if ov.commit
       end
     end
 
@@ -1820,7 +1844,7 @@ module Gori::Tui
         return false
       end
       path = @session.ca.ca_cert_path
-      close_active_overlay
+      close_active_overlay(ov)
       confirm("IMPORT CA",
         "Replace the current root CA with the imported one?\n\n" \
         "The old CA becomes untrusted — re-trust the imported\n" \

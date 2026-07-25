@@ -15,6 +15,8 @@ require "./memory_backend"
 #   * `open?` mirrors whether the shell still holds the modal in `@active_overlay`.
 #   * `commits` counts runs of the injected `on_commit` closure — the open-site behaviour
 #     a migrated modal no longer carries itself.
+#   * `closes` counts runs of `on_close`, the nested-modal pop-back the shell performs
+#     AFTER dropping the modal (see the ordering note on `close!`).
 #
 # If those Runner methods ever change, change them HERE too: this harness is the
 # spec-side statement of that contract, and a modal spec that passes against a stale
@@ -46,6 +48,9 @@ class OverlayHarness
   getter area : Gori::Tui::Rect
   # Times the injected on_commit ran (a :commit outcome, whether or not it closed).
   getter commits = 0
+  # Times the overlay's on_close ran — the nested-modal pop-back, which fires on a cancel
+  # AND on a commit that closed, but never while the modal stays up.
+  getter closes = 0
   # The shell still holds this modal — false once a :cancel, or a :commit whose closure
   # returned true, dropped it.
   getter? open = true
@@ -176,10 +181,20 @@ class OverlayHarness
 
   private def dispatch(outcome : Symbol) : Symbol
     case outcome
-    when :cancel then @open = false
-    when :commit then @open = false if @overlay.commit
+    when :cancel then close!
+    when :commit then close! if @overlay.commit
     end
     @open ? :open : :closed
+  end
+
+  # Mirrors `Runner#close_active_overlay`: the shell DROPS the modal first and runs its
+  # `on_close` after. That order is load-bearing rather than incidental — a pop-back
+  # closure re-opens its parent with `open_overlay`, so it has to be the last write;
+  # running on_close first would leave the shell holding nothing.
+  private def close! : Nil
+    @open = false
+    @closes += 1
+    @overlay.on_close.try(&.call)
   end
 
   private def event(k : Termisu::Input::Key, char : Char?,
