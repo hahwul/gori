@@ -2493,3 +2493,57 @@ describe "MCP repeater tags" do
     end
   end
 end
+
+private def seed_flow(store, target = "/a") : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+  id
+end
+
+describe "MCP flow deletion" do
+  it "deletes one flow by id" do
+    with_store do |store|
+      a = seed_flow(store, "/a")
+      b = seed_flow(store, "/b")
+      tools = tools_for(store)
+
+      ok_json(tools, "delete_flow", %({"id":#{a}}))["deleted"].as_bool.should be_true
+      store.get_flow(a).should be_nil
+      store.get_flow(b).should_not be_nil
+      tools.call("delete_flow", JSON.parse(%({"id":#{a}}))).is_error.should be_true # already gone
+    end
+  end
+
+  it "refuses clear_history without confirm:true and reports the count it would destroy" do
+    with_store do |store|
+      seed_flow(store, "/a")
+      seed_flow(store, "/b")
+      tools = tools_for(store)
+
+      r = tools.call("clear_history", JSON.parse("{}"))
+      r.is_error.should be_true
+      r.text.should contain("2")
+      store.count.should eq(2) # nothing destroyed
+
+      tools.call("clear_history", JSON.parse(%({"confirm":false}))).is_error.should be_true
+      store.count.should eq(2)
+
+      ok_json(tools, "clear_history", %({"confirm":true}))["deleted"].as_i.should eq(2)
+      store.count.should eq(0)
+    end
+  end
+
+  it "refuses both under --read-only" do
+    with_store do |store|
+      id = seed_flow(store)
+      ro = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      ro.call("delete_flow", JSON.parse(%({"id":#{id}}))).is_error.should be_true
+      ro.call("clear_history", JSON.parse(%({"confirm":true}))).is_error.should be_true
+      store.count.should eq(1)
+    end
+  end
+end

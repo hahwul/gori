@@ -93,6 +93,7 @@ module Gori
         "probe_dismiss", "probe_promote", "probe_delete",
         "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
         "delete_issue", "update_scope_rule", "set_sitemap_tag",
+        "delete_flow", "clear_history",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -1091,6 +1092,18 @@ module Gori
               s.field "tag", strprop("the memo; empty or absent CLEARS the tag")
             end
 
+            tool j, "delete_flow",
+              "Hard-delete one captured flow from History. This cannot be undone." do |s|
+              s.field "id", intprop("flow id"), required: true
+            end
+
+            tool j, "clear_history",
+              "Delete EVERY captured flow in the project. Requires confirm:true — without it " \
+              "the call is refused and reports how many flows it would have destroyed. " \
+              "This cannot be undone." do |s|
+              s.field "confirm", boolprop("must be true to actually delete; anything else refuses"), required: true
+            end
+
             tool j, "set_probe_mode",
               "Set the project's scan mode. off = no analysis; passive = zero-request checks on " \
               "captured traffic (default); active = passive plus light-touch probes that SEND " \
@@ -1484,6 +1497,8 @@ module Gori
         when "delete_issue"            then gated { delete_issue(h) }
         when "update_scope_rule"       then gated { update_scope_rule(h) }
         when "set_sitemap_tag"         then gated { set_sitemap_tag(h) }
+        when "delete_flow"             then gated { delete_flow(h) }
+        when "clear_history"           then gated { clear_history(h) }
         when "fuzz_start"              then gated { fuzz_start(h) }
         when "fuzz_status"             then gated { fuzz_status(h) }
         when "fuzz_results"            then gated { fuzz_results(h) }

@@ -126,6 +126,30 @@ module Gori
         BodyChunkOptions.new(flow_id, repeater_id, offset, limit, bool_arg(h, "raw", false))
       end
 
+      # Hard-delete ONE captured flow (the TUI History tab's delete). Single and explicit,
+      # so no extra confirmation — unlike clear_history.
+      private def delete_flow(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        return not_found("no flow with id #{id}") unless store.get_flow(id)
+        store.delete_flow(id)
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+      end
+
+      # Wipe EVERY captured flow. The TUI puts a danger confirm in front of this; here
+      # confirm:true is that gate. Without it we report the count and refuse, so a
+      # mis-issued call cannot silently empty a capture session.
+      private def clear_history(h) : Result
+        n = store.count
+        unless bool(h, "confirm")
+          return err("refusing to delete #{n} flow#{n == 1 ? "" : "s"} without confirm:true — this cannot be undone",
+            "CONFIRM_REQUIRED", field: "confirm",
+            details: JSON.parse({"flows" => n}.to_json))
+        end
+        store.clear_flows
+        Result.new({"deleted" => n, "cleared" => true}.to_json)
+      end
+
       private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : {Bytes?, Bytes?} | Result
         if id = flow_id
           detail = store.get_flow(id)

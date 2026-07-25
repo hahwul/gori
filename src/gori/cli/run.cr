@@ -133,6 +133,8 @@ module Gori
       SUBCOMMANDS = [
         {"capture", "Start the proxy and stream captured flows to STDOUT"},
         {"history (ls)", "List / QL-query captured flows"},
+        {"history delete", "Hard-delete one captured flow by id"},
+        {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
         {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
         {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},

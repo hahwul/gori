@@ -4,6 +4,80 @@ module Gori
   module CLI
     module Run
       private def self.cmd_history(args : Array(String)) : Nil
+        # `delete`/`clear` are reserved as the first positional (same convention as
+        # `gori run probe`); a QL query starting with one goes through --query.
+        case args.first?
+        when "delete", "rm" then cmd_history_delete(args[1..])
+        when "clear"        then cmd_history_clear(args[1..])
+        else                     cmd_history_list(args)
+        end
+      end
+
+      # Hard-delete ONE captured flow. Single and explicit, so no extra confirmation —
+      # unlike `clear`, which needs --yes.
+      private def self.cmd_history_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run history delete <id>\n\nHard-delete one captured flow. This can't be undone."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run history delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run history delete: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id_s = positional.first? || abort("gori run history delete: <id> is required")
+        id = id_s.to_i64? || abort("gori run history delete: invalid flow id #{id_s.inspect}")
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          abort "gori run history delete: no flow with id #{id}" unless store.get_flow(id)
+          store.delete_flow(id)
+          puts "Flow ##{id} deleted."
+        ensure
+          store.close
+        end
+      end
+
+      # Wipe EVERY captured flow in the project. The TUI puts a danger confirm in front of
+      # this; headless, --yes is that confirm — without it we print the count and refuse, so
+      # a mistyped command can't empty a capture session.
+      private def self.cmd_history_clear(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        yes = false
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run history clear --yes\n\n" \
+                     "Delete ALL captured flows in the project. This can't be undone."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run history clear: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run history clear: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          n = store.count
+          unless yes
+            abort "gori run history clear: refusing to delete #{n} flow#{n == 1 ? "" : "s"} without --yes"
+          end
+          store.clear_flows
+          puts "Deleted #{n} flow#{n == 1 ? "" : "s"}."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_history_list(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         query : String? = nil
@@ -12,7 +86,8 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)"
+          p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
+                     "Subcommands: history delete <id> · history clear --yes"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
