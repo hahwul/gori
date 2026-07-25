@@ -6,6 +6,10 @@ module Gori
       # `gori run oast` — headless out-of-band listener (interactsh & friends). Store-free
       # and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       private def self.cmd_oast(args : Array(String)) : Nil
+        # `providers` is the one OAST subcommand that touches the project store, so it must be
+        # dispatched BEFORE strip_project_flags eats the --project/--db it actually needs.
+        return cmd_oast_providers(args[1..]) if args.first? == "providers"
+
         filtered = strip_project_flags(args)
         case sub = filtered.first?
         when "presets"           then oast_presets
@@ -43,11 +47,232 @@ module Gori
       private def self.oast_help : Nil
         puts <<-HELP
         Usage: gori run oast <subcommand>
-          listen    Register an OAST payload and stream incoming callbacks
-          presets   List the built-in public providers
+          listen      Register an OAST payload and stream incoming callbacks
+          presets     List the built-in public providers
+          providers   Manage SAVED providers (list, add, update, enable/disable, delete)
 
         Run `gori run oast listen -h` for listen options.
         HELP
+      end
+
+      # --- saved providers (the TUI OAST tab's Providers sub-tab) ---------------------------
+      #
+      # `listen` takes an ad-hoc --provider/--server/--token per run; these are the persisted
+      # entries an operator configures once (a private interactsh server and its token, say)
+      # and reuses. Only PROJECT entries are writable here — a global one lives in the user's
+      # settings.json and is shared across every project.
+
+      private def self.cmd_oast_providers(args : Array(String)) : Nil
+        case args.first?
+        when "add"          then cmd_oast_provider_write(args[1..], update: false)
+        when "update"       then cmd_oast_provider_write(args[1..], update: true)
+        when "enable"       then cmd_oast_provider_enabled(args[1..], true)
+        when "disable"      then cmd_oast_provider_enabled(args[1..], false)
+        when "delete", "rm" then cmd_oast_provider_delete(args[1..])
+        when "list", nil    then cmd_oast_providers_list(args.empty? ? args : args[1..])
+        else                     cmd_oast_providers_list(args)
+        end
+      end
+
+      private def self.cmd_oast_providers_list(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        show_tokens = false
+        format = :text
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast providers [list] [options]\n\n" \
+                     "List saved OAST providers. `id` is scope-qualified: p_<n> is this project's,\n" \
+                     "g_<hex> is a global one from settings.json (read-only here)."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run oast providers: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast providers: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        configs = begin
+          Oast.provider_configs(store)
+        ensure
+          store.close
+        end
+
+        if format == :json
+          puts(JSON.build do |j|
+            j.array do
+              configs.each do |c|
+                j.object do
+                  j.field "id", c.key
+                  j.field "name", c.name
+                  j.field "kind", c.kind
+                  j.field "host", c.host
+                  j.field "scope", c.scope
+                  j.field "enabled", c.enabled
+                  j.field "token", c.token.nil? ? nil : (show_tokens ? c.token : "[REDACTED]")
+                end
+              end
+            end
+          end)
+          return
+        end
+        if configs.empty?
+          STDERR.puts "no saved OAST providers (add one with `gori run oast providers add`)"
+          return
+        end
+        configs.each do |c|
+          tok = c.token.nil? ? "" : "  token=#{show_tokens ? c.token : "[REDACTED]"}"
+          puts "#{c.enabled ? "[on ]" : "[off]"} #{c.key.ljust(12)} #{c.kind.ljust(13)} #{c.name.ljust(24)} #{c.host}#{tok}"
+        end
+      end
+
+      private def self.cmd_oast_provider_write(args : Array(String), *, update : Bool) : Nil
+        verb = update ? "update" : "add"
+        db_path : String? = nil
+        project_name : String? = nil
+        id : String? = nil
+        name : String? = nil
+        # Nilable sentinels, not defaults: on `update` a field the caller did not mention must
+        # keep its stored value. Replacing the whole row instead would silently drop the
+        # provider's auth TOKEN whenever someone edited only the name.
+        kind_s : String? = nil
+        host : String? = nil
+        token : String? = nil
+        enabled : Bool? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = update ? "Usage: gori run oast providers update <id> [options]\n\nFields you do not pass keep their current value." \
+                               : "Usage: gori run oast providers add --name=N [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--name=NAME", "Display name#{update ? "" : " (required)"}") { |v| name = v }
+          p.on("--kind=KIND", "interactsh (default) | custom-http | webhook.site | BOAST | postbin") { |v| kind_s = v }
+          p.on("--host=URL", "Server/base URL (defaults to the kind's public preset)") { |v| host = v }
+          p.on("--token=TOK", "Provider auth token") { |v| token = v }
+          p.on("--enabled", "Turn the provider on") { enabled = true }
+          p.on("--disabled", "Turn the provider off") { enabled = false }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| id = rest.first? }
+          p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        # An unparseable kind would be stored verbatim and then never match a ProviderKind at
+        # listen time — the provider would simply never fire. Refuse it here.
+        kind = kind_s.try do |k|
+          Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}'")
+        end
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          if update
+            oast_provider_apply_update(store, oast_provider_row_id(store, id, verb),
+              name, kind, host, token, enabled)
+          else
+            oast_provider_apply_add(store, name, kind, host, token, enabled)
+          end
+        ensure
+          store.close
+        end
+      end
+
+      # Update path: every field the caller omitted keeps its stored value.
+      private def self.oast_provider_apply_update(store : Store, row : Int64, name : String?,
+                                                  kind : Oast::ProviderKind?, host : String?,
+                                                  token : String?, enabled : Bool?) : Nil
+        existing = store.oast_providers.find { |p| p.id == row }
+        abort "gori run oast providers update: no project OAST provider with id 'p_#{row}'" if existing.nil?
+        store.update_oast_provider(row,
+          name.try(&.strip).presence || existing.name,
+          kind.try(&.label) || existing.kind,
+          host.try(&.strip).presence || existing.host,
+          token.try(&.strip).presence || existing.token,
+          enabled.nil? ? existing.enabled? : enabled)
+        puts "OAST provider p_#{row} updated."
+      end
+
+      private def self.oast_provider_apply_add(store : Store, name : String?,
+                                               kind : Oast::ProviderKind?, host : String?,
+                                               token : String?, enabled : Bool?) : Nil
+        abort "gori run oast providers add: --name is required" if name.nil? || name.empty?
+        k = kind || Oast::ProviderKind::Interactsh
+        h = host.try(&.strip).presence || Oast::Presets.all.find { |p| p.kind == k }.try(&.host)
+        abort "gori run oast providers add: --host is required for #{k.label} (it has no default preset)" if h.nil?
+        id = store.insert_oast_provider(name, k.label, h, token.try(&.strip).presence,
+          enabled.nil? ? true : enabled, store.oast_providers.size)
+        abort "gori run oast providers add: failed to persist the provider (store busy or unwritable)" if id == 0
+        puts "OAST provider 'p_#{id}' created."
+      end
+
+      private def self.cmd_oast_provider_enabled(args : Array(String), enabled : Bool) : Nil
+        verb = enabled ? "enable" : "disable"
+        db_path : String? = nil
+        project_name : String? = nil
+        id : String? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast providers #{verb} <id>"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| id = rest.first? }
+          p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          row = oast_provider_row_id(store, id, verb)
+          store.set_oast_provider_enabled(row, enabled)
+          puts "OAST provider p_#{row} is now #{enabled ? "enabled" : "disabled"}."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        id : String? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast providers delete <id>"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| id = rest.first? }
+          p.invalid_option { |f| abort "gori run oast providers delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast providers delete: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          row = oast_provider_row_id(store, id, "delete")
+          store.delete_oast_provider(row)
+          puts "OAST provider p_#{row} deleted."
+        ensure
+          store.close
+        end
+      end
+
+      # The PROJECT row id behind a "p_<n>" key, refusing a global one (settings.json, shared
+      # across projects) and an id that names no row.
+      private def self.oast_provider_row_id(store : Store, id : String?, verb : String) : Int64
+        key = id
+        abort "gori run oast providers #{verb}: <id> is required (see `gori run oast providers`)" if key.nil?
+        if key.starts_with?("g_")
+          abort "gori run oast providers #{verb}: '#{key}' is a GLOBAL provider (stored in settings.json, shared across projects) — it cannot be changed per project"
+        end
+        row = key.starts_with?("p_") ? key[2..].to_i64? : key.to_i64?
+        abort "gori run oast providers #{verb}: malformed provider id '#{key}' (expected p_<n>)" if row.nil?
+        abort "gori run oast providers #{verb}: no project OAST provider with id '#{key}'" unless store.oast_providers.any? { |p| p.id == row }
+        row
       end
 
       private def self.oast_presets : Nil

@@ -39,6 +39,7 @@ require "./tools/jobs"
 require "./tools/links"
 require "./tools/mine"
 require "./tools/notes"
+require "./tools/oast_providers"
 require "./tools/probe"
 require "./tools/projects"
 require "./tools/ql"
@@ -96,6 +97,7 @@ module Gori
         "delete_issue", "update_scope_rule", "set_sitemap_tag",
         "delete_flow", "clear_history",
         "add_link", "remove_link",
+        "create_oast_provider", "update_oast_provider", "set_oast_provider_enabled", "delete_oast_provider",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
@@ -560,6 +562,14 @@ module Gori
             "List the free-text memos the operator pinned onto sitemap paths, as " \
             "[{host, path, tag}]. These are the same tags list_sitemap stamps onto its entries." do |s|
             s.field "host", strprop("only list tags on this host")
+          end
+
+          tool j, "list_oast_providers",
+            "List the SAVED OAST providers (the TUI OAST tab's Providers sub-tab) — the entries " \
+            "an operator configured once and reuses, as opposed to oast_start's per-call ad-hoc " \
+            "provider/server/token. `id` is scope-qualified: p_<n> is this project's, g_<hex> is " \
+            "a global one from settings.json. Tokens are [REDACTED] unless include_sensitive." do |s|
+            s.field "include_sensitive", boolprop("return provider tokens instead of [REDACTED] (default false)")
           end
 
           tool j, "list_links",
@@ -1103,6 +1113,41 @@ module Gori
               s.field "tag", strprop("the memo; empty or absent CLEARS the tag")
             end
 
+            tool j, "create_oast_provider",
+              "Save a project OAST provider for reuse. `kind` is interactsh|custom-http|" \
+              "webhook.site|BOAST|postbin; `host` defaults to that kind's public preset when " \
+              "it has one." do |s|
+              s.field "name", strprop("display name"), required: true
+              s.field "kind", strprop("provider kind (default interactsh)")
+              s.field "host", strprop("server/base URL; required for kinds with no preset")
+              s.field "token", strprop("optional provider auth token")
+              s.field "enabled", boolprop("whether the provider is active (default true)")
+            end
+
+            tool j, "update_oast_provider",
+              "Update a project provider (same fields as create_oast_provider). " \
+              "Fields you omit keep their current value — so editing the name will not drop " \
+              "the provider's token. A GLOBAL provider (g_<hex>) belongs to settings.json and " \
+              "is not editable here." do |s|
+              s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
+              s.field "name", strprop("display name (default: unchanged)")
+              s.field "kind", strprop("provider kind (default interactsh)")
+              s.field "host", strprop("server/base URL")
+              s.field "token", strprop("optional provider auth token")
+              s.field "enabled", boolprop("whether the provider is active (default true)")
+            end
+
+            tool j, "set_oast_provider_enabled",
+              "Turn one saved project provider on or off without editing its other fields." do |s|
+              s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
+              s.field "enabled", boolprop("true to enable, false to disable"), required: true
+            end
+
+            tool j, "delete_oast_provider",
+              "Delete a saved project OAST provider." do |s|
+              s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
+            end
+
             tool j, "add_link",
               "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / " \
               "Fuzz or Miner run. Idempotent — re-linking the same pair returns " \
@@ -1464,6 +1509,7 @@ module Gori
         when "list_probe_rules"        then list_probe_rules(h)
         when "list_sitemap_tags"       then list_sitemap_tags(h)
         when "list_links"              then list_links(h)
+        when "list_oast_providers"     then list_oast_providers(h)
         when "list_scope"              then list_scope
         when "list_env"                then list_env(h)
         when "list_host_overrides"     then list_host_overrides
@@ -1492,73 +1538,77 @@ module Gori
       # works on a fresh machine. nil when `name` isn't one of them.
       private def action_tool(name : String, h) : Result?
         case name
-        when "send_request"            then gated { send_request(h) }
-        when "send_websocket"          then gated { send_websocket(h) }
-        when "oast_start"              then gated { oast_start(h) }
-        when "oast_stop"               then gated { oast_stop(h) }
-        when "intercept_forward"       then gated { intercept_forward(h) }
-        when "intercept_drop"          then gated { intercept_drop(h) }
-        when "intercept_forward_edit"  then gated { intercept_forward_edit(h) }
-        when "intercept_toggle"        then gated { intercept_toggle(h) }
-        when "intercept_set_filter"    then gated { intercept_set_filter(h) }
-        when "intercept_set_direction" then gated { intercept_set_direction(h) }
-        when "add_scope_rule"          then gated { add_scope_rule(h) }
-        when "delete_scope_rule"       then gated { delete_scope_rule(h) }
-        when "set_scope_enabled"       then gated { set_scope_enabled(h) }
-        when "set_sandbox"             then gated { set_sandbox(h) }
-        when "set_env_var"             then gated { set_env_var(h) }
-        when "delete_env_var"          then gated { delete_env_var(h) }
-        when "add_host_override"       then gated { add_host_override(h) }
-        when "update_host_override"    then gated { update_host_override(h) }
-        when "delete_host_override"    then gated { delete_host_override(h) }
-        when "import_flows"            then gated { import_flows(h) }
-        when "create_repeater"         then gated { create_repeater(h) }
-        when "update_repeater"         then gated { update_repeater(h) }
-        when "delete_repeater"         then gated { delete_repeater(h) }
-        when "create_issue"            then gated { create_issue(h) }
-        when "update_issue"            then gated { update_issue(h) }
-        when "probe_dismiss"           then gated { probe_dismiss(h) }
-        when "probe_promote"           then gated { probe_promote(h) }
-        when "probe_delete"            then gated { probe_delete(h) }
-        when "set_probe_rule_enabled"  then gated { set_probe_rule_enabled(h) }
-        when "create_probe_rule"       then gated { create_probe_rule(h) }
-        when "update_probe_rule"       then gated { update_probe_rule(h) }
-        when "delete_probe_rule"       then gated { delete_probe_rule(h) }
-        when "set_probe_mode"          then gated { set_probe_mode(h) }
-        when "delete_issue"            then gated { delete_issue(h) }
-        when "update_scope_rule"       then gated { update_scope_rule(h) }
-        when "set_sitemap_tag"         then gated { set_sitemap_tag(h) }
-        when "delete_flow"             then gated { delete_flow(h) }
-        when "clear_history"           then gated { clear_history(h) }
-        when "add_link"                then gated { add_entity_link(h) }
-        when "remove_link"             then gated { remove_entity_link(h) }
-        when "fuzz_start"              then gated { fuzz_start(h) }
-        when "fuzz_status"             then gated { fuzz_status(h) }
-        when "fuzz_results"            then gated { fuzz_results(h) }
-        when "fuzz_stop"               then gated { fuzz_stop(h) }
-        when "mine_start"              then gated { mine_start(h) }
-        when "mine_status"             then gated { mine_status(h) }
-        when "mine_results"            then gated { mine_results(h) }
-        when "mine_stop"               then gated { mine_stop(h) }
-        when "sequence_start"          then gated { sequence_start(h) }
-        when "sequence_status"         then gated { sequence_status(h) }
-        when "sequence_results"        then gated { sequence_results(h) }
-        when "sequence_stop"           then gated { sequence_stop(h) }
-        when "discover_start"          then gated { discover_start(h) }
-        when "discover_status"         then gated { discover_status(h) }
-        when "discover_results"        then gated { discover_results(h) }
-        when "discover_stop"           then gated { discover_stop(h) }
-        when "list_jobs"               then gated { list_jobs }
-        when "get_job"                 then gated { get_job(h) }
-        when "stop_job"                then gated { stop_job(h) }
-        when "create_note"             then gated { create_note(h) }
-        when "update_note"             then gated { update_note(h) }
-        when "delete_note"             then gated { delete_note(h) }
-        when "create_rule"             then gated { create_rule(h) }
-        when "update_rule"             then gated { update_rule(h) }
-        when "preview_rule"            then gated { preview_rule(h) }
-        when "set_rule_enabled"        then gated { set_rule_enabled(h) }
-        when "delete_rule"             then gated { delete_rule(h) }
+        when "send_request"              then gated { send_request(h) }
+        when "send_websocket"            then gated { send_websocket(h) }
+        when "oast_start"                then gated { oast_start(h) }
+        when "oast_stop"                 then gated { oast_stop(h) }
+        when "intercept_forward"         then gated { intercept_forward(h) }
+        when "intercept_drop"            then gated { intercept_drop(h) }
+        when "intercept_forward_edit"    then gated { intercept_forward_edit(h) }
+        when "intercept_toggle"          then gated { intercept_toggle(h) }
+        when "intercept_set_filter"      then gated { intercept_set_filter(h) }
+        when "intercept_set_direction"   then gated { intercept_set_direction(h) }
+        when "add_scope_rule"            then gated { add_scope_rule(h) }
+        when "delete_scope_rule"         then gated { delete_scope_rule(h) }
+        when "set_scope_enabled"         then gated { set_scope_enabled(h) }
+        when "set_sandbox"               then gated { set_sandbox(h) }
+        when "set_env_var"               then gated { set_env_var(h) }
+        when "delete_env_var"            then gated { delete_env_var(h) }
+        when "add_host_override"         then gated { add_host_override(h) }
+        when "update_host_override"      then gated { update_host_override(h) }
+        when "delete_host_override"      then gated { delete_host_override(h) }
+        when "import_flows"              then gated { import_flows(h) }
+        when "create_repeater"           then gated { create_repeater(h) }
+        when "update_repeater"           then gated { update_repeater(h) }
+        when "delete_repeater"           then gated { delete_repeater(h) }
+        when "create_issue"              then gated { create_issue(h) }
+        when "update_issue"              then gated { update_issue(h) }
+        when "probe_dismiss"             then gated { probe_dismiss(h) }
+        when "probe_promote"             then gated { probe_promote(h) }
+        when "probe_delete"              then gated { probe_delete(h) }
+        when "set_probe_rule_enabled"    then gated { set_probe_rule_enabled(h) }
+        when "create_probe_rule"         then gated { create_probe_rule(h) }
+        when "update_probe_rule"         then gated { update_probe_rule(h) }
+        when "delete_probe_rule"         then gated { delete_probe_rule(h) }
+        when "set_probe_mode"            then gated { set_probe_mode(h) }
+        when "delete_issue"              then gated { delete_issue(h) }
+        when "update_scope_rule"         then gated { update_scope_rule(h) }
+        when "set_sitemap_tag"           then gated { set_sitemap_tag(h) }
+        when "delete_flow"               then gated { delete_flow(h) }
+        when "clear_history"             then gated { clear_history(h) }
+        when "add_link"                  then gated { add_entity_link(h) }
+        when "remove_link"               then gated { remove_entity_link(h) }
+        when "create_oast_provider"      then gated { create_oast_provider(h) }
+        when "update_oast_provider"      then gated { update_oast_provider(h) }
+        when "set_oast_provider_enabled" then gated { set_oast_provider_enabled(h) }
+        when "delete_oast_provider"      then gated { delete_oast_provider(h) }
+        when "fuzz_start"                then gated { fuzz_start(h) }
+        when "fuzz_status"               then gated { fuzz_status(h) }
+        when "fuzz_results"              then gated { fuzz_results(h) }
+        when "fuzz_stop"                 then gated { fuzz_stop(h) }
+        when "mine_start"                then gated { mine_start(h) }
+        when "mine_status"               then gated { mine_status(h) }
+        when "mine_results"              then gated { mine_results(h) }
+        when "mine_stop"                 then gated { mine_stop(h) }
+        when "sequence_start"            then gated { sequence_start(h) }
+        when "sequence_status"           then gated { sequence_status(h) }
+        when "sequence_results"          then gated { sequence_results(h) }
+        when "sequence_stop"             then gated { sequence_stop(h) }
+        when "discover_start"            then gated { discover_start(h) }
+        when "discover_status"           then gated { discover_status(h) }
+        when "discover_results"          then gated { discover_results(h) }
+        when "discover_stop"             then gated { discover_stop(h) }
+        when "list_jobs"                 then gated { list_jobs }
+        when "get_job"                   then gated { get_job(h) }
+        when "stop_job"                  then gated { stop_job(h) }
+        when "create_note"               then gated { create_note(h) }
+        when "update_note"               then gated { update_note(h) }
+        when "delete_note"               then gated { delete_note(h) }
+        when "create_rule"               then gated { create_rule(h) }
+        when "update_rule"               then gated { update_rule(h) }
+        when "preview_rule"              then gated { preview_rule(h) }
+        when "set_rule_enabled"          then gated { set_rule_enabled(h) }
+        when "delete_rule"               then gated { delete_rule(h) }
           # switch is always available (selecting a DB is not a data mutation).
         when "switch_project" then switch_project(h)
           # create when unbound even under --read-only; once bound, actions-gated.

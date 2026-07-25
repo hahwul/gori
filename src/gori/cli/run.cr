@@ -26,6 +26,7 @@ require "../miner"
 require "../sequencer"
 require "../discover"
 require "../discover/adapters"
+require "../oast/provider_config"
 require "../probe/passive"
 require "../probe/group"
 require "../notes"
@@ -147,6 +148,7 @@ module Gori
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
         {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
         {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
+        {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
         {"sitemap tag", "Pin/clear/list a free-text memo on a sitemap path"},
         {"import", "Import flows from a HAR, URL list, or OpenAPI spec into History"},
