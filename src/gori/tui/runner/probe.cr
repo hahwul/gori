@@ -117,15 +117,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
   def probe_promote : Nil
     return unless i = probe_controller.view.target_issue
-    # Probe::Triage.promote returns nil when the source is already Confirmed (= already
-    # promoted); it marks the source Confirmed precisely so a second press cannot mint a
-    # duplicate Issue. Same call the CLI/MCP promote paths make.
-    unless Probe::Triage.promote(@session.store, i)
+    # Same call the CLI/MCP promote paths make. A store-busy Failed must NOT read as
+    # "already promoted" — that would tell the user to stop retrying the one thing that
+    # would fix it.
+    case Probe::Triage.promote(@session.store, i).outcome
+    in Probe::Triage::Outcome::AlreadyPromoted
       @toast = "already promoted to an issue"
-      return
+    in Probe::Triage::Outcome::Failed
+      @toast = "promotion failed (store busy) — nothing was written, try again"
+    in Probe::Triage::Outcome::Promoted
+      probe_controller.view.reload(@session.store)
+      @toast = "promoted to issue — see the Issues tab"
     end
-    probe_controller.view.reload(@session.store)
-    @toast = "promoted to issue — see the Issues tab"
   end
 
   def probe_rule_toggle : Nil

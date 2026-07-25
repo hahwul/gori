@@ -36,7 +36,9 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          abort "gori run history delete: no flow with id #{id}" unless store.get_flow(id)
+          # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
+          # "does this exist?" — a 40 MB response would be read and discarded.
+          abort "gori run history delete: no flow with id #{id}" unless store.flow_row(id)
           store.delete_flow(id)
           puts "Flow ##{id} deleted."
         ensure

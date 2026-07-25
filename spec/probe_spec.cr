@@ -3290,15 +3290,21 @@ describe "Gori::Probe::Triage" do
         severity: Gori::Store::Severity::High, url: "https://acme.test/x", evidence: "tok"))
       issue = store.probe_issues.first
 
-      issue_id = Gori::Probe::Triage.promote(store, issue).not_nil!
-      created = store.get_issue(issue_id).not_nil!
+      res = Gori::Probe::Triage.promote(store, issue)
+      res.promoted?.should be_true
+      created = store.get_issue(res.issue_id.not_nil!).not_nil!
       created.title.should eq(issue.title)
       created.severity.should eq(Gori::Store::Severity::High)
       store.get_probe_issue(issue.id).not_nil!.status.confirmed?.should be_true
 
-      # Re-read (the in-memory `issue` still holds the pre-promotion status).
+      # Re-read (the in-memory `issue` still holds the pre-promotion status). A second call
+      # reports AlreadyPromoted — distinct from Failed, which means nothing was written and
+      # a retry IS correct.
       again = store.get_probe_issue(issue.id).not_nil!
-      Gori::Probe::Triage.promote(store, again).should be_nil
+      second = Gori::Probe::Triage.promote(store, again)
+      second.promoted?.should be_false
+      second.outcome.already_promoted?.should be_true
+      second.issue_id.should be_nil
       store.issues.size.should eq(1)
     end
   end

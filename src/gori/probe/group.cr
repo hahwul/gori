@@ -84,9 +84,6 @@ module Gori
       end
     end
 
-    # The canonical JSON object for one grouped issue — the single source of the field shape
-    # shared by `gori run probe --format json` (CLI::Output.probe_group_fields delegates here)
-    # and the MCP probe_scan tool, so both describe an issue identically.
     # A PERSISTED probe issue (the `probe_issues` row the live Analyzer folds into), as opposed
     # to group_json's stateless scan result. Carries the fields only persistence has: the row id
     # triage acts on, the triage status, and the first/last-seen window.
@@ -111,6 +108,9 @@ module Gori
       end
     end
 
+    # The canonical JSON object for one grouped issue — the single source of the field shape
+    # shared by `gori run probe --format json` (CLI::Output.probe_group_fields delegates here)
+    # and the MCP probe_scan tool, so both describe an issue identically.
     def self.group_json(j : JSON::Builder, g : Group) : Nil
       j.object do
         j.field "code", g.code

@@ -2775,3 +2775,39 @@ describe "MCP minimize_repeater" do
     end
   end
 end
+
+describe "code-review follow-ups" do
+  it "refuses to minimize a repeater whose saved request holds §fuzz§ markers" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/",
+        "GET /a?id=§1§ HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, false, true, nil, 0)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      tools = tools_for(store)
+
+      # A marked-up template is not a request: minimizing it would send real requests full of
+      # literal § bytes, and apply:true would overwrite the user's template with the result.
+      r = tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{id}})))
+      r.is_error.should be_true
+      r.text.should contain("marker")
+      # Untouched.
+      String.new(store.get_repeater(id).not_nil!.request).should contain("§1§")
+    end
+  end
+
+  it "flags a sitemap tag whose path matches no captured endpoint" do
+    with_store do |store|
+      seed_flow(store, "/api/users")
+      tools = tools_for(store)
+
+      hit = ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/api/users","tag":"ok"}))
+      hit["matches_endpoint"].as_bool.should be_true
+      hit.as_h.has_key?("warning").should be_false
+
+      # Sitemap.add drops a trailing slash, so /api/users/ is a key no node ever has.
+      miss = ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/api/users/","tag":"typo"}))
+      miss["matches_endpoint"].as_bool.should be_false
+      miss["warning"].as_s.should contain("no captured endpoint")
+    end
+  end
+end

@@ -46,6 +46,13 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         resolved = begin
+          # Validate the owner exists, like the mutate path and the MCP list_links tool do —
+          # otherwise a typo'd id prints "no links on issue #99999", which reads as "this
+          # issue has no evidence" rather than "there is no such issue".
+          unless link_owner_exists?(store, owner_kind, oid)
+            store.close
+            abort "gori run links: no #{owner_kind.label} with id #{oid}"
+          end
           Links.resolve_all(store, store.list_links(owner_kind, oid))
         ensure
           store.close
@@ -160,10 +167,12 @@ module Gori
 
       private def self.link_ref_exists?(store : Store, kind : Store::LinkRefKind, id : Int64) : Bool
         case kind
-        when .flow?     then !store.get_flow(id).nil?
+        # flow_row / get_*_session are the row-only reads; get_flow would materialize the
+        # request AND response BLOBs just to answer "does this exist?".
+        when .flow?     then !store.flow_row(id).nil?
         when .repeater? then !store.get_repeater(id).nil?
-        when .fuzz?     then store.fuzz_sessions.any? { |s| s.id == id }
-        else                 store.miner_sessions.any? { |s| s.id == id }
+        when .fuzz?     then !store.get_fuzz_session(id).nil?
+        else                 !store.get_miner_session(id).nil?
         end
       end
     end

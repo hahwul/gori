@@ -40,6 +40,11 @@ module Gori::Repeater
     # is ever edited. (None of these are in REMOVABLE_HEADERS either — belt and suspenders.)
     PROTECTED_HEADERS = Miner::Inject::FORBIDDEN_HEADERS | Set{"host"}
 
+    # Total network sends one minimize run may make, across calibration AND probes. Lives here,
+    # on the engine that owns the algorithm, so the TUI/CLI/MCP cannot advertise a cap different
+    # from the one they enforce (all three wrap their sender in a Fuzz::CappedBackend with it).
+    SEND_CAP = 250_i64
+
     # Baseline calibration rounds — enough to observe natural churn (timestamps/CSRF) so a
     # near-static page still gets a non-zero tolerance band. Mirrors Miner's stability_rounds.
     CALIBRATION_ROUNDS = 3

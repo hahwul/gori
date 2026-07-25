@@ -131,7 +131,9 @@ module Gori
       private def delete_flow(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        return not_found("no flow with id #{id}") unless store.get_flow(id)
+        # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
+        # "does this exist?" — a 40 MB response would be read and discarded.
+        return not_found("no flow with id #{id}") unless store.flow_row(id)
         store.delete_flow(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end

@@ -2,24 +2,29 @@
 module Gori
   module CLI
     module Run
-      # The categories a Probe scan can emit (shared with the MCP probe_scan tool).
-      PROBE_CATEGORIES = Probe::SCAN_CATEGORIES
+      # The categories a `--category` filter accepts (shared with the MCP probe tools).
+      PROBE_CATEGORIES = Probe::FILTER_CATEGORIES
 
-      # Triage subcommands operate on PERSISTED findings (the `probe_issues` table the live
-      # scanner fills — what the TUI Probe tab shows); a bare `gori run probe` is still the
-      # stateless rescan. These words are therefore reserved as the first positional: to scan
-      # with a QL query that starts with one, pass it via --query.
-      PROBE_SUBCOMMANDS = %w[issues dismiss promote delete rm rules mode]
+      # Triage/config subcommands operate on PERSISTED findings (the `probe_issues` table the
+      # live scanner fills — what the TUI Probe tab shows) or on the scan config; a bare
+      # `gori run probe` is still the stateless rescan. These words are therefore RESERVED as
+      # the first positional: to scan with a QL query that starts with one, pass it via
+      # --query. The dispatch below is generated from this list so the two cannot drift.
+      PROBE_SUBCOMMANDS = {
+        "issues"  => ->(a : Array(String)) { cmd_probe_issues(a) },
+        "dismiss" => ->(a : Array(String)) { cmd_probe_dismiss(a) },
+        "promote" => ->(a : Array(String)) { cmd_probe_promote(a) },
+        "delete"  => ->(a : Array(String)) { cmd_probe_delete(a) },
+        "rm"      => ->(a : Array(String)) { cmd_probe_delete(a) },
+        "rules"   => ->(a : Array(String)) { cmd_probe_rules(a) },
+        "mode"    => ->(a : Array(String)) { cmd_probe_mode(a) },
+      }
 
       private def self.cmd_probe(args : Array(String)) : Nil
-        case args.first?
-        when "issues"       then cmd_probe_issues(args[1..])
-        when "dismiss"      then cmd_probe_dismiss(args[1..])
-        when "promote"      then cmd_probe_promote(args[1..])
-        when "delete", "rm" then cmd_probe_delete(args[1..])
-        when "rules"        then cmd_probe_rules(args[1..])
-        when "mode"         then cmd_probe_mode(args[1..])
-        else                     cmd_probe_scan(args)
+        if (sub = args.first?) && (run = PROBE_SUBCOMMANDS[sub]?)
+          run.call(args[1..])
+        else
+          cmd_probe_scan(args)
         end
       end
 
@@ -261,11 +266,15 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           issue = store.get_probe_issue(id) || abort("gori run probe promote: no probe finding with id #{id}")
-          issue_id = Probe::Triage.promote(store, issue)
-          if issue_id
-            puts "Promoted finding ##{issue.id} to Issue ##{issue_id}."
-          else
+          res = Probe::Triage.promote(store, issue)
+          case res.outcome
+          in Probe::Triage::Outcome::Promoted
+            puts "Promoted finding ##{issue.id} to Issue ##{res.issue_id}."
+          in Probe::Triage::Outcome::AlreadyPromoted
             puts "Finding ##{issue.id} was already promoted to an issue."
+          in Probe::Triage::Outcome::Failed
+            # Nothing was written — exit non-zero so a script retries rather than moving on.
+            abort "gori run probe promote: finding ##{issue.id} NOT promoted (store busy or unwritable); it is unchanged"
           end
         ensure
           store.close
@@ -276,16 +285,20 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         all = false
+        yes = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run probe delete <id> | --all\n\n" \
-                     "Hard-delete findings. A delete also SUPPRESSES that (code, host) pair so the\n" \
-                     "next scan does not immediately re-add it — prefer `probe dismiss` when you\n" \
-                     "only want it out of the default lens."
+          p.banner = "Usage: gori run probe delete <id> | --all --yes\n\n" \
+                     "Delete <id>: also SUPPRESSES that (code, host) pair so the next scan does not\n" \
+                     "immediately re-add it — prefer `probe dismiss` when you only want it out of\n" \
+                     "the default lens.\n" \
+                     "Delete --all: wipes every finding AND every suppression, so a rescan\n" \
+                     "re-discovers everything. Needs --yes."
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
-          p.on("--all", "Delete EVERY probe finding in the project") { all = true }
+          p.on("--all", "Delete EVERY probe finding AND every suppression in the project") { all = true }
+          p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run probe delete: unknown option: #{f}\n#{p}" }
@@ -301,8 +314,11 @@ module Gori
         begin
           if all
             n = store.count_probe_issues
+            unless yes
+              abort "gori run probe delete: refusing to delete #{n} finding#{n == 1 ? "" : "s"} (and every suppression) without --yes"
+            end
             store.clear_probe_issues
-            puts "Deleted #{n} finding#{n == 1 ? "" : "s"}."
+            puts "Deleted #{n} finding#{n == 1 ? "" : "s"} and cleared every suppression."
           elsif iid = id
             issue = store.get_probe_issue(iid) || abort("gori run probe delete: no probe finding with id #{iid}")
             store.delete_probe_issue(issue.id)

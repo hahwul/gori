@@ -1188,9 +1188,9 @@ module Gori::Tui
 
     def repeater_send : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      view.commit_chain_pane           # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
-      view.sync_host_to_target_once    # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
-      if view.inflight?      # one outstanding round-trip per view — don't pile up fibers on ^R mashing
+      view.commit_chain_pane        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
+      view.sync_host_to_target_once # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
+      if view.inflight?             # one outstanding round-trip per view — don't pile up fibers on ^R mashing
         @host.status("repeater already in flight…")
         return
       end
@@ -1240,8 +1240,6 @@ module Gori::Tui
 
     # Hard ceiling on a single minimize's total network sends (calibration + probes). A
     # request with a huge header/param set can't blast the origin — the CappedBackend
-    # returns a benign error past the cap and the run reports a partial result.
-    MINIMIZE_SEND_CAP = 250_i64
 
     # "Minimize request" (Space → M): strip cosmetic headers, tracking-cookie crumbs and
     # unused query/body params from the current request while keeping the response
@@ -1278,7 +1276,7 @@ module Gori::Tui
         Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), view.http2?,
             !@host.session.config.insecure_upstream?, view.sni_override, timeout: 10.seconds),
-          MINIMIZE_SEND_CAP),
+          Repeater::Minimize::SEND_CAP),
         @host.session.scope)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report

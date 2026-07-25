@@ -539,7 +539,7 @@ module Gori
             s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
             s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
             s.field "severity", strprop("only return issues at/above this level (info|low|medium|high|critical)")
-            s.field "category", strprop("only return issues in this category (#{Probe::SCAN_CATEGORIES.join("|")})")
+            s.field "category", strprop("only return issues in this category (#{Probe::FILTER_CATEGORIES.join("|")})")
             s.field "allow_unscoped", boolprop("with active:true, run even when a target host is outside — or without — a configured scope (default false)")
             s.field "unsafe", boolprop("with active:true, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data (default false)")
             s.field "aggressive", boolprop("with active:true, raise per-rule caps + use wider bypass sets (implies unsafe) — authorized targets only (default false)")
@@ -554,7 +554,7 @@ module Gori
             "{issues, returned, offset, total, has_more} — not a bare array." do |s|
             s.field "include_closed", boolprop("also return dismissed/confirmed/resolved findings (default false = open only)")
             s.field "severity", strprop("only return findings at/above this level (info|low|medium|high|critical)")
-            s.field "category", strprop("only return findings in this category (#{Probe::SCAN_CATEGORIES.join("|")})")
+            s.field "category", strprop("only return findings in this category (#{Probe::FILTER_CATEGORIES.join("|")})")
             s.field "host", strprop("only return findings for this exact host")
             s.field "limit", intprop("max rows (default 100, max 500)")
             s.field "offset", intprop("start row (default 0)")
@@ -1044,11 +1044,14 @@ module Gori
             end
 
             tool j, "probe_delete",
-              "Hard-delete probe findings (ids from probe_issues). Deleting also SUPPRESSES that " \
-              "(code, host) pair so the next scan does not immediately re-add it — prefer " \
-              "probe_dismiss when you only want it out of the default lens." do |s|
+              "Hard-delete probe findings (ids from probe_issues). Deleting ONE also SUPPRESSES " \
+              "that (code, host) pair so the next scan does not immediately re-add it — prefer " \
+              "probe_dismiss when you only want it out of the default lens. all:true is the " \
+              "OPPOSITE: it wipes every finding AND every suppression, so a rescan re-discovers " \
+              "everything; it needs confirm:true and cannot be combined with `id`." do |s|
               s.field "id", intprop("probe finding id to delete")
-              s.field "all", boolprop("delete EVERY probe finding in the project (default false)")
+              s.field "all", boolprop("delete EVERY probe finding AND every suppression (default false)")
+              s.field "confirm", boolprop("required with all:true; without it the call is refused")
             end
 
             tool j, "set_probe_rule_enabled",
@@ -1108,10 +1111,12 @@ module Gori
 
             tool j, "set_sitemap_tag",
               "Pin a free-text memo onto one sitemap endpoint, or clear it with an empty/absent " \
-              "`tag`. Keyed by the URL PATH (no query string) exactly as the Sitemap tree stamps " \
-              "it, so a tag set here is the one the TUI Sitemap tab shows." do |s|
+              "`tag`. Keyed by the node path exactly as the Sitemap tree stamps it — which " \
+              "INCLUDES any query string, so /search?q=1 is a different node from /search. " \
+              "Pass the `target` you saw in list_sitemap verbatim; a tag filed under a path no " \
+              "node has is silently invisible in both list_sitemap and the TUI." do |s|
               s.field "host", strprop("host the path belongs to"), required: true
-              s.field "path", strprop("URL path, e.g. /api/users (query string is ignored)"), required: true
+              s.field "path", strprop("node path as list_sitemap shows it, e.g. /api/users or /search?q=1"), required: true
               s.field "tag", strprop("the memo; empty or absent CLEARS the tag")
             end
 
@@ -1133,10 +1138,10 @@ module Gori
               "is not editable here." do |s|
               s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
               s.field "name", strprop("display name (default: unchanged)")
-              s.field "kind", strprop("provider kind (default interactsh)")
-              s.field "host", strprop("server/base URL")
-              s.field "token", strprop("optional provider auth token")
-              s.field "enabled", boolprop("whether the provider is active (default true)")
+              s.field "kind", strprop("provider kind (default: unchanged)")
+              s.field "host", strprop("server/base URL (default: unchanged)")
+              s.field "token", strprop("provider auth token (default: unchanged — omit to KEEP the existing token)")
+              s.field "enabled", boolprop("whether the provider is active (default: unchanged)")
             end
 
             tool j, "set_oast_provider_enabled",

@@ -24,8 +24,8 @@ module Gori
           p.banner = "Usage: gori run sitemap tag --host=H --path=P --tag=TEXT\n" \
                      "       gori run sitemap tag --list [--host=H]\n\n" \
                      "Pin a free-text memo onto one sitemap path (the same tags the TUI Sitemap\n" \
-                     "tab shows). --path is the path AS THE TREE SHOWS IT, including any query\n" \
-                     "string — that is the key a tag is stored under."
+                     "tab shows). --path is the node path AS THE TREE SHOWS IT, INCLUDING any\n" \
+                     "query string — /search?q=1 is a different node from /search."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--host=HOST", "Host the path belongs to") { |v| host = v }
@@ -48,21 +48,40 @@ module Gori
             rows.each { |(k, t)| puts "#{k[0]}#{k[1]}\t#{t}" }
             return
           end
-          # Copy into plain locals first: `host`/`path`/`tag` are captured by the OptionParser
-          # blocks, so Crystal keeps them nilable and `x || abort` does not narrow them.
-          h = host
-          pth = path
-          t = tag
-          abort "gori run sitemap tag: --host is required" if h.nil?
-          abort "gori run sitemap tag: --path is required" if pth.nil?
-          abort "gori run sitemap tag: pass --tag=TEXT or --clear" if t.nil? && !clear
-          abort "gori run sitemap tag: --tag and --clear are mutually exclusive" if t && clear
-          key = sitemap_tag_path(pth)
-          text = clear ? "" : t.to_s
-          store.set_sitemap_tag(h, key, text)
-          puts text.empty? ? "Tag cleared on #{h}#{key}." : "Tagged #{h}#{key}: #{text}"
+          apply_sitemap_tag(store, host, path, tag, clear)
         ensure
           store.close
+        end
+      end
+
+      # Validate the write-side flags and set (or clear) the tag. Split out of cmd_sitemap_tag
+      # to keep it under the cyclomatic-complexity bar. Takes the parsed values as ARGUMENTS:
+      # in place they are assigned inside OptionParser blocks, so Crystal keeps them nilable
+      # and `x || abort` does not narrow them.
+      private def self.apply_sitemap_tag(store : Store, host : String?, path : String?,
+                                         tag : String?, clear : Bool) : Nil
+        abort "gori run sitemap tag: --host is required" if host.nil?
+        abort "gori run sitemap tag: --path is required" if path.nil?
+        abort "gori run sitemap tag: pass --tag=TEXT or --clear" if tag.nil? && !clear
+        abort "gori run sitemap tag: --tag and --clear are mutually exclusive" if tag && clear
+
+        key = sitemap_tag_path(path)
+        text = clear ? "" : tag.to_s
+        matched = sitemap_node_exists?(store, host, key)
+        store.set_sitemap_tag(host, key, text)
+        puts text.empty? ? "Tag cleared on #{host}#{key}." : "Tagged #{host}#{key}: #{text}"
+        unless matched || text.empty?
+          STDERR.puts "gori run sitemap tag: warning: no captured endpoint at #{host}#{key} — this tag will not show in the tree until one exists (check for a typo or a trailing slash)"
+        end
+      end
+
+      # Whether any captured endpoint on `host` normalizes to `path`. A tag whose (host, path)
+      # names no endpoint is stored but unreachable — it can never stamp onto a tree node. The
+      # common causes are a typo and a trailing slash (Sitemap.add drops one, so /api/users/ is
+      # stamped as /api/users).
+      private def self.sitemap_node_exists?(store : Store, host : String, path : String) : Bool
+        store.sitemap_entries_detailed(QL::EMPTY, Store::SITEMAP_MAX).any? do |e|
+          e.host == host && sitemap_tag_path(e.target) == path
         end
       end
 

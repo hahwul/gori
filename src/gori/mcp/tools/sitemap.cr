@@ -53,9 +53,24 @@ module Gori
         # Normalize exactly as the Sitemap tree stamps node paths (query string INCLUDED).
         path = sitemap_tag_path(path)
         tag = (str(h, "tag") || "").strip
+        # A tag whose (host, path) names no captured endpoint is stored but unreachable — it
+        # can never stamp onto a tree node or a list_sitemap entry. Report that rather than
+        # answering a flat success: the common causes are a typo and a trailing slash
+        # (Sitemap.add drops one, so /api/users/ is stamped as /api/users).
+        matched = sitemap_node_exists?(host, path)
         store.set_sitemap_tag(host, path, tag)
-        Result.new({"host" => host, "path" => path, "tag" => tag.presence,
-                    "cleared" => tag.empty?}.to_json)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "host", host
+            j.field "path", path
+            j.field "tag", tag.presence
+            j.field "cleared", tag.empty?
+            j.field "matches_endpoint", matched
+            unless matched || tag.empty?
+              j.field "warning", "no captured endpoint at #{host}#{path} — this tag will not show in list_sitemap or the TUI until one exists (check for a typo or a trailing slash)"
+            end
+          end
+        end)
       end
 
       private def list_sitemap_tags(h) : Result
@@ -73,6 +88,14 @@ module Gori
             end
           end
         end)
+      end
+
+      # Whether any captured endpoint on `host` normalizes to `path` — the same derivation
+      # list_sitemap's tag stamping uses, so "matched" here means "will be visible there".
+      private def sitemap_node_exists?(host : String, path : String) : Bool
+        store.sitemap_entries_detailed(QL::EMPTY, Store::SITEMAP_MAX).any? do |e|
+          e.host == host && sitemap_tag_path(e.target) == path
+        end
       end
 
       # A sitemap tag's key is the node path the tree stamps, which Sitemap.normalize_path

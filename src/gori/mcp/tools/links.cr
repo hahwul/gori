@@ -106,10 +106,12 @@ module Gori
 
       private def link_ref_exists?(kind : Store::LinkRefKind, id : Int64) : Bool
         case kind
-        when .flow?     then !store.get_flow(id).nil?
+        # flow_row / get_*_session are the row-only reads; get_flow would materialize the
+        # request AND response BLOBs just to answer "does this exist?".
+        when .flow?     then !store.flow_row(id).nil?
         when .repeater? then !store.get_repeater(id).nil?
-        when .fuzz?     then store.fuzz_sessions.any? { |s| s.id == id }
-        else                 store.miner_sessions.any? { |s| s.id == id }
+        when .fuzz?     then !store.get_fuzz_session(id).nil?
+        else                 !store.get_miner_session(id).nil?
         end
       end
     end

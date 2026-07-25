@@ -126,25 +126,46 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         issue = store.get_probe_issue(id)
         return not_found("no probe issue with id #{id}") unless issue
-        issue_id = Probe::Triage.promote(store, issue)
-        unless issue_id
-          # Already Confirmed = already promoted. Not an error (the desired end state holds),
-          # but say so rather than reporting a promotion that did not happen.
-          return Result.new({"id" => issue.id, "promoted" => false,
-                             "reason" => "already promoted to an issue"}.to_json)
+        res = Probe::Triage.promote(store, issue)
+        case res.outcome
+        in Probe::Triage::Outcome::AlreadyPromoted
+          # The desired end state already holds, so not an error — but say so rather than
+          # reporting a promotion that did not happen.
+          Result.new({"id" => issue.id, "promoted" => false,
+                      "reason" => "already promoted to an issue"}.to_json)
+        in Probe::Triage::Outcome::Failed
+          # Nothing was written. This IS an error: unlike AlreadyPromoted, retrying is correct.
+          busy("probe finding #{issue.id} NOT promoted (store busy or unwritable); it is unchanged")
+        in Probe::Triage::Outcome::Promoted
+          Result.new({"id" => issue.id, "promoted" => true, "issue_id" => res.issue_id}.to_json)
         end
-        Result.new({"id" => issue.id, "promoted" => true, "issue_id" => issue_id}.to_json)
       end
 
-      # probe_delete — hard-delete one finding, or clear them all. A delete also SUPPRESSES the
-      # (code, host) pair so the next scan does not immediately re-add it (Store's own rule).
+      # probe_delete — hard-delete one finding, or clear them all.
+      #
+      # The two forms behave OPPOSITELY on suppressions: deleting one finding records a
+      # (code, host) suppression so the next scan does not immediately re-add it, whereas
+      # all:true calls Store#clear_probe_issues, which wipes every suppression too — so a
+      # rescan re-discovers everything. all:true is therefore gated on confirm:true.
       private def probe_delete(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) if id.nil? && present?(h, "id")
-        if bool(h, "all")
+        all = bool(h, "all") || false
+        # Reject the ambiguous combination rather than silently letting `all` win — an agent
+        # that sets `all` defensively alongside a specific `id` would lose the whole table.
+        # (The CLI refuses the same input.)
+        if all && id
+          return err("pass 'id' (one finding) or all:true (clear every finding), not both",
+            "INVALID_ARGUMENT", field: "all")
+        end
+        if all
           n = store.count_probe_issues
+          unless bool(h, "confirm")
+            return err("refusing to delete #{n} finding#{n == 1 ? "" : "s"} without confirm:true — this also clears every hard-delete suppression, so a rescan re-discovers them",
+              "CONFIRM_REQUIRED", field: "confirm", details: JSON.parse({"findings" => n}.to_json))
+          end
           store.clear_probe_issues
-          return Result.new({"deleted" => n, "all" => true}.to_json)
+          return Result.new({"deleted" => n, "all" => true, "suppressions_cleared" => true}.to_json)
         end
         return err("pass 'id' (one finding) or all:true (clear every finding)", "INVALID_ARGUMENT", field: "id") unless id
         issue = store.get_probe_issue(id)
@@ -319,8 +340,8 @@ module Gori
       private def probe_scan_category(h) : String? | Result
         category = str(h, "category").try(&.strip.downcase).presence
         return nil unless category
-        return category if Probe::SCAN_CATEGORIES.includes?(category)
-        err("invalid category '#{category}' (#{Probe::SCAN_CATEGORIES.join("|")})", "INVALID_ARGUMENT", field: "category")
+        return category if Probe::FILTER_CATEGORIES.includes?(category)
+        err("invalid category '#{category}' (#{Probe::FILTER_CATEGORIES.join("|")})", "INVALID_ARGUMENT", field: "category")
       end
 
       # Resolve the scope for an active scan: {scope, scope_configured}. Passive → {nil, false}.

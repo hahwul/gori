@@ -5,14 +5,11 @@ require "../../repeater/minimize"
 require "../../repeater/flow_request"
 require "../../repeater/ws_engine"
 require "../../env"
+require "../../fuzz/template"
 
 module Gori
   module MCP
     class Tools
-      # Bound the probe volume the same way the TUI and CLI do — a pathological request must
-      # not blast the origin (repeater_controller.cr#MINIMIZE_SEND_CAP).
-      MINIMIZE_SEND_CAP = 250_i64
-
       # minimize_repeater — strip cosmetic headers, tracking-cookie crumbs, and unused
       # query/body params from a saved repeater request while keeping the response within
       # tolerance of a calibrated baseline (Caido-"squash"-style). Drives the same
@@ -43,7 +40,7 @@ module Gori
           Fuzz::CappedBackend.new(
             Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), rec.http2?,
               @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
-            MINIMIZE_SEND_CAP),
+            Repeater::Minimize::SEND_CAP),
           scope)
 
         report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }
@@ -83,6 +80,14 @@ module Gori
           return err("repeater #{id} is a WebSocket upgrade — minimize works on plain HTTP requests",
             "INVALID_ARGUMENT", field: "repeater_id")
         end
+        # The TUI refuses this too (repeater_view.cr#minimizable?). A saved request holding
+        # §fuzz§ markers is a TEMPLATE, not a request: minimizing it would send 250 requests
+        # containing literal § bytes (garbage the origin answers uniformly, which then lets
+        # real headers look removable) and apply:true would overwrite the marked-up template.
+        unless Fuzz::Template.marker_regions(text).empty?
+          return err("repeater #{id} contains §fuzz§ markers — remove them first, or use fuzz_start to sweep them",
+            "INVALID_ARGUMENT", field: "repeater_id")
+        end
         scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
         return err("could not determine a target host for repeater #{id}", "INVALID_ARGUMENT", field: "repeater_id") if host.empty?
         unless scheme.in?("http", "https")
@@ -99,7 +104,7 @@ module Gori
       # (ScopedBackend) still hard-blocks a Sandbox/exclude even under allow_unscoped.
       private def scope_refusal(scope : Scope, scheme : String, host : String,
                                 text : String, allow_unscoped : Bool) : Result?
-        url = Scope.request_url(scheme, host, request_line_target(text))
+        url = Scope.request_url(scheme, host, request_target(text.to_slice))
         if scope.sandbox? && scope.sandbox_blocks?(url, host)
           return err("blocked by sandbox (out of scope) — minimize refuses to send", "SCOPE_BLOCKED",
             field: "repeater_id", details: JSON.parse({"scope_decision" => "sandbox"}.to_json))
@@ -111,12 +116,6 @@ module Gori
             details: JSON.parse({"scope_decision" => "unscoped", "host" => host}.to_json))
         end
         nil
-      end
-
-      # The request-line target of a raw request ("/a?b=1"), for the scope URL. Falls back to
-      # "/" so a malformed first line still produces a checkable URL rather than raising.
-      private def request_line_target(text : String) : String
-        (text.each_line.first?.try(&.split(' ')[1]?)) || "/"
       end
     end
   end

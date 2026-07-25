@@ -8,7 +8,11 @@ module Gori
       private def self.cmd_oast(args : Array(String)) : Nil
         # `providers` is the one OAST subcommand that touches the project store, so it must be
         # dispatched BEFORE strip_project_flags eats the --project/--db it actually needs.
-        return cmd_oast_providers(args[1..]) if args.first? == "providers"
+        # Match it ANYWHERE in the argv, not just at args[0] — `gori run oast --project=X
+        # providers` is the natural invocation and is exactly the one that carries the flag.
+        if i = args.index("providers")
+          return cmd_oast_providers(args[...i] + args[(i + 1)..])
+        end
 
         filtered = strip_project_flags(args)
         case sub = filtered.first?

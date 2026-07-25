@@ -5,10 +5,6 @@
 module Gori
   module CLI
     module Run
-      # Bound the probe volume the same way the TUI does — a pathological request must not
-      # blast the origin (repeater_controller.cr#MINIMIZE_SEND_CAP).
-      MINIMIZE_SEND_CAP = 250_i64
-
       private def self.cmd_repeater_minimize(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -21,7 +17,7 @@ module Gori
           p.banner = "Usage: gori run repeater minimize <repeater-id> [options]\n\n" \
                      "Strip cosmetic headers, tracking-cookie crumbs, and unused query/body params\n" \
                      "from a saved repeater request, keeping the response within tolerance of a\n" \
-                     "calibrated baseline. SENDS MANY REAL REQUESTS (capped at #{MINIMIZE_SEND_CAP}).\n" \
+                     "calibrated baseline. SENDS MANY REAL REQUESTS (capped at #{Repeater::Minimize::SEND_CAP}).\n" \
                      "Prints the trimmed request; pass --apply to also save it back to the session."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -61,7 +57,7 @@ module Gori
           Fuzz::CappedBackend.new(
             Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), rec.http2?,
               !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds),
-            MINIMIZE_SEND_CAP),
+            Repeater::Minimize::SEND_CAP),
           scope)
 
         meter = STDERR.tty?
@@ -92,6 +88,14 @@ module Gori
                                                 text : String, scope : Gori::Scope) : {String, String, Int32}
         if Repeater::WsEngine.upgrade_request?(text)
           abort "gori run repeater minimize: session ##{id} is a WebSocket upgrade — minimize works on plain HTTP requests"
+        end
+        # The TUI refuses this too (repeater_view.cr#minimizable?). A saved request holding
+        # §fuzz§ markers is a TEMPLATE, not a request: minimizing it would send 250 requests
+        # containing literal § bytes (garbage the origin answers uniformly, which then lets
+        # real headers look removable) and --apply would overwrite the user's marked-up
+        # template with the mangled result.
+        unless Fuzz::Template.marker_regions(text).empty?
+          abort "gori run repeater minimize: session ##{id} contains §fuzz§ markers — remove them first, or use `gori run fuzz` to sweep them"
         end
         scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
         abort "gori run repeater minimize: could not determine a target host for session ##{id}" if host.empty?

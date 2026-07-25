@@ -223,7 +223,7 @@ describe "MCP probe triage tools" do
       call_json(tools, "probe_delete", %({"id":#{a.id}}))["deleted"].as_i.should eq(1)
       store.count_probe_issues.should eq(1)
 
-      call_json(tools, "probe_delete", %({"all":true}))["deleted"].as_i.should eq(1)
+      call_json(tools, "probe_delete", %({"all":true,"confirm":true}))["deleted"].as_i.should eq(1)
       store.count_probe_issues.should eq(0)
     end
   end
@@ -375,6 +375,44 @@ describe "MCP probe rules + mode tools" do
       ro.call("create_probe_rule", JSON.parse(%({"title":"x","pattern":"y"}))).is_error.should be_true
       ro.call("set_probe_mode", JSON.parse(%({"mode":"off"}))).is_error.should be_true
       call_json(ro, "list_probe_rules", "{}")["rules"].as_a.size.should be > 0
+    end
+  end
+end
+
+describe "MCP probe_delete guards" do
+  it "refuses all:true without confirm, and refuses id+all together" do
+    with_store do |store|
+      a = seed_probe_issue(store, code: "secret_in_url", host: "a.test")
+      seed_probe_issue(store, code: "secret_in_url", host: "b.test")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      # all:true wipes every SUPPRESSION too, so a rescan re-discovers everything — gated.
+      r = tools.call("probe_delete", JSON.parse(%({"all":true})))
+      r.is_error.should be_true
+      r.text.should contain("2")
+      store.count_probe_issues.should eq(2)
+
+      # `all` must not silently win over an explicit `id`: an agent that sets it defensively
+      # alongside a specific finding would otherwise lose the whole table.
+      both = tools.call("probe_delete", JSON.parse(%({"id":#{a.id},"all":true})))
+      both.is_error.should be_true
+      store.count_probe_issues.should eq(2)
+
+      call_json(tools, "probe_delete", %({"all":true,"confirm":true}))["deleted"].as_i.should eq(2)
+      store.count_probe_issues.should eq(0)
+    end
+  end
+
+  it "accepts category:custom, which scans now emit and persisted rows have always held" do
+    with_store do |store|
+      store.upsert_probe_issue(Gori::Probe::Detection.new(
+        code: "custom_p_1", category: "custom", host: "acme.test", title: "stripe key",
+        severity: Gori::Store::Severity::High, url: "https://acme.test/x"))
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+
+      res = call_json(tools, "probe_issues", %({"category":"custom"}))
+      res["total"].as_i.should eq(1)
+      res["issues"].as_a.first["code"].as_s.should eq("custom_p_1")
     end
   end
 end

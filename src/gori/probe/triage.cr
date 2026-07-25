@@ -13,13 +13,32 @@ module Gori
     module Triage
       extend self
 
+      # Why a promotion did not produce a new Issue. Kept distinct because the two cases need
+      # OPPOSITE responses from the operator: AlreadyPromoted is the desired end state and
+      # needs no action; Failed means nothing was written and the call should be retried.
+      enum Outcome
+        Promoted
+        AlreadyPromoted
+        Failed
+      end
+
+      record Result, outcome : Outcome, issue_id : Int64? = nil do
+        def promoted? : Bool
+          outcome.promoted?
+        end
+      end
+
       # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the
-      # Issues report). Returns the new Issue id, or nil when the source was ALREADY promoted
-      # — promotion marks the source Confirmed precisely so a second call cannot mint a
-      # duplicate Issue for the same finding.
-      def promote(store : Store, issue : Store::ProbeIssue) : Int64?
-        return nil if issue.status.confirmed?
+      # Issues report). Promotion marks the source Confirmed precisely so a second call cannot
+      # mint a duplicate Issue for the same finding.
+      def promote(store : Store, issue : Store::ProbeIssue) : Result
+        return Result.new(Outcome::AlreadyPromoted) if issue.status.confirmed?
         issue_id = store.insert_issue(issue.title, issue.severity, issue.host, issue.sample_flow_id)
+        # insert_issue returns 0 — NOT nil — when the write never committed (busy/locked/closing
+        # store), and 0 is TRUTHY in Crystal. Without this guard a failed promotion would link
+        # evidence to a nonexistent issue #0, mark the source Confirmed anyway, and report
+        # success — permanently blocking any retry, since a Confirmed source never promotes again.
+        return Result.new(Outcome::Failed) if issue_id == 0
         # Preserve Repeater-only evidence: with no source flow, link the Issue to the Repeater
         # tab that produced the finding so the evidence pointer survives promotion (insert_issue
         # only carries a flow id).
@@ -29,7 +48,7 @@ module Gori
         # Mark the source confirmed (= "promoted to an Issue") so it leaves the default
         # open-only lens instead of lingering as unreviewed noise; still reachable via "show all".
         store.update_probe_issue_status(issue.id, Store::Status::Confirmed)
-        issue_id
+        Result.new(Outcome::Promoted, issue_id)
       end
 
       # Toggle a Probe issue between dismissed (false-positive) and open — the one-key triage

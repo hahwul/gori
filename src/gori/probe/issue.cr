@@ -13,10 +13,16 @@ module Gori
       CUSTOM   = "custom" # user-defined string/regex match rule
     end
 
-    # The categories a scan can emit — the single list the CLI (--category) and the MCP
-    # probe_scan tool validate against. Excludes CUSTOM (user match rules, not a scan check).
+    # The categories a BUILT-IN check can emit.
     SCAN_CATEGORIES = [Category::HEADERS, Category::COOKIES, Category::TECH,
                        Category::INFOLEAK, Category::CORS, Category::CLIENT, Category::ACTIVE]
+
+    # The categories a `--category` / `category:` FILTER accepts — the single list the CLI and
+    # the MCP tools validate against. Includes CUSTOM: every scan surface now runs the
+    # operator's custom match rules (Probe::Scan feeds them to Passive.analyze), and the
+    # persisted probe_issues table has always held category="custom" rows, so refusing the
+    # value would leave those findings unfilterable.
+    FILTER_CATEGORIES = SCAN_CATEGORIES + [Category::CUSTOM]
 
     # Static, display-only metadata for one built-in check — the identity the Rules
     # sub-tab lists and toggles by. `id` is a stable slug (one per Rule class, even when
