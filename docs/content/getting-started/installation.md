@@ -16,6 +16,41 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `GORI_INSTALL_PREFIX`. After install, `gori update` self-updates the binary (or guides you through Homebrew / Snap / AUR when those channels own the install).
 
+### If you hit a GitHub rate limit
+
+The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP** — behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.1.4 via ... (no API call)`.
+
+To use the authenticated 5000/hour limit instead, export a token first. Note that it has to be exported rather than prefixed onto `curl` — the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
+
+```bash
+export GITHUB_TOKEN=<personal access token>
+curl -fsSL https://gori.hahwul.com/install.sh | bash
+```
+
+`GORI_GITHUB_TOKEN` and `GH_TOKEN` work too, and `gori update` reads the same variables. Only a public-repo read scope is needed.
+
+### Direct download (Dockerfiles, CI)
+
+Every release also carries a version-less copy of each asset, so you can pull the latest build from a stable URL with no version lookup and no API call. These land with the first release published after v0.1.4 — earlier releases only carry the versioned names:
+
+```bash
+# Linux x86_64 / arm64 — a static binary
+curl -fsSL -o gori https://github.com/hahwul/gori/releases/latest/download/gori-linux-x86_64 && chmod +x gori
+
+# macOS arm64 / x86_64 — a tarball holding gori plus its lib/
+curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/download/gori-osx-arm64.tar.gz
+```
+
+The versioned names (`gori-v0.1.4-linux-x86_64`) stay published alongside them — use those when you want to pin a build.
+
+Each release also publishes a `SHA256SUMS` listing every asset under both naming schemes. The installer and `gori update` check against it automatically; to verify a direct download yourself:
+
+```bash
+curl -fsSL -O https://github.com/hahwul/gori/releases/latest/download/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS       # Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS   # macOS
+```
+
 ## Homebrew
 
 Works on **macOS** (Apple Silicon & Intel) and **Linux** (x86_64 & arm64):

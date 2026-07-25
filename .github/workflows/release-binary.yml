@@ -120,6 +120,30 @@ jobs:
           path: build
 
       - if: startsWith(github.ref, 'refs/tags/')
+        name: Create version-less alias assets
+        # Never let a convenience copy block the actual release: a failure here
+        # would otherwise skip the upload step below and ship a release with no
+        # assets at all for this platform. install.sh tries the versioned name
+        # first, so a missing alias costs nothing.
+        continue-on-error: true
+        # Copies of each asset under a name with no version in it, so
+        # https://github.com/hahwul/gori/releases/download/latest/<alias> resolves
+        # without first asking api.github.com for the tag — that API is capped at
+        # 60 req/h per IP unauthenticated, and a 403 there used to break install.sh
+        # outright. install.sh and `gori update` fall back to these.
+        #
+        # Deliberately copies, not renames: the Homebrew formula, the AUR
+        # PKGBUILD and the snapcraft recipe all pin the versioned filenames.
+        # Runs after upload-artifact so CI artifacts do not carry the duplicates.
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            cp "build/gori-${GITHUB_REF_SLUG}-linux-${ARCH}" "build/gori-linux-${ARCH}"
+          else
+            cp "build/gori-${GITHUB_REF_SLUG}-osx-${ARCH}.tar.gz" "build/gori-osx-${ARCH}.tar.gz"
+          fi
+          ls -la build
+
+      - if: startsWith(github.ref, 'refs/tags/')
         name: Upload to GitHub Releases
         uses: svenstaro/upload-release-action@v2
         with:
@@ -128,3 +152,53 @@ jobs:
           overwrite: true
           file_glob: true
           file: build/*
+
+  # One SHA256SUMS covering every platform, so integrity can be checked over a
+  # path that never touches api.github.com. It matters because the API is what
+  # normally hands `gori update` a per-asset digest: once the 60 req/h limit is
+  # spent and the client falls back to the release redirect, this file is the
+  # only checksum source left. Single aggregated file rather than one per asset
+  # to keep the release page readable.
+  checksums:
+    name: Publish SHA256SUMS
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v5
+
+      - name: Download built assets
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: build-*
+          merge-multiple: true
+
+      - name: Compute checksums
+        run: |
+          set -euo pipefail
+          : > SHA256SUMS
+          for path in artifacts/*; do
+            [ -f "$path" ] || continue
+            name="$(basename "$path")"
+            sum="$(sha256sum "$path" | cut -d' ' -f1)"
+            printf '%s  %s\n' "$sum" "$name" >> SHA256SUMS
+            # The version-less aliases are byte-identical copies, so the same
+            # hash is emitted under the alias name too — whichever filename a
+            # client downloaded, it finds a line it can verify against.
+            alias_name="${name/gori-${GITHUB_REF_SLUG}-/gori-}"
+            if [ "$alias_name" != "$name" ]; then
+              printf '%s  %s\n' "$sum" "$alias_name" >> SHA256SUMS
+            fi
+          done
+          test -s SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload SHA256SUMS
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          overwrite: true
+          file: SHA256SUMS

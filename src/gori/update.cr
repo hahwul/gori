@@ -18,6 +18,14 @@ module Gori
     USER_AGENT    = "gori/#{VERSION} (+#{REPOSITORY_URL})"
     MAX_REDIRECTS = 10
     HTTP_TIMEOUT  = 60.seconds
+    # api.github.com caps unauthenticated callers at 60 requests/hour per IP and
+    # answers 403 once that is spent — a shared NAT/CI egress IP burns it fast.
+    # This endpoint is the plain web one, not the API, so it carries no such cap:
+    # it 302s to .../releases/tag/<tag>, which is enough to name the release.
+    RELEASES_LATEST_URL = "#{RELEASES_URL}/latest"
+    DOWNLOAD_BASE       = "#{RELEASES_URL}/download"
+    # A PAT lifts the API cap to 5000/hour. Checked in order, first non-empty wins.
+    TOKEN_ENVS = %w[GORI_GITHUB_TOKEN GITHUB_TOKEN GH_TOKEN]
     # Short timeout for the TUI startup update check (background, best-effort) so a
     # slow/hung GitHub never keeps a fiber alive for a full minute. The explicit
     # `gori update` flow keeps HTTP_TIMEOUT.
@@ -638,6 +646,23 @@ module Gori
       HEX_SHA256.matches?(hex) ? hex : nil
     end
 
+    # Parses a `sha256sum`-style SHA256SUMS body into {asset name => hex}. Lines
+    # are "<64 hex><spaces><name>", the name optionally prefixed with `*` for
+    # binary mode. Anything that does not match that shape is skipped rather than
+    # raising — a malformed line must not cost us the checksums we can read.
+    def self.parse_checksums(text : String) : Hash(String, String)
+      sums = {} of String => String
+      text.each_line do |line|
+        parts = line.strip.split(/\s+/, 2)
+        next unless parts.size == 2
+        hex = parts[0].downcase
+        next unless HEX_SHA256.matches?(hex)
+        name = parts[1].strip.lchop('*')
+        sums[name] = hex unless name.empty?
+      end
+      sums
+    end
+
     # Streamed SHA256 of a file as lowercase hex (constant memory).
     def self.file_sha256(path : String) : String
       digest = Digest::SHA256.new
@@ -690,12 +715,144 @@ module Gori
                             timeout : Time::Span = UPDATE_CHECK_TIMEOUT) : String?
       parse_release(fetch_latest_release_json(api_url, timeout: timeout)).version
     rescue
-      nil
+      # Rate-limited or offline. This check only needs a version number, and the
+      # redirect endpoint still supplies one, so the notice survives a spent quota.
+      return nil unless default_api?(api_url)
+      resolve_tag_via_redirect(timeout).try { |tag| normalize_version(tag) }
     end
 
     # Resolves the releases API URL: explicit arg → env override → GitHub default.
     def self.resolve_api_url(api_url : String? = nil) : String
       api_url || ENV[UPDATE_API_ENV]? || API_LATEST
+    end
+
+    # True only when we are talking to the real GitHub API rather than a mock
+    # server injected by a spec or GORI_UPDATE_API_URL. The redirect fallback
+    # targets github.com specifically, so it must not fire for those.
+    def self.default_api?(api_url : String? = nil) : Bool
+      resolve_api_url(api_url) == API_LATEST
+    end
+
+    # First non-empty value among TOKEN_ENVS, or nil.
+    def self.github_token : String?
+      TOKEN_ENVS.each do |name|
+        value = ENV[name]?.try(&.strip)
+        return value if value && !value.empty?
+      end
+      nil
+    end
+
+    # Tag out of a /releases/latest redirect Location, or nil when the target is
+    # not a release page. A repo with no published release redirects to plain
+    # /releases, so requiring the /releases/tag/ segment is what stops this path
+    # from inventing a tag out of an unrelated redirect.
+    def self.tag_from_release_location(location : String?) : String?
+      return nil unless location
+      loc = location.strip
+      return nil unless loc.includes?("/releases/tag/")
+      tag = loc.rpartition("/releases/tag/")[2]
+      # Drop anything GitHub might append after the tag.
+      tag = tag.partition('?')[0].partition('#')[0].partition('/')[0]
+      tag.empty? ? nil : tag
+    end
+
+    # Names the latest release from the web redirect instead of the API: no
+    # quota, but the tag is all we learn (no asset list, no size, no digest).
+    # Returns nil on any failure — callers treat that as "fallback unavailable".
+    def self.resolve_tag_via_redirect(timeout : Time::Span = HTTP_TIMEOUT) : String?
+      uri = URI.parse(RELEASES_LATEST_URL)
+      host = uri.host
+      return nil unless host
+      port = uri.port || (uri.scheme == "https" ? 443 : 80)
+      client = http_client(host, port, uri.scheme == "https", timeout)
+      begin
+        response = client.head(uri.request_target,
+          headers: HTTP::Headers{"User-Agent" => USER_AGENT})
+        return nil unless {301, 302, 303, 307, 308}.includes?(response.status_code)
+        tag_from_release_location(response.headers["Location"]?)
+      ensure
+        client.close
+      end
+    rescue
+      nil
+    end
+
+    # Stand-in for the API payload, built from a tag alone, so the redirect path
+    # can reuse parse_release/resolve_asset_from_json unchanged. The asset name is
+    # derived exactly as release-binary.yml builds it. `digest` comes from the
+    # release's SHA256SUMS when it has one; without it verify_sha256! no-ops, so
+    # the caller warns that the checksum check was skipped (see update_binary).
+    def self.synthesize_release_json(tag : String, os : String = current_os,
+                                     arch : String = current_arch,
+                                     digest : String? = nil) : String
+      name = asset_name(tag, os, arch)
+      JSON.build do |json|
+        json.object do
+          json.field "tag_name", tag
+          json.field "assets" do
+            json.array do
+              json.object do
+                json.field "name", name
+                json.field "browser_download_url", "#{DOWNLOAD_BASE}/#{tag}/#{name}"
+                json.field "digest", "sha256:#{digest}" if digest
+              end
+            end
+          end
+        end
+      end
+    end
+
+    # sha256 for `name` out of the release's SHA256SUMS, or nil when the release
+    # publishes none / the fetch fails. Only needed on the redirect fallback: the
+    # API hands us a per-asset digest directly, but it is the API that is
+    # unavailable there, and SHA256SUMS travels the same no-quota download path.
+    def self.fetch_asset_digest(tag : String, name : String) : String?
+      body : String? = nil
+      with_tempdir("gori-sums-") do |dir|
+        dest = File.join(dir, "SHA256SUMS")
+        download_to("#{DOWNLOAD_BASE}/#{tag}/SHA256SUMS", dest)
+        body = File.read(dest)
+      end
+      body.try { |text| parse_checksums(text)[name]? }
+    rescue
+      nil
+    end
+
+    # fetch_latest_release_json, but when GitHub refuses (rate limit, outage) it
+    # names the release through the redirect endpoint instead. Returns the JSON
+    # and whether it came from that fallback, so the caller can say so.
+    #
+    # Falls back on any fetch error rather than only 403: resolve_tag_via_redirect
+    # validates its own answer, so a genuine "no releases" still surfaces the
+    # original error instead of being papered over.
+    def self.fetch_latest_release_json_with_fallback(api_url : String? = nil, *,
+                                                     timeout : Time::Span = HTTP_TIMEOUT) : {String, Bool}
+      {fetch_latest_release_json(api_url, timeout: timeout), false}
+    rescue ex
+      raise ex unless default_api?(api_url)
+      tag = resolve_tag_via_redirect(timeout)
+      raise ex unless tag
+      digest = fetch_asset_digest(tag, asset_name(tag, current_os, current_arch))
+      {synthesize_release_json(tag, digest: digest), true}
+    end
+
+    # Maps a non-200 releases-API status onto the error we surface. Split out of
+    # fetch_latest_release_json so the status ladder does not dominate it.
+    private def self.api_error(status : Int32, body : String) : Error
+      case status
+      when 404
+        Error.new("no GitHub releases found for #{GITHUB_REPO} — see #{RELEASES_URL}")
+      when 401
+        Error.new("GitHub API rejected the token (HTTP 401) — check #{TOKEN_ENVS.join('/')}")
+      when 403, 429
+        Error.new(
+          "GitHub API rate limit reached (HTTP #{status}; unauthenticated callers get " \
+          "60 requests/hour per IP) — retry shortly, or set GITHUB_TOKEN to raise it to 5000/hour"
+        )
+      else
+        snippet = body.lines.first?.try { |l| l.size > 200 ? l[0, 200] : l } || ""
+        Error.new("GitHub releases API returned HTTP #{status}#{snippet.empty? ? "" : ": #{snippet}"}")
+      end
     end
 
     def self.fetch_latest_release_json(api_url : String? = nil, *,
@@ -707,22 +864,18 @@ module Gori
         "User-Agent" => USER_AGENT,
       }
       host = uri.host || raise Error.new("invalid API URL: #{url}")
+      # Gated on the host, not on resolve_api_url: a token must never travel to a
+      # mock server or any other endpoint someone points GORI_UPDATE_API_URL at.
+      if host == "api.github.com" && (token = github_token)
+        headers["Authorization"] = "Bearer #{token}"
+      end
       port = uri.port || (uri.scheme == "https" ? 443 : 80)
       tls = uri.scheme == "https"
       client = http_client(host, port, tls, timeout)
       begin
         response = client.get(uri.request_target, headers: headers)
-        case response.status_code
-        when 200
-          response.body
-        when 404
-          raise Error.new("no GitHub releases found for #{GITHUB_REPO} — see #{RELEASES_URL}")
-        when 403
-          raise Error.new("GitHub API forbidden (rate limit or auth) — see #{RELEASES_URL}")
-        else
-          snippet = response.body.lines.first?.try { |l| l.size > 200 ? l[0, 200] : l } || ""
-          raise Error.new("GitHub releases API returned HTTP #{response.status_code}#{snippet.empty? ? "" : ": #{snippet}"}")
-        end
+        raise api_error(response.status_code, response.body) unless response.status_code == 200
+        response.body
       ensure
         client.close
       end
@@ -913,11 +1066,29 @@ module Gori
       end
     end
 
+    # Post-download integrity gate: non-empty, matches the size the release
+    # advertised, and matches its sha256 when the API supplied a digest. The
+    # digest is absent on the redirect fallback, where verify_sha256! no-ops.
+    private def self.verify_download!(dest : String, asset : Asset, got : Int64, io : IO) : Nil
+      raise Error.new("downloaded asset is empty: #{asset.name}") unless got > 0
+      if asset.size > 0 && got != asset.size
+        raise Error.new("downloaded size mismatch for #{asset.name}: expected #{asset.size} bytes, got #{got}")
+      end
+      if expected_sha = parse_sha256_digest(asset.digest)
+        io.puts "Verifying sha256 checksum"
+        verify_sha256!(dest, expected_sha, asset.name)
+      end
+    end
+
     def self.update_binary(target_path : String, io : IO = STDOUT, _err : IO = STDERR, *,
                            release_json : String? = nil,
                            api_url : String? = nil,
                            force_progress : Bool = false) : Nil
-      json = release_json || fetch_latest_release_json(api_url)
+      json, via_redirect = if provided = release_json
+                             {provided, false}
+                           else
+                             fetch_latest_release_json_with_fallback(api_url)
+                           end
       release = parse_release(json)
       ver = release.version
       local = normalize_version(VERSION)
@@ -942,6 +1113,14 @@ module Gori
         )
       end
 
+      if via_redirect
+        io.puts "Note: the GitHub release API was unavailable (rate limit or outage);"
+        io.puts "      resolved #{release.tag_name} from #{RELEASES_LATEST_URL} instead."
+        unless parse_sha256_digest(asset.digest)
+          io.puts "      #{release.tag_name} publishes no SHA256SUMS, so sha256 verification is skipped."
+        end
+      end
+
       io.puts "Updating #{VERSION} → #{release.tag_name}"
       size_note = asset.size > 0 ? " (#{format_size(asset.size)})" : ""
       io.puts "Downloading #{asset.name}#{size_note}"
@@ -953,14 +1132,7 @@ module Gori
           expected_size: asset.size,
           progress_io: io,
           force_progress: force_progress)
-        raise Error.new("downloaded asset is empty: #{asset.name}") unless got > 0
-        if asset.size > 0 && got != asset.size
-          raise Error.new("downloaded size mismatch for #{asset.name}: expected #{asset.size} bytes, got #{got}")
-        end
-        if expected_sha = parse_sha256_digest(asset.digest)
-          io.puts "Verifying sha256 checksum"
-          verify_sha256!(dest, expected_sha, asset.name)
-        end
+        verify_download!(dest, asset, got, io)
         io.puts "Downloaded #{format_size(got)} in #{format_duration(started.elapsed)}"
         install_from_download(dest, target_path, asset_is_archive?(asset.name))
       end

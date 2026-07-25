@@ -2,6 +2,19 @@ require "./spec_helper"
 require "file_utils"
 require "./support/mock_release_server"
 
+# Sets env vars for the block and restores them exactly afterwards — a nil value
+# means "unset", both going in and coming back out, so a var that did not exist
+# before does not linger as an empty string for later examples.
+private def with_env(vars : Hash(String, String?), &)
+  saved = vars.keys.to_h { |key| {key, ENV[key]?} }
+  begin
+    vars.each { |key, value| value ? (ENV[key] = value) : ENV.delete(key) }
+    yield
+  ensure
+    saved.each { |key, value| value ? (ENV[key] = value) : ENV.delete(key) }
+  end
+end
+
 describe Gori::Update do
   describe ".detect_channel" do
     it "detects Homebrew Cellar paths" do
@@ -804,6 +817,159 @@ describe Gori::Update do
         end
       ensure
         FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+  end
+
+  # --- rate-limit fallback ---------------------------------------------------
+  # api.github.com allows 60 unauthenticated requests/hour per IP; past that it
+  # answers 403 and `gori update` used to simply fail. These cover the two ways
+  # out: a token, and naming the release from the web redirect instead.
+
+  describe ".tag_from_release_location" do
+    it "extracts the tag from a release redirect" do
+      Gori::Update.tag_from_release_location(
+        "https://github.com/hahwul/gori/releases/tag/v0.1.4").should eq("v0.1.4")
+    end
+
+    it "ignores query strings, fragments and trailing segments" do
+      Gori::Update.tag_from_release_location(
+        "https://github.com/hahwul/gori/releases/tag/v1.2.3?a=1").should eq("v1.2.3")
+      Gori::Update.tag_from_release_location(
+        "  https://github.com/hahwul/gori/releases/tag/v1.2.3#notes  ").should eq("v1.2.3")
+    end
+
+    it "returns nil when the redirect is not a release page" do
+      # A repo with no published release redirects to plain /releases. Reading a
+      # tag out of that would send the installer after an asset that cannot exist.
+      Gori::Update.tag_from_release_location("https://github.com/hahwul/gori/releases").should be_nil
+      Gori::Update.tag_from_release_location("https://github.com/hahwul/gori/releases/tag/").should be_nil
+      Gori::Update.tag_from_release_location("https://github.com/login").should be_nil
+      Gori::Update.tag_from_release_location(nil).should be_nil
+    end
+  end
+
+  describe ".github_token" do
+    it "takes the first non-empty of GORI_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN" do
+      with_env({"GORI_GITHUB_TOKEN" => "a", "GITHUB_TOKEN" => "b", "GH_TOKEN" => "c"}) do
+        Gori::Update.github_token.should eq("a")
+      end
+      with_env({"GORI_GITHUB_TOKEN" => nil, "GITHUB_TOKEN" => "b", "GH_TOKEN" => "c"}) do
+        Gori::Update.github_token.should eq("b")
+      end
+      with_env({"GORI_GITHUB_TOKEN" => nil, "GITHUB_TOKEN" => nil, "GH_TOKEN" => "c"}) do
+        Gori::Update.github_token.should eq("c")
+      end
+    end
+
+    it "treats a blank value as absent" do
+      with_env({"GORI_GITHUB_TOKEN" => "   ", "GITHUB_TOKEN" => nil, "GH_TOKEN" => nil}) do
+        Gori::Update.github_token.should be_nil
+      end
+    end
+  end
+
+  describe ".default_api?" do
+    it "is false for an explicit URL or the env override" do
+      Gori::Update.default_api?("http://127.0.0.1:1/x").should be_false
+      with_env({"GORI_UPDATE_API_URL" => "http://127.0.0.1:1/x"}) do
+        Gori::Update.default_api?.should be_false
+      end
+    end
+
+    it "is true for the stock GitHub endpoint" do
+      with_env({"GORI_UPDATE_API_URL" => nil}) do
+        Gori::Update.default_api?.should be_true
+      end
+    end
+  end
+
+  describe ".synthesize_release_json" do
+    it "builds a release the normal parser and asset picker consume" do
+      json = Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64")
+      release = Gori::Update.parse_release(json)
+      release.tag_name.should eq("v9.9.9")
+      asset = Gori::Update.select_asset(release, "linux", "x86_64").not_nil!
+      asset.name.should eq("gori-v9.9.9-linux-x86_64")
+      asset.browser_download_url.should eq(
+        "https://github.com/hahwul/gori/releases/download/v9.9.9/gori-v9.9.9-linux-x86_64")
+    end
+
+    it "advertises no digest when SHA256SUMS gave none, rather than faking one" do
+      release = Gori::Update.parse_release(
+        Gori::Update.synthesize_release_json("v9.9.9", "osx", "arm64"))
+      release.assets.first.digest.should be_nil
+      Gori::Update.parse_sha256_digest(release.assets.first.digest).should be_nil
+    end
+
+    it "carries a SHA256SUMS digest through so verify_sha256! actually runs" do
+      hex = "e" * 64
+      release = Gori::Update.parse_release(
+        Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64", digest: hex))
+      Gori::Update.parse_sha256_digest(release.assets.first.digest).should eq(hex)
+    end
+  end
+
+  describe ".parse_checksums" do
+    it "parses sha256sum-style lines" do
+      text = "#{"a" * 64}  gori-v9.9.9-linux-x86_64\n#{"b" * 64}  gori-linux-x86_64\n"
+      sums = Gori::Update.parse_checksums(text)
+      sums["gori-v9.9.9-linux-x86_64"].should eq("a" * 64)
+      sums["gori-linux-x86_64"].should eq("b" * 64)
+    end
+
+    it "accepts the binary-mode marker and uppercase hex" do
+      sums = Gori::Update.parse_checksums("#{"A" * 64} *gori-osx-arm64.tar.gz\n")
+      sums["gori-osx-arm64.tar.gz"].should eq("a" * 64)
+    end
+
+    it "skips malformed lines instead of discarding the whole file" do
+      text = String.build do |s|
+        s << "not-a-hash  gori-bad\n"
+        s << "\n"
+        s << "#{"c" * 64}  gori-ok\n"
+        s << "#{"d" * 63}  gori-tooshort\n"
+        s << "#{"e" * 64}\n" # hash with no name
+      end
+      sums = Gori::Update.parse_checksums(text)
+      sums.keys.should eq(["gori-ok"])
+    end
+  end
+
+  describe ".fetch_latest_release_json_with_fallback" do
+    it "reports HTTP 403 as a rate limit and names the token workaround" do
+      with_mock_release_server(api_status: 403) do |server|
+        ex = expect_raises(Gori::Error, /rate limit/i) do
+          Gori::Update.fetch_latest_release_json(server.api_url)
+        end
+        ex.message.not_nil!.should contain("GITHUB_TOKEN")
+      end
+    end
+
+    it "passes an API success straight through, with no fallback flag" do
+      with_mock_release_server do |server|
+        json, via_redirect = Gori::Update.fetch_latest_release_json_with_fallback(server.api_url)
+        via_redirect.should be_false
+        Gori::Update.parse_release(json).tag_name.should eq("v99.0.0")
+      end
+    end
+
+    it "does not fall back to github.com when an explicit API URL was given" do
+      # Mock servers and GORI_UPDATE_API_URL must stay hermetic: a 403 from the
+      # injected endpoint has to surface, not silently retarget the real repo.
+      with_mock_release_server(api_status: 403) do |server|
+        expect_raises(Gori::Error, /rate limit/i) do
+          Gori::Update.fetch_latest_release_json_with_fallback(server.api_url)
+        end
+      end
+    end
+
+    it "never sends a token to a host other than api.github.com" do
+      with_env({"GORI_GITHUB_TOKEN" => "secret-pat"}) do
+        with_mock_release_server do |server|
+          Gori::Update.fetch_latest_release_json(server.api_url)
+          server.last_api_headers.not_nil!["Authorization"]?.should be_nil
+        end
       end
     end
   end

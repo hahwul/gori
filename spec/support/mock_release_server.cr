@@ -11,8 +11,14 @@ class MockReleaseServer
   getter body : Bytes
   getter asset_names : Array(String)
 
+  # Headers of the most recent request to the release-API path, so specs can
+  # assert what we do and do not send (e.g. that a PAT never leaves for a
+  # non-github.com host).
+  getter last_api_headers : HTTP::Headers?
+
   @server : HTTP::Server
   @closed = false
+  @last_api_headers : HTTP::Headers? = nil
 
   # `reported_size`: override the release JSON's `size` field independent of the
   # real asset body (defaults to the true body size). Lets specs simulate the
@@ -30,7 +36,9 @@ class MockReleaseServer
                  reported_size : Int64? = nil,
                  truncate_at : Int32? = nil,
                  provide_digest : Bool = false,
-                 digest_override : String? = nil)
+                 digest_override : String? = nil,
+                 api_status : Int32 = 200)
+    @api_status = api_status
     @tag = tag
     @body = body.is_a?(Bytes) ? body : body.to_slice
     ver = tag.lchop('v').lchop('V')
@@ -96,7 +104,14 @@ class MockReleaseServer
     path = req.path
     case
     when path == "/repos/hahwul/gori/releases/latest"
+      @last_api_headers = req.headers.dup
       context.response.content_type = "application/json"
+      if @api_status != 200
+        # Shaped like the real thing so error-message specs match reality.
+        context.response.status = HTTP::Status.new(@api_status)
+        context.response.print %({"message":"API rate limit exceeded for 203.0.113.7."})
+        return
+      end
       context.response.print release_json
     when path.starts_with?("/download/")
       name = path.lchop("/download/")
