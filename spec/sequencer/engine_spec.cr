@@ -84,6 +84,23 @@ describe Gori::Sequencer::Engine do
     backend.sent.should eq(0)
   end
 
+  it "runs manual mode with NO backend at all (an analyse-only engine has no sender)" do
+    # Manual mode sends nothing, so it takes no send seam — the TUI used to hand it a
+    # throwaway Sender pointed at http://localhost:80 purely to satisfy this constructor.
+    config = Q::Config.new(mode: Q::Mode::Manual, manual_tokens: ["aa", "bb"])
+    samples = drain(Q::Engine.new(Bytes.empty, http2: false, backend: nil, config: config))
+    samples.map(&.token).should eq(["aa", "bb"])
+  end
+
+  it "refuses a live-replay engine with no backend at construction" do
+    # The other half of the nilable backend: rejected here rather than discovered inside a
+    # worker fiber, which is what makes manual mode's nil safe everywhere else.
+    config = Q::Config.new(mode: Q::Mode::LiveReplay, token_loc: Q::TokenLoc.cookie("SID"), goal: 1)
+    expect_raises(ArgumentError, "live replay needs a send backend") do
+      Q::Engine.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false, backend: nil, config: config)
+    end
+  end
+
   it "reports a Done event with collected/sent counts" do
     backend = CounterCookieBackend.new(F::Origin.new("http", "h", 80))
     config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 10, concurrency: 1, retries: 0)

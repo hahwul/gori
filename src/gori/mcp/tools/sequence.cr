@@ -1,5 +1,8 @@
 require "json"
 require "../../fuzz"
+require "../../host_overrides"
+require "../../repeater/flow_request"
+require "../../sequencer"
 
 module Gori
   module MCP
@@ -24,7 +27,11 @@ module Gori
 
       private def sequence_start(h) : Result
         ob = outbound(bool(h, "allow_unscoped") || false)
-        engine, origin, goal, loc = build_sequence_job(h, ob)
+        plan = build_sequence_plan(h, ob)
+        # `origin!` never raises here: sequence_start only ever builds a LIVE plan (a pasted
+        # token list is sequence_analyze's job and builds no engine at all).
+        origin = plan.origin!
+        goal = plan.goal
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
@@ -32,11 +39,11 @@ module Gori
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
-        sjob = SequenceJob.new(id, goal, engine, audit)
+        sjob = SequenceJob.new(id, goal, plan.engine, audit)
         evict_finished_jobs(@sequence_jobs)
         @sequence_jobs[id] = sjob
-        Log.info { "sequence_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} goal=#{goal} loc=#{loc.label}" }
-        spawn(name: "mcp-seq-#{id}") { run_sequence_job(sjob, engine) }
+        Log.info { "sequence_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} goal=#{goal} loc=#{plan.config.token_loc.label}" }
+        spawn(name: "mcp-seq-#{id}") { run_sequence_job(sjob, plan.engine) }
         Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "goal", goal; j.field "status", "running"; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid sequence arguments", is_error: true)
@@ -132,27 +139,60 @@ module Gori
         @sequence_jobs[id]? || not_found("no sequence job #{id}")
       end
 
-      # Build a ready-to-run collection engine + its origin + goal + token location.
-      private def build_sequence_job(h, ob : Outbound) : {Sequencer::Engine, Fuzz::Origin, Int32, Sequencer::TokenLoc}
-        bytes, default_target, src_h2 = mine_request_source(h)
-        use_h2 = (bool(h, "http2") || false) || src_h2
-        origin = fuzz_origin(h, default_target)
-        loc = sequence_token_loc(h)
-        goal = clamp(int(h, "count"), 500, SEQUENCE_MAX_GOAL)
-        # The sender carries the Outbound decision, so Sandbox / EXCLUDE now hard-block a
-        # collection run per send — sequence_start used to have only the job-start check.
-        sender = Fuzz::Sender.new(origin, ob, http2: use_h2,
-          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h),
-          overrides: HostOverrides.load(store))
-        config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay, token_loc: loc, goal: goal,
+      # Normalize the tool args into `Sequencer::PlanOptions` and let the shared builder
+      # assemble the run. Raises FuzzArgError (clean message) on any malformed input.
+      private def build_sequence_plan(h, ob : Outbound) : Sequencer::Plan
+        bytes, default_target, src_h2 = sequence_request_source(h)
+        config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay,
+          token_loc: sequence_token_loc(h), goal: clamp(int(h, "count"), 500, SEQUENCE_MAX_GOAL),
           concurrency: clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
         config.rps = int(h, "rate").try(&.to_f64)
         config.timeout = fuzz_timeout(h)
         config.retries = (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i
         cap = int(h, "max_requests")
         config.max_requests = cap ? {cap, SEQUENCE_MAX_REQUESTS}.min : SEQUENCE_MAX_REQUESTS
-        engine = Sequencer::Engine.new(bytes, use_h2, sender, config)
-        {engine, origin, goal, loc}
+        # The builder's sender carries the Outbound decision, so Sandbox / EXCLUDE hard-block
+        # a collection run per send — sequence_start used to have only the job-start check.
+        options = Sequencer::PlanOptions.new(bytes, default_target: default_target,
+          target: str(h, "url"), http2: (bool(h, "http2") || false) || src_h2, config: config,
+          verify: @verify_upstream && !(bool(h, "insecure") || false),
+          overrides: HostOverrides.load(store))
+        Sequencer::Plan.build(options, ob)
+      rescue ex : Sequencer::PlanError
+        raise FuzzArgError.new(sequence_plan_error(ex))
+      end
+
+      # MCP's wording for a collection the args can't produce — the builder reports the
+      # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
+      private def sequence_plan_error(ex : Sequencer::PlanError) : String
+        case ex.reason
+        in Sequencer::PlanError::Reason::NoTarget
+          "provide a 'url' target (scheme://host) or a flow_id that carries one"
+        in Sequencer::PlanError::Reason::BadTarget
+          "could not parse a host from '#{ex.detail}'"
+        in Sequencer::PlanError::Reason::NoTokenLoc
+          "provide exactly one token location: cookie|header|regex|position|jsonpath"
+        in Sequencer::PlanError::Reason::NoTokens
+          # Unreachable here: a pasted token list goes to sequence_analyze, which builds no plan.
+          "provide a non-empty 'tokens' array"
+        end
+      end
+
+      # {raw request bytes, the seeding flow's target, http2} for a collection. Deliberately
+      # UNEXPANDED — `Sequencer::Plan.build` owns `Env.expand`, and expanding here as well
+      # (as the shared `mine_request_source` does for the miner) would resolve a var whose
+      # value itself contains a `$TOKEN` twice.
+      private def sequence_request_source(h) : {Bytes, String?, Bool}
+        if t = str(h, "template")
+          return {t.to_slice, nil, false} unless t.strip.empty?
+        end
+        if id = int(h, "flow_id")
+          detail = store.get_flow(id)
+          raise FuzzArgError.new("no flow with id #{id}") unless detail
+          built = Repeater::FlowRequest.build(detail)
+          return {built.bytes, built.target, built.http2}
+        end
+        raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
       end
 
       private def sequence_token_loc(h) : Sequencer::TokenLoc

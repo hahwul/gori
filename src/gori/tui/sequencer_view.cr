@@ -321,28 +321,39 @@ module Gori::Tui
     end
 
     # --- engine ---
+    # Gather this session's state into `Sequencer::PlanOptions` and let the shared builder
+    # assemble the run — the view no longer knows how a collection is wired together.
+    #
     # `scope` becomes the interactive `Gori::Outbound` decision every collected sample is
     # dialled through. The Sequencer used to build a bare `Fuzz::Sender` with NO gate at
     # all, so Sandbox mode did not contain it — the exact omission the Outbound seam makes
-    # impossible (the decision is now a constructor argument).
-    def build_engine(verify : Bool, scope : Gori::Scope) : {Sequencer::Engine?, String?}
-      outbound = Gori::Outbound.interactive(scope)
-      if @config.mode.manual?
-        return {nil, "no tokens to analyze — paste some first"} if @config.manual_tokens.all?(&.empty?)
-        # Manual mode analyzes a pasted list and never sends, but the engine still wants a
-        # backend — gate it like any other so the type system has no ungated escape hatch.
-        dummy = Fuzz::Sender.new(Fuzz::Origin.new("http", "localhost", 80), outbound, http2: false, verify: false)
-        return {Sequencer::Engine.new(Bytes.empty, false, dummy, @config), nil}
-      end
-      scheme, host, port = Repeater::FlowRequest.parse_target(@target)
-      return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
-      loc = @config.token_loc
-      return {nil, "set a token location first"} if loc.selector.strip.empty? && !loc.kind.position?
-      sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
-        http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
-      {Sequencer::Engine.new(@request, @http2, sender, @config), nil}
+    # impossible (the decision is now a constructor argument). `overrides` is the project's
+    # LIVE `Session#host_overrides` (the instance the HOST OVERRIDES pane edits and the
+    # proxy reads), and it has no default: every TUI workbench tool silently took a nil one
+    # and dialled the real DNS answer while `gori run sequence` pinned the override (#367),
+    # so a caller has to say what it means rather than inherit that bug back.
+    def build_engine(verify : Bool, scope : Gori::Scope,
+                     overrides : Gori::HostOverrides?) : {Sequencer::Engine?, String?}
+      options = Sequencer::PlanOptions.new(@request, target: @target, http2: @http2,
+        config: @config, verify: verify, sni: sni_override, overrides: overrides)
+      {Sequencer::Plan.build(options, Gori::Outbound.interactive(scope)).engine, nil}
+    rescue ex : Sequencer::PlanError
+      {nil, plan_error(ex)}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # The Sequencer tab's wording for a plan this view's state can't produce. The builder
+    # reports the machine-readable `reason`; the hint (and the hotkeys it names) is ours.
+    private def plan_error(ex : Sequencer::PlanError) : String
+      case ex.reason
+      in Sequencer::PlanError::Reason::NoTokens
+        "no tokens to analyze — paste some first"
+      in Sequencer::PlanError::Reason::NoTarget, Sequencer::PlanError::Reason::BadTarget
+        "invalid target — use scheme://host[:port]/path"
+      in Sequencer::PlanError::Reason::NoTokenLoc
+        "set a token location first"
+      end
     end
 
     # --- config (de)serialization (opaque JSON; manual tokens are secrets, never stored) ---

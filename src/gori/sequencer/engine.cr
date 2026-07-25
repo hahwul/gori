@@ -25,7 +25,10 @@ module Gori::Sequencer
 
     getter events : Channel(Event)
 
-    @backend : Fuzz::CappedBackend
+    # nil for an ANALYSE-ONLY engine: manual mode replays a pasted token list and never
+    # opens a socket, so it needs no send seam at all. The constructor rejects the other
+    # combination (live replay without a backend), which is what makes this nil safe.
+    @backend : Fuzz::CappedBackend?
     @concurrency : Int32
     @state : State
     @wake : Channel(Nil)
@@ -37,8 +40,13 @@ module Gori::Sequencer
     @last_dispatch : Time::Instant
     @token_re : Regex? = nil # Regex token descriptor compiled ONCE per run (see run_live)
 
-    def initialize(@request : Bytes, @http2 : Bool, backend : Fuzz::Backend, @config : Config)
-      @backend = Fuzz::CappedBackend.new(backend, @config.max_requests)
+    # `backend` is nil ONLY for manual mode, which analyses pasted tokens offline. Live
+    # replay without one is rejected here rather than discovered inside a worker fiber —
+    # and modelling it as absent is why manual mode no longer needs a throwaway sender
+    # pointed at http://localhost:80 just to satisfy this signature.
+    def initialize(@request : Bytes, @http2 : Bool, backend : Fuzz::Backend?, @config : Config)
+      raise ArgumentError.new("sequencer: live replay needs a send backend") if backend.nil? && !@config.mode.manual?
+      @backend = backend.try { |b| Fuzz::CappedBackend.new(b, @config.max_requests) }
       @concurrency = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @state = State::Running
       @wake = Channel(Nil).new(1)
@@ -113,6 +121,14 @@ module Gori::Sequencer
     end
 
     private def run_live : Nil
+      # Unwrapped once here, then passed down. The constructor rejects live-replay-with-no-
+      # backend, but `@config` is the caller's LIVE object (the TUI config overlay binds one),
+      # so a consumer that flips an analyse-only run's `mode` to LiveReplay after the engine
+      # was built lands here — with no sender to reach for. Doing the unwrap on THIS fiber
+      # makes that a clean ErrorEvent from orchestrate (and NO traffic) rather than a raise
+      # inside a worker fiber; it is the reason manual mode can honestly carry no backend
+      # instead of a throwaway sender that would have sent somewhere real.
+      backend = @backend || raise Error.new("sequencer: live replay without a send backend")
       # Compile the Regex token descriptor ONCE up front instead of per response. A bad
       # pattern is reported to the operator as a clean error (via orchestrate's ErrorEvent
       # + DoneEvent) rather than raising per-sample inside a worker fiber — which would dump
@@ -157,7 +173,7 @@ module Gori::Sequencer
             # to 2 extra live requests.
             break if @collected + (@dispatched - @sent) >= @config.goal
             break if @dispatched >= @config.max_sends
-            break if @backend.cap_reached?
+            break if backend.cap_reached?
             pace(interval)
             jobs.send(@dispatched)
             @dispatched += 1
@@ -172,7 +188,7 @@ module Gori::Sequencer
           begin
             while jobs.receive?
               next if @state.stopped?
-              process_one
+              process_one(backend)
             end
           ensure
             finished.send(nil)
@@ -183,8 +199,8 @@ module Gori::Sequencer
       @concurrency.times { finished.receive }
     end
 
-    private def process_one : Nil
-      raw = send_with_retries(@request)
+    private def process_one(backend : Fuzz::CappedBackend) : Nil
+      raw = send_with_retries(backend, @request)
       @sent += 1
       token = Extract.extract(raw, @config.token_loc, @token_re)
       idx = (@idx += 1)
@@ -197,10 +213,10 @@ module Gori::Sequencer
       emit_progress
     end
 
-    private def send_with_retries(bytes : Bytes) : Repeater::Result
+    private def send_with_retries(backend : Fuzz::CappedBackend, bytes : Bytes) : Repeater::Result
       attempts = 0
       loop do
-        raw = @backend.send(bytes)
+        raw = backend.send(bytes)
         return raw if raw.error.nil? || raw.error == Fuzz::CappedBackend::CAP_ERROR || attempts >= @config.retries
         attempts += 1
         sleep @config.retry_pause

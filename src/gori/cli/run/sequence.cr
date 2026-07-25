@@ -79,10 +79,14 @@ module Gori
         k = kind
         abort "gori run sequence: specify a token location (--cookie/--header/--regex/--position/--jsonpath) or use --tokens" unless k
 
-        bytes, default_target, src_h2 = mine_source_for("sequence", flow_id, request_file, project_name, db_path)
-        scheme, host, port = resolve_target_for("sequence", target_override, default_target)
-        http2 = force_h2 || src_h2
-        token_loc = build_token_loc(k, selector, "sequence")
+        # The project's ENV vars, for a source that does NOT read the project itself
+        # (--request/stdin): `Plan.build` expands the request and the target, and without this
+        # only GLOBAL vars would resolve — a `$TOKEN` defined in the project would go out
+        # literally. Explicit and identical to cmd_fuzz, rather than relying on the store that
+        # `cli_host_overrides` happens to open below (see run.cr's open_store).
+        hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
+        bytes, default_target, src_h2 = sequence_source(flow_id, request_file, project_name, db_path)
+        token_loc = build_token_loc(k, selector)
 
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay, token_loc: token_loc, goal: count, concurrency: concurrency)
         config.rps = rate
@@ -90,19 +94,46 @@ module Gori
         config.timeout = timeout
         config.retries = retries
         config.max_requests = max_requests
+        options = Sequencer::PlanOptions.new(bytes, default_target: default_target,
+          target: target_override, http2: force_h2 || src_h2, config: config,
+          verify: !insecure, sni: sni,
+          overrides: cli_host_overrides(project_name, db_path, flow_id))
         # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send. (The
         # --tokens path returned above without touching the network, so it needs none.)
         outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
-        guard_outbound(outbound, scheme, host, Gori::Outbound.request_target(bytes), "gori run sequence")
-        sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound,
-          http2: http2, verify: !insecure, sni: sni, timeout: timeout,
-          overrides: cli_host_overrides(project_name, db_path, flow_id))
-        engine = Sequencer::Engine.new(bytes, http2, sender, config)
+        plan = begin
+          Sequencer::Plan.build(options, outbound)
+        rescue ex : Sequencer::PlanError
+          outbound.close
+          abort "gori run sequence: #{sequence_plan_error(ex)}"
+        end
+        origin = plan.origin!
+        unless origin.scheme.in?("http", "https")
+          outbound.close
+          abort "gori run sequence: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
+        end
+        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run sequence")
         begin
-          run_sequence_stream(engine, scheme, host, port, token_loc, count, format)
+          run_sequence_stream(plan.engine, origin.scheme, origin.host, origin.port, token_loc, plan.goal, format)
         ensure
           outbound.close
+        end
+      end
+
+      # `gori run sequence`'s wording for a collection the options can't produce. The builder
+      # reports the machine-readable `reason`; the sentence (and the flags it names) is ours.
+      private def self.sequence_plan_error(ex : Sequencer::PlanError) : String
+        case ex.reason
+        in Sequencer::PlanError::Reason::NoTarget
+          "--target is required for --request/stdin"
+        in Sequencer::PlanError::Reason::BadTarget
+          "could not determine a target host"
+        in Sequencer::PlanError::Reason::NoTokenLoc
+          "token location selector is empty"
+        in Sequencer::PlanError::Reason::NoTokens
+          # Unreachable here: --tokens is handled above and never builds a plan.
+          "no tokens to analyze"
         end
       end
 
@@ -115,25 +146,28 @@ module Gori
         raw.scrub.split(/\r?\n/).map(&.strip).reject(&.empty?)
       end
 
-      private def self.build_token_loc(kind : Sequencer::ExtractKind, selector : String, cmd : String) : Sequencer::TokenLoc
+      private def self.build_token_loc(kind : Sequencer::ExtractKind, selector : String) : Sequencer::TokenLoc
         if kind.position?
           a, _, b = selector.partition(':')
-          ai = a.to_i? || abort("gori run #{cmd}: --position needs A:B byte offsets")
-          bi = b.to_i? || abort("gori run #{cmd}: --position needs A:B byte offsets")
+          ai = a.to_i? || abort("gori run sequence: --position needs A:B byte offsets")
+          bi = b.to_i? || abort("gori run sequence: --position needs A:B byte offsets")
           Sequencer::TokenLoc.new(kind, "", ai, bi)
         else
-          abort "gori run #{cmd}: token location selector is empty" if selector.strip.empty?
+          # A blank selector is NOT rejected here: `Sequencer::Plan.build` owns that check so
+          # all three surfaces refuse the same descriptors (it reports NoTokenLoc, which
+          # sequence_plan_error words exactly as this abort used to).
           Sequencer::TokenLoc.new(kind, selector)
         end
       end
 
-      # Shared with cmd_sequence (same shape as mine_source/resolve_mine_target but with a
-      # subcommand-name prefix on the abort messages).
-      private def self.mine_source_for(cmd : String, flow_id : Int64?, request_file : String?,
+      # {raw request bytes, the seeding flow's target, http2} from the chosen source.
+      # Deliberately UNEXPANDED: `Sequencer::Plan.build` owns `Env.expand`, and expanding
+      # here as well would resolve a var whose value itself contains a `$TOKEN` twice.
+      private def self.sequence_source(flow_id : Int64?, request_file : String?,
                                        project_name : String?, db_path : String?) : {Bytes, String?, Bool}
         if file = request_file
-          abort "gori run #{cmd}: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
-          {Env.expand_wire(File.read(file)), nil, false}
+          abort "gori run sequence: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
+          {File.read(file).to_slice, nil, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))
           detail = begin
@@ -141,22 +175,14 @@ module Gori
           ensure
             store.close
           end
-          abort "gori run #{cmd}: no flow ##{id}" unless detail
+          abort "gori run sequence: no flow ##{id}" unless detail
           built = Repeater::FlowRequest.build(detail)
-          {Env.expand_wire(String.new(built.bytes)), built.target, built.http2}
+          {built.bytes, built.target, built.http2}
         elsif !STDIN.tty?
-          {Env.expand_wire(STDIN.gets_to_end), nil, false}
+          {STDIN.gets_to_end.to_slice, nil, false}
         else
-          abort "gori run #{cmd}: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
+          abort "gori run sequence: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end
-      end
-
-      private def self.resolve_target_for(cmd : String, override : String?, default_target : String?) : {String, String, Int32}
-        target = Env.expand(override || default_target || abort("gori run #{cmd}: --target is required for --request/stdin"))
-        scheme, host, port = Repeater::FlowRequest.parse_target(target)
-        abort "gori run #{cmd}: could not determine a target host" if host.empty?
-        abort "gori run #{cmd}: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        {scheme, host, port}
       end
 
       private def self.run_sequence_stream(engine : Sequencer::Engine, scheme : String, host : String,

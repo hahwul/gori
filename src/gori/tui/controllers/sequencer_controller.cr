@@ -377,8 +377,12 @@ module Gori::Tui
       s.empty? ? "request" : s
     end
 
+    # NO `Env.expand` here: `Sequencer::Plan.build` expands the request once, at run time.
+    # Expanding at seed time as well would resolve a var whose value itself contains a
+    # `$TOKEN` twice, and would freeze the resolved value into the persisted session — a
+    # sequenced request keeps its `$TOKEN`s like the Repeater editor does.
     private def text_to_request(text : String) : Bytes
-      Env.expand(text).gsub(/\r?\n/, "\r\n").to_slice
+      text.gsub(/\r?\n/, "\r\n").to_slice
     end
 
     # --- send-selection: selected text becomes manual sample(s) ---
@@ -443,7 +447,11 @@ module Gori::Tui
     end
 
     private def start_run(view : SequencerView) : Nil
-      engine, err = view.build_engine(!@host.session.config.insecure_upstream?, @host.session.scope)
+      # The project's LIVE HostOverrides instance, not a fresh `HostOverrides.load(store)`:
+      # this is the one the HOST OVERRIDES pane edits and the proxy reads (Mutex-guarded), so
+      # a pin added while the tab is open applies to the next collection (#367).
+      engine, err = view.build_engine(!@host.session.config.insecure_upstream?, @host.session.scope,
+        @host.session.host_overrides)
       unless engine
         @host.status(err || "cannot collect")
         return
