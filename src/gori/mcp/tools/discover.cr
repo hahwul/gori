@@ -1,8 +1,7 @@
 require "json"
 require "../../discover"
 require "../../discover/adapters"
-require "../../env"
-require "../../scope"
+require "../../discover/plan"
 
 module Gori
   module MCP
@@ -10,53 +9,56 @@ module Gori
       # --- discover (spider + directory brute-force) --------------------------
 
       private def discover_start(h) : Result
-        engine, seed_url, host = build_discover_job(h)
-        p = Discover::Url.parse(seed_url)
-        chk_url = p ? "#{Discover::Url.origin(p)}/" : seed_url
-        sc = outbound(bool(h, "allow_unscoped") || false).check(chk_url, host)
+        # ONE Outbound for the whole call: the builder derives the crawl-time ScopePolicy
+        # from it (see Discover::Plan.resolve_policy) and the Layer-1 check below reads the
+        # same decision, so `allow_unscoped` cannot be honoured by one and not the other.
+        ob = outbound(bool(h, "allow_unscoped") || false)
+        plan = build_discover_plan(h, ob)
+        # Matched on the SEED URL (path included), not its bare origin: a project scoped to
+        # `https://acme.test/api/` should be crawlable from `https://acme.test/api/v1`.
+        sc = ob.check(plan.seed, plan.host)
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "ds_#{@job_seq}"
-        audit = JobAudit.new(seed_url, int(h, "rate").try(&.to_f64),
-          clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
-          int(h, "max_requests"), Time.utc.to_unix_ms)
+        # Read back off the plan, not re-derived from the args: the concurrency clamp used to
+        # be written out twice, and `max_requests` was recorded RAW while the engine ran with
+        # `min(requested, DISCOVER_MAX_REQUESTS)` — an audit line that disagreed with the run.
+        audit = JobAudit.new(plan.seed, plan.config.rps, plan.config.concurrency,
+          plan.config.max_requests, Time.utc.to_unix_ms)
+        engine = plan.engine
         djob = DiscoverJob.new(id, engine, audit)
         evict_finished_jobs(@discover_jobs)
         @discover_jobs[id] = djob
-        Log.info { "discover_start #{id} #{seed_url} scope=#{sc.decision}" }
+        Log.info { "discover_start #{id} #{plan.seed} scope=#{sc.decision}" }
         spawn(name: "mcp-discover-#{id}") { run_discover_job(djob, engine) }
         Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "status", "running"; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid discover arguments", is_error: true)
       end
 
-      # Build a ready-to-run discover engine + seed URL + host from the tool args.
-      private def build_discover_job(h) : {Discover::Engine, String, String}
-        raw = str(h, "url").presence || raise FuzzArgError.new("provide a 'url' seed target")
-        seed = Env.expand(raw)
-        seed = "https://#{seed}" unless seed.matches?(/\Ahttps?:\/\//i)
-        parts = Discover::Url.parse(seed) || raise FuzzArgError.new("could not parse a host from '#{raw}'")
+      # Parse the tool args into Discover::PlanOptions and hand them to the ONE builder every
+      # surface shares. Everything here is arg decoding (clamps, enum tokens, MCP's own
+      # ceilings); seed normalization, wordlist load, scope policy and sender wiring are the
+      # builder's. Raises FuzzArgError (clean message) on any malformed input.
+      private def build_discover_plan(h, ob : Outbound) : Discover::Plan
+        options = Discover::PlanOptions.new(str(h, "url") || "", config: discover_config(h),
+          verify: @verify_upstream && !(bool(h, "insecure") || false),
+          overrides: HostOverrides.load(store))
+        Discover::Plan.build(options, ob)
+      rescue ex : Discover::PlanError
+        raise FuzzArgError.new(discover_plan_error(ex))
+      end
 
+      # Every run knob the args carry, with MCP's own ceilings applied (an agent must not be
+      # able to ask for an unbounded crawl). `user_wordlist` lives on the Config like every
+      # other knob — the builder reads it from there on all three surfaces.
+      private def discover_config(h) : Discover::Config
         spider = bool(h, "spider")
         bruteforce = bool(h, "bruteforce")
         spider = true if spider.nil?
         bruteforce = true if bruteforce.nil?
-        raise FuzzArgError.new("at least one of spider/bruteforce must stay enabled") unless spider || bruteforce
-
-        containment = Discover::Containment::ScopeAware
-        if c = str(h, "containment").presence
-          containment = Discover::Containment.parse?(c) || raise FuzzArgError.new("invalid containment '#{c}' (same-origin|scope-aware|host+subdomains)")
-        end
-        extensions = (str(h, "extensions") || "").split(',').compact_map do |t|
-          tok = t.strip.lchop('.')
-          tok.empty? ? nil : tok
-        end
-        header_lines = [] of String
-        if hm = h["headers"]?.try(&.as_h?)
-          hm.each { |k, v| header_lines << "#{k}: #{Env.expand(v.as_s? || v.to_s)}" }
-        end
         cap = int(h, "max_requests")
-        config = Discover::Config.new(
+        Discover::Config.new(
           concurrency: clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
           rps: int(h, "rate").try(&.to_f64),
           timeout: discover_timeout(h),
@@ -64,27 +66,48 @@ module Gori
           max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
           spider: spider, bruteforce: bruteforce,
           max_depth: clamp(int(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
-          extensions: extensions, containment: containment,
-          headers: Discover::Headers.parse_lines(header_lines))
-        words = Discover::Wordlist.load(str(h, "wordlist").presence)
-        scope = Scope.load(store)
-        policy = discover_policy(scope, seed, parts.host, bool(h, "allow_unscoped") || false)
-        sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h),
-          headers: config.headers, overrides: HostOverrides.load(store))
-        engine = Discover::Engine.new(seed, words, sender, config, policy)
-        {engine, seed, parts.host}
-      rescue ex : File::Error
-        raise FuzzArgError.new("wordlist error: #{ex.message}")
+          user_wordlist: str(h, "wordlist").presence,
+          extensions: discover_extensions(h), containment: discover_containment(h),
+          headers: Discover::Headers.parse_lines(discover_header_lines(h)))
       end
 
-      # Mirror of the CLI's discover_policy (cli/run/discover.cr): with allow_unscoped on an
-      # out-of-scope seed, keep sandbox/exclude but drop the include boundary so scope-aware
-      # containment falls back to same-origin instead of blocking every hop (which otherwise
-      # gutted the crawl to just the seed + robots/sitemap — see UnscopedStoreScope).
-      private def discover_policy(scope : Scope, seed : String, host : String, allow_unscoped : Bool) : Discover::ScopePolicy
-        return Discover::OpenScope.new unless scope.configured?
-        return Discover::UnscopedStoreScope.new(scope) if allow_unscoped && !scope.matches_url?(seed, host)
-        Discover::StoreScope.new(scope)
+      private def discover_containment(h) : Discover::Containment
+        c = str(h, "containment").presence
+        return Discover::Containment::ScopeAware unless c
+        Discover::Containment.parse?(c) ||
+          raise FuzzArgError.new("invalid containment '#{c}' (same-origin|scope-aware|host+subdomains)")
+      end
+
+      private def discover_extensions(h) : Array(String)
+        (str(h, "extensions") || "").split(',').compact_map do |t|
+          tok = t.strip.lchop('.')
+          tok.empty? ? nil : tok
+        end
+      end
+
+      # `{"headers": {"X-A": "1"}}` as raw `Name: Value` lines. `$VAR` in a value is left
+      # alone here — the builder expands it (and re-applies the CRLF guard afterwards).
+      private def discover_header_lines(h) : Array(String)
+        lines = [] of String
+        if hm = h["headers"]?.try(&.as_h?)
+          hm.each { |k, v| lines << "#{k}: #{v.as_s? || v.to_s}" }
+        end
+        lines
+      end
+
+      # MCP's wording for a plan the args can't produce — the builder reports the
+      # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
+      private def discover_plan_error(ex : Discover::PlanError) : String
+        case ex.reason
+        in Discover::PlanError::Reason::NoTarget
+          "provide a 'url' seed target"
+        in Discover::PlanError::Reason::BadTarget
+          "could not parse a host from '#{ex.detail}'"
+        in Discover::PlanError::Reason::NoTechnique
+          "at least one of spider/bruteforce must stay enabled"
+        in Discover::PlanError::Reason::Wordlist
+          "wordlist error: #{ex.detail}"
+        end
       end
 
       private def discover_timeout(h) : Time::Span?

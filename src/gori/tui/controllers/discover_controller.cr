@@ -2,6 +2,8 @@ require "../tab_controller"
 require "../discover_view"
 require "../../discover"
 require "../../discover/adapters"
+require "../../discover/plan"
+require "../../outbound"
 require "../../store"
 
 module Gori::Tui
@@ -181,16 +183,41 @@ module Gori::Tui
       @host.status("discovering #{run.target} in the background — watch the bottom bar / notifications")
     end
 
+    # View state → Discover::PlanOptions → the ONE builder every surface shares. The run's
+    # `config` is passed by REFERENCE on purpose: the discover config overlay edits that same
+    # instance while the row is selected, so a ^R re-run must read it, not a snapshot.
+    #
+    # `Outbound.interactive` is the TUI's Layer-1 policy (no up-front gate — the operator
+    # chose this target from the Sitemap/History; Sandbox and EXCLUDE still bound the crawl
+    # through the ScopePolicy the builder derives from it). The session's LIVE HostOverrides
+    # instance is handed over rather than a fresh `HostOverrides.load`, so an override the
+    # operator adds in the Project tab mid-session applies to the next run (issue #367) — the
+    # Fuzzer/Miner/Sequencer/Repeater tabs used to drop this argument entirely and silently
+    # dial the real DNS answer while `gori run discover` pinned it.
     private def build_engine(run : DiscoverRun) : {Discover::Engine?, String?}
-      return {nil, "invalid target — use scheme://host[:port][/path]"} unless Discover::Url.parse(run.target)
-      words = Discover::Wordlist.load(run.config.user_wordlist)
-      scope = @host.session.scope
-      policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
-      sender = Discover::Sender.new(verify: !@host.session.config.insecure_upstream?, timeout: run.config.timeout,
-        headers: run.config.headers)
-      {Discover::Engine.new(run.target, words, sender, run.config, policy), nil}
+      session = @host.session
+      options = Discover::PlanOptions.new(run.target, config: run.config,
+        verify: !session.config.insecure_upstream?, overrides: session.host_overrides)
+      {Discover::Plan.build(options, Gori::Outbound.interactive(session.scope)).engine, nil}
+    rescue ex : Discover::PlanError
+      {nil, discover_plan_error(ex)}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # The Discover tab's wording for a plan the run can't produce. The builder reports the
+    # machine-readable `reason`; naming the tab's own hotkeys and panes is ours.
+    private def discover_plan_error(ex : Discover::PlanError) : String
+      case ex.reason
+      in Discover::PlanError::Reason::NoTarget
+        "no target — start from Sitemap/History (space → \"Discover here\")"
+      in Discover::PlanError::Reason::BadTarget
+        "invalid target — use scheme://host[:port][/path]"
+      in Discover::PlanError::Reason::NoTechnique
+        "enable spider or brute-force in the run config first"
+      in Discover::PlanError::Reason::Wordlist
+        "wordlist error: #{ex.detail}"
+      end
     end
 
     # --- async drain (run-loop tick) ---

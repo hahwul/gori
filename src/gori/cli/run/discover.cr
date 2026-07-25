@@ -1,4 +1,6 @@
 # `gori run discover` — spider + directory brute-force a target; findings feed the Sitemap.
+require "../../discover/plan"
+
 module Gori
   module CLI
     module Run
@@ -54,33 +56,63 @@ module Gori
         end
         parser.parse(args)
 
-        abort "gori run discover: --no-spider and --no-bruteforce can't both be set" unless spider || bruteforce
-        seed_url = resolve_discover_seed(target_override)
+        # The two checks that read ONLY the flags, made before the project is resolved. The
+        # builder makes them too and is the authority — but `--db PATH` is create-or-reopened
+        # below, and `abort` exits without unwinding, so letting a malformed invocation reach
+        # that point would leave a freshly-migrated database (plus its -wal/-shm) behind and
+        # would report "no projects yet" instead of naming the flag that was wrong. The
+        # sentences come from the ONE mapping so they cannot drift from the builder's.
+        abort "gori run discover: #{discover_reason_error(Discover::PlanError::Reason::NoTechnique)}" unless spider || bruteforce
+        abort "gori run discover: #{discover_reason_error(Discover::PlanError::Reason::NoTarget)}" if target_override.to_s.strip.empty?
+
+        config = Discover::Config.new(
+          concurrency: concurrency, rps: rate, throttle_ms: throttle, timeout: timeout,
+          retries: retries, max_requests: max_requests, spider: spider, bruteforce: bruteforce,
+          max_depth: max_depth, user_wordlist: wordlist, extensions: extensions,
+          containment: containment, headers: Discover::Headers.parse_lines(headers))
 
         project = resolve_discover_project(project_name, db_path)
         store = open_store(project)
         begin
-          scope = Scope.load(store)
-          guard_discover_scope(seed_url, scope, allow_unscoped)
-
-          config = Discover::Config.new(
-            concurrency: concurrency, rps: rate, throttle_ms: throttle, timeout: timeout,
-            retries: retries, max_requests: max_requests, spider: spider, bruteforce: bruteforce,
-            max_depth: max_depth, extensions: extensions, containment: containment,
-            headers: Discover::Headers.parse_lines(headers))
-          words = begin
-            Discover::Wordlist.load(wordlist)
-          rescue ex
-            abort "gori run discover: wordlist error: #{ex.message}"
+          # The store stays open for the whole run (findings are written through it), so the
+          # Outbound does NOT take ownership of it — the ensure below is what closes it.
+          outbound = Gori::Outbound.cli(Scope.load(store), allow_unscoped)
+          # `.to_s` rather than `|| ""`: an OptionParser-closured var never narrows out of String?.
+          options = Discover::PlanOptions.new(target_override.to_s, config: config,
+            verify: !insecure, overrides: Gori::HostOverrides.load(store))
+          plan = begin
+            Discover::Plan.build(options, outbound)
+          rescue ex : Discover::PlanError
+            abort "gori run discover: #{discover_plan_error(ex)}"
           end
-          policy = discover_policy(scope, seed_url, allow_unscoped)
-          sender = Discover::Sender.new(verify: !insecure, timeout: timeout, headers: config.headers,
-            overrides: Gori::HostOverrides.load(store))
-          engine = Discover::Engine.new(seed_url, words, sender, config, policy)
-          discover_preflight(seed_url, config, words.size, force)
-          run_discover_stream(engine, store, format, no_store)
+          guard_discover_scope(plan, outbound)
+          discover_preflight(plan, force)
+          run_discover_stream(plan.engine, store, format, no_store)
         ensure
           store.close
+        end
+      end
+
+      # `gori run discover`'s wording for a plan the options can't produce. The builder
+      # reports the machine-readable `reason`; the sentence (and the flags it names) is ours.
+      private def self.discover_plan_error(ex : Discover::PlanError) : String
+        case ex.reason
+        in Discover::PlanError::Reason::BadTarget
+          "invalid --target #{ex.detail.inspect} (use http:// or https://)"
+        in Discover::PlanError::Reason::Wordlist
+          "wordlist error: #{ex.detail}"
+        in Discover::PlanError::Reason::NoTarget, Discover::PlanError::Reason::NoTechnique
+          discover_reason_error(ex.reason)
+        end
+      end
+
+      # The reasons whose sentence needs no `detail`, so the flag pre-checks above can share
+      # the exact wording the builder's own failure would produce.
+      private def self.discover_reason_error(reason : Discover::PlanError::Reason) : String
+        case reason
+        when Discover::PlanError::Reason::NoTarget    then "--target URL is required"
+        when Discover::PlanError::Reason::NoTechnique then "--no-spider and --no-bruteforce can't both be set"
+        else                                               "invalid discover options"
         end
       end
 
@@ -96,35 +128,15 @@ module Gori
         resolve_read_project(project_name, nil)
       end
 
-      private def self.resolve_discover_seed(target : String?) : String
-        raw = Env.expand(target || abort("gori run discover: --target URL is required"))
-        seed = raw.matches?(/\Ahttps?:\/\//i) ? raw : "https://#{raw}"
-        abort "gori run discover: invalid --target #{raw.inspect} (use http:// or https://)" unless Discover::Url.parse(seed)
-        seed
-      end
-
-      private def self.guard_discover_scope(seed_url : String, scope : Scope, allow_unscoped : Bool) : Nil
-        return if allow_unscoped || !scope.configured?
-        p = Discover::Url.parse(seed_url)
-        return unless p
-        return if scope.matches_url?(seed_url, p.host)
-        abort "gori run discover: #{seed_url} is out of the project scope — add a scope include rule or pass --allow-unscoped"
-      end
-
-      # The ScopePolicy the crawl engine enforces. Unconfigured scope ⇒ OpenScope (nothing
-      # bounded). Otherwise StoreScope (sandbox/exclude + the include boundary) — UNLESS
-      # --allow-unscoped was passed AND the seed is genuinely outside the include boundary,
-      # in which case UnscopedStoreScope keeps the hard sandbox/exclude gate but drops the
-      # include boundary so scope-aware containment can fall back to same-origin (the flag
-      # was a no-op on the policy before, gutting the crawl — see UnscopedStoreScope). When
-      # the seed IS in scope the flag is redundant, so normal StoreScope is kept unchanged.
-      private def self.discover_policy(scope : Scope, seed_url : String, allow_unscoped : Bool) : Discover::ScopePolicy
-        return Discover::OpenScope.new unless scope.configured?
-        if allow_unscoped
-          p = Discover::Url.parse(seed_url)
-          return Discover::UnscopedStoreScope.new(scope) if p.nil? || !scope.matches_url?(seed_url, p.host)
-        end
-        Discover::StoreScope.new(scope)
+      # Layer-1 scope gate, matched on the SEED URL (path included) rather than on its bare
+      # origin: a project scoped to `https://acme.test/api/` should be crawlable from
+      # `https://acme.test/api/v1`, which an origin-only check would refuse. The policy
+      # itself is the Outbound's (`Outbound.cli`: an unconfigured project stays permissive,
+      # a configured one refuses an out-of-scope seed unless --allow-unscoped); only the
+      # sentence is ours.
+      private def self.guard_discover_scope(plan : Discover::Plan, outbound : Gori::Outbound) : Nil
+        return unless outbound.check(plan.seed, plan.host).blocked?
+        abort "gori run discover: #{plan.seed} is out of the project scope — add a scope include rule or pass --allow-unscoped"
       end
 
       private def self.parse_extensions(v : String) : Array(String)
@@ -138,11 +150,12 @@ module Gori
         Discover::Containment.parse?(v) || abort("gori run discover: invalid --containment '#{v}' (same-origin|scope-aware|host+subdomains)")
       end
 
-      private def self.discover_preflight(seed_url : String, config : Discover::Config, words : Int32, force : Bool) : Nil
+      private def self.discover_preflight(plan : Discover::Plan, force : Bool) : Nil
+        config = plan.config
         techniques = [] of String
         techniques << "spider(d#{config.max_depth})" if config.spider?
-        techniques << "brute(#{words}w)" if config.bruteforce?
-        STDERR.puts "discovering #{seed_url} · #{techniques.join("+")} · #{config.containment.label}"
+        techniques << "brute(#{plan.word_count}w)" if config.bruteforce?
+        STDERR.puts "discovering #{plan.seed} · #{techniques.join("+")} · #{config.containment.label}"
         if config.max_requests.nil? && config.spider? && config.max_depth >= 8 && !force
           abort "gori run discover: a depth-#{config.max_depth} crawl with no --max-requests could send a lot; pass --max-requests / a lower --max-depth, or --force"
         end

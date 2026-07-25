@@ -1,3 +1,4 @@
+require "../env"
 require "../proxy/codec/http1"
 
 module Gori::Discover
@@ -37,7 +38,7 @@ module Gori::Discover
         name = name.strip
         value = value.strip
         next if name.empty? || !valid_name?(name)
-        next if value.includes?('\r') || value.includes?('\n')
+        next unless safe_value?(value)
         out << {name, value}
       end
       out
@@ -50,10 +51,31 @@ module Gori::Discover
       out = [] of {String, String}
       req.headers.each do |h|
         next if DROP.includes?(h.name.downcase)
-        next if h.value.includes?('\r') || h.value.includes?('\n')
+        next unless safe_value?(h.value)
         out << {h.name, h.value}
       end
       out
+    end
+
+    # Header values with `$VAR` resolved, applied by `Discover::Plan` at send time (the
+    # editor / CLI flag / MCP map all keep the raw `$TOKEN` so the operator still sees what
+    # they typed). Expansion happens AFTER parsing, so `safe_value?` has to run again here:
+    # `parse_lines` only ever judged the literal `$TOKEN`, and an env var whose VALUE carries
+    # a newline would otherwise splice extra headers into every probe the crawl sends.
+    def self.expand(pairs : Array({String, String})) : Array({String, String})
+      pairs.compact_map do |(name, value)|
+        # Stripped AFTER substituting, matching what `parse_lines` did back when MCP expanded
+        # before parsing: a var whose value has surrounding spaces must not widen the OWS.
+        expanded = Env.expand(value).strip
+        safe_value?(expanded) ? {name, expanded} : nil
+      end
+    end
+
+    # The one injection rule: a value may not carry CR or LF. Applied wherever untrusted text
+    # reaches a request line or header — hand-typed lines, a reused flow's headers, a crawl
+    # seed (`Discover::Plan`), and post-expansion.
+    def self.safe_value?(value : String) : Bool
+      !value.includes?('\r') && !value.includes?('\n')
     end
 
     # The final ordered header list the Sender emits between `Host` and `Connection`:
