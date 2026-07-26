@@ -233,14 +233,25 @@ module Gori
     # The request-target (path) from a raw request's first line — the value every caller
     # splices into `scheme://host<target>` to match string/regex scope rules. Was copied
     # verbatim into four files before this.
+    #
+    # Split on RUNS of ASCII whitespace, not a single ' ': `"GET  /admin HTTP/1.1"` (two
+    # spaces, or a tab) otherwise splits to `["GET", "", "/admin", ...]`, so `[1]?` is the
+    # empty string — non-nil, so `|| "/"` never fires — and the scope gate then evaluates an
+    # EMPTY path, silently satisfying any string/regex include/exclude rule. That let a
+    # doubled space in the request line bypass BOTH scope layers (Sandbox included). `split`
+    # with no argument collapses whitespace runs and drops the empty parts, so the real
+    # request-target is recovered from a malformed request line. (The bytes themselves still
+    # go on the wire byte-exact — P7 — this only feeds the scope decision.)
     def self.request_target(bytes : Bytes) : String
-      line = String.new(bytes).each_line.first? || ""
-      line.split(' ')[1]? || "/"
+      request_target_line(String.new(bytes).each_line.first? || "")
     end
 
     def self.request_target(text : String) : String
-      line = text.each_line.first? || ""
-      line.split(' ')[1]? || "/"
+      request_target_line(text.each_line.first? || "")
+    end
+
+    private def self.request_target_line(line : String) : String
+      line.split[1]? || "/"
     end
 
     # The URL the gate evaluates, ALWAYS anchored on the DIAL target (the scheme/host the

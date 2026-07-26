@@ -74,7 +74,9 @@ module Gori
       # a caller can confirm scheme/host/port/method/target/version independently
       # of which inputs it supplied (flow_id vs url/raw).
       private def emit_effective_request(j : JSON::Builder, built : RequestBuilder::Built, http2 : Bool) : Nil
-        parts = (String.new(built.bytes).each_line.first? || "").split(' ')
+        # `split` (no arg) collapses whitespace runs so a malformed request line with a
+        # doubled space still reports the real method/target/version (see Outbound.request_target).
+        parts = (String.new(built.bytes).each_line.first? || "").split
         j.field "effective_request" do
           j.object do
             j.field "scheme", built.scheme

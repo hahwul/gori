@@ -353,5 +353,29 @@ describe Gori::Outbound do
       Gori::Outbound.request_target("garbage").should eq("/")
       Gori::Outbound.request_target("".to_slice).should eq("/")
     end
+
+    # A request line with a REPEATED space (or a tab) must still yield the real path, not an
+    # empty string — otherwise the scope gate evaluates an empty path and silently satisfies
+    # any string/regex include/exclude rule (a full Sandbox bypass with one extra space).
+    it "recovers the target from a request line with irregular whitespace" do
+      Gori::Outbound.request_target("GET  /admin/x HTTP/1.1\r\nHost: h\r\n\r\n").should eq("/admin/x")
+      Gori::Outbound.request_target("GET   /admin/x HTTP/1.1\r\n".to_slice).should eq("/admin/x")
+      Gori::Outbound.request_target("POST\t/a/b\tHTTP/1.1\r\n").should eq("/a/b")
+    end
+
+    it "keeps the scope gate honest against a doubled-space request line" do
+      with_scope do |scope, _store|
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "string", "/admin")
+        scope.enable_sandbox
+        ob = Gori::Outbound.interactive(scope)
+        # A well-formed request to the excluded path is blocked…
+        ob.send_block("https", "acme.test", Gori::Outbound.request_target(
+          "GET /admin/x HTTP/1.1\r\nHost: acme.test\r\n\r\n")).should eq(Gori::Outbound::SANDBOX_ERROR)
+        # …and a doubled space must NOT slip past it.
+        ob.send_block("https", "acme.test", Gori::Outbound.request_target(
+          "GET  /admin/x HTTP/1.1\r\nHost: acme.test\r\n\r\n")).should eq(Gori::Outbound::SANDBOX_ERROR)
+      end
+    end
   end
 end
