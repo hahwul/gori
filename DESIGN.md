@@ -416,6 +416,52 @@ A surface still owns its own error wording: `Fuzz::PlanError` carries a machine-
 `reason`, and each surface renders the sentence naming its own flags (`--auto` / `auto:true` /
 `^A params`). Sharing the assembly must not flatten three different vocabularies into one.
 
+### 2026-07-26: the verb registry is a TUI concern, and `ExecContext` is a catalogue
+
+Refines: [P1](#p1). Issue #357.
+
+Two comments described a system that does not exist. `src/gori/verb.cr` promised that one
+`Verb::Definition` drives "a keybinding AND a command-palette entry (and later an MCP tool +
+CLI subcommand)", and `src/gori/verb/context.cr` called `ExecContext` "thin … deliberately
+(P0)". Neither the later nor the thin was true: `grep -rn 'Verb::Registry\|Verb::Definition'
+src/gori/cli src/gori/mcp` returns nothing, and the interface declares 266 abstract methods.
+Both read as descriptions of the present, which cost reviewers time. The comments are now
+corrected; the structure is deliberately unchanged.
+
+Measured on `main` at `57f1812`:
+
+- `ExecContext` requires **266** abstract methods: 42 in `verb/context.cr` and 224 more spread
+  across the twenty per-tool files in `verb/context/`, which exist only to hold declarations.
+- `Tui::Runner` (with its `runner/*.cr` mixins) defines **534** methods and implements all
+  266, none missing. It is the only production implementor; `spec/support/fake_context.cr` is
+  a recording double.
+- Only the 42 root ones are app chrome and cross-tool actions. The other 224 are tool intents
+  grouped by tool (repeater 28, issues 23, probe 22, history 17, fuzzer 17, jwt 13 …) —
+  surface-neutral in name.
+
+Collapsing `ExecContext` into direct `Runner` calls was considered and rejected. It would
+delete the 266 declarations and the indirection, not the 266 implementations, which the
+palette and keymap still have to invoke — a large mechanical edit for no behavioural gain. It
+would also destroy the two things the interface does buy: one enumerable catalogue of every
+action a verb can trigger, and a one-way dependency, since `verb/` names no `Tui::` in code
+([§2.1](#s2-1)). Keeping a 266-method abstraction is not a [P0](#p0) minimalism claim, and it
+should stop being written up as one.
+
+Wiring CLI and MCP into the registry was also rejected, for a reason worth recording because
+it is not obvious from the method names. Those 224 tool intents are surface-neutral in name
+and TUI-coupled in semantics: `repeater_send` means "send the ACTIVE sub-tab",
+`probe_rule_toggle` means "toggle the HIGHLIGHTED row". A CLI or MCP caller has no selection,
+only an id. Making them callable from another surface therefore requires an argument schema
+so an intent can name its target — the field `Verb::Definition` records as absent. That
+schema is the prerequisite, not a follow-up to the wiring, and it is a project of its own
+across ~224 intents.
+
+So P1's reach stays where [P1](#p1) already describes it: one execution path inside the TUI,
+parity elsewhere by calling the same engines. Read P1's closing sentence — "that gap is real,
+known, and under decision in issue #357" — as settled by this entry: the gap is deliberate, and
+what would close it is the argument schema, not registry wiring. If CLI/MCP parity work resumes
+at the rate it ran before, revisit, but open the argument-schema issue first.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

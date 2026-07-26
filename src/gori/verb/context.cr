@@ -21,11 +21,22 @@ require "./context/sitemap"
 
 module Gori
   module Verb
-    # The narrow facade a verb handler is given. Verbs express *intents* through
-    # it; they never touch raw TUI/proxy/store state directly (P5 — state changes
-    # are mediated). The TUI App provides the concrete implementation; tests use
-    # a recording double. Keeping this interface thin is deliberate (P0): it is
-    # the entire surface verbs can affect, so it doubles as the action catalogue.
+    # The facade a verb handler is given. Verbs express *intents* through it; they
+    # never touch raw TUI/proxy/store state directly (P5 — state changes are
+    # mediated). `Tui::Runner` is the one production implementation; specs use a
+    # recording double (`spec/support/fake_context.cr`).
+    #
+    # This interface is WIDE, not thin: 266 abstract methods (42 here — app chrome
+    # plus cross-tool actions — and 224 in context/*.cr, grouped by tool). With a
+    # single implementor there is no polymorphism being bought, so do not read the
+    # indirection as P0 minimalism. What it does buy, and why it is kept rather
+    # than collapsed into direct Runner calls: every action a verb can trigger is
+    # declared in ONE enumerable place, and `verb/` compiles without naming `Tui::`
+    # at all, keeping the dependency one-way (DESIGN.md §2.1).
+    #
+    # So a new method here is not free — it widens the catalogue and every double
+    # that implements it. Check whether an existing intent already covers the case.
+    # Measured and decided in DESIGN.md §7 (2026-07-26), issue #357.
     abstract class ExecContext
       # app lifecycle / messaging
       abstract def quit! : Nil         # exit gori entirely

@@ -1,9 +1,17 @@
 require "./verb/context"
 
 module Gori
-  # The verb system — gori's "same surface" core (P1). A single Definition is the
-  # one source of truth that drives a keybinding AND a command-palette entry (and
-  # later an MCP tool + CLI subcommand). No per-surface code paths.
+  # The verb system — the TUI's one source of truth for an action (P1). A single
+  # Definition drives a keybinding, a command-palette entry AND a space-menu entry;
+  # all three run the same Definition#call, so the TUI has no per-surface dispatch.
+  #
+  # It stops at the TUI, deliberately. `gori run` and `gori mcp` declare their own
+  # commands and reach parity by calling the same engines (DESIGN.md §2.1), not by
+  # reading this registry. The blocker is not wiring: a verb names no target, it
+  # reads one from TUI selection state (`repeater_send` sends the ACTIVE sub-tab),
+  # and a caller with an id but no selection cannot express that — see the argument
+  # schema Definition does not have. Measured and decided in DESIGN.md §7
+  # (2026-07-26), issue #357.
   module Verb
     # Where a verb may fire. The active surface (focused tab / open overlay)
     # selects which scope's keymap is consulted; Global verbs fire everywhere.
@@ -95,8 +103,13 @@ module Gori
 
     # One action. `handler` runs the action and returns an optional status-line
     # message. `available?` gates visibility/firing for the current context (P4).
-    # Argument schemas (for palette prompts / MCP) are intentionally absent this
-    # milestone — no verb takes arguments yet, and the field is additive later.
+    #
+    # There is NO argument schema, and that absence is load-bearing: a verb reads
+    # its target from TUI selection state rather than naming it, which is exactly
+    # what keeps the registry TUI-only. Adding one is additive to this struct but
+    # is a project of its own — it means giving the 224 per-tool intents in
+    # verb/context/*.cr an explicit target — and it is the prerequisite for a
+    # surface-neutral registry, not a follow-up to one (DESIGN.md §7, 2026-07-26).
     struct Definition
       getter id : String
       getter title : String
