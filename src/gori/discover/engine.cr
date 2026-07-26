@@ -45,10 +45,11 @@ module Gori::Discover
     # A send refused because the URL cannot be framed. `target` and `host` are spliced
     # verbatim into the request line and the `Host` header by `build_get`, so a raw CR/LF in
     # either splices a SECOND, fully attacker-chosen request (method, absolute-form request
-    # line, and Host) onto the same connection — and with `Settings.upstream_proxy_addr` set,
-    # an absolute-form line is routed by the upstream proxy to a genuinely different host.
-    # Returned as a benign error Result rather than raised: the caller's contract is one
-    # Result per fetch, and one poisoned link must not end the run.
+    # line, and Host) onto the same connection. The victim is the ORIGIN gori dialled: an
+    # upstream proxy cannot be made to route the injected absolute-form line elsewhere,
+    # because `Upstream.dial` always CONNECT-tunnels (`proxy/upstream.cr`) rather than
+    # forwarding in absolute form. Returned as a benign error Result rather than raised: the
+    # caller's contract is one Result per fetch, and one poisoned link must not end the run.
     UNSAFE_URL = "url contains a control character"
 
     @header_block : String
@@ -441,8 +442,8 @@ module Gori::Discover
       @pages += 1 if task.kind == TaskKind::Crawl
       fetched = oc.fetched
       return unless fetched
-      if fetched.error
-        @errors += 1
+      if err = fetched.error
+        @errors += 1 unless benign_error?(err)
         return
       end
       if @seed_calibration_dir && (task.source.robots? || task.source.sitemap?)
@@ -450,6 +451,12 @@ module Gori::Discover
       else
         record_page(task, fetched)
       end
+      expand_links(oc, task, fetched)
+    end
+
+    # The link-expansion half of handle_crawl: the page's own links unless its content cluster
+    # has saturated, plus a followed redirect.
+    private def expand_links(oc : Outcome, task : Task, fetched : Calibrate::Fetched) : Nil
       count = @clusters.observe(fetched.simhash, @config.simhash_distance)
       if count > @config.cluster_saturation
         @cluster_suppressed += oc.links.size # a template/listing trap — stop expanding it
@@ -484,7 +491,7 @@ module Gori::Discover
       fetched = oc.fetched
       return unless fetched
       if err = fetched.error
-        @errors += 1 unless err == CappedBackend::CAP_ERROR || err == SCOPE_REFUSED
+        @errors += 1 unless benign_error?(err)
         return
       end
       if oc.hit && oc.confidence >= @config.confidence_floor
@@ -501,6 +508,18 @@ module Gori::Discover
 
     # Record a crawled/declared page as a finding (skip 404/5xx noise; 401/403 are kept —
     # they exist but gate access).
+    # A non-error "error": the engine's own budget or gate declining a send, not a failure
+    # reaching the target. Neither is a fault the operator can act on, and both are decisions
+    # they configured, so neither belongs in the error count every surface renders.
+    #
+    # `handle_probe` already excluded CAP_ERROR; `handle_crawl` excluded nothing, and with
+    # max_requests set the orchestrator fills the @jobs buffer before any worker increments
+    # @capped.sent — so `--max-requests 5` at the default concurrency reported dozens of
+    # "errors" that were the cap working exactly as designed.
+    private def benign_error?(err : String) : Bool
+      err == CappedBackend::CAP_ERROR || err == SCOPE_REFUSED
+    end
+
     private def record_page(task : Task, fetched : Calibrate::Fetched) : Nil
       s = fetched.status
       return unless s && (s < 400 || s == 401 || s == 403)
@@ -626,9 +645,11 @@ module Gori::Discover
           break if cap > 0 && count >= cap
           p = Url.parse("#{bl.dir}#{cand}")
           next unless p
-          next unless probe_allowed?(p)
+          # @seen first: it is a hash lookup, while probe_allowed? walks every scope rule
+          # under a mutex with PCRE2. Same verdict either way — this runs 275 words × dirs.
           key = Url.visit_key(p)
           next if @seen.includes?(key)
+          next unless probe_allowed?(p)
           @seen << key
           count += 1
           @frontier << Task.new(TaskKind::Probe, Url.normalize(p), task.depth,
@@ -657,11 +678,12 @@ module Gori::Discover
       return nil unless Headers.safe_url?(p)
       return nil unless confined?(p)
       url = Url.normalize(p)
-      return nil unless @scope.allowed?(url, p.host) # excludes/sandbox — every mode
+      gate = Url.gate_url(p)                          # port-less, matching every other Layer-2 consumer (see gate_url)
+      return nil unless @scope.allowed?(gate, p.host) # excludes/sandbox — every mode
       ok = case @config.containment
            in Containment::SameOrigin        then same_origin?(p)
            in Containment::HostAndSubdomains then same_or_subdomain?(p)
-           in Containment::ScopeAware        then @scope.configured? ? @scope.boundary?(url, p.host) : same_origin?(p)
+           in Containment::ScopeAware        then @scope.configured? ? @scope.boundary?(gate, p.host) : same_origin?(p)
            end
       ok ? url : nil
     end
@@ -695,8 +717,13 @@ module Gori::Discover
     # Gating at enqueue as well as at `send_with_retries` keeps a refused candidate out of the
     # frontier and out of the per-directory cap entirely, rather than spending both on a send
     # that will be refused.
+    #
+    # `safe_url?` is here for symmetry with `bounded_url`: a hostile wordlist can carry an
+    # interior lone CR (`Wordlist.load` strips only the ends of a line). The wire seam would
+    # catch it, but only after the candidate had been enqueued, retried `retries + 1` times
+    # and counted as an error — so refuse it at the same place every other derived URL is.
     private def probe_allowed?(p : Url::Parts) : Bool
-      confined?(p) && @scope.allowed?(Url.normalize(p), p.host)
+      Headers.safe_url?(p) && confined?(p) && @scope.allowed?(Url.gate_url(p), p.host)
     end
 
     private def same_origin?(p : Url::Parts) : Bool
@@ -795,11 +822,13 @@ module Gori::Discover
       # ("identical on every surface, and applied even when Layer 1 was waived"). Calibration
       # probes are `#{dir}#{bogus_name}` strings a worker builds at send time, so this is the
       # only place they can be judged at all; brute-force probes are pre-gated in
-      # `enqueue_probes` and re-checked here, which is what makes a scope edit mid-run bite.
-      # Asked about the NORMALIZED url, so the gate and the crawl can never judge two
-      # different spellings of one target (the `dir + cand` concat is not normalized).
-      norm = Url.normalize(p)
-      unless @scope.allowed?(norm, p.host)
+      # `enqueue_probes` and re-checked here so the two can never drift.
+      #
+      # `Url.gate_url`, not `Url.normalize`: the `dir + cand` concat is unnormalized, and the
+      # scope must be asked in the port-less form every other Layer-2 consumer uses — see
+      # `Url.gate_url`. NOTE the engine holds a snapshot policy, so this does NOT pick up a
+      # scope edit made mid-run except in the TUI, where the `Scope` object is shared live.
+      unless @scope.allowed?(Url.gate_url(p), p.host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_REFUSED)
       end
       target = p.query ? "#{p.path}?#{p.query}" : p.path

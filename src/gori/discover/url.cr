@@ -44,6 +44,26 @@ module Gori::Discover
       q ? "#{origin(p)}#{p.path}?#{q}" : "#{origin(p)}#{p.path}"
     end
 
+    # The string the SCOPE is asked about — deliberately NOT `normalize`.
+    #
+    # gori's scope model has no port dimension: `Scope.request_url` is
+    # `"#{scheme}://#{host}#{target}"` and the proxy splits host from port before asking
+    # (`client_conn.cr`), so every other Layer-2 consumer judges a port-LESS URL. `normalize`
+    # appends `:port` whenever it is not 80/443, so on a non-default port discover was asking
+    # about `http://acme.test:8080/logout` while a rule was written against
+    # `http://acme.test/logout` — and a host-qualified `string` or `regex` EXCLUDE therefore
+    # never matched. That is the exact rule the brute-forcer is supposed to obey, silently
+    # failing open on any `:8080`/`:8443` target.
+    #
+    # Kept as its own function rather than folded into `normalize` because the two answers
+    # must differ: the crawl, the findings and the Sitemap rows all need the port (it is part
+    # of the resource's identity), and only the gate question drops it.
+    def self.gate_url(p : Parts) : String
+      q = p.query
+      base = "#{p.scheme}://#{p.host}#{p.path}"
+      q ? "#{base}?#{q}" : base
+    end
+
     # EXACT identity — lowercase host, drop default port + fragment, sort query pairs, KEEP
     # values (?page=1 ≠ ?page=2). Populates `seen`.
     def self.visit_key(p : Parts) : String

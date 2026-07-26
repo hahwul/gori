@@ -82,6 +82,27 @@ private class AllowExact < D::ScopePolicy
   end
 end
 
+# Allows a URL the first time it is asked and denies it afterwards — the shape a live scope
+# takes when the operator adds an EXCLUDE mid-run (the TUI shares the Scope object with the
+# engine's policy). Every Crawl/Fetch URL is asked once at enqueue and once at send.
+private class DenyAfterFirstAsk < D::ScopePolicy
+  def initialize
+    @asked = Set(String).new
+  end
+
+  def allowed?(url : String, host : String) : Bool
+    @asked.add?(url)
+  end
+
+  def boundary?(url : String, host : String) : Bool
+    true
+  end
+
+  def configured? : Bool
+    false
+  end
+end
+
 # The bogus soft-404 probes an origin-root calibration sends: one path segment directly under
 # "/", minus the two well-known paths seed_frontier queues by name. A path-scoped run's own
 # brute-force probes are deeper (/app/…), so they never land in here.
@@ -540,5 +561,91 @@ describe Gori::Discover::Engine do
       end
       findings.select(&.source.bruteforced?).map(&.url).should contain("http://t/admin")
     end
+  end
+
+  # Review findings on the four fixes above.
+  describe "the Layer-2 gate string" do
+    it "asks the scope in the port-less form every other consumer uses" do
+      # `Url.normalize` appends `:port` off the defaults, but gori's scope model has no port
+      # dimension: `Scope.request_url` is "scheme://host/target" and the proxy splits the port
+      # off before asking. So on :8080 discover asked about "http://t:8080/logout" while a rule
+      # was written against "http://t/logout", and a host-qualified string/regex EXCLUDE — the
+      # exact rule #391 is about — silently failed open.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 1,
+        retries: 0, confidence_floor: 0.4)
+      sent = [] of String
+      run_discover("http://t:8080/", ["logout", "admin"], cfg,
+        DenyExact.new(Set{"http://t/logout"})) do |t|
+        sent << t
+        notfound
+      end
+      sent.should_not contain("/logout")
+      sent.should contain("/admin") # control: the sibling probe on the same port still goes out
+    end
+
+    it "keeps the port on the crawled url and the finding" do
+      # Only the gate question drops the port — the resource's own identity keeps it.
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      findings, _ = run_discover("http://t:8080/", [] of String, cfg) do |t|
+        t == "/" ? html(%(<a href="/kept">k</a>)) : html("an ordinary page body here")
+      end
+      findings.map(&.url).should contain("http://t:8080/kept")
+    end
+  end
+
+  describe "the error count" do
+    it "does not count the max-requests cap as an error on the crawl path" do
+      # handle_probe already excluded CAP_ERROR; handle_crawl excluded nothing. With
+      # max_requests set the orchestrator fills the @jobs buffer before any worker increments
+      # @capped.sent, so every over-dispatched crawl came back CAP_ERROR and was counted —
+      # `--max-requests 5` at default concurrency reported dozens of "errors" that were the
+      # cap working as designed.
+      # The frontier must hold more jobs than the cap at the moment of dispatch: `@jobs` is
+      # buffered to `concurrency`, so the orchestrator pushes all three seed tasks (the seed
+      # crawl + robots.txt + sitemap.xml) before any worker increments `@capped.sent`. The
+      # third then comes back CAP_ERROR.
+      cfg = D::Config.new(spider: true, bruteforce: false, max_requests: 2_i64,
+        concurrency: 8, retries: 0)
+      backend = RouteBackend.new(->(_t : String) { html("an ordinary page body here") })
+      engine = D::Engine.new("http://t/", [] of String, backend, cfg)
+      errors = 0_i64
+      sent = 0_i64
+      engine.run do |ev|
+        if ev.is_a?(D::DoneEvent)
+          errors = ev.progress.errors
+          sent = ev.progress.sent
+        end
+      end
+      sent.should eq(2)
+      errors.should eq(0)
+    end
+
+    it "does not count a Layer-2 refusal as an error on the crawl path" do
+      # Every Crawl/Fetch URL is asked twice — once at enqueue, once at send. In the TUI the
+      # Scope object is shared live, so an EXCLUDE added mid-run turns queued crawls into
+      # refusals at send; those are decisions the operator asked for, not failures.
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      backend = RouteBackend.new(->(_t : String) { notfound })
+      engine = D::Engine.new("http://t/", [] of String, backend, cfg, DenyAfterFirstAsk.new)
+      errors = 0_i64
+      engine.run { |ev| errors = ev.progress.errors if ev.is_a?(D::DoneEvent) }
+      errors.should eq(0)
+    end
+  end
+
+  it "refuses a probe candidate carrying an interior CR from a hostile wordlist" do
+    # Wordlist.load strips only the ends of a line, so an interior lone CR survives into
+    # `bl.dir + cand`. The wire seam would catch it, but only after the candidate had been
+    # enqueued, retried and counted as an error — bounded_url refuses its equivalent, so the
+    # probe gate does too.
+    cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1,
+      retries: 0)
+    sent = [] of String
+    run_discover("http://t/", ["ad\rmin", "clean"], cfg) do |t|
+      sent << t
+      notfound
+    end
+    sent.should contain("/clean")
+    sent.none?(&.includes?('\r')).should be_true
   end
 end
