@@ -1539,13 +1539,17 @@ module Gori::Tui
       # Capture the parent BEFORE open_overlay: that call overwrites @active_overlay, and
       # this is the only reference to the modal the confirm was raised from.
       parent = active_overlay
+      # …and the raw @overlay kind too: Palette / the hidden-tabs dropdown are NOT on the
+      # object seam (they live on @overlay alone, see MODAL_OVERLAYS), so `parent` is nil for
+      # them and only this captures what to restore (#413).
+      displaced = @overlay
       accepted = false
       ov.on_commit = -> {
         accepted = true
         true # let the shell close normally — the action runs from on_close, after the restore
       }
       ov.on_close = -> {
-        restore_overlay(back, parent)
+        restore_overlay(back, parent, displaced)
         # Restore FIRST, act second — the pre-seam `run_confirm` order, and load-bearing
         # twice over. history_controller's delete reads `@host.overlay == :detail` to decide
         # whether the drill-in should close now the flow is gone, so an action running
@@ -1573,8 +1577,13 @@ module Gori::Tui
     # confirm over any modal dropped it, on_close and all — the reachable trigger being the
     # quit confirm (^C/^D with settings:general "Confirm before quit" on), which hits every
     # modal in the app.
-    private def restore_overlay(kind : OverlayKind, parent : Overlay?) : Nil
+    private def restore_overlay(kind : OverlayKind, parent : Overlay?, displaced : OverlayKind = OverlayKind::None) : Nil
       return open_overlay(parent) if parent && (parent.key == kind || kind.none?)
+      # A :none confirm displaced an unmigrated MODAL_OVERLAYS member (Palette / the hidden-tabs
+      # dropdown), which has no object on the seam — `back` is None and can't name it, so put the
+      # captured @overlay back rather than dropping to the bare body (#413). Before this, declining
+      # the quit confirm over the palette silently closed it.
+      return (@overlay = displaced) if kind.none? && MODAL_OVERLAYS.includes?(displaced)
       # No object to restore — either nothing was displaced (a :none confirm over the bare
       # body or the History Detail drill-in), or `return_to:` names a state the shell routes
       # BY STATE. Setting @overlay alone is right for None / Detail / an unmigrated

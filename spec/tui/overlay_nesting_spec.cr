@@ -100,8 +100,11 @@ private class NestShell
   # Mirror of Runner#restore_overlay (runner.cr). Keep in step — a spec that passes against
   # a drifted copy proves nothing about the real shell. The `|| kind.none?` clause is the
   # #384 fix: a :none confirm displacing a modal restores it, rather than dropping it.
-  def restore_overlay(kind : OverlayKind, parent : Overlay?) : Nil
+  def restore_overlay(kind : OverlayKind, parent : Overlay?, displaced : OverlayKind = OverlayKind::None) : Nil
     return open_overlay(parent) if parent && (parent.key == kind || kind.none?)
+    # #413: a :none confirm over an unmigrated MODAL_OVERLAYS member (Palette/TabsMore, no
+    # object seam) restores the captured @overlay rather than dropping to the bare body.
+    return (@overlay = displaced) if kind.none? && MODAL_OVERLAYS.includes?(displaced)
     restorable = kind.none? || kind.detail? || MODAL_OVERLAYS.includes?(kind)
     @overlay = restorable ? kind : OverlayKind::None
   end
@@ -114,10 +117,11 @@ private class NestShell
     ov = ConfirmDialog.new("CONFIRM", "quit?")
     back = OverlayKind.from_sym(return_to)
     parent = active_overlay
+    displaced = @overlay # for an unmigrated Palette/TabsMore that has no object on the seam (#413)
     accepted = false
     ov.on_commit = -> { accepted = true; true }
     ov.on_close = -> {
-      restore_overlay(back, parent)
+      restore_overlay(back, parent, displaced)
       action.call if accepted
     }
     open_overlay(ov)
@@ -450,6 +454,23 @@ describe "Runner#restore_overlay — a :none confirm displacing a modal (#384)" 
 
     shell.active_overlay.should be_nil
     shell.overlay.should eq(OverlayKind::None)
+  end
+
+  it "restores the command palette / hidden-tabs dropdown displaced by a :none confirm (#413)" do
+    # Palette and TabsMore are NOT on the object seam — open_palette/open_more_menu set
+    # @overlay directly, no @active_overlay. So the quit confirm captured a nil `parent` and,
+    # with `back` = None, dropped them to the bare body. The captured @overlay restores them.
+    {OverlayKind::Palette, OverlayKind::TabsMore}.each do |kind|
+      shell = NestShell.new
+      shell.overlay = kind # mirror open_palette / open_more_menu (state only, no object)
+
+      shell.confirm(return_to: :none) { } # ^C/^D with confirm-before-quit on
+      shell.active_overlay.should be_a(ConfirmDialog)
+      shell.press(NO) # decline the quit
+
+      shell.active.should be_nil    # neither carries an object…
+      shell.overlay.should eq(kind) # …but the state is restored, so it still renders + captures
+    end
   end
 
   it "never restores a MIGRATED kind by STATE alone — the phantom hazard" do

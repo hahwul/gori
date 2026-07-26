@@ -59,7 +59,10 @@ module Gori
       rows
     rescue ex
       raise ex if raise_on_error
-      STDERR.puts "gori: search failed (#{ex.message})"
+      # Degrade to no matches (the live TUI must never crash the render loop). Route to gori.log
+      # via Log, NOT STDERR: in TUI mode STDERR is the alternate screen, so a write there prints
+      # ON TOP of the frame and garbles it until a resize (#411). The CLI passes raise_on_error.
+      ::Log.warn { "search failed: #{ex.message}" }
       [] of FlowRow
     end
 
@@ -312,7 +315,7 @@ module Gori
       rows
     rescue ex
       raise ex if raise_on_error
-      STDERR.puts "gori: sitemap query failed (#{ex.message})"
+      ::Log.warn { "sitemap query failed: #{ex.message}" } # gori.log, not STDERR (see #search, #411)
       [] of SitemapEntry
     end
 
@@ -332,7 +335,7 @@ module Gori
       # matches, mirrors #search); the one-shot CLI passes raise_on_error so a failed
       # query reads distinctly from a genuinely empty tree.
       raise ex if raise_on_error
-      STDERR.puts "gori: sitemap query failed (#{ex.message})"
+      ::Log.warn { "sitemap query failed: #{ex.message}" } # gori.log, not STDERR (see #search, #411)
       [] of {String, String, String}
     end
 

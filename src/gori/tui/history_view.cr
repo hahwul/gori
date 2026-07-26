@@ -263,7 +263,17 @@ module Gori::Tui
         return
       end
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, query_filter)
-      @rows = store.search(combined, PAGE)
+      @rows =
+        begin
+          store.search(combined, PAGE, raise_on_error: true)
+        rescue ex
+          # A VALID QL parse that SQLite still can't run (a huge OR chain past the
+          # expression-tree-depth limit, a pathological FTS phrase). Degrade to empty like
+          # before, but SAY why via the note so it doesn't read as a genuine "no flows match"
+          # (#411). The store already logged it to gori.log; the live loop must never crash.
+          @query_note = "query too complex to run — narrow the filter"
+          [] of Store::FlowRow
+        end
       @rows.reverse! unless newest_first?
       @filter_dirty = false
       @selected =

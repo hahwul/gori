@@ -414,7 +414,9 @@ module Gori
             end
             committed = true
           rescue ex
-            STDERR.puts "gori: store write batch failed (#{ops.size} op(s), rolled back): #{ex.message}"
+            # gori.log, not STDERR: in TUI mode STDERR is the alternate screen and a write there
+            # garbles the frame (#411). The count below is what the TUI actually surfaces.
+            ::Log.error { "store write batch failed (#{ops.size} op(s), rolled back): #{ex.message}" }
             @write_failures.add(ops.size) # surfaced in the TUI so the operator knows capture stopped
           end
           # publish never raises (see #publish); replies are buffered — so neither
@@ -479,7 +481,7 @@ module Gori
         c.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
       end
     rescue ex
-      STDERR.puts "gori: retention prune failed (will retry): #{ex.message}"
+      ::Log.warn { "retention prune failed (will retry): #{ex.message}" } # gori.log, not STDERR (#411)
     end
 
     # Unblock a caller whose batch was rolled back, with a no-op fallback (no row
