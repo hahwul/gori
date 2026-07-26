@@ -157,6 +157,10 @@ module Gori::Discover
     # Setup error for a seed the Layer-2 gate refuses. A constant because it is the one
     # engine error a spec (and a surface) wants to recognize rather than merely display.
     SEED_BLOCKED = "seed blocked by scope (Sandbox or an exclude rule)"
+    # A send the per-URL Layer-2 gate refused, in the shape CappedBackend uses for the request
+    # cap: a benign Result, no network, and NOT counted as an error — a scope refusal is a
+    # decision the operator asked for, not a failure of the run.
+    SCOPE_REFUSED = "blocked by scope (Sandbox or an exclude rule)"
 
     enum State : UInt8
       Running
@@ -470,8 +474,8 @@ module Gori::Discover
     private def handle_probe(oc : Outcome) : Nil
       fetched = oc.fetched
       return unless fetched
-      if fetched.error
-        @errors += 1 unless fetched.error == CappedBackend::CAP_ERROR
+      if err = fetched.error
+        @errors += 1 unless err == CappedBackend::CAP_ERROR || err == SCOPE_REFUSED
         return
       end
       if oc.hit && oc.confidence >= @config.confidence_floor
@@ -613,6 +617,7 @@ module Gori::Discover
           break if cap > 0 && count >= cap
           p = Url.parse("#{bl.dir}#{cand}")
           next unless p
+          next unless probe_allowed?(p)
           key = Url.visit_key(p)
           next if @seen.includes?(key)
           @seen << key
@@ -641,12 +646,7 @@ module Gori::Discover
       # and `Persist` would then write the poisoned string into the Sitemap as a real flow.
       # It is refused for the same reason any out-of-bounds link is, and takes the same exit.
       return nil unless Headers.safe_url?(p)
-      if cp = @confine_path
-        # Segment-boundary confinement: in-subtree iff the path IS the base or sits under
-        # "base/". A bare starts_with?(base) would also admit sibling prefixes (/api-internal
-        # for an /api seed, /prefix-test-evil for /prefix-test) — the scope bypass this guards.
-        return nil unless p.path == cp || p.path.starts_with?("#{cp}/")
-      end
+      return nil unless confined?(p)
       url = Url.normalize(p)
       return nil unless @scope.allowed?(url, p.host) # excludes/sandbox — every mode
       ok = case @config.containment
@@ -655,6 +655,39 @@ module Gori::Discover
            in Containment::ScopeAware        then @scope.configured? ? @scope.boundary?(url, p.host) : same_origin?(p)
            end
       ok ? url : nil
+    end
+
+    # Segment-boundary confinement for a path-scoped run: in-subtree iff the path IS the base
+    # or sits under "base/". A bare starts_with?(base) would also admit sibling prefixes
+    # (/api-internal for an /api seed, /prefix-test-evil for /prefix-test) — the scope bypass
+    # this guards. Shared with `probe_allowed?`, which is the half `bounded_url` never saw.
+    private def confined?(p : Url::Parts) : Bool
+      return true unless cp = @confine_path
+      p.path == cp || p.path.starts_with?("#{cp}/")
+    end
+
+    # A brute-force candidate is `bl.dir` + a wordlist entry, and only the DIRECTORY was ever
+    # authorised — one `allowed?` answer standing in for ~278 real requests with the defaults.
+    # Two things do not survive that append:
+    #
+    #   * The path confine. `Url.parse` collapses dot-segments, so a wordlist entry like
+    #     `../admin` re-parses to a path OUTSIDE the seed's subtree; the confine lived only in
+    #     `bounded_url`, which probes never reached. Traversal entries are common in public
+    #     wordlists.
+    #   * Layer 2. Only `host` rules and `string` INCLUDEs are monotone under a path append —
+    #     `string`/`regex` EXCLUDEs and the `regex` INCLUDEs Sandbox reads as its allowlist are
+    #     not, so a child can be denied while its parent is allowed. An EXCLUDE on `logout` /
+    #     `signout` / `shutdown`, the canonical "do not touch destructive endpoints" rule, was
+    #     silently ignored by the brute-forcer even though `logout` ships in the built-in list.
+    #
+    # Containment / `boundary?` (Layer 1) is deliberately NOT re-asked here: it was answered
+    # for the directory, which is what the crawl actually reached, and Layer 1 is the layer
+    # DESIGN.md §3 says varies by surface. Layer 2 is the one that is identical everywhere.
+    # Gating at enqueue as well as at `send_with_retries` keeps a refused candidate out of the
+    # frontier and out of the per-directory cap entirely, rather than spending both on a send
+    # that will be refused.
+    private def probe_allowed?(p : Url::Parts) : Bool
+      confined?(p) && @scope.allowed?(Url.normalize(p), p.host)
     end
 
     private def same_origin?(p : Url::Parts) : Bool
@@ -749,6 +782,17 @@ module Gori::Discover
     private def send_with_retries(url : String) : Repeater::Result
       p = Url.parse(url)
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "unparseable url") unless p
+      # Layer 2, per URL, on the ONE line every send passes — the invariant §3 states for it
+      # ("identical on every surface, and applied even when Layer 1 was waived"). Calibration
+      # probes are `#{dir}#{bogus_name}` strings a worker builds at send time, so this is the
+      # only place they can be judged at all; brute-force probes are pre-gated in
+      # `enqueue_probes` and re-checked here, which is what makes a scope edit mid-run bite.
+      # Asked about the NORMALIZED url, so the gate and the crawl can never judge two
+      # different spellings of one target (the `dir + cand` concat is not normalized).
+      norm = Url.normalize(p)
+      unless @scope.allowed?(norm, p.host)
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_REFUSED)
+      end
       target = p.query ? "#{p.path}?#{p.query}" : p.path
       attempts = 0
       loop do

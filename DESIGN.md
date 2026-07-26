@@ -517,9 +517,51 @@ Three specifics worth recording:
 
 What this does **not** close, deliberately, because each is a separate decision: brute-force and
 calibration probes are still authorised by their *directory* rather than per URL, so a `string`
-or `regex` EXCLUDE that matches a child but not its parent does not stop them; and
-`Plan.resolve_policy` still hands an unconfigured scope an `OpenScope`, so Layer 2 is absent
-entirely on a project with Sandbox on and no rules.
+or `regex` EXCLUDE that matches a child but not its parent does not stop them (closed by #391,
+below); and `Plan.resolve_policy` still hands an unconfigured scope an `OpenScope`, so Layer 2 is
+absent entirely on a project with Sandbox on and no rules.
+
+### 2026-07-26: a directory verdict does not authorise the URLs under it
+
+Refines: [§3](#s3). Issue #391, the remaining half of the #364 review.
+
+`enqueue_probes` was the only `@frontier <<` site with no gate: it built `Url.parse("#{bl.dir}#{cand}")`
+and pushed a Probe straight onto the frontier, and `process_calibrate` sent `"#{dir}#{bogus_name}"`
+`calibrate_probes + extensions.size` times the same way. With the defaults that is **~278 real
+requests per calibrated directory on one `allowed?` answer about the directory**.
+
+The reason a directory verdict cannot stand in for its children is that only some rule kinds are
+monotone under a path append. `host` rules and `string` INCLUDEs are; `string` and `regex`
+EXCLUDEs are not, and neither are the `regex` INCLUDEs Sandbox reads as its allowlist — any
+`$`-anchored or length-bounded pattern matches a directory and refuses everything beneath it. So
+an EXCLUDE on `logout` / `signout` / `shutdown`, the canonical "do not touch destructive
+endpoints" rule, was silently ignored by the brute-forcer even though `logout` ships on line 41
+of the built-in wordlist, alongside `admin`, `actuator/env`, `.git/config` and `.env`.
+
+The path confine was escapable by the same append: `Url.parse` collapses dot-segments, so a
+wordlist entry of `../admin` under an `/app/`-confined run re-parsed to `/admin`, and
+`@confine_path` lived only inside `bounded_url`, which probes never reached.
+
+The fix splits by layer rather than by call site, because the two layers have different contracts:
+
+- **Layer 2 moves to `send_with_retries`,** the single funnel all three send sites pass through.
+  Calibration probes are built by a *worker* at send time from a random bogus name, so no
+  enqueue-time gate can see them at all; this is the only line that can judge them. Brute-force
+  candidates are additionally gated in `enqueue_probes`, which keeps a refused one out of the
+  frontier and out of `per_dir_cap` instead of spending both on a send that will be refused.
+  A refusal returns a benign `Engine::SCOPE_REFUSED` Result in the shape `CappedBackend` already
+  uses for the request cap, and is **not** counted as an error: it is a decision the operator
+  asked for, not a failure of the run.
+- **The path confine moves to `enqueue_probes` only,** via the `confined?` predicate now shared
+  with `bounded_url`. It deliberately does *not* go on the send chokepoint: the origin-root
+  calibration and the two well-known paths waive the confine on purpose (previous entry), and
+  gating there would refuse them on every path-scoped run.
+- **Layer 1 (`containment` / `boundary?`) is deliberately NOT re-asked per probe.** It was
+  answered for the directory, which is what the crawl actually reached, and [§3](#s3) makes
+  Layer 1 the layer whose strictness legitimately varies per surface. Re-asking it would also
+  mean a narrow anchored include silently disables brute-force under a directory that include
+  itself admitted. Layer 2 is the layer that is identical everywhere, and it is the one that now
+  bites every send.
 
 ---
 

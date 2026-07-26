@@ -62,6 +62,26 @@ private class DenyExact < D::ScopePolicy
   end
 end
 
+# A ScopePolicy that allows ONLY an exact URL set — the shape a `regex` include anchored with
+# `$` takes under Sandbox, and the one the issue-#391 table calls non-monotone: a directory can
+# be allowlisted while every child under it is not.
+private class AllowExact < D::ScopePolicy
+  def initialize(@allow : Set(String))
+  end
+
+  def allowed?(url : String, host : String) : Bool
+    @allow.includes?(url)
+  end
+
+  def boundary?(url : String, host : String) : Bool
+    true
+  end
+
+  def configured? : Bool
+    false
+  end
+end
+
 # The bogus soft-404 probes an origin-root calibration sends: one path segment directly under
 # "/", minus the two well-known paths seed_frontier queues by name. A path-scoped run's own
 # brute-force probes are deeper (/app/…), so they never land in here.
@@ -410,6 +430,70 @@ describe Gori::Discover::Engine do
       sent.should contain("/clean")
       sent.should_not contain("/ok?q=1")
       sent.none? { |t| t.includes?('\r') || t.includes?('\n') }.should be_true
+    end
+  end
+
+  # Issue #391 / DESIGN.md §7. Brute-force and calibration probes were authorised by their
+  # DIRECTORY: one `allowed?` answer about the dir stood in for ~278 real requests under it,
+  # and the path confine never applied to them at all.
+  describe "probes are authorised per URL, not by their directory" do
+    it "skips a wordlist entry an EXCLUDE denies while its directory is allowed" do
+      # The issue's repro. `logout` is line 41 of the built-in wordlist, and an exclude on it
+      # is the canonical "do not touch destructive endpoints" rule — silently ignored, because
+      # the only question ever asked was about "http://t/".
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 1,
+        retries: 0, confidence_floor: 0.4)
+      sent = [] of String
+      findings, _ = run_discover("http://t/", ["logout", "admin"], cfg,
+        DenyExact.new(Set{"http://t/logout"})) do |t|
+        sent << t
+        t == "/logout" || t == "/admin" ? html("A REAL PAGE THAT WOULD BE REPORTED") : notfound
+      end
+      sent.should_not contain("/logout")
+      # The control: the sibling probe under the very same directory DID go out, so this is a
+      # verdict about the gate and not about a brute-forcer that never ran.
+      sent.should contain("/admin")
+      findings.map(&.url).should contain("http://t/admin")
+      findings.map(&.url).should_not contain("http://t/logout")
+    end
+
+    it "skips the calibration probes when the scope allows the directory but not its children" do
+      # process_calibrate builds "#{dir}#{bogus_name}" inside a WORKER at send time, so these
+      # are the sends no enqueue-time gate can ever see — only the send chokepoint can.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
+        retries: 0)
+      gated = [] of String
+      backend = RouteBackend.new(->(t : String) { gated << t; notfound })
+      engine = D::Engine.new("http://t/", ["admin"], backend, cfg, AllowExact.new(Set{"http://t/"}))
+      errors = 0_i64
+      engine.run { |ev| errors = ev.progress.errors if ev.is_a?(D::DoneEvent) }
+      gated.should be_empty
+      # A refusal is a decision the operator asked for, not a failure — it must not inflate
+      # the error count every surface renders.
+      errors.should eq(0)
+
+      open = [] of String
+      run_discover("http://t/", ["admin"], cfg) do |t|
+        open << t
+        notfound
+      end
+      open.size.should eq(4) # control: 3 calibration probes + the one wordlist entry
+    end
+
+    it "keeps a traversal wordlist entry inside the seed's path confine" do
+      # `bl.dir + cand` is re-parsed by Url.parse, whose normalize_path collapses "..", so
+      # `../admin` under an /app/-confined run resolved to /admin. @confine_path lived only
+      # inside bounded_url, which probes never reached.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 1,
+        retries: 0, confidence_floor: 0.4)
+      sent = [] of String
+      findings, _ = run_discover("http://t/app/", ["../admin", "inner"], cfg) do |t|
+        sent << t
+        t == "/admin" || t == "/app/inner" ? html("A REAL PAGE THAT WOULD BE REPORTED") : notfound
+      end
+      sent.should_not contain("/admin")
+      sent.should contain("/app/inner") # control: an ordinary entry in the same list still probes
+      findings.map(&.url).should_not contain("http://t/admin")
     end
   end
 end
