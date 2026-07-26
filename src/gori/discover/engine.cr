@@ -241,8 +241,12 @@ module Gori::Discover
           # blocked seed blocks everything derived from it, so the alternative is a run that
           # finishes with zero findings and no reason, which reads as "there is nothing
           # there" instead of "gori sent nothing" (P4).
+          # `gate_url`, not `normalize`: gori's scope model has no port dimension, so a
+          # port-bearing URL misses a host-qualified string/regex include/exclude and the
+          # seed check both falsely denies a legitimate non-default-port target and fails
+          # open on an exclude (#407). Report the normalized URL, but ASK the port-less one.
           seed_norm = Url.normalize(sp)
-          @scope.allowed?(seed_norm, sp.host) ? nil : "#{SEED_BLOCKED}: #{seed_norm}"
+          @scope.allowed?(Url.gate_url(sp), sp.host) ? nil : "#{SEED_BLOCKED}: #{seed_norm}"
         end
       @seed_parts = sp || Url::Parts.new("http", "invalid.invalid", 80, "/", nil)
       # A path-scoped run (seed path deeper than "/") confines discovery to that subtree.
@@ -440,8 +444,11 @@ module Gori::Discover
     # #364). A blocked one is skipped silently rather than failing the run: unlike the seed,
     # the crawl is still meaningful without it.
     private def enqueue_well_known(url : String, source : Source) : Nil
-      # `url` is built from Url.origin(@seed_parts), so its host IS the seed's host.
-      return unless @scope.allowed?(url, @seed_parts.host)
+      # `url` is built from Url.origin(@seed_parts), so its host IS the seed's host. Gate on the
+      # PORT-LESS form (gate_url) — gori's scope has no port dimension, so a port-bearing URL
+      # misses a host-qualified string/regex rule (#407). `url` keeps its port for the Fetch.
+      gate = (p = Url.parse(url)) ? Url.gate_url(p) : url
+      return unless @scope.allowed?(gate, @seed_parts.host)
       @frontier << Task.new(TaskKind::Fetch, url, 0, source)
     end
 
@@ -454,8 +461,9 @@ module Gori::Discover
     # seed's formerly ungated blast radius (#364).
     private def enqueue_seed_only_calibration(dir : String) : Nil
       return if @dirs.includes?(dir)
-      return unless Url.parse(dir)
-      return unless @scope.allowed?(dir, @seed_parts.host)
+      return unless p = Url.parse(dir)
+      # Gate on the PORT-LESS form (#407), same as the seed and well-known checks.
+      return unless @scope.allowed?(Url.gate_url(p), @seed_parts.host)
       @dirs << dir
       @frontier << Task.new(TaskKind::Calibrate, dir, 0, Source::Bruteforced, dir: dir, seed_only: true)
     end

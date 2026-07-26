@@ -67,6 +67,26 @@ private def notfound : R
   make(404, "not found here")
 end
 
+# Allows every url but records the exact string each Layer-2 gate is asked about — so a spec
+# can assert the seed and its derived paths are gated on the PORT-LESS form (#407).
+private class RecordingScope < D::ScopePolicy
+  def initialize(@asked : Array(String))
+  end
+
+  def allowed?(url : String, host : String) : Bool
+    @asked << url
+    true
+  end
+
+  def boundary?(url : String, host : String) : Bool
+    true
+  end
+
+  def configured? : Bool
+    false
+  end
+end
+
 # A ScopePolicy that denies an exact URL set — the shape `StoreScope#allowed?` takes for a
 # regex EXCLUDE rule, or for Sandbox with the host off the allowlist. `configured?` is false
 # so ScopeAware containment falls back to same-origin and only `allowed?` (Layer 2) is under
@@ -819,5 +839,22 @@ describe Gori::Discover::Engine do
     end
     sent.should contain("/clean")
     sent.none?(&.includes?('\r')).should be_true
+  end
+
+  # #407: gori's scope model has no port dimension (Scope.request_url is "scheme://host/target"),
+  # so every Layer-2 gate must ask the PORT-LESS url. The seed check, enqueue_well_known and
+  # enqueue_seed_only_calibration used Url.normalize/origin, which append :port on a non-default
+  # port — so a host-qualified string/regex include falsely denied the seed and an exclude failed
+  # open. This records every url handed to the scope and proves none carries the port.
+  it "asks the scope the port-less url for the seed and its derived paths (#407)" do
+    asked = [] of String
+    scope = RecordingScope.new(asked)
+    cfg = D::Config.new(spider: true, bruteforce: false, retries: 0, max_depth: 1)
+    # A non-default port on the seed — the exact case that regressed.
+    engine = D::Engine.new("http://acme.test:8443/", [] of String, RouteBackend.new(->(_t : String) { notfound }), cfg, scope)
+    engine.run { |_ev| }
+    asked.should_not be_empty
+    asked.select(&.includes?("8443")).should eq([] of String) # never the port-bearing form
+    asked.all?(&.starts_with?("http://acme.test/")).should be_true
   end
 end
