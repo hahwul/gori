@@ -230,3 +230,33 @@ describe "Gori::Store project-tab aggregates (AT A GLANCE viz)" do
     end
   end
 end
+
+# #408: abandon_pending! finalises orphaned in-flight Pending rows to Error on session
+# start/stop, but an `import --urls`/`--oas` reference is stored Pending with a nil response ON
+# PURPOSE and will never be sent. It must be left alone, not corrupted into a fake network error.
+private def abandon_req(target : String) : Gori::Store::CapturedRequest
+  Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil)
+end
+
+describe "Gori::Store#abandon_pending! and imported reference placeholders" do
+  it "abandons an orphaned in-flight flow but not an unsent import placeholder" do
+    with_store do |store|
+      # An in-flight proxy capture (request in, response never arrived).
+      inflight = store.insert_flow(abandon_req("/in-flight"))
+      # An import reference: a Pending row with a nil response, stored unsent.
+      store.insert_import_batch([{abandon_req("/imported-ref"), nil.as(Gori::Store::CapturedResponse?)}])
+      imported = store.get_flow(inflight + 1).not_nil!.row.id
+
+      store.abandon_pending!("orphaned by a previous session")
+
+      store.get_flow(inflight).not_nil!.row.state.should eq(Gori::Store::FlowState::Error)
+      # The import placeholder stays Pending, with no fabricated error.
+      ref = store.get_flow(imported).not_nil!
+      ref.row.state.should eq(Gori::Store::FlowState::Pending)
+      ref.error.should be_nil
+    end
+  end
+end

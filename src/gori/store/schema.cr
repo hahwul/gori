@@ -557,7 +557,19 @@ module Gori
         "UPDATE repeaters SET request = CAST(request AS BLOB)",
       ]
 
-      MIGRATIONS = [V1, V2]
+      # `unsent` marks a flow row that will NEVER receive a response because it was never sent —
+      # an `import --urls`/`--oas` reference placeholder (Import::Builder.pending_request stores
+      # it Pending with a nil response ON PURPOSE). abandon_pending! finalises Pending rows to
+      # Error on session start/stop ("nothing else will ever resolve them"), which was FALSE for
+      # these — a capture (or just opening the project) corrupted every imported reference into a
+      # fabricated network error (#408). The gate excludes `unsent = 1`. Existing rows default to
+      # 0: only new imports are marked, so this prevents future corruption without guessing which
+      # already-stored Pending rows were imports.
+      V3 = [
+        "ALTER TABLE flows ADD COLUMN unsent INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

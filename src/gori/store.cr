@@ -353,7 +353,9 @@ module Gori
                   batch_reply = op.reply
                   inserted = [] of {Int64, Bool}
                   op.pairs.each do |req, resp|
-                    id, req_fts = insert_one(c, req)
+                    # A response-less import pair is a reference placeholder that will never be
+                    # sent — mark it `unsent` so abandon_pending! never fabricates an error for it (#408).
+                    id, req_fts = insert_one(c, req, unsent: resp.nil?)
                     has_resp = !resp.nil?
                     if r = resp
                       # Hand update_one the request FTS text we just computed so its memo
@@ -498,15 +500,18 @@ module Gori
       # caller gone / channel closed — nothing to unblock
     end
 
-    # Bulk-mark every Pending flow Error; returns the ids touched (for events).
+    # Bulk-mark every Pending flow Error; returns the ids touched (for events). `unsent` rows
+    # (import reference placeholders that were never sent) are EXCLUDED — they are permanently
+    # Pending by design, not orphaned in-flight captures, so finalising them to Error would
+    # fabricate a network failure for data the operator imported (#408).
     private def abandon_all_pending(conn : DB::Connection, message : String) : Array(Int64)
       ids = [] of Int64
-      conn.query("SELECT id FROM flows WHERE state = ?", FlowState::Pending.value) do |rs|
+      conn.query("SELECT id FROM flows WHERE state = ? AND unsent = 0", FlowState::Pending.value) do |rs|
         rs.each { ids << rs.read(Int64) }
       end
       return ids if ids.empty?
       conn.exec(
-        "UPDATE flows SET state = ?, error = ?, status = 0 WHERE state = ?",
+        "UPDATE flows SET state = ?, error = ?, status = 0 WHERE state = ? AND unsent = 0",
         FlowState::Error.value, message, FlowState::Pending.value)
       ids
     end
@@ -527,7 +532,7 @@ module Gori
     # Inserts the request row + its FTS entry, returning {id, req_fts} so the caller can
     # hand the already-computed request-side FTS text to update_one (post-commit) instead of
     # reading the head+body back out of the row.
-    private def insert_one(conn : DB::Connection, req : CapturedRequest) : {Int64, String}
+    private def insert_one(conn : DB::Connection, req : CapturedRequest, unsent : Bool = false) : {Int64, String}
       # request_size is the TRUE wire size (body_size when the BLOB was truncated),
       # so the History size column stays honest even for a capped body.
       body_size = req.body_size || req.body.try(&.size.to_i64) || 0_i64
@@ -536,15 +541,15 @@ module Gori
         INSERT INTO flows
           (created_at, scheme, host, port, method, target, http_version,
            sni, alpn, tls_version, request_head, request_body, request_size, state,
-           h2_conn_id, h2_stream_id, request_body_truncated)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           h2_conn_id, h2_stream_id, request_body_truncated, unsent)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         SQL
         req.created_at, req.scheme, req.host, req.port, req.method, req.target,
         req.http_version, req.sni, req.alpn, req.tls_version,
         req.head, req.body,
         req.head.size.to_i64 + body_size,
         FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id,
-        req.body_truncated? ? 1 : 0)
+        req.body_truncated? ? 1 : 0, unsent ? 1 : 0)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       id = res.last_insert_id
       # Index the request body text now; the response side is filled in by

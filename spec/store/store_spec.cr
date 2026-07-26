@@ -386,7 +386,8 @@ describe Gori::Store do
         .should eq("GET /x HTTP/1.1\r\nHost: h\r\n\r\n")
 
       Gori::Store::Schema.migrate!(db)
-      db.scalar("PRAGMA user_version").as(Int64).should eq(2_i64)
+      # Migrates all the way to the current schema (the V2 UPDATE this test targets runs en route).
+      db.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION.to_i64)
 
       recovered = db.query_one("SELECT request FROM repeaters WHERE target = 'https://a.test'", as: Bytes)
       recovered.should eq(with_nul) # full byte-for-byte recovery, embedded NUL and all
