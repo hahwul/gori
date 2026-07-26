@@ -10,6 +10,7 @@ abstract class Gori::Verb::ExecContext
   abstract def notes_copy_all : Nil         # copy the entire current note to the clipboard
   abstract def notes_read_mode? : Bool      # READ vs INS (gates y/copy verbs)
   abstract def notes_clear : Nil            # clear the current note's text
+  abstract def notes_export : Nil           # open the destination-path popup, then write the note as .md
   abstract def notes_edit : Nil             # open the current note in the external editor
   abstract def notes_goto : Nil             # open the go-to-line prompt
   abstract def notes_find : Nil             # open the find-in-note prompt

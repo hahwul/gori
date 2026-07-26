@@ -14,20 +14,32 @@ describe "Gori::Verbs.register_notes" do
 
   it "gates every Notes verb on the Notes tab" do
     elsewhere = FakeExecContext.new # :history
-    {"notes.new"   => :notes_new,
-     "notes.close" => :notes_close,
-     "notes.clear" => :notes_clear,
-     "notes.edit"  => :notes_edit,
-     "notes.goto"  => :notes_goto,
-     "notes.find"  => :notes_find,
-     "notes.links" => :notes_links,
-     "notes.copy"  => :read_copy,
+    {"notes.new"    => :notes_new,
+     "notes.close"  => :notes_close,
+     "notes.clear"  => :notes_clear,
+     "notes.edit"   => :notes_edit,
+     "notes.goto"   => :notes_goto,
+     "notes.find"   => :notes_find,
+     "notes.links"  => :notes_links,
+     "notes.export" => :notes_export,
+     "notes.copy"   => :read_copy,
     }.each do |id, intent|
       r[id].scope.should eq(Gori::Verb::Scope::Notes)
       r[id].available?(elsewhere).should be_false
       r[id].available?(in_notes).should be_true
       verb_intents(r, id).should eq([intent])
     end
+  end
+
+  it "puts export on the space menu with no chord, under a capital mnemonic" do
+    # 'e' is Edit-in-$EDITOR and 'x' is read_edit.cr's Select line, both already in this
+    # scope — hence the capital, following 'S' (Send selection to). A CHORD would be dead
+    # weight: the Notes body swallows every printable key, so the space menu and the palette
+    # are the only ways in.
+    r["notes.export"].menu_key.should eq('E')
+    r["notes.export"].section.should eq(:common)
+    r["notes.export"].chords.should be_empty
+    r["notes.export"].hidden?.should be_false
   end
 
   it "keeps every mnemonic distinct within the scope" do

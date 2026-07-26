@@ -124,7 +124,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issue_link_move(delta)
   end
 
+  # Ask where to write the report, then write it. The empty-store check happens BEFORE the
+  # popup (asking for a path and then refusing to write is worse than not asking), and uses
+  # count_issues rather than materializing store.issues here and again in the controller.
   def issues_export(format : Symbol) : Nil
-    issues_controller.issues_export(format)
+    if @session.store.count_issues == 0
+      @toast = "no issues to export"
+      return
+    end
+    ext = format == :json ? "json" : "md"
+    kind = format == :json ? :issues_json : :issues_md
+    open_export(kind, File.join(Dir.current, "issues.#{ext}")) { |p| issues_controller.issues_export_to(format, p) }
   end
 end

@@ -995,6 +995,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:notes_clear)
   end
 
+  def notes_export : Nil
+    rec(:notes_export)
+  end
+
   def notes_edit : Nil
     rec(:notes_edit)
   end

@@ -72,6 +72,7 @@ require "./custom_rule_overlay"
 require "./oast_provider_overlay"
 require "./ca_import_overlay"
 require "./import_overlay"
+require "./export_overlay"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -3287,6 +3288,22 @@ module Gori::Tui
       @toast = msg
     rescue ex
       @toast = "import failed: #{ex.message}"
+    end
+
+    # --- Export path popup (Notes → Export note, Issues → Export issues) -----
+
+    # One overlay, two callers: the destination form is identical, and the WRITE rides in as
+    # the on_commit closure (see overlay.cr) so neither controller learns about the modal.
+    #
+    # The closure's Bool IS the shell's close decision. A failed write (permissions, a
+    # directory that vanished between the check and the write) returns false, and the card
+    # stays up showing the error toast with the typed path intact instead of making the user
+    # retype it — the same "keep the form up on a correctable failure" the CA import commit
+    # relies on.
+    private def open_export(kind : Symbol, default_path : String, &write : String -> Bool) : Nil
+      ov = ExportOverlay.new(kind, default_path)
+      ov.on_commit = -> { write.call(ov.resolved_path) }
+      open_overlay(ov)
     end
 
     private def render_search_prompt(screen : Screen, rect : Rect) : Nil

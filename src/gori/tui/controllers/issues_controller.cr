@@ -346,19 +346,36 @@ module Gori::Tui
       @host.status(msg)
     end
 
-    def issues_export(format : Symbol) : Nil
-      issues = @host.session.store.issues
-      return @host.status("no issues to export") if issues.empty?
-      ext = format == :json ? "json" : "md"
+    # Write the issue report to `path` (the destination came from ExportOverlay — this used
+    # to hardcode <project dir>/issues.{md,json} and clobber it silently). Returns true when
+    # the shell should close the popup; false keeps it up so a correctable failure doesn't
+    # cost the typed path.
+    #
+    # The trailing newline mirrors `gori run issues --export=PATH`, so this and the CLI write
+    # byte-identical files for the same project and format (`--format=markdown|json`; the
+    # CLI's DEFAULT --format is `text`, a different report entirely). JSON.build emits no
+    # trailing newline of its own, so the JSON export gains one here.
+    def issues_export_to(format : Symbol, path : String) : Bool
       store = @host.session.store
+      issues = store.issues
+      if issues.empty?
+        @host.status("no issues to export")
+        return true
+      end
       content = format == :json ? Issues::Export.json(issues, store) : Issues::Export.markdown(issues, store, @host.session.project.name)
-      path = File.join(@host.session.project.dir, "issues.#{ext}")
-      File.write(path, content)
+      File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
       msg = "exported #{issues.size} issue#{issues.size == 1 ? "" : "s"} → #{path}"
-      msg += "  ⚠ temp project — copy it before closing" if @host.session.project.ephemeral?
+      # Only warn when the report landed INSIDE the ephemeral project dir. The path used to
+      # always be in there, so the warning was unconditional; now the operator picks it, and
+      # a file written to their cwd survives the project just fine.
+      if @host.session.project.ephemeral? && path.starts_with?(@host.session.project.dir)
+        msg += "  ⚠ temp project — copy it before closing"
+      end
       @host.status(msg)
+      true
     rescue ex
       @host.status("export failed: #{ex.message}")
+      false
     end
   end
 end

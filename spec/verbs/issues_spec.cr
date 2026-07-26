@@ -131,13 +131,42 @@ describe "Gori::Verbs.register_issues" do
       end
     end
 
-    it "defaults the Issues-scope 'x' chord to the human-readable Markdown report" do
-      # Issues-scoped so 'x' doesn't collide with the hex toggles in other scopes.
+    it "defaults the Issues-scope export key to the human-readable Markdown report" do
       verb = r["issues.export-key"]
-      verb.chords.should eq([Gori::Verb::Chord.new("x")])
+      verb.scope.should eq(Gori::Verb::Scope::Issues)
       ctx = FakeExecContext.new
       verb.call(ctx)
       ctx.args_for(:issues_export).should eq(["markdown"])
+    end
+
+    it "binds export to ⇧E — the SAME key Notes uses — and leaves 'x' to Select line" do
+      # 'x' means "Select line" in all nine read_edit.cr scopes, including the Issues DETAIL
+      # one ↵ away; the list's old 'x' export was the lone exception and collided with its
+      # own tab. Sharing 'E' with notes.export makes export one key across tabs.
+      verb = r["issues.export-key"]
+      verb.menu_key.should eq('E')
+      verb.menu_key.should eq(r["notes.export"].menu_key)
+      verb.hidden?.should be_false
+
+      # Chord.new("E") would be DEAD: Keybind.from_event normalises a typed capital to
+      # shift + lowercase, so the stored chord has to be the shift form.
+      verb.chords.should eq([Gori::Verb::Chord.new("e", shift: true)])
+      verb.chords.map(&.key).should_not contain("x")
+
+      # …and nothing in the Issues list scope claims 'x' any more.
+      r.select(&.scope.issues?).compact_map(&.menu_key).should_not contain('x')
+    end
+
+    it "keeps all three entries on the SAME intent now that the path comes from a popup" do
+      # The destination moved from a hardcoded <project dir>/issues.{md,json} to an
+      # ExportOverlay prompt, but that is purely a shell concern: the verb ids, scopes,
+      # chords and the issues_export(format) signature all had to stay put, so anything
+      # bound to them (palette entries, user keybindings, the MCP/CLI surfaces) is untouched.
+      %w[issues.export-md issues.export-json issues.export-key].each do |id|
+        ctx = FakeExecContext.new
+        r[id].call(ctx)
+        ctx.call_names.should eq([:issues_export])
+      end
     end
   end
 end

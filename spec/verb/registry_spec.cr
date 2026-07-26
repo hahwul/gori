@@ -992,6 +992,10 @@ private class FakeContext < ExecContext
     @calls << :notes_clear
   end
 
+  def notes_export : Nil
+    @calls << :notes_export
+  end
+
   def notes_edit : Nil
     @calls << :notes_edit
   end

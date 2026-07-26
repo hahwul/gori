@@ -39,6 +39,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     notes_controller.notes_clear
   end
 
+  # Write the current note to a .md file (space menu → "Export note…").
+  #
+  # The emptiness check happens BEFORE the popup: asking for a path and then refusing to
+  # write is worse than not asking at all (issues_export's "no issues to export" is the same
+  # call). No focus_pane(:body) either — unlike notes_goto/notes_find, this doesn't target
+  # the body's cursor.
+  def notes_export : Nil
+    view = notes_controller.view
+    if view.current_text.strip.empty?
+      @toast = "note is empty — nothing to export"
+      return
+    end
+    base = Notes.export_basename(view.current_text, view.current_index)
+    open_export(:note, File.join(Dir.current, base)) { |p| notes_controller.notes_export_to(p) }
+  end
+
   def notes_edit : Nil
     focus_pane(:body)
     run_external_editor(notes_controller.view.current_text, :notes) { |t| notes_controller.view.replace_current(t) }

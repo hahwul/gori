@@ -2,6 +2,7 @@
 
 ## v0.1.4
 
+- TUI: export the current note to a Markdown file from the Notes space menu, and ask where to write the Issues report instead of always overwriting `<project dir>/issues.{md,json}`. Export is `⇧E` on both tabs; the Issues list's old `x` is freed, so `x` now means "Select line" everywhere
 - Probe: add active-scan rules — open redirect, CRLF/response-header injection, host-header (X-Forwarded-Host) injection, access-control bypass via path normalization and via X-Original-URL/X-Rewrite-URL, NGINX-style parameter path traversal, active GraphQL introspection, and SSTI (#299)
 - Proxy: fix HTTPS blank pages / empty History — reflect origin ALPN so h1-only origins load, resolve the system CA trust store for upstream verification, and report TLS-verify failures separately from connect failures (#332, #333, #334, #336)
 - Proxy: stop an upstream RST leaving a flow stuck Pending forever (#330)

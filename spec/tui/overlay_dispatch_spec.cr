@@ -31,7 +31,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences,
   :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
-  :probe_rule, :rewriter_rule, :ca_import, :import, :scope_rule, :sequence_config,
+  :probe_rule, :rewriter_rule, :ca_import, :import, :export, :scope_rule, :sequence_config,
   :mine_config, :copy_as, :send_to,
 }
 
@@ -74,6 +74,9 @@ private MIGRATED_KINDS = [
   OverlayKind::Hosts,
   OverlayKind::Env,
   OverlayKind::Hotkeys,
+  # Export — born on the seam (Notes → Export note, Issues → Export issues), so it was
+  # never in MODAL_OVERLAYS to be deleted from.
+  OverlayKind::Export,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

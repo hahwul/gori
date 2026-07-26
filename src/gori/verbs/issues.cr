@@ -133,22 +133,35 @@ module Gori
         "issue.link-up", "Previous related link", "Select the previous related item",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.issue_link_move(-1); nil }
 
-      # Export (palette/Global — the issues' way out): write a report to the project dir.
+      # Export (palette/Global — the issues' way out): ask for a destination path, then
+      # write the report there. All three entries below open the same popup, prefilled with
+      # <cwd>/issues.{md,json}; the path used to be hardcoded to the project dir.
       r.register Verb::Definition.new(
-        "issues.export-md", "Export issues (Markdown)", "Write all issues to issues.md in the project dir",
+        "issues.export-md", "Export issues (Markdown)…", "Write all issues to a Markdown file (asks for the path)",
         Verb::Scope::Global, [] of Verb::Chord) { |ctx| ctx.issues_export(:markdown); nil }
 
       r.register Verb::Definition.new(
-        "issues.export-json", "Export issues (JSON)", "Write all issues to issues.json in the project dir",
+        "issues.export-json", "Export issues (JSON)…", "Write all issues to a JSON file (asks for the path)",
         Verb::Scope::Global, [] of Verb::Chord) { |ctx| ctx.issues_export(:json); nil }
 
-      # The discoverable 'x' export chord on the Issues tab (the verbs above are the
-      # palette entries / both formats). Issues-scoped so 'x' doesn't collide with
-      # the hex toggles elsewhere; defaults to the human-readable Markdown report.
-      # NON-hidden so it joins the Issues list's "space" menu (key derives from 'x').
+      # The discoverable export key on the Issues tab (the verbs above are the palette
+      # entries / both formats); defaults to the human-readable Markdown report. NON-hidden
+      # so it joins the Issues list's "space" menu.
+      #
+      # ⇧E, not 'x', and it MATCHES notes.export's mnemonic on purpose. 'x' means "Select
+      # line" everywhere else in the app — all nine read-mode scopes in read_edit.cr, the
+      # Issues DETAIL one ↵ away included. So the list's 'x' was the odd one out, and it
+      # collided with its own tab's detail view. Sharing 'E' with Notes makes export one key
+      # across tabs and leaves x = Select line exception-free.
+      #
+      # The chord is Chord.new("e", shift: true), NOT Chord.new("E"): Keybind.from_event
+      # normalises a typed capital to shift + lowercase, so an "E" chord would never fire.
+      # menu_key skips shift chords, hence the explicit mnemonic — the same pairing
+      # notes.send-to uses for 'S'.
       r.register Verb::Definition.new(
-        "issues.export-key", "Export issues (Markdown)", "Write the Markdown report to the project dir",
-        Verb::Scope::Issues, [Verb::Chord.new("x")]) { |ctx| ctx.issues_export(:markdown); nil }
+        "issues.export-key", "Export issues (Markdown)…", "Write the Markdown report to a file (asks for the path)",
+        Verb::Scope::Issues, [Verb::Chord.new("e", shift: true)],
+        mnemonic: 'E') { |ctx| ctx.issues_export(:markdown); nil }
     end
   end
 end

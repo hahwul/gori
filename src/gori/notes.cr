@@ -150,5 +150,35 @@ module Gori
     def self.line_count(text : String) : Int32
       text.split('\n').size
     end
+
+    FILENAME_MAX_CHARS = 48
+
+    # A filesystem-safe basename for "export this note", derived from its title the same
+    # way the sub-tab label is.
+    #
+    # UNICODE IS PRESERVED — a Korean/CJK title stays legible in the filename. Neither of
+    # the codebase's other name-manglers fits: ProjectRegistry#slugify must emit an ASCII
+    # *directory* slug and so hashes a non-ASCII name to project-<sha256>, and Runner's
+    # title_safe caps at 40 with a '…' that has no business in a filename. Only bytes a
+    # path cannot carry are replaced here.
+    #
+    # `index` is the sub-tab position behind the "note N" fallback, matching
+    # NotesView::Note#label, so an untitled note exports as note-3.md and never as a bare
+    # ".md". Path separators are replaced BEFORE the strip, so a title like "../../etc/passwd"
+    # can only ever yield "etc-passwd.md".
+    #
+    # The cap is in CHARACTERS, not bytes: 48 × 4 bytes worst case plus ".md" is still far
+    # under the 255-byte limit every filesystem gori runs on enforces.
+    def self.export_basename(text : String, index : Int32) : String
+      raw = (title(text) || "").scrub
+      safe = raw.gsub { |c| c.control? ? ' ' : c } # NUL/ESC/BEL/CR can never reach a filename
+        .gsub(/[\/\\:*?"<>|]+/, "-")               # path separators + the Windows-hostile set
+        .gsub(/\s+/, "-")
+        .gsub(/-+/, "-")
+        .strip("-. \t") # "." / ".." / a leading dot (hidden) / a trailing dot cannot survive
+      safe = safe[0, FILENAME_MAX_CHARS].strip("-. ") if safe.size > FILENAME_MAX_CHARS
+      safe = "note-#{index + 1}" if safe.empty?
+      "#{safe}.md"
+    end
   end
 end

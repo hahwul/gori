@@ -375,5 +375,28 @@ module Gori::Tui
         @host.status("note cleared")
       end
     end
+
+    # Write the current note to `path` (the destination came from ExportOverlay). Returns
+    # true when the shell should close the popup; false keeps it up so a correctable failure
+    # (a read-only directory, a path that lost its parent) doesn't cost the typed path.
+    #
+    # Deliberately NO save_notes first, unlike notes_duplicate / notes_links: `current_text`
+    # reads the live in-memory TextArea, so the export already carries unsaved edits — the
+    # bytes on screen, which is what the user means by "this note". Exporting mutates no gori
+    # state and so should have no persistence side effect.
+    #
+    # The bytes go out VERBATIM — no scrub_controls. That helper exists for text headed to a
+    # live terminal (see the split in `gori run issues`: the --export branch writes raw, the
+    # STDOUT branch scrubs). A .md file is not a TTY, and scrubbing would corrupt whatever the
+    # operator captured into the note.
+    def notes_export_to(path : String) : Bool
+      text = @notes.current_text
+      File.write(path, text.ends_with?('\n') ? text : "#{text}\n")
+      @host.status("exported note → #{path}")
+      true
+    rescue ex
+      @host.status("export failed: #{ex.message}")
+      false
+    end
   end
 end

@@ -51,6 +51,15 @@ module Gori
         "notes.clear", "Clear note", "Clear the current note's text",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'c') { |ctx| ctx.notes_clear; nil }
 
+      # Export the note as Markdown. Mnemonic 'E', not 'e' or 'x': 'e' is Edit-in-$EDITOR
+      # and 'x' is read_edit.cr's Select line, both already in this scope. A capital follows
+      # the precedent 'S' (Send selection to) sets right next to it. No chord either — the
+      # Notes body swallows every printable key, so the space menu and the palette are the
+      # only surfaces this can be reached from.
+      r.register Verb::Definition.new(
+        "notes.export", "Export note…", "Write the current note's text to a Markdown file",
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'E') { |ctx| ctx.notes_export; nil }
+
       r.register Verb::Definition.new(
         "notes.edit", "Edit in $EDITOR", "Open the current note in the external editor",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'e') { |ctx| ctx.notes_edit; nil }
