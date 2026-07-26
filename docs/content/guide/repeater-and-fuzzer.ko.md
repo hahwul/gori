@@ -78,6 +78,14 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 ffuf 스타일 matcher와 filter로 status, size, words, lines, 본문 정규식에 대해 결과를 필터링합니다. 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
 
+### 연결 재사용 {#connection-reuse}
+
+스윕은 하나의 HTTP/1.1 연결을 여러 요청에 재사용합니다. 요청마다가 아니라 워커마다 TCP 핸드셰이크를(그리고 `https`라면 TLS 핸드셰이크까지) 한 번만 치릅니다. 원격 오리진을 대상으로 할 때 대개 이것이 실행 시간의 가장 큰 비용입니다.
+
+프레이밍이 명확하다고 증명할 수 없는 요청은 설정과 무관하게 소켓을 공유하지 않습니다. 실제 본문 길이와 어긋나는 `Content-Length`, `CL`+`TE`, 난독화된 프레이밍 헤더, `Connection: close`, `Upgrade`는 각각 자기 연결을 받습니다. 스머글링 페이로드가 다음 페이로드의 결과를 오프레이밍할 수 없다는 뜻입니다. 대상의 동작이 연결 단위일 때(연결 범위 rate limit, 연결로 고정하는 로드 밸런서) 또는 keep-alive 처리 자체를 시험할 때는 `--no-keep-alive`(CLI), `keep_alive: false`(MCP), Fuzzer ADVANCED 오버레이의 **Keep-alive** 토글로 재사용을 끕니다.
+
+`gori run fuzz`는 실제로 치른 비용을 함께 출력합니다: `connections · 50 dialed · 2950 reused`.
+
 ### 헤드리스 실행 {#running-headless}
 
 ```bash

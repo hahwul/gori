@@ -42,15 +42,31 @@ module Gori
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
         # whole-request deadline would need a timer fiber racing a socket close.
-        ct = timeout || Settings.connect_timeout
-        it = timeout || Settings.io_timeout
-        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
+        upstream = dial(scheme, host, port, verify_upstream, sni, timeout, overrides)
         return error(connect_error(scheme, host, port, verify_upstream), started) unless upstream
 
         begin
           exchange(upstream, request, host, port, started)
         ensure
           upstream.close rescue nil
+        end
+      end
+
+      # Opens ONE upstream connection to the origin, or nil when the dial (or, for https,
+      # the TLS handshake) failed. Public because a keep-alive pool has to own the socket's
+      # lifetime across many exchanges — `send` above is the same dial plus a single
+      # exchange plus a close. `timeout` is the per-operation bound (connect, and idle
+      # between reads/writes), exactly as in `send`.
+      def self.dial(scheme : String, host : String, port : Int32, verify_upstream : Bool,
+                    sni : String?, timeout : Time::Span?,
+                    overrides : Gori::HostOverrides?) : IO?
+        ct = timeout || Settings.connect_timeout
+        it = timeout || Settings.io_timeout
+        if scheme == "https"
+          Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni,
+            connect_timeout: ct, io_timeout: it, overrides: overrides)
+        else
+          Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
         end
       end
 
@@ -71,9 +87,7 @@ module Gori
                              overrides : Gori::HostOverrides? = nil) : Array(Result)
         results = [] of Result
         return results if requests.empty?
-        ct = timeout || Settings.connect_timeout
-        it = timeout || Settings.io_timeout
-        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
+        upstream = dial(scheme, host, port, verify_upstream, sni, timeout, overrides)
         unless upstream
           msg = connect_error(scheme, host, port, verify_upstream)
           now = Time.instant
@@ -101,16 +115,28 @@ module Gori
         results
       end
 
+      # The exact error string a clean EOF before ANY response byte produces. A keep-alive
+      # pool matches on it to tell "the origin had already closed this parked socket" (retry
+      # once on a fresh connection) apart from a timeout or a mid-response failure (never
+      # retried — the origin may well have processed the request).
+      def self.no_response_error(host : String, port : Int32) : String
+        "no response from #{host}:#{port}"
+      end
+
       # Writes one request on an already-open connection and reads its single response
       # (skipping interim 1xx). Fully self-contained: any IO/parse failure becomes an error
       # Result rather than propagating, so a group send can decide what to do next. `started`
       # is when timing began (pre-dial for a one-shot send; per-request for a group).
-      private def self.exchange(upstream : IO, request : Bytes, host : String, port : Int32,
-                                started : Time::Instant) : Result
+      #
+      # Public because `send_pipeline` is not the only multi-request-per-connection caller
+      # any more: `Fuzz::ConnPool` reuses one socket across a sweep's requests. Both apply
+      # the SAME retirement rule to the socket afterwards (error or incomplete ⇒ unusable).
+      def self.exchange(upstream : IO, request : Bytes, host : String, port : Int32,
+                        started : Time::Instant) : Result
         upstream.write(request)
         upstream.flush
         head = read_response_head(upstream)
-        return error("no response from #{host}:#{port}", started) unless head
+        return error(no_response_error(host, port), started) unless head
 
         resp = Proxy::Codec::Http1.parse_response_head(head)
         # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured request
@@ -176,7 +202,9 @@ module Gori
           timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
       end
 
-      private def self.error(message : String, started : Time::Instant) : Result
+      # An error Result with no head/body, timed from `started` (shared with the pool, which
+      # reports a failed dial the same way `send` does).
+      def self.error(message : String, started : Time::Instant) : Result
         Result.new(Bytes.new(0), nil, nil, elapsed(started), message)
       end
 
@@ -184,7 +212,7 @@ module Gori
       # rejection into a single nil socket, so spell out the likely causes — and, for
       # verified https, that a self-signed/expired cert is a common one — rather than
       # leaving the user with a bare "connect failed".
-      private def self.connect_error(scheme : String, host : String, port : Int32, verify : Bool) : String
+      def self.connect_error(scheme : String, host : String, port : Int32, verify : Bool) : String
         if scheme == "https" && verify
           "connect failed: #{host}:#{port} — host unreachable (DNS/refused/timeout) or the origin's TLS certificate failed verification (e.g. self-signed/expired)"
         else

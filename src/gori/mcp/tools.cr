@@ -1228,6 +1228,7 @@ module Gori
               s.field "rate", intprop("requests/sec cap (0 = unlimited)")
               s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")
               s.field "retries", intprop("retries per request on a network error")
+              s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection across many requests (default true) — one TCP/TLS handshake per worker instead of per request. Set false to dial a fresh connection per request, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection) or when keep-alive handling is itself what you are probing.")
               s.field "http2", boolprop("use real HTTP/2 (default false)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")

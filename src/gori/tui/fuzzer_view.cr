@@ -797,6 +797,7 @@ module Gori::Tui
       AdvancedSnapshot.new(
         conc: @s_conc, rate: @s_rate, timeout: @s_timeout, retries: @s_retries,
         follow: @config.follow_redirects?, calibrate: @config.auto_calibrate?,
+        keep_alive: @config.keep_alive?,
         m_status: @matcher.match_status || "", m_size: @matcher.match_size || "",
         m_words: @matcher.match_words || "", m_regex: @s_m_regex,
         f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
@@ -813,6 +814,7 @@ module Gori::Tui
       @config.follow_redirects = s.follow
       @config.auto_calibrate = s.calibrate
       @matcher.auto_calibrate = s.calibrate
+      @config.keep_alive = s.keep_alive
       @matcher.match_status = blank_nil(s.m_status)
       @matcher.match_size = blank_nil(s.m_size)
       @matcher.match_words = blank_nil(s.m_words)
@@ -1376,6 +1378,7 @@ module Gori::Tui
           j.field "retries", @config.retries
           j.field "follow", @config.follow_redirects?
           j.field "calibrate", @config.auto_calibrate?
+          j.field "keep_alive", @config.keep_alive?
           j.field("sets") { j.array { @sets.each { |s| j.object { j.field "kind", s.kind.to_s; j.field "value", s.value } } } }
           j.field "match_status", @matcher.match_status
           j.field "filter_status", @matcher.filter_status
@@ -1403,6 +1406,9 @@ module Gori::Tui
       obj["retries"]?.try(&.as_i?).try { |n| @config.retries = n }
       @config.follow_redirects = obj["follow"]?.try(&.as_bool?) || false
       @config.auto_calibrate = obj["calibrate"]?.try(&.as_bool?) || false
+      # A session persisted before this key existed reads as nil ⇒ keep the ctor default
+      # (on). `|| false` here would silently turn keep-alive off for every saved tab.
+      @config.keep_alive = obj["keep_alive"]?.try(&.as_bool?) != false
       apply_sets_json(obj["sets"]?)
       @matcher.match_status = obj["match_status"]?.try(&.as_s?)
       @matcher.filter_status = obj["filter_status"]?.try(&.as_s?)

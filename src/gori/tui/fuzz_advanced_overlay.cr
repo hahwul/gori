@@ -11,7 +11,7 @@ module Gori::Tui
   # strings (compiled by the view's commit_buffers at build/persist time, unchanged).
   record AdvancedSnapshot,
     conc : String, rate : String, timeout : String, retries : String,
-    follow : Bool, calibrate : Bool,
+    follow : Bool, calibrate : Bool, keep_alive : Bool,
     m_status : String, m_size : String, m_words : String, m_regex : String,
     f_status : String, f_size : String, f_words : String, f_regex : String
 
@@ -31,6 +31,7 @@ module Gori::Tui
       {:retries, "Retries", :text},
       {:follow, "Follow redirects", :toggle},
       {:calibrate, "Auto-calibrate", :toggle},
+      {:keep_alive, "Keep-alive", :toggle},
       {:m_status, "Match status", :text},
       {:m_size, "Match size", :text},
       {:m_words, "Match words", :text},
@@ -47,6 +48,7 @@ module Gori::Tui
       @scroll = 0
       @follow = snap.follow
       @calibrate = snap.calibrate
+      @keep_alive = snap.keep_alive
       @fields = {
         :conc     => TextField.new(snap.conc),
         :rate     => TextField.new(snap.rate),
@@ -121,8 +123,9 @@ module Gori::Tui
 
     private def toggle_current : Nil
       case current[0]
-      when :follow    then @follow = !@follow
-      when :calibrate then @calibrate = !@calibrate
+      when :follow     then @follow = !@follow
+      when :calibrate  then @calibrate = !@calibrate
+      when :keep_alive then @keep_alive = !@keep_alive
       end
     end
 
@@ -140,7 +143,7 @@ module Gori::Tui
       AdvancedSnapshot.new(
         conc: @fields[:conc].value, rate: @fields[:rate].value,
         timeout: @fields[:timeout].value, retries: @fields[:retries].value,
-        follow: @follow, calibrate: @calibrate,
+        follow: @follow, calibrate: @calibrate, keep_alive: @keep_alive,
         m_status: @fields[:m_status].value, m_size: @fields[:m_size].value,
         m_words: @fields[:m_words].value, m_regex: @fields[:m_regex].value,
         f_status: @fields[:f_status].value, f_size: @fields[:f_size].value,
@@ -183,7 +186,11 @@ module Gori::Tui
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if foc
       screen.text(box.x + 2, y, label, foc ? Theme.text_bright : Theme.muted, bg)
       if kind == :toggle
-        on = key == :follow ? @follow : @calibrate
+        on = case key
+             when :follow     then @follow
+             when :keep_alive then @keep_alive
+             else                  @calibrate
+             end
         screen.text(vx, y, on ? "‹ on ›" : "‹ off ›", foc ? Theme.text_bright : Theme.text, bg)
       else
         vw = {box.right - 2 - vx, 1}.max

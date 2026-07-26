@@ -78,6 +78,14 @@ Mark positions with `§…§` markers in the request, or let gori place them aut
 
 Filter results with ffuf-style matchers and filters on status, size, words, lines, and body regex, plus auto-calibration to drop noisy baselines. Matched responses are highlighted and can be extracted with a capture regex.
 
+### Connection Reuse
+
+A sweep reuses one HTTP/1.1 connection across many requests, so a run pays one TCP — and, on `https`, one TLS — handshake per worker instead of one per request. Against a remote origin that is usually the largest single cost of a run.
+
+Requests gori cannot prove unambiguous never share a socket, whatever the setting: a `Content-Length` that does not match the body on the wire, `CL`+`TE`, an obfuscated framing header, `Connection: close`, or `Upgrade` each get their own connection, so a smuggling payload can never misframe the next payload's result. Turn reuse off entirely with `--no-keep-alive` (CLI), `keep_alive: false` (MCP), or the **Keep-alive** toggle in the Fuzzer's ADVANCED overlay when the target's behaviour is per-connection — a connection-scoped rate limit, a load balancer pinning by connection — or when keep-alive handling is itself what you are testing.
+
+`gori run fuzz` reports what the run actually paid: `connections · 50 dialed · 2950 reused`.
+
 ### Running Headless
 
 ```bash

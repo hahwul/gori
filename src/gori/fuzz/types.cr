@@ -116,6 +116,16 @@ module Gori
       property? auto_calibrate : Bool # drop responses identical to the baseline
       property keep_bodies : Symbol   # :none | :matched | :all
       property max_requests : Int64?  # hard cap on total sends
+      # Reuse one HTTP/1.1 connection across many sends instead of dialing per request
+      # (see Fuzz::ConnPool). On by default: a sweep pays one TCP — and, on https, one TLS
+      # — handshake per WORKER rather than per request, which is the single largest cost of
+      # a run against a remote origin. Turn it off to make every request a fresh connection:
+      # per-connection origin state (a connection-scoped rate limit, a load balancer pinning
+      # by connection, a target you are probing for keep-alive behaviour itself) is then
+      # observable per payload again. Requests the pool cannot prove unambiguous — a
+      # mis-declared Content-Length, `Connection: close`, CL+TE — get their own connection
+      # regardless of this flag.
+      property? keep_alive : Bool
 
       def initialize(@mode : Mode = Mode::Sniper,
                      @concurrency : Int32 = 20,
@@ -131,7 +141,8 @@ module Gori
                      @add_content_length_when_missing : Bool = false,
                      @auto_calibrate : Bool = false,
                      @keep_bodies : Symbol = :matched,
-                     @max_requests : Int64? = nil)
+                     @max_requests : Int64? = nil,
+                     @keep_alive : Bool = true)
       end
     end
   end

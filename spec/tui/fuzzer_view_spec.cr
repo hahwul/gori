@@ -179,13 +179,14 @@ describe Gori::Tui::FuzzerView do
       snap = view.advanced_snapshot
       edited = Gori::Tui::AdvancedSnapshot.new(
         conc: "50", rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
-        follow: true, calibrate: snap.calibrate,
+        follow: true, calibrate: snap.calibrate, keep_alive: false,
         m_status: "200,500", m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
         f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex)
       view.apply_advanced(edited)
       back = view.advanced_snapshot
       back.conc.should eq("50")
       back.follow.should be_true
+      back.keep_alive.should be_false # on by default; the edit must survive the round-trip
       back.m_status.should eq("200,500")
     end
 
@@ -194,7 +195,7 @@ describe Gori::Tui::FuzzerView do
       snap = src.advanced_snapshot
       src.apply_advanced(Gori::Tui::AdvancedSnapshot.new(
         conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
-        follow: snap.follow, calibrate: snap.calibrate,
+        follow: snap.follow, calibrate: snap.calibrate, keep_alive: snap.keep_alive,
         m_status: snap.m_status, m_size: snap.m_size, m_words: "42", m_regex: snap.m_regex,
         f_status: snap.f_status, f_size: snap.f_size, f_words: "7", f_regex: snap.f_regex))
       dst = FuzzerView.new

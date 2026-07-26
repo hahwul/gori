@@ -544,7 +544,9 @@ module Gori
           retries: (int(h, "retries") || 0_i64).clamp(0_i64, 1000_i64).to_i,
           timeout: fuzz_timeout(h),
           keep_bodies: fuzz_record_policy(h),
-          max_requests: cap)
+          max_requests: cap,
+          # Absent ⇒ the Config default (on); only an explicit `false` opts out.
+          keep_alive: bool_arg(h, "keep_alive", true))
       end
     end
   end

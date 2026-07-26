@@ -26,6 +26,7 @@ module Gori
         timeout : Time::Span? = nil
         retries = 0
         follow = false
+        keep_alive = true
         auto_cal = false
         format = :text
         force = false
@@ -64,6 +65,7 @@ module Gori
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--follow-redirects", "Follow same-origin redirects") { follow = true }
+          p.on("--no-keep-alive", "Dial a fresh connection for every request (default: reuse)") { keep_alive = false }
           p.on("--mc=SPEC", "Match status (e.g. 200,302,500-599,2xx)") { |v| matcher.match_status = v }
           p.on("--fc=SPEC", "Filter out status") { |v| matcher.filter_status = v }
           p.on("--ms=SPEC", "Match response size (e.g. 1500,>1000)") { |v| matcher.match_size = v }
@@ -99,7 +101,8 @@ module Gori
           auto_mark: auto, marks: marks, http2: http2,
           sources: sources, processors: processors,
           config: Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
-            retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal, keep_bodies: :none),
+            retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal,
+            keep_bodies: :none, keep_alive: keep_alive),
           matcher: matcher, verify: !insecure, sni: sni,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
         # Gate outbound traffic through the ONE seam every surface shares (Gori::Outbound):
@@ -125,7 +128,7 @@ module Gori
         # connection — a raise in there would otherwise leak it.
         begin
           plan.engine.calibrate_baseline if auto_cal
-          run_fuzz_stream(plan.engine, mode, origin.scheme, origin.host, origin.port, format, force, fail_if_no_matches)
+          run_fuzz_stream(plan.engine, mode, origin.scheme, origin.host, origin.port, format, force, fail_if_no_matches, plan.pool)
         ensure
           outbound.close
         end
@@ -181,7 +184,7 @@ module Gori
 
       private def self.run_fuzz_stream(engine : Fuzz::Engine, mode : Fuzz::Mode, scheme : String,
                                        host : String, port : Int32, format : Symbol, force : Bool,
-                                       fail_if_no_matches : Bool) : Nil
+                                       fail_if_no_matches : Bool, pool : Fuzz::ConnPool? = nil) : Nil
         total = fuzz_preflight(engine, mode, scheme, host, port, force)
         matched = 0
         errored = 0
@@ -195,7 +198,7 @@ module Gori
             if emit_fuzz_result(r, format, buffer)
               r.matched? ? (matched += 1) : (errored += 1)
             end
-          when Fuzz::DoneEvent  then fuzz_done(ev, matched + errored)
+          when Fuzz::DoneEvent  then fuzz_done(ev, matched + errored, pool)
           when Fuzz::ErrorEvent then had_error = true; STDERR.puts "fuzz error: #{ev.message}"
           end
         end
@@ -230,9 +233,16 @@ module Gori
         STDERR.flush
       end
 
-      private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32) : Nil
+      private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::ConnPool?) : Nil
         STDERR.print "\r" if STDERR.tty? # clear the in-place meter (none was drawn when piped)
         STDERR.puts "done · #{ev.progress.sent} sent · #{emitted} shown · #{ev.progress.errors} errors#{ev.stopped ? " (stopped)" : ""}"
+        # Handshakes actually paid for. Worth a line: it is how an operator sees whether the
+        # origin honoured keep-alive at all (dialed ≈ sent means it closed after every
+        # response, or the requests were too odd to share a socket — see ConnPool).
+        return unless pool && pool.dialed > 0
+        STDERR.puts "connections · #{pool.dialed} dialed · #{pool.reused} reused" \
+                    "#{pool.stale_retries > 0 ? " · #{pool.stale_retries} re-sent on a closed connection" : ""}" \
+                    "#{pool.pooling? ? "" : " · keep-alive gave up (origin closes every connection)"}"
       end
 
       # Prints/buffers a result; returns true when it was emitted. Errored sends are shown too

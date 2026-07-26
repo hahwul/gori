@@ -4,6 +4,7 @@ require "../repeater/h2_engine"
 require "../proxy/codec/http1"
 require "../outbound"
 require "../scope"
+require "./conn_pool"
 
 module Gori::Fuzz
   # The origin a run targets (also the boundary for redirect following).
@@ -36,6 +37,12 @@ module Gori::Fuzz
   abstract class Backend
     abstract def send(bytes : Bytes) : Repeater::Result
     abstract def origin : Origin
+
+    # Release any transport a backend is holding open (the keep-alive pool's parked
+    # sockets). Called once when a run ends. A no-op by default so the spec doubles and
+    # the connection-per-send backends stay three-line classes.
+    def close : Nil
+    end
   end
 
   # Production backend over the Repeater engines (fresh connection per send — there is
@@ -51,10 +58,23 @@ module Gori::Fuzz
     getter origin : Origin
     # Sends refused by the scope gate — never put on the wire.
     getter blocked : Int64 = 0_i64
+    # The HTTP/1.1 keep-alive pool, or nil for connection-per-send (h2, or keep_alive off).
+    # Exposed so a surface can report how many handshakes a run actually paid for.
+    getter pool : ConnPool?
 
+    # `keep_alive` reuses one connection across many sends (see ConnPool) — the sweep
+    # senders (Fuzzer) opt in; the one-shot senders (Repeater minimize, Probe active) have
+    # nothing to amortise and leave it off. `idle_conns` bounds the parked sockets and
+    # should be the run's concurrency: one per worker fiber is the most that can ever be
+    # checked out at once, so a larger pool would only hold dead sockets open.
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
-                   @overrides : Gori::HostOverrides? = nil)
+                   @overrides : Gori::HostOverrides? = nil,
+                   keep_alive : Bool = false, idle_conns : Int32 = 0)
+      # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
+      # a separate change with its own stream-state rules.
+      @pool = (keep_alive && !@http2) ? ConnPool.new(@origin, @verify, @sni, @timeout,
+        @overrides, Math.max(idle_conns, 1)) : nil
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -69,10 +89,16 @@ module Gori::Fuzz
       if @http2
         Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
           port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+      elsif p = @pool
+        p.send(bytes)
       else
         Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
           port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
       end
+    end
+
+    def close : Nil
+      @pool.try(&.close_all)
     end
   end
 
@@ -103,6 +129,10 @@ module Gori::Fuzz
       @sent += 1
       @inner.send(bytes)
     end
+
+    def close : Nil
+      @inner.close
+    end
   end
 
   # Applies the `Gori::Outbound` gate to a backend the caller INJECTED (Probe Active lets
@@ -126,6 +156,10 @@ module Gori::Fuzz
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
       @inner.send(bytes)
+    end
+
+    def close : Nil
+      @inner.close
     end
   end
 
@@ -316,6 +350,10 @@ module Gori::Fuzz
 
     private def coordinate : Nil
       @concurrency.times { @finished.receive }
+      # Every worker has left run_one, so no fiber can be holding a checked-out socket:
+      # release the keep-alive pool's parked ones instead of waiting for GC to finalize
+      # them (a stopped 50-worker run would otherwise sit on 50 fds).
+      @backend.close
       @events.send(DoneEvent.new(snapshot, @state == State::Stopped))
       @events.close
     end

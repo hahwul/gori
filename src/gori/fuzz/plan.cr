@@ -120,6 +120,10 @@ module Gori::Fuzz
     getter origin : Origin
     getter template : Template
     getter? http2 : Bool
+    # The run's keep-alive pool, or nil when it runs connection-per-send (h2, or
+    # `keep_alive` off). Surfaces read its counters to report how many handshakes the run
+    # actually paid for — the one directly observable measure of what pooling bought.
+    getter pool : ConnPool?
     # The request-target of the template's first line, taken BEFORE marking so the §…§
     # bytes never leak into the string the scope gate matches on.
     getter request_target : String
@@ -130,7 +134,7 @@ module Gori::Fuzz
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
                    @http2 : Bool, @request_target : String,
-                   @mark_matches : Array({String, Int32}))
+                   @mark_matches : Array({String, Int32}), @pool : ConnPool? = nil)
     end
 
     # Candidate request count, or nil when unknown / Int64-overflowing. Reads the payload
@@ -177,11 +181,16 @@ module Gori::Fuzz
       # The shared decoder registry applies each position's inline `¦chain` at render time.
       # Wired here so a new surface cannot forget it and silently send un-transformed payloads.
       generator = Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
+      # One parked connection per worker fiber is the ceiling that can ever be checked out
+      # at once, so the pool is sized to the (clamped) concurrency the engine will run at.
       sender = Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
-        sni: options.sni, timeout: config.timeout, overrides: options.overrides)
+        sni: options.sni, timeout: config.timeout, overrides: options.overrides,
+        keep_alive: config.keep_alive?,
+        idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY))
       new(engine: Engine.new(generator, matcher, sender, config), generator: generator,
         matcher: matcher, config: config, origin: origin, template: template,
-        http2: options.http2?, request_target: request_target, mark_matches: mark_matches)
+        http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
+        pool: sender.pool)
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent

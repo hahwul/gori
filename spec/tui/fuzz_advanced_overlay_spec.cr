@@ -11,7 +11,7 @@ end
 private def blank_snapshot : Gori::Tui::AdvancedSnapshot
   Gori::Tui::AdvancedSnapshot.new(
     conc: "20", rate: "", timeout: "", retries: "0",
-    follow: false, calibrate: false,
+    follow: false, calibrate: false, keep_alive: true,
     m_status: "", m_size: "", m_words: "", m_regex: "",
     f_status: "", f_size: "", f_words: "", f_regex: "")
 end
@@ -130,6 +130,16 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.rendered?("advanced editor").should be_true
   end
 
+  it "toggles keep-alive, which starts on" do
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    ov.snapshot.keep_alive.should be_true
+    6.times { ov.handle_key(akey(Termisu::Input::Key::Down)) } # → Keep-alive (row 6)
+    ov.handle_key(akey(Termisu::Input::Key::Space))
+    ov.snapshot.keep_alive.should be_false
+    ov.snapshot.calibrate.should be_false # the neighbouring toggle is untouched
+    ov.snapshot.follow.should be_false
+  end
+
   it "offsets a click by the scroll position once the list has scrolled" do
     # Production hands an overlay `layout.body` — 6 rows shorter and offset from the screen —
     # so this 18-row card renders clipped to 14 and the row list must scroll to reach the
@@ -145,11 +155,13 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.rendered?("Filter regex").should be_true # this render is what advances @scroll
     h.type("x")
 
-    # The first VISIBLE row is now ROWS[3] (Retries), not ROWS[0] (Concurrency).
-    h.click_in_box(2, 1).should eq(:open)
+    # The list has scrolled, so the first VISIBLE row is no longer ROWS[0] (Concurrency):
+    # the 4th visible row is "Match status", which is where this click must land.
+    h.click_in_box(2, 4).should eq(:open)
     h.type("9")
-    ov.snapshot.retries.should eq("09") # lands in Concurrency if the click ignores @scroll
-    ov.snapshot.conc.should eq("20")    # …and Concurrency stays untouched
+    ov.snapshot.m_status.should eq("9") # lands in Retries if the click ignores @scroll
+    ov.snapshot.retries.should eq("0")  # …and the un-scrolled rows stay untouched
+    ov.snapshot.conc.should eq("20")
     ov.snapshot.f_regex.should eq("x")
 
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
