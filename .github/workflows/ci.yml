@@ -9,6 +9,12 @@ on:
       - shard.lock
       - docker/Dockerfile
       - "**/*.cr"
+  # Builds the PROSPECTIVE MERGE RESULT, not the PR branch. Without this, two PRs that
+  # each pass CI alone and touch different hunks of one file can merge cleanly and leave
+  # `main` broken — which is exactly what #371 + #372 did (#382): one changed a method's
+  # arity, the other added a call site against the old signature. Inert until a merge
+  # queue is enabled for `main` in the repository settings; harmless before then.
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
