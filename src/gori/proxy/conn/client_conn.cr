@@ -6,6 +6,7 @@ require "../sink"
 require "../head_rewriter"
 require "../../interceptor"
 require "../../host_overrides"
+require "../../outbound"
 require "../prefix_io"
 require "../socket_tuning"
 require "../h2/relay"
@@ -1143,7 +1144,7 @@ module Gori::Proxy
     private def record_blocked_request(req, scheme, host, port, created_at) : Nil
       flow_id = @sink.on_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: nil))
-      @sink.on_response(FlowMapper.aborted_response(flow_id, "blocked by sandbox (out of scope)"))
+      @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Outbound::SANDBOX_ERROR))
     end
 
     # Tell the client the sandbox refused this request — a distinct 403 + marker header so a
