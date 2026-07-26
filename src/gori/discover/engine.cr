@@ -169,6 +169,12 @@ module Gori::Discover
     # cap: a benign Result, no network, and NOT counted as an error — a scope refusal is a
     # decision the operator asked for, not a failure of the run.
     SCOPE_REFUSED = "blocked by scope (Sandbox or an exclude rule)"
+    # Seeding enqueued nothing, so the run would send zero requests and still finish with a
+    # clean DoneEvent — "0 found", which an operator reads as "there is nothing there" rather
+    # than "gori sent nothing" (P4). Terminal for exactly the reason SEED_BLOCKED is, and
+    # written as a backstop over the whole condition rather than over the one shape that
+    # produced it (#395): whatever the reason the frontier comes up empty, the run says so.
+    NOTHING_TO_SEND = "nothing to send: no crawl page or brute-force directory survived the scope and containment gates"
 
     enum State : UInt8
       Running
@@ -315,6 +321,14 @@ module Gori::Discover
 
     private def orchestrate : Nil
       seed_frontier
+      # Seeding is the ONLY source of initial work, so an empty frontier here means the run
+      # will send nothing at all (see NOTHING_TO_SEND). Recorded now and emitted as the run's
+      # terminal event at the bottom rather than returned early: `start` has already spawned
+      # the workers, so the shutdown sequence below (close @jobs, join every worker) has to
+      # run on this path too or they park on `@jobs.receive?` forever — the fiber + socket
+      # leak the rescue clause guards against. The loop itself is a no-op with an empty
+      # frontier and no pending work: it breaks on its first iteration.
+      nothing_to_send = @frontier.empty?
       @phase = Phase::Crawling
       interval = pace_interval
       loop do
@@ -343,7 +357,13 @@ module Gori::Discover
       drain_pending
       @jobs.close
       @concurrency.times { @finished.receive }
-      @events.send(DoneEvent.new(progress_snapshot, run_stats, @state == State::Stopped))
+      # ErrorEvent is terminal — no trailing DoneEvent — so a consumer cannot settle a
+      # "0 found" success over it, the same shape `start`'s setup-error path uses.
+      if nothing_to_send
+        @events.send(ErrorEvent.new(NOTHING_TO_SEND))
+      else
+        @events.send(DoneEvent.new(progress_snapshot, run_stats, @state == State::Stopped))
+      end
       @events.close
     rescue ex
       # ErrorEvent is terminal (no trailing DoneEvent) so consumers don't mask the error
@@ -378,7 +398,7 @@ module Gori::Discover
         enqueue_well_known("#{root}/robots.txt", Source::Robots)
         enqueue_well_known("#{root}/sitemap.xml", Source::Sitemap)
       end
-      bf_dir = Url.dir_of(@seed_parts)
+      bf_dir = bruteforce_root
       enqueue_dir(bf_dir, 0) if @config.bruteforce?
       # robots.txt/sitemap.xml are GUESSED well-known paths, not organically-linked ones — they
       # deserve the same soft-404 gate a brute-forced wordlist hit gets, not the "exists by
@@ -389,13 +409,12 @@ module Gori::Discover
       # check reuses the bf_dir calibration when that dir IS the origin. Asking @dirs rather
       # than comparing `root_dir == bf_dir` is the whole fix for #393: the old comparison
       # assumed the `enqueue_dir` above had SUCCEEDED, but it goes through `bounded_url`, which
-      # applies the path confine — and the confine refuses the seed's own directory whenever
-      # the seed path is a single segment with no trailing slash. For `http://t/api`,
-      # @confine_path is "/api" while bf_dir is "http://t/", whose path is neither "/api" nor
-      # under "/api/". No Calibrate task was queued, yet @seed_calibration_dir was set, so
-      # robots.txt and sitemap.xml were fetched for real and then parked forever waiting on a
-      # baseline that never arrived: 2 real requests sent, 0 findings recorded, not even
-      # counted in calibrated_out.
+      # can still refuse it (Layer 2, or containment). No Calibrate task would be queued, yet
+      # @seed_calibration_dir was set, so robots.txt and sitemap.xml were fetched for real and
+      # then parked forever waiting on a baseline that never arrived: 2 real requests sent, 0
+      # findings recorded, not even counted in calibrated_out. (The shape that first exposed
+      # it — a file-shaped seed whose bf_dir fell outside its own confine — is gone with #395,
+      # but the assumption it broke was never safe.)
       if @config.spider? && @config.bruteforce?
         root_dir = "#{Url.origin(@seed_parts)}/"
         # @seed_calibration_dir is set even when the Calibrate task below is refused, and that
@@ -708,6 +727,31 @@ module Gori::Discover
     private def confined?(p : Url::Parts) : Bool
       return true unless cp = @confine_path
       p.path == cp || p.path.starts_with?("#{cp}/")
+    end
+
+    # The directory the brute-forcer starts from.
+    #
+    # `Url.dir_of` — everything up to the last '/' — is right only when the seed's path is
+    # already a directory. For a FILE-SHAPED seed it returns the seed's CONTAINING directory,
+    # which a path-confined run then refuses: on `http://t/api`, `dir_of` is `http://t/`,
+    # whose path is neither `/api` nor under `/api/`, so `enqueue_dir`'s `bounded_url` dropped
+    # it and the seed's own subtree was never probed at all. With `--no-spider` that was the
+    # whole run — zero requests, a clean DoneEvent, no reason given (#395).
+    #
+    # The two derivations have to agree, and it is `confined?` that carries the operator's
+    # intent: a seed path deeper than "/" means THE SUBTREE ROOTED HERE, so the brute-force
+    # base is that subtree's root as a directory. It is `dir_of` for a seed already ending in
+    # '/', and the seed's own path plus '/' otherwise — never anything the operator did not
+    # type. Widening `@confine_path` to "/" instead would spray the built-in wordlist
+    # (`admin`, `logout`, `.git/config`, `.env`) at the origin root of a run explicitly scoped
+    # to `/api`, which is the bypass the confine exists to prevent.
+    #
+    # `@seed_parts.path` is already dot-segment- and slash-normalized by `Url.parse`, so the
+    # rchop in `@confine_path` can only ever have removed one real trailing slash.
+    private def bruteforce_root : String
+      cp = @confine_path
+      return Url.dir_of(@seed_parts) unless cp
+      "#{Url.origin(@seed_parts)}#{cp}/"
     end
 
     # A brute-force candidate is `bl.dir` + a wordlist entry, and only the DIRECTORY was ever

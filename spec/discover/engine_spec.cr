@@ -322,6 +322,95 @@ describe Gori::Discover::Engine do
     urls.should_not contain("http://t/api-internal/secret") # sibling prefix — must be excluded
   end
 
+  # Issue #395. The brute-force base came from `Url.dir_of(seed)` while the confine came from
+  # the seed's full path, and for a file-shaped seed the two disagreed: `dir_of("http://t/api")`
+  # is the origin root, which `@confine_path` of "/api" then refuses. The seed's own subtree
+  # was never probed, and with --no-spider that was the entire run.
+  describe "a file-shaped seed" do
+    it "brute-forces its own subtree rather than nothing" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 1,
+        retries: 0, confidence_floor: 0.4)
+      sent = [] of String
+      findings, _ = run_discover("http://t/api", ["admin"], cfg) do |t|
+        sent << t
+        t == "/api/admin" ? html("a real admin page under the api subtree") : notfound
+      end
+      # Calibration probes + the wordlist entry, all under /api/ — never at the origin root,
+      # which is outside what the operator typed.
+      sent.should_not be_empty
+      sent.should contain("/api/admin")
+      sent.all?(&.starts_with?("/api/")).should be_true
+      findings.map(&.url).should contain("http://t/api/admin")
+    end
+
+    it "keeps the brute-force base inside the confine for a deeper path and a query seed" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
+      %w(http://t/a/b http://t/api?x=1 http://t:8080/api).each do |seed|
+        sent = [] of String
+        run_discover(seed, ["admin"], cfg) do |t|
+          sent << t
+          notfound
+        end
+        base = seed.includes?("/a/b") ? "/a/b/" : "/api/"
+        sent.should_not be_empty
+        sent.all?(&.starts_with?(base)).should be_true
+      end
+    end
+
+    it "leaves a directory seed and an origin seed calibrating exactly where they did" do
+      # The control: the two rows of the issue's matrix that already worked must not move.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
+      {"http://t/api/" => "/api/", "http://t/" => "/"}.each do |seed, base|
+        sent = [] of String
+        run_discover(seed, ["admin"], cfg) { |t| sent << t; notfound }
+        sent.should contain("#{base}admin")
+        sent.all?(&.starts_with?(base)).should be_true
+      end
+    end
+  end
+
+  # Issue #395, the general half: a run that sends nothing must say so.
+  describe "a run whose frontier comes up empty" do
+    it "ends in a terminal ErrorEvent instead of a clean 0-finding Done" do
+      # Brute-force only, with the seed's own subtree refused by Layer 2. The seed itself is
+      # allowed, so SEED_BLOCKED does not fire — yet not one request would go out.
+      #
+      # `concurrency: 4` is load-bearing, not decoration: the terminal event is emitted after
+      # the ordinary shutdown (close @jobs, join every worker), so if this path ever returned
+      # early instead, the four worker fibers would park on `@jobs.receive?` forever and this
+      # example would hang rather than fail.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 4, retries: 0)
+      sent = [] of String
+      backend = RouteBackend.new(->(t : String) { sent << t; notfound })
+      engine = D::Engine.new("http://t/api", ["admin"], backend, cfg,
+        DenyExact.new(Set{"http://t/api/"}))
+      kinds = [] of Symbol
+      messages = [] of String
+      engine.run do |ev|
+        case ev
+        when D::ErrorEvent then kinds << :error; messages << ev.message
+        when D::DoneEvent  then kinds << :done
+        end
+      end
+      kinds.should eq([:error])
+      messages.first.should eq(D::Engine::NOTHING_TO_SEND)
+      sent.should be_empty
+    end
+
+    it "still emits a normal Done when the frontier had work (the control)" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
+      kinds = [] of Symbol
+      backend = RouteBackend.new(->(_t : String) { notfound })
+      D::Engine.new("http://t/api", ["admin"], backend, cfg).run do |ev|
+        case ev
+        when D::ErrorEvent then kinds << :error
+        when D::DoneEvent  then kinds << :done
+        end
+      end
+      kinds.should eq([:done])
+    end
+  end
+
   # Issue #364 / DESIGN.md §7: the seed and its two derived well-known paths waive Layer 1,
   # the containment mode and the path confine — but never Layer 2 (Sandbox + EXCLUDE).
   describe "the Layer-2 gate on the seed trio" do

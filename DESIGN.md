@@ -640,6 +640,38 @@ repairable half never reaches it, having been encoded upstream — and it means 
 state the invariant it is there to state: a Discover run never puts a malformed or doubled
 request line on a connection.
 
+### 2026-07-26: a path-confined run brute-forces its own subtree, and an empty frontier is an error
+
+Refines: [P4](#p4). Issue #395, adjacent to #393.
+
+`seed_frontier` took the brute-force base from `Url.dir_of(seed)` — everything up to the last
+`/` — while `@confine_path` was derived from the seed's full path. For a **file-shaped seed**
+(a path with no trailing slash) the two disagreed: on `http://t/api`, `dir_of` is the origin
+root `http://t/`, whose path is neither `/api` nor under `/api/`, so `enqueue_dir` went through
+`bounded_url`, the confine refused it, and the seed's own subtree was never probed. With
+`spider: false, bruteforce: true` — `gori run discover --target https://acme.test/api
+--no-spider`, an ordinary invocation — that was the entire run: `sent=0 findings=[]`, a clean
+`DoneEvent`, no reason given.
+
+The issue offered two fixes, and the answer is a third that the confine's own documented meaning
+already implies. Widening `@confine_path` from `/api` to `/` would spray the built-in wordlist —
+`admin`, `logout`, `.git/config`, `.env` — at the origin root of a run the operator explicitly
+scoped to `/api`, which is what the confine exists to prevent. Reporting "brute-force has
+nothing to do" answers a question nobody asked: a seed path deeper than `/` means *the subtree
+rooted here* (`confined?`), so **the brute-force base is that subtree's root as a directory**,
+not the seed's containing directory. `/api` and `/api/` therefore both calibrate `http://t/api/`,
+`/a/b` calibrates `http://t/a/b/`, and a seed at `/` is unchanged (no confine, so `dir_of`).
+Every row of the issue's matrix that already worked keeps its exact behaviour; the derivation
+never reaches outside what the operator typed.
+
+Separately, and as the general backstop: **an empty frontier after seeding is now a terminal
+`ErrorEvent`** (`Engine::NOTHING_TO_SEND`), not a `DoneEvent` with zero findings. This is the
+same [P4](#p4) argument `Engine::SEED_BLOCKED` records — an operator reads "0 found" as "there
+is nothing there" rather than "gori sent nothing" — applied to every present and future reason
+the frontier can come up empty, rather than to the one shape this issue found. After the fix
+above the remaining reason is a Layer-2 or containment refusal of the brute-force root on a
+`--no-spider` run, which is a decision worth naming out loud.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
