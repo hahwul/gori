@@ -1,3 +1,4 @@
+require "./url"
 require "../env"
 require "../proxy/codec/http1"
 
@@ -76,6 +77,16 @@ module Gori::Discover
     # seed (`Discover::Plan`), and post-expansion.
     def self.safe_value?(value : String) : Bool
       !value.includes?('\r') && !value.includes?('\n')
+    end
+
+    # The same rule for a URL bound for a request line. `URI.parse` keeps a raw CR/LF
+    # VERBATIM in a URL's host, path and query alike (it validates none of the three), and
+    # `Discover::Sender#build_get` splices all three into the request line and the `Host`
+    # header — so any one of them can splice a second, fully attacker-chosen request onto
+    # the connection. Checking only the path would leave the other two open.
+    def self.safe_url?(parts : Url::Parts) : Bool
+      q = parts.query
+      safe_value?(parts.host) && safe_value?(parts.path) && (q.nil? || safe_value?(q))
     end
 
     # The final ordered header list the Sender emits between `Host` and `Connection`:

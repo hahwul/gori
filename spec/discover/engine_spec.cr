@@ -368,4 +368,48 @@ describe Gori::Discover::Engine do
       findings.select { |f| f.source.robots? || f.source.sitemap? }.should be_empty
     end
   end
+
+  # Issue #390. `Extract::ATTR`'s `[^"]` matches CR and LF, `Url.resolve` strips only the ends,
+  # and `URI.parse` keeps an interior CR/LF verbatim in host, path AND query — so a crawled
+  # `<a href>` reached `Sender#build_get` intact and spliced a second, fully attacker-chosen
+  # request onto the connection. The byte-level proof lives in sender_spec; this pins the
+  # engine half: such a link is dropped before it is ever queued.
+  describe "a crawled link carrying a raw CRLF" do
+    it "is dropped silently and never reaches the backend" do
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
+      poison = "/p\r\nX-Injected: 1\r\n\r\nGET http://evil.test/pwned HTTP/1.1\r\nHost: evil.test\r\n\r\n"
+      sent = [] of String
+      findings, _ = run_discover("http://t/", [] of String, cfg) do |t|
+        sent << t
+        case t
+        when "/"      then html(%(<a href="#{poison}">poison</a> <a href="/clean">ok</a>))
+        when "/clean" then html("an ordinary sibling link on the same page")
+        else               notfound
+        end
+      end
+      # The control: the page WAS crawled and its links WERE extracted, so "nothing poisoned
+      # went out" is a verdict about the guard and not about a crawl that never happened.
+      findings.map(&.url).should contain("http://t/clean")
+      sent.should contain("/clean")
+
+      sent.none?(&.includes?('\r')).should be_true
+      sent.none?(&.includes?('\n')).should be_true
+      sent.none?(&.includes?("evil.test")).should be_true
+      findings.map(&.url).none?(&.includes?("evil.test")).should be_true
+    end
+
+    it "is dropped when the CRLF sits in the QUERY rather than the path" do
+      # `URI.parse("http://t/a?q=1\r\nX: 1").query` keeps the CR/LF, and send_with_retries
+      # rebuilds the target as "#{path}?#{query}" — so a path-only check would miss this.
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
+      sent = [] of String
+      run_discover("http://t/", [] of String, cfg) do |t|
+        sent << t
+        t == "/" ? html(%(<a href="/ok?q=1\r\nX-Injected: 1">q</a> <a href="/clean">ok</a>)) : notfound
+      end
+      sent.should contain("/clean")
+      sent.should_not contain("/ok?q=1")
+      sent.none? { |t| t.includes?('\r') || t.includes?('\n') }.should be_true
+    end
+  end
 end

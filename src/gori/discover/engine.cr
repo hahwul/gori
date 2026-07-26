@@ -1,5 +1,6 @@
 require "./types"
 require "./url"
+require "./headers"
 require "./fingerprint"
 require "./extract"
 require "./calibrate"
@@ -41,6 +42,15 @@ module Gori::Discover
 
   # Production backend over the Repeater engine (fresh connection per send). GET only.
   class Sender < Backend
+    # A send refused because the URL cannot be framed. `target` and `host` are spliced
+    # verbatim into the request line and the `Host` header by `build_get`, so a raw CR/LF in
+    # either splices a SECOND, fully attacker-chosen request (method, absolute-form request
+    # line, and Host) onto the same connection — and with `Settings.upstream_proxy_addr` set,
+    # an absolute-form line is routed by the upstream proxy to a genuinely different host.
+    # Returned as a benign error Result rather than raised: the caller's contract is one
+    # Result per fetch, and one poisoned link must not end the run.
+    UNSAFE_URL = "url contains a control character"
+
     @header_block : String
 
     def initialize(@verify : Bool, @timeout : Time::Span? = nil, @http2 : Bool = false,
@@ -53,6 +63,13 @@ module Gori::Discover
     end
 
     def fetch(scheme : String, host : String, port : Int32, target : String) : Repeater::Result
+      # The wire seam's own invariant, not a duplicate of the engine's gate: `Engine#bounded_url`
+      # drops a poisoned URL before it is ever queued, but this is the only line every send
+      # provably passes, so the guarantee "a Discover run never puts two request lines on one
+      # connection" is stated where it can actually be enforced (see UNSAFE_URL).
+      unless Headers.safe_value?(target) && Headers.safe_value?(host)
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
+      end
       req = build_get(scheme, host, port, target)
       if @http2
         Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
@@ -613,6 +630,17 @@ module Gori::Discover
     # hand it back rather than have the caller rebuild it. Still short-circuits on the path
     # confine before normalizing anything.
     private def bounded_url(p : Url::Parts) : String?
+      # A crawled `<a href>` is the one input here that no gate downstream can make safe: the
+      # extractor's `[^"]` matches CR and LF, `Url.resolve` only strips the ends, and
+      # `URI.parse` keeps an interior CR/LF verbatim — so the href reaches the request line
+      # intact (`Sender::UNSAFE_URL`). Same single rule the seed goes through in
+      # `Discover::Plan`, applied here because this is where a DERIVED url is judged.
+      #
+      # DROPPED SILENTLY, not recorded: a Finding asserts "this endpoint exists", and this URL
+      # is never requested, so there is no status, length, or content type to claim one with —
+      # and `Persist` would then write the poisoned string into the Sitemap as a real flow.
+      # It is refused for the same reason any out-of-bounds link is, and takes the same exit.
+      return nil unless Headers.safe_url?(p)
       if cp = @confine_path
         # Segment-boundary confinement: in-subtree iff the path IS the base or sits under
         # "base/". A bare starts_with?(base) would also admit sibling prefixes (/api-internal
