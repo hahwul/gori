@@ -547,11 +547,13 @@ describe Gori::Import do
     end
   end
 
-  it "skips a HAR entry whose URL carries a CRLF injection instead of importing a fabricated request" do
+  it "imports a HAR entry whose URL PATH carries a CRLF, storing the operator's payload byte-exact (P7)" do
     har = File.tempname("gori", ".har")
     begin
-      # The malicious entry's URL smuggles a second fake request via literal CRLFs. Left
-      # unchecked this used to land straight in the stored request line/History row.
+      # A HAR the operator exported of a deliberate request-smuggling test: the CRLF lives in
+      # the PATH, so the host is a real host and the entry is the operator's own payload. gori
+      # must reproduce it, not sanitise it away — that is the point of a security-testing proxy
+      # (P7; see #400, DESIGN.md §7). It is stored and replayed byte-exact, never skipped.
       File.write(har, {log: {entries: [
         {request: {method: "GET", url: "https://a.test/1"}, response: {status: 200, content: {text: "ok"}}},
         {request:  {method: "GET", url: "https://evil.test/path\r\nX-Injected: pwn\r\n\r\nGET /second HTTP/1.1"},
@@ -560,27 +562,51 @@ describe Gori::Import do
       ]}}.to_json)
       with_store do |store|
         result = Gori::Import.import_file(store, :har, har)
-        result.count.should eq(2)   # the two clean entries imported
-        result.skipped.should eq(1) # the CRLF-injected entry skipped, not fabricated
-        store.count.should eq(2)
+        result.count.should eq(3)   # all three imported, the payload entry included
+        result.skipped.should eq(0) # nothing rejected
+        store.count.should eq(3)
         rows = store.search(Gori::QL::EMPTY, 10)
-        rows.each { |r| r.target.should_not match(/[\r\n]/) }
-        rows.map(&.host).sort.should eq(["a.test", "a.test"])
+        payload = rows.find { |r| r.host == "evil.test" }.not_nil!
+        # The forged bytes survive verbatim in both the target column and the stored head.
+        payload.target.should eq("/path\r\nX-Injected: pwn\r\n\r\nGET /second HTTP/1.1")
+        String.new(store.get_flow(payload.id).not_nil!.request_head).should contain("\r\nX-Injected: pwn\r\n")
       end
     ensure
       File.delete?(har)
     end
   end
 
-  it "skips a URL-list line with a raw control character in the path" do
+  it "imports a URL-list line with a raw control character in the PATH byte-exact (operator payload, P7)" do
     urls = File.tempname("gori", ".txt")
     begin
       File.write(urls, "https://a.test/1\nhttp://a.test/\x01\x02control\nhttps://a.test/2\n")
       with_store do |store|
         result = Gori::Import.import_file(store, :urls, urls)
-        result.count.should eq(2)   # the two clean lines imported
-        result.skipped.should eq(1) # the control-char line skipped
-        store.count.should eq(2)
+        result.count.should eq(3)   # all three lines imported, control-char one included
+        result.skipped.should eq(0) # nothing rejected
+        store.count.should eq(3)
+        payload = store.search(Gori::QL::EMPTY, 10).find(&.target.includes?("control")).not_nil!
+        payload.target.should eq("/\x01\x02control") # stored verbatim, not sanitised
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "still SKIPS a URL-list line whose HOST carries a space (not a URL, per #400)" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      # A space (or control byte) in the HOST is a parse failure, not a payload: URI.parse copies
+      # the reg-name verbatim, so `ev il.test` becomes a bogus "host". Skip it the way a bad
+      # scheme is skipped, while the clean lines around it still import. (CRLF-in-host can't ride
+      # a line-oriented URL file — File.each_line would split it — so it is covered at the
+      # Builder.endpoint unit level below.)
+      File.write(urls, "https://a.test/1\nhttps://ev il.test/x\nhttps://a.test/2\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(2)   # only the two clean lines
+        result.skipped.should eq(1) # the bogus-host line skipped
+        store.search(Gori::QL::EMPTY, 10).map(&.host).sort!.should eq(["a.test", "a.test"])
       end
     ensure
       File.delete?(urls)

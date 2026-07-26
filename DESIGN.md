@@ -748,6 +748,46 @@ everywhere and applied continuously. #396 asked for the second, not the first.
 `boundary?` itself needs no reload of its own: its only caller (`bounded_url`) asks it
 immediately after `allowed?`, so it already reads whatever that call refreshed.
 
+### 2026-07-26: import is deliberately permissive — the host is a URL, the target is a payload
+
+Refines: [P7](#p7). Issue #400.
+
+Import (`src/gori/import/builder.cr`) feeds the replay path, so it obeys [P7](#p7): it stores and
+replays operator-supplied malformed input byte-exact rather than sanitising it. A HAR, OpenAPI
+spec or `--urls` file is a file the operator deliberately handed gori, describing traffic they
+want to reproduce — a CRLF-bearing request line, a raw space in a target, a duplicate `Host` are
+the smuggling *payloads* an operator tests with, not corruption to be repaired. Reproducing a
+broken request is the point of the tool. This closes the inverse of how #400 was first filed:
+the defect was never that a byte slipped *through* the denylist and replayed; it was that a
+denylist rejected the operator's payload at all.
+
+The split that makes this safe to state is **host versus target**:
+
+- A control byte or space in the **path or query** is a URL describing a malformed request →
+  store it, replay it byte-exact. `URI.parse` copies a literal control byte verbatim into
+  `path`/`query`, and `request_head` writes the target onto the request line as-is, so the
+  operator's forged message reaches the wire unchanged.
+- A control byte or space in the **host** is not a URL at all — a parse failure, not a payload.
+  `URI.parse` copies a reg-name authority verbatim, so `not a url at all` becomes a stored
+  "host" of literal spaces. `Builder::HOST_INVALID` (`/[\x00-\x20\x7f]/`) rejects it in
+  `endpoint`, and the parser's per-entry rescue skips just that entry. This is the ONE reject
+  import keeps, and it is a shape check on a URL, not a judgement on a request.
+
+One `CONTROL_CHAR` regex used to match anywhere in the URL and so did both jobs, rejecting the
+payload case along with the parse-failure case; removing it and leaning on the pre-existing
+`HOST_INVALID` restores the distinction. The send layer already encodes the same principle:
+`Codec::Http1.request_token_safe?` (#399) documents itself as applying only where gori
+*synthesizes* a request line from bytes a remote chose, never to operator-replay bytes.
+`spec/repeater/import_replay_wire_spec.cr` pins that on the socket — an imported CRLF target
+replays byte-exact through `Repeater::Plan`, and the guard's own verdict on those same bytes is
+`false`, proving it does not gate the replay path.
+
+Two adjacent guards are NOT relaxed by this decision and stay as they were: `HEADER_INJECT`
+(CR/LF/NUL in a header name/value) and `reject_inject!` (the same in method / HTTP version /
+reason phrase). Those forge a message boundary the same way a CRLF target does, and whether
+import should also carry an operator's header-boundary payload is a separate question #400 did
+not settle — left rejected pending its own call rather than widened by implication.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

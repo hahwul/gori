@@ -27,28 +27,28 @@ module Gori
       LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//i
       HTTP_SCHEME    = /\Ahttps?:\/\//i
 
-      # A raw CR/LF (or other C0 control / DEL) in a URL is never legitimate — a
-      # PERCENT-ENCODED `%0d%0a` stays encoded text through URI.parse (harmless), but a
-      # LITERAL control byte does not: URI.parse copies it verbatim into host/path with
-      # no rejection, so left unchecked it flows straight into request_head/response_head
-      # and forges a second, fabricated HTTP message inside one stored request/status line
-      # (e.g. `GET /path\r\nX-Injected: pwn\r\n\r\nGET /second HTTP/1.1 HTTP/1.0\r\n...`).
-      # Reject the entry here, at the same point the scheme/shape checks below do, so every
-      # caller's existing skip-a-bad-entry rescue handles it identically to those checks.
-      CONTROL_CHAR = /[\x00-\x1f\x7f]/
+      # A raw control byte (CR, LF, NUL, other C0 or DEL) in the PATH or QUERY of an imported
+      # URL is NOT rejected: it is the operator's own payload. Importing a HAR of a deliberately
+      # CRLF-bearing request — a smuggling case — is exactly what a security-testing proxy is
+      # for, so the entry is stored and replayed byte-exact, never sanitised (P7; DESIGN.md §7).
+      # URI.parse copies a literal control byte verbatim into `path`/`query`, and `request_head`
+      # writes the target onto the request line as-is, which faithfully reproduces the operator's
+      # forged message on the wire — the point, not a defect. (Header/method/version smuggling is
+      # a DIFFERENT boundary and keeps its own guards below; see HEADER_INJECT.)
 
-      # URI.parse copies a reg-name authority into `host` VERBATIM without validating it — a
-      # `--urls`/HAR line like `not a url at all` becomes a stored "host" of literal spaces
+      # The HOST is the one place import still rejects a control byte or space, because there it
+      # means the string is not a URL at all — a parse failure, not a URL describing a malformed
+      # request. URI.parse copies a reg-name authority into `host` VERBATIM without validating it,
+      # so a `--urls`/HAR line like `not a url at all` becomes a stored "host" of literal spaces
       # instead of being skipped the way `ftp://…` and empty URLs already are. A real host
       # (reg-name, IPv4/IPv6 literal, punycode) never contains a space or other C0/DEL byte —
-      # userinfo, port and the `://` sit outside `uri.host` — so reject one in `endpoint`, at
-      # the same raise-to-skip point the scheme/shape checks use. Space (0x20) is what
-      # CONTROL_CHAR misses, so this widens the range to include it.
+      # userinfo, port and the `://` sit outside `uri.host` — so reject one in `endpoint`, at the
+      # same raise-to-skip point the scheme/shape checks use. The range covers all of C0, space
+      # (0x20) and DEL (0x7f).
       HOST_INVALID = /[\x00-\x20\x7f]/
 
       def self.normalize_url(url : String) : String
         u = url.strip
-        raise Gori::Error.new("invalid URL (control character): #{url.inspect}") if u.matches?(CONTROL_CHAR)
         return u if u.starts_with?(HTTP_SCHEME)
         raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.matches?(LEADING_SCHEME)
         "https://#{u}"
@@ -77,12 +77,14 @@ module Gori
       # A raw CR/LF (or NUL) inside a header NAME or VALUE forges a message boundary once
       # the head is serialized here and later replayed byte-exact (Repeater): a HAR/OAS
       # value of `"a\r\nX-Injected: evil\r\n\r\nGET /admin HTTP/1.1"` would smuggle a whole
-      # second request into the stored head. This is the header analogue of the URL
-      # smuggling normalize_url guards against — reject the entry at the SAME point (a raise
-      # here is caught by every import parser's per-entry rescue, dropping the bad entry
-      # exactly like a bad URL). Narrower than CONTROL_CHAR on purpose: a header VALUE may
-      # legally contain a horizontal tab (RFC 7230 §3.2 field-value), so only CR/LF/NUL —
-      # the bytes that can actually forge a boundary or truncate — are rejected.
+      # second request into the stored head. This guard still fires. Unlike the request
+      # TARGET — deliberately permissive now, a control byte there being the operator's own
+      # payload (see HOST_INVALID above and DESIGN.md §7) — header-boundary import was not
+      # part of the #400 decision and stays rejected pending its own call. Reject the entry
+      # at the SAME point (a raise here is caught by every import parser's per-entry rescue,
+      # dropping the bad entry exactly like a bad host). Only CR/LF/NUL: a header VALUE may
+      # legally contain a horizontal tab (RFC 7230 §3.2 field-value), so bytes that merely
+      # break a value without forging a boundary are left alone.
       HEADER_INJECT = /[\r\n\x00]/
 
       # Reject any header whose name/value could forge a message boundary (see HEADER_INJECT).
@@ -94,7 +96,8 @@ module Gori
 
       # A start-line scalar (method / statusText reason / HTTP version) that reaches the
       # request/status line: same boundary-forging risk as a header, so reject the same
-      # CR/LF/NUL bytes. (`target`/`host` come from normalize_url and are already clean.)
+      # CR/LF/NUL bytes. (`host` is cleaned by HOST_INVALID; `target` is intentionally NOT —
+      # a control byte there is the operator's payload, replayed byte-exact. See DESIGN.md §7.)
       def self.reject_inject!(field : String, label : String) : Nil
         raise Gori::Error.new("invalid #{label} (control character): #{field.inspect}") if field.matches?(HEADER_INJECT)
       end
