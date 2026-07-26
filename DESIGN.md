@@ -672,6 +672,33 @@ the frontier can come up empty, rather than to the one shape this issue found. A
 above the remaining reason is a Layer-2 or containment refusal of the brute-force root on a
 `--no-spider` run, which is a decision worth naming out loud.
 
+### 2026-07-26: Discover's Layer-2 gate reloads on the same schedule as every other sweep
+
+Refines: [P5](#p5). Issue #396, surfaced by the review of #391.
+
+The entry above for #354 records one reload semantic for the active-traffic scope gate: the
+scope is re-read from its store before each Layer-2 check, throttled to
+`Outbound::RELOAD_INTERVAL`, "uniform for every LONG-RUNNING job … on all three surfaces".
+Discover was not honouring it. Its Layer 2 goes through the injected `ScopePolicy`
+(`StoreScope#allowed?`) and not through `Outbound#sweep_block`, so `Outbound#refresh` was never
+reached: `cli/run/discover.cr` and `mcp/tools/discover.cr` both use the `Outbound` for
+`Plan.build` plus the up-front Layer-1 guard and then hand the engine a policy that never calls
+back into it. The result was that `gori run project scope add exclude string logout` in a second
+terminal stopped an in-flight fuzz, mine or sequence within a second, while an in-flight
+discover — potentially thousands of probes — kept going against a start-time snapshot. Only the
+TUI was exempt, and by accident: it shares its live `Scope` object, which its own `data_version`
+poll reloads.
+
+`StoreScope#allowed?` now performs the same throttled reload, reusing
+`Outbound::RELOAD_INTERVAL` rather than naming a second interval — same clock-before-reload
+ordering so concurrent worker fibers cannot stampede the store, same swallowed failure so the
+last-known rules stay in force rather than the run breaking or failing open. Threading the
+`Outbound` into the engine was rejected for the reason the `ScopePolicy` seam exists at all: the
+engine is deliberately Store-free ([§2.1](#s2-1)).
+
+`boundary?` deliberately does not reload. It is Layer 1, and its only caller (`bounded_url`)
+asks it immediately after `allowed?`, so it already reads rules that call refreshed.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
