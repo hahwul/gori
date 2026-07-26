@@ -46,8 +46,29 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
 | `io_timeout_secs` | integer | `30` | Upstream read / write idle timeout in seconds (minimum `1`) |
 | `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
+| `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls_passthrough) below |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
+
+#### tls_passthrough
+
+A CONNECT whose host matches is answered `200` and then relayed as an opaque byte tunnel: no certificate is minted for it, nothing is decrypted, and nothing is captured. The client validates the origin's own certificate, exactly as if gori were not in the path.
+
+This is the escape hatch for a client that pins certificates — a mobile app, an auto-updater, a desktop agent — sharing the proxy with your actual target. Without it, that traffic breaks. Scope does not help here: scope decides what is *recorded* and acted on, never whether TLS is intercepted, so an out-of-scope host is still decrypted.
+
+```json
+{
+  "network": {
+    "tls_passthrough": ["updates.example.com", "*.push.apple.com"]
+  }
+}
+```
+
+Patterns use the same dialect as scope `host` rules: `example.com` covers that host **and its subdomains**, `*.push.example.com` is a glob (subdomains only, not the bare host), and an IPv6 literal matches bracketed or bare. Matching is case-insensitive. Entries are bare hosts — a scheme, a path, or a `:port` is rejected when you save, because such an entry could never match.
+
+Empty (the default) means everything is intercepted, which is how gori behaved before this setting existed. Plaintext HTTP is unaffected: there is no TLS there to pass through.
+
+Because a bypassed host produces no flow, gori writes one line to its log the first time each host is relayed, so a host missing from History has a traceable reason. Edit the list from Preferences → **Network & Tabs** → **Network** → **TLS passthrough** (comma-separated).
 
 ### layout
 

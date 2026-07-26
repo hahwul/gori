@@ -1,5 +1,6 @@
 require "json"
 require "socket"
+require "../host_pattern"
 
 # NETWORK section (settings:network): proxy bind, upstream proxy, dial timeouts,
 # body capture cap, and per-project overrides of the same. See settings.cr for the
@@ -22,6 +23,26 @@ module Gori::Settings
   # Int32 or every read on the proxy hot path raises OverflowError and drops the
   # connection. 2047 MiB = 2_146_435_072 bytes < Int32::MAX. Clamped at read AND input.
   MAX_CAPTURE_MAX_MIB = 2047
+  # Hosts gori must NOT MITM (settings:network). A CONNECT whose authority matches is
+  # answered 200 and then relayed as an OPAQUE byte tunnel: no leaf certificate is minted,
+  # nothing is decrypted, nothing is captured — the client validates the ORIGIN's own
+  # certificate end-to-end, exactly as if gori were not there.
+  #
+  # This is the escape hatch for a certificate-PINNING client that shares the proxy with the
+  # real target — a mobile app, an auto-updater, a desktop agent. Without it that traffic
+  # simply breaks, and Scope cannot help: scope decides what is RECORDED and acted on, never
+  # whether TLS is bumped (an out-of-scope host is still MITM'd today, just not recorded).
+  #
+  # Patterns use the dialect shared with scope `host` rules (Gori::HostPattern):
+  # `updates.acme.test` covers that host and its subdomains, `*.push.acme.test` is a glob.
+  # Empty (the default) = MITM everything, gori's behaviour before this setting existed.
+  # Global-only. Plaintext HTTP is unaffected — there is no TLS there to pass through.
+  DEFAULT_TLS_PASSTHROUGH = [] of String
+  # Cap on the once-per-host passthrough notice (see tls_passthrough?). A bypassed host is
+  # otherwise INVISIBLE — nothing is captured — so "why is this host missing from History?"
+  # has no answer anywhere; one gori.log line per distinct host gives it one, without a log
+  # line per reconnect from a chatty push connection.
+  PASSTHROUGH_NOTICE_MAX = 1024
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -44,6 +65,44 @@ module Gori::Settings
   class_property io_timeout_secs : Int32 = DEFAULT_IO_TIMEOUT_SECS
   # Body capture cap, stored in MiB; the proxy/import read it in bytes via capture_max. Global-only.
   class_property capture_max_mib : Int32 = DEFAULT_CAPTURE_MAX_MIB
+
+  # The passthrough list, hand-written rather than `class_property` because assignment has to
+  # recompile the patterns (the proxy tests them per CONNECT — see PASSTHROUGH_NOTICE_MAX for
+  # why the notice set is reset alongside).
+  @@tls_passthrough : Array(String) = DEFAULT_TLS_PASSTHROUGH.dup
+  @@tls_passthrough_compiled : Array(HostPattern::Compiled) = [] of HostPattern::Compiled
+  # Hosts already announced to gori.log. Bare Set, no mutex, mirroring Tunnel's
+  # @h1_only_origins: single-threaded fibers, and the read/add pair does not yield.
+  @@tls_passthrough_noticed : Set(String) = Set(String).new
+
+  def self.tls_passthrough : Array(String)
+    @@tls_passthrough
+  end
+
+  # Assigning the list recompiles it and re-arms the once-per-host notice, so editing the
+  # setting re-announces the hosts it now covers instead of staying quiet about a new pattern.
+  def self.tls_passthrough=(patterns : Array(String)) : Array(String)
+    @@tls_passthrough = patterns
+    @@tls_passthrough_compiled = HostPattern.compile(patterns)
+    @@tls_passthrough_noticed = Set(String).new
+    patterns
+  end
+
+  # Whether this CONNECT authority must be relayed opaquely instead of MITM'd. Called once
+  # per CONNECT from ClientConn#handle_connect; the patterns are precompiled and the host is
+  # normalized once for the whole list.
+  #
+  # Also emits the once-per-host gori.log notice, because this is the only place that knows a
+  # bypass happened AND which host it was — a bypassed connection produces no flow, no event,
+  # and no other trace.
+  def self.tls_passthrough?(host : String) : Bool
+    return false unless HostPattern.matches_any?(@@tls_passthrough_compiled, host)
+    if !@@tls_passthrough_noticed.includes?(host) && @@tls_passthrough_noticed.size < PASSTHROUGH_NOTICE_MAX
+      @@tls_passthrough_noticed << host
+      ::Log.info { "tls passthrough: #{host} relayed without MITM (settings network.tls_passthrough) — nothing captured for it" }
+    end
+    true
+  end
 
   # The dial timeouts as a Time::Span (what Upstream/the engines actually pass to the socket).
   def self.connect_timeout : Time::Span
@@ -89,6 +148,15 @@ module Gori::Settings
     project_upstream_proxy || upstream_proxy
   end
 
+  # Read the passthrough list out of the parsed `network` object. Tolerant like every other
+  # section: a non-array, or entries that aren't strings, are dropped rather than failing the
+  # load; an ABSENT key leaves the current value (so a hand-edited file missing the key keeps
+  # whatever the running process has, matching load_bool's false-preserving discipline).
+  def self.parse_tls_passthrough(net : JSON::Any) : Nil
+    return unless arr = net["tls_passthrough"]?.try(&.as_a?)
+    self.tls_passthrough = arr.compact_map(&.as_s?.try(&.strip).presence)
+  end
+
   private def self.serialize_network(j : JSON::Builder) : Nil
     j.field "network" do
       j.object do
@@ -100,6 +168,10 @@ module Gori::Settings
         j.field "connect_timeout_secs", connect_timeout_secs
         j.field "io_timeout_secs", io_timeout_secs
         j.field "capture_max_mib", capture_max_mib
+        # Written even when empty: the whole problem this setting solves is that a
+        # non-MITM'd host was previously inexpressible, so the key should be discoverable
+        # in the file rather than appearing only once someone already knew to add it.
+        j.field "tls_passthrough" { j.array { tls_passthrough.each { |p| j.string p } } }
       end
     end
   end
@@ -150,6 +222,26 @@ module Gori::Settings
     # (underscores, spaces, …) — labels are alphanumeric, dot/hyphen separated.
     return nil if h.matches?(/\A[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?\z/)
     "settings: invalid bind address #{h.inspect}"
+  end
+
+  # nil if every entry is a usable HOST pattern; an error message otherwise. Passthrough
+  # matching is host-only, so an entry carrying a scheme, a path, or a :port can never match
+  # anything — rejecting it at save time keeps a plausible typo ("https://x.test", "x.test:443")
+  # from silently leaving the bypass off and a pinned app broken with no clue why. Same
+  # reasoning as upstream_proxy_port_error. Blank entries are dropped, not errors.
+  def self.tls_passthrough_error(patterns : Array(String)) : String?
+    patterns.each do |raw|
+      p = raw.strip
+      next if p.empty?
+      return "settings: TLS passthrough #{p.inspect} must be a bare host, without a scheme" if p.includes?("://")
+      return "settings: TLS passthrough #{p.inspect} must be a bare host, without a path" if p.includes?('/')
+      # A trailing :port — but NOT an IPv6 literal, bracketed ("[::1]") or bare ("::1"),
+      # whose colons are part of the address (see HostPattern.bare).
+      if (i = p.rindex(':')) && !p.starts_with?('[') && !p[0...i].includes?(':')
+        return "settings: TLS passthrough #{p.inspect} must be a bare host, without a :port"
+      end
+    end
+    nil
   end
 
   # nil if `value` is an acceptable upstream-proxy string; an error message if its explicit

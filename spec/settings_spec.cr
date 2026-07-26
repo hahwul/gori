@@ -50,6 +50,54 @@ describe Gori::Settings do
     end
   end
 
+  # The passthrough list is the one network value that is not a scalar, so its JSON round trip
+  # (and the pattern RECOMPILE that load has to trigger) is worth pinning separately: a list
+  # that reloads as strings but never recompiles would read back correctly and match nothing.
+  it "persists and reloads the TLS passthrough list, recompiling its patterns" do
+    dir = File.tempname("gori-settings-passthrough")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.tls_passthrough
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.tls_passthrough = ["updates.acme.test", "*.push.acme.test"]
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("tls_passthrough"))
+
+      Gori::Settings.tls_passthrough = [] of String
+      Gori::Settings.tls_passthrough?("updates.acme.test").should be_false
+      Gori::Settings.load
+      Gori::Settings.tls_passthrough.should eq(["updates.acme.test", "*.push.acme.test"])
+      # Matching works after a reload, not just the array contents.
+      Gori::Settings.tls_passthrough?("api.updates.acme.test").should be_true
+      Gori::Settings.tls_passthrough?("a.push.acme.test").should be_true
+      Gori::Settings.tls_passthrough?("acme.test").should be_false
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.tls_passthrough = prev
+    end
+  end
+
+  # Tolerant parsing, matching every other section: junk is dropped, not fatal.
+  it "drops non-string and blank passthrough entries rather than failing the load" do
+    dir = File.tempname("gori-settings-passthrough-junk")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.tls_passthrough
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(File.join(dir, "settings.json"),
+        %({"network":{"tls_passthrough":["  acme.test  ", "", 42, null, "  "]}}))
+      Gori::Settings.load
+      Gori::Settings.tls_passthrough.should eq(["acme.test"]) # trimmed, junk dropped
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.tls_passthrough = prev
+    end
+  end
+
   it "persists and reloads the update-check settings as JSON" do
     dir = File.tempname("gori-settings-update")
     Dir.mkdir_p(dir)

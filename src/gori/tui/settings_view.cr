@@ -31,6 +31,7 @@ module Gori::Tui
       Field.new("Connect timeout (s)", "how long an upstream TCP/proxy connect may take before giving up — seconds (min 1)"),
       Field.new("Idle timeout (s)", "initial read/write timeout on the upstream socket — seconds (min 1)"),
       Field.new("Capture body limit (MiB)", "max body bytes captured + stored per flow — MiB (min 1); applies to NEW flows only"),
+      Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     EDITOR_FIELDS = [
@@ -169,7 +170,7 @@ module Gori::Tui
                 when :display       then display_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off", Settings.update_check_enabled? ? "on" : "off"]
-                else                     [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
+                else                     network_values
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -225,12 +226,43 @@ module Gori::Tui
                   Settings::DEFAULT_CONFIRM_QUIT ? "on" : "off",
                   Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
       @preedit = ""
       @status = nil
+    end
+
+    # The NETWORK row values, read from the live Settings. One helper for both the load
+    # (`reload`) and the post-save rebuild (`commit`) so the two can't drift out of step with
+    # NETWORK_FIELDS — the values are positional, so an inserted field would otherwise have to
+    # be mirrored in three separate literals.
+    private def network_values : Array(String)
+      [
+        Settings.bind_host,
+        Settings.bind_port.to_s,
+        Settings.upstream_proxy,
+        Settings.verify_upstream? ? "on" : "off",
+        Settings.serve_landing? ? "on" : "off",
+        Settings.connect_timeout_secs.to_s,
+        Settings.io_timeout_secs.to_s,
+        Settings.capture_max_mib.to_s,
+        passthrough_label(Settings.tls_passthrough),
+        hostnames_summary,
+      ]
+    end
+
+    # The passthrough list as one editable line, and back. Comma-separated rather than a
+    # dedicated list overlay: these are a handful of host patterns, and a text field keeps the
+    # whole Network section inline (the overlay is reserved for the hostname map, which has two
+    # columns per entry). ", " on the way out reads better; parsing accepts commas or spaces.
+    private def passthrough_label(patterns : Array(String)) : String
+      patterns.join(", ")
+    end
+
+    private def passthrough_from_label(value : String) : Array(String)
+      value.split(/[,\s]+/).compact_map(&.strip.presence)
     end
 
     private def layout_values : Array(String)
@@ -506,6 +538,11 @@ module Gori::Tui
         return "settings: invalid capture limit #{@values[7].inspect} (MiB, min 1)"
       end
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
+      passthrough = passthrough_from_label(@values[8])
+      if err = Settings.tls_passthrough_error(passthrough)
+        @status = "invalid TLS passthrough host"
+        return err
+      end
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up
@@ -514,7 +551,8 @@ module Gori::Tui
       Settings.connect_timeout_secs = ct
       Settings.io_timeout_secs = it
       Settings.capture_max_mib = cap
-      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
+      Settings.tls_passthrough = passthrough
+      @values = network_values
       persist
     end
 

@@ -100,9 +100,11 @@ describe SettingsView do
       Gori::Settings.serve_landing?.should eq(Gori::Settings::DEFAULT_SERVE_LANDING)
 
       # The Hostname-overrides opener must still be the focusable action row after the
-      # inserted field (index shift didn't misalign fields/values).
+      # inserted field (index shift didn't misalign fields/values). Walked by field COUNT,
+      # not a pinned index: it is the LAST network row, and hard-coding the number just
+      # breaks this on the next inserted field without telling us anything new.
       v.reload(:network)
-      8.times { v.move_field(1) } # → Hostname overrides (index 8: after Info page + 3 timeout/capture fields)
+      (SettingsView::NETWORK_FIELDS.size - 1).times { v.move_field(1) }
       v.focused_opener.should eq(:hosts)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
@@ -213,9 +215,10 @@ describe SettingsView do
       Gori::Settings.io_timeout_secs.should eq(7)
       Gori::Settings.capture_max_mib.should eq(9)
 
-      # The Hostname-overrides opener is still the focusable action row after the inserted fields.
+      # The Hostname-overrides opener is still the focusable action row after the inserted
+      # fields — walked by field count (see the note in the Info-page example).
       v.reload(:network)
-      8.times { v.move_field(1) } # → Hostname overrides (index 8, the opener)
+      (SettingsView::NETWORK_FIELDS.size - 1).times { v.move_field(1) }
       v.focused_opener.should eq(:hosts)
 
       v.reset_to_defaults
@@ -226,6 +229,49 @@ describe SettingsView do
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.bind_host, Gori::Settings.bind_port, Gori::Settings.upstream_proxy, Gori::Settings.connect_timeout_secs, Gori::Settings.io_timeout_secs, Gori::Settings.capture_max_mib = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # The TLS-passthrough row is a comma-separated list rendered into one text field, so the
+  # round trip (Array → line → edit → Array) is the part that can silently mangle the setting.
+  it "saves the TLS passthrough list from its comma-separated field, and refuses a bad entry" do
+    dir = File.tempname("gori-settings-passthrough-view")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.tls_passthrough
+    passthrough_row = SettingsView::NETWORK_FIELDS.index! { |f| f.label == "TLS passthrough" }
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.tls_passthrough = [] of String
+      v = SettingsView.new
+      v.reload(:network)
+      passthrough_row.times { v.move_field(1) }
+      set_text(v, "updates.acme.test, *.push.acme.test")
+      v.save
+      Gori::Settings.tls_passthrough.should eq(["updates.acme.test", "*.push.acme.test"])
+      Gori::Settings.tls_passthrough?("api.updates.acme.test").should be_true
+
+      # Re-open and save again without touching the row. This is the Array → line → Array
+      # round trip: if the row rendered the list wrongly, the untouched re-save would corrupt it.
+      v.reload(:network)
+      v.save
+      Gori::Settings.tls_passthrough.should eq(["updates.acme.test", "*.push.acme.test"])
+
+      # A host-only pattern can't carry a port; rejecting it at save keeps the live value intact
+      # rather than storing something that would match nothing.
+      passthrough_row.times { v.move_field(1) }
+      set_text(v, "acme.test:443")
+      v.save.should contain("without a :port")
+      Gori::Settings.tls_passthrough.should eq(["updates.acme.test", "*.push.acme.test"])
+
+      v.reload(:network)
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.tls_passthrough.should eq(Gori::Settings::DEFAULT_TLS_PASSTHROUGH)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.tls_passthrough = prev
       FileUtils.rm_rf(dir)
     end
   end

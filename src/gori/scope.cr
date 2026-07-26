@@ -1,5 +1,6 @@
 require "db"
 require "./ql"
+require "./host_pattern"
 require "./store"
 
 module Gori
@@ -36,7 +37,9 @@ module Gori
       getter pattern : String
       @regex : Regex?
       @pattern_down : String
-      @pattern_host : String
+      # Host rules only (nil for string/regex): the shared host-pattern dialect, compiled
+      # once here — see Gori::HostPattern, which the TLS passthrough list uses too.
+      @host_pattern : HostPattern::Compiled?
 
       def initialize(@id : Int64, @kind : String, @match_type : String, @pattern : String)
         # The pattern is immutable (a Rule is rebuilt, never edited in place), so its
@@ -44,10 +47,10 @@ module Gori
         # of a Scope-filtered reload and per host of a Sitemap reload — is computed ONCE
         # here rather than re-allocated on each `matches?` call (mirrors @regex).
         @pattern_down = @pattern.downcase
-        # The bare, bracket-free host form ("[::1]" → "::1"), likewise precomputed. Host
-        # matching compares against this so an IPv6 rule matches whether the flow host was
-        # captured bracketed (some URL paths) or bare (the CONNECT/tunnel path).
-        @pattern_host = Scope.bare_host(@pattern_down)
+        # Precompute the host forms (lowercased + bracket-free, so an IPv6 rule matches
+        # whether the flow host was captured bracketed or bare) only for host rules — a
+        # string/regex rule never consults them.
+        @host_pattern = HostPattern::Compiled.new(@pattern) if @match_type == "host"
         # Compile the regex once. An invalid pattern degrades to nil → never-match,
         # rather than unwinding through SQLite's C REGEXP callback or a proxy fiber.
         # Persisted patterns are validated on add/update; this is defense-in-depth.
@@ -94,20 +97,12 @@ module Gori
         end
       end
 
+      # Exact / subdomain / glob host matching, in the dialect shared with the TLS
+      # passthrough list (Gori::HostPattern). Only reachable for a host rule, so
+      # @host_pattern is non-nil; `try` keeps a hand-constructed odd rule non-matching
+      # rather than raising onto the proxy hot path.
       private def host_match?(host : String) : Bool
-        h = Scope.bare_host(host.downcase) # normalize "[::1]" → "::1" (see @pattern_host)
-        if @pattern.includes?('*')
-          # File.match? raises on a malformed glob; treat as non-matching so it can't
-          # unwind onto the proxy hot path (mirrors SQLite GLOB's tolerance → keeps
-          # live gating and the History SQL view consistent).
-          begin
-            File.match?(@pattern_down, h)
-          rescue File::BadPatternError
-            false
-          end
-        else
-          h == @pattern_host || h.ends_with?(".#{@pattern_host}")
-        end
+        !!@host_pattern.try(&.matches?(host))
       end
     end
 
@@ -437,8 +432,10 @@ module Gori
     # paths but bare via the dominant HTTPS-MITM CONNECT path; peeling surrounding brackets
     # on BOTH the rule pattern and the flow host lets "[::1]" and "::1" match interchangeably
     # (Rule#host_match? / host_cond) and keeps the suggested form the one actually stored.
+    # Kept as Scope's own name (several call sites here, plus specs) but delegating, so
+    # there is ONE implementation shared with the TLS passthrough list.
     def self.bare_host(host : String) : String
-      (host.starts_with?('[') && host.ends_with?(']')) ? host[1...-1] : host
+      HostPattern.bare(host)
     end
 
     # The pattern with its :PORT stripped AND surrounding brackets peeled, for the

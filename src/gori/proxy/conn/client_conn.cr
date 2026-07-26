@@ -917,12 +917,21 @@ module Gori::Proxy
     end
 
     # CONNECT host:port -> 200, then TLS MITM (if configured) or blind tunnel.
+    #
+    # A host on the TLS passthrough list takes the blind-tunnel branch even when MITM IS
+    # configured: no leaf is minted and the client validates the origin's own certificate,
+    # which is the whole point (a pinning client would otherwise break). Deliberately AFTER
+    # connect_answered_locally? — the reserved self-host, the self-loop refusal and the
+    # sandbox gate must all keep winning, so a passthrough pattern can neither strand the CA
+    # download nor open a tunnel the sandbox refuses. Reading Settings here (not in the
+    # Tunnel) is what makes the bypass cover the h2c-in-CONNECT branch too: the byte peek
+    # below never happens for a passthrough host.
     private def handle_connect(req : Codec::RawRequest) : Bool
       host, port = Upstream.split_host_port(req.target, 443)
 
       return false if connect_answered_locally?(host, port)
 
-      if tls = @tls
+      if (tls = @tls) && !Settings.tls_passthrough?(host)
         @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
         @io.flush
         # Peek one byte to route the tunnel: a TLS ClientHello starts with 0x16

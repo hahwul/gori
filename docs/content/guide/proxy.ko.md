@@ -137,6 +137,14 @@ gori run history -q 'status:5xx host:api.example.com'
 
 스테이징 호스트, IP 기반 가상 호스트, 또는 `Host` 헤더를 그대로 유지하면서 프로덕션 호스트명을 랩 박스로 향하게 할 때 유용합니다.
 
+## 피닝된 앱이 방해할 때 {#pinned-app-in-the-way}
+
+gori는 모든 HTTPS 연결을 가로채므로, 인증서를 피닝하는 클라이언트(모바일 앱, 자동 업데이터, 백그라운드 에이전트)는 깨집니다. 휴대폰이나 공용 머신에서는 그런 트래픽이 원하든 원치 않든 함께 들어오고, 다른 것을 테스트하는 동안 계속 실패합니다.
+
+그 호스트들을 **TLS passthrough**에 등록하세요(Preferences → **Network & Tabs** → **Network**, 쉼표로 구분. 또는 `settings.json`의 `network.tls_passthrough`). 등록된 호스트는 불투명한 터널로 중계되어, 클라이언트가 원 서버의 실제 인증서를 보고 정상 동작합니다. 대신 그 호스트는 아무것도 캡처되지 않습니다.
+
+스코프로는 안 됩니다. 스코프는 무엇을 기록하고 개입할지를 결정할 뿐이고, 스코프 밖 호스트도 복호화됩니다. TLS 자체에 손대지 않게 하는 설정은 passthrough뿐입니다. 패턴 문법은 [`tls_passthrough` 레퍼런스](/ko/reference/config/#tls-passthrough)를 참고하세요.
+
 ## Project 탭 {#project-tab}
 
 **Project** 홈 탭은 단순한 요약 이상입니다. 포커스 가능한 패널들(`Tab`으로 순환):

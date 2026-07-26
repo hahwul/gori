@@ -691,7 +691,9 @@ describe "C5 · SettingsOverlay on the Overlay seam" do
       saved = 0
       ov.on_save = ->(_s : Symbol, _m : String) { saved += 1; nil }
       h = OverlayHarness.new(ov)
-      8.times { h.press(DOWN) } # walk to the last NETWORK field, the Hostnames opener
+      # Walk to the LAST network field — the Hostnames opener. By count, not a pinned index:
+      # what matters is that it is last, and a literal only breaks on the next added field.
+      (SettingsView::NETWORK_FIELDS.size - 1).times { h.press(DOWN) }
       h.press(ENTER).should eq(:open)
       opened.should eq([:hosts])
       saved.should eq(0) # an opener row must not persist the section
