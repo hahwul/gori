@@ -137,6 +137,9 @@ module Gori::Discover
     # them far past any real crawl. Once @seen hits this, consider_link stops tracking and
     # enqueuing new links: the run keeps draining what's in flight but adds nothing new.
     MAX_SEEN = 250_000
+    # Setup error for a seed the Layer-2 gate refuses. A constant because it is the one
+    # engine error a spec (and a surface) wants to recognize rather than merely display.
+    SEED_BLOCKED = "seed blocked by scope (Sandbox or an exclude rule)"
 
     enum State : UInt8
       Running
@@ -184,7 +187,23 @@ module Gori::Discover
     def initialize(seed_url : String, @words : Array(String), backend : Backend,
                    @config : Config, @scope : ScopePolicy = OpenScope.new)
       sp = Url.parse(seed_url)
-      @setup_error = sp ? nil : "invalid seed url: #{seed_url}"
+      @setup_error =
+        if sp.nil?
+          "invalid seed url: #{seed_url}"
+        else
+          # Layer 2 (Sandbox + explicit EXCLUDE) is the ONE gate the operator's own seed does
+          # not waive. Layer 1 is already waived FOR it, per surface (`Outbound.interactive`
+          # in the TUI, `--allow-unscoped` elsewhere) because a human typed the target — but
+          # "the operator chose this" was never an argument about Sandbox, whose documented
+          # promise is unconditional (DESIGN.md §3, and the §7 entry for #364).
+          #
+          # Refused up front as a TERMINAL error rather than by quietly enqueuing nothing: a
+          # blocked seed blocks everything derived from it, so the alternative is a run that
+          # finishes with zero findings and no reason, which reads as "there is nothing
+          # there" instead of "gori sent nothing" (P4).
+          seed_norm = Url.normalize(sp)
+          @scope.allowed?(seed_norm, sp.host) ? nil : "#{SEED_BLOCKED}: #{seed_norm}"
+        end
       @seed_parts = sp || Url::Parts.new("http", "invalid.invalid", 80, "/", nil)
       # A path-scoped run (seed path deeper than "/") confines discovery to that subtree.
       # Store the base with any single trailing slash stripped so bounded_url can test
@@ -322,11 +341,13 @@ module Gori::Discover
     private def seed_frontier : Nil
       @seen << Url.visit_key(@seed_parts)
       if @config.spider?
+        # The seed itself needs no gate here — `initialize` already refused the whole run if
+        # Layer 2 blocks it, so reaching this line means it passed.
         @crawl_enqueued += 1
         @frontier << Task.new(TaskKind::Crawl, Url.normalize(@seed_parts), 0, Source::Seed)
         root = Url.origin(@seed_parts)
-        @frontier << Task.new(TaskKind::Fetch, "#{root}/robots.txt", 0, Source::Robots)
-        @frontier << Task.new(TaskKind::Fetch, "#{root}/sitemap.xml", 0, Source::Sitemap)
+        enqueue_well_known("#{root}/robots.txt", Source::Robots)
+        enqueue_well_known("#{root}/sitemap.xml", Source::Sitemap)
       end
       bf_dir = Url.dir_of(@seed_parts)
       enqueue_dir(bf_dir, 0) if @config.bruteforce?
@@ -339,19 +360,40 @@ module Gori::Discover
       # path-scoped run confined elsewhere.
       if @config.spider? && @config.bruteforce?
         root_dir = "#{Url.origin(@seed_parts)}/"
+        # @seed_calibration_dir is set even when the Calibrate task below is refused, and that
+        # is deliberate: it is what routes a robots/sitemap outcome to resolve_seed_finding
+        # rather than record_page. With no baseline those outcomes park and are never counted
+        # ("no baseline, no claim", see resolve_seed_finding) — whereas dropping the routing
+        # would send them to record_page, which is exactly the raw-status trust that reports a
+        # wildcard-200 server's robots.txt as a finding. Fail safe, not fail loud.
         @seed_calibration_dir = root_dir
         enqueue_seed_only_calibration(root_dir) unless root_dir == bf_dir
       end
     end
 
+    # robots.txt / sitemap.xml are DERIVED, not typed: nothing but the run itself asked for
+    # them, and they are anchored on the origin, so on a path-confined run they sit outside
+    # the subtree by construction. They keep waiving Layer 1, containment and the path confine
+    # for the calibration reason above — but not Layer 2, same as the seed (DESIGN.md §7,
+    # #364). A blocked one is skipped silently rather than failing the run: unlike the seed,
+    # the crawl is still meaningful without it.
+    private def enqueue_well_known(url : String, source : Source) : Nil
+      # `url` is built from Url.origin(@seed_parts), so its host IS the seed's host.
+      return unless @scope.allowed?(url, @seed_parts.host)
+      @frontier << Task.new(TaskKind::Fetch, url, 0, source)
+    end
+
     # A Calibrate task queued ONLY to gate robots.txt/sitemap.xml (see seed_frontier) — unlike
     # enqueue_dir it never feeds enqueue_probes, so it can't brute-force the wordlist onto the
-    # origin on a run confined to a deeper subtree. Bypasses bounded_url/scope the same way the
-    # robots/sitemap Fetch tasks themselves already do (well-known paths are always checked at
-    # the origin, confine/scope notwithstanding).
+    # origin on a run confined to a deeper subtree. Bypasses the path confine and the
+    # containment mode the same way the robots/sitemap Fetch tasks do (well-known paths are
+    # always checked at the origin) — but not Layer 2: its bogus probes are real requests, and
+    # `calibrate_probes + extensions.size` of them made this the largest single part of the
+    # seed's formerly ungated blast radius (#364).
     private def enqueue_seed_only_calibration(dir : String) : Nil
       return if @dirs.includes?(dir)
       return unless Url.parse(dir)
+      return unless @scope.allowed?(dir, @seed_parts.host)
       @dirs << dir
       @frontier << Task.new(TaskKind::Calibrate, dir, 0, Source::Bruteforced, dir: dir, seed_only: true)
     end

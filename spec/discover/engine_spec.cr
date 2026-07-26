@@ -41,9 +41,39 @@ private def notfound : R
   make(404, "not found here")
 end
 
-private def run_discover(seed : String, words : Array(String), cfg : D::Config, &route : String -> R) : {Array(D::Finding), D::RunStats}
+# A ScopePolicy that denies an exact URL set — the shape `StoreScope#allowed?` takes for a
+# regex EXCLUDE rule, or for Sandbox with the host off the allowlist. `configured?` is false
+# so ScopeAware containment falls back to same-origin and only `allowed?` (Layer 2) is under
+# test here.
+private class DenyExact < D::ScopePolicy
+  def initialize(@deny : Set(String))
+  end
+
+  def allowed?(url : String, host : String) : Bool
+    !@deny.includes?(url)
+  end
+
+  def boundary?(url : String, host : String) : Bool
+    true
+  end
+
+  def configured? : Bool
+    false
+  end
+end
+
+# The bogus soft-404 probes an origin-root calibration sends: one path segment directly under
+# "/", minus the two well-known paths seed_frontier queues by name. A path-scoped run's own
+# brute-force probes are deeper (/app/…), so they never land in here.
+private def root_calibration_probes(targets : Array(String)) : Array(String)
+  targets.select { |t| t.matches?(%r{\A/[^/]+\z}) && t != "/robots.txt" && t != "/sitemap.xml" }
+end
+
+private def run_discover(seed : String, words : Array(String), cfg : D::Config,
+                         scope : D::ScopePolicy = D::OpenScope.new,
+                         &route : String -> R) : {Array(D::Finding), D::RunStats}
   backend = RouteBackend.new(route)
-  engine = D::Engine.new(seed, words, backend, cfg)
+  engine = D::Engine.new(seed, words, backend, cfg, scope)
   findings = [] of D::Finding
   stats = nil.as(D::RunStats?)
   engine.run do |ev|
@@ -249,5 +279,93 @@ describe Gori::Discover::Engine do
     urls.should contain("http://t/api")                     # the seed path itself (== base) stays in-subtree
     urls.should contain("http://t/api/inner")               # a genuine child under base/
     urls.should_not contain("http://t/api-internal/secret") # sibling prefix — must be excluded
+  end
+
+  # Issue #364 / DESIGN.md §7: the seed and its two derived well-known paths waive Layer 1,
+  # the containment mode and the path confine — but never Layer 2 (Sandbox + EXCLUDE).
+  describe "the Layer-2 gate on the seed trio" do
+    it "refuses the whole run, terminally and without a single send, when Layer 2 blocks the seed" do
+      sent = [] of String
+      backend = RouteBackend.new(->(t : String) { sent << t; notfound })
+      cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 2, concurrency: 1, retries: 0)
+      engine = D::Engine.new("http://t/", ["admin"], backend, cfg, DenyExact.new(Set{"http://t/"}))
+      kinds = [] of Symbol
+      messages = [] of String
+      engine.run do |ev|
+        if ev.is_a?(D::ErrorEvent)
+          kinds << :error
+          messages << ev.message
+        end
+        kinds << :done if ev.is_a?(D::DoneEvent)
+      end
+      # A silent 0-finding Done would read as "there is nothing there" rather than "gori sent
+      # nothing", which is the whole reason this is a setup error and not a skipped enqueue.
+      kinds.should eq([:error])
+      messages.first.should contain(D::Engine::SEED_BLOCKED)
+      sent.should be_empty
+    end
+
+    it "drops robots.txt/sitemap.xml when Layer 2 excludes them, and keeps the seed" do
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      denied = Set{"http://t/robots.txt", "http://t/sitemap.xml"}
+      sent = [] of String
+      run_discover("http://t/", [] of String, cfg, DenyExact.new(denied)) do |t|
+        sent << t
+        t == "/" ? html("home, no links") : notfound
+      end
+      sent.should eq(["/"])
+    end
+
+    it "still fetches both when nothing denies them (the control for the case above)" do
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      sent = [] of String
+      run_discover("http://t/", [] of String, cfg) do |t|
+        sent << t
+        t == "/" ? html("home, no links") : notfound
+      end
+      sent.sort.should eq(["/", "/robots.txt", "/sitemap.xml"])
+    end
+
+    it "gates the origin calibration a path-scoped run queues to grade those two paths" do
+      # The seed-only calibration is the LARGEST part of the trio's blast radius — one bogus
+      # probe per calibrate_probes, at the origin root, on a run confined to /app/. Denying
+      # the root dir alone leaves the seed and both well-known paths allowed, so what this
+      # asserts on is the calibration and nothing else.
+      cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 3, max_depth: 1,
+        concurrency: 1, retries: 0)
+      route = ->(t : String) { t == "/app/" ? html("app root, no links") : notfound }
+
+      gated = [] of String
+      run_discover("http://t/app/", ["admin"], cfg, DenyExact.new(Set{"http://t/"})) do |t|
+        gated << t
+        route.call(t)
+      end
+      root_calibration_probes(gated).should be_empty
+      gated.should contain("/robots.txt") # the deny was narrow: only the calibration is gone
+      gated.should contain("/sitemap.xml")
+
+      # Control run — without it, the assertion above would pass just as happily against an
+      # engine that never calibrates the origin at all.
+      open = [] of String
+      run_discover("http://t/app/", ["admin"], cfg) do |t|
+        open << t
+        route.call(t)
+      end
+      root_calibration_probes(open).size.should eq(3)
+    end
+
+    it "does not downgrade robots.txt/sitemap.xml to raw-status trust when that calibration is gated" do
+      # Gating the calibration must not also drop the routing that sends a robots/sitemap
+      # outcome through the soft-404 baseline: with no baseline they have to go UNCOUNTED
+      # ("no baseline, no claim"), not fall back to record_page — which on a 200-everything
+      # server reports both as findings, the exact false positive the calibration exists to
+      # stop. An earlier draft of this fix skipped the routing and did precisely that.
+      cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 3, max_depth: 1,
+        concurrency: 1, retries: 0)
+      findings, _ = run_discover("http://t/app/", ["admin"], cfg, DenyExact.new(Set{"http://t/"})) do |_t|
+        html("THE SAME SOFT-404 PAGE FOR EVERY SINGLE PATH ON THIS SERVER")
+      end
+      findings.select { |f| f.source.robots? || f.source.sitemap? }.should be_empty
+    end
   end
 end

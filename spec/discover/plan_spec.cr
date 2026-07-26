@@ -68,6 +68,19 @@ private def crawl_config : D::Config
     bruteforce: false, max_depth: 1, timeout: 3.seconds)
 end
 
+# The seed and its two derived well-known paths and NOTHING else: depth 0 so no link can add
+# a fourth request, and headroom on `max_requests` so a fourth would still be visible on the
+# wire rather than swallowed by CappedBackend. Used by the Layer-2 tests on the seed trio.
+private def seed_trio_config : D::Config
+  D::Config.new(concurrency: 1, retries: 0, max_requests: 10_i64, spider: true,
+    bruteforce: false, max_depth: 0, timeout: 3.seconds)
+end
+
+# The request targets an origin actually saw, in the order it saw them.
+private def targets_of(heads : Array(String)) : Array(String)
+  heads.compact_map { |h| h.lines.first?.try(&.split(' ')[1]?) }
+end
+
 # Run one plan against a throwaway origin. Yields the listener's port so the caller can
 # build a seed pointing at it; returns the findings plus every request head the origin saw.
 #
@@ -75,7 +88,7 @@ end
 # worth having: the getters and the engine are populated from the same locals, so asserting
 # `plan.seed` / `plan.policy` alone cannot tell a plan that hands the crawl the right values
 # from one that reports them and passes the engine something else.
-private def run_one(outbound = ungated_outbound, body = "hi",
+private def run_one(outbound = ungated_outbound, body = "hi", events : Array(D::Event)? = nil,
                     &build : Int32 -> D::PlanOptions) : {Array(D::Finding), Array(String)}
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
@@ -93,7 +106,10 @@ private def run_one(outbound = ungated_outbound, body = "hi",
   begin
     plan = D::Plan.build(build.call(port), outbound)
     findings = [] of D::Finding
-    plan.engine.run { |ev| findings << ev.finding if ev.is_a?(D::FindingEvent) }
+    plan.engine.run do |ev|
+      events << ev if events
+      findings << ev.finding if ev.is_a?(D::FindingEvent)
+    end
     {findings, seen}
   ensure
     server.close
@@ -237,9 +253,9 @@ describe Gori::Discover::Plan do
     # These two drive the engine instead, as an A/B on one crawled link: same plan, same
     # harness, only the scope rules differ.
     #
-    # The assertion is about the LINK, not the seed: the seed plus robots.txt/sitemap.xml
-    # bypass the engine's gate outright (issue #364, deliberately not fixed here), so they go
-    # out under both rule sets. Everything discovered after them is gated normally.
+    # The assertion is about the LINK, not the seed: the seed trio takes a DIFFERENT path
+    # through the gate (Layer 2 only — see the Layer-2 block below and DESIGN.md §7), so
+    # asserting on it here would conflate the two.
     linked = %(<html><a href="/deeper">d</a></html>)
 
     it "hands the derived policy to the engine, not just to the getter" do
@@ -265,6 +281,58 @@ describe Gori::Discover::Plan do
         end
         seen.any?(&.includes?("GET /deeper ")).should be_true
         findings.map(&.url).any?(&.includes?("/deeper")).should be_true
+      end
+    end
+  end
+
+  # Issue #364 / DESIGN.md §7. The seed and its two derived well-known paths waive Layer 1 —
+  # a human typed the target — but not Layer 2, whose promise ("blocks ALL out-of-scope
+  # traffic") is unconditional. These drive a REAL `Gori::Scope` end to end and assert on the
+  # bytes the origin received, because a policy double could only restate the decision.
+  describe "Layer 2 on the seed and its two derived well-known paths" do
+    it "sends nothing at all — and says why — when Sandbox blocks the seed's host" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "elsewhere.test")
+        scope.enable_sandbox
+        events = [] of D::Event
+        # `Outbound.interactive` is the STRONGEST case for leaving the seed alone: the TUI's
+        # Layer 1 is waived precisely because the operator chose this target. Sandbox still
+        # has to stop it.
+        findings, seen = run_one(Gori::Outbound.interactive(scope), "hi", events) do |port|
+          D::PlanOptions.new("http://127.0.0.1:#{port}/", config: seed_trio_config, verify: false)
+        end
+        seen.should be_empty
+        findings.should be_empty
+        events.map(&.class).should eq([D::ErrorEvent])
+        events.first.as(D::ErrorEvent).message.should contain(D::Engine::SEED_BLOCKED)
+      end
+    end
+
+    it "sends all three once Sandbox allowlists the host" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "127.0.0.1")
+        scope.enable_sandbox
+        _findings, seen = run_one(Gori::Outbound.interactive(scope)) do |port|
+          D::PlanOptions.new("http://127.0.0.1:#{port}/", config: seed_trio_config, verify: false)
+        end
+        targets_of(seen).sort.should eq(["/", "/robots.txt", "/sitemap.xml"])
+      end
+    end
+
+    it "drops the derived pair to an EXCLUDE rule while the seed still goes out" do
+      # Sandbox is OFF here: Layer 2 is Sandbox *plus* explicit excludes, and discover is the
+      # most automated sweep gori has, so an operator's carve-out has to hold on its seed
+      # requests exactly as it does on every URL the crawl derives afterwards.
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "127.0.0.1")
+        scope.add("exclude", "regex", "/(robots\\.txt|sitemap\\.xml)\\z")
+        _findings, seen = run_one(Gori::Outbound.interactive(scope)) do |port|
+          D::PlanOptions.new("http://127.0.0.1:#{port}/", config: seed_trio_config, verify: false)
+        end
+        targets_of(seen).should eq(["/"])
       end
     end
   end

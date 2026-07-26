@@ -462,6 +462,65 @@ known, and under decision in issue #357" — as settled by this entry: the gap i
 what would close it is the argument schema, not registry wiring. If CLI/MCP parity work resumes
 at the rate it ran before, revisit, but open the argument-schema issue first.
 
+### 2026-07-26: Discover's seed waives Layer 1, never Layer 2
+
+Refines: [P4](#p4). Issue #364, surfaced by the review of #354.
+
+`Discover::Engine#seed_frontier` put the seed, `<origin>/robots.txt`, `<origin>/sitemap.xml` and
+the origin-root soft-404 calibration straight onto the frontier with no `bounded_url` call.
+Every URL the crawl derived afterwards was gated normally, which is why it read as a deliberate
+seed exemption rather than a hole, but only the *path-confinement* half had ever been reasoned
+about (well-known paths live at the origin, so a run confined to `/app/` has to step outside its
+subtree to find them). The scope gate rode along with it by accident.
+
+The exposure was not uniform across the four, and the difference is what settles the decision. A
+Layer-1 `in_scope` verdict already implies a clean Layer 2, because `Scope#sandbox_blocks?` and
+`Outbound#evaluate` both route through `allowlisted_unlocked?` — so for the **seed** the gap only
+ever opened where Layer 1 was waived, which is the TUI and any `--allow-unscoped` run. The three
+**derived** requests were exposed on every surface, since they are anchored on `Url.origin` and a
+path-scoped include rule never covers them.
+
+The two-layer split in [§3](#s3) already answers this, and the answer is asymmetric on purpose:
+
+- **Layer 1 stays waived for all four.** The seed is what a human typed, which is the same
+  argument `Outbound.interactive` makes for the TUI, and every surface has already made that
+  decision before the engine runs (`Outbound.agent` refuses an out-of-scope seed, `.cli` refuses
+  one on a configured project, `.interactive` waives by name; the CLI and MCP enforce the verdict
+  right after `Plan.build`, before a single send). `robots.txt` and `sitemap.xml` inherit it:
+  they are derived from a seed the operator was already authorised to hit and live at that same
+  origin by construction. Re-asking the include question here would only re-ask what the surface
+  just answered, and on a path-scoped include rule it would break the calibration on every run
+  that has one.
+- **Layer 2 now applies to all four.** Sandbox's documented promise in [§3](#s3), that a request
+  to a host which is not allowlisted is blocked outright, carries no "unless the operator typed
+  it" clause, and `Outbound.interactive`'s own contract already says Layer 2 still hard-stops the
+  send. "The operator chose this target" was never an argument about Sandbox. Explicit EXCLUDE
+  rules come with it (`sweep_block` semantics, not `send_block`): discover is the most automated
+  sweep gori has, and its every other URL is judged by the same predicate.
+
+Three specifics worth recording:
+
+- **A blocked seed fails the run, loudly.** The verdict is taken in `Engine#initialize` and
+  `Engine#start` emits it as the run's sole terminal `ErrorEvent` (`Engine::SEED_BLOCKED`); it is
+  not a skipped enqueue. A blocked seed blocks everything derived from it, so the alternative is
+  a run that finishes with zero findings and no reason, which an operator reads as "there is
+  nothing there" rather than "gori sent nothing" ([P4](#p4)). A blocked `robots.txt`/`sitemap.xml`
+  is skipped silently instead: the crawl is still meaningful without it.
+- **A gated calibration still routes its two dependants.** `@seed_calibration_dir` is set whether
+  or not the Calibrate task survives the gate. Without it a robots/sitemap outcome falls back to
+  `record_page`, whose raw-status trust reports both as findings on a 200-everything server,
+  which is the exact false positive the calibration exists to prevent. With it and no baseline
+  they go uncounted: no baseline, no claim.
+- **The gate is the engine's injected `ScopePolicy`, not an `Outbound`.** `StoreScope#allowed?`
+  is already the negation of `sandbox_blocks? || excluded?`, which is `sweep_block`'s predicate,
+  and the engine stays Store-free, which is the whole reason that seam exists.
+
+What this does **not** close, deliberately, because each is a separate decision: brute-force and
+calibration probes are still authorised by their *directory* rather than per URL, so a `string`
+or `regex` EXCLUDE that matches a child but not its parent does not stop them; and
+`Plan.resolve_policy` still hands an unconfigured scope an `OpenScope`, so Layer 2 is absent
+entirely on a project with Sandbox on and no rules.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
