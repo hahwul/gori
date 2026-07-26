@@ -207,6 +207,24 @@ module Gori
         abort "#{prefix}: #{reason}"
       end
 
+      # The Layer-1 (include-list) gate for the hand-authored repeater send paths. `abort_if_blocked!`
+      # above (plan.refusal → Outbound#send_block) is Layer 2 (Sandbox/exclude) ONLY; without this the
+      # configured project scope was silently inert for `gori run repeater` and there was no
+      # --allow-unscoped waiver, unlike the sibling fuzz/mine/sequence/discover CLIs and MCP's
+      # send_gate (#406). DESIGN.md §3 lists repeater as gated on BOTH layers.
+      private def self.abort_if_out_of_scope!(outbound : Gori::Outbound, plan : Repeater::Plan, prefix : String) : Nil
+        return unless repeater_out_of_scope?(outbound, plan)
+        outbound.close
+        abort "#{prefix}: #{plan.host} is out of the project scope — add a scope include rule or pass --allow-unscoped"
+      end
+
+      # The Layer-1 verdict `abort_if_out_of_scope!` acts on, split out so it can be asserted
+      # without the process-exiting `abort`. True = the include list refuses this plan's origin.
+      private def self.repeater_out_of_scope?(outbound : Gori::Outbound, plan : Repeater::Plan) : Bool
+        target = (bytes = plan.requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
+        outbound.check_request(plan.scheme, plan.host, target).blocked?
+      end
+
       # A saved repeater SESSION row IS the option set: its target, http2 toggle, SNI and
       # auto-Content-Length switch, straight into the one builder every surface assembles
       # through. The builder classifies the request as a WebSocket upgrade too, so the
@@ -273,6 +291,7 @@ module Gori
         format = :text
         ws_messages = [] of String
         idle_ms : Int64? = nil
+        allow_unscoped = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -283,6 +302,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--message=TEXT", "WebSocket: outbound text message (repeatable; replaces the session's stored messages)") { |v| ws_messages << v }
           p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -308,13 +328,16 @@ module Gori
         # The scope decision every active send passes through. `gori run repeater` dials
         # Repeater::Engine/H2Engine/WsEngine directly, bypassing the proxy's own gate, so
         # Sandbox mode's "blocks ALL out-of-scope traffic" promise lives here.
-        outbound = project_outbound(project_name, db_path, false)
+        outbound = project_outbound(project_name, db_path, allow_unscoped)
 
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
+
+        # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater send")
 
         if plan.websocket?
           cmd_repeater_send_ws(id, plan, project_name, db_path, idle_ms, ws_messages, outbound, format)
@@ -588,6 +611,7 @@ module Gori
         format = :text
         headers = [] of String
         body_override : String? = nil
+        allow_unscoped = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -606,6 +630,7 @@ module Gori
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
           p.on("-HHEADER", "--header=HEADER", "Custom header to overwrite/add (repeatable). An explicit Content-Length is honored verbatim (no auto-resync) for CL-mismatch testing") { |v| headers << v }
           p.on("-bBODY", "--body=BODY", "Request body override") { |v| body_override = v }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -672,7 +697,7 @@ module Gori
         body_bytes = raw_bytes[crlf_crlf_idx + 4..]
 
         wire, explicit_cl = build_single_flow_request(head_bytes, body_bytes, headers, body_override, target_override)
-        outbound = project_outbound(project_name, db_path, false)
+        outbound = project_outbound(project_name, db_path, allow_unscoped)
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new([wire],
             target: target_override, default_target: built.target,
@@ -682,6 +707,8 @@ module Gori
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater", ex)
         end
+        # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater")
         abort_if_blocked!(plan, "gori run repeater")
         result = plan.send
         outbound.close

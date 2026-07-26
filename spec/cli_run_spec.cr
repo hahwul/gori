@@ -265,6 +265,43 @@ module Gori::CLI::Run
   end
 end
 
+# #406: `gori run repeater send/<flow-id>/minimize` ran only the Layer-2 (Sandbox/exclude)
+# gate, so a configured project scope was silently inert and there was no --allow-unscoped
+# waiver — unlike fuzz/mine/sequence/discover and MCP. `repeater_out_of_scope?` is the Layer-1
+# decision `abort_if_out_of_scope!` acts on; a Gate::Configured outbound must refuse an
+# out-of-scope origin and a waived one must not.
+module Gori::CLI::Run
+  def self.repeater_out_of_scope_for_spec(ob : Gori::Outbound, plan : Gori::Repeater::Plan) : Bool
+    repeater_out_of_scope?(ob, plan)
+  end
+end
+
+describe "gori run repeater — Layer-1 scope gate (#406)" do
+  it "refuses an out-of-scope origin under a configured scope, and honours --allow-unscoped" do
+    path = File.tempname("gori-repscope", ".db")
+    store = Gori::Store.open(path)
+    begin
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "in.test") # 127.0.0.1 is NOT in scope
+      plan = Gori::Repeater::Plan.build(
+        Gori::Repeater::PlanOptions.new(["GET /x HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice],
+          target: "http://127.0.0.1:9/x"), Gori::Outbound.cli(scope, false))
+      # Layer 1 (Gate::Configured) refuses it...
+      Gori::CLI::Run.repeater_out_of_scope_for_spec(Gori::Outbound.cli(scope, false), plan).should be_true
+      # ...and --allow-unscoped (the operator waiver) lets it through.
+      Gori::CLI::Run.repeater_out_of_scope_for_spec(Gori::Outbound.cli(scope, true), plan).should be_false
+      # An in-scope origin is never refused.
+      in_plan = Gori::Repeater::Plan.build(
+        Gori::Repeater::PlanOptions.new(["GET /x HTTP/1.1\r\nHost: in.test\r\n\r\n".to_slice],
+          target: "http://in.test/x"), Gori::Outbound.cli(scope, false))
+      Gori::CLI::Run.repeater_out_of_scope_for_spec(Gori::Outbound.cli(scope, false), in_plan).should be_false
+    ensure
+      store.close
+      File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")
+    end
+  end
+end
+
 describe "gori run repeater send (session row → PlanOptions mapping)" do
   it "maps the session's target, http2, SNI and auto-CL toggle onto the plan" do
     rec = Gori::Store::RepeaterRecord.new(1_i64, "https://h.test:8443",

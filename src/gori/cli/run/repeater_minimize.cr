@@ -11,6 +11,7 @@ module Gori
         insecure = false
         apply = false
         format = :text
+        allow_unscoped = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -23,6 +24,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--apply", "Write the minimized request back into the repeater session") { apply = true }
           p.on("-k", "--insecure", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("--allow-unscoped", "Minimize even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -45,7 +47,7 @@ module Gori
           store.close
         end
         abort "gori run repeater minimize: no repeater session ##{id}" unless rec
-        outbound = project_outbound(project_name, db_path, false)
+        outbound = project_outbound(project_name, db_path, allow_unscoped)
 
         text = String.new(rec.request)
         scheme, host, port = minimize_target_or_abort(id, rec, text, outbound)
@@ -105,7 +107,14 @@ module Gori
         scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
         abort "gori run repeater minimize: could not determine a target host for session ##{id}" if host.empty?
         abort "gori run repeater minimize: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        if reason = outbound.send_block(scheme, host, Gori::Outbound.request_target(text))
+        target = Gori::Outbound.request_target(text)
+        # Layer 1 (include list): the configured project scope, waivable with --allow-unscoped —
+        # mirrors fuzz/mine/sequence and MCP minimize's scope_refusal (#406).
+        if outbound.check_request(scheme, host, target).blocked?
+          abort "gori run repeater minimize: #{host} is out of the project scope — add a scope include rule or pass --allow-unscoped"
+        end
+        # Layer 2 (Sandbox / exclude): applies even under --allow-unscoped.
+        if reason = outbound.send_block(scheme, host, target)
           abort "gori run repeater minimize: #{reason}"
         end
         {scheme, host, port}
