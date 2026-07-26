@@ -18,7 +18,12 @@ module Gori
         end
         scope = Scope.load(store)
         unless scope.add(kind, match_type, pattern)
-          return busy("failed to add scope rule (duplicate, empty, or invalid)")
+          # kind/match_type/pattern are already validated above, so a false here means the rule
+          # is a DUPLICATE — a deterministic condition that will never succeed on retry. Report it
+          # as a non-retryable INVALID_ARGUMENT, not PROJECT_BUSY/retryable (which made an agent
+          # that trusts `retryable` loop forever, #414).
+          return err("scope rule already exists (identical kind/match_type/pattern)",
+            "INVALID_ARGUMENT", field: "pattern")
         end
         # Scope#add reloads @rules from the store before returning, so this lookup
         # already sees the freshly assigned id.

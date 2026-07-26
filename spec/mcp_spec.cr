@@ -1648,6 +1648,20 @@ describe Gori::MCP::Server do
       end
     end
 
+    # #414: a duplicate rule is a deterministic rejection — reporting it retryable made an agent
+    # that trusts `retryable` loop forever. It must be a non-retryable INVALID_ARGUMENT.
+    it "rejects a duplicate rule as a non-retryable error" do
+      with_store do |store|
+        add = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_scope_rule","arguments":{"kind":"include","match_type":"host","pattern":"dup.example.com"}}})
+        drive(store, add)
+        dup = drive(store, add)[0]["result"]
+        dup["isError"].as_bool.should be_true
+        dup["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        dup["structuredContent"]["retryable"].as_bool.should be_false
+        store.scope_rules.size.should eq(1) # not duplicated
+      end
+    end
+
     it "toggles the scope lens on/off and reflects it in list_scope" do
       with_store do |store|
         listed0 = tool_payload(drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_scope"}}))[0])
