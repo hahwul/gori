@@ -213,9 +213,14 @@ module Gori::Proxy
       if rw = @rewriter
         rewritten = rw.rewrite_request(forward_head, host)
         if rewritten != forward_head
-          sent_head = rewritten
-          sent_req = Codec::Http1.parse_request_head(rewritten)
-          record_head = rw.rewrite_request(req.raw_head, host)
+          # A head rule that changed Content-Length/Transfer-Encoding must not desync the
+          # streamed body from the head we send (#403): the body streams UNTOUCHED (P6), so
+          # its framing is `forward_head`'s — restore that onto the rewritten head. No-op
+          # (byte-exact) when the rule left framing alone. `record_head` mirrors it so History
+          # shows exactly what went on the wire.
+          sent_head = restore_framing_headers(rewritten, forward_head)
+          sent_req = Codec::Http1.parse_request_head(sent_head)
+          record_head = restore_framing_headers(rw.rewrite_request(req.raw_head, host), req.raw_head)
           record_req = Codec::Http1.parse_request_head(record_head) unless record_head == req.raw_head
         end
       end
@@ -453,6 +458,17 @@ module Gori::Proxy
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
       sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp, host)
+      # A response head rule that changed Content-Length/Transfer-Encoding must not desync the
+      # body streamed to the client from the head sent (#403): the body streams UNTOUCHED, framed
+      # by the ORIGINAL response — restore that framing onto the rewritten head (byte-exact no-op
+      # when the rule left CL/TE alone) and re-parse so capture/streaming agree with the wire.
+      if sent_resp_head != resp_head
+        resynced = restore_framing_headers(sent_resp_head, resp_head)
+        unless resynced == sent_resp_head
+          sent_resp_head = resynced
+          sent_resp = Codec::Http1.parse_response_head(sent_resp_head)
+        end
+      end
       # Body framing must reflect the method the ORIGIN actually received (HEAD/CONNECT
       # are bodyless per RFC 7230 §3.3.3). A Match&Replace / intercept edit can rewrite
       # the request-line method, so key off sent_req, not the client's original req.
@@ -1251,6 +1267,46 @@ module Gori::Proxy
       end
       io << "Content-Length: " << len << eol << eol
       io.to_slice
+    end
+
+    # Force `sent_head`'s body-framing headers (Content-Length / Transfer-Encoding) to match
+    # `orig_head`'s. A head-only Match&Replace rewrite streams the body UNTOUCHED (P6), so the
+    # bytes forwarded are framed by the ORIGINAL head; if the rewrite changed CL/TE, the wire
+    # head would then declare a different body length than gori actually forwards — a
+    # self-inflicted request smuggle / response split (#403). The body-rewrite path already
+    # re-frames to the real length (reframe_to_length); this is the head-only counterpart:
+    # restore the original framing headers (in their original relative order) while keeping
+    # every other rewrite. A no-op — returning `sent_head` byte-for-byte (P7) — when the
+    # rewrite left CL/TE alone, which is the overwhelmingly common case.
+    private def restore_framing_headers(sent_head : Bytes, orig_head : Bytes) : Bytes
+      orig_framing = framing_header_lines(orig_head)
+      sent_framing = framing_header_lines(sent_head)
+      return sent_head if orig_framing == sent_framing # rewrite didn't touch framing → byte-exact
+
+      text = String.new(sent_head)
+      eol = text.index("\r\n") ? "\r\n" : "\n"
+      section = text.split(eol + eol, 2).first # headers up to the blank line
+      lines = section.split(eol)
+      io = IO::Memory.new(sent_head.size + 32)
+      io << lines.first << eol # request / status line, untouched
+      lines[1..].each do |line|
+        next if header_line_named?(line, "transfer-encoding") || header_line_named?(line, "content-length")
+        io << line << eol
+      end
+      orig_framing.each { |line| io << line << eol } # the framing that matches the streamed body
+      io << eol
+      io.to_slice
+    end
+
+    # The Content-Length / Transfer-Encoding header lines of a head, in order — the ones that
+    # decide the body boundary. Compared verbatim so an untouched rewrite stays byte-exact.
+    private def framing_header_lines(head : Bytes) : Array(String)
+      text = String.new(head)
+      eol = text.index("\r\n") ? "\r\n" : "\n"
+      section = text.split(eol + eol, 2).first
+      section.split(eol)[1..]?.try(&.select { |line|
+        header_line_named?(line, "content-length") || header_line_named?(line, "transfer-encoding")
+      }) || [] of String
     end
 
     # True when a header line's field-name (case-insensitive, ignoring leading space) is

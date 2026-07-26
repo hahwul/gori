@@ -65,6 +65,32 @@ private class BodyRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# A Match&Replace rewriter that SHRINKS the request head's Content-Length (a footgun rule,
+# or a deliberate one) without touching the body. The body streams untouched (P6), so unless
+# the head is re-synced the wire head declares fewer bytes than gori forwards — the leftover
+# tail then smuggles as a second request at the origin (#403).
+private class RequestCLShrinkRewriter < Gori::Proxy::HeadRewriter
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    String.new(head).gsub(/Content-Length: \d+/, "Content-Length: 4").to_slice
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    head
+  end
+end
+
+# The response-side counterpart: shrink the response head's Content-Length. Without a re-sync
+# the client is handed a head declaring fewer bytes than the body that follows (response split).
+private class ResponseCLShrinkRewriter < Gori::Proxy::HeadRewriter
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    head
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    String.new(head).gsub(/Content-Length: \d+/, "Content-Length: 2").to_slice
+  end
+end
+
 # Reads from a socket until `marker` appears (or the read times out / EOFs),
 # returning everything read so far. Used to frame one response off a keep-alive
 # connection without consuming the next one.
@@ -696,6 +722,62 @@ describe Gori::Proxy::Server do
 
     sink.requests.first.target.should eq("/hi")                    # capture = sent (modified) bytes
     String.new(sink.responses.first.head).should contain("200 YO") # capture = sent (modified) bytes
+  end
+
+  it "re-syncs a request head whose M&R rule changed Content-Length, so the body can't smuggle (#403)" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_body_origin("ok", seen_body)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: RequestCLShrinkRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    # The body's tail is a complete request line: if the shrunk Content-Length (4) reached
+    # the wire, the origin would read only "AAAA" and parse the rest as a SECOND request.
+    body = "AAAAGET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+    client << "POST /legit HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    # The origin framed the body by the head gori SENT — with the re-sync it declares the real
+    # length, so the whole body is one request (no smuggled tail). Without the fix this is "AAAA".
+    seen_body.receive.should eq(body)
+    # And the sent/captured head declares the real length, not the rewritten 4.
+    String.new(sink.requests.first.head).should contain("Content-Length: #{body.bytesize}")
+    String.new(sink.requests.first.head).should_not contain("Content-Length: 4")
+  end
+
+  it "re-syncs a response head whose M&R rule changed Content-Length, so it can't split (#403)" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("Hello!", seen) # 6-byte body, Content-Length: 6
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: ResponseCLShrinkRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    response = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen.receive # drain
+    # The head sent to the client declares the real body length (6), not the rewritten 2 —
+    # otherwise the 4 trailing bytes desync whatever reads the client's connection next.
+    response.should contain("Content-Length: 6")
+    response.should_not contain("Content-Length: 2")
+    response.should contain("Hello!")
+    String.new(sink.responses.first.head).should contain("Content-Length: 6")
   end
 
   it "rewrites request/response BODIES and re-frames Content-Length" do
