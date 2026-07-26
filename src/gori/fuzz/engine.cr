@@ -1,6 +1,7 @@
 require "uri"
 require "../repeater/engine"
 require "../repeater/h2_engine"
+require "../proxy/codec/http1"
 require "../outbound"
 require "../scope"
 
@@ -342,7 +343,25 @@ module Gori::Fuzz
     private def redirect_request(loc : String) : Bytes?
       o = @backend.origin
       path = resolve_redirect_path(loc, o)
-      return nil unless path
+      # The `Location` is chosen by whatever host answered, and the next line splices it
+      # straight into a request line — so it gets the same rule as any other remote-chosen
+      # request-line token (#397). Checked HERE rather than inside resolve_redirect_path
+      # because this is the method that assembles the bytes, and both of that method's
+      # branches (relative, and absolute-form same-origin — `URI.parse` keeps a raw space in
+      # `path` and `query` just as verbatim) reach the wire through it.
+      #
+      # Both halves of the rule are live here, not just the SP/TAB one. A bare LF or CR in a
+      # field-value survives `parse_headers` (which breaks lines on the two-byte CRLF only),
+      # and the response path gates on `framing_ambiguous?` rather than the stricter
+      # `obfuscated_header?` — so a `Location` carrying a smuggled request line that does not
+      # disturb framing reaches this method and used to put a whole second, attacker-chosen
+      # request on the connection. spec/fuzz/redirect_wire_spec.cr pins that off a real socket.
+      #
+      # An unsafe Location is not followed at all rather than percent-encoded: gori cannot
+      # know whether the origin meant a literal space or a broken link, and refusing leaves
+      # the run reporting the 3xx it actually got. That matches the existing treatment of a
+      # cross-origin Location — the chain stops, the 3xx is the result.
+      return nil unless path && Proxy::Codec::Http1.request_token_safe?(path)
       default = o.scheme == "https" ? 443 : 80
       host = o.port == default ? o.host : "#{o.host}:#{o.port}"
       "GET #{path} HTTP/1.1\r\nHost: #{host}\r\nConnection: close\r\n\r\n".to_slice

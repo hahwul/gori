@@ -127,4 +127,43 @@ describe Gori::Proxy::Codec::Http1 do
       Http1.read_head(IO::Memory.new("")).should be_nil
     end
   end
+
+  # The rule for text gori SYNTHESIZES into a request line. Its callers are the ones that build
+  # a request out of something a remote chose: `Fuzz::Engine`'s redirect follower (#397) and
+  # `MCP::RequestBuilder`'s method / target / host / header-name checks.
+  describe ".request_token_safe?" do
+    it "accepts an ordinary request target, including the punctuation a URL needs" do
+      Http1.request_token_safe?("/a/b?x=1&y=2#f").should be_true
+      Http1.request_token_safe?("*").should be_true
+      Http1.request_token_safe?("http://host:8080/p%20q").should be_true
+      Http1.request_token_safe?("GET").should be_true
+    end
+
+    it "rejects every octet that can break a request line into more tokens" do
+      # SP and TAB forge the line (`GET /a b HTTP/1.1` reads as target `/a`, version `b`);
+      # CR and LF splice a second request onto the connection; NUL and DEL are the remaining
+      # members of the same class and are never legal here either.
+      {" ", "\t", "\r", "\n", "\0", "\u007F"}.each do |c|
+        Http1.request_token_safe?("/a#{c}b").should be_false
+        Http1.request_token_safe?("/a#{c}").should be_false
+        Http1.request_token_safe?("#{c}/a").should be_false
+      end
+    end
+
+    it "accepts an empty string" do
+      # Emptiness is the caller's business (MCP raises its own "must not be empty" first);
+      # this predicate answers only "does it contain a line-breaking octet".
+      Http1.request_token_safe?("").should be_true
+    end
+
+    it "does not reject a non-ASCII target for being non-ASCII" do
+      # Every octet of a multi-byte UTF-8 sequence is >= 0x80, so none of them can trip the
+      # <= 0x20 test. Deliberately NOT claimed here: that a byte-wise scan and a char-wise one
+      # differ. They do not — 0x00-0x20 and 0x7F can never appear as UTF-8 continuation octets,
+      # so the two agree on every input, valid or invalid. The byte-wise form is preferred for
+      # being decode-free, not for a behaviour difference, and no example can pin that choice.
+      Http1.request_token_safe?("/검색?q=값").should be_true
+      Http1.request_token_safe?("/검색 ?q=값").should be_false
+    end
+  end
 end

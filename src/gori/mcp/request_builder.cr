@@ -1,6 +1,7 @@
 require "json"
 require "uri"
 require "../env"
+require "../proxy/codec/http1"
 
 module Gori
   module MCP
@@ -140,13 +141,14 @@ module Gori
         reject_token_breakers(method, "method #{method.inspect}")
       end
 
-      # Reject any whitespace or control octet (<= 0x20, incl. SP/TAB, or DEL) in
-      # `s`. Used for the method, header names, the request target, and the host —
-      # all single tokens where even a bare SP forges the request line
-      # (`GET /a b HTTP/1.1`: a lenient origin then reads target `/a`, version `b`).
+      # Raise unless `s` is safe as one request-line token. Used for the method, header
+      # names, the request target, and the host. The rule itself is
+      # `Codec::Http1.request_token_safe?` — this is only the MCP-shaped error around it, so
+      # that this surface and the engines that build a request line out of remote-chosen text
+      # (`Fuzz::Engine`'s redirect follower) cannot drift apart.
       private def self.reject_token_breakers(s : String, what : String) : Nil
-        s.each_char do |c|
-          raise Gori::Error.new("illegal whitespace/control character in #{what}") if c <= ' ' || c == '\u007F'
+        unless Proxy::Codec::Http1.request_token_safe?(s)
+          raise Gori::Error.new("illegal whitespace/control character in #{what}")
         end
       end
 

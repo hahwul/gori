@@ -170,6 +170,35 @@ module Gori::Proxy::Codec::Http1
     resp.raw_head
   end
 
+  # Whether `s` may be written onto a request line as ONE space-delimited token — the
+  # method, the request target, or an authority. False for any octet at or below SP
+  # (0x20, which covers SP, HTAB, CR, LF and NUL) and for DEL (0x7F).
+  #
+  # A request line is `METHOD SP target SP version`, so a single SP inside any of the three
+  # forges it: `GET /a b HTTP/1.1` reads to a lenient origin as target `/a` and version `b`,
+  # and gori then records a request it did not send. CR or LF is the worse half of the same
+  # class — it terminates the line and splices a second, fully attacker-chosen request onto
+  # the connection.
+  #
+  # This is the one home for that rule. gori has now hit the same shape in three subsystems
+  # (#390 a crawled `<a href>` in Discover, #394 a raw space in the same, #397 a redirect
+  # `Location` in the fuzzer), each time because the rule was written next to one caller and
+  # the next subsystem did not know it existed. It lives with the HTTP/1 framing predicates
+  # because that is what it is, and because every engine and every surface already depends on
+  # this codec — `Fuzz::Engine`'s redirect follower and the MCP request builder's
+  # `reject_token_breakers` both call it, and `Discover::Headers.safe_url?` (CR/LF only today)
+  # is the third caller once #394 settles whether Discover encodes or refuses.
+  #
+  # It does NOT apply to bytes an operator handed gori to replay: those go out verbatim,
+  # malformed or not (P7). It applies where gori SYNTHESIZES a request line out of text that
+  # a remote chose.
+  def self.request_token_safe?(s : String) : Bool
+    # Bytes, not chars: the multi-byte UTF-8 continuation octets are all >= 0x80, so this is
+    # identical to the char-wise test on valid input and correct on invalid input too.
+    s.each_byte { |b| return false if b <= 0x20_u8 || b == 0x7f_u8 }
+    true
+  end
+
   # Index of the CRLF at or after `from`, or nil if none. Scans the raw bytes so
   # the parser never materializes the whole head as a String (P7: raw is truth).
   private def self.index_crlf(raw : Bytes, from : Int32) : Int32?
