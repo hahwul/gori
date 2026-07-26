@@ -14,6 +14,32 @@ private class RouteBackend < D::Backend
   end
 end
 
+# Records the HOST of every fetch, not just the target — the only way to see what would have
+# gone onto a CONNECT line (`Upstream.dial_via_proxy` builds it from this argument).
+private class HostRecordingBackend < D::Backend
+  def initialize(@hosts : Array(String), @route : String -> R)
+  end
+
+  def fetch(scheme : String, host : String, port : Int32, target : String) : R
+    @hosts << host
+    @route.call(target)
+  end
+end
+
+# Drive an engine to completion and return {terminal event kinds, error messages}. The KINDS
+# list is what distinguishes a terminal error from an error followed by a success Done.
+private def terminal_of(engine : D::Engine) : {Array(Symbol), Array(String)}
+  kinds = [] of Symbol
+  messages = [] of String
+  engine.run do |ev|
+    case ev
+    when D::ErrorEvent then kinds << :error; messages << ev.message
+    when D::DoneEvent  then kinds << :done
+    end
+  end
+  {kinds, messages}
+end
+
 private def make(status : Int32, body : String, ctype : String? = "text/html", location : String? = nil) : R
   head = String.build do |s|
     s << "HTTP/1.1 " << status << " X\r\n"
@@ -343,9 +369,40 @@ describe Gori::Discover::Engine do
       findings.map(&.url).should contain("http://t/api/admin")
     end
 
+    it "brute-forces a seed whose path ends in a bare dot" do
+      # `/api/.` is the one dot-segment shape `Url.parse` used to leave alone, which made
+      # `@confine_path` unsatisfiable — nothing derived can equal `/api/.`, so the run went
+      # back to sending nothing. Normalizing it at parse is what keeps #395 true for this
+      # shape too.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
+      sent = [] of String
+      run_discover("http://t/api/.", ["admin"], cfg) { |t| sent << t; notfound }
+      sent.should contain("/api/admin")
+    end
+
+    it "drops a crawled link whose HOST carries a space, before it can reach a CONNECT line" do
+      # The sweep's chain for the #394 class: `<a href="http://ac me.acme.test/x">` passes
+      # `Headers.safe_url?` (a space is not CR/LF) and `same_or_subdomain?` containment, so on
+      # the way to the wire it would have reached `Upstream.dial_via_proxy`, which writes
+      # `CONNECT ac me.acme.test:80 HTTP/1.1` with no validation of its own. `Url.parse`
+      # refusing the host is what makes that unreachable; the byte-level half is in
+      # sender_spec's "with an upstream proxy configured".
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1,
+        retries: 0, containment: D::Containment::HostAndSubdomains)
+      hosts = [] of String
+      backend = HostRecordingBackend.new(hosts, ->(t : String) {
+        t == "/" ? html(%(<a href="http://ac me.acme.test/x">spaced host</a> <a href="http://ok.acme.test/y">ok</a>)) : html("an ordinary page")
+      })
+      D::Engine.new("http://acme.test/", [] of String, backend, cfg).run { |_ev| }
+      # The control: a sibling subdomain link on the same page WAS crawled, so this is a
+      # verdict about the host guard and not about a crawl that never happened.
+      hosts.should contain("ok.acme.test")
+      hosts.none?(&.includes?(' ')).should be_true
+    end
+
     it "keeps the brute-force base inside the confine for a deeper path and a query seed" do
       cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
-      %w(http://t/a/b http://t/api?x=1 http://t:8080/api).each do |seed|
+      %w[http://t/a/b http://t/api?x=1 http://t:8080/api].each do |seed|
         sent = [] of String
         run_discover(seed, ["admin"], cfg) do |t|
           sent << t
@@ -369,45 +426,52 @@ describe Gori::Discover::Engine do
     end
   end
 
-  # Issue #395, the general half: a run that sends nothing must say so.
-  describe "a run whose frontier comes up empty" do
-    it "ends in a terminal ErrorEvent instead of a clean 0-finding Done" do
+  # Issue #395, the general half: a run that puts nothing on the wire must say so. The
+  # condition is the SEND COUNTER, not an empty frontier — an empty frontier is only the
+  # shape #395 found.
+  describe "a run that sends nothing" do
+    it "ends in a terminal ErrorEvent when seeding enqueued nothing" do
       # Brute-force only, with the seed's own subtree refused by Layer 2. The seed itself is
       # allowed, so SEED_BLOCKED does not fire — yet not one request would go out.
-      #
-      # `concurrency: 4` is load-bearing, not decoration: the terminal event is emitted after
-      # the ordinary shutdown (close @jobs, join every worker), so if this path ever returned
-      # early instead, the four worker fibers would park on `@jobs.receive?` forever and this
-      # example would hang rather than fail.
       cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 4, retries: 0)
       sent = [] of String
       backend = RouteBackend.new(->(t : String) { sent << t; notfound })
       engine = D::Engine.new("http://t/api", ["admin"], backend, cfg,
         DenyExact.new(Set{"http://t/api/"}))
-      kinds = [] of Symbol
-      messages = [] of String
-      engine.run do |ev|
-        case ev
-        when D::ErrorEvent then kinds << :error; messages << ev.message
-        when D::DoneEvent  then kinds << :done
-        end
-      end
+      kinds, messages = terminal_of(engine)
+      kinds.should eq([:error])
+      messages.first.should eq(D::Engine::NOTHING_TO_SEND)
+      sent.should be_empty
+      # The terminal event is emitted AFTER the ordinary shutdown, never by returning early:
+      # with `concurrency: 4` an early return would leave four worker fibers parked on
+      # `@jobs.receive?` forever. `engine.run` would still return (it only waits on @events),
+      # so the leak is invisible unless the closed channel is asserted directly.
+      engine.@jobs.closed?.should be_true
+    end
+
+    it "ends in a terminal ErrorEvent when the frontier had work but every send was refused" do
+      # The half an empty-frontier test cannot see, and the one that became ordinary with #396:
+      # the seed IS enqueued (its Layer-2 check at construction passes, so SEED_BLOCKED does
+      # not fire) and then every send is refused per-URL in `send_with_retries`. This is
+      # exactly the shape a mid-run EXCLUDE now produces. `SCOPE_REFUSED` is a benign error, so
+      # `errors` stays 0 too — without the send-counter condition the run is completely silent.
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      sent = [] of String
+      backend = RouteBackend.new(->(t : String) { sent << t; notfound })
+      engine = D::Engine.new("http://t/api", [] of String, backend, cfg, DenyAfterFirstAsk.new)
+      kinds, messages = terminal_of(engine)
       kinds.should eq([:error])
       messages.first.should eq(D::Engine::NOTHING_TO_SEND)
       sent.should be_empty
     end
 
-    it "still emits a normal Done when the frontier had work (the control)" do
+    it "still emits a normal Done as soon as ONE request goes out (the control)" do
       cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
-      kinds = [] of Symbol
-      backend = RouteBackend.new(->(_t : String) { notfound })
-      D::Engine.new("http://t/api", ["admin"], backend, cfg).run do |ev|
-        case ev
-        when D::ErrorEvent then kinds << :error
-        when D::DoneEvent  then kinds << :done
-        end
-      end
+      sent = [] of String
+      backend = RouteBackend.new(->(t : String) { sent << t; notfound })
+      kinds, _ = terminal_of(D::Engine.new("http://t/api", ["admin"], backend, cfg))
       kinds.should eq([:done])
+      sent.should_not be_empty
     end
   end
 

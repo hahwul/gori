@@ -121,6 +121,19 @@ describe Gori::Discover::Url do
       U.parse("http://h/a/./b").not_nil!.path.should eq("/a/b")
     end
 
+    it "collapses a TRAILING bare dot, which the other dot-segment shapes do not cover" do
+      # `/a/.` trips none of `..`, `./`, `//`, so it used to survive un-normalized — the one
+      # dot-segment shape `parse` let through. It matters since #395 derives the brute-force
+      # base from the seed's path: a `@confine_path` of `/api/.` is unsatisfiable, because
+      # every URL derived from it comes back through here normalized.
+      U.parse("http://h/a/.").not_nil!.path.should eq("/a")
+      U.parse("http://h/.").not_nil!.path.should eq("/")
+      # A leading dot is an ordinary segment name and must NOT be touched.
+      U.parse("http://h/a/.env").not_nil!.path.should eq("/a/.env")
+      U.parse("http://h/.well-known/x").not_nil!.path.should eq("/.well-known/x")
+      U.parse("http://h/a/./b").not_nil!.path.should eq("/a/b")
+    end
+
     it "defaults an empty path to /" do
       U.parse("http://h").not_nil!.path.should eq("/")
     end
@@ -198,18 +211,42 @@ describe Gori::Discover::Url do
   # line's field separator — and `URI.parse` keeps a raw one verbatim in both path and query.
   # The class is every octet <= 0x20 plus DEL; the remedy splits by what the octet does.
   describe "request-line octets" do
-    describe ".request_line_safe?" do
+    # The class itself has ONE home (`Codec::Http1.request_token_safe?`, #397) and is specced
+    # there. What has to be pinned HERE is that Discover's per-octet repair set agrees with it
+    # exactly: the encoder needs a per-BYTE test and cannot call a string predicate once per
+    # byte, so the class is written twice — this is what stops the two drifting.
+    it "encodes exactly the class the codec refuses, minus the framing pair" do
+      # The expectation is DERIVED from the codec's predicate, never a second copy of the
+      # range, so widening the class there and not here fails this example. Measured through
+      # `parse` rather than the private per-byte helper: what matters is the octet a request
+      # line would carry. NUL is skipped — `URI.parse` truncates the path at one, so it never
+      # reaches the encoder to be observed.
+      (0x01..0x7F).each do |b|
+        c = b.unsafe_chr
+        path = U.parse("http://h/x#{c}y").try(&.path)
+        next if path.nil?
+        refused = !Gori::Proxy::Codec::Http1.request_token_safe?(c.to_s)
+        framing = b == 0x0d || b == 0x0a
+        if refused && !framing
+          path.should eq("/x%#{b.to_s(16, upcase: true).rjust(2, '0')}y"), "octet 0x#{b.to_s(16)}"
+        elsif framing
+          path.should eq("/x#{c}y"), "framing octet 0x#{b.to_s(16)} must stay raw"
+        end
+      end
+    end
+
+    describe "the codec's class, as Discover applies it" do
       it "is false for every octet <= 0x20 and for DEL, true above them" do
-        (0..0x20).each { |b| U.request_line_safe?("/a#{b.unsafe_chr}b").should be_false }
-        U.request_line_safe?("/a\u007Fb").should be_false
-        U.request_line_safe?("/a~b").should be_true # 0x7E, the char below DEL
-        U.request_line_safe?("/my%20file.pdf?q=1&r=2").should be_true
+        (0..0x20).each { |b| Gori::Proxy::Codec::Http1.request_token_safe?("/a#{b.unsafe_chr}b").should be_false }
+        Gori::Proxy::Codec::Http1.request_token_safe?("/a\u007Fb").should be_false
+        Gori::Proxy::Codec::Http1.request_token_safe?("/a~b").should be_true # 0x7E, the char below DEL
+        Gori::Proxy::Codec::Http1.request_token_safe?("/my%20file.pdf?q=1&r=2").should be_true
       end
 
       it "is true for a multi-byte UTF-8 path (the check is byte-wise, not char-wise)" do
         # Every continuation byte is >= 0x80, so a non-ASCII path must not be caught by a
         # test written against the 0x00..0x20 range.
-        U.request_line_safe?("/문서/파일.pdf").should be_true
+        Gori::Proxy::Codec::Http1.request_token_safe?("/문서/파일.pdf").should be_true
       end
     end
 
@@ -219,7 +256,7 @@ describe Gori::Discover::Url do
         # /my%20file.pdf. Rejecting it would silently shrink the crawl's coverage.
         p = U.parse("http://h/my file.pdf").not_nil!
         p.path.should eq("/my%20file.pdf")
-        U.request_line_safe?(p.path).should be_true
+        Gori::Proxy::Codec::Http1.request_token_safe?(p.path).should be_true
       end
 
       it "percent-encodes a raw space in the query" do
@@ -242,7 +279,7 @@ describe Gori::Discover::Url do
         # and what matters is that the CR/LF survive so the gates below can still refuse.
         p.path.should eq("/a\r\nX-Injected:%201")
         Gori::Discover::Headers.safe_url?(p).should be_false
-        U.request_line_safe?(p.path).should be_false
+        Gori::Proxy::Codec::Http1.request_token_safe?(p.path).should be_false
       end
 
       it "is idempotent — an already-encoded path never becomes %2520" do

@@ -86,11 +86,11 @@ module Gori::Discover
     # the connection. Checking only the path would leave the other two open.
     #
     # This is the FRAMING half of the octets a request line cannot carry, and the half whose
-    # answer is refusal. `Url.request_line_safe?` names the whole class (every octet <= 0x20
-    # plus DEL — SP and TAB separate the line's fields without starting a second message), and
-    # `Url.encode_unsafe` repairs the rest at parse instead of dropping it, because a space in
-    # an href is ordinary handwritten HTML (#394). Nothing that reaches this predicate has a
-    # repair.
+    # answer is refusal. `Codec::Http1.request_token_safe?` is the whole class and its one home
+    # (every octet <= 0x20 plus DEL — SP and TAB separate the line's fields without starting a
+    # second message); `Url.parse` percent-encodes the rest instead of dropping it, because a
+    # space in an href is ordinary handwritten HTML (#394). Nothing that reaches this predicate
+    # has a repair.
     def self.safe_url?(parts : Url::Parts) : Bool
       q = parts.query
       safe_value?(parts.host) && safe_value?(parts.path) && (q.nil? || safe_value?(q))

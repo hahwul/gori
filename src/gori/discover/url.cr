@@ -1,4 +1,5 @@
 require "uri"
+require "../proxy/codec/http1"
 
 module Gori::Discover
   # URL parsing, normalization, and the TWO keys that make trap prevention work:
@@ -15,7 +16,7 @@ module Gori::Discover
 
     # Parse an absolute http(s) URL into normalized Parts (host lowercased, path defaulted
     # to "/"), or nil for a non-http / hostless / unparseable URL — or for one whose HOST
-    # carries an octet that cannot be framed (see `request_line_safe?`).
+    # carries an octet that cannot be framed (`Codec::Http1.request_token_safe?`).
     def self.parse(url : String) : Parts?
       uri = URI.parse(url) rescue return nil
       host = uri.host
@@ -26,7 +27,11 @@ module Gori::Discover
       # `://` all sit outside `uri.host`). `URI.parse` copies such a host in verbatim —
       # `http://a b/x` yields `"a b"` — so this is the only line that can refuse it, and nil
       # is the exit every unparseable URL already takes.
-      return nil unless request_line_safe?(host)
+      #
+      # It is also the only line that can protect the CONNECT line: with an upstream proxy
+      # configured, `Upstream.dial` writes `CONNECT #{host}:#{port} HTTP/1.1` out of this
+      # host, and that line is synthesized far below any Discover gate.
+      return nil unless Proxy::Codec::Http1.request_token_safe?(host)
       scheme = (uri.scheme || "http").downcase
       return nil unless scheme == "http" || scheme == "https"
       port = uri.port || (scheme == "https" ? 443 : 80)
@@ -37,7 +42,17 @@ module Gori::Discover
       return "/" if path.nil? || path.empty?
       # Collapse dot-segments so /a/../b and /b share one visit_key (avoids a re-crawl of the
       # same resource reached via an absolute href, which resolve() returns un-normalized).
-      path = normalize_path(path) if path.includes?("..") || path.includes?("./") || path.includes?("//")
+      #
+      # `ends_with?("/.")` catches a TRAILING bare dot, which the other three tests miss:
+      # `/a/..` and `/a/./` both trip them, `/a/.` trips none, so it came back un-normalized
+      # and `/a/.` and `/a/` were two visit_keys for one resource. That mattered little until
+      # `bruteforce_root` (#395) started deriving the brute-force base from the seed's path:
+      # a seed of `/api/.` produced the confine `/api/.`, which NOTHING can satisfy, since
+      # every derived URL comes back through here normalized. The run then brute-forced
+      # nothing — the exact shape #395 exists to remove.
+      if path.includes?("..") || path.includes?("./") || path.includes?("//") || path.ends_with?("/.")
+        path = normalize_path(path)
+      end
       encode_unsafe(path)
     end
 
@@ -48,26 +63,15 @@ module Gori::Discover
 
     PCT_HEX = "0123456789ABCDEF"
 
-    # True when `s` can go onto a request line as-is.
-    #
-    # `Sender#build_get` writes `GET #{target} HTTP/1.1\r\nHost: #{host}\r\n`, so an octet
-    # <= 0x20 or 0x7F is unrepresentable in either slot: SP and TAB separate the request
-    # line's three fields, CR and LF end it, and RFC 3986 forbids the rest unencoded anyway.
-    # One class, stated once, rather than the CR/LF pair that #390 named and the space that
-    # #394 found afterwards. `src/gori/mcp/request_builder.cr` (`reject_token_breakers`)
-    # already applies exactly this rule to the method, the target and the host.
-    #
-    # Byte-wise, not char-wise: a percent-encoded or multi-byte UTF-8 path is untouched
-    # (every continuation byte is >= 0x80).
-    def self.request_line_safe?(s : String) : Bool
-      s.each_byte { |b| return false if b <= 0x20_u8 || b == 0x7f_u8 }
-      true
-    end
-
     # Percent-encode the request-line breakers that a PATH or QUERY may legitimately carry.
     #
-    # The class `request_line_safe?` names has two halves, and they get different remedies
-    # because they do different things to the wire:
+    # The class is `Codec::Http1.request_token_safe?`'s and is not restated here: every octet
+    # <= 0x20 or 0x7F, because `Sender#build_get` writes `GET #{target} HTTP/1.1` and those
+    # octets are unrepresentable in a request-line token. That predicate is the rule's one
+    # home (#397); this method is the only thing Discover adds to it — a REPAIR for the half
+    # of the class that has one.
+    #
+    # The two halves get different remedies because they do different things to the wire:
     #
     #   * CR and LF FRAME. They do not corrupt one request line, they end it and start a
     #     second message (#390). No author writes them into an `<a href>`, so they are left
@@ -104,6 +108,12 @@ module Gori::Discover
       end
     end
 
+    # Membership in the repairable half, per octet. The string-level rule lives in the codec
+    # and must not be restated — but the encoder needs a per-BYTE test, and calling the
+    # codec's predicate once per octet would allocate a String per byte on a path that runs
+    # for every considered link and every brute-force candidate. So this is the one place the
+    # class is written twice, and `url_spec` pins the two against each other over all 256
+    # octets: `encodable?(b) == !request_token_safe?(b) && b is not CR/LF`, for every b.
     private def self.encodable?(b : UInt8) : Bool
       (b <= 0x20_u8 || b == 0x7f_u8) && b != 0x0d_u8 && b != 0x0a_u8
     end

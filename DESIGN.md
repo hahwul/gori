@@ -604,13 +604,12 @@ defect. The malformed line then persisted into the stored flow head via `Discove
 (`Import::Builder::CONTROL_CHAR` is `[\x00-\x1f\x7f]`, which does not cover 0x20), so a
 byte-exact Repeater re-send reproduced it.
 
-The rule is now stated once, over the whole octet class rather than the two members each
-incident happened to name: **`Url.request_line_safe?` — no octet `<= 0x20` or `0x7F` reaches a
-request line raw.** That is the rule `src/gori/mcp/request_builder.cr`'s `reject_token_breakers`
-already applies to the method, the target and the host.
+The rule is not restated here. It is `Proxy::Codec::Http1.request_token_safe?` — no octet
+`<= 0x20` or `0x7F` reaches a request line raw — which the #397 fix made the one home for
+exactly this class, after gori hit it in three subsystems in a week. Discover adds only the
+part that is its own: a **repair** for the half of the class that has one.
 
-The *remedy* splits, and the split is by what the octet does to the wire rather than by which
-issue found it:
+The remedy splits by what the octet does to the wire, not by which issue found it:
 
 - **CR and LF frame.** They do not corrupt one request line, they end it and begin a second
   message (#390). No author writes one into an href. They are **refused** — dropped at every
@@ -621,6 +620,14 @@ issue found it:
   second. A space in an href is a real resource a browser fetches, so refusing it would silently
   shrink a crawl's coverage — the failure mode this project treats as worse than an error
   ([P4](#p4)). They are **percent-encoded**, which is lossless and is what every browser does.
+
+This is deliberately the opposite call from #397, which **refuses** an unsafe redirect
+`Location` on the same octet class, and the difference is provenance rather than inconsistency.
+A page's own `<a href>` is text that page authored and that a browser would encode before
+fetching, so encoding reproduces what the link meant. A redirect `Location` is named by whatever
+host answered; encoding it would invent a URL the origin never named while gori recorded it as
+sent. Same class, same one predicate, different answer because the input is a different kind of
+thing.
 
 Encoded at **parse** (`Url.parse`), not in `build_get`, because a URL must have exactly one
 spelling: `visit_key`, `template_key`, the Layer-2 gate question, the `Finding`, and the Sitemap
@@ -633,14 +640,26 @@ the class), which `#{bl.dir}#{cand}` and every re-crawled link rely on.
 
 The **host** is refused rather than repaired, by `Url.parse` returning nil: percent-encoding is
 defined for a path, not for a reg-name, and `Import::Builder::HOST_INVALID` already records that
-a real host never carries one of these octets.
+a real host never carries one of these octets. That refusal turned out to close the question
+#397 left open. #397 could not demonstrate a live path to the unguarded
+`CONNECT #{authority} HTTP/1.1` in `proxy/upstream.cr`; there is one, and it runs through here.
+A crawled `<a href="http://ac me.acme.test/x">` passes `Headers.safe_url?` (a space is not
+CR/LF) and `same_or_subdomain?` containment, and with an upstream proxy configured its host
+reaches `Upstream.dial_via_proxy` verbatim. Refusing at parse makes it unreachable, and refusing
+at parse is the only place that covers BOTH synthesized request lines — the GET and the CONNECT —
+since the CONNECT is built far below any Discover gate. `sender_spec` pins it on the socket.
 
 `Sender#fetch` now refuses the whole class rather than CR/LF. That costs no coverage — the
 repairable half never reaches it, having been encoded upstream — and it means the wire seam can
 state the invariant it is there to state: a Discover run never puts a malformed or doubled
 request line on a connection.
 
-### 2026-07-26: a path-confined run brute-forces its own subtree, and an empty frontier is an error
+One instance of the same root cause is knowingly left open, because it is outside this
+subsystem: `Import::Builder::CONTROL_CHAR` (`import/builder.cr`) still stops at `\x1f`, so a
+raw space in a request target imported from a HAR or `--urls` file is stored and replayed
+byte-exact. `HOST_INVALID` covers space, but only for the host.
+
+### 2026-07-26: a path-confined run brute-forces its own subtree, and a run that sends nothing says so
 
 Refines: [P4](#p4). Issue #395, adjacent to #393.
 
@@ -661,16 +680,33 @@ nothing to do" answers a question nobody asked: a seed path deeper than `/` mean
 rooted here* (`confined?`), so **the brute-force base is that subtree's root as a directory**,
 not the seed's containing directory. `/api` and `/api/` therefore both calibrate `http://t/api/`,
 `/a/b` calibrates `http://t/a/b/`, and a seed at `/` is unchanged (no confine, so `dir_of`).
-Every row of the issue's matrix that already worked keeps its exact behaviour; the derivation
-never reaches outside what the operator typed.
 
-Separately, and as the general backstop: **an empty frontier after seeding is now a terminal
-`ErrorEvent`** (`Engine::NOTHING_TO_SEND`), not a `DoneEvent` with zero findings. This is the
-same [P4](#p4) argument `Engine::SEED_BLOCKED` records — an operator reads "0 found" as "there
-is nothing there" rather than "gori sent nothing" — applied to every present and future reason
-the frontier can come up empty, rather than to the one shape this issue found. After the fix
-above the remaining reason is a Layer-2 or containment refusal of the brute-force root on a
-`--no-spider` run, which is a decision worth naming out loud.
+Two consequences are worth stating plainly rather than leaving a reader to discover them:
+
+- The base appends a slash the operator did not type. `/api` and `/api/` are distinct resources
+  on an origin that cares, and the probes now go under the latter. That is the only reading
+  under which a file-shaped seed has a subtree at all, and it is what `build_discover_seed`
+  already does when a run is seeded from Sitemap or History.
+- A file-shaped seed with the spider on now calibrates **twice**, at `/api/` and at the origin
+  root, where it previously calibrated once. The root calibration is the one #393 added to gate
+  `robots.txt`/`sitemap.xml`; it used to be reached because `enqueue_dir` had FAILED and left
+  `@dirs` empty. Both are needed once the subtree is really probed. The rows of the issue's
+  matrix that already brute-forced something — `http://t/` and `http://t/api/` — are unchanged
+  in both request count and destination.
+
+`Url.parse` also now collapses a trailing bare `.`, the one dot-segment shape it let through
+(`/a/.` trips none of `..`, `./`, `//`). That was harmless while nothing read the seed's path
+back, but this entry's derivation does: a seed of `/api/.` produced the confine `/api/.`, which
+nothing can satisfy, and the run went straight back to brute-forcing nothing.
+
+Separately, as the general backstop: **a run that puts no request on the wire now ends in a
+terminal `ErrorEvent`** (`Engine::NOTHING_TO_SEND`) rather than a `DoneEvent` with zero
+findings. The condition is the send counter, deliberately, and not "seeding enqueued nothing" —
+an empty frontier is only the shape this issue found. A frontier whose every task is refused
+later by the per-URL Layer-2 gate ends in exactly the same silence, and `SCOPE_REFUSED` is a
+benign error, so even the error count stays 0. That state became ordinary the moment the gate
+started re-reading the scope mid-run (entry below). A run the operator STOPPED is exempt:
+stopping before the first send is a decision, not a failure to have anything to do.
 
 ### 2026-07-26: Discover's Layer-2 gate reloads on the same schedule as every other sweep
 
@@ -696,8 +732,21 @@ last-known rules stay in force rather than the run breaking or failing open. Thr
 `Outbound` into the engine was rejected for the reason the `ScopePolicy` seam exists at all: the
 engine is deliberately Store-free ([§2.1](#s2-1)).
 
-`boundary?` deliberately does not reload. It is Layer 1, and its only caller (`bounded_url`)
-asks it immediately after `allowed?`, so it already reads rules that call refreshed.
+**`configured?` is snapshotted at construction, and that is the load-bearing half of this
+entry.** It answers "is there a scope to bound the crawl", which is what switches
+`Containment::ScopeAware` between the same-origin fallback and `boundary?` — a Layer-1 question.
+Delegating it live would let the reload rewrite the containment mode mid-run, and the direction
+it rewrites in is catastrophic: on a project with no rules, an operator adding the single
+canonical `exclude string logout` flips `configured?` false to true, and `matches_url?` requires
+at least one INCLUDE (`Scope#allowlisted_unlocked?` — an excludes-only scope is deliberately not
+an allowed range), so `boundary?` becomes false for every URL. The operator asked to skip one
+path and the whole crawl would stop, silently, which is the [P4](#p4) failure the entry above
+exists to remove. [§3](#s3) and the #354 entry already draw the line this respects: Layer 1's
+strictness is settled per surface before the first byte, Layer 2 is the layer that is identical
+everywhere and applied continuously. #396 asked for the second, not the first.
+
+`boundary?` itself needs no reload of its own: its only caller (`bounded_url`) asks it
+immediately after `allowed?`, so it already reads whatever that call refreshed.
 
 ---
 

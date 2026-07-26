@@ -21,6 +21,24 @@ private def notfound : R
   R.new(head, "not found".to_slice, Gori::Proxy::Codec::Http1.parse_response_head(head), 1000_i64)
 end
 
+# A Scope whose `reload` raises once armed — the only way to exercise `StoreScope#refresh`'s
+# rescue, since a closed Store keeps answering.
+private class RaisingScope < Gori::Scope
+  getter reload_attempts = 0
+
+  def arm! : Nil
+    @armed = true
+  end
+
+  def reload : Nil
+    @reload_attempts += 1
+    raise "scope reload failed" if @armed
+    super
+  end
+
+  @armed = false
+end
+
 private class RouteBackend < D::Backend
   def initialize(@route : String -> R)
   end
@@ -62,25 +80,47 @@ describe Gori::Discover::StoreScope do
       end
     end
 
-    it "keeps the last-known scope when the reload fails (a closed store must not fail open)" do
-      path = File.tempname("gori-discover-closed", ".db")
-      store = Gori::Store.open(path)
-      scope = Gori::Scope.load(store)
-      scope.add("include", "host", "acme.test")
-      scope.enable_sandbox
-      policy = D::StoreScope.new(scope)
-      store.close
-      begin
+    it "keeps the last-known scope when the reload RAISES (must not fail open, must not die)" do
+      # Driven by a Scope whose `reload` actually raises. Closing the store is NOT enough to
+      # produce that: SQLite keeps serving the handle, so a spec written that way asserts
+      # nothing — it passes identically with the `rescue` deleted.
+      with_store do |store|
+        scope = RaisingScope.new(store, [] of Gori::Scope::Rule, true, false)
+        scope.add("include", "host", "acme.test")
+        scope.enable_sandbox
+        policy = D::StoreScope.new(scope)
+        scope.arm!
         sleep(Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds)
-        # The reload raises against the closed store and is swallowed: the rules loaded before
-        # the close stay in force, so Sandbox still blocks an off-allowlist host rather than
-        # the run dying or degrading to allow-everything.
+        # The raise is swallowed and the rules loaded before it stay in force: Sandbox still
+        # blocks an off-allowlist host rather than the run dying or allowing everything.
         policy.allowed?("https://acme.test/s", "acme.test").should be_true
         policy.allowed?("https://other.test/s", "other.test").should be_false
-      ensure
-        File.delete?(path)
-        File.delete?("#{path}-wal")
-        File.delete?("#{path}-shm")
+        scope.reload_attempts.should be > 0
+      end
+    end
+
+    it "does not let the reload rewrite Layer-1 containment mid-run" do
+      # The reload is Layer 2 only. `configured?` decides whether ScopeAware containment uses
+      # the include boundary or falls back to same-origin, and on a rule-less project one
+      # added EXCLUDE would flip it true — at which point `matches_url?` refuses everything,
+      # because it requires at least one INCLUDE. The operator asked to skip one path; the
+      # whole crawl would stop.
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        policy = D::StoreScope.new(scope)
+        policy.configured?.should be_false
+
+        store.add_scope_rule("exclude", "string", "logout")
+        sleep(Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds)
+
+        # Layer 2 bites — that is the whole point of #396 …
+        policy.allowed?("http://t/logout", "t").should be_false
+        # … while Layer 1 stays exactly as the surface settled it before the first byte, so an
+        # ordinary link is still judged by same-origin rather than by an empty allowlist.
+        policy.configured?.should be_false
+        policy.allowed?("http://t/users", "t").should be_true
+        # The live scope really did flip; only the policy's Layer-1 answer is pinned.
+        scope.configured?.should be_true
       end
     end
 

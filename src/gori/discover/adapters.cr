@@ -12,9 +12,11 @@ module Gori::Discover
   # include allowlist is the boundary for scope-aware containment.
   class StoreScope < ScopePolicy
     @last_reload : Time::Instant
+    @configured : Bool
 
     def initialize(@scope : Gori::Scope)
       @last_reload = Time.instant
+      @configured = @scope.configured?
     end
 
     # Layer 2, and therefore the line that owes DESIGN.md §7's "one reload semantic for the
@@ -33,14 +35,29 @@ module Gori::Discover
       !@scope.sandbox_blocks?(url, host) && !@scope.excluded?(url, host)
     end
 
-    # Layer 1, and deliberately NOT reloaded: its only caller (`Engine#bounded_url`) asks it
-    # immediately after `allowed?`, so it already reads whatever that call refreshed.
+    # Layer 1, whose only caller (`Engine#bounded_url`) asks it immediately after `allowed?`,
+    # so it already reads whatever that call refreshed.
     def boundary?(url : String, host : String) : Bool
       @scope.matches_url?(url, host)
     end
 
+    # Layer 1, and SNAPSHOT at construction on purpose — the one thing the #396 reload must
+    # not make mutable.
+    #
+    # This answers "does a scope exist to bound the crawl", which is what switches
+    # `Containment::ScopeAware` between the same-origin fallback and `boundary?`. Delegating
+    # it live would let the reload rewrite the containment mode mid-run, and the direction it
+    # rewrites in is catastrophic: on a project with NO rules, an operator adding the single
+    # canonical `exclude string logout` flips `configured?` false→true, and `matches_url?`
+    # requires at least one INCLUDE (`Scope#allowlisted_unlocked?` — an excludes-only scope is
+    # deliberately not an allowed range), so `boundary?` becomes false for EVERY url. The
+    # operator asked to skip one path and the whole crawl would stop, silently.
+    #
+    # DESIGN.md §3 and the #354 entry already draw this line: Layer 1's strictness is settled
+    # per surface before the first byte, Layer 2 is the layer that is identical everywhere and
+    # applied continuously. #396 asked for the second, not the first.
     def configured? : Bool
-      @scope.configured?
+      @configured
     end
 
     # `Outbound#refresh`, mirrored rather than re-decided — including the interval constant, so

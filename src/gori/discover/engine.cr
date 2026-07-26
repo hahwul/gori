@@ -51,11 +51,11 @@ module Gori::Discover
     # forwarding in absolute form. Returned as a benign error Result rather than raised: the
     # caller's contract is one Result per fetch, and one poisoned link must not end the run.
     #
-    # The refusal covers the whole `Url.request_line_safe?` class, not just CR/LF: a bare SP
-    # forges the line just as effectively (`GET /a b HTTP/1.1` — a lenient origin reads target
-    # `/a`, version `b`), which is what #394 found after #390. Nothing legitimate is lost by
-    # refusing the repairable half here, because `Url.parse` has already percent-encoded it
-    # upstream — this line only ever sees a target no repair applies to.
+    # The refusal covers the whole `Codec::Http1.request_token_safe?` class, not just CR/LF: a
+    # bare SP forges the line just as effectively (`GET /a b HTTP/1.1` — a lenient origin reads
+    # target `/a`, version `b`), which is what #394 found after #390. Nothing legitimate is
+    # lost by refusing the repairable half here, because `Url.parse` has already
+    # percent-encoded it upstream — this line only ever sees a target no repair applies to.
     UNSAFE_URL = "url contains whitespace or a control character"
 
     @header_block : String
@@ -75,7 +75,7 @@ module Gori::Discover
       # this is the only line every send provably passes, so the guarantee "a Discover run
       # never puts a malformed or doubled request line on a connection" is stated where it can
       # actually be enforced (see UNSAFE_URL).
-      unless Url.request_line_safe?(target) && Url.request_line_safe?(host)
+      unless Proxy::Codec::Http1.request_token_safe?(target) && Proxy::Codec::Http1.request_token_safe?(host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
       end
       req = build_get(scheme, host, port, target)
@@ -169,12 +169,17 @@ module Gori::Discover
     # cap: a benign Result, no network, and NOT counted as an error — a scope refusal is a
     # decision the operator asked for, not a failure of the run.
     SCOPE_REFUSED = "blocked by scope (Sandbox or an exclude rule)"
-    # Seeding enqueued nothing, so the run would send zero requests and still finish with a
-    # clean DoneEvent — "0 found", which an operator reads as "there is nothing there" rather
-    # than "gori sent nothing" (P4). Terminal for exactly the reason SEED_BLOCKED is, and
-    # written as a backstop over the whole condition rather than over the one shape that
-    # produced it (#395): whatever the reason the frontier comes up empty, the run says so.
-    NOTHING_TO_SEND = "nothing to send: no crawl page or brute-force directory survived the scope and containment gates"
+    # The run reached its end without putting a single request on the wire, so a DoneEvent
+    # would report "0 found" — which an operator reads as "there is nothing there" rather than
+    # "gori sent nothing" (P4). Terminal for exactly the reason SEED_BLOCKED is.
+    #
+    # The condition is `@capped.sent == 0`, deliberately, and NOT "seeding enqueued nothing".
+    # An empty frontier is only the shape #395 found; a frontier whose every task is refused
+    # later by the per-URL Layer-2 gate in `send_with_retries` ends in the same silence, and
+    # that state became ordinary the moment the gate started re-reading the scope mid-run
+    # (#396). Anchoring on the send counter covers both, plus whatever comes next: if nothing
+    # went out, the run says so.
+    NOTHING_TO_SEND = "nothing to send: no crawl page or brute-force candidate survived the scope and containment gates"
 
     enum State : UInt8
       Running
@@ -321,14 +326,6 @@ module Gori::Discover
 
     private def orchestrate : Nil
       seed_frontier
-      # Seeding is the ONLY source of initial work, so an empty frontier here means the run
-      # will send nothing at all (see NOTHING_TO_SEND). Recorded now and emitted as the run's
-      # terminal event at the bottom rather than returned early: `start` has already spawned
-      # the workers, so the shutdown sequence below (close @jobs, join every worker) has to
-      # run on this path too or they park on `@jobs.receive?` forever — the fiber + socket
-      # leak the rescue clause guards against. The loop itself is a no-op with an empty
-      # frontier and no pending work: it breaks on its first iteration.
-      nothing_to_send = @frontier.empty?
       @phase = Phase::Crawling
       interval = pace_interval
       loop do
@@ -357,9 +354,17 @@ module Gori::Discover
       drain_pending
       @jobs.close
       @concurrency.times { @finished.receive }
-      # ErrorEvent is terminal — no trailing DoneEvent — so a consumer cannot settle a
-      # "0 found" success over it, the same shape `start`'s setup-error path uses.
-      if nothing_to_send
+      # A run that put nothing on the wire ends in a terminal ErrorEvent — no trailing
+      # DoneEvent, so a consumer cannot settle a "0 found" success over it, the same shape
+      # `start`'s setup-error path uses (see NOTHING_TO_SEND). Decided HERE rather than right
+      # after `seed_frontier` for two reasons: the send counter is only final once the run is,
+      # and the shutdown sequence above (close @jobs, join every worker) has to run either way
+      # or the workers park on `@jobs.receive?` forever — the fiber + socket leak the rescue
+      # clause below guards against.
+      #
+      # A run the operator STOPPED is exempt: stopping before the first send is a decision, not
+      # a failure to have anything to do.
+      if @capped.sent == 0 && @state != State::Stopped
         @events.send(ErrorEvent.new(NOTHING_TO_SEND))
       else
         @events.send(DoneEvent.new(progress_snapshot, run_stats, @state == State::Stopped))
@@ -883,8 +888,10 @@ module Gori::Discover
       #
       # `Url.gate_url`, not `Url.normalize`: the `dir + cand` concat is unnormalized, and the
       # scope must be asked in the port-less form every other Layer-2 consumer uses — see
-      # `Url.gate_url`. NOTE the engine holds a snapshot policy, so this does NOT pick up a
-      # scope edit made mid-run except in the TUI, where the `Scope` object is shared live.
+      # `Url.gate_url`. The policy re-reads its rules on the schedule every other sweep uses
+      # (`StoreScope#allowed?`, throttled to `Outbound::RELOAD_INTERVAL`), so a scope edit made
+      # while the run is in flight stops it here within that window — on every surface, not
+      # only in the TUI where the `Scope` object happens to be shared live (#396).
       unless @scope.allowed?(Url.gate_url(p), p.host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_REFUSED)
       end
