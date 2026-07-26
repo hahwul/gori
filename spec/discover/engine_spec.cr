@@ -496,4 +496,49 @@ describe Gori::Discover::Engine do
       findings.map(&.url).should_not contain("http://t/admin")
     end
   end
+
+  # Issue #393. `enqueue_seed_only_calibration` used to be skipped whenever the origin root WAS
+  # the seed's own brute-force directory, on the assumption that `enqueue_dir` had already
+  # queued a Calibrate for it. But `enqueue_dir` goes through `bounded_url`, which applies the
+  # path confine — and the confine refuses the origin root on a single-segment seed with no
+  # trailing slash. So no baseline ever arrived, and robots.txt/sitemap.xml were fetched for
+  # real and then parked forever.
+  describe "the origin calibration that grades robots.txt/sitemap.xml" do
+    # Every seed shape from the issue's table, including the three that already worked — the
+    # bug was one shape out of four, so pinning only the broken one would not show that the fix
+    # left the others alone.
+    {"http://t/api", "http://t/api/", "http://t/", "http://t/a/b"}.each do |seed|
+      it "records both well-known findings for a seed of #{seed}" do
+        cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 2, concurrency: 2,
+          retries: 0)
+        fetched = [] of String
+        findings, _ = run_discover(seed, [] of String, cfg) do |t|
+          fetched << t
+          case t
+          when "/robots.txt"  then make(200, "User-agent: *\nDisallow: /admin\n", "text/plain")
+          when "/sitemap.xml" then make(200, %(<?xml version="1.0"?><urlset><url><loc>http://t/x</loc></url></urlset>), "application/xml")
+          else                     notfound
+          end
+        end
+        # Both were always SENT; what the bug lost was the recording of their outcomes.
+        fetched.count("/robots.txt").should eq(1)
+        fetched.count("/sitemap.xml").should eq(1)
+        urls = findings.map(&.url)
+        urls.should contain("http://t/robots.txt")
+        urls.should contain("http://t/sitemap.xml")
+      end
+    end
+
+    it "still brute-forces the origin when it IS the seed's own directory" do
+      # The regression guard for dropping the `unless root_dir == bf_dir` short-circuit: a
+      # seed_only Calibrate never feeds enqueue_probes, so if it displaced the ordinary one
+      # instead of deduping against it, brute-force would go silently dead at the origin.
+      cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 2, concurrency: 1,
+        retries: 0, confidence_floor: 0.4)
+      findings, _ = run_discover("http://t/", ["admin"], cfg) do |t|
+        t == "/admin" ? html("ADMIN CONTROL PANEL") : notfound
+      end
+      findings.select(&.source.bruteforced?).map(&.url).should contain("http://t/admin")
+    end
+  end
 end

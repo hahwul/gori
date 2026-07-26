@@ -376,9 +376,18 @@ module Gori::Discover
       # deserve the same soft-404 gate a brute-forced wordlist hit gets, not the "exists by
       # construction" trust record_page gives a crawled <a href>. Only wire this up when
       # bruteforce is on: that's the only mode with a calibration baseline to gate against.
-      # Reuse the dir bf_dir just calibrated above when it IS the seed's own dir; otherwise
-      # calibrate the origin separately — robots.txt/sitemap.xml always live there even on a
-      # path-scoped run confined elsewhere.
+      # The origin is calibrated separately — robots.txt/sitemap.xml always live there even on
+      # a path-scoped run confined elsewhere — and `enqueue_seed_only_calibration`'s own @dirs
+      # check reuses the bf_dir calibration when that dir IS the origin. Asking @dirs rather
+      # than comparing `root_dir == bf_dir` is the whole fix for #393: the old comparison
+      # assumed the `enqueue_dir` above had SUCCEEDED, but it goes through `bounded_url`, which
+      # applies the path confine — and the confine refuses the seed's own directory whenever
+      # the seed path is a single segment with no trailing slash. For `http://t/api`,
+      # @confine_path is "/api" while bf_dir is "http://t/", whose path is neither "/api" nor
+      # under "/api/". No Calibrate task was queued, yet @seed_calibration_dir was set, so
+      # robots.txt and sitemap.xml were fetched for real and then parked forever waiting on a
+      # baseline that never arrived: 2 real requests sent, 0 findings recorded, not even
+      # counted in calibrated_out.
       if @config.spider? && @config.bruteforce?
         root_dir = "#{Url.origin(@seed_parts)}/"
         # @seed_calibration_dir is set even when the Calibrate task below is refused, and that
@@ -388,7 +397,7 @@ module Gori::Discover
         # would send them to record_page, which is exactly the raw-status trust that reports a
         # wildcard-200 server's robots.txt as a finding. Fail safe, not fail loud.
         @seed_calibration_dir = root_dir
-        enqueue_seed_only_calibration(root_dir) unless root_dir == bf_dir
+        enqueue_seed_only_calibration(root_dir)
       end
     end
 
