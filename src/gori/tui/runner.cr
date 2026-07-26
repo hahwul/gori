@@ -1522,9 +1522,12 @@ module Gori::Tui
     # Open the confirmation modal; `action` runs only if the user accepts.
     # Defaults to a red "danger" confirm button (destructive deletes). Pass
     # `danger: false` and custom labels for non-destructive choices (e.g. open
-    # vs stay after create-and-link). `return_to` is the overlay restored on
-    # close — leave it :none for a palette-launched confirm, or pass the parent
-    # modal (e.g. :tabs) when raising the confirm from inside another overlay.
+    # vs stay after create-and-link). `return_to` is what `restore_overlay` puts
+    # back on close — pass the parent modal (e.g. :tabs) when raising the confirm
+    # from inside another overlay, or leave it :none. :none means "I did not ask
+    # to change where you were": with nothing up it lands on the bare body, but
+    # over a modal (the quit confirm, which hits any modal) it restores that modal
+    # rather than dropping it — see restore_overlay (#384).
     # It stays a Symbol because it is part of the Host facade (tab_controller.cr), which
     # controllers still speak; from_sym is the total, loud-on-typo bridge to OverlayKind.
     def confirm(title : String, message : String, *, confirm_label : String = "delete",
@@ -1555,18 +1558,31 @@ module Gori::Tui
       open_overlay(ov)
     end
 
-    # Put back the modal a confirm was raised from. A parent that has migrated onto the
-    # Overlay seam has to be re-opened as an OBJECT — setting @overlay alone would name a
-    # modal with nothing behind it, which neither renders nor takes keys.
+    # Put back the modal a confirm was raised OVER. The confirm DISPLACED it (open_overlay
+    # overwrote @active_overlay); it was never asked to close, so its on_close must NOT run.
+    # Running it would treat the interruption as a cancel and fire that modal's teardown — it
+    # would revert a live theme preview, or drop a sub-editor's unsaved edits with no warning
+    # (#384). So a displaced parent is re-opened as the captured OBJECT, which restores BOTH
+    # @active_overlay and @overlay; it comes back exactly as it was, edits and all.
+    #
+    # That happens when `return_to:` NAMES the parent (a confirm raised from inside the modal
+    # — RESET SETTINGS over the Settings card) OR when `return_to:` is :none. :none means "I
+    # did not ask to change where you were": the opt-in quit confirm and every palette-
+    # launched confirm use it, and the right answer over a modal is to leave the user where
+    # they were, not to tear it down. Before #384 only the named case restored, so a :none
+    # confirm over any modal dropped it, on_close and all — the reachable trigger being the
+    # quit confirm (^C/^D with settings:general "Confirm before quit" on), which hits every
+    # modal in the app.
     private def restore_overlay(kind : OverlayKind, parent : Overlay?) : Nil
-      return open_overlay(parent) if parent && parent.key == kind
-      # No object to restore. Setting @overlay alone is right for a parent the shell still
-      # routes BY STATE — an unmigrated modal, or the non-modal None/Detail. For a MIGRATED
-      # kind it would be a phantom: nothing renders or takes keys, and since a migrated kind
-      # is deleted from MODAL_OVERLAYS, modal_overlay? answers false too, so clicks fall
-      # through to the tab body behind a card that was never drawn. No `return_to:` names a
-      # migrated modal today, but that changes the moment Settings / Tabs / DiscoverConfig
-      # migrate — so land on the bare body, which the user can at least act from.
+      return open_overlay(parent) if parent && (parent.key == kind || kind.none?)
+      # No object to restore — either nothing was displaced (a :none confirm over the bare
+      # body or the History Detail drill-in), or `return_to:` names a state the shell routes
+      # BY STATE. Setting @overlay alone is right for None / Detail / an unmigrated
+      # MODAL_OVERLAYS member. A MIGRATED kind here would be a phantom: nothing renders or
+      # takes keys, and being deleted from MODAL_OVERLAYS modal_overlay? answers false too, so
+      # clicks fall through to the tab body behind a card that was never drawn — so land on
+      # the bare body instead. (Unreachable today: a migrated parent is always captured as
+      # `parent` and restored above.)
       restorable = kind.none? || kind.detail? || MODAL_OVERLAYS.includes?(kind)
       @overlay = restorable ? kind : OverlayKind::None
     end

@@ -70,6 +70,10 @@ private class NestShell
   property overlay = OverlayKind::None
   getter active : Overlay?
 
+  # Mirrors Runner::MODAL_OVERLAYS — the states restore_overlay is allowed to name without
+  # an object behind them. Keep in step (it is deliberately tiny; migrated modals are absent).
+  MODAL_OVERLAYS = {OverlayKind::Palette, OverlayKind::TabsMore}
+
   def open_overlay(ov : Overlay) : Nil
     @active = ov
     @overlay = ov.key
@@ -91,6 +95,32 @@ private class NestShell
   def active_overlay : Overlay?
     ov = @active
     ov if ov && @overlay == ov.key
+  end
+
+  # Mirror of Runner#restore_overlay (runner.cr). Keep in step — a spec that passes against
+  # a drifted copy proves nothing about the real shell. The `|| kind.none?` clause is the
+  # #384 fix: a :none confirm displacing a modal restores it, rather than dropping it.
+  def restore_overlay(kind : OverlayKind, parent : Overlay?) : Nil
+    return open_overlay(parent) if parent && (parent.key == kind || kind.none?)
+    restorable = kind.none? || kind.detail? || MODAL_OVERLAYS.includes?(kind)
+    @overlay = restorable ? kind : OverlayKind::None
+  end
+
+  # Mirror of Runner#confirm's overlay-state wiring (runner.cr): capture the displaced
+  # parent BEFORE open_overlay overwrites it, then wire the dialog to restore-first-act-
+  # second on close. Uses the real ConfirmDialog so `y`/`n`/esc route exactly as they do
+  # in the shell. `return_to` mirrors the production Symbol seam.
+  def confirm(*, return_to : Symbol = :none, &action : -> Nil) : Nil
+    ov = ConfirmDialog.new("CONFIRM", "quit?")
+    back = OverlayKind.from_sym(return_to)
+    parent = active_overlay
+    accepted = false
+    ov.on_commit = -> { accepted = true; true }
+    ov.on_close = -> {
+      restore_overlay(back, parent)
+      action.call if accepted
+    }
+    open_overlay(ov)
   end
 
   def press(k : Termisu::Input::Key) : Nil
@@ -346,5 +376,92 @@ describe "Overlay#on_close — a confirm raised from inside another modal" do
     shell.open_overlay(dialog)
     shell.press(ENTER)
     seen_by_action.should eq(OverlayKind::Confirm) # not :detail — too early to read it
+  end
+end
+
+# #384 — a confirm raised OVER another modal with the default `return_to: :none`. Its one
+# reachable trigger is the opt-in quit confirm (settings:general "Confirm before quit"),
+# which fires from `Runner#handle_key` while ANY modal is up. These drive the real
+# `NestShell#confirm` + `#restore_overlay` (mirrors of runner.cr) through the real
+# ConfirmDialog, so `n`/`y`/esc route exactly as the shell does.
+private YES = Termisu::Input::Key::LowerY
+private NO  = Termisu::Input::Key::LowerN
+
+describe "Runner#restore_overlay — a :none confirm displacing a modal (#384)" do
+  it "restores the displaced modal on decline, and does NOT run its on_close" do
+    # The bug: declining the quit confirm dropped the modal AND left its on_close unrun, so
+    # a theme preview stuck applied, an unsaved edit vanished, or a nested pop-back was lost.
+    # The modal was only DISPLACED, never asked to close, so its teardown must not fire — it
+    # comes back exactly as it was.
+    shell = NestShell.new
+    editor = NestModal.new(OverlayKind::Settings) # e.g. the Theme card, mid live-preview
+    popped_back = 0
+    editor.on_close = -> { popped_back += 1; nil } # its teardown (revert preview / pop to Prefs)
+    shell.open_overlay(editor)
+
+    shell.confirm(return_to: :none) { } # ^C/^D with confirm-before-quit on
+    shell.active_overlay.should be_a(ConfirmDialog)
+    shell.press(NO) # "no, don't quit"
+
+    shell.active_overlay.should be(editor)         # the card is back…
+    shell.overlay.should eq(OverlayKind::Settings) # …object AND state, so it renders + captures
+    popped_back.should eq(0)                       # …and its teardown never ran
+  end
+
+  it "on accept, restores the modal FIRST and then runs the quit action" do
+    # Accepting still runs restore-then-action (the ordering history_controller relies on).
+    # The quit action fires last; the restore before it is harmless (the app is leaving).
+    shell = NestShell.new
+    editor = NestModal.new(OverlayKind::Hosts)
+    shell.open_overlay(editor)
+
+    quit_ran = false
+    seen_by_action = nil.as(Overlay?)
+    shell.confirm(return_to: :none) { quit_ran = true; seen_by_action = shell.active_overlay }
+    shell.press(YES) # "yes, quit"
+
+    quit_ran.should be_true
+    seen_by_action.should be(editor) # the restore ran before the action, not after
+  end
+
+  it "still restores when return_to NAMES the parent (the existing path, unregressed)" do
+    # RESET SETTINGS / RESET TAB BAR raise their confirm with return_to: :settings / :tabs
+    # from inside the card. This worked before #384 and must keep working: same object-restore.
+    shell = NestShell.new
+    card = NestModal.new(OverlayKind::Settings)
+    reset_ran = 0
+    card.on_close = -> { reset_ran += 1; nil }
+    shell.open_overlay(card)
+
+    shell.confirm(return_to: :settings) { }
+    shell.press(NO)
+
+    shell.active_overlay.should be(card)
+    shell.overlay.should eq(OverlayKind::Settings)
+    reset_ran.should eq(0) # the card was displaced, not closed
+  end
+
+  it "lands on the bare body when a :none confirm displaced nothing" do
+    # A palette-launched confirm (no modal up) still means "nowhere to go back to": decline
+    # leaves the user on the tab body. The fix must not conjure a parent that was never there.
+    shell = NestShell.new
+    shell.confirm(return_to: :none) { }
+    shell.press(NO)
+
+    shell.active_overlay.should be_nil
+    shell.overlay.should eq(OverlayKind::None)
+  end
+
+  it "never restores a MIGRATED kind by STATE alone — the phantom hazard" do
+    # restore_overlay may only name a state for None / Detail / an unmigrated MODAL_OVERLAYS
+    # member. A migrated kind restored by @overlay alone (no object) renders nothing, takes
+    # no keys, and — being absent from MODAL_OVERLAYS — lets clicks fall through to the body
+    # behind a card that was never drawn. With no object to restore it, fall to the bare body.
+    shell = NestShell.new
+    shell.restore_overlay(OverlayKind::Settings, nil) # a migrated kind, no object
+    shell.overlay.should eq(OverlayKind::None)        # …not a phantom Settings
+
+    shell.restore_overlay(OverlayKind::Palette, nil) # an unmigrated MODAL_OVERLAYS member
+    shell.overlay.should eq(OverlayKind::Palette)    # …that one IS routed by state
   end
 end
