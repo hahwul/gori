@@ -7,7 +7,29 @@ require "../scope"
 
 module Gori::Fuzz
   # The origin a run targets (also the boundary for redirect following).
-  record Origin, scheme : String, host : String, port : Int32
+  #
+  # The scheme is folded ws→http / wss→https at construction so the TLS decision is correct
+  # by construction for EVERY surface that builds an Origin — the Fuzzer/Miner/Sequencer Plan
+  # builders, Repeater Minimize (TUI/CLI/MCP), and Probe active. `Sender#send` dials through
+  # `Repeater::Engine`/`H2Engine`, which decide TLS with `scheme == "https"` ALONE, so a
+  # `wss://` target (from an operator TARGET field, `--target`, an MCP `url`, or a captured WS
+  # flow row replayed one-shot) that reached them unfolded went out CLEARTEXT to a TLS port,
+  # leaking the request's cookies and auth. Only `http`/`https` are recorded by the capture
+  # proxy, so this fold is a no-op on a normal captured origin. Repeater::Plan folds the same
+  # way on its own tuple path; centralising it here removes the ad hoc per-CLI guards.
+  struct Origin
+    getter scheme : String
+    getter host : String
+    getter port : Int32
+
+    def initialize(scheme : String, @host : String, @port : Int32)
+      @scheme = case scheme
+                when "ws"  then "http"
+                when "wss" then "https"
+                else            scheme
+                end
+    end
+  end
 
   # The send seam. Swappable so specs (and the baseline calibrator) can drive the
   # engine without a real socket.
