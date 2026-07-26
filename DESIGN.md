@@ -517,9 +517,9 @@ Three specifics worth recording:
 
 What this does **not** close, deliberately, because each is a separate decision: brute-force and
 calibration probes are still authorised by their *directory* rather than per URL, so a `string`
-or `regex` EXCLUDE that matches a child but not its parent does not stop them (closed by #391,
-below); and `Plan.resolve_policy` still hands an unconfigured scope an `OpenScope`, so Layer 2 is
-absent entirely on a project with Sandbox on and no rules.
+or `regex` EXCLUDE that matches a child but not its parent does not stop them; and
+`Plan.resolve_policy` still hands an unconfigured scope an `OpenScope`, so Layer 2 is absent
+entirely on a project with Sandbox on and no rules. Both are closed by the two entries below.
 
 ### 2026-07-26: a directory verdict does not authorise the URLs under it
 
@@ -562,6 +562,31 @@ The fix splits by layer rather than by call site, because the two layers have di
   mean a narrow anchored include silently disables brute-force under a directory that include
   itself admitted. Layer 2 is the layer that is identical everywhere, and it is the one that now
   bites every send.
+
+### 2026-07-26: a rule-less scope is not an absent one
+
+Refines: [§3](#s3). Issue #392.
+
+`Plan.resolve_policy` returned `OpenScope` for `scope.nil? || verdict.unscoped?`, and
+`unscoped?` is true exactly when `Scope#configured?` is false — that is, whenever the project's
+scope has no *rules*. `OpenScope#allowed?` is unconditionally true, so Layer 2 was absent for the
+entire run.
+
+Sandbox is enabled independently of rules (`Scope#enable_sandbox` takes none into account), and
+with no include rules `sandbox_blocks?` blocks everything, which [§3](#s3) states is deliberate.
+So on a project with Sandbox on and no rules the proxy blocked every request and every other
+automated sweep refused — `Outbound#sweep_block` skips only on a **nil** scope, never on a
+rule-less one — while `gori run discover` and the TUI Discover tab crawled and brute-forced
+completely unrestricted. Discover was the sole fail-**open** tool, in the one configuration §3
+singles out as fail-closed.
+
+The fix separates the two questions the old condition conflated. `scope.nil?` — genuinely no
+project — keeps `OpenScope`, because there is nothing to consult. A rule-less scope now gets
+`StoreScope` like any other. This changes containment not at all: `StoreScope#configured?`
+delegates to `Scope#configured?`, still false, so scope-aware containment keeps falling back to
+same-origin and `boundary?` is never consulted. The only difference is that `allowed?` starts
+consulting Sandbox and EXCLUDE, and on an ordinary rule-less project with Sandbox off both are
+false — so those runs are byte-for-byte unaffected.
 
 ---
 

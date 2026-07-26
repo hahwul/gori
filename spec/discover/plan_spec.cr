@@ -181,14 +181,44 @@ describe Gori::Discover::Plan do
   describe "the crawl-time scope policy is derived from the Outbound" do
     seed = "https://acme.test/api"
 
-    it "bounds nothing when the project has no scope rules, on every surface" do
+    it "bounds nothing but still consults Layer 2 when the project has no scope rules" do
+      # Issue #392: a rule-LESS scope is not an ABSENT one. It used to get OpenScope, whose
+      # allowed? is unconditionally true, so Layer 2 was missing for the whole run.
       with_store do |store|
         scope = Gori::Scope.load(store)
         [Gori::Outbound.agent(scope, false), Gori::Outbound.cli(scope, false),
          Gori::Outbound.interactive(scope)].each do |ob|
-          D::Plan.build(D::PlanOptions.new(seed), ob).policy.class.should eq(D::OpenScope)
+          policy = D::Plan.build(D::PlanOptions.new(seed), ob).policy
+          policy.class.should eq(D::StoreScope)
+          # Containment is unchanged: configured? is still false, so scope-aware containment
+          # keeps falling back to same-origin and boundary? is never consulted.
+          policy.configured?.should be_false
+          # And with Sandbox off, an ordinary rule-less run is bounded exactly as before.
+          policy.allowed?(seed, "acme.test").should be_true
         end
       end
+    end
+
+    it "fails CLOSED for discover when Sandbox is on and the project has no rules" do
+      # Sandbox is enabled independently of rules, and §3 makes a scope with no include rules
+      # block everything on purpose. Every other sweep already refused here (`sweep_block`
+      # skips only on a NIL scope) and the proxy blocked every request, while discover crawled
+      # and brute-forced unrestricted — fail-open in the one configuration §3 calls fail-closed.
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.enable_sandbox
+        [Gori::Outbound.agent(scope, false), Gori::Outbound.cli(scope, false),
+         Gori::Outbound.interactive(scope)].each do |ob|
+          D::Plan.build(D::PlanOptions.new(seed), ob).policy
+            .allowed?(seed, "acme.test").should be_false
+        end
+      end
+    end
+
+    it "keeps OpenScope when there is genuinely no project" do
+      # `scope.nil?` is a different question from "the scope has no rules", and only the
+      # former means there is nothing to consult.
+      D::Plan.build(D::PlanOptions.new(seed), ungated_outbound).policy.class.should eq(D::OpenScope)
     end
 
     it "applies the project scope when one is configured and Layer 1 was not waived by the operator" do

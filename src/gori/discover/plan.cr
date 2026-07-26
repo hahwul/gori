@@ -152,7 +152,7 @@ module Gori::Discover
     # re-derived per surface (`gori run discover` and MCP each carried a copy of this, the
     # MCP one labelled "mirror of the CLI's"; the TUI had a third, shorter one).
     #
-    # Unconfigured scope ⇒ OpenScope, nothing bounded. Otherwise StoreScope (sandbox/exclude
+    # No project at all ⇒ OpenScope, nothing bounded. Otherwise StoreScope (sandbox/exclude
     # + the include boundary) — UNLESS Layer 1 was waived by the OPERATOR (--allow-unscoped /
     # allow_unscoped:true) AND the seed is genuinely outside the include boundary, in which
     # case UnscopedStoreScope keeps the hard sandbox/exclude gate but drops the include
@@ -171,7 +171,20 @@ module Gori::Discover
       # `in_scope?` is "inside the include boundary" — the two questions this used to answer
       # by pulling the Scope out and re-running `configured?` / `matches_url?` by hand.
       verdict = outbound.check(seed, host)
-      return OpenScope.new if scope.nil? || verdict.unscoped?
+      # Only a genuinely absent project gets OpenScope. A project whose scope simply has no
+      # RULES does not: `verdict.unscoped?` is true exactly when `Scope#configured?` is false,
+      # and Sandbox is enabled independently of rules (`Scope#enable_sandbox`) — so discover
+      # used to crawl and brute-force completely unrestricted on the one configuration
+      # DESIGN.md §3 singles out as fail-CLOSED, while the proxy blocked every request and
+      # every other sweep (`Outbound#sweep_block`, which only skips on a nil scope) refused.
+      #
+      # Nothing about containment changes: `StoreScope#configured?` delegates to
+      # `Scope#configured?`, which is false here too, so scope-aware containment still falls
+      # back to same-origin and `boundary?` is never consulted. The only difference is that
+      # `allowed?` starts consulting Sandbox and EXCLUDE — both false on an ordinary
+      # rule-less project with Sandbox off, so those runs are unaffected.
+      return OpenScope.new if scope.nil?
+      return StoreScope.new(scope) if verdict.unscoped?
       if outbound.reason == Gori::Outbound::Reason::Operator && !verdict.in_scope?
         return UnscopedStoreScope.new(scope)
       end
