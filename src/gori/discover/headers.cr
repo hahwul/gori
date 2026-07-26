@@ -84,6 +84,13 @@ module Gori::Discover
     # `Discover::Sender#build_get` splices all three into the request line and the `Host`
     # header — so any one of them can splice a second, fully attacker-chosen request onto
     # the connection. Checking only the path would leave the other two open.
+    #
+    # This is the FRAMING half of the octets a request line cannot carry, and the half whose
+    # answer is refusal. `Url.request_line_safe?` names the whole class (every octet <= 0x20
+    # plus DEL — SP and TAB separate the line's fields without starting a second message), and
+    # `Url.encode_unsafe` repairs the rest at parse instead of dropping it, because a space in
+    # an href is ordinary handwritten HTML (#394). Nothing that reaches this predicate has a
+    # repair.
     def self.safe_url?(parts : Url::Parts) : Bool
       q = parts.query
       safe_value?(parts.host) && safe_value?(parts.path) && (q.nil? || safe_value?(q))

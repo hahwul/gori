@@ -588,6 +588,58 @@ same-origin and `boundary?` is never consulted. The only difference is that `all
 consulting Sandbox and EXCLUDE, and on an ordinary rule-less project with Sandbox off both are
 false — so those runs are byte-for-byte unaffected.
 
+### 2026-07-26: a request line refuses what frames it and encodes what merely breaks it
+
+Refines: [P7](#p7). Issue #394, the remaining half of the #390 review.
+
+`Headers.safe_url?` rejected CR and LF only, but `Sender#build_get` writes
+`GET #{target} HTTP/1.1\r\n` and **space is that line's field separator**. `Extract::ATTR`'s
+`"([^"]*)"` captures a space, `Url.resolve` strips only the ends, and `URI.parse` keeps it
+verbatim in `path` and `query` — so an ordinary `<a href="/my file.pdf">`, which is common in
+handwritten HTML, put `GET /my file.pdf HTTP/1.1` on a real socket. No attacker required. A
+lenient origin reads target `/my` and version `file.pdf`, so gori requests a resource it did
+not record; a strict one 400s, and that 400 diverges from the soft-404 baseline, which
+`Calibrate.hit?` scores at +0.50 — a false-POSITIVE source in the brute-forcer, not a cosmetic
+defect. The malformed line then persisted into the stored flow head via `Discover::Persist`
+(`Import::Builder::CONTROL_CHAR` is `[\x00-\x1f\x7f]`, which does not cover 0x20), so a
+byte-exact Repeater re-send reproduced it.
+
+The rule is now stated once, over the whole octet class rather than the two members each
+incident happened to name: **`Url.request_line_safe?` — no octet `<= 0x20` or `0x7F` reaches a
+request line raw.** That is the rule `src/gori/mcp/request_builder.cr`'s `reject_token_breakers`
+already applies to the method, the target and the host.
+
+The *remedy* splits, and the split is by what the octet does to the wire rather than by which
+issue found it:
+
+- **CR and LF frame.** They do not corrupt one request line, they end it and begin a second
+  message (#390). No author writes one into an href. They are **refused** — dropped at every
+  enqueue by `Headers.safe_url?`, refused at the wire by `Sender#fetch` — which keeps #390's
+  disposition intact. Encoding them instead would convert a splice attempt into a real request
+  for a URL nobody authored, and put `%0D%0A` rows in the operator's Sitemap.
+- **SP, TAB, DEL and the remaining C0 separate fields.** They break one line and cannot start a
+  second. A space in an href is a real resource a browser fetches, so refusing it would silently
+  shrink a crawl's coverage — the failure mode this project treats as worse than an error
+  ([P4](#p4)). They are **percent-encoded**, which is lossless and is what every browser does.
+
+Encoded at **parse** (`Url.parse`), not in `build_get`, because a URL must have exactly one
+spelling: `visit_key`, `template_key`, the Layer-2 gate question, the `Finding`, and the Sitemap
+row `Persist` writes all come off the same `Parts`. Encoding only at the wire would leave the
+raw octet in all five, so the scope would judge a different URL than the one sent — the exact
+two-spellings bug `Url.gate_url` and the seed's `Url.normalize` were introduced to kill. It also
+makes discover ask the gate the already-encoded form every other Layer-2 consumer sees, since
+those targets arrive off the wire from a real client. The encoding is idempotent (`%` is not in
+the class), which `#{bl.dir}#{cand}` and every re-crawled link rely on.
+
+The **host** is refused rather than repaired, by `Url.parse` returning nil: percent-encoding is
+defined for a path, not for a reg-name, and `Import::Builder::HOST_INVALID` already records that
+a real host never carries one of these octets.
+
+`Sender#fetch` now refuses the whole class rather than CR/LF. That costs no coverage — the
+repairable half never reaches it, having been encoded upstream — and it means the wire seam can
+state the invariant it is there to state: a Discover run never puts a malformed or doubled
+request line on a connection.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

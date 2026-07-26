@@ -193,4 +193,95 @@ describe Gori::Discover::Url do
       U.template_key(U.parse("http://h/s?a=1&&b=2").not_nil!).should eq("http://h/s?a&b")
     end
   end
+
+  # Issue #394. `Sender#build_get` writes "GET #{target} HTTP/1.1", so space is the request
+  # line's field separator — and `URI.parse` keeps a raw one verbatim in both path and query.
+  # The class is every octet <= 0x20 plus DEL; the remedy splits by what the octet does.
+  describe "request-line octets" do
+    describe ".request_line_safe?" do
+      it "is false for every octet <= 0x20 and for DEL, true above them" do
+        (0..0x20).each { |b| U.request_line_safe?("/a#{b.unsafe_chr}b").should be_false }
+        U.request_line_safe?("/a\u007Fb").should be_false
+        U.request_line_safe?("/a~b").should be_true # 0x7E, the char below DEL
+        U.request_line_safe?("/my%20file.pdf?q=1&r=2").should be_true
+      end
+
+      it "is true for a multi-byte UTF-8 path (the check is byte-wise, not char-wise)" do
+        # Every continuation byte is >= 0x80, so a non-ASCII path must not be caught by a
+        # test written against the 0x00..0x20 range.
+        U.request_line_safe?("/문서/파일.pdf").should be_true
+      end
+    end
+
+    describe ".parse" do
+      it "percent-encodes a raw space in the path — the #394 repro" do
+        # `<a href="/my file.pdf">` is ordinary handwritten HTML; a browser fetches
+        # /my%20file.pdf. Rejecting it would silently shrink the crawl's coverage.
+        p = U.parse("http://h/my file.pdf").not_nil!
+        p.path.should eq("/my%20file.pdf")
+        U.request_line_safe?(p.path).should be_true
+      end
+
+      it "percent-encodes a raw space in the query" do
+        p = U.parse("http://h/s?q=1 2&r=3").not_nil!
+        p.query.should eq("q=1%202&r=3")
+      end
+
+      it "percent-encodes TAB, DEL and the other C0 octets" do
+        U.parse("http://h/a\tb").not_nil!.path.should eq("/a%09b")
+        U.parse("http://h/a\u007Fb").not_nil!.path.should eq("/a%7Fb")
+        U.parse("http://h/a\vb").not_nil!.path.should eq("/a%0Bb")
+      end
+
+      it "leaves CR and LF RAW so the refusal gates still see them (#390's disposition)" do
+        # The framing half is dropped, not repaired: `Headers.safe_url?` refuses such a URL at
+        # every enqueue and `Sender#fetch` refuses it at the wire. Encoding it here would turn
+        # a splice attempt into a real request for a URL nobody authored.
+        p = U.parse("http://h/a\r\nX-Injected: 1").not_nil!
+        # The space in the injected header line IS encoded — the two halves are independent,
+        # and what matters is that the CR/LF survive so the gates below can still refuse.
+        p.path.should eq("/a\r\nX-Injected:%201")
+        Gori::Discover::Headers.safe_url?(p).should be_false
+        U.request_line_safe?(p.path).should be_false
+      end
+
+      it "is idempotent — an already-encoded path never becomes %2520" do
+        # `#{bl.dir}#{cand}` re-parses a path this method produced, and so does every
+        # re-crawled link. `%` is not in the class, so nothing re-encodes.
+        once = U.parse("http://h/my file.pdf").not_nil!
+        twice = U.parse(U.normalize(once)).not_nil!
+        twice.path.should eq("/my%20file.pdf")
+        U.parse("http://h/a%20b").not_nil!.path.should eq("/a%20b")
+      end
+
+      it "refuses a host carrying a request-line octet rather than encoding it" do
+        # `URI.parse("http://a b/x").host` is "a b" verbatim. Percent-encoding is defined for
+        # a path, not a reg-name, so there is nothing to repair — nil, the same exit every
+        # unparseable URL takes.
+        U.parse("http://a b/x").should be_nil
+        U.parse("http://h /x").should be_nil
+        U.parse("http://ev\r\nil.test/a").should be_nil
+      end
+
+      it "gives the URL ONE spelling across identity, the gate question and the finding" do
+        # The reason this is repaired at parse and not in `build_get`: these five strings all
+        # come off the same Parts, and a raw space left in any of them would make the scope
+        # judge a different URL than the one sent, and `Persist` write a corrupt Sitemap row.
+        p = U.parse("http://h/my file.pdf?q=a b").not_nil!
+        U.normalize(p).should eq("http://h/my%20file.pdf?q=a%20b")
+        U.gate_url(p).should eq("http://h/my%20file.pdf?q=a%20b")
+        U.visit_key(p).should eq("http://h/my%20file.pdf?q=a%20b")
+        U.template_key(p).should eq("http://h/my%20file.pdf?q")
+        U.dir_of(p).should eq("http://h/")
+      end
+    end
+
+    describe ".resolve into .parse" do
+      it "carries a spaced href through to an encoded, sendable URL" do
+        base = U.parse("http://h/dir/page").not_nil!
+        abs = U.resolve(base, "my file.pdf").not_nil!
+        U.parse(abs).not_nil!.path.should eq("/dir/my%20file.pdf")
+      end
+    end
+  end
 end

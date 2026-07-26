@@ -85,6 +85,39 @@ describe Gori::Discover::Sender do
     result.not_nil!.error.should eq(D::Sender::UNSAFE_URL)
   end
 
+  it "sends nothing at all when the target carries a raw SPACE (request-line corruption)" do
+    # Issue #394. Space is the request line's field separator, so #390's CR/LF-only guard let
+    # this through: the issue captured `GET /my file.pdf HTTP/1.1` off a real socket, which a
+    # lenient origin reads as target `/my` + version `file.pdf`, and a strict one 400s — a 400
+    # that diverges from the soft-404 baseline and scores +0.50 in `Calibrate.hit?`.
+    #
+    # Nothing legitimate is refused by this line: `Url.parse` has already percent-encoded a
+    # spaced href upstream (see the next example), so the only target that reaches here with a
+    # raw space is one no repair applies to.
+    result = nil.as(Gori::Repeater::Result?)
+    wire = wire_bytes do |port|
+      result = D::Sender.new(verify: false, timeout: 2.seconds).fetch("http", "127.0.0.1", port, "/my file.pdf")
+    end
+    wire.should eq("")
+    result.not_nil!.error.should eq(D::Sender::UNSAFE_URL)
+  end
+
+  it "puts the encoded form of a spaced link on the wire as ONE well-formed request line" do
+    # The other half of #394, end to end at the byte level: the href a page carries
+    # (`/my file.pdf`) goes through the same `Url.parse` the engine uses, and what lands on
+    # the socket is the request a browser would have sent. A URL-string assertion could not
+    # have shown this — #390's lesson.
+    target = begin
+      p = D::Url.parse("http://127.0.0.1/my file.pdf?q=a b").not_nil!
+      "#{p.path}?#{p.query}"
+    end
+    wire = wire_bytes do |port|
+      D::Sender.new(verify: false, timeout: 2.seconds).fetch("http", "127.0.0.1", port, target)
+    end
+    request_lines(wire).should eq(["GET /my%20file.pdf?q=a%20b HTTP/1.1"])
+    wire.should match(/\AGET \/my%20file\.pdf\?q=a%20b HTTP\/1\.1\r\nHost: 127\.0\.0\.1:\d+\r\n/)
+  end
+
   it "sends nothing when the HOST carries a raw CRLF" do
     # `URI.parse("http://ev\r\nil.test/a").host` is `"ev\r\nil.test"` verbatim, and the host is
     # spliced into the `Host` header — so checking only the target would leave this open.

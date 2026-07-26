@@ -439,6 +439,25 @@ describe Gori::Discover::Engine do
       findings.map(&.url).none?(&.includes?("evil.test")).should be_true
     end
 
+    # Issue #394, the other half of the same octet class. A raw SPACE is NOT dropped: it is
+    # what handwritten HTML actually contains, so dropping it would silently shrink coverage
+    # and lose a real endpoint. It is percent-encoded at parse, which gives the URL one
+    # spelling for the wire, the scope question, the finding and the Sitemap row alike.
+    it "percent-encodes a crawled link carrying a raw space instead of dropping it" do
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
+      sent = [] of String
+      findings, _ = run_discover("http://t/", [] of String, cfg) do |t|
+        sent << t
+        t == "/" ? html(%(<a href="/my file.pdf">doc</a> <a href="/rep ort?q=a b">q</a>)) : html("a real document body")
+      end
+      sent.should contain("/my%20file.pdf")
+      sent.should contain("/rep%20ort?q=a%20b")
+      sent.none?(&.includes?(' ')).should be_true
+      # The finding — and therefore the Sitemap row `Persist` writes from it — carries the
+      # same encoded spelling, so a byte-exact Repeater re-send reproduces a valid request.
+      findings.map(&.url).should contain("http://t/my%20file.pdf")
+    end
+
     it "is dropped when the CRLF sits in the QUERY rather than the path" do
       # `URI.parse("http://t/a?q=1\r\nX: 1").query` keeps the CR/LF, and send_with_retries
       # rebuilds the target as "#{path}?#{query}" — so a path-only check would miss this.

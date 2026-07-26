@@ -50,7 +50,13 @@ module Gori::Discover
     # because `Upstream.dial` always CONNECT-tunnels (`proxy/upstream.cr`) rather than
     # forwarding in absolute form. Returned as a benign error Result rather than raised: the
     # caller's contract is one Result per fetch, and one poisoned link must not end the run.
-    UNSAFE_URL = "url contains a control character"
+    #
+    # The refusal covers the whole `Url.request_line_safe?` class, not just CR/LF: a bare SP
+    # forges the line just as effectively (`GET /a b HTTP/1.1` — a lenient origin reads target
+    # `/a`, version `b`), which is what #394 found after #390. Nothing legitimate is lost by
+    # refusing the repairable half here, because `Url.parse` has already percent-encoded it
+    # upstream — this line only ever sees a target no repair applies to.
+    UNSAFE_URL = "url contains whitespace or a control character"
 
     @header_block : String
 
@@ -65,10 +71,11 @@ module Gori::Discover
 
     def fetch(scheme : String, host : String, port : Int32, target : String) : Repeater::Result
       # The wire seam's own invariant, not a duplicate of the engine's gate: `Engine#bounded_url`
-      # drops a poisoned URL before it is ever queued, but this is the only line every send
-      # provably passes, so the guarantee "a Discover run never puts two request lines on one
-      # connection" is stated where it can actually be enforced (see UNSAFE_URL).
-      unless Headers.safe_value?(target) && Headers.safe_value?(host)
+      # drops a poisoned URL before it is ever queued and `Url.parse` repairs a spaced one, but
+      # this is the only line every send provably passes, so the guarantee "a Discover run
+      # never puts a malformed or doubled request line on a connection" is stated where it can
+      # actually be enforced (see UNSAFE_URL).
+      unless Url.request_line_safe?(target) && Url.request_line_safe?(host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
       end
       req = build_get(scheme, host, port, target)
@@ -675,6 +682,12 @@ module Gori::Discover
       # is never requested, so there is no status, length, or content type to claim one with —
       # and `Persist` would then write the poisoned string into the Sitemap as a real flow.
       # It is refused for the same reason any out-of-bounds link is, and takes the same exit.
+      #
+      # Only the FRAMING half of the octet class gets this exit. The rest of it (SP, TAB, DEL,
+      # the other C0) corrupts one request line without starting a second, and `<a href="/my
+      # file.pdf">` is ordinary handwritten HTML — so `Url.parse` has already percent-encoded
+      # those and nothing reaches here to drop (#394, and `Url.encode_unsafe` for why the two
+      # halves are answered differently).
       return nil unless Headers.safe_url?(p)
       return nil unless confined?(p)
       url = Url.normalize(p)
