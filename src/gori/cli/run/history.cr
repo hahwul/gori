@@ -127,6 +127,11 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
               end
+              # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run
+              # right after a capture — or against a db a killed process left behind — would
+              # under-report until the backlog drains. A one-shot answer must be exact, so
+              # wait for it here rather than silently returning fewer rows.
+              store.index_pending! if filter.uses_fts?
               begin
                 store.search(filter, limit, raise_on_error: true)
               rescue ex

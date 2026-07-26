@@ -19,6 +19,9 @@ module Gori
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
+        # An agent gets one shot at this answer and cannot tell "no match" from "not indexed
+        # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it.
+        store.index_pending! if filter.uses_fts?
         rows = (query && !query.strip.empty?) ? store.search(filter, limit, before_id, since_id) : store.recent_flows(limit, before_id, since_id)
         Result.new(JSON.build { |j| j.array { rows.each { |r| Serialize.flow_row(j, r) } } })
       end

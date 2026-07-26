@@ -88,6 +88,28 @@ describe "contentless FTS (V24)" do
     end
   end
 
+  # FTS_INDEX_MAX is an indexing-work budget (~30µs per indexed KiB), so it is deliberately
+  # far below the capture body cap. That makes the recall boundary a real, user-visible
+  # property: pin BOTH sides of it here so a future change to the constant has to face what
+  # it costs — and so the documented escape hatch (`body~` scans the whole stored BLOB) is
+  # proven to still reach past the cap.
+  it "indexes only the first FTS_INDEX_MAX body bytes, leaving the rest to body~" do
+    fts_store do |store|
+      cap = Gori::Store::FTS_INDEX_MAX
+      # Both markers are >=3 chars (so `body:` takes the trigram path, not the LIKE
+      # fallback) and are placed clear of the cut so neither straddles the boundary.
+      body = "beforethecapmarker" + ("x" * cap) + "afterthecapmarker"
+      id = store.insert_flow(req_with_body("/big", nil))
+      store.update_response(resp_with_body(id, body))
+      store.flush
+
+      body_hits(store, "beforethecapmarker").should eq([id])
+      body_hits(store, "afterthecapmarker").should be_empty # past the cap: not in the index
+      # ...but still in the stored bytes, so the regex form finds it.
+      store.search(Gori::QL.parse("body~afterthecapmarker"), 10).map(&.id).should eq([id])
+    end
+  end
+
   it "skips a binary response body (never indexed)" do
     fts_store do |store|
       id = store.insert_flow(req_with_body("/c", nil))
@@ -154,6 +176,115 @@ describe "contentless FTS (V24)" do
       store.flush
       body_hits(store, "secondtoken").should eq([id])
       body_hits(store, "firsttoken").should be_empty # no stale posting, no dup-rowid error
+    end
+  end
+
+  # --- off-commit indexing (V4 / fts_dirty) ---------------------------------------------
+  #
+  # The point of the flag is that "captured" and "searchable" are now two events. Everything
+  # below pins the seam: that the gap is REPORTED rather than silent, that it always closes,
+  # and that nothing else the store does (prune, clear, a rolled-back index) can strand a row
+  # dirty-but-unsearchable or indexed-but-stale.
+
+  it "leaves a captured flow searchable only after indexing, and SAYS so meanwhile" do
+    fts_store do |store|
+      id = store.insert_flow(req_with_body("/async", "deferredbodytoken"))
+      store.update_response(resp_with_body(id, "deferredresptoken"))
+      # The row is committed and fully readable as a projection...
+      store.flow_row(id).should_not be_nil
+      # ...while the backlog reports the flow whose index has not landed yet. (Nothing has
+      # driven the writer's idle path here, so the dirty row is still waiting.)
+      store.fts_backlog.should eq(1)
+
+      store.flush # the barrier includes the index drain
+      store.fts_backlog.should eq(0)
+      body_hits(store, "deferredbodytoken").should eq([id]) # request side
+      body_hits(store, "deferredresptoken").should eq([id]) # response side, same pass
+    end
+  end
+
+  it "reports an empty backlog once drained, and re-dirties on a later response" do
+    fts_store do |store|
+      id = store.insert_flow(req_with_body("/redirty", "firstpasstoken"))
+      store.flush
+      store.fts_backlog.should eq(0)
+
+      # A response landing after the row was indexed must mark it stale again — otherwise the
+      # response body would never be searchable for a flow the indexer had already visited.
+      store.update_response(resp_with_body(id, "secondpasstoken"))
+      store.fts_backlog.should eq(1)
+      store.flush
+      body_hits(store, "secondpasstoken").should eq([id])
+      body_hits(store, "firstpasstoken").should eq([id]) # the request side survived the re-index
+    end
+  end
+
+  it "index_pending! drains every dirty flow, not just one batch" do
+    fts_store do |store|
+      # More flows than FTS_BATCH, so a single-batch drain would leave a remainder behind.
+      n = Gori::Store::FTS_BATCH * 2 + 3
+      # Zero-padded so no token is a SUBSTRING of another — trigram matching is substring
+      # matching, and "batchtoken1" would otherwise also hit batchtoken10..19.
+      tok = ->(i : Int32) { "batchtoken#{i.to_s.rjust(3, '0')}" }
+      ids = (1..n).map { |i| store.insert_flow(req_with_body("/b#{i}", tok.call(i))) }
+      store.index_pending!.should be >= n
+      store.fts_backlog.should eq(0)
+      body_hits(store, tok.call(n)).should eq([ids.last])  # past the first batch
+      body_hits(store, tok.call(1)).should eq([ids.first]) # and the first batch too
+    end
+  end
+
+  it "finishes a backlog left behind by a previous process (durable across reopen)" do
+    path = File.tempname("gori-fts-reopen", ".db")
+    begin
+      # First store: capture WITHOUT ever letting the indexer run, then abandon it the way a
+      # killed process would — the dirty flag is what makes those flows recoverable at all.
+      db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+      Gori::Store::Schema.migrate!(db)
+      store = Gori::Store.new(db, nil, retention_flows: 0)
+      id = store.insert_flow(req_with_body("/crash", "survivorbodytoken"))
+      store.fts_backlog.should eq(1)
+      store.close
+
+      db2 = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+      store2 = Gori::Store.new(db2, nil, retention_flows: 0)
+      begin
+        store2.fts_backlog.should eq(1) # the backlog was in the db, not in the dead process
+        store2.index_pending!.should eq(1)
+        store2.search(Gori::QL.parse("body:survivorbodytoken"), 10).map(&.id).should eq([id])
+      ensure
+        store2.close
+      end
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "drops a still-dirty flow's backlog entry when the flow is deleted" do
+    fts_store do |store|
+      keep = store.insert_flow(req_with_body("/keep", "keptbodytoken"))
+      doomed = store.insert_flow(req_with_body("/doomed", "doomedbodytoken"))
+      store.fts_backlog.should eq(2)
+      # Deleted BEFORE it was ever indexed: the pending re-index must go with the row, not
+      # resurrect as an FTS entry for a rowid that no longer exists.
+      store.delete_flow(doomed)
+      store.flush
+      store.fts_backlog.should eq(0)
+      body_hits(store, "doomedbodytoken").should be_empty
+      body_hits(store, "keptbodytoken").should eq([keep])
+    end
+  end
+
+  it "clears the backlog with the flows on clear_flows" do
+    fts_store do |store|
+      store.insert_flow(req_with_body("/x", "clearedbodytoken"))
+      store.fts_backlog.should eq(1)
+      store.clear_flows
+      store.flush
+      store.fts_backlog.should eq(0)
+      body_hits(store, "clearedbodytoken").should be_empty
     end
   end
 

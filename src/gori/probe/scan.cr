@@ -54,6 +54,10 @@ module Gori
 
       # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
       def flow_ids(store : Store, filter : QL::Filter?) : Array(Int64)
+        # A scan that silently skipped flows because their trigram entries hadn't been written
+        # yet (indexing is off-commit — Store V4) would under-report FINDINGS, so drain the
+        # backlog before selecting the set to scan.
+        store.index_pending! if filter.try(&.uses_fts?)
         rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end

@@ -569,7 +569,28 @@ module Gori
         "ALTER TABLE flows ADD COLUMN unsent INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3]
+      # `fts_dirty` marks a flow whose `flows_fts` entry is missing or stale, so trigram
+      # tokenization can move OFF the capture commit (see Store#index_pending_batch). It was
+      # the dominant capture cost: ~30µs per indexed KiB inside the writer's transaction, which
+      # is where a 64 KiB text response cost ~2ms and collapsed end-to-end capture of text/html
+      # to a few hundred req/s — while the proxy + HTTP/1.1 codec add only ~25µs per request.
+      #
+      # Durability is the reason this is a COLUMN and not an in-memory queue: a killed process
+      # (or a batch dropped under saturation) would otherwise leave those flows permanently
+      # unsearchable with nothing to detect it. The flag persists, so the next open — or the
+      # next idle moment — finishes the job, and `Store#fts_backlog` can SAY how far behind
+      # search is instead of silently under-reporting a `body:` query.
+      #
+      # Existing rows default to 0 (= index current): every already-stored flow WAS indexed by
+      # the old synchronous path, so defaulting to 0 avoids re-indexing whole histories on
+      # upgrade. Only rows written from here on are marked dirty. The partial index keeps the
+      # backlog probe O(backlog) rather than O(table) — it holds nothing at all once drained.
+      V4 = [
+        "ALTER TABLE flows ADD COLUMN fts_dirty INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX idx_flows_fts_dirty ON flows (id) WHERE fts_dirty = 1",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

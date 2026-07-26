@@ -324,6 +324,8 @@ describe "Gori::Store#search (QL)" do
         head: "GET /about HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
         body: "nothing here".to_slice))
 
+      store.flush # body: reads the trigram index, which is written off-commit (Store V4)
+
       hits = store.search(Gori::QL.parse("body:secrettoken"), 50).map(&.id).sort
       hits.should eq([req_match, resp_match].sort) # case-insensitive, req + resp
 

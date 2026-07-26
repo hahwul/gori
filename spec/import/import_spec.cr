@@ -62,10 +62,11 @@ describe Gori::Import do
   it "indexes the imported request body for FTS body: search (response-bearing entry)" do
     har = File.tempname("gori", ".har")
     begin
-      # A response is present, so the import writer takes the update_one path (which reuses
-      # the request FTS text computed at insert time instead of reading the row back). The
-      # distinctive token lives ONLY in the REQUEST body, so a body: hit proves the request
-      # FTS column was populated correctly through that path.
+      # A response is present, so the import writer takes the insert_one + update_one path and
+      # the row is left `fts_dirty` for the off-commit indexer (Store V4) — which indexes BOTH
+      # sides in one pass. The distinctive token lives ONLY in the REQUEST body, so a body: hit
+      # proves the indexer populated the request FTS column for an imported pair, not just the
+      # response side it was re-dirtied for.
       File.write(har, <<-JSON)
         {
           "log": {
@@ -89,6 +90,7 @@ describe Gori::Import do
 
       with_store do |store|
         Gori::Import.import_file(store, :har, har).count.should eq(1)
+        store.flush # barrier: the index is written off-commit
         hits = store.search(Gori::QL.parse("body:zephyrquux"), 10)
         hits.size.should eq(1)
         hits.first.target.should eq("/submit")

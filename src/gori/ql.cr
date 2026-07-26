@@ -26,6 +26,16 @@ module Gori
 
       def initialize(@sql : String, @args : Array(DB::Any))
       end
+
+      # Does answering this filter read the trigram index? `body:` and free text are the
+      # only terms that compile to a `flows_fts` subquery (see body_cond / free text below),
+      # and nothing else mentions that table, so matching the name is exact rather than
+      # heuristic. Callers use it to decide whether a stale index would corrupt their answer:
+      # indexing is off-commit (Store V4), so a one-shot surface drains the backlog first
+      # (Store#index_pending!) while a live one reports Store#fts_backlog instead of stalling.
+      def uses_fts? : Bool
+        @sql.includes?("flows_fts")
+      end
     end
 
     EMPTY = Filter.new("1", [] of DB::Any)

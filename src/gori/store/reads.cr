@@ -183,7 +183,8 @@ module Gori
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         c.exec("DELETE FROM h2_connections")
-        @pending_req_fts.clear
+        # No index backlog bookkeeping to undo: a pending re-index is the row's own
+        # `fts_dirty` flag, so deleting the rows deletes the backlog with them.
         nil
       }
     end
@@ -205,7 +206,6 @@ module Gori
         conn.exec("DELETE FROM h2_frames WHERE conn_id = ? AND ? NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)", cid, cid)
         conn.exec("DELETE FROM h2_connections WHERE id = ? AND id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)", cid, cid)
       end
-      @pending_req_fts.delete(id)
     end
 
     # Distinct host values for History QL Tab-complete (`host:`). Prefix-filtered

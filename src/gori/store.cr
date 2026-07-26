@@ -118,6 +118,18 @@ module Gori
       end
     end
 
+    # Asks the writer to index one slice of the FTS backlog and report how many rows it did
+    # (see Store#index_pending!). Deliberately NOT an ExecTask: an ExecTask body runs inside
+    # the batch's shared transaction, and indexing needs its OWN — both so a nested
+    # transaction isn't opened on the same connection, and so an index failure rolls back
+    # only itself instead of the captured flows batched alongside it.
+    struct IndexBatch < WriteOp
+      getter reply : Channel(Int32)
+
+      def initialize(@reply)
+      end
+    end
+
     # Marks every Pending flow Error (e.g. proxy shutdown before a response landed).
     struct AbandonPending < WriteOp
       getter message : String
@@ -129,11 +141,18 @@ module Gori
 
     BATCH_MAX = 128
 
-    # Cap on @pending_req_fts (see initialize). Far above the in-flight (request sent,
-    # response pending) flow count under any real load, since each entry lives only until
-    # its response lands; overflow (a flood of never-answered requests) clears the memo so
-    # update_one transparently falls back to the readback.
-    PENDING_FTS_MAX = 8192
+    # Flows re-indexed per idle indexing transaction (see index_pending_batch). Small
+    # enough that a batch can't hold the writer long enough to delay a capture that
+    # arrives mid-batch; large enough to amortize the transaction over many rows.
+    FTS_BATCH = 32
+    # How long the writer waits for capture work before spending the idle time on the FTS
+    # backlog. FAST while there may be work (so a backlog drains at a useful rate), SLOW
+    # once a batch comes back empty (so a quiet session isn't waking up 200×/s for nothing).
+    FTS_IDLE_TICK_FAST = 5.milliseconds
+    FTS_IDLE_TICK_SLOW = 250.milliseconds
+    # Ceiling on the backlog probe (see #fts_backlog). The exact number stops mattering
+    # once it's "lots"; capping it keeps the probe O(cap) instead of O(backlog).
+    FTS_BACKLOG_PROBE_MAX = 10_000
 
     # Keep at most this many newest flows; older ones (and their ws/h2 rows) are
     # pruned so the DB plateaus instead of growing forever (freed pages are
@@ -141,8 +160,18 @@ module Gori
     RETENTION_DEFAULT = 100_000
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
-    # Per-side ceiling on body text fed to the FTS index (keeps the index small).
-    FTS_INDEX_MAX = 64 * 1024
+    # Per-side ceiling on body text fed to the FTS index. Every byte becomes a 3-byte-window
+    # token, so this is a WORK budget, measured at roughly 30µs per indexed KiB (SQLite 3.51,
+    # arm64, one flow per transaction). Indexing runs off the capture commit (V4), so the cap
+    # no longer bounds capture latency directly — it bounds how fast the backlog drains, and
+    # how much index a burst leaves to catch up on. At 64 KiB one text response cost the
+    # indexer ~2ms; 8 KiB keeps the common case (JSON APIs, small HTML) fully indexed at ~250µs.
+    #
+    # The trade is search RECALL, not correctness: `body:` (FTS) sees only the first
+    # 8 KiB per side, while `body~<regex>` still scans the whole stored BLOB, so anything
+    # past the cap stays findable — just with a table scan instead of an index hit. Raising
+    # this affects only flows indexed AFTERWARDS; already-indexed rows keep their entries.
+    FTS_INDEX_MAX = 8 * 1024
 
     @events : Channel(FlowEvent)?
     # Second post-commit notification channel feeding the Probe analyzer. Separate from
@@ -202,13 +231,13 @@ module Gori
       @write_failures = Atomic(Int32).new(0)
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
-      # Writer-fiber-only memo of the request-side FTS text keyed by a just-inserted flow id,
-      # so update_one (the response side) reuses it instead of reading the request head +
-      # body back out of the row it just wrote. Populated ONLY post-commit (a rolled-back insert
-      # never enters, so its id can't feed a stale response); bounded so abandoned Pending flows
-      # (a request whose response never arrives) can't grow it without limit — an evicted id
-      # simply falls back to the readback. Single writer fiber ⇒ no lock.
-      @pending_req_fts = {} of Int64 => String
+      # Writer-fiber-only hint: does `flows.fts_dirty = 1` possibly have rows? Starts true so a
+      # db reopened with a backlog (a killed process, or a batch dropped under saturation) gets
+      # drained without waiting for a capture to hint at it; set false the moment an indexing
+      # batch comes back empty, and true again whenever a committed batch dirtied a row. Only a
+      # HINT — it decides how eagerly the writer wakes to index, never whether a row is indexed
+      # (the `fts_dirty` column is the truth). Single writer fiber ⇒ no lock.
+      @fts_backlog_hint = true
       # Bumped after every committed probe_issues mutation (upsert/delete/status).
       # The TUI polls this every main-loop tick — more reliable than PRAGMA data_version
       # (same-process writer visibility is flaky) or the droppable Probe event channel.
@@ -226,6 +255,11 @@ module Gori
     end
 
     # --- write API (called from proxy fibers) --------------------------------
+    #
+    # BARRIER NOTE: a returned flow write is committed and readable through every projection
+    # query — but NOT necessarily through `body:`/free-text yet. Trigram indexing moved off the
+    # commit path (V4/`fts_dirty`), so a caller that must see its own write in an FTS query
+    # calls #flush (or #index_pending!) first; a live surface reports #fts_backlog instead.
 
     # Inserts a Pending flow (request captured) and returns its new id.
     # Blocks the caller until the row is committed.
@@ -281,11 +315,49 @@ module Gori
       nil
     end
 
-    # Blocks until every write enqueued before this call has committed. The single
-    # writer drains its channel FIFO, so a synchronous round-trip also flushes the
-    # fire-and-forget h2-frame writes that precede it (a clean read barrier).
+    # Blocks until every write enqueued before this call has committed AND the search index
+    # has caught up with them. The single writer drains its channel FIFO, so a synchronous
+    # round-trip also flushes the fire-and-forget h2-frame writes that precede it (a clean
+    # read barrier).
+    #
+    # The index drain is part of the barrier on purpose: trigram indexing is off-commit
+    # (V4/`fts_dirty`), so without it a caller that flushed and then ran a `body:` query
+    # would silently under-report — the exact failure the flag exists to prevent. No hot path
+    # calls this; it is the one-shot/`spec` barrier, where correctness beats latency. A live
+    # surface (the TUI) must NOT use it — it reports #fts_backlog instead of stalling.
     def flush : Nil
       exec_task ->(_c : DB::Connection) { nil }
+      index_pending!
+    end
+
+    # Indexes the whole FTS backlog, blocking until it is empty; returns the flows indexed.
+    # Runs on the writer connection (one batch per round-trip) so it interleaves with capture
+    # rather than locking it out.
+    def index_pending! : Int32
+      total = 0
+      begin
+        loop do
+          reply = Channel(Int32).new(1) # buffered: the writer must never block sending a reply
+          @writes.send(IndexBatch.new(reply))
+          n = reply.receive
+          break if n == 0
+          total += n
+        end
+      rescue Channel::ClosedError
+        # store closing — stop draining; the rows stay dirty and durable for the next open
+      end
+      total
+    end
+
+    # How many flows are waiting to be (re)indexed for `body:`/free-text search — i.e. how
+    # far behind the search index is. Capped at FTS_BACKLOG_PROBE_MAX (a bigger number would
+    # only ever be shown as "lots"), and answered from the partial index, so it is cheap
+    # enough for a live surface to poll. 0 means every stored flow is searchable.
+    def fts_backlog : Int32
+      @db.scalar("SELECT COUNT(*) FROM (SELECT 1 FROM flows WHERE fts_dirty = 1 LIMIT #{FTS_BACKLOG_PROBE_MAX})")
+        .as(Int64).to_i32
+    rescue
+      0 # a failed probe must never break a render/poll; it only understates the note
     end
 
     # --- shared read helper (used by both issues.cr and probe_issues.cr) ---
@@ -322,7 +394,10 @@ module Gori
         # writes (the default is 1000 pages; set it explicitly on the writer).
         conn.exec("PRAGMA wal_autocheckpoint=1000") rescue nil
         loop do
-          first = @writes.receive?
+          # Wait for capture work, but spend an idle wait on the FTS backlog instead of just
+          # parking (see await_op). Capture ALWAYS wins: an op arriving mid-wait is taken
+          # immediately, and indexing only ever runs between batches, never inside one.
+          first = await_op(conn)
           break if first.nil? # channel closed: drained, exit
 
           ops = [first]
@@ -336,6 +411,10 @@ module Gori
           # every blocked caller (and close()) deadlocks. On failure we roll back
           # and unblock each caller with a fallback so the app degrades, not hangs.
           deferred = [] of -> Nil
+          # Index requests are pulled OUT of the batch: they need their own transaction (see
+          # IndexBatch) and they must be answered whether or not the batch itself committed —
+          # the rows they index were dirtied by EARLIER, already-committed batches.
+          index_replies = ops.compact_map { |op| op.as?(IndexBatch).try(&.reply) }
           committed = false
           begin
             conn.transaction do |tx|
@@ -344,25 +423,17 @@ module Gori
                 case op
                 when InsertFlow
                   ins_reply = op.reply
-                  id, req_fts = insert_one(c, op.req)
-                  # Remember the request-side FTS text so this flow's later response update
-                  # skips the row readback. Merged only in the post-commit deferred block, so
-                  # a rolled-back insert leaves no entry behind.
-                  deferred << -> { remember_req_fts(id, req_fts); ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
+                  id = insert_one(c, op.req)
+                  deferred << -> { ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
                 when InsertImportBatch
                   batch_reply = op.reply
                   inserted = [] of {Int64, Bool}
                   op.pairs.each do |req, resp|
                     # A response-less import pair is a reference placeholder that will never be
                     # sent — mark it `unsent` so abandon_pending! never fabricates an error for it (#408).
-                    id, req_fts = insert_one(c, req, unsent: resp.nil?)
+                    id = insert_one(c, req, unsent: resp.nil?)
                     has_resp = !resp.nil?
                     if r = resp
-                      # Hand update_one the request FTS text we just computed so its memo
-                      # lookup HITS instead of reading the row back (a per-entry SELECT +
-                      # up-to-64KiB body re-materialization on every imported pair with a
-                      # response). delete-on-read in update_one keeps the memo from growing.
-                      remember_req_fts(id, req_fts)
                       update_one(c, Store::CapturedResponse.new(
                         flow_id: id, status: r.status, head: r.head,
                         body: r.body, reason: r.reason,
@@ -425,6 +496,9 @@ module Gori
           # branch can block or throw back into the loop.
           if committed
             deferred.each(&.call)
+            # Any committed flow write left a row `fts_dirty` — tell the idle wait to start
+            # looking again (see @fts_backlog_hint).
+            @fts_backlog_hint = true if ops.any? { |op| dirties_fts?(op) }
             # Count bulk-import rows too — an InsertImportBatch inserts many flows in ONE op,
             # so counting it as a single InsertFlow (or 0) let a large import bypass the
             # retention sweep, keeping the DB far over its cap until enough live captures accrue.
@@ -436,6 +510,9 @@ module Gori
           else
             ops.each { |op| fail_reply(op) }
           end
+          # Outside the batch transaction, and after it, so an explicit drain
+          # (Store#index_pending!) also picks up rows this very batch just dirtied.
+          index_replies.each(&.send(index_pending_batch(conn)))
         end
       end
     end
@@ -531,10 +608,99 @@ module Gori
       nil
     end
 
-    # Inserts the request row + its FTS entry, returning {id, req_fts} so the caller can
-    # hand the already-computed request-side FTS text to update_one (post-commit) instead of
-    # reading the head+body back out of the row.
-    private def insert_one(conn : DB::Connection, req : CapturedRequest, unsent : Bool = false) : {Int64, String}
+    # Blocking receive that puts an otherwise-idle writer to work on the FTS backlog.
+    # Returns the next op, or nil when the channel closed.
+    #
+    # This is what makes trigram indexing off-commit affordable without a second connection:
+    # SQLite has ONE writer, so the index work must still run on this fiber — the win is that
+    # it no longer sits INSIDE the transaction a proxy fiber is blocked on. Capture keeps
+    # strict priority (an op arriving during the wait is returned at once, and a batch is
+    # never interrupted), so under sustained load indexing simply falls behind and the
+    # backlog drains in the gaps — which is what `fts_backlog` exists to make visible.
+    private def await_op(conn : DB::Connection) : WriteOp?
+      loop do
+        tick = @fts_backlog_hint ? FTS_IDLE_TICK_FAST : FTS_IDLE_TICK_SLOW
+        select
+        when op = @writes.receive
+          return op
+        when timeout(tick)
+          # No capture work waiting: index a slice of the backlog and re-check.
+          @fts_backlog_hint = false if index_pending_batch(conn) == 0
+        end
+      end
+    rescue Channel::ClosedError
+      nil # closing: the writer_loop exits; any remaining fts_dirty rows survive in the db
+    end
+
+    # Re-indexes up to FTS_BATCH dirty flows in one transaction; returns how many it did
+    # (0 = backlog empty). Reads the text back out of the row rather than carrying it in
+    # memory: that is what makes the backlog crash-safe and unbounded-in-size safe, and the
+    # readback is cheap next to the tokenization it feeds (the body is SQL-capped to
+    # FTS_INDEX_MAX before it ever crosses into Crystal).
+    #
+    # A failure here must not kill the writer or lose capture: it runs in its own
+    # transaction and swallows errors, leaving the rows dirty for the next attempt.
+    private def index_pending_batch(conn : DB::Connection) : Int32
+      rows = [] of {Int64, Bytes, Bytes?, Bytes?, Bytes?, String?}
+      begin
+        # `content_type` comes from the COLUMN, not from re-parsing response_head: it is the
+        # value the proxy already extracted from that head, and it is what the old on-commit
+        # path skipped binary bodies on. A synthesised response (an import, a test double) can
+        # carry a content type that never appeared in its head bytes, and deriving the marker
+        # from the head would silently start indexing a binary body those callers marked.
+        conn.query(
+          "SELECT id, request_head, substr(request_body, 1, ?), response_head, substr(response_body, 1, ?), " \
+          "content_type FROM flows WHERE fts_dirty = 1 ORDER BY id LIMIT ?",
+          FTS_INDEX_MAX, FTS_INDEX_MAX, FTS_BATCH) do |rs|
+          rs.each do
+            rows << {rs.read(Int64), rs.read(Bytes), rs.read(Bytes?),
+                     rs.read(Bytes?), rs.read(Bytes?), rs.read(String?)}
+          end
+        end
+        return 0 if rows.empty?
+        conn.transaction do |tx|
+          c = tx.connection
+          rows.each do |(id, req_head, req_body, resp_head, resp_body, resp_ct)|
+            # The request side has no content_type column, so its marker comes from its head —
+            # exactly what the old path did for the request body.
+            req = body_fts_text(req_head, req_body)
+            resp = resp_head.nil? ? "" : body_fts_text(resp_head, resp_body, resp_ct)
+            # Contentless FTS5 forbids UPDATE, so a refresh is DELETE (a cheap tombstone under
+            # contentless_delete=1) + INSERT. Unconditional rather than tracking whether this row
+            # was ever indexed: it makes a re-index idempotent — and a double index pass, or one
+            # racing a peer process, can't leave two entries matching the same rowid.
+            c.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
+            c.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", id, req, resp)
+            c.exec("UPDATE flows SET fts_dirty = 0 WHERE id = ?", id)
+          end
+        end
+        rows.size
+      rescue ex
+        # gori.log, not STDERR (#411). The rows stay dirty, so this self-heals; fts_backlog
+        # keeps reporting them so a persistent failure is visible rather than silent.
+        ::Log.warn { "FTS index batch failed (#{rows.size} flow(s), will retry): #{ex.message}" }
+        0
+      end
+    end
+
+    # The FTS text for one side, given that side's raw head and its already-capped body.
+    # Skips a body that is binary by content type or compressed by Content-Encoding — the same
+    # rule the old on-commit path applied. `ct`, when given (the response side), is the stored
+    # content_type column and takes precedence over whatever the head says; the head is still
+    # scanned for Content-Encoding, which has no column.
+    private def body_fts_text(head : Bytes, body : Bytes?, ct : String? = nil) : String
+      return "" if body.nil? || body.empty?
+      return "" if ct && binary_content?(ct)
+      skip_body_fts?(head) ? "" : String.new(body)
+    end
+
+    # Does this op leave a flow row `fts_dirty`? (Only flow writes touch the index.)
+    private def dirties_fts?(op : WriteOp) : Bool
+      op.is_a?(InsertFlow) || op.is_a?(UpdateResp) || op.is_a?(InsertImportBatch)
+    end
+
+    # Inserts the request row, marked `fts_dirty` for the off-commit indexer.
+    private def insert_one(conn : DB::Connection, req : CapturedRequest, unsent : Bool = false) : Int64
       # request_size is the TRUE wire size (body_size when the BLOB was truncated),
       # so the History size column stays honest even for a capped body.
       body_size = req.body_size || req.body.try(&.size.to_i64) || 0_i64
@@ -543,8 +709,8 @@ module Gori
         INSERT INTO flows
           (created_at, scheme, host, port, method, target, http_version,
            sni, alpn, tls_version, request_head, request_body, request_size, state,
-           h2_conn_id, h2_stream_id, request_body_truncated, unsent)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           h2_conn_id, h2_stream_id, request_body_truncated, unsent, fts_dirty)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
         SQL
         req.created_at, req.scheme, req.host, req.port, req.method, req.target,
         req.http_version, req.sni, req.alpn, req.tls_version,
@@ -553,12 +719,9 @@ module Gori
         FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id,
         req.body_truncated? ? 1 : 0, unsent ? 1 : 0)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
-      id = res.last_insert_id
-      # Index the request body text now; the response side is filled in by
-      # update_one. Same transaction, so FTS and the row commit together.
-      req_fts = request_fts(req)
-      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, '')", id, req_fts)
-      {id, req_fts}
+      # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
+      # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
+      res.last_insert_id
     end
 
     private def update_one(conn : DB::Connection, resp : CapturedResponse) : Nil
@@ -572,70 +735,19 @@ module Gori
         UPDATE flows SET
           response_head = ?, response_body = ?, status = ?, reason = ?,
           content_type = ?, response_size = ?, state = ?,
-          ttfb_us = ?, duration_us = ?, error = ?, response_body_truncated = ?
+          ttfb_us = ?, duration_us = ?, error = ?, response_body_truncated = ?,
+          fts_dirty = 1
         WHERE id = ?
         SQL
         resp.head, resp.body, resp.status, resp.reason, resp.content_type,
         response_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.flow_id)
-      # flows_fts is contentless (V24): FTS5 forbids UPDATE there, so re-write the whole
-      # row. insert_one indexed the request side (searchable while Pending); DELETE that
-      # row and re-INSERT with BOTH sides. The request text was computed at insert time and
-      # memoized (@pending_req_fts) — reuse it rather than reading the head + (capped) body
-      # back from the row on every response; a miss (evicted, an import, or a cross-process
-      # write) falls back to that readback. DELETE is a cheap tombstone (contentless_delete=1)
-      # and also makes a double update_response idempotent (last write wins).
-      # Skip the FTS body text for a binary content type or a compressed (non-identity
-      # Content-Encoding) body. Both markers now ride on CapturedResponse (extracted once
-      # by the proxy where the headers are already parsed), so this no longer copies the
-      # raw head into a String + scans it per flow. A body-less response (204/304/redirect)
-      # has no text to index and short-circuits before the marker checks.
-      resp_body = resp.body
-      resp_fts = (resp_body.nil? || resp_body.empty? || binary_content?(resp.content_type) || encoded?(resp.content_encoding)) ? "" : fts_text(resp_body)
-      req_fts = @pending_req_fts.delete(resp.flow_id) || request_fts_from_row(conn, resp.flow_id)
-      conn.exec("DELETE FROM flows_fts WHERE rowid = ?", resp.flow_id)
-      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", resp.flow_id, req_fts, resp_fts)
-    end
-
-    # Record a flow's request-side FTS text for its pending response update (writer fiber
-    # only). Clears the memo on overflow rather than growing unbounded — a burst of requests
-    # whose responses never land would otherwise pin memory; after a clear, those responses
-    # take the readback path.
-    private def remember_req_fts(id : Int64, req_fts : String) : Nil
-      @pending_req_fts.clear if @pending_req_fts.size >= PENDING_FTS_MAX
-      @pending_req_fts[id] = req_fts
-    end
-
-    # The request-side FTS text for an already-stored flow, recomputed the same way
-    # request_fts does but reading the head + (SQL-capped) body back from the row —
-    # update_one has only the response, and contentless FTS can't keep the old req
-    # column across a rewrite. A bodyless request (the common GET) reads just the small
-    # head; a binary body is skipped (empty), matching request_fts.
-    private def request_fts_from_row(conn : DB::Connection, flow_id : Int64) : String
-      row = conn.query_one?(
-        "SELECT request_head, substr(request_body, 1, ?) FROM flows WHERE id = ?",
-        FTS_INDEX_MAX, flow_id, as: {Bytes, Bytes?})
-      return "" unless row
-      head, body = row
-      return "" if body.nil? || body.empty?
-      skip_body_fts?(head) ? "" : String.new(body)
-    end
-
-    # Body text fed to the FTS index, capped per side so a large body can't bloat
-    # the index.
-    private def fts_text(bytes : Bytes?) : String
-      return "" unless bytes
-      String.new(bytes[0, {bytes.size, FTS_INDEX_MAX}.min])
-    end
-
-    # The request body's FTS text, skipping the (synchronous, on-commit) trigram
-    # tokenization for a clearly-binary body. The head is scanned for Content-Type
-    # only when a body actually exists (bodyless GETs cost nothing).
-    private def request_fts(req : CapturedRequest) : String
-      body = req.body
-      return "" if body.nil? || body.empty?
-      skip_body_fts?(req.head) ? "" : fts_text(body)
+      # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
+      # indexer wrote for this row is stale. Re-dirtying an already-dirty row is a no-op, so
+      # the common case — response landing before the indexer ever reached the row — is
+      # indexed exactly ONCE, with both sides, instead of the old empty-insert + delete +
+      # re-insert. That also makes a double update_response idempotent (last write wins).
     end
 
     # Skip body FTS for clearly-binary content types (images/media/archives/

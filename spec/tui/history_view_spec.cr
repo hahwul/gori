@@ -34,6 +34,54 @@ describe Gori::Tui::HistoryView do
   # so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }
 
+  # Trigram indexing is off the capture commit (Store V4), so a `body:` filter in a LIVE view
+  # can legitimately be answered from an index that hasn't caught up. The view must not stall
+  # to fix that (the one-shot CLI/MCP surfaces drain instead) — it must SAY it, or an operator
+  # reads "no flows match" as "this traffic doesn't exist", which on a security proxy is how a
+  # finding gets missed.
+  it "notes a lagging body-search index instead of silently under-reporting" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/submit", http_version: "HTTP/1.1",
+        head: "POST /submit HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+        body: "lagindexbodytoken".to_slice))
+
+      view = HistoryView.new
+      view.start_query
+      "body:lagindexbodytoken".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      # Captured but not yet indexed: no rows, and a note that explains WHY there are none.
+      view.@rows.should be_empty
+      note = view.@query_note
+      note.should_not be_nil
+      note.not_nil!.should contain("body search")
+      note.not_nil!.should contain("1")
+
+      # Once the index catches up the flow appears and the note goes away — the gap is
+      # temporary, so the warning must not become permanent furniture.
+      store.flush
+      view.reload(store)
+      view.@rows.map(&.id).should eq([id])
+      view.@query_note.should be_nil
+    end
+  end
+
+  # A filter that never touches flows_fts must not pay for (or display) the backlog probe:
+  # its answer is complete the moment the row commits.
+  it "does not note the index backlog for a filter that doesn't read it" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.start_query
+      "method:GET".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      view.@rows.size.should eq(1)
+      view.@query_note.should be_nil
+    end
+  end
+
   it "splits the list rect for Req/Res preview when history_preview is on" do
     prev = Gori::Settings.history_preview
     begin

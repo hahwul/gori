@@ -249,7 +249,7 @@ module Gori::Tui
       invalidate_host_suggest_cache
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       query_filter = QL.parse(@query)
-      @query_note = query_note_for(query_filter)
+      @query_note = query_note_for(query_filter, store)
       # A non-blank query that compiles to EMPTY (every term invalid — a typo'd field,
       # a bad numeric like dur:>2sec, an unterminated value) must NOT fall through to a
       # match-all search: that would show EVERY flow while the bar claims a filter is
@@ -289,11 +289,30 @@ module Gori::Tui
     # A short note explaining a filter that matches nothing because it is INVALID (vs a
     # valid filter that genuinely has no matches) — surfaced in the empty-state hint so a
     # typo'd status:/dur:/size: or a broken body~[regex isn't misread as "no traffic".
-    private def query_note_for(filter : QL::Filter) : String?
+    private def query_note_for(filter : QL::Filter, store : Store) : String?
       return nil if @query.blank?
       return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
       bad = QL.invalid_regex_terms(@query)
-      bad.empty? ? nil : "invalid regex in #{bad.first}"
+      return "invalid regex in #{bad.first}" unless bad.empty?
+      fts_backlog_note(filter, store)
+    end
+
+    # `body:`/free-text read the trigram index, which is written OFF the capture commit
+    # (Store V4) so a busy proxy is never throttled by tokenization. The cost is that during
+    # a burst the newest flows are captured but not yet indexed — and "not indexed yet" would
+    # otherwise be indistinguishable from "no match", which on a security proxy is the kind of
+    # silence that hides a finding. So SAY it. A live view must not stall to fix this (the
+    # one-shot CLI/MCP surfaces call Store#index_pending! instead), and the backlog drains on
+    # its own as soon as capture goes quiet.
+    #
+    # Probed only for a filter that actually reads the index, since reload re-runs on every
+    # tick while a filter is active.
+    private def fts_backlog_note(filter : QL::Filter, store : Store) : String?
+      return nil unless filter.uses_fts?
+      pending = store.fts_backlog
+      return nil if pending == 0
+      count = pending >= Store::FTS_BACKLOG_PROBE_MAX ? "#{Store::FTS_BACKLOG_PROBE_MAX}+" : pending.to_s
+      "body search is #{count} flow(s) behind — still indexing"
     end
 
     # settings:layout History list order — newest first (default) or oldest first.

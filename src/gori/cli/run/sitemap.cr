@@ -165,6 +165,9 @@ module Gori
       # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool) : Array(Sitemap::Node)
+        # `--query body:…` reads the off-commit trigram index (Store V4); drain it so a
+        # one-shot tree can't be missing endpoints that simply weren't indexed yet.
+        store.index_pending! if filter.uses_fts?
         hosts = Sitemap.build(store.sitemap_entries(filter, limit, raise_on_error: true))
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope
