@@ -11,7 +11,10 @@ module Gori
         sni : String? = nil
         force_h2 = false
         insecure = false
-        locations = [] of Miner::Location
+        # nil = flag absent (auto-detect); a non-nil (possibly empty) value means --locations was
+        # given. Distinguishing the two lets an explicit `--locations=` error instead of silently
+        # falling back to auto-detect (#415).
+        locations : Array(Miner::Location)? = nil
         wordlist : String? = nil
         bucket : Int32? = nil
         concurrency = 10
@@ -70,12 +73,17 @@ module Gori
         config.retries = retries
         config.max_requests = max_requests
         config.user_wordlist = wordlist
+        # `--locations=` with no usable value (empty, or only blanks/commas) is an operator
+        # mistake, not a request to auto-detect — abort instead of silently mining defaults.
+        if (loc = locations) && loc.empty?
+          abort "gori run mine: --locations was empty — name at least one of query|form|multipart|json|headers|cookies (or omit it to auto-detect)"
+        end
         options = Miner::PlanOptions.new(text,
           default_target: default_target, target: target_override,
           http2: force_h2 || src_h2, bucket: bucket,
           # No --locations at all ⇒ nil, so the builder auto-detects what applies to this
-          # request; an explicit but unusable list stays an error, not a silent default.
-          locations: locations.empty? ? nil : locations,
+          # request; an explicit but unusable list is an error above, never a silent default.
+          locations: locations,
           config: config, verify: !insecure, sni: sni,
           overrides: cli_host_overrides(project_name, db_path, flow_id))
         # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless

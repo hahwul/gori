@@ -338,11 +338,13 @@ module Gori
           Signal::INT.trap { stop.send(nil) rescue nil }
           Signal::TERM.trap { stop.send(nil) rescue nil }
         end
+        once_failed = false
         loop do
           interactions = begin
             prov.poll(http, session)
           rescue ex
             STDERR.puts "poll error: #{ex.message}"
+            once_failed = true
             [] of Oast::Interaction
           end
           interactions.each do |i|
@@ -359,6 +361,9 @@ module Gori
           break if oast_wait_or_stop(stop, interval.seconds)
         end
         prov.deregister(http, session) if once
+        # A --once run whose single poll FAILED must not exit 0 — a scripted caller can't
+        # otherwise tell "polled, found nothing" from "the poll errored". (#416)
+        exit 1 if once && once_failed
       end
 
       # Block up to `interval`, returning true the instant a stop arrives (Ctrl-C via the

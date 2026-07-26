@@ -183,20 +183,30 @@ module Gori
                                        host : String, port : Int32, format : Symbol, force : Bool,
                                        fail_if_no_matches : Bool) : Nil
         total = fuzz_preflight(engine, mode, scheme, host, port, force)
-        emitted = 0
+        matched = 0
+        errored = 0
         had_error = false
         buffer = [] of Fuzz::Result
         engine.run do |ev|
           case ev
           when Fuzz::ProgressEvent then fuzz_progress(ev, total)
-          when Fuzz::ResultEvent   then emitted += 1 if emit_fuzz_result(ev.result, format, buffer)
-          when Fuzz::DoneEvent     then fuzz_done(ev, emitted)
-          when Fuzz::ErrorEvent    then had_error = true; STDERR.puts "fuzz error: #{ev.message}"
+          when Fuzz::ResultEvent
+            r = ev.result
+            if emit_fuzz_result(r, format, buffer)
+              r.matched? ? (matched += 1) : (errored += 1)
+            end
+          when Fuzz::DoneEvent  then fuzz_done(ev, matched + errored)
+          when Fuzz::ErrorEvent then had_error = true; STDERR.puts "fuzz error: #{ev.message}"
           end
         end
         puts CLI::Output.fuzz_array_json(buffer) if format == :json
         exit 1 if had_error
-        exit 3 if fail_if_no_matches && emitted == 0
+        exit 3 if fail_if_no_matches && matched == 0
+        # A run where NOTHING matched and every send errored (target down, scope-blocked, TLS
+        # failure) is a failure, not a clean "no matches" — so a scripted caller can tell the two
+        # apart even without --fail-if-no-matches. The errored rows are now shown too (below),
+        # matching the TUI which renders every result. (#410)
+        exit 1 if matched == 0 && errored > 0
       end
 
       # Resolve + announce the request count; gate huge/unknown runs behind --force.
@@ -225,9 +235,11 @@ module Gori
         STDERR.puts "done · #{ev.progress.sent} sent · #{emitted} shown · #{ev.progress.errors} errors#{ev.stopped ? " (stopped)" : ""}"
       end
 
-      # Prints/buffers a matched result; returns true when it was emitted.
+      # Prints/buffers a result; returns true when it was emitted. Errored sends are shown too
+      # (the row helpers render "ERR" + the message / `error` field), so a headless run has the
+      # same visibility as the TUI — a scope-block or a dead target is no longer silently dropped.
       private def self.emit_fuzz_result(r : Fuzz::Result, format : Symbol, buffer : Array(Fuzz::Result)) : Bool
-        return false unless r.matched?
+        return false unless r.matched? || r.error
         case format
         when :jsonl then puts CLI::Output.fuzz_row_json(r)
         when :json  then buffer << r

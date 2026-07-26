@@ -254,6 +254,35 @@ describe "gori run probe --active" do
   end
 end
 
+# #410: `gori run fuzz` dropped every errored send from all output formats (the CLI showed only
+# matches), so a headless run that 100%-failed looked identical to one that cleanly matched
+# nothing. `emit_fuzz_result` now emits an errored row too — proven here via a whitebox wrapper.
+module Gori::CLI::Run
+  def self.emit_fuzz_result_for_spec(r : Gori::Fuzz::Result, buffer : Array(Gori::Fuzz::Result)) : Bool
+    emit_fuzz_result(r, :json, buffer) # :json only buffers, no stdout
+  end
+end
+
+private def fuzz_result(matched : Bool, error : String?) : Gori::Fuzz::Result
+  Gori::Fuzz::Result.new(index: 0_i64, payloads: ["p"], position: 0, status: (matched ? 200 : nil),
+    length: 0_i64, words: 0, lines: 0, duration_us: 1_i64, error: error, matched: matched,
+    incomplete: false, extracted: nil)
+end
+
+describe "gori run fuzz — errored result visibility (#410)" do
+  it "emits an errored send, not just a matched one" do
+    buf = [] of Gori::Fuzz::Result
+    # A send failure (scope-blocked / target down): matched? false, error set.
+    Gori::CLI::Run.emit_fuzz_result_for_spec(fuzz_result(false, "connect failed"), buf).should be_true
+    # A plain non-match with no error is still dropped (unchanged).
+    Gori::CLI::Run.emit_fuzz_result_for_spec(fuzz_result(false, nil), buf).should be_false
+    # A match is emitted as before.
+    Gori::CLI::Run.emit_fuzz_result_for_spec(fuzz_result(true, nil), buf).should be_true
+    buf.size.should eq(2) # the errored row + the match; the bare no-match was not buffered
+    buf.any? { |r| r.error == "connect failed" }.should be_true
+  end
+end
+
 # `gori run repeater send`'s session-replay resolution used to live in a private CLI helper
 # (`build_repeater_send`). Since #356 the RESOLUTION is `Repeater::Plan.build`, asserted once
 # for all three surfaces in spec/repeater/plan_spec.cr — but the row → options MAPPING is
