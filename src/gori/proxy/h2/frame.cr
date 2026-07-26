@@ -14,9 +14,13 @@ module Gori::Proxy::H2
 
     HEADER_SIZE = 9
 
-    # The default SETTINGS_MAX_FRAME_SIZE (RFC 7540 §6.5.2); we accept up to a
-    # generous cap to avoid unbounded allocation from a malformed length field.
-    MAX_PAYLOAD = 16 * 1024 * 1024
+    # The largest value the 24-bit frame length field can hold (RFC 7540 §4.1) — the
+    # inherent hard ceiling on one frame's payload, so `read`'s default never rejects a
+    # well-formed frame (a relay must forward whatever the peer legally sends). It was
+    # `16 * 1024 * 1024` (= 1<<24), one MORE than any 24-bit length, so the `len > max_payload`
+    # guard could never fire; naming the true maximum makes the guard honest and lets a caller
+    # that wants a tighter cap pass a smaller `max_payload` to `read` and have it bite.
+    MAX_PAYLOAD = (1 << 24) - 1
 
     enum Type : UInt8
       Data         = 0x0

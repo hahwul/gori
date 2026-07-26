@@ -45,6 +45,11 @@ module Gori::Proxy::H2
       # MAX_HEADER_LIST) only bound ONE block; this bounds the accumulation.
       property header_bytes = 0
       property ended = false
+      # True between a HEADERS without END_HEADERS and the CONTINUATION that ends the block.
+      # A CONTINUATION is only legal while this holds (RFC 9113 §6.10); one arriving otherwise
+      # is a protocol violation a hostile peer uses to fabricate or erase a flow, so it is
+      # dropped (#409).
+      property awaiting_continuation = false
     end
 
     private class Stream
@@ -79,8 +84,21 @@ module Gori::Proxy::H2
     end
 
     private def feed_locked(direction : String, frame : Frame::Header) : Nil
+      # PUSH_PROMISE opens the PROMISED stream itself (with its own cap check) and never touches
+      # frame.stream_id's slot, so handle it before the lookup below — otherwise it would
+      # allocate an unused Stream for the associated id.
+      if frame.frame_type == Frame::Type::PushPromise
+        handle_push_promise(direction, frame, direction == "out" ? @req_decoder : @resp_decoder)
+        return
+      end
+
       stream = @streams[frame.stream_id]?
       if stream.nil?
+        # Only HEADERS opens a stream. Every other frame for an UNKNOWN stream id — DATA,
+        # PRIORITY, WINDOW_UPDATE, RST_STREAM, a bare CONTINUATION — must not allocate a
+        # tracking slot, or a cheap flood of them exhausts MAX_LIVE_STREAMS and blinds capture
+        # for the rest of the connection (#412). The raw frame log stays the truth (P7).
+        return unless frame.frame_type == Frame::Type::Headers
         return if @streams.size >= MAX_LIVE_STREAMS # at cap — don't track new streams
         stream = @streams[frame.stream_id] = Stream.new
       end
@@ -107,11 +125,24 @@ module Gori::Proxy::H2
         return
       when Frame::Type::Headers
         append_header_fragment(side, header_block(frame))
-        finish_header_block(side, decoder) if frame.end_headers?
+        if frame.end_headers?
+          side.awaiting_continuation = false
+          finish_header_block(side, decoder)
+        else
+          side.awaiting_continuation = true # a CONTINUATION may now legally follow
+        end
         side.ended = true if frame.end_stream?
       when Frame::Type::Continuation
+        # A CONTINUATION with no open (un-terminated) header block is a protocol violation
+        # (RFC 9113 §6.10) — a hostile peer uses one to complete a fabricated flow on a
+        # never-opened stream, or to append to an already-finished one, spoofing gori's view
+        # even though the raw frame log stays byte-exact. Drop it (#409).
+        return unless side.awaiting_continuation
         append_header_fragment(side, frame.payload)
-        finish_header_block(side, decoder) if frame.end_headers?
+        if frame.end_headers?
+          side.awaiting_continuation = false
+          finish_header_block(side, decoder)
+        end
         # END_STREAM is illegal on CONTINUATION (RFC 7540 §6.10) but a hostile peer
         # can set it; mirror HEADERS/DATA so the request still emits and the stream
         # closes — otherwise it's silently dropped and the stream leaks (P7).
@@ -119,9 +150,6 @@ module Gori::Proxy::H2
       when Frame::Type::Data
         side.body.write(data_block(frame))
         side.ended = true if frame.end_stream?
-      when Frame::Type::PushPromise
-        handle_push_promise(direction, frame, decoder)
-        return
       else
         return
       end

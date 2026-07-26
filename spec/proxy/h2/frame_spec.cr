@@ -65,4 +65,18 @@ describe Gori::Proxy::H2::Frame do
     settings_ack = Frame::Header.new(Frame::Type::Settings.value, Frame::ACK, 0_u32, Bytes.empty)
     settings_ack.ack?.should be_true
   end
+
+  # #417: MAX_PAYLOAD is the 24-bit length field's true maximum, so the default `read` never
+  # rejects a well-formed frame (a relay must forward whatever the peer legally sends) — but a
+  # caller passing a SMALLER cap gets a real, firing guard (it used to be 1<<24, one more than
+  # any 24-bit length, so `len > max_payload` could never be true).
+  it "caps the frame payload at the 24-bit maximum, and a tighter cap bites" do
+    Frame::MAX_PAYLOAD.should eq((1 << 24) - 1)
+    # A 300-byte frame is accepted by default...
+    payload = Bytes.new(300, 0xab_u8)
+    wire = Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, payload).to_bytes
+    Frame.read(IO::Memory.new(wire)).not_nil!.payload.size.should eq(300)
+    # ...but rejected when the caller asks for a tighter ceiling.
+    expect_raises(Gori::Error, /too large/) { Frame.read(IO::Memory.new(wire), max_payload: 100) }
+  end
 end

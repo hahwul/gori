@@ -251,4 +251,58 @@ describe Gori::Proxy::H2::Assembler do
     sink.responses.first.status.should eq(200)
     String.new(sink.responses.first.body.not_nil!).should eq("pushed body")
   end
+
+  # #409: a CONTINUATION frame with no preceding un-terminated HEADERS is a protocol violation
+  # (RFC 9113 §6.10). A hostile peer sends a lone one to FABRICATE a flow on a never-opened
+  # stream — after which the real HEADERS that arrive later would be dropped, spoofing gori's
+  # view. It must be ignored, and must not open/track the stream.
+  it "drops a lone CONTINUATION on a never-opened stream and still emits the real request" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    # A single CONTINUATION with END_HEADERS|END_STREAM, empty payload, on a stream that never
+    # had HEADERS — the fabrication primitive.
+    assembler.feed("out", Frame::Header.new(Frame::Type::Continuation.value,
+      Frame::END_HEADERS | Frame::END_STREAM, 3_u32, Bytes.empty))
+    sink.requests.should be_empty # nothing fabricated
+
+    # The genuine request on the same stream id must still be assembled (not shadowed by a phantom).
+    assembler.feed("out", headers_frame(3_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    sink.requests.size.should eq(1)
+    sink.requests.first.method.should eq("GET")
+    sink.requests.first.host.should eq("www.example.com")
+  end
+
+  # #409: a CONTINUATION after a header block already ended (END_HEADERS seen) must also drop,
+  # not append to / re-emit the finished stream.
+  it "drops a CONTINUATION that arrives after the header block already ended" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(5_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    sink.requests.size.should eq(1)
+    # A trailing CONTINUATION with a bogus block — awaiting_continuation is already false.
+    assembler.feed("out", Frame::Header.new(Frame::Type::Continuation.value,
+      Frame::END_HEADERS, 5_u32, Bytes[0x88_u8, 0x88_u8]))
+    sink.requests.size.should eq(1) # not re-emitted, not corrupted
+  end
+
+  # #412: only HEADERS opens a stream. A flood of frames that never open one (PRIORITY /
+  # WINDOW_UPDATE / DATA / RST for an unknown id) must not consume MAX_LIVE_STREAMS slots and
+  # blind capture for the rest of the connection.
+  it "does not let non-opening frames exhaust the live-stream cap" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    # More WINDOW_UPDATE frames than the cap, each on a distinct unknown (even) stream id.
+    (1_u32..1500_u32).each do |i|
+      sid = i * 2
+      assembler.feed("in", Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, sid,
+        Bytes[0_u8, 0_u8, 0_u8, 1_u8]))
+    end
+    # A genuine request on a fresh odd id must still be tracked and emitted.
+    assembler.feed("out", headers_frame(9001_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    sink.requests.size.should eq(1)
+    sink.requests.first.method.should eq("GET")
+  end
 end
