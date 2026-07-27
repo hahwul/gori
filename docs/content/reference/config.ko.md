@@ -115,6 +115,45 @@ CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 �
 
 규칙은 [호스트 오버라이드](#hostname_overrides) 적용 **이전의 원래 호스트명**에 대해 매칭됩니다 — 오버라이드는 어느 IP로 접속할지만 바꿉니다.
 
+### outbound_tls
+
+gori가 **거는** 연결의 목적지별 TLS 정책입니다 — 제시할 클라이언트 인증서, 그리고 협상할 프로토콜/암호군 하한. 순서가 있고 첫 일치가 이기며, 호스트 패턴 문법은 동일합니다. 편집은 `gori settings --edit`.
+
+[`upstream_rules`](#upstream_rules)와 의도적으로 분리된 테이블입니다. 둘 다 목적지 호스트로 키를 잡지만 답하는 질문이 다르고, 합치면 가장 흔한 형태를 표현할 수 없게 됩니다 — "전부 사내 프록시 경유 + 한 호스트만 클라이언트 인증서"를 쓰려면 그 호스트 행에 프록시 주소를 중복해야 합니다. 하나의 first-match 테이블은 호스트당 한 행만 적용할 수 있기 때문입니다.
+
+```json
+{
+  "outbound_tls": [
+    {
+      "host": "mtls.example.com",
+      "client_cert": "/home/you/certs/client.crt.pem",
+      "client_key": "/home/you/certs/client.key.pem"
+    },
+    {
+      "host": "legacy-appliance.internal",
+      "min_version": "tls1.0",
+      "ciphers": "ALL:@SECLEVEL=0",
+      "permissive": true
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `host` | string | 호스트 패턴. `upstream_rules`와 동일하며 `*`는 catch-all |
+| `client_cert` | string | 제시할 PEM 인증서 체인 경로(상호 TLS) |
+| `client_key` | string | 대응하는 PEM 개인키 경로. 둘 다 있어야 하거나 둘 다 없어야 합니다 |
+| `min_version` | string | 협상할 최저 프로토콜: `tls1.0`, `tls1.1`, `tls1.2`, `tls1.3`. 비우면 기본값 |
+| `ciphers` | string | TLS 1.2 이하용 OpenSSL 암호군 목록. 비우면 기본값 |
+| `permissive` | bool | 망가진/레거시 서버 상대: OpenSSL security level을 0으로 낮추고 재협상을 허용합니다 |
+
+**`min_version`이 필요한 이유.** gori는 기본 상태로 TLS 1.0/1.1만 지원하는 장비에 접근할 수 없고, `verify_upstream: false`로도 해결되지 않습니다 — 그건 인증서 *검증*을 끄는 것이지 프로토콜 협상과 무관합니다. Crystal의 TLS 클라이언트 컨텍스트가 생성자에서 TLS 1.0과 1.1을 비활성화하므로, 여기서 하한을 낮추는 것이 유일한 방법입니다. 레거시 장비는 보통 `permissive: true`도 함께 필요합니다 — 배포판이 OpenSSL을 옛 암호군을 아예 거부하는 security level로 빌드하기 때문입니다.
+
+**인증서는 인라인 값이 아니라 파일 경로입니다.** 개인키는 공유·내보내기 대상인 `settings.json`에 들어갈 것이 아닙니다([#439](https://github.com/hahwul/gori/issues/439)). 패스프레이즈가 걸린 키는 저장 시 거부됩니다 — OpenSSL이 TUI가 점유한 터미널에 패스프레이즈를 물어보므로, gori가 그냥 멈춘 것처럼 보이게 됩니다. `openssl pkey -in key.pem -out plain.pem`으로 먼저 복호화하세요.
+
+정책은 SNI 오버라이드가 아니라 **실제 접속한 호스트**로 조회합니다 — 인증서와 프로토콜 하한은 실제로 대화하는 장비에 속하는 반면, Repeater의 SNI 필드는 도메인 프론팅·vhost 테스트를 위해 의도적으로 이름을 다르게 보내는 기능입니다.
+
 ### layout {#layout}
 
 영역별 TUI 레이아웃 환경설정 (커맨드 팔레트 → **Settings: Layout**). 두 값 모두 공장 기본값이면 생략됩니다.

@@ -115,6 +115,45 @@ Precedence, highest first:
 
 A rule is matched against the **original** hostname, before any [host override](#hostname_overrides) is applied — an override only changes which IP is dialled.
 
+### outbound_tls
+
+Per-destination TLS policy for the connections gori **makes**: a client certificate to present, and the protocol/cipher floor to negotiate with. Ordered, first match wins, same host-pattern dialect. Edit with `gori settings --edit`.
+
+This is a separate table from [`upstream_rules`](#upstream_rules) on purpose. Both are keyed by destination host, but they answer different questions, and folding them together would make the common shape inexpressible — "everything through the corporate proxy, plus a client certificate for one host" would need the proxy address duplicated onto that host's row, because one first-match table can only apply a single row per host.
+
+```json
+{
+  "outbound_tls": [
+    {
+      "host": "mtls.example.com",
+      "client_cert": "/home/you/certs/client.crt.pem",
+      "client_key": "/home/you/certs/client.key.pem"
+    },
+    {
+      "host": "legacy-appliance.internal",
+      "min_version": "tls1.0",
+      "ciphers": "ALL:@SECLEVEL=0",
+      "permissive": true
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `host` | string | Host pattern, as in `upstream_rules`. `*` is the catch-all |
+| `client_cert` | string | Path to a PEM certificate chain to present (mutual TLS) |
+| `client_key` | string | Path to the matching PEM private key. Both halves are required, or neither |
+| `min_version` | string | Lowest protocol to negotiate: `tls1.0`, `tls1.1`, `tls1.2`, `tls1.3`. Empty leaves the default |
+| `ciphers` | string | OpenSSL cipher list for TLS 1.2 and below. Empty leaves the default |
+| `permissive` | bool | Talk to broken/legacy servers: drops the OpenSSL security level to 0 and allows renegotiation |
+
+**Why `min_version` exists.** gori cannot reach a TLS 1.0/1.1-only appliance out of the box, and `verify_upstream: false` does not help — that turns off certificate *verification*, not protocol negotiation. Crystal's TLS client context disables TLS 1.0 and 1.1 in its constructor, so lowering the floor here is the only way. A legacy appliance usually needs `permissive: true` as well, because distributions build OpenSSL at a security level that rejects the old cipher suites outright.
+
+**Certificates are file paths, not inline material.** A private key does not belong in `settings.json`, which is shareable and exportable ([#439](https://github.com/hahwul/gori/issues/439)). A passphrase-protected key is rejected at save time: OpenSSL would prompt for the passphrase on the terminal the TUI owns, so gori would simply appear to hang. Decrypt it first with `openssl pkey -in key.pem -out plain.pem`.
+
+The policy is looked up on the **dialled** host, not on an SNI override — a certificate and a protocol floor belong to the machine actually being talked to, whereas the Repeater's SNI field deliberately lies about the name for domain-fronting and vhost tests.
+
 ### layout
 
 Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted when both values are factory defaults.

@@ -406,13 +406,20 @@ module Gori::Proxy
     # `alpn` offers an ALPN protocol (e.g. "h2"); nil leaves it unset so the
     # origin answers HTTP/1.1. The caller checks `ssl.alpn_protocol` for what was
     # actually negotiated.
-    # Shared client SSL contexts keyed by {verify, alpn}. SNI + hostname
+    # Shared client SSL contexts keyed by {verify, alpn, outbound-TLS policy}. SNI + hostname
     # verification are applied per-CONNECTION on the SSL socket (the `hostname:`
     # arg below), so the context — which only carries verify_mode + ALPN — is safe
     # to share. This avoids a fresh SSL_CTX alloc + set_default_verify_paths (system
     # CA load) + GC finalizer on EVERY flow. Single-threaded fibers → the lazy ||=
     # is race-free.
-    @@tls_contexts = {} of {Bool, String?} => OpenSSL::SSL::Context::Client
+    #
+    # The THIRD key element is load-bearing, not cosmetic. Anything that mutates the context
+    # — a per-host client certificate, a protocol floor, a cipher list — must appear in the
+    # key or the first context built wins for the whole process: a client certificate would be
+    # presented to hosts it was never configured for, and a settings change would silently do
+    # nothing. `OutboundTlsRule#cache_key` is that identity, and it is "" for the all-defaults
+    # policy so the common case still shares ONE context.
+    @@tls_contexts = {} of {Bool, String?, String} => OpenSSL::SSL::Context::Client
 
     # Standard system CA locations (the same list Go's crypto/x509 probes). A single
     # bundle FILE carries every root, so files are tried first; the DIRS are the
@@ -528,8 +535,9 @@ module Gori::Proxy
       "set SSL_CERT_FILE=/path/to/ca-bundle.crt or run with --insecure-upstream"
     end
 
-    private def self.client_context(verify : Bool, alpn : String?) : OpenSSL::SSL::Context::Client
-      @@tls_contexts[{verify, alpn}] ||= begin
+    private def self.client_context(verify : Bool, alpn : String?,
+                                    tls : Settings::OutboundTlsRule = Settings::DEFAULT_OUTBOUND_TLS) : OpenSSL::SSL::Context::Client
+      @@tls_contexts[{verify, alpn, tls.cache_key}] ||= begin
         ctx = OpenSSL::SSL::Context::Client.new
         if verify
           apply_system_trust(ctx) unless env_ca_override?
@@ -537,7 +545,50 @@ module Gori::Proxy
           ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
         end
         ctx.alpn_protocol = alpn if alpn
+        apply_outbound_tls(ctx, tls)
         ctx
+      end
+    end
+
+    # Apply one destination's outbound-TLS policy to a fresh context: the client certificate to
+    # present, the protocol floor, the cipher list, and the permissive switch.
+    #
+    # Failures here are DELIBERATELY not swallowed. A client certificate that cannot be loaded,
+    # or a cipher string OpenSSL rejects, must not degrade into a silent plaintext-policy
+    # connection that then fails at the origin — the settings validator checks these at save
+    # time, so reaching a raise means a hand-edited file or a file removed since, and the
+    # dial_tls_result caller turns it into a recorded Tls error the operator can see.
+    private def self.apply_outbound_tls(ctx : OpenSSL::SSL::Context::Client,
+                                        tls : Settings::OutboundTlsRule) : Nil
+      return if tls.default?
+      if tls.client_auth?
+        ctx.certificate_chain = tls.client_cert
+        ctx.private_key = tls.client_key
+      end
+      apply_tls_floor(ctx, tls.min_version)
+      # Lower the security level BEFORE the cipher list: on a distribution built at
+      # SECLEVEL=2 the legacy suites a caller names here are rejected outright, so setting
+      # ciphers first would raise on exactly the legacy origin this exists to reach.
+      ctx.security_level = 0 if tls.permissive
+      ctx.ciphers = tls.ciphers unless tls.ciphers.empty?
+      # Some legacy appliances renegotiate; Crystal's constructor forbids it by default.
+      ctx.remove_options(OpenSSL::SSL::Options::NO_RENEGOTIATION) if tls.permissive
+    end
+
+    # Move the protocol floor. Crystal's Context::Client.new adds NO_TLS_V1 | NO_TLS_V1_1, so
+    # anything below 1.2 is opt-in by REMOVING those options — that constructor default is why
+    # a TLS 1.0-only appliance was previously unreachable at any setting.
+    private def self.apply_tls_floor(ctx : OpenSSL::SSL::Context::Client, min_version : String) : Nil
+      case min_version
+      when "tls1.0"
+        ctx.remove_options(OpenSSL::SSL::Options.flags(NO_TLS_V1, NO_TLS_V1_1))
+      when "tls1.1"
+        ctx.remove_options(OpenSSL::SSL::Options::NO_TLS_V1_1)
+        ctx.add_options(OpenSSL::SSL::Options::NO_TLS_V1)
+      when "tls1.2"
+        ctx.add_options(OpenSSL::SSL::Options.flags(NO_TLS_V1, NO_TLS_V1_1))
+      when "tls1.3"
+        ctx.add_options(OpenSSL::SSL::Options.flags(NO_TLS_V1, NO_TLS_V1_1, NO_TLS_V1_2))
       end
     end
 
@@ -571,7 +622,12 @@ module Gori::Proxy
                              *, overrides : Gori::HostOverrides? = nil) : {OpenSSL::SSL::Socket::Client?, TlsDialError?}
       tcp = dial(host, port, connect_timeout, io_timeout, overrides: overrides)
       return {nil, TlsDialError::Connect} unless tcp
-      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: sni || host)
+      # The outbound-TLS policy is looked up on the DIALED host, not `sni`: a client
+      # certificate and a protocol floor belong to the machine we are actually talking to,
+      # whereas `sni` deliberately lies about the name for domain-fronting / vhost tests.
+      tls_policy = Settings.outbound_tls_for(host)
+      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn, tls_policy),
+        sync_close: true, hostname: sni || host)
       ssl.sync = true
       {ssl, nil}
     rescue
