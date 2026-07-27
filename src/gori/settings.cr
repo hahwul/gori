@@ -281,8 +281,25 @@ module Gori
     end
 
     # Apply the selected sections of `raw` to the live settings and persist. Returns the keys
-    # applied. Whole-section REPLACE, matching how merge_with_disk already reasons — a section
-    # is the unit an operator selects, so a half-merged one would be a surprise.
+    # applied.
+    #
+    # WHAT "SECTION" MEANS HERE, precisely — this was documented as a whole-section REPLACE,
+    # which is only true of the table-shaped sections:
+    #
+    #   * A section ABSENT from the profile (or not selected) is untouched. This is the real
+    #     guarantee, and the one an operator is choosing between when they pass --sections.
+    #   * A LIST/TABLE section present in the profile replaces wholesale — upstream_rules,
+    #     outbound_tls, listeners, scan_rules, hostname_overrides, tabs, … A profile carrying
+    #     `"upstream_rules": []` therefore clears the table, which is how "no rules" is said.
+    #   * An OBJECT-of-scalars section (network, editor, probe) applies KEY BY KEY: a key the
+    #     profile omits keeps its current value. That is deliberate — a team profile pinning
+    #     `network.upstream_proxy` must not also reset everyone's bind_port to the factory
+    #     default it never mentioned — but it does mean such a section is merged, not replaced.
+    #
+    # The second consequence to know: `export_document` omits a section sitting at its factory
+    # default (serialize_* skip it), so exporting from a machine where a value is default and
+    # importing onto one where it is not will NOT reset it. A profile is a set of values to
+    # apply, not a snapshot of a whole configuration.
     #
     # Reuses `apply_sections`, the same reader `load` uses, so every section's tolerant parse
     # (unknown enum → safe fallback, junk entry dropped) applies here identically. Persisting

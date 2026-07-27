@@ -16,6 +16,10 @@ private def with_config_home(&)
     prev_cfg ? (ENV["GORI_CONFIG"] = prev_cfg) : ENV.delete("GORI_CONFIG")
     Gori::Settings.path_override = nil
     Gori::Settings.upstream_proxy = ""
+    Gori::Settings.bind_port = 8070
+    # Through the setter, so the COMPILED pattern cache goes back with it — a leaked rule
+    # would silently reroute `upstream_route` in whatever spec file runs next.
+    Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
     Gori::Settings.theme = Gori::Settings::DEFAULT_THEME
     Gori::Settings.env_vars = [] of {String, String}
     FileUtils.rm_rf(dir)
@@ -166,6 +170,35 @@ describe "settings profiles" do
         Gori::Settings.bind_port.should eq(9191)
         Gori::Settings.theme.should eq("goridark") # not selected → unchanged
         JSON.parse(File.read(Gori::Settings.path)).as_h["theme"].as_s.should eq("goridark")
+      end
+    end
+
+    # The two halves of what "section" means here, pinned because the difference is exactly
+    # what surprises: a LIST section replaces wholesale, an OBJECT-of-scalars section applies
+    # key by key. Documented in cli.md; a drift in either direction is a silent data change.
+    it "replaces a table section wholesale, including with an empty list" do
+      with_config_home do
+        Gori::Settings.upstream_rules = [
+          Gori::Settings::UpstreamRule.new("*.corp", "http", "proxy:3128"),
+        ]
+        Gori::Settings.import_document(%({"upstream_rules":[{"host":"*.dev","kind":"direct"}]}))
+        Gori::Settings.upstream_rules.map(&.host).should eq(["*.dev"])
+
+        # An empty list is how a profile says "no rules" — it must clear, not be ignored.
+        Gori::Settings.import_document(%({"upstream_rules":[]}))
+        Gori::Settings.upstream_rules.should be_empty
+      end
+    end
+
+    it "applies an object-of-scalars section key by key, keeping keys the profile omits" do
+      with_config_home do
+        Gori::Settings.bind_port = 9000
+        Gori::Settings.upstream_proxy = ""
+        # A team profile that pins ONLY the upstream must not reset the bind port it never
+        # mentioned — that is why `network` merges rather than replacing.
+        Gori::Settings.import_document(%({"network":{"upstream_proxy":"corp:3128"}}))
+        Gori::Settings.upstream_proxy.should eq("corp:3128")
+        Gori::Settings.bind_port.should eq(9000)
       end
     end
 
