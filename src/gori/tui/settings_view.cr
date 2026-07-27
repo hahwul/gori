@@ -31,6 +31,8 @@ module Gori::Tui
       Field.new("Connect timeout (s)", "how long an upstream TCP/proxy connect may take before giving up — seconds (min 1)"),
       Field.new("Idle timeout (s)", "initial read/write timeout on the upstream socket — seconds (min 1)"),
       Field.new("Capture body limit (MiB)", "max body bytes captured + stored per flow — MiB (min 1); applies to NEW flows only"),
+      Field.new("HTTP/2", "auto follows the origin's ALPN; off forces HTTP/1.1 on every tunnelled connection (for reproducing a finding on h1) — ←/→ cycles",
+        choices: Settings::HTTP2_MODES),
       Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
@@ -226,7 +228,7 @@ module Gori::Tui
                   Settings::DEFAULT_CONFIRM_QUIT ? "on" : "off",
                   Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -248,6 +250,7 @@ module Gori::Tui
         Settings.connect_timeout_secs.to_s,
         Settings.io_timeout_secs.to_s,
         Settings.capture_max_mib.to_s,
+        Settings.http2,
         passthrough_label(Settings.tls_passthrough),
         hostnames_summary,
       ]
@@ -538,7 +541,7 @@ module Gori::Tui
         return "settings: invalid capture limit #{@values[7].inspect} (MiB, min 1)"
       end
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
-      passthrough = passthrough_from_label(@values[8])
+      passthrough = passthrough_from_label(@values[9])
       if err = Settings.tls_passthrough_error(passthrough)
         @status = "invalid TLS passthrough host"
         return err
@@ -551,6 +554,7 @@ module Gori::Tui
       Settings.connect_timeout_secs = ct
       Settings.io_timeout_secs = it
       Settings.capture_max_mib = cap
+      Settings.http2 = @values[8]
       Settings.tls_passthrough = passthrough
       @values = network_values
       persist

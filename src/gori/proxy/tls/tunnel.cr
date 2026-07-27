@@ -175,13 +175,19 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when the sandbox is on, OR intercept is on for this host, OR
-    # Match&Replace rules are live: h2's HPACK-encoded heads never reach the
+    # ClientConn path — when HTTP/2 is switched off, the sandbox is on, intercept is on for this
+    # host, OR Match&Replace rules are live: h2's HPACK-encoded heads never reach the
     # HeadRewriter/interceptor seams (nor ClientConn's sandbox block), so the relay would
     # silently skip all of them. Out-of-scope, sandbox-off, intercept-off, rule-less hosts are
     # candidates (subject to the origin actually speaking h2 — see reflect_origin_h2).
+    #
+    # `http2_disabled?` is one MORE reason to downgrade, deliberately not a way to override the
+    # others: those three are correctness requirements, not preferences, so no setting may turn
+    # them off. Placing the check here also means "off" skips the origin ALPN probe entirely —
+    # reflect_origin_h2 consults this before dialing.
     private def h2_candidate?(host : String) : Bool
-      !(@interceptor.try(&.sandbox_enabled?) ||
+      !(Gori::Settings.http2_disabled? ||
+        @interceptor.try(&.sandbox_enabled?) ||
         @interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
     end
 

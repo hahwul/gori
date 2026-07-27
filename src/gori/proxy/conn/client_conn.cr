@@ -945,6 +945,11 @@ module Gori::Proxy
           # (the host having already cleared the coarse gate above) refuse the whole tunnel —
           # h2c-in-CONNECT is rare, and a blocking mode must not leave an ungated path open.
           return false if (ic = @interceptor) && ic.sandbox_enabled?
+          # With HTTP/2 switched off, refuse rather than relay. The client has already
+          # committed to h2 by sending the preface, so there is nothing to downgrade — and
+          # silently relaying it would make "force HTTP/1.1" quietly untrue for this path,
+          # which is worse than a visible refusal.
+          return false if Settings.http2_disabled?
           intercept_h2c(host, port, stream)
         else
           tls.intercept(host, port, stream, @sink)

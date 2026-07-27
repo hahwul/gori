@@ -46,9 +46,22 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
 | `io_timeout_secs` | integer | `30` | Upstream read / write idle timeout in seconds (minimum `1`) |
 | `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
+| `http2` | string | `"auto"` | `auto` reflects the origin's ALPN; `off` forces HTTP/1.1 on every tunnelled connection. See [http2](#http2) below |
 | `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls_passthrough) below |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
+
+#### http2
+
+`auto` (the default) reflects the origin's ALPN: gori advertises HTTP/2 to the client only when the origin speaks it. `off` never advertises it, so every tunnelled connection takes the HTTP/1.1 path.
+
+Pinning the version matters because h1-vs-h2 differences are often the *subject* of a test — request framing, header-name handling, smuggling — and holding the protocol constant is how the difference gets isolated.
+
+Before this setting, the only lever was an implementation detail: gori downgrades to HTTP/1.1 when Match & Replace rules are live, so the way to force h1 was to enable a no-op rule. That also turned on head rewriting, and was easy to leave behind.
+
+`off` takes effect on the next tunnelled connection, and skips the origin ALPN probe entirely (one fewer connection per origin). It does **not** override the downgrades gori performs for correctness — the Sandbox, per-host interception, and live Match & Replace rules still force HTTP/1.1 regardless, because the HTTP/2 relay genuinely bypasses those seams. A cleartext-HTTP/2 (`h2c`) tunnel inside `CONNECT` is refused rather than relayed when `off`: the client has already committed to h2 by sending the preface, so there is nothing to downgrade.
+
+There is no `force` mode. It would need a defined fallback for an origin that turns out not to speak HTTP/2, and no need for it has come up; the string form leaves room to add it without a compatibility shim.
 
 #### tls_passthrough
 

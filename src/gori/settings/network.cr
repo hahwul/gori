@@ -38,6 +38,24 @@ module Gori::Settings
   # Empty (the default) = MITM everything, gori's behaviour before this setting existed.
   # Global-only. Plaintext HTTP is unaffected — there is no TLS there to pass through.
   DEFAULT_TLS_PASSTHROUGH = [] of String
+  # Whether gori may use HTTP/2 at all (settings:network).
+  #
+  #   "auto" — reflect the ORIGIN's ALPN (#323): advertise h2 to the client only when the
+  #            origin speaks it. The default, and what gori always did.
+  #   "off"  — never advertise h2; every tunnelled connection takes the HTTP/1.1 path.
+  #
+  # "off" exists because h1-vs-h2 differences are frequently the SUBJECT of a test (framing,
+  # header handling, smuggling — #403/#409/#412/#417), so pinning the version is how the
+  # difference gets isolated. Before this the only lever was `h2_candidate?` returning false
+  # when Match&Replace rules are live, so operators forced h1 by enabling a no-op M&R rule —
+  # a workaround that silently changes other behaviour and is easy to leave behind.
+  #
+  # Deliberately a STRING, not a Bool: a third mode ("force" h2 regardless of the ALPN probe)
+  # is a plausible future addition, and it is additive here whereas a Bool would need a
+  # compat shim. It is NOT implemented now — it needs a defined fallback for an origin that
+  # turns out not to speak h2, and there is no demonstrated need yet.
+  HTTP2_MODES   = ["auto", "off"]
+  DEFAULT_HTTP2 = "auto"
   # Cap on the once-per-host passthrough notice (see tls_passthrough?). A bypassed host is
   # otherwise INVISIBLE — nothing is captured — so "why is this host missing from History?"
   # has no answer anywhere; one gori.log line per distinct host gives it one, without a log
@@ -65,6 +83,16 @@ module Gori::Settings
   class_property io_timeout_secs : Int32 = DEFAULT_IO_TIMEOUT_SECS
   # Body capture cap, stored in MiB; the proxy/import read it in bytes via capture_max. Global-only.
   class_property capture_max_mib : Int32 = DEFAULT_CAPTURE_MAX_MIB
+  # HTTP/2 mode (see HTTP2_MODES). Read live by the TLS tunnel per CONNECT, so a change
+  # applies to the next connection without a restart. Global-only.
+  class_property http2 : String = DEFAULT_HTTP2
+
+  # True when HTTP/2 must not be used. The proxy asks this rather than comparing strings, so
+  # an out-of-range hand-edited value reads as "auto" (only an explicit "off" disables h2)
+  # instead of silently forcing h1 on a typo.
+  def self.http2_disabled? : Bool
+    http2 == "off"
+  end
 
   # The passthrough list, hand-written rather than `class_property` because assignment has to
   # recompile the patterns (the proxy tests them per CONNECT — see PASSTHROUGH_NOTICE_MAX for
@@ -172,6 +200,7 @@ module Gori::Settings
         # non-MITM'd host was previously inexpressible, so the key should be discoverable
         # in the file rather than appearing only once someone already knew to add it.
         j.field "tls_passthrough" { j.array { tls_passthrough.each { |p| j.string p } } }
+        j.field "http2", http2
       end
     end
   end
