@@ -4,6 +4,7 @@ require "./frame"
 require "./text_field"
 require "./path_complete"
 require "./overlay"
+require "../import"
 
 module Gori::Tui
   # Centered popup collecting the source path for palette → "Import: HAR / URLs /
@@ -38,22 +39,20 @@ module Gori::Tui
     end
 
     # The source format, for the card title and the Runner's result toast — one source
-    # so the popup and the toast can't disagree about what was imported.
+    # so the popup, the toast and `gori run import` can't disagree about what was imported.
     def label : String
-      case @kind
-      when :har  then "HAR"
-      when :urls then "URLs"
-      when :oas  then "OpenAPI"
-      else            "file"
-      end
+      Import.label(@kind)
     end
 
     private def blurb : String
       case @kind
-      when :har  then "Load flows from a browser or proxy HAR export into History."
-      when :urls then "Load a text file of URLs into History — one URL per line."
-      when :oas  then "Build request templates from an OpenAPI spec into History."
-      else            "Load flows into History."
+      when :har      then "Load flows from a browser or proxy HAR export into History."
+      when :urls     then "Load a text file of URLs into History — one URL per line."
+      when :oas      then "Build request templates from an OpenAPI spec into History."
+      when :postman  then "Build request templates from a Postman Collection v2 export."
+      when :insomnia then "Build request templates from an Insomnia v4 JSON export."
+      when :burp     then "Load saved Burp items into History — request and response, byte-exact."
+      else                "Load flows into History."
       end
     end
 

@@ -1170,6 +1170,18 @@ class FakeExecContext < Gori::Verb::ExecContext
   def import_oas : Nil
     rec(:import_oas)
   end
+
+  def import_postman : Nil
+    rec(:import_postman)
+  end
+
+  def import_insomnia : Nil
+    rec(:import_insomnia)
+  end
+
+  def import_burp : Nil
+    rec(:import_burp)
+  end
 end
 
 # Fire one verb on a fresh recording context and return the intents it dispatched, IN

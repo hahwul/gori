@@ -1812,12 +1812,44 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "rejects an invalid kind" do
+    it "imports a Postman collection into History" do
+      with_store do |store|
+        path = File.tempname("gori-mcp-import", ".json")
+        File.write(path, %({"info":{"name":"n"},"variable":[{"key":"b","value":"https://a.test"}],) +
+                         %("item":[{"name":"f","item":[{"request":{"method":"GET","url":"{{b}}/x"}}]}]}))
+        begin
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"postman","path":#{path.to_json}}}})
+          payload = tool_payload(drive(store, call)[0])
+          payload["count"].as_i.should eq(1)
+          store.search(Gori::QL::EMPTY, 1).first.host.should eq("a.test")
+        ensure
+          File.delete?(path)
+        end
+      end
+    end
+
+    it "rejects an invalid kind and lists the accepted ones" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"csv","path":"/tmp/x"}}})
         resp = drive(store, call)[0]["result"]
         resp["isError"].as_bool.should be_true
         resp["structuredContent"]["field"].as_s.should eq("kind")
+        # The message enumerates the kinds; an agent that guessed wrong gets the real list.
+        resp["content"][0]["text"].as_s.should contain("postman")
+      end
+    end
+
+    it "accepts every kind Import.import_file dispatches on" do
+      # The MCP whitelist (mcp/tools/import.cr) and the parser table are edited in different
+      # files — a format added to one and not the other is invisible to agents.
+      Gori::Import::LABELS.each_key do |kind|
+        with_store do |store|
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":#{kind.to_s.to_json},"path":"/no/such/file"}}})
+          resp = drive(store, call)[0]["result"]
+          resp["isError"].as_bool.should be_true
+          # It got past the kind check and failed on the path — which is the point.
+          resp["content"][0]["text"].as_s.should contain("not found")
+        end
       end
     end
   end

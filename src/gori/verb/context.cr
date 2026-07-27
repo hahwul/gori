@@ -131,6 +131,9 @@ module Gori
       abstract def import_har : Nil
       abstract def import_urls : Nil
       abstract def import_oas : Nil
+      abstract def import_postman : Nil
+      abstract def import_insomnia : Nil
+      abstract def import_burp : Nil
     end
   end
 end

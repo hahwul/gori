@@ -1103,6 +1103,18 @@ private class FakeContext < ExecContext
   def import_oas : Nil
     @calls << :import_oas
   end
+
+  def import_postman : Nil
+    @calls << :import_postman
+  end
+
+  def import_insomnia : Nil
+    @calls << :import_insomnia
+  end
+
+  def import_burp : Nil
+    @calls << :import_burp
+  end
 end
 
 describe Gori::Verb do

@@ -7,8 +7,8 @@ require "json"
 # Private CLI glue — reopen the module for thin bare-call wrappers (same whitebox trick
 # the other CLI specs use).
 module Gori::CLI::Run
-  def self.import_source_for_spec(har : String?, oas : String?, urls : String?) : {Symbol, String}
-    import_source(har, oas, urls)
+  def self.import_source_for_spec(sources : Hash(Symbol, String?)) : {Symbol, String}
+    import_source(sources)
   end
 
   def self.import_result_json_for_spec(kind : Symbol, path : String, result : Import::Result) : String
@@ -20,11 +20,27 @@ module Gori::CLI::Run
   end
 end
 
+private def only(kind : Symbol, path : String) : Hash(Symbol, String?)
+  sources = {} of Symbol => String?
+  Gori::Import::LABELS.each_key { |k| sources[k] = nil }
+  sources[kind] = path
+  sources
+end
+
 describe "gori run import" do
   it "maps each source flag to its {kind, path}" do
-    Gori::CLI::Run.import_source_for_spec("a.har", nil, nil).should eq({:har, "a.har"})
-    Gori::CLI::Run.import_source_for_spec(nil, "api.yaml", nil).should eq({:oas, "api.yaml"})
-    Gori::CLI::Run.import_source_for_spec(nil, nil, "urls.txt").should eq({:urls, "urls.txt"})
+    {har: "a.har", urls: "urls.txt", oas: "api.yaml",
+     postman: "c.postman_collection.json", insomnia: "i.json", burp: "items.xml"}.each do |kind, path|
+      Gori::CLI::Run.import_source_for_spec(only(kind, path)).should eq({kind, path})
+    end
+  end
+
+  it "covers every kind Import.import_file dispatches on" do
+    # A parser reachable from the TUI but not from `gori run import` is a wiring miss; the
+    # flag table and the label table are edited in different files.
+    Gori::Import::LABELS.each_key do |kind|
+      Gori::CLI::Run.import_source_for_spec(only(kind, "f")).should eq({kind, "f"})
+    end
   end
 
   it "carries kind, path, count and skipped in the JSON result" do
@@ -55,5 +71,16 @@ describe "gori run import" do
     one.should eq("imported 1 flow from HAR · d.har (1 entry skipped)")
     many = Gori::CLI::Run.import_result_text_for_spec(:har, "d.har", Gori::Import::Result.new(count: 0, skipped: 4))
     many.should eq("imported 0 flows from HAR · d.har (4 entries skipped)")
+  end
+
+  it "names the source with the same label the TUI card uses" do
+    # One table (Import::LABELS) feeds the CLI line, the overlay title and the TUI toast, so
+    # they cannot drift apart as sources are added.
+    {har: "HAR", urls: "URLs", oas: "OpenAPI",
+     postman: "Postman", insomnia: "Insomnia", burp: "Burp"}.each do |kind, label|
+      Gori::CLI::Run.import_result_text_for_spec(kind, "f", Gori::Import::Result.new(count: 1))
+        .should eq("imported 1 flow from #{label} · f")
+      Gori::Tui::ImportOverlay.new(kind).label.should eq(label)
+    end
   end
 end

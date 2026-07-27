@@ -61,6 +61,7 @@ gori run <subcommand> [options]
 | `sequence` (`seq`) `[<flow-id>]` | Grade token randomness (live replay, or `--tokens` for a pasted list) |
 | `probe [QL]` | Passive security scan (no requests) |
 | `discover` | Spider and brute-force endpoints into the Sitemap |
+| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp file |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
 | `jwt [<token>]` | Decode, re-sign, or generate attack payloads for a JWT |
@@ -231,6 +232,30 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--force` | Bypass the unbounded-run safety gate |
 | `--no-store` | Do not write findings into the project |
 | `--format` | `text`, `json`, or `jsonl` |
+
+### run import
+
+Bulk-import flows into the project's History — the CLI counterpart of the TUI's Import overlay (see [Proxy & History → Import](/guide/proxy/#import)). Exactly one source flag is required. Sends no traffic.
+
+```bash
+gori run import --postman api.postman_collection.json --db ./assessment.db --format json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--har=PATH` | A browser/proxy HAR (HTTP Archive) export — full request/response flows |
+| `--urls=PATH` | A text file of URLs, one per line (`#` comments and blanks ignored) |
+| `--oas=PATH` | An OpenAPI/Swagger spec (JSON or YAML) — one template per operation |
+| `--postman=PATH` | A Postman Collection v2 export (JSON) |
+| `--insomnia=PATH` | An Insomnia v4 export (JSON) |
+| `--burp=PATH` | A Burp Suite item export (XML) — request **and** response, byte-exact |
+| `--project=NAME` | Project to import into (default: most-recently-active) |
+| `--db=PATH` | Explicit SQLite db file to import into (created if absent) |
+| `--format` | `text` (default) or `json` |
+
+Import writes flows, so it resolves its target like `discover`: an explicit `--db` is created or reopened, and without one it writes into an existing project rather than silently creating a default.
+
+A malformed entry is skipped rather than aborting the file; the result reports both counts (`{"count": 12, "skipped": 3}`). Only `--har` and `--burp` carry responses — the rest import request templates that show as `Pending` in History until you send them.
 
 ### run sitemap
 

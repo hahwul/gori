@@ -1,8 +1,9 @@
 # `gori run import` — bulk-import captured flows into the project's History from a
-# HAR export, a URL list, or an OpenAPI/Swagger spec (the CLI counterpart of the
-# TUI's Import overlay). Exactly one source flag is required. Import WRITES flows,
-# so it resolves its target like `discover` (--db create-or-reopen, else an existing
-# project — never silently a fresh default).
+# HAR export, a URL list, an OpenAPI/Swagger spec, a Postman or Insomnia collection,
+# or a Burp item export (the CLI counterpart of the TUI's Import overlay). Exactly one
+# source flag is required. Import WRITES flows, so it resolves its target like
+# `discover` (--db create-or-reopen, else an existing project — never silently a fresh
+# default).
 module Gori
   module CLI
     module Run
@@ -10,32 +11,45 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        har : String? = nil
-        oas : String? = nil
-        urls : String? = nil
+        # One entry per source flag, in the order they appear in --help. Adding a format
+        # means adding a row here and a `p.on` below — nothing else in this file.
+        sources = {
+          :har      => nil.as(String?),
+          :urls     => nil.as(String?),
+          :oas      => nil.as(String?),
+          :postman  => nil.as(String?),
+          :insomnia => nil.as(String?),
+          :burp     => nil.as(String?),
+        }
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run import (--har PATH | --oas PATH | --urls PATH) [options]\n\n" \
+          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH) [options]\n\n" \
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
-                     "  --har   a browser/proxy HAR (HTTP Archive) export\n" \
-                     "  --urls  a text file of URLs, one per line (# comments and blanks ignored)\n" \
-                     "  --oas   request templates from an OpenAPI/Swagger spec (JSON or YAML)"
-          p.on("--har=PATH", "Import a HAR (HTTP Archive) export") { |v| har = v }
-          p.on("--oas=PATH", "Import an OpenAPI/Swagger spec (JSON or YAML)") { |v| oas = v }
-          p.on("--urls=PATH", "Import a URL list (one URL per line)") { |v| urls = v }
+                     "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
+                     "  --urls      a text file of URLs, one per line (# comments and blanks ignored)\n" \
+                     "  --oas       request templates from an OpenAPI/Swagger spec (JSON or YAML)\n" \
+                     "  --postman   request templates from a Postman Collection v2 export (JSON)\n" \
+                     "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \
+                     "  --burp      saved Burp items (XML) — request AND response, byte-exact"
+          p.on("--har=PATH", "Import a HAR (HTTP Archive) export") { |v| sources[:har] = v }
+          p.on("--urls=PATH", "Import a URL list (one URL per line)") { |v| sources[:urls] = v }
+          p.on("--oas=PATH", "Import an OpenAPI/Swagger spec (JSON or YAML)") { |v| sources[:oas] = v }
+          p.on("--postman=PATH", "Import a Postman Collection v2 export") { |v| sources[:postman] = v }
+          p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export") { |v| sources[:insomnia] = v }
+          p.on("--burp=PATH", "Import a Burp Suite item export (XML)") { |v| sources[:burp] = v }
           p.on("--project=NAME", "Project to import into (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args do |rest, _|
-            abort "gori run import: unexpected argument#{rest.size == 1 ? "" : "s"} #{rest.join(" ").inspect} — pass the file via --har PATH, --oas PATH, or --urls PATH" unless rest.empty?
+            abort "gori run import: unexpected argument#{rest.size == 1 ? "" : "s"} #{rest.join(" ").inspect} — pass the file via a source flag, e.g. --har PATH" unless rest.empty?
           end
           p.invalid_option { |f| abort "gori run import: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run import: missing value for #{f}" }
         end
         parser.parse(args)
 
-        kind, path = import_source(har, oas, urls)
+        kind, path = import_source(sources)
 
         store = open_store(resolve_import_project(project_name, db_path))
         result = begin
@@ -49,17 +63,19 @@ module Gori
         emit_import_result(kind, path, result, format)
       end
 
-      # Exactly one of --har/--oas/--urls. Zero or two+ is a clean usage error.
-      private def self.import_source(har : String?, oas : String?, urls : String?) : {Symbol, String}
+      # Exactly one source flag. Zero or two+ is a clean usage error.
+      private def self.import_source(sources : Hash(Symbol, String?)) : {Symbol, String}
         chosen = [] of {Symbol, String}
-        chosen << {:har, har} if har
-        chosen << {:oas, oas} if oas
-        chosen << {:urls, urls} if urls
+        sources.each { |kind, path| chosen << {kind, path} if path }
         case chosen.size
-        when 0 then abort "gori run import: a source is required — pass one of --har PATH, --oas PATH, or --urls PATH"
+        when 0 then abort "gori run import: a source is required — pass one of #{import_flags(sources)}"
         when 1 then chosen.first
         else        abort "gori run import: pass exactly one source (got #{chosen.map(&.[0]).join(", ")})"
         end
+      end
+
+      private def self.import_flags(sources : Hash(Symbol, String?)) : String
+        sources.keys.map { |k| "--#{k} PATH" }.join(", ")
       end
 
       # Import WRITES flows, so an explicit --db is create-or-reopened (like capture /
@@ -80,9 +96,9 @@ module Gori
       end
 
       # Mirrors the TUI Import toast wording (runner.cr#apply_import) so the CLI and TUI
-      # describe the same import the same way.
+      # describe the same import the same way. Both read `Import.label`.
       private def self.import_result_text(kind : Symbol, path : String, result : Import::Result) : String
-        s = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{import_label(kind)} · #{path}"
+        s = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{Import.label(kind)} · #{path}"
         s += " (#{result.skipped} #{result.skipped == 1 ? "entry" : "entries"} skipped)" if result.skipped > 0
         s
       end
@@ -95,15 +111,6 @@ module Gori
             j.field "count", result.count
             j.field "skipped", result.skipped
           end
-        end
-      end
-
-      private def self.import_label(kind : Symbol) : String
-        case kind
-        when :har  then "HAR"
-        when :urls then "URLs"
-        when :oas  then "OpenAPI"
-        else            kind.to_s
         end
       end
     end

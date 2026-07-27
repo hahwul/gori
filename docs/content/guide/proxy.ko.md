@@ -148,8 +148,17 @@ gori run history -q 'status:5xx host:api.example.com'
 | **Import: HAR** | 브라우저 또는 프록시 HAR 익스포트 → 전체 요청/응답 플로우 |
 | **Import: URLs** | 한 줄에 URL 하나씩 담긴 텍스트 파일 → 골격 요청 플로우 |
 | **Import: OpenAPI** | OpenAPI/Swagger JSON 또는 YAML → 오퍼레이션마다 요청 템플릿 하나 |
+| **Import: Postman** | Postman Collection v2 익스포트 → 저장된 요청마다 요청 템플릿 하나 |
+| **Import: Insomnia** | Insomnia v4 JSON 익스포트 → 저장된 요청마다 요청 템플릿 하나 |
+| **Import: Burp** | Burp Suite 저장 항목(XML) → 전체 요청/응답 플로우, 바이트 단위 그대로 |
 
 형식이 잘못된 항목은 전체 임포트를 중단시키지 않고 건너뜁니다. 임포트된 플로우는 캡처된 트래픽처럼 History에 들어오므로, 똑같이 필터링하고 Repeater로 재전송하거나 퍼징·스캔할 수 있습니다.
+
+**Postman과 Insomnia**는 컬렉션 자체의 variable 목록(Insomnia는 익스포트된 환경)에서 `{{변수}}`를 치환합니다. 치환되지 않은 변수가 URL에 남은 요청은 `{{baseUrl}}`을 호스트로 그대로 저장하지 않고 건너뜁니다. 모든 요청이 그렇게 건너뛰어지면, 어떤 변수를 채워야 하는지 에러 메시지가 이름을 알려 줍니다. 폴더 중첩은 끝까지 따라가고, 인증은 `bearer`·`basic`·헤더 API 키를 채워 줍니다. 토큰 교환이 필요한 방식(OAuth, AWS SigV4, NTLM 등)은 직접 채워야 합니다.
+
+**Burp** 항목은 저장된 그대로의 wire 바이트를 유지합니다. 이상한 공백, 중복 헤더, 일부러 틀린 `Content-Length`, 요청 타깃 안의 CRLF까지 그대로입니다. 손으로 만든 요청이 Repeater에서 바이트 단위로 똑같이 재전송된다는 점이, 요청을 다시 기술하는 대신 Burp에서 가져오는 이유입니다.
+
+같은 소스를 헤드리스에서도 다룰 수 있습니다. `gori run import --postman PATH`(그리고 `--har` / `--urls` / `--oas` / `--insomnia` / `--burp`)와 MCP의 `import_flows` 도구입니다.
 
 ## 호스트 오버라이드 {#host-overrides}
 

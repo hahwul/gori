@@ -61,6 +61,7 @@ gori run <subcommand> [options]
 | `sequence` (`seq`) `[<flow-id>]` | 토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 `--tokens`) |
 | `probe [QL]` | 패시브 보안 스캔 (요청 없음) |
 | `discover` | 엔드포인트를 스파이더링 & 브루트포스하여 Sitemap으로 반영 |
+| `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp 파일에서 History로 플로우 일괄 임포트 |
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
 | `jwt [<token>]` | JWT 디코드, 재서명, 또는 공격 페이로드 생성 |
@@ -231,6 +232,30 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--force` | 무제한 실행 안전 게이트 우회 |
 | `--no-store` | 결과를 프로젝트에 기록하지 않음 |
 | `--format` | `text`, `json`, 또는 `jsonl` |
+
+### run import {#run-import}
+
+프로젝트의 History로 플로우를 일괄 임포트합니다. TUI의 Import 오버레이에 대응하는 CLI입니다([Proxy & History → 임포트](/guide/proxy/#import) 참고). 소스 플래그는 정확히 하나만 지정해야 하며, 트래픽은 전혀 보내지 않습니다.
+
+```bash
+gori run import --postman api.postman_collection.json --db ./assessment.db --format json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--har=PATH` | 브라우저/프록시 HAR(HTTP Archive) 익스포트 — 전체 요청/응답 플로우 |
+| `--urls=PATH` | 한 줄에 URL 하나씩 담긴 텍스트 파일(`#` 주석과 빈 줄은 무시) |
+| `--oas=PATH` | OpenAPI/Swagger 스펙(JSON 또는 YAML) — 오퍼레이션마다 템플릿 하나 |
+| `--postman=PATH` | Postman Collection v2 익스포트(JSON) |
+| `--insomnia=PATH` | Insomnia v4 익스포트(JSON) |
+| `--burp=PATH` | Burp Suite 항목 익스포트(XML) — 요청 **과** 응답, 바이트 단위 그대로 |
+| `--project=NAME` | 임포트할 프로젝트(기본값: 가장 최근에 사용한 프로젝트) |
+| `--db=PATH` | 임포트할 SQLite db 파일을 직접 지정(없으면 생성) |
+| `--format` | `text`(기본) 또는 `json` |
+
+임포트는 플로우를 기록하므로 `discover`와 같은 방식으로 대상을 정합니다. `--db`를 주면 생성하거나 다시 열고, 주지 않으면 기본 프로젝트를 몰래 만들지 않고 기존 프로젝트에 씁니다.
+
+형식이 잘못된 항목은 파일 전체를 중단시키지 않고 건너뛰며, 결과에 양쪽 개수가 모두 담깁니다(`{"count": 12, "skipped": 3}`). 응답까지 가져오는 것은 `--har`와 `--burp`뿐이고, 나머지는 요청 템플릿이라 보내기 전까지 History에서 `Pending`으로 보입니다.
 
 ### run sitemap {#run-sitemap}
 

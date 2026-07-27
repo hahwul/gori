@@ -148,8 +148,17 @@ You don't have to capture everything live. From the command palette (`Ctrl-P`):
 | **Import: HAR** | Browser or proxy HAR export → full request/response flows |
 | **Import: URLs** | Text file, one URL per line → skeleton request flows |
 | **Import: OpenAPI** | OpenAPI/Swagger JSON or YAML → one request template per operation |
+| **Import: Postman** | Postman Collection v2 export → one request template per saved request |
+| **Import: Insomnia** | Insomnia v4 JSON export → one request template per saved request |
+| **Import: Burp** | Burp Suite saved items (XML) → full request/response flows, byte-exact |
 
 Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.
+
+**Postman and Insomnia** resolve `{{variables}}` from the collection's own variable list (Insomnia: from the exported environments). A request whose URL still holds an unresolved variable is skipped rather than stored with a literal `{{baseUrl}}` host — if every request is skipped that way, the error names the variables so you know what to add. Folder nesting is walked in full, and auth seeds `bearer`, `basic`, and header API keys; token-exchange schemes (OAuth, AWS SigV4, NTLM, …) are left for you to fill in.
+
+**Burp** items keep their wire bytes exactly as saved — odd spacing, duplicate headers, a deliberately wrong `Content-Length`, a CRLF in the request target. A hand-forged request replays from the Repeater byte-for-byte, which is the point of importing from Burp rather than re-describing the request.
+
+The same sources are scriptable headless: `gori run import --postman PATH` (and `--har` / `--urls` / `--oas` / `--insomnia` / `--burp`), and the MCP `import_flows` tool.
 
 ## Host Overrides
 

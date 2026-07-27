@@ -14,13 +14,34 @@ end
 
 describe Gori::Tui::ImportOverlay do
   it "titles and describes the card by import kind" do
-    {:har => "HAR", :urls => "URLs", :oas => "OpenAPI"}.each do |kind, want|
+    {:har => "HAR", :urls => "URLs", :oas => "OpenAPI",
+     :postman => "Postman", :insomnia => "Insomnia", :burp => "Burp"}.each do |kind, want|
       ov = ImportOverlay.new(kind)
       ov.label.should eq(want)
       backend = MemoryBackend.new(100, 30)
       ov.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
       backend.contains?("IMPORT #{want.upcase}").should be_true
     end
+  end
+
+  it "gives every import kind its own blurb, drawn in full inside the card" do
+    # Two failures at once: the generic "Load flows into History." is the else-branch
+    # fallback (a kind added to the parser table but never described here), and a blurb
+    # longer than the 76-wide card's text column would be silently clipped by `width:`.
+    {:har      => "browser or proxy HAR export",
+     :urls     => "one URL per line",
+     :oas      => "OpenAPI spec",
+     :postman  => "Build request templates from a Postman Collection v2 export.",
+     :insomnia => "Build request templates from an Insomnia v4 JSON export.",
+     :burp     => "Load saved Burp items into History — request and response, byte-exact.",
+    }.each do |kind, fragment|
+      backend = MemoryBackend.new(100, 30)
+      ImportOverlay.new(kind).render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+      backend.contains?(fragment).should be_true
+      backend.contains?("Load flows into History.").should be_false
+    end
+    # Every registered kind is described — no source can be added without a blurb.
+    Gori::Import::LABELS.size.should eq(6)
   end
 
   it "centers the card in the body area" do

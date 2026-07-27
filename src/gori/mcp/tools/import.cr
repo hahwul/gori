@@ -5,20 +5,26 @@ require "../../import"
 module Gori
   module MCP
     class Tools
-      # Bulk-import flows into the project's History from a HAR export, a URL list,
-      # or an OpenAPI/Swagger spec — the MCP counterpart of `gori run import`. `path`
-      # is resolved on the MCP SERVER's filesystem (same trust boundary as
-      # send_request/repeater — this process runs locally alongside the agent).
+      # Bulk-import flows into the project's History from a HAR export, a URL list, an
+      # OpenAPI/Swagger spec, a Postman or Insomnia collection, or a Burp item export —
+      # the MCP counterpart of `gori run import`. `path` is resolved on the MCP SERVER's
+      # filesystem (same trust boundary as send_request/repeater — this process runs
+      # locally alongside the agent).
+      KINDS = {
+        "har"      => :har,
+        "urls"     => :urls,
+        "oas"      => :oas,
+        "postman"  => :postman,
+        "insomnia" => :insomnia,
+        "burp"     => :burp,
+      }
+
       private def import_flows(h) : Result
         kind_s = str(h, "kind").try(&.strip.downcase)
-        unless kind_s.in?("har", "urls", "oas")
-          return err("invalid 'kind' (expected har|urls|oas)", "INVALID_ARGUMENT", field: "kind")
+        kind = kind_s.try { |k| KINDS[k]? }
+        unless kind_s && kind
+          return err("invalid 'kind' (expected #{KINDS.keys.join("|")})", "INVALID_ARGUMENT", field: "kind")
         end
-        kind = case kind_s
-               when "har"  then :har
-               when "urls" then :urls
-               else             :oas
-               end
         path = str(h, "path").try(&.strip)
         return err("missing required 'path'", "INVALID_ARGUMENT", field: "path") if path.nil? || path.empty?
         result = Import.import_file(store, kind, path)

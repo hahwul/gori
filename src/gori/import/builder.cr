@@ -80,7 +80,14 @@ module Gori
       # second request into the stored head. This guard still fires. Unlike the request
       # TARGET — deliberately permissive now, a control byte there being the operator's own
       # payload (see HOST_INVALID above and DESIGN.md §7) — header-boundary import was not
-      # part of the #400 decision and stays rejected pending its own call. Reject the entry
+      # part of the #400 decision and stays rejected here, for every source that DESCRIBES a
+      # request in parts (HAR, OpenAPI, URL lists, Postman, Insomnia) and has this Builder
+      # serialize a head from them. `Import::Raw` — the Burp item path — is the deliberate
+      # exception and does not pass through here at all: it stores the operator's own wire
+      # bytes byte-exact, where there is no boundary to forge because the bytes ARE the
+      # message. Do not "fix" that inconsistency by routing Raw through Builder; it would
+      # destroy the hand-forged requests that are the whole reason to import from Burp.
+      # Reject the entry
       # at the SAME point (a raise here is caught by every import parser's per-entry rescue,
       # dropping the bad entry exactly like a bad host). Only CR/LF/NUL: a header VALUE may
       # legally contain a horizontal tab (RFC 7230 §3.2 field-value), so bytes that merely
