@@ -20,7 +20,11 @@ module Gori::Tui
     # `choices` cycles among those values (←/→/space); an `opener` field is an action row
     # whose ↵ opens the named sub-overlay (e.g. :hosts) and whose value column is
     # display-only; the rest are free-text lines.
-    record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil, opener : Symbol? = nil
+    # `readonly` is a DISPLAY row: it shows a live summary of something configured elsewhere and
+    # swallows every edit. It exists so a table that lives only in settings.json is still
+    # discoverable from the UI, without pretending to be editable here.
+    record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil,
+      opener : Symbol? = nil, readonly : Bool = false
 
     NETWORK_FIELDS = [
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
@@ -34,6 +38,12 @@ module Gori::Tui
       Field.new("HTTP/2", "auto follows the origin's ALPN; off forces HTTP/1.1 on every tunnelled connection (for reproducing a finding on h1) — ←/→ cycles",
         choices: Settings::HTTP2_MODES),
       Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
+      Field.new("Upstream rules",
+        "per-host routing / SOCKS5 / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
+        readonly: true),
+      Field.new("Outbound TLS",
+        "per-host client certificates + protocol floor — edit with `gori settings --edit` (outbound_tls)",
+        readonly: true),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     EDITOR_FIELDS = [
@@ -231,7 +241,7 @@ module Gori::Tui
                   Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
                   Settings::DEFAULT_RETENTION_FLOWS.to_s,
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), rule_count_label(Settings.outbound_tls.size, "entry", "entries"), hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -255,6 +265,8 @@ module Gori::Tui
         Settings.capture_max_mib.to_s,
         Settings.http2,
         passthrough_label(Settings.tls_passthrough),
+        rule_count_label(Settings.upstream_rules.size, "rule"),
+        rule_count_label(Settings.outbound_tls.size, "entry", "entries"),
         hostnames_summary,
       ]
     end
@@ -274,6 +286,13 @@ module Gori::Tui
     # dedicated list overlay: these are a handful of host patterns, and a text field keeps the
     # whole Network section inline (the overlay is reserved for the hostname map, which has two
     # columns per entry). ", " on the way out reads better; parsing accepts commas or spaces.
+    # "none — see settings.json" / "2 rules". A display row for a table gori does not yet edit
+    # in the TUI: the count is what tells you it is there at all.
+    private def rule_count_label(n : Int32, one : String, many : String = "") : String
+      return "none — configured in settings.json" if n == 0
+      "#{n} #{n == 1 ? one : (many.presence || "#{one}s")}"
+    end
+
     private def passthrough_label(patterns : Array(String)) : String
       patterns.join(", ")
     end
@@ -346,8 +365,9 @@ module Gori::Tui
     end
 
     def insert(ch : Char) : Nil
-      return if opener_field? # an action row — typing does nothing (↵ opens its overlay)
-      if bool_field?          # a toggle field swallows typing; space flips it
+      return if readonly_field? # a display row — nothing to type into
+      return if opener_field?   # an action row — typing does nothing (↵ opens its overlay)
+      if bool_field?            # a toggle field swallows typing; space flips it
         toggle if ch == ' '
         return
       end
@@ -364,7 +384,7 @@ module Gori::Tui
     end
 
     def backspace : Nil
-      return if bool_field? || choice_field? || opener_field? || @cursor == 0
+      return if bool_field? || choice_field? || opener_field? || readonly_field? || @cursor == 0
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       @values[@focused] = "#{v[0, c - 1]}#{v[c..]}"
@@ -409,6 +429,10 @@ module Gori::Tui
 
     private def opener_field? : Bool
       !fields[@focused].opener.nil?
+    end
+
+    private def readonly_field? : Bool
+      fields[@focused].readonly
     end
 
     # The sub-overlay the focused action row opens (↵), or nil for an ordinary field. The

@@ -276,6 +276,38 @@ describe SettingsView do
     end
   end
 
+  # A display row exists so a table that lives only in settings.json is still discoverable from
+  # the UI. It must show the live count AND refuse every edit — a row that looked editable but
+  # silently discarded typing would be worse than no row.
+  it "shows a live count for the rule tables and refuses to be edited" do
+    dir = File.tempname("gori-settings-rulerows")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.upstream_rules
+    row = SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Upstream rules" }
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
+      v = SettingsView.new
+      v.reload(:network)
+      row.times { v.move_field(1) }
+
+      # Typing and backspace are both swallowed: the row is not a text field.
+      v.insert('x')
+      v.backspace
+      v.save.should_not contain("invalid")
+      Gori::Settings.upstream_rules.should be_empty # nothing was parsed out of the row
+
+      Gori::Settings.upstream_rules = [Gori::Settings::UpstreamRule.new("*", "http", "p.test:1")]
+      v.reload(:network)
+      SettingsView::NETWORK_FIELDS[row].readonly.should be_true
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.upstream_rules = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "saves and resets the DISPLAY section (detail pane, time format, gutter, preview cap, resource meter, terminal title)" do
     dir = File.tempname("gori-settings-display-view")
     Dir.mkdir_p(dir)
