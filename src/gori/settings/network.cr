@@ -180,7 +180,19 @@ module Gori::Settings
   # "host:port" with an optional "http://" scheme prefix; defaults the port to
   # 8080 when omitted.
   def self.upstream_proxy_addr : {String, Int32}?
-    value = effective_upstream_proxy.strip
+    proxy_addr(effective_upstream_proxy, default_port: DEFAULT_HTTP_PROXY_PORT)
+  end
+
+  # Default proxy ports when a rule/scalar names no explicit port: the conventional HTTP-proxy
+  # and SOCKS ports.
+  DEFAULT_HTTP_PROXY_PORT = 8080
+  DEFAULT_SOCKS_PORT      = 1080
+
+  # The shared "host:port" parse behind upstream_proxy_addr and the upstream RULE table
+  # (which needs a different default port per kind). Accepts an optional "http://" prefix and
+  # a bracketed IPv6 literal; nil when blank or when the host part is empty.
+  def self.proxy_addr(value : String, *, default_port : Int32) : {String, Int32}?
+    value = value.strip
     return nil if value.empty?
     value = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
     # Bracketed IPv6 ("[::1]" / "[::1]:8080"): host is inside the brackets, the
@@ -191,15 +203,15 @@ module Gori::Settings
         host = value[1...close]
         return nil if host.empty?
         rest = value[(close + 1)..]
-        return {host, rest.starts_with?(':') ? (rest[1..].to_i? || 8080) : 8080}
+        return {host, rest.starts_with?(':') ? (rest[1..].to_i? || default_port) : default_port}
       end
     end
     idx = value.rindex(':')
-    return {value, 8080} unless idx
+    return {value, default_port} unless idx
     host = value[0...idx]
     return nil if host.empty?
-    return {value, 8080} if host.includes?(':') # unbracketed IPv6 literal → no port
-    {host, value[(idx + 1)..].to_i? || 8080}
+    return {value, default_port} if host.includes?(':') # unbracketed IPv6 literal → no port
+    {host, value[(idx + 1)..].to_i? || default_port}
   end
 
   # nil if `host` is an acceptable proxy BIND address; an error message otherwise. Accepts

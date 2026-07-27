@@ -1,6 +1,7 @@
 require "json"
 require "./paths"
 require "./settings/network"
+require "./settings/upstream_rules"
 require "./settings/env"
 require "./settings/scan_rules"
 require "./settings/oast_providers"
@@ -79,6 +80,7 @@ module Gori
         self.editor = ed["command"]?.try(&.as_s?) || editor
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
+      self.upstream_rules = parse_upstream_rules(root["upstream_rules"]?)
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_env(root["env"]?)
@@ -213,6 +215,7 @@ module Gori
           serialize_general(j)
           serialize_update(j)
           serialize_network(j)
+          serialize_upstream_rules(j)
           serialize_editor(j)
           serialize_tabs(j)
           serialize_hostname_overrides(j)
