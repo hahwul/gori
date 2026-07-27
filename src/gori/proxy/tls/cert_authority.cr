@@ -32,18 +32,29 @@ module Gori::Proxy::Tls
       @mutex = Mutex.new
     end
 
+    # `tighten: false` because `--ca-dir` is an OPERATOR-named path (four entry points: the
+    # TUI, `gori ca`, `ca regenerate`, `ca import`), exactly like `--config` in #466 — gori
+    # does not own a directory it merely FINDS, and a relative `--ca-dir certs` would re-mode
+    # a checked-out directory, a bare `.` the working directory. A dir gori CREATES is still
+    # made 0700 (see Paths.ensure_dir), and what actually protects the secret either way is
+    # the key file's own 0600 below: the cert beside it is public by design.
     def self.load_or_create(dir : String, common_name : String = DEFAULT_CN) : CertAuthority
-      Gori::Paths.ensure_dir(dir) # race-tolerant (two instances may start at once)
+      Gori::Paths.ensure_dir(dir, tighten: false) # race-tolerant (two instances may start at once)
       cert_path = File.join(dir, CA_CERT_FILE)
       key_path = File.join(dir, CA_KEY_FILE)
 
       if File.exists?(cert_path) && File.exists?(key_path)
+        # Re-assert the mode on EVERY load, not just at mint time: a key can arrive loose
+        # from a pre-0600 gori, a `cp`/restore that dropped the mode, or a crash mid-write —
+        # and nothing else would ever tighten it again. Mirrors Store.harden_permissions
+        # re-locking the db on every open. Best-effort: a filesystem that cannot represent
+        # 0600 (a mounted share) must not make gori refuse to start.
+        File.chmod(key_path, 0o600) rescue nil
         new(Cert.read_pem(cert_path), KeyPair.read_pem(key_path), cert_path)
       else
         cert, key = CertBuilder.build_root(common_name)
         cert.write_pem(cert_path)
-        key.write_pem(key_path)
-        File.chmod(key_path, 0o600) # the CA private key is a machine secret
+        key.write_pem(key_path) # 0600 at CREATE time — see KeyPair#write_pem
         new(cert, key, cert_path)
       end
     end
@@ -141,14 +152,17 @@ module Gori::Proxy::Tls
     # exist, so the on-disk cert/key never disagree past the gap between renames).
     private def install!(cert : Cert, key : KeyPair) : Nil
       dir = File.dirname(@ca_cert_path)
-      Gori::Paths.ensure_dir(dir) # parity with load_or_create: the dir may have been removed at runtime
+      # Full parity with load_or_create, `tighten:` included: the dir may have been removed
+      # at runtime, and re-creating it must not re-mode an operator's --ca-dir either.
+      Gori::Paths.ensure_dir(dir, tighten: false)
       key_path = File.join(dir, CA_KEY_FILE)
       cert_tmp = "#{@ca_cert_path}.tmp"
       key_tmp = "#{key_path}.tmp"
       begin
         cert.write_pem(cert_tmp)
+        # 0600 before any key bytes reach the temp (KeyPair#write_pem); rename moves the
+        # inode, mode and all, so the installed key is never briefly readable.
         key.write_pem(key_tmp)
-        File.chmod(key_tmp, 0o600) # the CA private key is a machine secret
         File.rename(key_tmp, key_path)
         File.rename(cert_tmp, @ca_cert_path)
       rescue ex

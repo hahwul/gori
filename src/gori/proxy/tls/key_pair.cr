@@ -31,7 +31,24 @@ module Gori::Proxy::Tls
       new(pkey)
     end
 
+    # Owner-only from the first byte. `BIO_new_file` goes through fopen(), which creates at
+    # the umask default (0644 on a stock box) — so chmod'ing AFTER the write leaves both a
+    # window where a machine secret is world-readable and, if the process dies in between, a
+    # key that STAYS that way: nothing re-modes a file that already exists (CertAuthority's
+    # create-time chmod only ever ran on the branch that mints the key). Set the mode first
+    # instead, at the one place every private key is written.
+    #
+    # Truncating here is not a new risk — the "w" BIO truncates anyway — and a caller
+    # replacing a LIVE key stages to a temp file and renames (see CertAuthority#install!),
+    # so a failed write never lands on the real key path.
     def write_pem(path : String) : Nil
+      perm = File::Permissions.new(0o600)
+      # `perm:` applies only to a file File.open CREATES, so chmod as well: a `.tmp` left by
+      # an earlier crashed write would otherwise keep its old mode and carry it through the
+      # rename. Unrescued, unlike the load-path re-assert — a key we are minting right now
+      # and cannot protect is not a key to hand out.
+      File.open(path, "w", perm: perm) { }
+      File.chmod(path, perm)
       bio = LibCrypto.bio_new_file(path, "w")
       raise Gori::Error.new("BIO_new_file(#{path}) failed") if bio.null?
       begin

@@ -12,7 +12,94 @@ private def with_ca_dir(&)
   end
 end
 
+private def mode_of(path : String) : Int32
+  (File.info(path).permissions.value & 0o777).to_i
+end
+
 describe Gori::Proxy::Tls::CertAuthority do
+  # `--ca-dir` is an operator-named path, so the CA dir gets the same ownership rule as
+  # `--config` (#466): 0700 for one gori CREATES, never a chmod on one it FINDS. What keeps
+  # the secret secret is the key file's own mode, pinned by the group below.
+  describe "the CA directory it was pointed at" do
+    it "creates a missing one at 0700" do
+      with_ca_dir do |dir|
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        mode_of(dir).should eq(0o700)
+      end
+    end
+
+    it "leaves a pre-existing one's mode alone" do
+      with_ca_dir do |dir|
+        Dir.mkdir_p(dir)
+        File.chmod(dir, 0o755) # a shared checkout / dotfiles dir the operator named
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        mode_of(dir).should eq(0o755)
+      end
+    end
+
+    it "leaves it alone when regenerate! re-establishes it too" do
+      with_ca_dir do |dir|
+        Dir.mkdir_p(dir)
+        File.chmod(dir, 0o755)
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        ca.regenerate!
+        mode_of(dir).should eq(0o755)
+        mode_of(File.join(dir, "root.key.pem")).should eq(0o600) # the file still is protected
+      end
+    end
+  end
+
+  describe "the root private key's mode" do
+    it "is 0600 even when the CA dir is world-traversable" do
+      with_ca_dir do |dir|
+        Dir.mkdir_p(dir)
+        File.chmod(dir, 0o755)
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        mode_of(File.join(dir, "root.key.pem")).should eq(0o600)
+        mode_of(File.join(dir, "root.crt.pem")).should_not eq(0o600) # the cert is public
+      end
+    end
+
+    # The write is the only moment the mode was ever set, so a key that got loose any other
+    # way — a pre-0600 gori, a restore that dropped the mode, a crash between fopen and the
+    # old post-write chmod — stayed loose for good. Every load re-asserts it now.
+    it "is re-tightened on load when it was left readable" do
+      with_ca_dir do |dir|
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        key = File.join(dir, "root.key.pem")
+        File.chmod(key, 0o644)
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir) # a plain reload, no minting
+        mode_of(key).should eq(0o600)
+      end
+    end
+
+    # fopen() inside BIO_new_file creates at the umask default, so the mode has to be set
+    # BEFORE the key bytes go in — never chmod'd after.
+    it "is 0600 from creation, not from a chmod after the bytes land" do
+      with_ca_dir do |dir|
+        Dir.mkdir_p(dir)
+        path = File.join(dir, "written.key.pem")
+        Gori::Proxy::Tls::KeyPair.generate_ec.write_pem(path)
+        mode_of(path).should eq(0o600)
+        File.read(path).should contain("PRIVATE KEY") # and it really wrote the key
+      end
+    end
+
+    # `perm:` applies only to a file the open CREATES: a `.tmp` left by a crashed write would
+    # otherwise keep 0644 and carry it through install!'s rename onto the live key path.
+    it "tightens a leftover temp file rather than inheriting its mode" do
+      with_ca_dir do |dir|
+        Dir.mkdir_p(dir)
+        stale = File.join(dir, "root.key.pem.tmp")
+        File.write(stale, "leftover")
+        File.chmod(stale, 0o644)
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        ca.regenerate! # stages through exactly that path, then renames
+        mode_of(File.join(dir, "root.key.pem")).should eq(0o600)
+      end
+    end
+  end
+
   it "generates and persists a root CA on first run" do
     with_ca_dir do |dir|
       Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
