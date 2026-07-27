@@ -202,8 +202,24 @@ module Gori
           hbytes, bbytes, eol = Miner::Inject.split(combined)
           lines = String.new(hbytes).split(eol)
           kept = [] of String
+          dropping = false
           lines.each_with_index do |l, i|
-            next if i > 0 && credential_header?(l) # request line (i == 0) is normalized below
+            if i == 0 # request line — normalized below, never a header
+              kept << l
+              next
+            end
+            # An obs-fold continuation (RFC 7230 §3.2.4: a line starting with SP/HTAB continues
+            # the previous header) belongs to whatever header it follows. Testing each line on
+            # its own dropped a folded `Cookie:` first line and KEPT its continuation, which
+            # then reads as a header line of its own — a head we forged, sent to the origin as
+            # the control request the whole finding rests on. Carry the drop across the fold.
+            if l.starts_with?(' ') || l.starts_with?('\t')
+              next if dropping
+              kept << l
+              next
+            end
+            dropping = credential_header?(l)
+            next if dropping
             kept << l
           end
           unless kept.empty?

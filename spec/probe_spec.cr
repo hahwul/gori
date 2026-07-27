@@ -1656,6 +1656,33 @@ describe "Gori::Probe::Active::NextjsActionNoAuth" do
     end
   end
 
+  # RFC 7230 §3.2.4 obs-fold: a line beginning with SP/HTAB continues the header above it.
+  # Testing lines independently dropped the `Cookie:` line and kept its continuation, which
+  # then reads as a header line of its own — a head gori forged, sent to the origin as the
+  # control request the entire finding rests on.
+  it "drops an obs-folded credential header's continuation lines with it" do
+    with_store do |store|
+      headers = "Next-Action: #{aid}\r\nCookie: session=secret;\r\n more=alsosecret\r\nAccept: */*\r\n"
+      flow = action_flow.call(store, headers, 200, priv)
+      text = String.new(probe.plan(flow, unsafe).not_nil!.request)
+      text.downcase.should_not contain("cookie:")
+      text.should_not contain("alsosecret") # the folded continuation went with its header
+      text.should contain("Next-Action: #{aid}")
+      text.should contain("Accept: */*") # the header after the fold survives
+    end
+  end
+
+  it "keeps an obs-folded NON-credential header whole" do
+    with_store do |store|
+      headers = "Next-Action: #{aid}\r\nCookie: session=secret\r\nX-Trace: one;\r\n\ttwo\r\nAccept: */*\r\n"
+      flow = action_flow.call(store, headers, 200, priv)
+      text = String.new(probe.plan(flow, unsafe).not_nil!.request)
+      text.downcase.should_not contain("cookie:")
+      text.should contain("X-Trace: one;")
+      text.should contain("two") # its continuation is not collateral damage
+    end
+  end
+
   it "flags a possible missing-authorization (Medium) when the stripped request still returns a comparable 2xx" do
     with_store do |store|
       flow = action_flow.call(store, action_headers, 200, priv)
