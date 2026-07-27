@@ -560,9 +560,45 @@ gori ca import --cert root.crt.pem --key root.key.pem --yes
 ## gori settings {#gori-settings}
 
 ```bash
-gori settings          # print the settings.json path
-gori settings --edit   # open it in $EDITOR
+gori settings                      # settings.json 경로 출력
+gori settings --edit               # $EDITOR로 열기
+gori settings sections             # 최상위 섹션 목록
+gori settings export [-o FILE]     # 공유 가능한 프로필 출력(기본 stdout)
+gori settings import FILE          # 프로필의 섹션들을 적용
 ```
+
+### 프로필 {#profiles}
+
+`export`와 `import`는 설정을 다른 머신으로 옮기거나, 팀과 공유하거나, 재현 가능한 실행을 위해 저장소에 커밋할 때 씁니다. 단위는 최상위 섹션이며 목록은 `gori settings sections`로 확인합니다.
+
+```bash
+gori settings export --sections network,scan_rules -o team-profile.json
+gori settings import team-profile.json --dry-run     # 무엇이 바뀔지 미리 보기
+gori settings import team-profile.json --sections network
+```
+
+| 플래그 | 대상 | 설명 |
+|------|-----------|-------------|
+| `--sections a,b` | 공통 | 쉼표로 구분한 섹션 이름. export 기본값은 비밀을 담은 섹션을 제외한 전부, import 기본값은 파일에 있는 전부 |
+| `-o`, `--out FILE` | export | stdout 대신 파일로 기록 |
+| `--dry-run` | import | 바뀔 섹션만 출력하고 아무것도 쓰지 않고 종료 |
+
+import는 **섹션 단위로 통째 교체**하며, 선택하지 않은 섹션은 그대로 둡니다. TUI와 동일한 저장 경로를 거치므로 원자적 쓰기가 유지되고, 동시에 실행 중인 gori가 건드리지 않은 섹션에 한 편집을 덮어쓰지 않습니다. 파일에 있는 알 수 없는 섹션은 보고하고 무시합니다.
+
+`env`와 `decoder`는 export에서 기본 제외됩니다 — `env`는 토큰 값을, `decoder`는 마지막 입력과 저장된 세션을 담기 때문입니다. 명시적으로 이름을 적는 것(`--sections env`)이 포함에 대한 동의입니다. `upstream_rules`는 공유해도 안전합니다 — 사용자명과 환경변수 *이름*만 저장하고 비밀번호는 담지 않습니다.
+
+### `--config PATH` {#config-flag}
+
+`--config`는 이번 실행에 쓸 설정 파일을 지정합니다. 서브커맨드 앞에 옵니다.
+
+```bash
+gori --config ./ci-profile.json run capture --target https://api.example.com
+gori --config ~/profiles/corp.json          # 다른 설정으로 TUI 실행
+```
+
+우선순위는 `--config` → `$GORI_CONFIG` → `$GORI_HOME/settings.json`입니다.
+
+이 플래그는 의도적으로 **`GORI_HOME`과 직교**합니다 — 읽고 쓸 설정 파일만 바꾸고 CA, 프로젝트 DB, 테마, 워드리스트는 그대로 둡니다. 이전에는 설정을 바꾸려면 트리 전체를 옮기는 방법밖에 없었습니다.
 
 ## gori wizard {#gori-wizard}
 

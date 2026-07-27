@@ -24,6 +24,8 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 
 `settings.json`은 JSON입니다. `gori settings` / `gori settings --edit`로 찾거나 편집합니다.
 
+위치는 `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/settings.json` 순으로 결정되므로, CA·프로젝트 DB·테마·워드리스트를 옮기지 않고도 다른 설정으로 실행할 수 있습니다. 섹션 단위 이동은 [`gori settings export` / `import`](/ko/reference/cli/#profiles)로 합니다.
+
 ### network {#network}
 
 ```json

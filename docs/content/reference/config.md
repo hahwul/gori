@@ -24,6 +24,8 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 
 `settings.json` is JSON. Find or edit it with `gori settings` / `gori settings --edit`.
 
+Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/settings.json`, so a run can use a different configuration without relocating the CA, project databases, themes and wordlists. Sections can be moved between configs with [`gori settings export` / `import`](/reference/cli/#profiles).
+
 ### network
 
 ```json

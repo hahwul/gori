@@ -560,9 +560,45 @@ Trust only `root.crt.pem` in your clients. Never distribute the private key.
 ## gori settings
 
 ```bash
-gori settings          # print the settings.json path
-gori settings --edit   # open it in $EDITOR
+gori settings                      # print the settings.json path
+gori settings --edit               # open it in $EDITOR
+gori settings sections             # list the top-level sections
+gori settings export [-o FILE]     # write a shareable profile (stdout by default)
+gori settings import FILE          # apply a profile's sections
 ```
+
+### Profiles
+
+`export` and `import` move settings between machines, share them with a team, or check a configuration into a repository for a reproducible run. The unit is the top-level section, listed by `gori settings sections`.
+
+```bash
+gori settings export --sections network,scan_rules -o team-profile.json
+gori settings import team-profile.json --dry-run     # show what would change
+gori settings import team-profile.json --sections network
+```
+
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--sections a,b` | both | Comma-separated section names. Export defaults to everything except secret-bearing sections; import defaults to every section in the file |
+| `-o`, `--out FILE` | export | Write to a file instead of stdout |
+| `--dry-run` | import | Print which sections would change, then exit without writing |
+
+Import **replaces whole sections**; a section you do not select is left exactly as it was. It goes through the same writer the TUI uses, so it keeps the atomic write and cannot clobber a concurrently-running gori's edit to a section it did not touch. Unrecognised sections in the file are reported and ignored.
+
+`env` and `decoder` are excluded from an export by default: `env` holds token values and `decoder` holds your last input and saved sessions. Naming one explicitly (`--sections env`) is how you consent to include it. Note that `upstream_rules` is safe to share — it stores a username and an environment-variable *name*, never a password.
+
+### `--config PATH`
+
+`--config` points gori at a specific settings file for one run. It works before any subcommand:
+
+```bash
+gori --config ./ci-profile.json run capture --target https://api.example.com
+gori --config ~/profiles/corp.json          # the TUI, with a different config
+```
+
+Resolution order is `--config` → `$GORI_CONFIG` → `$GORI_HOME/settings.json`.
+
+This is deliberately **orthogonal to `GORI_HOME`**: it changes only which settings file is read and written, leaving the CA, the project databases, the themes and the wordlists where they are. Relocating the whole tree was previously the only way to switch configuration.
 
 ## gori wizard
 

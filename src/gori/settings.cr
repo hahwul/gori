@@ -43,8 +43,20 @@ module Gori
     # unrelated edit isn't clobbered by this process persisting one unrelated field.
     @@loaded_raw : String? = nil
 
+    # An explicit settings file for THIS process (`gori --config PATH`), overriding both
+    # $GORI_CONFIG and the default under GORI_HOME. Set once from CLI.run before any
+    # subcommand dispatch, so every surface — TUI, `gori run`, `gori mcp` — reads the same
+    # file. Orthogonal to GORI_HOME on purpose: pointing at a different config must not also
+    # relocate the CA, the project databases, the themes and the wordlists, which is the only
+    # thing GORI_HOME could do before this.
+    @@path_override : String? = nil
+
+    def self.path_override=(p : String?) : String?
+      @@path_override = p.try(&.presence)
+    end
+
     def self.path : String
-      File.join(Paths.home_dir, "settings.json")
+      @@path_override || ENV["GORI_CONFIG"]?.presence || File.join(Paths.home_dir, "settings.json")
     end
 
     # Load persisted values into the class properties. Tolerant: a missing or
@@ -63,7 +75,9 @@ module Gori
 
     # Read each top-level section of a parsed settings document into the class properties.
     # Split out of load so load stays a small read → parse → apply flow.
-    private def self.apply_sections(root : JSON::Any) : Nil
+    # Not private: import_document reuses it, so a profile import runs the SAME per-section
+    # readers as a normal load rather than a parallel implementation that could drift.
+    protected def self.apply_sections(root : JSON::Any) : Nil
       if net = root["network"]?
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
@@ -152,6 +166,10 @@ module Gori
     # not crash the TUI); returns whether it succeeded.
     def self.save : Bool
       Paths.ensure_dirs
+      # With --config / $GORI_CONFIG the file can live outside GORI_HOME, whose directory
+      # ensure_dirs above does not create. The temp+rename below would fail on a missing
+      # parent, so make it first (0700: the file can carry env values and decoder sessions).
+      Paths.ensure_dir(File.dirname(path))
       # Atomic write: a torn File.write (crash / two instances / disk-full) would leave a
       # half-written settings.json that load()'s blanket rescue silently resets to factory
       # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder sessions.
@@ -201,6 +219,69 @@ module Gori
       end
     rescue
       current # any merge hiccup falls back to the plain write (never worse than before)
+    end
+
+    # --- profiles: export / import a settings subset (`gori settings export|import`) -------
+    #
+    # The unit is the TOP-LEVEL JSON KEY, and the list of keys is derived from the current
+    # serialization rather than hand-maintained: a new section becomes exportable the moment
+    # it is written, with no second list to keep in step.
+    #
+    # Sections holding SECRETS or machine-local scratch, excluded from an export unless the
+    # operator names them explicitly. `env` carries token VALUES and `decoder` carries the last
+    # input plus saved sessions; the point of an export is that it can be committed or shared.
+    # Note `upstream_rules` is deliberately NOT here — it stores only a username and an
+    # environment-variable NAME, never a password (see settings/upstream_rules.cr).
+    SECRET_SECTIONS = ["env", "decoder"]
+
+    # Every top-level key the current settings would write. Also the answer to
+    # `gori settings sections`.
+    def self.document_keys : Array(String)
+      (JSON.parse(serialize).as_h?.try(&.keys) || [] of String)
+    end
+
+    # The current settings as a JSON document. `only` narrows it to those keys (an unknown key
+    # is simply absent — the caller validates and reports). With `only` nil, everything except
+    # SECRET_SECTIONS is written; naming a secret section explicitly IS the consent to include
+    # it, so no separate flag is needed to leak one by accident.
+    def self.export_document(only : Array(String)? = nil) : String
+      doc = JSON.parse(serialize).as_h
+      keep = only || (doc.keys - SECRET_SECTIONS)
+      JSON.build(indent: "  ") do |j|
+        j.object do
+          doc.each { |k, v| j.field k, v if keep.includes?(k) }
+        end
+      end
+    end
+
+    # The top-level keys in `raw` that would actually CHANGE the current settings, and the keys
+    # it carries that gori does not recognise. Import is destructive at section granularity, so
+    # `--dry-run` prints this before anything is written.
+    def self.import_preview(raw : String, only : Array(String)? = nil) : {Array(String), Array(String)}
+      incoming = JSON.parse(raw).as_h
+      current = JSON.parse(serialize).as_h
+      known = document_keys
+      selected = incoming.keys.select { |k| only.nil? || only.includes?(k) }
+      changed = selected.select { |k| current[k]? != incoming[k] }
+      {changed, selected.reject { |k| known.includes?(k) }}
+    end
+
+    # Apply the selected sections of `raw` to the live settings and persist. Returns the keys
+    # applied. Whole-section REPLACE, matching how merge_with_disk already reasons — a section
+    # is the unit an operator selects, so a half-merged one would be a surprise.
+    #
+    # Reuses `apply_sections`, the same reader `load` uses, so every section's tolerant parse
+    # (unknown enum → safe fallback, junk entry dropped) applies here identically. Persisting
+    # goes through `save`, NOT a raw write: that keeps the atomic temp+rename and the 3-way
+    # merge, so an import cannot clobber a concurrent instance's edit to a section it did not
+    # touch.
+    def self.import_document(raw : String, only : Array(String)? = nil) : Array(String)
+      incoming = JSON.parse(raw).as_h
+      selected = incoming.keys.select { |k| only.nil? || only.includes?(k) }
+      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, incoming[k] } } }
+      apply_sections(JSON.parse(filtered))
+      save
+      selected
     end
 
     # Builds the full settings.json document by dispatching to each section's

@@ -29,6 +29,13 @@ module Gori
         return
       end
 
+      # `--config PATH` is consumed HERE, before subcommand detection, rather than being added
+      # to each subcommand's OptionParser. It must apply to every surface (tui, run, mcp,
+      # settings) and take effect before anything reads Settings, so one central strip is both
+      # simpler and impossible to forget on a new subcommand — and every parser below would
+      # otherwise reject it through invalid_option.
+      argv = extract_config_flag(argv)
+
       # Top-level help when no explicit subcommand is given
       has_explicit_sub = !argv.empty? && !argv[0].starts_with?("-")
       if argv.any? { |a| a == "-h" || a == "--help" } && !has_explicit_sub
@@ -62,6 +69,35 @@ module Gori
         print_main_help
         exit 1
       end
+    end
+
+    # Pull `--config PATH` / `--config=PATH` out of argv, point Settings at it, and return the
+    # remaining args. Aborts on a missing value rather than silently ignoring the flag — a
+    # config that quietly did not apply is the worst outcome for a reproducible run.
+    private def self.extract_config_flag(argv : Array(String)) : Array(String)
+      rest = [] of String
+      i = 0
+      while i < argv.size
+        arg = argv[i]
+        if arg == "--config"
+          value = argv[i + 1]?
+          # A following flag is not a path — treat `--config --edit` as the missing value it is,
+          # rather than writing settings to a file literally named "--edit".
+          abort "gori: --config needs a path" if value.nil? || value.starts_with?("-")
+          Settings.path_override = value
+          i += 2
+          next
+        elsif arg.starts_with?("--config=")
+          value = arg["--config=".size..]
+          abort "gori: --config needs a path" if value.empty?
+          Settings.path_override = value
+          i += 1
+          next
+        end
+        rest << arg
+        i += 1
+      end
+      rest
     end
 
     private def self.print_main_help : Nil
@@ -130,9 +166,18 @@ module Gori
     # $EDITOR. Lazily created with current defaults on first invocation. ("config"
     # the word is reserved for the runtime Config struct — flags/effective config.)
     private def self.run_settings(args : Array(String)) : Nil
+      case args[0]?
+      when "export"   then return run_settings_export(args[1..])
+      when "import"   then return run_settings_import(args[1..])
+      when "sections" then return run_settings_sections
+      end
+
       edit = false
       parser = OptionParser.new do |p|
-        p.banner = "Usage: gori settings [--edit]"
+        p.banner = "Usage: gori settings [--edit]\n" \
+                   "       gori settings sections\n" \
+                   "       gori settings export [--sections a,b] [-o FILE]\n" \
+                   "       gori settings import FILE [--sections a,b] [--dry-run]"
         p.on("--edit", "Open the settings file in your editor (Settings: Editor / $VISUAL / $EDITOR / vi)") { edit = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
@@ -163,6 +208,98 @@ module Gori
       status = Process.run(cmd[0], cmd[1..] + [path],
         input: Process::Redirect::Inherit, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
       abort "gori settings: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
+    end
+
+    # `gori settings sections` — the top-level keys export/import operate on. Derived from the
+    # live serialization, so a newly added section appears here with no list to update.
+    private def self.run_settings_sections : Nil
+      Settings.load
+      Settings.document_keys.each do |k|
+        puts Settings::SECRET_SECTIONS.includes?(k) ? "#{k}  (holds secrets — excluded unless named)" : k
+      end
+    end
+
+    # `gori settings export` — write a shareable profile to stdout (or -o FILE).
+    private def self.run_settings_export(args : Array(String)) : Nil
+      sections = nil.as(Array(String)?)
+      out = nil.as(String?)
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori settings export [--sections a,b] [-o FILE]"
+        p.on("--sections=LIST", "Comma-separated top-level sections (default: all but #{Settings::SECRET_SECTIONS.join('/')})") { |v| sections = split_sections(v) }
+        p.on("-o FILE", "--out=FILE", "Write here instead of stdout") { |v| out = v }
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.missing_option { |flag| abort "missing value for #{flag}" }
+      end
+      parser.parse(args)
+
+      Settings.load
+      if list = sections
+        unknown = list - Settings.document_keys
+        abort "gori settings export: unknown section(s): #{unknown.join(", ")}\nRun 'gori settings sections' for the list." unless unknown.empty?
+      end
+      doc = Settings.export_document(sections)
+      if path = out
+        File.write(path, doc)
+        STDERR.puts "wrote #{path}"
+      else
+        puts doc
+      end
+    end
+
+    # `gori settings import` — apply a profile's sections to this config.
+    private def self.run_settings_import(args : Array(String)) : Nil
+      sections = nil.as(Array(String)?)
+      dry = false
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori settings import FILE [--sections a,b] [--dry-run]"
+        p.on("--sections=LIST", "Comma-separated top-level sections to apply (default: every section in FILE)") { |v| sections = split_sections(v) }
+        p.on("--dry-run", "Print which sections would change, then exit without writing") { dry = true }
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.missing_option { |flag| abort "missing value for #{flag}" }
+      end
+      rest = [] of String
+      parser.unknown_args { |before, _| rest = before }
+      parser.parse(args)
+
+      file = rest[0]?
+      abort "gori settings import: needs a file\n#{parser}" unless file
+      raw = begin
+        File.read(file)
+      rescue ex
+        abort "gori settings import: cannot read #{file}: #{ex.message}"
+      end
+      # Reject a non-object before touching anything: apply_sections is tolerant by design and
+      # would silently no-op on a JSON array or scalar, which reads as "imported, nothing
+      # happened" rather than "this is not a settings document".
+      begin
+        abort "gori settings import: #{file} is not a settings document (expected a JSON object)" unless JSON.parse(raw).as_h?
+      rescue
+        abort "gori settings import: #{file} is not valid JSON"
+      end
+
+      Settings.load
+      changed, unknown = Settings.import_preview(raw, sections)
+      STDERR.puts "warning: unrecognised section(s) ignored: #{unknown.join(", ")}" unless unknown.empty?
+
+      if dry
+        if changed.empty?
+          puts "no changes — the selected sections already match #{Settings.path}"
+        else
+          puts "would replace #{changed.size} section(s) in #{Settings.path}:"
+          changed.each { |k| puts "  #{k}" }
+        end
+        return
+      end
+
+      applied = Settings.import_document(raw, sections)
+      known = applied - unknown
+      puts "imported #{known.size} section(s) into #{Settings.path}#{known.empty? ? "" : ": #{known.join(", ")}"}"
+    end
+
+    private def self.split_sections(value : String) : Array(String)
+      value.split(',').compact_map(&.strip.presence)
     end
 
     # `gori ca` is the CA utility surface:
