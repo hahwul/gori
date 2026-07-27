@@ -70,6 +70,51 @@ CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 �
 
 우회된 호스트는 flow를 남기지 않으므로, gori는 호스트별로 처음 중계할 때 로그에 한 줄을 남깁니다. History에서 빠진 호스트의 이유를 추적할 수 있게 하기 위함입니다. 목록은 Preferences → **Network & Tabs** → **Network** → **TLS passthrough**에서 쉼표로 구분해 편집합니다.
 
+### upstream_rules
+
+목적지별 업스트림 라우팅입니다. `network.upstream_proxy`는 *모든* 트래픽에 대한 단일 주소인 반면, 규칙 테이블은 "`*.corp.internal`은 사내 프록시로, 나머지는 직결"을 표현할 수 있고 자격증명을 실을 수 있으며 SOCKS 프록시에 접근할 수 있습니다.
+
+규칙은 **순서가 있고 첫 일치가 이깁니다**. 구체적인 규칙을 위에 두세요. 편집은 `gori settings --edit`.
+
+```json
+{
+  "upstream_rules": [
+    { "host": "intranet.corp.internal", "kind": "direct" },
+    {
+      "host": "*.corp.internal",
+      "kind": "http",
+      "addr": "proxy.corp.internal:3128",
+      "username": "alice",
+      "password_env": "CORP_PROXY_PASS"
+    },
+    { "host": "*.onion", "kind": "socks5", "addr": "127.0.0.1:9050" }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `host` | string | 호스트 패턴. 스코프 `host` 룰과 같은 문법 — `corp.internal`은 해당 호스트와 서브도메인, `*.corp.internal`은 글롭, `*`는 catch-all. 대소문자 무관 |
+| `kind` | string | `direct`, `http`, `socks5`. 알 수 없는 kind는 규칙을 버립니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
+| `addr` | string | 프록시 `host:port`. 포트 기본값은 `http`가 `8080`, `socks5`가 `1080`. `direct`에는 없어야 합니다 |
+| `username` | string | 선택. `http`는 HTTP Basic(RFC 7617), `socks5`는 RFC 1929 교환으로 전송 |
+| `password_env` | string | 선택. 비밀번호를 담은 **OS 환경변수의 이름** |
+
+**자격증명은 `settings.json`에 저장되지 않습니다.** 사용자명과 환경변수 *이름*만 기록되고, 비밀번호는 dial 시점에 OS 환경에서 읽습니다. 따라서 `export CORP_PROXY_PASS=…`가 재시작 없이 반영됩니다. gori 자체의 `env` 섹션은 의도적으로 쓰지 않습니다 — 그 변수들은 `settings.json`에 평문으로 저장되므로, 결국 다른 경로로 비밀을 파일에 넣는 셈이고 설정 공유·내보내기([#439](https://github.com/hahwul/gori/issues/439))를 무의미하게 만듭니다. `$`가 포함된 `password_env`는 거부됩니다 — 값이 아니라 변수 이름을 담는 필드입니다.
+
+`socks5`의 경우 호스트명 대상은 `ATYP DOMAIN`으로 전송되어 **프록시가** 이름을 해석합니다(`socks5h` 동작). Tor나 점프호스트 뒤의 도달 불가 네트워크가 이 덕분에 동작하며, gori 자체는 dial 경로에서 이름을 해석하지 않습니다.
+
+우선순위(높은 것부터):
+
+| 우선순위 | 출처 |
+|----------|------|
+| 1 (최상) | 프로젝트 `net.upstream_proxy` — 명시적 프로젝트 고정으로, 테이블을 통째로 건너뜁니다 |
+| 2 | `upstream_rules`의 첫 호스트 일치 |
+| 3 | `network.upstream_proxy` — 암묵적 catch-all |
+| 4 (최하) | 직접 연결 |
+
+규칙은 [호스트 오버라이드](#hostname_overrides) 적용 **이전의 원래 호스트명**에 대해 매칭됩니다 — 오버라이드는 어느 IP로 접속할지만 바꿉니다.
+
 ### layout {#layout}
 
 영역별 TUI 레이아웃 환경설정 (커맨드 팔레트 → **Settings: Layout**). 두 값 모두 공장 기본값이면 생략됩니다.

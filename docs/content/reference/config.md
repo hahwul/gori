@@ -70,6 +70,51 @@ Empty (the default) means everything is intercepted, which is how gori behaved b
 
 Because a bypassed host produces no flow, gori writes one line to its log the first time each host is relayed, so a host missing from History has a traceable reason. Edit the list from Preferences → **Network & Tabs** → **Network** → **TLS passthrough** (comma-separated).
 
+### upstream_rules
+
+Per-destination upstream routing. `network.upstream_proxy` is a single address for *everything*; a rule table can say "route `*.corp.internal` through the internal proxy, everything else direct", carry credentials, and reach a SOCKS proxy.
+
+Rules are **ordered** and the **first match wins**, so specific rules go above general ones. Edit them with `gori settings --edit`.
+
+```json
+{
+  "upstream_rules": [
+    { "host": "intranet.corp.internal", "kind": "direct" },
+    {
+      "host": "*.corp.internal",
+      "kind": "http",
+      "addr": "proxy.corp.internal:3128",
+      "username": "alice",
+      "password_env": "CORP_PROXY_PASS"
+    },
+    { "host": "*.onion", "kind": "socks5", "addr": "127.0.0.1:9050" }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `host` | string | Host pattern, same dialect as scope `host` rules: `corp.internal` covers that host and its subdomains, `*.corp.internal` is a glob, `*` is the catch-all. Case-insensitive |
+| `kind` | string | `direct`, `http`, or `socks5`. An unknown kind drops the rule rather than being treated as `direct`, which would quietly disable an intended proxy |
+| `addr` | string | Proxy `host:port`. Port defaults to `8080` for `http` and `1080` for `socks5`. Must be absent for `direct` |
+| `username` | string | Optional. Sent as HTTP Basic (RFC 7617) for `http`, or via the RFC 1929 exchange for `socks5` |
+| `password_env` | string | Optional. The **name** of an OS environment variable holding the password |
+
+**Credentials are never stored in `settings.json`.** Only the username and the environment-variable *name* are written; the password is read from the OS environment at dial time, so `export CORP_PROXY_PASS=…` takes effect without a restart. gori's own `env` section is deliberately not used for this — those variables live in `settings.json` in plaintext, which would put the secret in the file by another route and defeat sharing or exporting a config (see [#439](https://github.com/hahwul/gori/issues/439)). A `password_env` containing `$` is rejected: it holds a variable name, not a value.
+
+For `socks5`, a hostname target is sent as `ATYP DOMAIN` so the **proxy** resolves it (the `socks5h` behaviour). That is what makes Tor and a jump host into an otherwise unreachable network work; gori does not resolve names on the dial path itself.
+
+Precedence, highest first:
+
+| Priority | Source |
+|----------|--------|
+| 1 (highest) | Project `net.upstream_proxy` — an explicit per-project pin, which bypasses the table wholesale |
+| 2 | `upstream_rules`, first host match |
+| 3 | `network.upstream_proxy` — the implicit catch-all |
+| 4 (lowest) | Direct |
+
+A rule is matched against the **original** hostname, before any [host override](#hostname_overrides) is applied — an override only changes which IP is dialled.
+
 ### layout
 
 Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted when both values are factory defaults.

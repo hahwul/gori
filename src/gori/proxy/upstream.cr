@@ -1,3 +1,4 @@
+require "base64" # Proxy-Authorization credentials (dial_via_proxy)
 require "socket"
 require "openssl"
 require "../settings"
@@ -32,10 +33,17 @@ module Gori::Proxy
                   io_timeout : Time::Span = Settings.io_timeout,
                   *, overrides : Gori::HostOverrides? = nil) : TCPSocket?
       target = connect_target(host, overrides)
-      if proxy = Settings.upstream_proxy_addr
-        dial_via_proxy(proxy[0], proxy[1], target, port, connect_timeout, io_timeout)
-      else
+      # ONE decision point for "how do we reach this host": Settings.upstream_route folds the
+      # project pin, the rule table and the legacy scalar together. Resolved on the ORIGINAL
+      # host, not `target` — a rule is written against the name the operator sees, and a
+      # hostname override only changes which IP we dial (see connect_target).
+      route = Settings.upstream_route(host)
+      if route.direct?
         direct_dial(target, port, connect_timeout, io_timeout)
+      elsif route.socks5?
+        dial_via_socks5(route, target, port, connect_timeout, io_timeout)
+      else
+        dial_via_proxy(route, target, port, connect_timeout, io_timeout)
       end
     end
 
@@ -183,16 +191,22 @@ module Gori::Proxy
     # BOTH https and plaintext targets (the tunnel is a raw pipe to the origin, so
     # gori's existing TLS-wrap/forwarding works over it). The proxy must permit
     # CONNECT to the target port.
-    private def self.dial_via_proxy(proxy_host : String, proxy_port : Int32,
+    #
+    # Sends Proxy-Authorization when the route carries credentials. Before upstream rules
+    # existed this header was never emitted at all, which made gori simply unusable behind an
+    # authenticating proxy — there was no setting that could produce it.
+    private def self.dial_via_proxy(route : Settings::UpstreamRoute,
                                     host : String, port : Int32,
                                     connect_timeout : Time::Span = Settings.connect_timeout,
                                     io_timeout : Time::Span = Settings.io_timeout) : TCPSocket?
-      sock = direct_dial(proxy_host, proxy_port, connect_timeout, io_timeout)
+      sock = direct_dial(route.host, route.port, connect_timeout, io_timeout)
       return nil unless sock
       # An IPv6 literal host must be bracketed in the CONNECT request-target / Host header
       # ("CONNECT [::1]:443"), else the upstream proxy sees a malformed authority.
       authority = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]:#{port}" : "#{host}:#{port}"
-      sock << "CONNECT #{authority} HTTP/1.1\r\nHost: #{authority}\r\n\r\n"
+      sock << "CONNECT #{authority} HTTP/1.1\r\nHost: #{authority}\r\n"
+      sock << "Proxy-Authorization: Basic #{basic_credentials(route)}\r\n" if authenticating?(route)
+      sock << "\r\n"
       sock.flush
       return sock if connect_established?(sock)
       sock.close rescue nil
@@ -200,6 +214,164 @@ module Gori::Proxy
     rescue
       sock.try(&.close) rescue nil
       nil
+    end
+
+    # Whether this route has credentials to present. A username alone is legitimate (some
+    # proxies key on it), so either half being present counts.
+    private def self.authenticating?(route : Settings::UpstreamRoute) : Bool
+      !route.username.empty? || !(route.password || "").empty?
+    end
+
+    # base64("user:pass") per RFC 7617. A CR/LF in either half would inject a header line into
+    # our own CONNECT request (self-inflicted request smuggling, the #403 shape), so they are
+    # stripped rather than trusted: these values come from settings.json and the OS
+    # environment, neither of which is validated for wire-safety anywhere else.
+    private def self.basic_credentials(route : Settings::UpstreamRoute) : String
+      user = route.username.delete { |c| c == '\r' || c == '\n' }
+      pass = (route.password || "").delete { |c| c == '\r' || c == '\n' }
+      Base64.strict_encode("#{user}:#{pass}")
+    end
+
+    # --- SOCKS5 (RFC 1928 + RFC 1929 username/password auth) ----------------------------
+    # Reaches an origin through a SOCKS5 proxy — `ssh -D`, Tor, a jump host. The returned
+    # socket sits at the start of the origin stream, exactly like the CONNECT path, so every
+    # caller (dial_tls, the request forwarder) is unaffected.
+    SOCKS_VERSION              =    5_u8
+    SOCKS_AUTH_NONE            =    0_u8
+    SOCKS_AUTH_USERPWD         =    2_u8
+    SOCKS_AUTH_NONE_ACCEPTABLE = 0xFF_u8
+    SOCKS_CMD_CONNECT          =    1_u8
+    SOCKS_ATYP_IPV4            =    1_u8
+    SOCKS_ATYP_DOMAIN          =    3_u8
+    SOCKS_ATYP_IPV6            =    4_u8
+    # RFC 1928 caps a domain name at one length byte, and RFC 1929 caps each credential the
+    # same way. A longer value cannot be encoded, so the dial fails rather than being truncated
+    # into a request for a DIFFERENT host than the caller asked for.
+    SOCKS_MAX_FIELD = 255
+
+    private def self.dial_via_socks5(route : Settings::UpstreamRoute,
+                                     host : String, port : Int32,
+                                     connect_timeout : Time::Span = Settings.connect_timeout,
+                                     io_timeout : Time::Span = Settings.io_timeout) : TCPSocket?
+      sock = direct_dial(route.host, route.port, connect_timeout, io_timeout)
+      return nil unless sock
+      return sock if socks5_handshake(sock, route, host, port)
+      sock.close rescue nil
+      nil
+    rescue
+      sock.try(&.close) rescue nil
+      nil
+    end
+
+    # Method negotiation → optional auth → CONNECT. False on any refusal, so the caller closes.
+    private def self.socks5_handshake(sock : TCPSocket, route : Settings::UpstreamRoute,
+                                      host : String, port : Int32) : Bool
+      methods = authenticating?(route) ? Bytes[SOCKS_AUTH_NONE, SOCKS_AUTH_USERPWD] : Bytes[SOCKS_AUTH_NONE]
+      sock.write(Bytes[SOCKS_VERSION, methods.size.to_u8])
+      sock.write(methods)
+      sock.flush
+      return false unless (reply = socks5_read(sock, 2)) && reply[0] == SOCKS_VERSION
+      case reply[1]
+      when SOCKS_AUTH_NONE
+        # The proxy waived auth. Nothing to send even if we hold credentials.
+      when SOCKS_AUTH_USERPWD
+        return false unless socks5_authenticate(sock, route)
+      else
+        return false # 0xFF "no acceptable methods", or a method we never offered
+      end
+      socks5_connect(sock, host, port)
+    end
+
+    # RFC 1929: VER(1) ULEN(1) UNAME PLEN(1) PASSWD. Status 0 is success.
+    private def self.socks5_authenticate(sock : TCPSocket, route : Settings::UpstreamRoute) : Bool
+      user = route.username.to_slice
+      pass = (route.password || "").to_slice
+      return false if user.size > SOCKS_MAX_FIELD || pass.size > SOCKS_MAX_FIELD
+      sock.write(Bytes[1_u8, user.size.to_u8])
+      sock.write(user)
+      sock.write(Bytes[pass.size.to_u8])
+      sock.write(pass)
+      sock.flush
+      reply = socks5_read(sock, 2)
+      !!(reply && reply[1] == 0)
+    end
+
+    # The CONNECT request, then the reply (whose BND.ADDR must be drained by its own address
+    # type, or the socket would be left mid-reply and the origin stream would start desynced).
+    #
+    # An IP literal target is sent as ATYP IPV4/IPV6; a hostname is sent as ATYP DOMAIN, so the
+    # SOCKS proxy resolves it (the "socks5h" behaviour). That is the right default here: it is
+    # what makes Tor and a jump host into a network gori cannot otherwise see work at all, and
+    # gori deliberately does not resolve names on the dial path anyway (see parse_ip).
+    private def self.socks5_connect(sock : TCPSocket, host : String, port : Int32) : Bool
+      sock.write(Bytes[SOCKS_VERSION, SOCKS_CMD_CONNECT, 0_u8])
+      return false unless socks5_write_address(sock, host)
+      sock.write(Bytes[(port >> 8).to_u8, (port & 0xFF).to_u8])
+      sock.flush
+
+      return false unless (reply = socks5_read(sock, 4)) && reply[0] == SOCKS_VERSION
+      return false unless reply[1] == 0 # REP: 0 = succeeded; 1-8 are the failure codes
+      return false unless bound = socks5_bound_length(sock, reply[3])
+      !!socks5_read(sock, bound + 2) # BND.ADDR + BND.PORT — drained, not used
+    end
+
+    # How many bytes BND.ADDR occupies for `atyp`, consuming the length byte for a DOMAIN
+    # reply. nil for an address type the RFC does not define — the reply is then unusable and
+    # the socket cannot be trusted to be positioned at the start of the origin stream.
+    private def self.socks5_bound_length(sock : TCPSocket, atyp : UInt8) : Int32?
+      case atyp
+      when SOCKS_ATYP_IPV4   then 4
+      when SOCKS_ATYP_IPV6   then 16
+      when SOCKS_ATYP_DOMAIN then socks5_read(sock, 1).try(&.[0].to_i)
+      end
+    end
+
+    # ATYP + address. False when a hostname is too long to encode (see SOCKS_MAX_FIELD).
+    # A host arriving bracketed ("[::1]") is an IPv6 literal — the brackets are URL syntax and
+    # must not reach the wire, where the address is 16 raw bytes.
+    private def self.socks5_write_address(sock : TCPSocket, host : String) : Bool
+      bare = host.starts_with?('[') && host.ends_with?(']') ? host[1...-1] : host
+      if ip = parse_ip(bare)
+        v4 = ip.family == Socket::Family::INET
+        sock.write(Bytes[v4 ? SOCKS_ATYP_IPV4 : SOCKS_ATYP_IPV6])
+        sock.write(socks5_address_bytes(ip))
+        return true
+      end
+      name = host.to_slice
+      return false if name.empty? || name.size > SOCKS_MAX_FIELD
+      sock.write(Bytes[SOCKS_ATYP_DOMAIN, name.size.to_u8])
+      sock.write(name)
+      true
+    end
+
+    # An IP literal's network-order bytes: 4 for IPv4, 16 for IPv6. IPv4 is read off the
+    # canonical dotted text; IPv6 is copied out of the sockaddr the OS already parsed, rather
+    # than re-implementing "::" expansion here (in6_addr is exactly the 16 address bytes).
+    private def self.socks5_address_bytes(ip : Socket::IPAddress) : Bytes
+      return socks5_ipv4_bytes(ip) if ip.family == Socket::Family::INET
+      socks5_ipv6_bytes(ip)
+    end
+
+    private def self.socks5_ipv4_bytes(ip : Socket::IPAddress) : Bytes
+      out = Bytes.new(4)
+      ip.address.split('.').each_with_index { |octet, i| out[i] = octet.to_u8 }
+      out
+    end
+
+    private def self.socks5_ipv6_bytes(ip : Socket::IPAddress) : Bytes
+      addr = ip.to_unsafe.as(Pointer(LibC::SockaddrIn6)).value.sin6_addr
+      ptr = pointerof(addr).as(Pointer(UInt8))
+      out = Bytes.new(16)
+      16.times { |i| out[i] = ptr[i] }
+      out
+    end
+
+    # Read exactly `n` bytes, or nil on EOF/short read — every SOCKS field is fixed-length, so a
+    # partial read is a protocol failure, not something to proceed past.
+    private def self.socks5_read(sock : TCPSocket, n : Int32) : Bytes?
+      return Bytes.empty if n == 0
+      buf = Bytes.new(n)
+      sock.read_fully?(buf) ? buf : nil
     end
 
     # Bounds on the upstream proxy's CONNECT reply so a hostile/broken proxy can't
@@ -246,12 +418,12 @@ module Gori::Proxy
     # bundle FILE carries every root, so files are tried first; the DIRS are the
     # hashed-symlink fallback for systems that ship no bundle file. Kept in probe order.
     SYSTEM_CA_FILES = %w[
-      /etc/ssl/certs/ca-certificates.crt                 # Debian/Ubuntu/Alpine/Gentoo
-      /etc/pki/tls/certs/ca-bundle.crt                   # Fedora/RHEL 6
-      /etc/ssl/ca-bundle.pem                             # openSUSE
+      /etc/ssl/certs/ca-certificates.crt # Debian/Ubuntu/Alpine/Gentoo
+      /etc/pki/tls/certs/ca-bundle.crt # Fedora/RHEL 6
+      /etc/ssl/ca-bundle.pem # openSUSE
       /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem # CentOS/RHEL 7+
-      /etc/pki/tls/cacert.pem                            # OpenELEC
-      /etc/ssl/cert.pem                                  # Alpine/macOS/OpenBSD/FreeBSD
+      /etc/pki/tls/cacert.pem # OpenELEC
+      /etc/ssl/cert.pem # Alpine/macOS/OpenBSD/FreeBSD
     ]
     SYSTEM_CA_DIRS = %w[
       /etc/ssl/certs
