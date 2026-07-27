@@ -58,8 +58,9 @@ module Gori::Tui
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
 
-      @pane = :scope # :scope | :overrides | :desc
-      @sel = 0       # selected rule row in the SCOPE list
+      @pane = :scope   # :scope | :overrides | :env | :desc | :settings
+      @strip_start = 0 # first visible sub-tab chip (Chrome.render_tab_strip owns the window)
+      @sel = 0         # selected rule row in the SCOPE list
       # SCOPE add/edit is a centered popup (ScopeRuleOverlay), not an inline row.
 
       # HOST OVERRIDES pane: its own selection + inline add/edit row, fully independent
@@ -208,7 +209,12 @@ module Gori::Tui
       @desc_read.move(@desc_area, 0, delta * 4)
     end
 
-    PANES          = [:scope, :overrides, :env, :desc, :settings]
+    PANES = [:scope, :overrides, :env, :desc, :settings]
+    # Chip labels, in PANES order. Kept parallel rather than derived from the symbols so a
+    # label can read well ("HOST OVERRIDES") without renaming the pane it addresses.
+    PANE_LABELS = ["SCOPE", "HOST OVERRIDES", "ENV", "DESCRIPTION", "PROJECT SETTINGS"]
+    # One row for the sub-tab chips.
+    STRIP_H        =  1
     ENV_MIN_BODY_H = 11
 
     # NETWORK pane rows: two toggles (scope-lens, sandbox) over the three inline network
@@ -249,7 +255,9 @@ module Gori::Tui
     end
 
     private def enabled_panes : Array(Symbol)
-      PANES.reject { |p| p == :env && !@env_pane_enabled }
+      # Every pane is always reachable now that they no longer share the body — the old
+      # height-based ENV drop-out went away with the tiling.
+      PANES
     end
 
     def env_pane_enabled? : Bool
@@ -288,31 +296,42 @@ module Gori::Tui
       content_h >= ENV_MIN_BODY_H
     end
 
+    # SUB-TAB layout. The body shows ONE card at a time, under a chip strip, instead of
+    # tiling all five at once.
+    #
+    # Tiling was the previous design and it ran out of room: five cards split a single body
+    # between them, so SETTINGS got a fixed 6-row slice and ENV was DROPPED entirely below a
+    # height threshold (`env_pane_enabled?`) — a pane silently disappearing is a bad answer to
+    # "the terminal is short". One card at full size removes the threshold, and gives each
+    # editor room to grow (which is what let PROJECT SETTINGS take its per-project overrides).
+    #
+    # The 5-tuple contract is kept deliberately: the ACTIVE pane gets the whole content rect and
+    # the others get zero-height rects. Every existing geometry helper (scope_row_at,
+    # ov_row_at, settings_row_at, pane_at) then keeps working unchanged, because each already
+    # indexes this tuple — an inactive pane simply can't be hit.
     private def body_panes(rect : Rect) : {Rect, Rect, Rect, Rect, Rect}?
       oh = overview_h(rect)
       content = Rect.new(rect.x, rect.y + oh, rect.w, {rect.h - oh, 0}.max)
-      return nil if content.h < 2 || content.w < 4
-      left_w = {(content.w - 1) // 2, 1}.max
-      if env_pane_enabled?(content.h)
-        third = {content.h // 3, 2}.max
-        scope_h = third
-        ov_h = third
-        env_h = {content.h - scope_h - ov_h, 2}.max
-        env_rect = Rect.new(content.x, content.y + scope_h + ov_h, left_w, env_h)
-      else
-        scope_h = {content.h // 2, 1}.max
-        ov_h = {content.h - scope_h, 0}.max
-        env_rect = Rect.new(content.x, content.y + content.h, left_w, 0)
-      end
-      scope_rect = Rect.new(content.x, content.y, left_w, scope_h)
-      ov_rect = Rect.new(content.x, content.y + scope_h, left_w, ov_h)
-      right_x = content.x + left_w + 1
-      right_w = {content.w - left_w - 1, 0}.max
-      set_h = {SETTINGS_H, {content.h - MIN_DESC_H, 1}.max}.min
-      desc_h = {content.h - set_h, 0}.max
-      desc_rect = Rect.new(right_x, content.y, right_w, desc_h)
-      set_rect = Rect.new(right_x, content.y + desc_h, right_w, set_h)
-      {scope_rect, ov_rect, env_rect, desc_rect, set_rect}
+      return nil if content.h < 3 || content.w < 4
+      body = Rect.new(content.x, content.y + STRIP_H, content.w, {content.h - STRIP_H, 0}.max)
+      empty = Rect.new(content.x, content.y + content.h, content.w, 0)
+      active = pane_index
+      {
+        active == 0 ? body : empty,
+        active == 1 ? body : empty,
+        active == 2 ? body : empty,
+        active == 3 ? body : empty,
+        active == 4 ? body : empty,
+      }
+    end
+
+    # The one-row chip strip above the active card.
+    private def strip_rect(rect : Rect) : Rect
+      Rect.new(rect.x, rect.y + overview_h(rect), rect.w, STRIP_H)
+    end
+
+    private def pane_index : Int32
+      PANES.index(@pane) || 0
     end
 
     # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
@@ -321,11 +340,16 @@ module Gori::Tui
       return nil if rect.empty? || !rect.contains?(mx, my)
       return :overview if my < rect.y + overview_h(rect)
       return nil unless panes = body_panes(rect)
-      return :scope if panes[0].contains?(mx, my)
-      return :overrides if panes[1].contains?(mx, my)
-      return :env if panes[2].h > 0 && panes[2].contains?(mx, my)
-      return :desc if panes[3].contains?(mx, my)
-      panes[4].contains?(mx, my) ? :settings : nil
+      # A click on the chip strip selects that sub-tab, so the mouse reaches every pane even
+      # though only one is rendered.
+      if strip_rect(rect).contains?(mx, my)
+        seg = Chrome.strip_segments(strip_rect(rect), PANE_LABELS, pane_index, @strip_start).find { |(_, r)| r.contains?(mx, my) }
+        return seg ? PANES[seg[0]] : nil
+      end
+      PANES.each_with_index do |pane, i|
+        return pane if panes[i].h > 0 && panes[i].contains?(mx, my)
+      end
+      nil
     end
 
     # Index of the scope-rule row clicked, or nil outside the populated list.
@@ -894,11 +918,13 @@ module Gori::Tui
       render_overview(screen, ov_rect)
       render_analytics(screen, Rect.new(band.right - vw, band.y, vw, band.h)) if vw > 0
       return unless panes = body_panes(rect)
-      render_scope_card(screen, panes[0], scope_focused)
-      render_overrides_card(screen, panes[1], ov_focused)
+      @strip_start = Chrome.render_tab_strip(screen, strip_rect(rect), PANE_LABELS, pane_index, focused, @strip_start)
+      # Only the active card is drawn; the rest are zero-height (see body_panes).
+      render_scope_card(screen, panes[0], scope_focused) if panes[0].h > 0
+      render_overrides_card(screen, panes[1], ov_focused) if panes[1].h > 0
       render_env_card(screen, panes[2], env_focused) if panes[2].h > 0
-      render_desc_card(screen, panes[3], desc_focused)
-      render_settings_card(screen, panes[4], settings_focused)
+      render_desc_card(screen, panes[3], desc_focused) if panes[3].h > 0
+      render_settings_card(screen, panes[4], settings_focused) if panes[4].h > 0
     end
 
     private def render_overview(screen : Screen, rect : Rect) : Nil

@@ -249,36 +249,64 @@ describe "ProjectView AT A GLANCE severity" do
 end
 
 describe "ProjectView#pane_at" do
-  it "hides the ENV pane on short terminals" do
-    tmp_store do |store|
-      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
-      rect = Rect.new(0, 0, 120, 14)
-      view.render(Screen.new(MemoryBackend.new(120, 14)), rect, focused: false)
-      view.env_pane_enabled?.should be_false
-      content_y = rect.y + 5
-      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)
-      view.pane_at(rect, rect.x + 1, rect.y + 10).should eq(:overrides)
-      (content_y...rect.y + rect.h).each do |y|
-        pane = view.pane_at(rect, rect.x + 1, y)
-        pane.should_not eq(:env) if pane
-      end
-    end
-  end
-
-  it "splits the body into overview + SCOPE/OVERRIDES/ENV (left) / DESCRIPTION over NETWORK (right)" do
+  # The body is now ONE card under a chip strip, not five tiles. The pane the strip selects is
+  # the pane the body belongs to — that mapping is what these pin.
+  it "gives the whole body to the active sub-tab" do
     tmp_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
 
       view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)
-      content_y = rect.y + 12
-      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)
-      view.pane_at(rect, rect.x + 1, rect.y + 20).should eq(:overrides)
-      view.pane_at(rect, rect.x + 1, rect.y + 26).should eq(:env)
-      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc)
-      view.pane_at(rect, rect.right - 2, rect.y + 26).should eq(:settings)
+      # SCOPE is active by default: both edges of the body belong to it, where the old tiling
+      # would have answered :desc on the right.
+      body_y = rect.y + 14
+      view.pane_at(rect, rect.x + 1, body_y).should eq(:scope)
+      view.pane_at(rect, rect.right - 2, body_y).should eq(:scope)
+
+      view.focus_pane(:settings)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
+      view.pane_at(rect, rect.x + 1, body_y).should eq(:settings)
       view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil
+    end
+  end
+
+  # ENV used to drop OUT OF THE TAB RING below a height threshold, so on a short terminal it was
+  # simply unreachable. Panes no longer share the body, so the ring is now height-independent —
+  # that is the behaviour worth pinning, not a pixel offset.
+  it "keeps every sub-tab in the Tab ring regardless of height" do
+    tmp_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      rect = Rect.new(0, 0, 120, 14) # short enough that the old layout hid ENV
+      view.render(Screen.new(MemoryBackend.new(120, 14)), rect, focused: false)
+
+      visited = [view.pane]
+      while view.pane_advance(1)
+        visited << view.pane
+      end
+      visited.should eq(Gori::Tui::ProjectView::PANES)
+    end
+  end
+
+  # The strip is how the mouse reaches a pane that is not currently drawn.
+  it "selects a sub-tab from a click on the chip strip" do
+    tmp_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      rect = Rect.new(0, 0, 160, 30)
+      view.render(Screen.new(MemoryBackend.new(160, 30)), rect, focused: true)
+      # Find the strip by scanning down for the row where more than one pane is addressable —
+      # that only happens on the chip row, since the body belongs to a single pane.
+      hits = [] of Symbol
+      (rect.y...rect.bottom).each do |y|
+        row = (rect.x...rect.right).compact_map { |x| view.pane_at(rect, x, y) }.uniq
+        next unless row.size > 1
+        hits = row
+        break
+      end
+      # Every pane is addressable from the strip, including ones the body is not showing.
+      hits.should contain(:scope)
+      hits.should contain(:settings)
+      hits.should contain(:env)
     end
   end
 end
@@ -289,10 +317,11 @@ describe "ProjectView NETWORK pane" do
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
+      view.focus_pane(:settings) # the body shows one card at a time now
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
       b.contains?("NETWORK").should be_true
-      b.contains?("ENVIRONMENT").should be_true
+      b.contains?("ENV").should be_true # the chip strip still names every sub-tab
       b.contains?("Scope lens").should be_true
       b.contains?("Sandbox").should be_true
       b.contains?("Bind IP").should be_true
@@ -311,6 +340,7 @@ describe "ProjectView NETWORK pane" do
       Gori::Settings.project_bind_port = 9100
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
+      view.focus_pane(:settings)
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
       b.contains?("9100").should be_true
@@ -329,8 +359,8 @@ describe "ProjectView NETWORK pane" do
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true) # establish geometry
 
-      view.set_row_at(rect, rect.right - 4, rect.y + 26).should_not be_nil # a row in the settings band
-      view.settings_dirty?.should be_false                                 # fresh, inherited pane
+      view.set_row_at(rect, rect.x + 4, rect.y + 16).should_not be_nil # a row in the (now full-width) settings card
+      view.settings_dirty?.should be_false                             # fresh, inherited pane
 
       view.select_setting(3) # Bind Port (row 0 lens, 1 sandbox, 2 bind IP, 3 bind port)
       view.settings_scope_row?.should be_false
