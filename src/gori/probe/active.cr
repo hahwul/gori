@@ -12,6 +12,7 @@ require "./active/crlf_injection"
 require "./active/path_normalization_bypass"
 require "./active/url_rewrite_bypass"
 require "./active/ssti"
+require "./active/nextjs_action_no_auth"
 require "../outbound"
 require "../scope"
 require "../fuzz/engine"
@@ -35,7 +36,8 @@ module Gori
                GraphqlIntrospection.new, LfiParamTraversal.new,
                OpenRedirect.new, HostHeaderInjection.new,
                CrlfInjection.new, PathNormalizationBypass.new,
-               UrlRewriteBypass.new, Ssti.new] of Rule
+               UrlRewriteBypass.new, Ssti.new,
+               NextjsActionNoAuth.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.

@@ -30,7 +30,7 @@ Re-sending an unsafe method (`POST` / `PUT` / `PATCH` / `DELETE`) can mutate ser
 | `infoleak` | Body disclosures, secrets in URLs / WS frames, GraphQL introspection, source maps shipped with production scripts, directory listings, sensitive JWT claims |
 | `cors` | Wildcard / null origin / credentialed misconfigurations; active origin reflection |
 | `client` | Client-side suspicions in page and bundle scripts: DOM-based XSS (source into sink), DOM clobbering, prototype pollution, and postMessage weaknesses. Heuristic, so treat as leads to confirm |
-| `active` | Confirmed by a light-touch probe: reflected parameters, backslash-powered injection points, open redirect, CRLF/response-header & host-header injection, access-control bypass (spoofed client-IP / path normalization / URL-rewrite headers), NGINX alias & parameter path traversal, and server-side template injection. GraphQL introspection is confirmed actively too (recorded under `infoleak`) |
+| `active` | Confirmed by a light-touch probe: reflected parameters, backslash-powered injection points, open redirect, CRLF/response-header & host-header injection, access-control bypass (spoofed client-IP / path normalization / URL-rewrite headers), NGINX alias & parameter path traversal, server-side template injection, and Next.js server-action missing authorization (re-sends a `Next-Action` request with the session cookie/Authorization stripped — needs unsafe/AGGRESSIVE, since actions are POST). GraphQL introspection is confirmed actively too (recorded under `infoleak`) |
 
 Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run probe` runs passive checks by default, and pass `--active` to also run active checks.
 

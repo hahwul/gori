@@ -1603,6 +1603,142 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
   end
 end
 
+describe "Gori::Probe::Active::NextjsActionNoAuth" do
+  probe = Gori::Probe::Active::NextjsActionNoAuth.new
+  aid = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" # a 40-hex server-action id
+  unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+  # A privileged-looking payload that reads like a successful action result, not a rejection.
+  priv = %({"user":"alice","email":"alice@corp.test","role":"admin","balance":42000})
+  # Raw request-header lines for a server-action invocation carrying a session cookie.
+  action_headers = "Next-Action: #{aid}\r\nCookie: session=secret\r\nContent-Type: text/x-component\r\n"
+
+  # Build a captured server-action POST (SUCCEEDED with credentials by default). A proc, not a
+  # def — Crystal has no method definitions inside a spec block; this closes over capture_flow.
+  action_flow = ->(store : Gori::Store, headers : String, status : Int32, body : String) do
+    capture_flow(store, "HTTP/1.1 #{status} OK\r\n\r\n", target: "/dashboard", status: status,
+      method: "POST", req_headers: headers, req_body: %(["x"]),
+      body: body, content_type: "text/x-component")
+  end
+
+  it "only probes a credentialed, successful server-action invocation" do
+    with_store do |store|
+      # A POST server action is unsafe → not probed automatically…
+      flow = action_flow.call(store, action_headers, 200, priv)
+      probe.plan(flow).should be_nil
+      # …but IS probed when the caller opts into unsafe methods (manual scan / AGGRESSIVE).
+      probe.plan(flow, unsafe).should_not be_nil
+      probe.dedup_key(flow, unsafe).should eq(probe.plan(flow, unsafe).try(&.dedup_key))
+
+      # No Next-Action header → not a server-action invocation → nil.
+      not_action = action_flow.call(store, "Cookie: session=secret\r\n", 200, priv)
+      probe.plan(not_action, unsafe).should be_nil
+
+      # No credential to strip → nothing to prove → nil.
+      no_creds = action_flow.call(store, "Next-Action: #{aid}\r\n", 200, priv)
+      probe.plan(no_creds, unsafe).should be_nil
+
+      # The authenticated call itself failed → a matching failure without creds isn't a finding → nil.
+      failed = action_flow.call(store, action_headers, 500, priv)
+      probe.plan(failed, unsafe).should be_nil
+    end
+  end
+
+  it "strips Cookie / Authorization but keeps Next-Action and the body" do
+    with_store do |store|
+      headers = "Next-Action: #{aid}\r\nCookie: session=secret\r\nAuthorization: Bearer tok\r\nContent-Type: text/x-component\r\n"
+      flow = action_flow.call(store, headers, 200, priv)
+      text = String.new(probe.plan(flow, unsafe).not_nil!.request)
+      text.downcase.should_not contain("\r\ncookie:")
+      text.downcase.should_not contain("\r\nauthorization:")
+      text.should contain("Next-Action: #{aid}")
+      text.should contain(%(["x"]))                               # body preserved
+      probe.plan(flow, unsafe).not_nil!.followups.should be_empty # single request
+    end
+  end
+
+  it "flags a possible missing-authorization (Medium) when the stripped request still returns a comparable 2xx" do
+    with_store do |store|
+      flow = action_flow.call(store, action_headers, 200, priv)
+      plan = probe.plan(flow, unsafe).not_nil!
+
+      # Credential-less re-send STILL returns the privileged payload → possible bypass.
+      bypassed = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64)
+      dets = probe.detections(plan, bypassed, flow)
+      dets.size.should eq(1)
+      dets.first.code.should eq("nextjs_action_no_auth")
+      dets.first.category.should eq(Gori::Probe::Category::ACTIVE)
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
+      dets.first.evidence.not_nil!.should contain(aid[0, 8]) # short action id in the evidence
+    end
+  end
+
+  it "does not flag when the control held or the response isn't clearly privileged" do
+    with_store do |store|
+      flow = action_flow.call(store, action_headers, 200, priv)
+      plan = probe.plan(flow, unsafe).not_nil!
+
+      # 401 without creds → the gate held.
+      denied = Gori::Repeater::Result.new("HTTP/1.1 401 Unauthorized\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, denied, flow).should be_empty
+      # 302 → login is not 2xx.
+      redirect = Gori::Repeater::Result.new("HTTP/1.1 302 Found\r\nLocation: /login\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, redirect, flow).should be_empty
+      # A 200 whose body is an in-band "unauthorized" notice → not a bypass.
+      inband = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, %({"error":"Unauthorized"}).to_slice, nil, 1_i64)
+      probe.detections(plan, inband, flow).should be_empty
+      # An empty 200 (no payload returned to the anonymous client).
+      empty = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, empty, flow).should be_empty
+      # A trimmed stub far smaller than the authenticated baseline.
+      stub = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice, nil, 1_i64)
+      probe.detections(plan, stub, flow).should be_empty
+      # A 2xx that bounced the anonymous caller to login in-band (Next.js redirect() header) → control held.
+      to_login = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nX-Action-Redirect: /login\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64)
+      probe.detections(plan, to_login, flow).should be_empty
+      # …same via a plain Location to an auth route on a 2xx.
+      loc_login = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nLocation: /auth/signin\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64)
+      probe.detections(plan, loc_login, flow).should be_empty
+      # A truncated (incomplete) probe response is untrusted → never flags, even if it looks privileged.
+      partial = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64, nil, true)
+      probe.detections(plan, partial, flow).should be_empty
+      # A send failure never flags.
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections(plan, errored, flow).should be_empty
+    end
+  end
+
+  it "does not flag when the authenticated baseline had no body to compare against" do
+    with_store do |store|
+      # An empty-bodied 200 (or a 204) authenticated action: there is no privileged payload to
+      # match, so an arbitrary non-empty credential-less response must not produce a finding.
+      flow = action_flow.call(store, action_headers, 200, "")
+      plan = probe.plan(flow, unsafe).not_nil!
+      answered = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64)
+      probe.detections(plan, answered, flow).should be_empty
+    end
+  end
+
+  it "dedup_key equals plan.dedup_key across gating cases (per-opts)" do
+    with_store do |store|
+      cases = [
+        {headers: action_headers, status: 200, method: "POST"},                                       # credentialed success
+        {headers: action_headers, status: 200, method: "GET"},                                        # rare GET action
+        {headers: "Next-Action: #{aid}\r\n", status: 200, method: "POST"},                            # no creds → nil
+        {headers: "Cookie: s=1\r\n", status: 200, method: "POST"},                                    # no Next-Action → nil
+        {headers: action_headers, status: 500, method: "POST"},                                       # not 2xx → nil
+        {headers: "Next-Action: #{aid}\r\nAuthorization: Bearer t\r\n", status: 204, method: "POST"}, # bearer + 2xx
+      ]
+      cases.each do |c|
+        d = capture_flow(store, "HTTP/1.1 #{c[:status]} X\r\n\r\n", scheme: "http", host: "t.example",
+          target: "/dashboard", method: c[:method], status: c[:status],
+          req_headers: c[:headers], req_body: %(["x"]), content_type: nil)
+        probe.dedup_key(d, unsafe).should eq(probe.plan(d, unsafe).try(&.dedup_key)),
+          "nextjs_action_no_auth #{c[:method]} #{c[:status]}"
+      end
+    end
+  end
+end
+
 describe "Gori::Probe::Active::NginxAliasTraversal" do
   probe = Gori::Probe::Active::NginxAliasTraversal.new
 
