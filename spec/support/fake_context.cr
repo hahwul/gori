@@ -485,6 +485,22 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:sitemap_repeater)
   end
 
+  def sitemap_mark_toggle : Nil
+    rec(:sitemap_mark_toggle)
+  end
+
+  def sitemap_mark_clear : Nil
+    rec(:sitemap_mark_clear)
+  end
+
+  def sitemap_mark_extend(delta : Int32) : Nil
+    rec(:sitemap_mark_extend, delta)
+  end
+
+  # Settable so the availability sweep can exercise the marked-only entries (sitemap.mark-clear
+  # renders only while a mark is set), the way `current_tab` is settable for the tab gates.
+  property sitemap_marked_count : Int32 = 0
+
   def history_discover : Nil
     rec(:history_discover)
   end

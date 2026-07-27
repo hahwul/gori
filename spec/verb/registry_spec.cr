@@ -444,6 +444,22 @@ private class FakeContext < ExecContext
     @calls << :sitemap_repeater
   end
 
+  def sitemap_mark_toggle : Nil
+    @calls << :sitemap_mark_toggle
+  end
+
+  def sitemap_mark_clear : Nil
+    @calls << :sitemap_mark_clear
+  end
+
+  def sitemap_mark_extend(delta : Int32) : Nil
+    @calls << :sitemap_mark_extend
+  end
+
+  def sitemap_marked_count : Int32
+    0
+  end
+
   def history_discover : Nil
     @calls << :history_discover
   end

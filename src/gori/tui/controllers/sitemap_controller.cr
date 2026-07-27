@@ -30,7 +30,20 @@ module Gori::Tui
 
     # PageUp/PageDown/Home/End over the sitemap tree (view clamps the selection).
     def body_scroll(delta : Int32) : Bool
+      end_range_gesture # a page key is cursor nav, like ↑/↓
       @sitemap.move(delta)
+      true
+    end
+
+    # esc clears the marks. Runs BEFORE the Sitemap keymap, so this shadows sitemap.to-menu
+    # ONLY while marks are set — with none set, esc still pops to the sub-tab strip. (The QL
+    # bar and the tag editor claim every key ahead of this while either is up, so their own
+    # esc handling is unaffected.)
+    def handle_body_key(ev : Termisu::Event::Key) : Bool
+      return false if ev.ctrl? || ev.alt?
+      return false unless ev.key.escape? && @sitemap.mark_count > 0
+      @sitemap.clear_marks
+      @host.status("marks cleared")
       true
     end
 
@@ -60,19 +73,28 @@ module Gori::Tui
     def handle_click_content(content : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
       return true unless ri = @sitemap.row_at(content, mx, my)
+      # A click that MOVES the cursor collapses the range, same as a plain arrow. A click on
+      # the row already under the cursor doesn't: that reads as "expand this node" (the marker
+      # hit below), not as a selection gesture — the distinction af7e561 drew for the wheel.
+      end_range_gesture unless ri == @sitemap.selected_index
       @sitemap.select_index(ri)
       @sitemap.toggle_at(ri) if @sitemap.marker_hit?(content, mx, ri)
       true
     end
 
     def handle_wheel(step : Int32) : Bool
+      # Deliberately NOT end_range_gesture: a wheel reads as "scroll the viewport", not as a
+      # selection gesture, so it must not destroy a mark set the way a cursor key does.
       @sitemap.move(step)
       true
     end
 
     def body_hint(focus : Symbol) : String
       return "type a tag · ↵ save · esc cancel" if @sitemap.tagging?
-      @sitemap.querying? ? "type query · ↹ complete · ↵ apply · esc clear" : "↑/↓ move · / filter · t tag · g fold · ↵/→ expand · ← collapse · esc tabs"
+      return "type query · ↹ complete · ↵ apply · esc clear" if @sitemap.querying?
+      # Marks survive a filter change, so the `/` affordance stays up while they're set.
+      return "↑/↓ move · / filter · t mark · ⇧T tag · space cmds · esc clears marks" if @sitemap.mark_count > 0
+      "↑/↓ move · / filter · t mark · ⇧T tag · g fold · ↵/→ expand · ← collapse · esc tabs"
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or
@@ -153,11 +175,14 @@ module Gori::Tui
     end
 
     # --- tag editor (a text sub-mode; the shell routes its keys via handle_tag_key) ---
-    # `t` — open the tag editor for the selected node. A synthetic group fold node has
-    # no real path, so it can't be tagged — toast instead of opening an empty editor.
+    # ⇧T — open the tag editor over the target set (the marks if any, else the selected
+    # node). A synthetic group fold node has no real path, so it can't be tagged — toast
+    # instead of opening an empty editor.
     def sitemap_tag : Nil
+      n = @sitemap.mark_count
       if @sitemap.start_tag
-        @host.status("tag: type a memo · ↵ save · esc cancel")
+        subject = n > 0 ? "tag #{paths(n)}" : "tag"
+        @host.status("#{subject}: type a memo · ↵ save · esc cancel")
       else
         @host.status("can't tag a fold — expand it and tag a value")
       end
@@ -185,18 +210,29 @@ module Gori::Tui
     end
 
     private def commit_tag : Nil
-      if target = @sitemap.tag_target
-        host, path = target
-        text = @sitemap.tag_buffer
-        @host.session.store.set_sitemap_tag(host, path, text)
-        @sitemap.apply_tag(text) # stamp in place — keeps the selection, no re-derive
-        # A `tag:` filter must re-evaluate against the changed tag (the in-place stamp
-        # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
-        reload if @sitemap.filtering?
-        @host.status(text.empty? ? "tag cleared" : "tagged: #{text}")
-      else
+      targets = @sitemap.tag_targets
+      if targets.empty?
         @sitemap.cancel_tag
+        return
       end
+      text = @sitemap.tag_buffer
+      store = @host.session.store
+      targets.each { |(host, path)| store.set_sitemap_tag(host, path, text) }
+      @sitemap.apply_tag(text) # stamp every target in place — keeps the selection, no re-derive
+      # A `tag:` filter must re-evaluate against the changed tags (the in-place stamp
+      # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
+      reload if @sitemap.filtering?
+      n = targets.size
+      @host.status(
+        if text.empty?
+          n == 1 ? "tag cleared" : "cleared #{n} tags"
+        else
+          n == 1 ? "tagged: #{text}" : "tagged #{paths(n)}: #{text}"
+        end)
+    end
+
+    private def paths(n : Int32) : String
+      "#{n} path#{n == 1 ? "" : "s"}"
     end
 
     # `g` — fold/unfold path-param ids (uuid/hex/date + numeric runs), then rebuild.
@@ -206,11 +242,57 @@ module Gori::Tui
       @host.status(@sitemap.grouping? ? "id folding on" : "id folding off")
     end
 
+    # --- marks (multi-select, mirrors History #442) ---------------------------
+
+    def marked_node_count : Int32
+      @sitemap.mark_count
+    end
+
+    # `t` — flip the cursor row's mark and step down. A fold carries no path, so it can't be
+    # marked (nor tagged, nor resolved to an endpoint) — say so rather than eat the key.
+    def sitemap_mark_toggle : Nil
+      return @host.status("can't mark a fold — expand it and mark a value") unless @sitemap.toggle_mark
+      @host.status(mark_status)
+    end
+
+    def sitemap_mark_clear : Nil
+      @sitemap.clear_marks
+      @host.status("marks cleared")
+    end
+
+    def sitemap_mark_extend(delta : Int32) : Nil
+      @sitemap.extend_marks(delta)
+      @host.status(mark_status)
+    end
+
+    # Shared mark toast — says the count AND how much of it is off-screen, matching the bar
+    # chip: a set spanning collapsed subtrees or a filtered-out path must never look smaller
+    # than it is.
+    private def mark_status : String
+      n = @sitemap.mark_count
+      return "no marks — verbs act on the cursor row" if n == 0
+      hidden = @sitemap.marked_hidden_count
+      msg = "#{paths(n)} marked"
+      msg += " (#{hidden} not visible)" if hidden > 0
+      msg
+    end
+
+    # A plain (unshifted) cursor key ends the ⇧arrow range gesture and hands its marks back
+    # (SitemapView#end_mark_gesture). Says so only when marks actually went away, so arrowing
+    # down an unmarked tree stays silent — and names what survived, since `t` marks are
+    # deliberately not the gesture's to drop.
+    private def end_range_gesture : Nil
+      return if @sitemap.end_mark_gesture == 0
+      n = @sitemap.mark_count
+      @host.status(n == 0 ? "selection cleared" : "selection cleared — #{n} still marked")
+    end
+
     # --- verbs (delegated from the Runner's ExecContext) ---
     def sitemap_move(delta : Int32) : Nil
       if delta < 0 && @sitemap.at_top?
         @host.request_focus(:subtabs) # ↑ at the top node pops to Target's Sitemap|Discover strip (downgrades to :menu with no strip)
       else
+        end_range_gesture
         @sitemap.move(delta)
       end
     end

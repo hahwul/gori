@@ -58,6 +58,21 @@ The **Sitemap** tab collapses History into a deduplicated tree of `host → path
   <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so you can read a target's surface at a glance.</figcaption>
 </figure>
 
+### Marking paths (multi-select)
+
+The tree takes the same **multi-select** as the History list ([Marking flows](#marking-flows), below). Press `t` to **mark** the path under the cursor and step down, so a run of `t` marks consecutive rows; `Shift-↑` / `Shift-↓` extend a contiguous range from where you started; `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count (plus how many are currently off-screen — a mark under a collapsed subtree stays marked). Letting go of `Shift` and pressing a plain `↑` / `↓` hands the range back, the way a GUI list collapses its highlight; marks you placed with `t` stay, and the wheel only scrolls.
+
+Marks change **what the action menu acts on**, not which actions exist — the effective target is *the marks if any are set, else the cursor row*:
+
+| Action | Key | Over marks |
+|--------|-----|-----------|
+| Tag path | `Shift-T` | One editor, one memo, applied to every marked path (blank clears them all) |
+| Send to Repeater | `r` | One sub-tab per marked endpoint, deduplicated by captured flow (max 20) |
+
+So `/ status:5xx` → mark the paths that matter → `Shift-T` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target — they scan one subtree / collect one endpoint's token — and their menu entries say `(cursor)` while marks are set.
+
+Note that **`t` marks and `Shift-T` tags** — tagging moved off `t` so that `t` means the same thing in both lists. A synthetic `{uuid}` / `[1, 2, 3 …]` fold is not a real path, so it can't be marked or tagged: a range sweeps over it, and `t` on one says so. Unlike History there is no "mark all": on a tree that would sweep hosts and folders into the same batch as the endpoints under them.
+
 ## Protocol Support
 
 gori understands the protocols it carries:

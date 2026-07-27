@@ -29,10 +29,51 @@ module Gori
         "sitemap.query", "Filter (QL)", "Filter the tree with a query (host: path: method: status: tag: …)",
         Verb::Scope::Sitemap, [Verb::Chord.new("/")]) { |ctx| ctx.sitemap_query; nil }
 
-      # `t` — tag the selected path with a free-text memo (a group fold node toasts).
+      # --- multi-select marks (mirrors History #442) ---
+      # Marks make the EXISTING action menu act on N paths — the batch verbs below read the
+      # view's target set ("the marks if any, else the cursor row"), so there are no
+      # `sitemap.batch-*` twins and no second menu: one declaration, one call path.
+      #
+      # `t` marks here as it does in History (mutt's tag key, and the same many-times-per-minute
+      # triage gesture that earns it an L1 bare key there). Tagging moves up to ⇧T, so the two
+      # lists finally agree on what `t` means. NOTE the deliberate divergence from History's ⇧T
+      # (mark-all): a tree has no useful "mark every row" — it would sweep hosts and folders
+      # into the same batch as the endpoints under them.
       r.register Verb::Definition.new(
-        "sitemap.tag", "Tag path", "Pin a free-text memo to the selected path (filter with tag:)",
-        Verb::Scope::Sitemap, [Verb::Chord.new("t")]) { |ctx| ctx.sitemap_tag; nil }
+        "sitemap.mark-toggle", "Mark path", "Mark/unmark this path and step down — the action menu then acts on every marked path",
+        Verb::Scope::Sitemap, [Verb::Chord.new("t")]) { |ctx| ctx.sitemap_mark_toggle; nil }
+
+      # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
+      # shift+click. Free in this scope: Keymap#lookup matches a Chord record EXACTLY, so
+      # Chord("up", shift: true) never collided with sitemap.up's Chord("up") — it simply fell
+      # through to a no-op. Hidden like the other nav primitives (sitemap.up/down).
+      r.register Verb::Definition.new(
+        "sitemap.mark-extend-down", "Extend marks down", "Extend the marked range one row down",
+        Verb::Scope::Sitemap, [Verb::Chord.new("down", shift: true)],
+        hidden: true) { |ctx| ctx.sitemap_mark_extend(1); nil }
+
+      r.register Verb::Definition.new(
+        "sitemap.mark-extend-up", "Extend marks up", "Extend the marked range one row up",
+        Verb::Scope::Sitemap, [Verb::Chord.new("up", shift: true)],
+        hidden: true) { |ctx| ctx.sitemap_mark_extend(-1); nil }
+
+      # esc clears too (SitemapController#handle_body_key shadows sitemap.to-menu only while
+      # marks are set) — that's the reflex; this is the discoverable form. Menu-only: 'N' is
+      # free in this scope, and clearing is not worth a chord of its own.
+      r.register Verb::Definition.new(
+        "sitemap.mark-clear", "Clear marks", "Drop every mark (esc does the same)",
+        Verb::Scope::Sitemap,
+        available: ->(ctx : Verb::ExecContext) { ctx.sitemap_marked_count > 0 },
+        mnemonic: 'N') { |ctx| ctx.sitemap_mark_clear; nil }
+
+      # ⇧T — tag the selected path (or every marked path) with a free-text memo; a group fold
+      # node toasts. The chord is Chord.new("t", shift: true), NOT Chord.new("T") —
+      # Keybind.from_event normalises a typed capital to shift+lowercase, so a "T" chord would
+      # never fire; menu_key skips shift chords, hence the explicit mnemonic.
+      r.register Verb::Definition.new(
+        "sitemap.tag", "Tag path", "Pin a free-text memo to the selected — or every marked — path (filter with tag:)",
+        Verb::Scope::Sitemap, [Verb::Chord.new("t", shift: true)],
+        mnemonic: 'T') { |ctx| ctx.sitemap_tag; nil }
 
       # `g` — fold/unfold path-param ids (/users/<uuid> → {uuid}, /users/1,2,3… → [1, 2, 3 … +N]).
       r.register Verb::Definition.new(
@@ -52,9 +93,10 @@ module Gori
         "sitemap.discover", "Discover here", "Spider + brute-force the selected host or path subtree",
         Verb::Scope::Sitemap, [Verb::Chord.new("d")], mnemonic: 'd') { |ctx| ctx.sitemap_discover; nil }
 
-      # `r` — send the selected endpoint to Repeater (resolves a representative captured flow).
+      # `r` — send the selected endpoint (or every marked one) to Repeater, resolving a
+      # representative captured flow per path.
       r.register Verb::Definition.new(
-        "sitemap.repeater", "Send to Repeater", "Open the selected endpoint's captured request in Repeater",
+        "sitemap.repeater", "Send to Repeater", "Open the selected — or every marked — endpoint's captured request in Repeater",
         Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r') { |ctx| ctx.sitemap_repeater; nil }
 
       r.register Verb::Definition.new(

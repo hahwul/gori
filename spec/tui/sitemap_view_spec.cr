@@ -23,6 +23,11 @@ private def capture(store, host, method, target)
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
 end
 
+# Rows rendering the marked-row gutter bar ('▌'; the cursor row's is the thinner '▎').
+private def marked_row_indexes(b)
+  (0...20).select { |y| b.row(y).includes?("▌") }
+end
+
 describe Gori::Tui::SitemapView do
   it "builds and renders a literal host -> path tree" do
     tmp_store do |store|
@@ -559,6 +564,181 @@ describe Gori::Tui::SitemapView do
       view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
       b.contains?("other.test").should be_true
       b.contains?("users").should be_false
+    end
+  end
+
+  # --- marks (multi-select) -------------------------------------------------
+
+  it "marks the cursor row with `t` and steps down, so a run of `t` marks consecutive rows" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/a")
+      capture(store, "acme.test", "GET", "/b")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.mark_count.should eq(0)
+      view.move(1) # off the host row, onto /a
+
+      view.toggle_mark.should be_true
+      view.toggle_mark.should be_true
+      view.mark_count.should eq(2)
+      view.marked_keys.should eq([{"acme.test", "/a"}, {"acme.test", "/b"}]) # tree order
+      view.marked_hidden_count.should eq(0)
+
+      # The step saturates at the last row, so a third `t` there clears what the second set.
+      view.toggle_mark.should be_true
+      view.marked?("acme.test", "/b").should be_false
+      view.mark_count.should eq(1)
+    end
+  end
+
+  it "keeps a marked host from lighting up the id folds under it" do
+    # Regression: a fold node keeps `path` empty, exactly like its host row, so a mark keyed on
+    # (host, path) alone made `{"acme.test", ""}` mean BOTH — marking the host banded every
+    # fold in the tree. A fold is not markable at all; only the host row may carry the band.
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.toggle_mark.should be_true # the host row (selection starts there)
+      view.mark_count.should eq(1)
+      view.marked?("acme.test", "").should be_true
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      marked_rows = marked_row_indexes(b)
+      marked_rows.size.should eq(1) # the host row and nothing else
+      b.row(marked_rows.first).includes?("acme.test").should be_true
+
+      # And the fold itself refuses the mark rather than keying on its host's empty path.
+      view.move(2) # host → users → {uuid} fold
+      view.toggle_mark.should be_false
+      view.mark_count.should eq(1)
+    end
+  end
+
+  it "keeps marks across a reload and counts the ones off-screen" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+
+      view = SitemapView.new
+      view.reload(store)
+      2.times { view.move(1) } # host → api → users
+      view.toggle_mark.should be_true
+      view.mark_count.should eq(1)
+
+      capture(store, "acme.test", "GET", "/api/orders") # a live-capture style poll
+      view.reload(store)
+      view.mark_count.should eq(1) # keyed by (host, path), not by row index
+      view.marked?("acme.test", "/api/users").should be_true
+      view.marked_hidden_count.should eq(0)
+
+      # Collapsing the host takes the marked row off screen — the set is unchanged, and the
+      # bar chip says how much of it you can't see.
+      view.select_index(0)
+      view.collapse.should be_true
+      view.marked_hidden_count.should eq(1)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("1 marked ·1 hidden").should be_true
+    end
+  end
+
+  it "extends a range with ⇧arrows, stepping over folds instead of marking them" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+      capture(store, "acme.test", "GET", "/orders")
+
+      # Rows (the fold starts collapsed): acme.test / users / {uuid} fold / orders
+      view = SitemapView.new
+      view.reload(store)
+      view.select_index(1) # `users`
+      3.times { view.extend_marks(1) }
+      # The whole range is swept — the cursor walked over the fold — but only the two real
+      # paths in it end up marked. The host was never in range. (Siblings sort by path, so
+      # /orders precedes /users in tree order.)
+      view.marked_keys.should eq([{"acme.test", "/orders"}, {"acme.test", "/users"}])
+      view.mark_count.should eq(2)
+    end
+  end
+
+  it "hands back only the gesture's own marks when it ends" do
+    tmp_store do |store|
+      %w(/a /b /c /d).each { |p| capture(store, "acme.test", "GET", p) }
+
+      view = SitemapView.new
+      view.reload(store)
+      view.select_index(1) # /a
+      view.toggle_mark     # a deliberate `t` mark; the cursor steps to /b
+      view.extend_marks(1) # range from /b over /c
+      view.mark_count.should eq(3)
+
+      view.end_mark_gesture.should eq(2) # the two the range added
+      view.mark_count.should eq(1)       # the `t` mark stays — that's what makes a gap possible
+      view.marked?("acme.test", "/a").should be_true
+    end
+  end
+
+  it "tags every marked path from one editor, seeded from the cursor row's memo" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/a")
+      capture(store, "acme.test", "GET", "/b")
+      store.set_sitemap_tag("acme.test", "/a", "old")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.select_index(1) # /a
+      view.toggle_mark     # marks /a, cursor → /b
+      view.toggle_mark     # marks /b, cursor saturates there
+      view.mark_count.should eq(2)
+
+      # The cursor row wins the seed while it is itself a target (/b, untagged)…
+      view.start_tag.should be_true
+      view.tag_buffer.should eq("")
+      view.cancel_tag
+      # …and when the cursor sits outside the set, the first target in tree order does.
+      view.select_index(0) # the host row — marked? no
+      view.start_tag.should be_true
+      view.tag_targets.should eq([{"acme.test", "/a"}, {"acme.test", "/b"}])
+      view.tag_buffer.should eq("old")
+
+      3.times { view.tag_backspace } # the seed is editable, like any pre-filled field
+      "auth".each_char { |c| view.tag_insert(c) }
+      view.tag_targets.each { |(host, path)| store.set_sitemap_tag(host, path, view.tag_buffer) }
+      view.apply_tag(view.tag_buffer)
+      view.tagging?.should be_false
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      (0...20).count { |y| b.row(y).includes?("# auth") }.should eq(2) # both rows stamped in place
+      store.sitemap_tags[{"acme.test", "/a"}].should eq("auth")
+      store.sitemap_tags[{"acme.test", "/b"}].should eq("auth")
+    end
+  end
+
+  it "resolves the marked set to endpoints, and falls back to the cursor row with no marks" do
+    tmp_store do |store|
+      capture(store, "acme.test", "POST", "/api/orders")
+      capture(store, "acme.test", "GET", "/api/users")
+
+      view = SitemapView.new
+      view.reload(store)
+      # No marks: the cursor row IS the target set (one rule, no "batch mode").
+      view.select_index(3) # host → api → orders → users
+      view.target_keys.should eq([{"acme.test", "/api/users"}])
+      view.target_endpoints.map(&.[](:target)).should eq(["/api/users"])
+
+      view.select_index(2) # /api/orders
+      view.toggle_mark
+      view.select_index(3)
+      view.toggle_mark
+      eps = view.target_endpoints
+      eps.map(&.[](:target)).should eq(["/api/orders", "/api/users"])
+      eps.map(&.[](:method)).should eq(["POST", "GET"]) # per-node, GET-preferred
+      eps.map(&.[](:host)).uniq.should eq(["acme.test"])
     end
   end
 

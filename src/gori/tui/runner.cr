@@ -3688,10 +3688,11 @@ module Gori::Tui
     BATCH_SUBTAB_CAP = 20
 
     # Guard for the capped verbs: nil when the batch is refused (toast already set), else
-    # the ids to loop. `noun` names what each id would create, for the refusal message.
-    private def batch_within_cap(ids : Array(Int64), noun : String) : Array(Int64)?
+    # the ids to loop. `noun` names what each id would create, for the refusal message;
+    # `subject` names what was marked (the Sitemap marks endpoints, not flows).
+    private def batch_within_cap(ids : Array(Int64), noun : String, subject : String = "flows") : Array(Int64)?
       return ids if ids.size <= BATCH_SUBTAB_CAP
-      @toast = "#{ids.size} flows marked — #{noun} is capped at #{BATCH_SUBTAB_CAP}"
+      @toast = "#{ids.size} #{subject} marked — #{noun} is capped at #{BATCH_SUBTAB_CAP}"
       nil
     end
 
@@ -4253,15 +4254,16 @@ module Gori::Tui
 
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
-      history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id)
+      history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id) || sitemap_mark_menu_title(verb_id)
     end
 
     # The card's state label — "SPACE · 3 MARKED" while a mark set is non-empty (#442), so
-    # opening the menu over marks announces up front that the actions below are plural. Both
-    # mark-capable lists feed it; only one can be active at a time (they are different tabs).
+    # opening the menu over marks announces up front that the actions below are plural. Every
+    # mark-capable surface feeds it; only one can be active at a time (they are different tabs),
+    # so the sum is always just the live one's count.
     # nil ⇒ the section label (or nothing at all), exactly as before.
     private def space_menu_banner : String?
-      n = history_mark_menu_count + intercept_mark_menu_count
+      n = history_mark_menu_count + intercept_mark_menu_count + sitemap_mark_menu_count
       n > 0 ? "#{n} MARKED" : nil
     end
 
@@ -4340,6 +4342,41 @@ module Gori::Tui
         return fmt % plural(n, "held message")
       end
       "Clear #{plural(n, "mark")}" if verb_id == "intercept.mark-clear"
+    end
+
+    # How many marks the SITEMAP menu should speak for; 0 whenever mark titles don't apply
+    # (another tab, or the Discover sub-tab). Gated on the sub-tab rather than @active_tab
+    # alone: Sitemap lives under Target, so the tab symbol here is :target for both children.
+    private def sitemap_mark_menu_count : Int32
+      return 0 unless @active_tab == :target && target_controller.sitemap_active?
+      sitemap_controller.marked_node_count
+    end
+
+    # The Sitemap's batch-capable entries — the same set the per-verb handlers implement by
+    # reading SitemapView#target_keys. "%s" takes the path-count phrase ("3 paths").
+    SITEMAP_BATCH_TITLES = {
+      "sitemap.tag"      => "Tag %s",
+      "sitemap.repeater" => "Send %s to Repeater",
+    }
+
+    # Sitemap verbs that stay SINGLE-target even with marks set, and say so in their menu
+    # hint. Discover is single by design (one config popup scans one start target under one
+    # host — see the multi-host refusal in runner/discover.cr) and the Sequencer collects one
+    # endpoint's token; the rest (query / fold / scope-lens) are selection-independent, so a
+    # cursor note there would be noise.
+    SITEMAP_CURSOR_ONLY = {"sitemap.discover", "sitemap.sequence"}
+
+    # Retitle the Sitemap's menu entries while marks are set, so the menu says what will
+    # actually happen — "Tag 3 paths". MUST return nil when nothing is marked, so every
+    # existing title stays byte-identical.
+    private def sitemap_mark_menu_title(verb_id : String) : String?
+      n = sitemap_mark_menu_count
+      return nil if n == 0
+      if fmt = SITEMAP_BATCH_TITLES[verb_id]?
+        return fmt % plural(n, "path")
+      end
+      return "#{@session.registry[verb_id].title} (cursor)" if SITEMAP_CURSOR_ONLY.includes?(verb_id)
+      verb_id == "sitemap.mark-clear" ? "Clear #{plural(n, "mark")}" : nil
     end
 
     private def plural(n : Int32, noun : String) : String

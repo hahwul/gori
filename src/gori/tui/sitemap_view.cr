@@ -22,8 +22,10 @@ module Gori::Tui
 
     # A flattened tree row. `guides` is a bitmask: bit L set ⇒ a vertical `│` tree-guide
     # is drawn at ancestor level L (its branch continues below this row). Built once per
-    # tree/expand change in `collect`, not re-walked per frame.
-    private record VisibleRow, node : Node, depth : Int32, guides : UInt64
+    # tree/expand change in `collect`, not re-walked per frame. `host` is the label of the
+    # depth-0 node this row hangs under — stamped during the flatten so nothing has to walk
+    # back up the row list to find it (the mark predicate needs it on every drawn row).
+    private record VisibleRow, node : Node, depth : Int32, guides : UInt64, host : String
 
     # The QL fields meaningful for the endpoint tree. Mirrors History's set so the same
     # `/` query language applies, plus `tag:` — a Sitemap-local field (handled here, not
@@ -71,10 +73,21 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_cx = 0
       @tag_preedit = ""
-      # The (host, path) the open editor targets, PINNED at start_tag — belt-and-braces
-      # if a mid-edit rebuild drops the row; selection is also re-anchored by key on reload.
-      @tag_host = ""
-      @tag_path = ""
+      # The (host, path) pairs the open editor targets, PINNED at start_tag — the marks if
+      # any were set, else the cursor row. Pinned rather than re-derived so a mid-edit
+      # rebuild (a data_version poll under live capture) can't retarget the commit.
+      @tag_targets = [] of {String, String}
+      # Multi-select marks, keyed by the durable (host, path) address rather than a row
+      # index: the tree is rebuilt from the store ~1.3x/sec under capture, so an index-keyed
+      # mark would silently retarget on the next poll. A mark whose node is currently
+      # collapsed or filtered out stays marked (marked_hidden_count reports it); a mark whose
+      # path is gone simply fails to resolve at the verb. Mirrors History's model (#442).
+      @marks = Set({String, String}).new
+      @mark_anchor = nil.as({String, String}?) # key-anchored range anchor for the ⇧arrow extend
+      # Only the keys the CURRENT ⇧arrow gesture added. A plain arrow hands back exactly
+      # these, so `t` marks outside the range are never disturbed. Cleared by every
+      # non-extend mark action.
+      @mark_extent = Set({String, String}).new
     end
 
     # Inject the Scope lens so the tree honours it AND the bar can show its state
@@ -183,7 +196,7 @@ module Gori::Tui
       want_host, want_key = target
       rows.each_with_index do |row, i|
         next unless (k = expand_key(row.node)) && k == want_key
-        return i if host_label_for_row(rows, i) == want_host
+        return i if row.host == want_host
       end
       nil
     end
@@ -201,7 +214,7 @@ module Gori::Tui
         # `fold_templates!` appends before `group_sequences!` does — so matching on the
         # parent alone landed the cursor on the {hex} fold when a numeric run collapsed.
         next unless row.node.grouped && row.node.children.any? { |c| encloses?(c.path, want_path) }
-        return i if host_label_for_row(rows, i) == want_host
+        return i if row.host == want_host
       end
       nil
     end
@@ -211,13 +224,6 @@ module Gori::Tui
     private def encloses?(path : String, want : String) : Bool
       return true if path == want
       want.starts_with?(path) && want[path.size]? == '/'
-    end
-
-    private def host_label_for_row(rows : Array(VisibleRow), idx : Int32) : String
-      idx.downto(0) do |i|
-        return rows[i].node.label if rows[i].depth == 0
-      end
-      rows[idx].node.label
     end
 
     # --- tags: filter (stamping lives in Gori::Sitemap.stamp_tags!) ----------
@@ -443,20 +449,27 @@ module Gori::Tui
       @tagging
     end
 
-    # Open the tag editor for the selected node, seeding its current memo. Returns
-    # false when the selection can't be tagged (a synthetic group node / empty tree),
+    # Open the tag editor over the target set — the marks if any are set, else the selected
+    # node — seeding the buffer from the PRIMARY target's current memo. Returns false when
+    # there is nothing taggable (a fold under the cursor with nothing marked / empty tree),
     # so the controller can toast instead.
     def start_tag : Bool
-      node = selected_node
-      return false unless node && !node.grouped
-      target = resolve_target # selection-based (host, path) — captured NOW, before any reload
-      return false unless target
-      @tag_host, @tag_path = target
+      targets = target_keys
+      return false if targets.empty?
+      @tag_targets = targets # pinned NOW, before any reload can retarget the selection
       @tagging = true
-      @tag_buffer = node.tag || ""
+      @tag_buffer = node_index[primary_tag_target(targets)]?.try(&.tag) || ""
       @tag_cx = @tag_buffer.size
       @tag_preedit = ""
       true
+    end
+
+    # Which target's memo seeds the buffer. The cursor row wins when it is itself a target
+    # (it is the row you were looking at); otherwise the first in tree order, which is stable
+    # under every filter and expand state. Mirrors History's primary_target_id.
+    private def primary_tag_target(targets : Array({String, String})) : {String, String}
+      cur = resolve_target
+      cur && targets.includes?(cur) ? cur : targets.first
     end
 
     def cancel_tag : Nil
@@ -464,18 +477,19 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_cx = 0
       @tag_preedit = ""
+      @tag_targets = [] of {String, String}
     end
 
-    # Apply the committed memo to the selected node in place (blank clears it) and exit
-    # the editor. No re-derive — the tree structure is unchanged, so the selection
-    # stays put and draw_row reads the fresh tag live.
+    # Apply the committed memo to every pinned target in place (blank clears it) and exit the
+    # editor. No re-derive — the tree structure is unchanged, so the selection stays put and
+    # draw_row reads the fresh tags live. Each target is looked up by its (host, path) key
+    # rather than off the cursor, so a mid-edit reload that moved the selection (or a set of
+    # marks the cursor was never on) still stamps the right nodes; a key the tree no longer
+    # holds is skipped and picked up by the next reload from the store.
     def apply_tag(text : String) : Nil
-      # Stamp the live node in place ONLY while the selection still points at the pinned
-      # target (no external reload retargeted @selected); otherwise the persisted tag is
-      # picked up by the next reload, so skip rather than stamp the WRONG node.
-      if resolve_target == tag_target && (node = selected_node) && !node.grouped
-        node.tag = text.blank? ? nil : text
-      end
+      value = text.blank? ? nil : text
+      index = node_index
+      @tag_targets.each { |key| index[key]?.try { |node| node.tag = value } }
       cancel_tag
     end
 
@@ -502,33 +516,28 @@ module Gori::Tui
       @tag_preedit = text
     end
 
-    # The (host, path) the tag editor targets — the selected node's address (the host
-    # is the nearest depth-0 row above the selection). Nil when the selection isn't
-    # taggable (a group node / empty tree). The controller persists the buffer here.
-    # The PINNED (host, path) the open tag editor targets (captured at start_tag); nil
-    # when not tagging. Commit persists to this so a mid-edit reload can't retarget it.
-    def tag_target : {String, String}?
-      @tagging ? {@tag_host, @tag_path} : nil
+    # The PINNED (host, path) set the open tag editor targets (captured at start_tag —
+    # the marks if any were set, else the cursor row); empty when not tagging. The
+    # controller persists the buffer to each of these, so a mid-edit reload can't
+    # retarget the commit.
+    def tag_targets : Array({String, String})
+      @tagging ? @tag_targets : [] of {String, String}
     end
 
     # Selection-based (host, path) for the row currently under the cursor — the LIVE
-    # target, used to seed the pin at start_tag and detect a reload in apply_tag.
-    # Refuses a fold: a synthetic node has no path and is not taggable.
+    # target, used to seed the pin at start_tag and as the single-row fallback for
+    # target_keys. Refuses a fold: a synthetic node has no path and is not taggable.
     private def resolve_target : {String, String}?
-      rows = visible_rows
-      return nil unless row = rows[@selected]?
-      return nil if row.node.grouped
-      {host_label_for_row(rows, @selected), row.node.path}
+      visible_rows[@selected]?.try { |row| mark_key(row) }
     end
 
     # What selection is re-anchored on across a reload. Unlike resolve_target this DOES
     # resolve a fold (to its fold_key) — the cursor has to be able to rest on a `{uuid}`
     # row without being thrown back to the first host on the next poll.
     private def selection_anchor : {String, String}?
-      rows = visible_rows
-      return nil unless row = rows[@selected]?
+      return nil unless row = visible_rows[@selected]?
       return nil unless k = expand_key(row.node)
-      {host_label_for_row(rows, @selected), k}
+      {row.host, k}
     end
 
     # The selected endpoint's {host, method, target} for cross-surface actions (Send to
@@ -541,9 +550,8 @@ module Gori::Tui
     #                 row the user means "under /users", not "under this one uuid".
     # Both are identity on a normal node.
     def selected_endpoint(prefer : Symbol = :descendant) : {host: String, method: String, target: String}?
-      rows = visible_rows
-      return nil unless row = rows[@selected]?
-      host = host_label_for_row(rows, @selected)
+      return nil unless row = visible_rows[@selected]?
+      host = row.host
       node = row.node
       if node.grouped
         if prefer == :container
@@ -553,6 +561,15 @@ module Gori::Tui
         end
         return nil unless node = first_endpoint(node)
       end
+      endpoint_of(node, host)
+    end
+
+    # One node's {host, method, target}, GET-preferred. A node with no captured method of
+    # its own (an intermediate folder, a host row) still yields a tuple — it just resolves
+    # to no flow at the store, which is the same "no captured request for this path" the
+    # cursor already reports. Shared by the cursor path and the marked-set batch, so a mark
+    # can never resolve differently from pressing the same key on that row.
+    private def endpoint_of(node : Node, host : String) : {host: String, method: String, target: String}
       methods = node.methods
       method = methods.includes?("GET") ? "GET" : (methods.first? || "GET")
       {host: host, method: method, target: node.path}
@@ -568,6 +585,161 @@ module Gori::Tui
         end
       end
       nil
+    end
+
+    # --- marks (multi-select, mirrors History #442) ---------------------------
+
+    # A row's durable mark key, or nil when the row can't carry one. A synthetic fold is
+    # refused for the same reason it can't be tagged (it is not a real path) AND because it
+    # keeps `path` empty — exactly like its host node, so keying one would light the other up.
+    private def mark_key(row : VisibleRow) : {String, String}?
+      row.node.grouped ? nil : {row.host, row.node.path}
+    end
+
+    def mark_count : Int32
+      @marks.size
+    end
+
+    # Marks that aren't on a visible row right now — collapsed under a folded ancestor,
+    # filtered out, or gone from the tree. Surfaced next to the count so a set larger than
+    # what's on screen is never a surprise.
+    def marked_hidden_count : Int32
+      return 0 if @marks.empty?
+      visible = 0
+      visible_rows.each { |r| visible += 1 if (k = mark_key(r)) && @marks.includes?(k) }
+      @marks.size - visible
+    end
+
+    # Marks in TREE order — a full walk, not a visible_rows scan, so a mark under a
+    # collapsed ancestor still places. Any mark the tree no longer holds is appended
+    # (sorted) rather than dropped: it is still a legitimate tag target, and the Repeater
+    # batch reports it as unresolved instead of silently shrinking the set.
+    def marked_keys : Array({String, String})
+      ordered = [] of {String, String}
+      seen = Set({String, String}).new
+      each_node do |node, host|
+        k = {host, node.path}
+        next unless @marks.includes?(k)
+        next if seen.includes?(k) # a path is unique per host, so this is belt-and-braces
+        ordered << k
+        seen << k
+      end
+      ordered.concat((@marks - seen).to_a.sort!)
+      ordered
+    end
+
+    # The effective target set every batch verb acts on: the marks if any are set, else the
+    # cursor row. One rule, so a verb needs no notion of "batch mode". Empty when the cursor
+    # sits on a fold with nothing marked — the same refusal `t` and the tag editor give.
+    def target_keys : Array({String, String})
+      return marked_keys unless @marks.empty?
+      resolve_target.try { |k| [k] } || [] of {String, String}
+    end
+
+    # The endpoints behind `target_keys`, resolved through the CURRENT tree (so a collapsed
+    # node still resolves). A key the tree no longer holds drops out — the caller compares
+    # the size against target_keys to report the shortfall.
+    def target_endpoints : Array({host: String, method: String, target: String})
+      keys = target_keys
+      return [] of {host: String, method: String, target: String} if keys.empty?
+      index = node_index
+      keys.compact_map { |key| index[key]?.try { |node| endpoint_of(node, key[0]) } }
+    end
+
+    def marked?(host : String, path : String) : Bool
+      @marks.includes?({host, path})
+    end
+
+    # `t` — flip the mark on the cursor row, then step DOWN one row so a run of `t` marks
+    # consecutive rows (a tree reads top-down; unlike History's list there is no live tail
+    # to walk away from). The anchor lands on the row just toggled, so `t` then ⇧↓ extends
+    # from it. Returns false when the cursor row can't carry a mark (a fold / empty tree),
+    # so the caller can toast rather than look like a dropped keystroke.
+    def toggle_mark : Bool
+      return false unless row = visible_rows[@selected]?
+      return false unless key = mark_key(row)
+      @marks.includes?(key) ? @marks.delete(key) : @marks.add(key)
+      # The view's own clamping move, NOT the controller's sitemap_move — that pops focus to
+      # the sub-tab strip at the top row, which would eject you mid-gesture.
+      move(1)
+      @mark_anchor = key
+      @mark_extent.clear
+      true
+    end
+
+    def clear_marks : Nil
+      @marks.clear
+      reset_mark_anchor
+    end
+
+    # Forget where a range gesture started (and what it had added), so the next ⇧arrow
+    # anchors at the cursor instead of sweeping back to a stale point.
+    private def reset_mark_anchor : Nil
+      @mark_anchor = nil
+      @mark_extent.clear
+    end
+
+    # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
+    # and pressing a plain arrow does in a GUI list, where the highlight collapses instead
+    # of being left behind (#442 / af7e561). Only the gesture's own keys go (@mark_extent):
+    # `t` marks are deliberate, and dropping them too would put a discontiguous set out of
+    # reach ("mark this one, skip three, mark that one"). Returns how many marks it gave
+    # back, so the caller can say so rather than let a range vanish silently.
+    def end_mark_gesture : Int32
+      before = @marks.size
+      @mark_extent.each { |k| @marks.delete(k) }
+      reset_mark_anchor
+      before - @marks.size
+    end
+
+    # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
+    # shift+click. The anchor is re-seeded from the cursor whenever it can't be found on a
+    # visible row, which is also what covers "the user collapsed the subtree the anchor was
+    # in" — no special case for it. Fold rows inside the range are stepped over, not marked.
+    def extend_marks(delta : Int32) : Nil
+      rows = visible_rows
+      return if rows.empty?
+      anchor_idx = @mark_anchor.try { |a| index_of_mark(rows, a) }
+      unless anchor_idx
+        @mark_anchor = rows[@selected]?.try { |r| mark_key(r) }
+        anchor_idx = @selected
+        @mark_extent.clear
+      end
+      move(delta)
+      lo, hi = {anchor_idx, @selected}.minmax
+      wanted = Set({String, String}).new
+      (lo..hi).each { |i| rows[i]?.try { |r| mark_key(r).try { |k| wanted.add(k) } } }
+      # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after
+      # ⇧↓⇧↓ leaves two rows marked rather than three. @mark_extent holds only keys the
+      # gesture itself added, so a `t` mark survives a range sweeping over it and back off.
+      (@mark_extent - wanted).each { |k| @marks.delete(k) }
+      added = wanted - @marks
+      @marks.concat(added)
+      @mark_extent = (@mark_extent & wanted) | added
+    end
+
+    # Row index carrying mark key `key`, or nil when it isn't on screen (collapsed/filtered).
+    private def index_of_mark(rows : Array(VisibleRow), key : {String, String}) : Int32?
+      rows.index { |r| mark_key(r) == key }
+    end
+
+    # (host, path) → Node over the whole CURRENT tree, folds excluded. Built on demand by
+    # the batch verbs and the tag commit only — never per frame.
+    private def node_index : Hash({String, String}, Node)
+      index = {} of {String, String} => Node
+      each_node { |node, host| index[{host, node.path}] ||= node }
+      index
+    end
+
+    # Every real (non-fold) node with the host it hangs under, in tree order.
+    private def each_node(& : Node, String ->) : Nil
+      stack = [] of {Node, String}
+      @hosts.reverse_each { |h| stack << {h, h.label} }
+      while entry = stack.pop?
+        node, host = entry
+        yield node, host unless node.grouped
+        node.children.reverse_each { |c| stack << {c, host} }
+      end
     end
 
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
@@ -633,10 +805,20 @@ module Gori::Tui
     private def draw_row(screen : Screen, rect : Rect, row : VisibleRow, y : Int32, selected : Bool, focused : Bool) : Nil
       node = row.node
       host = row.depth == 0
-      bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
-      if selected
+      # A marked row reads as a dim band with a FULLER gutter bar, so it stays
+      # distinguishable from the cursor row (accent band) and from a cursor row that is ALSO
+      # marked (accent band + full bar). Both glyphs are single-width, so no column moves.
+      marked = mark_key(row).try { |k| @marks.includes?(k) } || false
+      bg = if selected
+             focused ? Theme.accent_bg : Theme.selection_dim
+           elsif marked
+             Theme.selection_dim
+           else
+             Theme.bg
+           end
+      if selected || marked
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
-        screen.cell(rect.x, y, '▎', Theme.accent, bg)
+        screen.cell(rect.x, y, marked ? '▌' : '▎', Theme.accent, bg)
       end
       draw_guides(screen, rect, row, y, bg)
 
@@ -839,7 +1021,9 @@ module Gori::Tui
       group_shown = gx > rect.x + 1
       screen.text(gx, rect.y, gchip, @grouping ? Theme.accent : Theme.muted) if group_shown
 
-      left_w = {(group_shown ? gx : scope_x) - (rect.x + 1) - 1, 0}.max
+      lx = render_mark_chip(screen, rect, group_shown ? gx : scope_x)
+
+      left_w = {lx - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
@@ -853,6 +1037,21 @@ module Gori::Tui
         # repeating it, and the user's next move here is to ADD a query atop the lens.
         screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
+    end
+
+    # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left edge
+    # of the chip cluster. Always shown while any mark is set — marks deliberately survive a
+    # sub-tab switch and a reload, so this chip is what keeps the set from being invisible when
+    # you come back. The hidden split covers marks the current filter/expand state doesn't
+    # show, so the count never silently exceeds what's on screen.
+    private def render_mark_chip(screen : Screen, rect : Rect, right_x : Int32) : Int32
+      return right_x if @marks.empty?
+      hidden = marked_hidden_count
+      chip = hidden > 0 ? "#{@marks.size} marked ·#{hidden} hidden" : "#{@marks.size} marked"
+      x = right_x - chip.size - 1
+      return right_x unless x > rect.x + 1 # too narrow — the host count/scope chips win
+      screen.text(x, rect.y, chip, Theme.accent)
+      x
     end
 
     private def render_column_headers(screen : Screen, rect : Rect, hdr_y : Int32) : Nil
@@ -898,6 +1097,12 @@ module Gori::Tui
       mx == rect.x + 1 + row.depth * 2
     end
 
+    # The cursor row index — what lets the controller tell a click that MOVES the selection
+    # from one that lands on the row already under it (only the former is a cursor gesture).
+    def selected_index : Int32
+      @selected
+    end
+
     # Mirrors `move`: set @selected clamped to the populated rows.
     def select_index(idx : Int32) : Nil
       rows = visible_rows
@@ -919,20 +1124,22 @@ module Gori::Tui
     private def visible_rows : Array(VisibleRow)
       @visible_cache ||= begin
         rows = [] of VisibleRow
-        @hosts.each_with_index { |host, i| collect(host, 0, 0_u64, i < @hosts.size - 1, rows) }
+        @hosts.each_with_index { |host, i| collect(host, 0, 0_u64, i < @hosts.size - 1, rows, host.label) }
         rows
       end
     end
 
     # Flatten the expanded tree, threading the tree-guide bitmask down. `has_next` is
     # whether `node` has a following sibling: when it does, descendants draw a `│` at
-    # `node`'s level (bit `depth`) so the branch reads as continuing.
-    private def collect(node : Node, depth : Int32, guides : UInt64, has_next : Bool, rows : Array(VisibleRow)) : Nil
-      rows << VisibleRow.new(node, depth, guides)
+    # `node`'s level (bit `depth`) so the branch reads as continuing. `host` is the depth-0
+    # ancestor's label, carried down so every row knows its host without a back-walk.
+    private def collect(node : Node, depth : Int32, guides : UInt64, has_next : Bool,
+                        rows : Array(VisibleRow), host : String) : Nil
+      rows << VisibleRow.new(node, depth, guides, host)
       return unless node.expanded
       child_guides = has_next ? (guides | (1_u64 << depth)) : guides
       last = node.children.size - 1
-      node.children.each_with_index { |child, i| collect(child, depth + 1, child_guides, i < last, rows) }
+      node.children.each_with_index { |child, i| collect(child, depth + 1, child_guides, i < last, rows, host) }
     end
 
     private def ensure_visible(total : Int32, h : Int32) : Nil
