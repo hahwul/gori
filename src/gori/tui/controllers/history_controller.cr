@@ -110,16 +110,23 @@ module Gori::Tui
       return true unless idx = @history.list_row_at(inner, mx, my)
       @history.set_preview_focus(:list)
       # SELECT-FIRST: first click selects, a second click on the selected row opens.
-      idx == @history.selected_index ? open_detail : @history.select_row(idx)
+      if idx == @history.selected_index
+        open_detail
+      else
+        end_range_gesture # a plain click collapses the range, same as a plain arrow
+        @history.select_row(idx)
+      end
       true
     end
 
     def handle_wheel(step : Int32) : Bool
       if @host.overlay == :detail
         @history.detail_navigable? ? @history.detail_scroll_view(step) : @history.scroll_detail(step)
-      elsif @history.preview_enabled? && (@history.preview_focus == :req || @history.preview_focus == :res)
+      elsif preview_scroll_focused?
         @history.scroll_preview(step)
       else
+        # Deliberately NOT end_range_gesture: a wheel reads as "scroll the viewport", not as a
+        # selection gesture, so it must not destroy a mark set the way a cursor key does.
         @history.move(step)
       end
       true
@@ -150,6 +157,7 @@ module Gori::Tui
     # :detail overlay in the Runner). Uses the view's clamping move directly, so it
     # never triggers move_selection's ↑-at-top focus pop mid-page.
     def body_scroll(delta : Int32) : Bool
+      end_range_gesture unless preview_scroll_focused? # a page key is cursor nav, like ↑/↓
       @history.move(delta)
       true
     end
@@ -323,17 +331,35 @@ module Gori::Tui
 
     # --- ExecContext verbs (delegated from the Runner) ---
     def move_selection(delta : Int32) : Nil
-      # Preview-focused: scroll the preview side (HistoryView#move handles it).
-      if @history.preview_enabled? && (@history.preview_focus == :req || @history.preview_focus == :res)
+      # Preview-focused: scroll the preview side (HistoryView#move handles it). The list
+      # cursor doesn't move, so a range gesture in flight is left alone.
+      if preview_scroll_focused?
         @history.move(delta)
         return
       end
-      # ↑ at the top row pops focus up to the tab bar (natural upward keyboard flow).
+      # ↑ at the top row pops focus up to the tab bar (natural upward keyboard flow). The
+      # cursor stays put there too, so the marks stay put with it.
       if delta < 0 && @history.at_top?
         @host.request_focus(:menu)
       else
+        end_range_gesture
         @history.move(delta)
       end
+    end
+
+    # A plain (unshifted) cursor key ends the ⇧arrow range gesture and hands its marks back
+    # (HistoryView#end_mark_gesture). Says so only when marks actually went away, so arrowing
+    # down an unmarked list stays silent — and names what survived, since `t`/⇧T marks are
+    # deliberately not the gesture's to drop.
+    private def end_range_gesture : Nil
+      return if @history.end_mark_gesture == 0
+      n = @history.mark_count
+      @host.status(n == 0 ? "selection cleared" : "selection cleared — #{n} still marked")
+    end
+
+    # A preview pane (not the list) holds focus, so ↑/↓ and the wheel scroll that pane.
+    private def preview_scroll_focused? : Bool
+      @history.preview_enabled? && @history.preview_focus != :list
     end
 
     def open_detail : Nil

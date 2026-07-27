@@ -1301,6 +1301,63 @@ describe "Gori::Tui::HistoryView marks" do
     end
   end
 
+  # Releasing ⇧ mid-selection and pressing a plain arrow collapses the highlight in every GUI
+  # list. Leaving the range marked behind the cursor is the surprising half.
+  it "hands the whole range back when a plain cursor move ends the gesture" do
+    tmp_store do |store|
+      ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.select_row(0)
+      view.extend_marks(1)
+      view.extend_marks(1)
+      view.mark_count.should eq(3)
+
+      view.end_mark_gesture.should eq(3) # the count is what the toast reports
+      view.mark_count.should eq(0)
+
+      # …and the next ⇧arrow opens a fresh range from wherever the cursor now is.
+      view.move(-1)
+      view.extend_marks(1)
+      view.marked_ids.should eq([ids[2], ids[1]])
+    end
+  end
+
+  # The other half of the split extend_marks already honours: `t`/⇧T marks are deliberate tags,
+  # and with no ctrl+arrow to step past them, dropping them here would put a discontiguous set
+  # out of reach ("mark this one, skip three, mark that one").
+  it "keeps `t` marks when a plain cursor move ends the range gesture" do
+    tmp_store do |store|
+      ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.select_row(2)
+      view.toggle_mark # an independent mark, made by `t`
+      view.select_row(0)
+      view.extend_marks(1)
+      view.extend_marks(1) # the range sweeps OVER the `t` mark at row 2
+      view.mark_count.should eq(3)
+
+      view.end_mark_gesture.should eq(2) # rows 0..1 only — row 2 was never the gesture's
+      view.marked_ids.should eq([ids[1]])
+    end
+  end
+
+  it "reports nothing handed back when no range gesture is in flight" do
+    tmp_store do |store|
+      ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.select_row(1)
+      view.toggle_mark
+
+      # A plain arrow over a `t`-marked list must stay silent (0) rather than toast on
+      # every keystroke — and must not touch the mark.
+      view.end_mark_gesture.should eq(0)
+      view.marked_ids.should eq([ids[1]])
+    end
+  end
+
   it "re-seeds the range anchor on a click, like a plain keyboard move" do
     tmp_store do |store|
       ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }

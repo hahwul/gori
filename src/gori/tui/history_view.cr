@@ -580,6 +580,20 @@ module Gori::Tui
       @mark_extent.clear
     end
 
+    # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
+    # and pressing a plain arrow does in a GUI list, where the highlight collapses instead of
+    # being left behind. Only the gesture's own ids go (@mark_extent): `t`/⇧T marks are
+    # deliberate tags, and there is no ctrl+arrow here to step the cursor past them without
+    # disturbing them, so dropping those too would put a discontiguous set out of reach
+    # ("mark this one, skip three, mark that one"). Returns how many marks it gave back, so
+    # the caller can say so rather than let a range vanish silently.
+    def end_mark_gesture : Int32
+      before = @marks.size
+      @mark_extent.each { |id| @marks.delete(id) }
+      reset_mark_anchor
+      before - @marks.size
+    end
+
     # Drop specific marks — the post-batch-delete prune, so a deleted flow's id can't
     # linger in the set and inflate the next count.
     def unmark_ids(ids : Enumerable(Int64)) : Nil
