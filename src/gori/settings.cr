@@ -143,7 +143,8 @@ module Gori
     private def self.load_root(raw : String) : JSON::Any?
       JSON.parse(raw)
     rescue
-      (File.write("#{path}.corrupt", raw) rescue nil) if raw.presence
+      # 0600 like the file it is a copy of — it carries the same secrets verbatim.
+      (write_private("#{path}.corrupt", raw) rescue nil) if raw.presence
       nil
     end
 
@@ -170,8 +171,10 @@ module Gori
       Paths.ensure_dirs
       # With --config / $GORI_CONFIG the file can live outside GORI_HOME, whose directory
       # ensure_dirs above does not create. The temp+rename below would fail on a missing
-      # parent, so make it first (0700: the file can carry env values and decoder sessions).
-      Paths.ensure_dir(File.dirname(path))
+      # parent, so make it first — but `tighten: false`, because that parent is a directory
+      # the OPERATOR named and gori does not own (see Paths.ensure_dir). What actually
+      # protects the env values and decoder sessions is the file's own 0600, below.
+      Paths.ensure_dir(File.dirname(path), tighten: false)
       # Atomic write: a torn File.write (crash / two instances / disk-full) would leave a
       # half-written settings.json that load()'s blanket rescue silently resets to factory
       # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder sessions.
@@ -185,13 +188,34 @@ module Gori
       # Basing on `mine` keeps "did I change this section?" honest, so an unchanged section
       # always yields to disk on every subsequent save.
       mine = serialize
-      File.write(tmp, merge_with_disk(mine))
+      # Written 0600, and renamed rather than copied, so the FINAL file carries that mode too
+      # (rename moves the inode, permissions and all).
+      write_private(tmp, merge_with_disk(mine))
       File.rename(tmp, path)
       @@loaded_raw = mine
       true
     rescue
       File.delete?("#{path}.tmp") rescue nil
       false
+    end
+
+    # Write a settings document owner-only. Inside GORI_HOME the 0700 tree already covers it,
+    # but `--config` can put this file anywhere — a shared checkout, /tmp, a home directory at
+    # 0755 — and it carries `env` token VALUES and saved decoder sessions (SECRET_SECTIONS
+    # below names both). `CLI.write_export` already does exactly this for the EXPORTED copy;
+    # the live file holds the same secrets and was the one still landing at the umask default.
+    #
+    # The mode is set at CREATE time so the bytes are never on disk at 0644 even briefly, and
+    # chmod'd as well because `File.open`'s perm applies only to a file it actually creates —
+    # a `.tmp` left by a crashed save would otherwise keep its old mode and carry it through
+    # the rename. The chmod is best-effort: a filesystem that cannot represent 0600 (a mounted
+    # share) must not turn every settings save into a failure.
+    private def self.write_private(path : String, doc : String) : Nil
+      perm = File::Permissions.new(0o600)
+      File.open(path, "w", perm: perm) do |f|
+        File.chmod(path, perm) rescue nil
+        f.print(doc)
+      end
     end
 
     # 3-way merge (base = what we loaded, mine = `current` serialization, theirs = the

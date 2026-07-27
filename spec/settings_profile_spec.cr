@@ -62,6 +62,45 @@ describe "settings profiles" do
         File.exists?(nested).should be_true
       end
     end
+
+    # settings.json carries `env` token VALUES and saved decoder sessions. Inside GORI_HOME the
+    # 0700 tree covers it, but --config can put it in a shared checkout or a 0755 home, where
+    # the file's OWN mode is the only thing protecting it.
+    it "writes the settings file owner-only" do
+      with_config_home do |dir|
+        target = File.join(dir, "shared", "profile.json")
+        Gori::Settings.path_override = target
+        Gori::Settings.save.should be_true
+        (File.info(target).permissions.value & 0o777).should eq(0o600)
+      end
+    end
+
+    # A `.tmp` left behind by a crashed save keeps its own mode through the rename, so the
+    # create-time perm alone is not enough — the chmod has to run too.
+    it "tightens a leftover temp file rather than inheriting its mode" do
+      with_config_home do |dir|
+        target = File.join(dir, "profile.json")
+        stale = "#{target}.tmp"
+        File.write(stale, "{}")
+        File.chmod(stale, 0o644)
+        Gori::Settings.path_override = target
+        Gori::Settings.save.should be_true
+        (File.info(target).permissions.value & 0o777).should eq(0o600)
+      end
+    end
+
+    # The regression: `--config` into an existing directory used to chmod that directory to
+    # 0700. It is the operator's, not gori's — and with a relative --config it is the cwd.
+    it "does not re-mode a parent directory the operator named" do
+      with_config_home do |dir|
+        parent = File.join(dir, "shared")
+        Dir.mkdir_p(parent)
+        File.chmod(parent, 0o755)
+        Gori::Settings.path_override = File.join(parent, "profile.json")
+        Gori::Settings.save.should be_true
+        (File.info(parent).permissions.value & 0o777).should eq(0o755)
+      end
+    end
   end
 
   describe ".document_keys" do

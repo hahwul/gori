@@ -79,12 +79,26 @@ module Gori
     # Race-tolerant `mkdir -p` at 0700 (see DIR_MODE): two gori instances can start
     # simultaneously and both create a fresh dir — one wins the mkdir, the other must
     # not crash.
-    def self.ensure_dir(path : String) : Nil
-      Dir.mkdir_p(path, DIR_MODE)
-      File.chmod(path, DIR_MODE) rescue nil # tighten a pre-0700 dir from an older install
-    rescue File::AlreadyExistsError
-      # created concurrently by another instance — it exists now, fine
-      File.chmod(path, DIR_MODE) rescue nil
+    #
+    # `tighten: false` keeps the 0700 creation but skips the chmod on a directory that was
+    # ALREADY there. The distinction is ownership, not mode: a directory gori makes is gori's
+    # to lock down, one it merely FINDS belongs to whoever made it. Every caller but one names
+    # a path inside GORI_HOME, where the two are the same thing — but `gori --config PATH`
+    # takes an arbitrary path, and its parent can be a shared checkout, a dotfiles repo, or
+    # (for a relative `--config`) the working directory. Silently stripping group/other off
+    # those is a side effect nobody asked for, and it is not what protects the file anyway:
+    # the settings file itself is written 0600 (see Settings.write_private).
+    def self.ensure_dir(path : String, *, tighten : Bool = true) : Nil
+      ours = !Dir.exists?(path) # sampled BEFORE the mkdir: only a dir we create is ours to mode
+      begin
+        Dir.mkdir_p(path, DIR_MODE)
+      rescue File::AlreadyExistsError
+        # created concurrently by another instance — it exists now, at DIR_MODE already
+        ours = false
+      end
+      # 0700 has no group/other bits for any umask to strip, so a dir we created is already
+      # exact; the chmod is for a pre-0700 dir from an older install.
+      File.chmod(path, DIR_MODE) rescue nil if ours || tighten
     end
   end
 end
