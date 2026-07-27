@@ -269,7 +269,8 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
   "capturing": true,
   "flows": 1234,
   "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
-  "upstream": ""
+  "upstream": "",
+  "upstream_rules": 0
 }
 ```
 
@@ -280,7 +281,8 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | `capturing` | bool | 프록시가 현재 캡처 중인지 여부 |
 | `flows` | integer | 캡처한 플로우 수 |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
-| `upstream` | string | 업스트림 프록시 `host:port`, 직접 연결이면 비어 있음 |
+| `upstream` | string | **캐치올** 업스트림 프록시 `host:port`, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream_rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
+| `upstream_rules` | integer | 적용 중인 [업스트림 규칙](#upstream_rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
 
 ### display {#display}
 

@@ -226,7 +226,14 @@ module Gori::Tui
               j.field "addr", BindAddress.authority(host, port)
             end
           end
+          # The CATCH-ALL upstream — what a destination matching no rule gets. It cannot be
+          # "the upstream" any more: since upstream rules exist, routing is per-destination
+          # and there is no single address to report. A script that only read this field
+          # would say "direct" for a session sending everything through a SOCKS5 jump host,
+          # so the rule count goes out beside it as the signal that per-host routing is live.
+          # Additive on purpose — `upstream` keeps its exact v1 meaning for existing scripts.
           j.field "upstream", Settings.effective_upstream_proxy
+          j.field "upstream_rules", Settings.upstream_rules.size
         end
       end
     end

@@ -269,7 +269,8 @@ Each run receives a JSON context on stdin describing the live session, so script
   "capturing": true,
   "flows": 1234,
   "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
-  "upstream": ""
+  "upstream": "",
+  "upstream_rules": 0
 }
 ```
 
@@ -280,7 +281,8 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `capturing` | bool | Whether the proxy is currently capturing |
 | `flows` | integer | Number of captured flows |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
-| `upstream` | string | Upstream proxy `host:port`, or empty when connecting directly |
+| `upstream` | string | The **catch-all** upstream proxy `host:port`, or empty when connecting directly. A destination matched by an [upstream rule](#upstream_rules) routes elsewhere — this field does not reflect that |
+| `upstream_rules` | integer | Number of [upstream rules](#upstream_rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
 
 ### display
 
