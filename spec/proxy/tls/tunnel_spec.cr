@@ -97,8 +97,8 @@ private def start_h2_origin(reply : Bytes, ack : Channel(Nil)) : Int32
         ssl = OpenSSL::SSL::Socket::Server.new(raw, ctx, sync_close: true)
         ssl.sync = true
         Gori::Proxy::H2::Frame.read_preface(ssl) # gori forwarded the client's preface
-        Gori::Proxy::H2::Frame.read(ssl)          # + its first frame (SETTINGS)
-        ssl.write(reply)                           # a frame the client must receive via the relay
+        Gori::Proxy::H2::Frame.read(ssl)         # + its first frame (SETTINGS)
+        ssl.write(reply)                         # a frame the client must receive via the relay
         ssl.flush
         ack.receive # keep the connection open until the client has read the reply
         ssl.close rescue nil
@@ -292,8 +292,8 @@ describe Gori::Proxy::Tls::Tunnel do
       proxy.stop
 
       response.should contain("200 OK")
-      response.should contain("TOP SECRET")           # loaded end-to-end over h1 (no blank page)
-      seen.receive.should eq("GET /secret HTTP/1.1")  # origin saw the forwarded request
+      response.should contain("TOP SECRET")          # loaded end-to-end over h1 (no blank page)
+      seen.receive.should eq("GET /secret HTTP/1.1") # origin saw the forwarded request
 
       req = sink.requests.first
       req.host.should eq("localhost")
