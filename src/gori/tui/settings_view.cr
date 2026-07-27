@@ -125,6 +125,8 @@ module Gori::Tui
       Field.new("Update check",
         "on startup, check GitHub for a newer release and show a one-line notice on the project picker — off = no outbound check; ←/→/space toggles",
         bool: true),
+      Field.new("History retention (flows)",
+        "how many newest flows a project keeps before the oldest are dropped — 0 = unlimited; applies on the next project open"),
     ]
     SECTIONS = {
       :network       => NETWORK_FIELDS,
@@ -171,7 +173,7 @@ module Gori::Tui
                 when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
                 when :display       then display_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
-                when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off", Settings.update_check_enabled? ? "on" : "off"]
+                when :general       then general_values
                 else                     network_values
                 end
       @focused = 0
@@ -227,6 +229,7 @@ module Gori::Tui
                   Settings::DEFAULT_CLIPBOARD_OSC52 ? "on" : "off",
                   Settings::DEFAULT_CONFIRM_QUIT ? "on" : "off",
                   Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
+                  Settings::DEFAULT_RETENTION_FLOWS.to_s,
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), hostnames_summary]
                 end
@@ -253,6 +256,17 @@ module Gori::Tui
         Settings.http2,
         passthrough_label(Settings.tls_passthrough),
         hostnames_summary,
+      ]
+    end
+
+    # The GENERAL row values, read from the live Settings — one helper for the load and the
+    # post-save rebuild, so the positional values can't drift from GENERAL_FIELDS.
+    private def general_values : Array(String)
+      [
+        Settings.clipboard_osc52? ? "on" : "off",
+        Settings.confirm_quit? ? "on" : "off",
+        Settings.update_check_enabled? ? "on" : "off",
+        Settings.retention_max_flows.to_s,
       ]
     end
 
@@ -505,10 +519,15 @@ module Gori::Tui
         return persist
       end
       if @section == :general
+        if err = Settings.retention_error(@values[3])
+          @status = "invalid retention"
+          return err
+        end
         Settings.clipboard_osc52 = @values[0] == "on"
         Settings.confirm_quit = @values[1] == "on"
         Settings.update_check_enabled = @values[2] == "on"
-        @values = [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off", Settings.update_check_enabled? ? "on" : "off"]
+        Settings.retention_max_flows = @values[3].strip.to_i
+        @values = general_values
         return persist
       end
       if err = Settings.bind_host_error(@values[0])

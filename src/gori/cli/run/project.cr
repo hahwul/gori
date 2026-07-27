@@ -300,7 +300,7 @@ module Gori
       # (mirrors MCP delete_project's dry run).
       private def self.project_object_counts(project : Project) : {Int64?, Int32?}
         return {nil, nil} unless File.exists?(project.db_path)
-        store = Store.open(project.db_path)
+        store = Store.open(project.db_path, retention_flows: Store::RETENTION_UNLIMITED)
         begin
           {store.count, store.count_issues}
         ensure

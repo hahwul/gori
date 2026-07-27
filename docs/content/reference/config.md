@@ -421,6 +421,30 @@ Your own Probe match rules, global across every project. Project-scoped rules li
 
 Parsing is tolerant. An entry missing `id`, `title`, or `pattern` is dropped, and an out-of-range `side` / `region` / `kind` / `severity` falls back to the safest value rather than failing the load.
 
+### retention
+
+How much captured history a project keeps.
+
+```json
+{
+  "retention": {
+    "max_flows": 100000
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `max_flows` | integer | `100000` | Keep at most this many newest flows per project; the oldest are dropped once the cap is passed. `0` = unlimited |
+
+Retention is **not new** — gori has always swept old flows so a project database plateaus instead of growing forever. What this section adds is the ability to see and change the cap, which was previously a compile-time constant. The default is the number that was already in force, so nothing changes until you edit it.
+
+The sweep runs on the capture path, amortized over every few thousand inserts, and cascades to a pruned flow's WebSocket messages and orphaned HTTP/2 frames. It writes one line to the log whenever it drops rows, so a flow that disappeared has a traceable reason rather than looking like a bug.
+
+Raising the cap takes effect on the next project open. Lowering it does not immediately reclaim disk: pruning frees pages for reuse inside the database file but does not shrink the file, so on-disk size only drops after a **Compress** from the project picker, which runs `VACUUM`.
+
+Surfaces that do not own capture never prune, whatever the cap says: `gori mcp`'s store, a project opened only to count its objects for a delete preview, and a freshly created project.
+
 ### Other sections
 
 | Section | Description |
@@ -456,4 +480,4 @@ Saving a Project-tab field that equals the current global value deletes that KV 
 
 ## Projects & Database
 
-Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.
+Each project keeps at most `retention.max_flows` flows (100,000 by default — see [retention](#retention)); older ones are pruned so the file plateaus. Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.

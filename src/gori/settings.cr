@@ -3,6 +3,7 @@ require "./paths"
 require "./settings/network"
 require "./settings/upstream_rules"
 require "./settings/outbound_tls"
+require "./settings/retention"
 require "./settings/env"
 require "./settings/scan_rules"
 require "./settings/oast_providers"
@@ -84,6 +85,7 @@ module Gori
       end
       self.upstream_rules = parse_upstream_rules(root["upstream_rules"]?)
       self.outbound_tls = parse_outbound_tls(root["outbound_tls"]?)
+      parse_retention(root["retention"]?)
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_env(root["env"]?)
@@ -220,6 +222,7 @@ module Gori
           serialize_network(j)
           serialize_upstream_rules(j)
           serialize_outbound_tls(j)
+          serialize_retention(j)
           serialize_editor(j)
           serialize_tabs(j)
           serialize_hostname_overrides(j)

@@ -45,7 +45,7 @@ module Gori
                   bind_fallback : Bool = false) : Session
       events = Channel(Store::FlowEvent).new(1024)
       probe_events = Channel(Store::FlowEvent).new(256)
-      store = Store.open(project.db_path, events, probe_events)
+      store = Store.open(project.db_path, events, probe_events, Settings.retention_flows)
       probe = nil.as(Probe::Analyzer?)
       begin
         # Per-project network overrides: pull this project's pinned bind/upstream (if any) into

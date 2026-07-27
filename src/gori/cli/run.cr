@@ -248,7 +248,7 @@ module Gori
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
       # turn that into a clean CLI error instead of an unhandled backtrace.
       private def self.open_store(project : Project) : Store
-        store = Store.open(project.db_path)
+        store = Store.open(project.db_path, retention_flows: Settings.retention_flows)
         Env.load_project(store)
         store
       rescue ex : DB::Error | SQLite3::Exception

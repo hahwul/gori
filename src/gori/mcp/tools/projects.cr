@@ -106,7 +106,9 @@ module Gori
       # unless Tools already took ownership via a prior switch.
       private def bind_project(proj : Project, reg : ProjectRegistry, *, source : String) : Result
         new_store = begin
-          Store.open(proj.db_path)
+          # Same never-prune stance as `gori mcp`'s initial open (cli.cr). Without this a
+          # switch_project silently re-enabled the sweep the entry point disabled.
+          Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
         rescue ex
           return err("could not open project database: #{ex.message}", "INTERNAL")
         end
@@ -211,7 +213,7 @@ module Gori
       # a locked/corrupt DB reports nil rather than failing the dry run.
       private def count_project_objects(proj : Project) : {Int64?, Int32?}
         return {nil, nil} unless File.exists?(proj.db_path)
-        s = Store.open(proj.db_path)
+        s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
         begin
           {s.count, s.count_issues}
         ensure

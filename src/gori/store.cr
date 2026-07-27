@@ -157,7 +157,21 @@ module Gori
     # Keep at most this many newest flows; older ones (and their ws/h2 rows) are
     # pruned so the DB plateaus instead of growing forever (freed pages are
     # reused by later inserts). 0 disables retention. Tunable per Store.open.
+    #
+    # This is the FACTORY value. A surface that owns capture must pass
+    # `Settings.retention_flows` instead, so the operator's configured cap actually applies —
+    # Store deliberately does not read Settings (it is the lower layer), so the value has to
+    # arrive from the caller. `Settings::DEFAULT_RETENTION_FLOWS` references this constant, so
+    # the number itself lives only here.
     RETENTION_DEFAULT = 100_000
+    # Pass this for a store that must never delete history: a read-oriented or
+    # count-only open, and the MCP server's own store. Named rather than a bare 0 so the
+    # intent is legible at the call site and greppable across surfaces.
+    #
+    # NOTE it only matters where flows are actually INSERTED: `prune` runs solely from the
+    # writer batch loop once PRUNE_INTERVAL inserts accumulate, so a purely reading open never
+    # sweeps regardless of what it passes.
+    RETENTION_UNLIMITED = 0
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
     # Per-side ceiling on body text fed to the FTS index. Every byte becomes a 3-byte-window
@@ -528,6 +542,7 @@ module Gori
       return unless max_id
       cutoff = max_id - @retention_flows
       return if cutoff <= 0
+      dropped = 0_i64
       conn.transaction do |tx|
         c = tx.connection
         # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
@@ -544,6 +559,9 @@ module Gori
         c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
+        # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
+        # statement, so any query in between (including the h2 reaping below) would replace it.
+        dropped = c.scalar("SELECT changes()").as(Int64)
         # h2 frames/connections key off conn_id, not flow id. Reap a connection's raw
         # log only once it's (a) not referenced by any surviving flow AND (b) INACTIVE
         # — its newest frame is older than the oldest kept flow. Keying (b) on frame
@@ -559,8 +577,18 @@ module Gori
         c.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
         c.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
       end
+      # Say that history was dropped. A sweep is otherwise completely silent, so a flow the
+      # operator looked at an hour ago simply vanishing is indistinguishable from a bug. At most
+      # one line per PRUNE_INTERVAL inserts, and only when flow rows actually went.
+      log_retention_drop(dropped) if dropped > 0
     rescue ex
       ::Log.warn { "retention prune failed (will retry): #{ex.message}" } # gori.log, not STDERR (#411)
+    end
+
+    # One gori.log line per sweep that actually removed history, naming the setting that
+    # controls it so the answer to "where did that flow go?" is in the message.
+    private def log_retention_drop(dropped : Int64) : Nil
+      ::Log.info { "retention: dropped #{dropped} oldest flow(s), keeping the newest #{@retention_flows} (settings retention.max_flows)" }
     end
 
     # Unblock a caller whose batch was rolled back, with a no-op fallback (no row

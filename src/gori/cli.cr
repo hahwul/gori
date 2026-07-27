@@ -500,7 +500,7 @@ module Gori
       # into a clean error instead of an unhandled backtrace (parity with `gori run`).
       store =
         begin
-          Store.open(resolved, events: nil, retention_flows: 0) # never prune the user's history
+          Store.open(resolved, events: nil, retention_flows: Store::RETENTION_UNLIMITED) # never prune the user's history
         rescue ex : DB::Error | SQLite3::Exception
           abort "gori mcp: cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         end

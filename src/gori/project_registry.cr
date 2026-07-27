@@ -151,7 +151,7 @@ module Gori
       # Open once even with no description: this creates the DB + runs migrations, and #list
       # SKIPS a directory without one. Leaving it lazy made a freshly created project
       # invisible to `gori run project list` / --project until something captured into it.
-      s = Store.open(proj.db_path)
+      s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
       begin
         desc = description.strip
         s.set_setting("description", desc) unless desc.empty?
