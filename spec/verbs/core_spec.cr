@@ -160,6 +160,61 @@ describe "Gori::Verbs.register_core" do
       verb_intents(r, "intercept.direction").should eq([:intercept_cycle_direction])
       verb_intents(r, "intercept.filter").should eq([:intercept_query])
     end
+
+    # Multi-select over the hold queue — the History list's model on the same keys. Marks are
+    # pruned the moment a hold leaves the queue, so a mark set always implies a cursor row:
+    # the existing `intercept_selected` gate is already the target-set gate.
+    describe "marks" do
+      it "registers the mark gestures on keys free across Scope::Intercept" do
+        r["intercept.mark-toggle"].chords.map(&.label).should eq(["t"])
+        r["intercept.mark-toggle"].menu_key.should eq('t')
+        # Chord.new("t", shift: true), never Chord.new("T") — Keybind.from_event normalises a
+        # typed capital to shift+lowercase, so a "T" chord could never fire.
+        r["intercept.mark-all"].chords.should eq([Gori::Verb::Chord.new("t", shift: true)])
+        r["intercept.mark-all"].menu_key.should eq('T')
+        r["intercept.mark-clear"].chords.should be_empty
+        r["intercept.mark-clear"].menu_key.should eq('N')
+        %w[intercept.mark-toggle intercept.mark-all intercept.mark-clear].each do |id|
+          r[id].scope.should eq(Gori::Verb::Scope::Intercept)
+        end
+      end
+
+      it "gates toggle/mark-all on a held message, like forward and drop" do
+        ctx = FakeExecContext.new # nothing held
+        r["intercept.mark-toggle"].available?(ctx).should be_false
+        r["intercept.mark-all"].available?(ctx).should be_false
+        ctx.intercept_selected = 3_i64
+        r["intercept.mark-toggle"].available?(ctx).should be_true
+        r["intercept.mark-all"].available?(ctx).should be_true
+        verb_intents(r, "intercept.mark-toggle").should eq([:intercept_mark_toggle])
+        verb_intents(r, "intercept.mark-all").should eq([:intercept_mark_all])
+      end
+
+      it "offers clear-marks only while something is marked" do
+        ctx = FakeExecContext.new
+        ctx.intercept_selected = 3_i64 # held, but nothing marked yet
+        r["intercept.mark-clear"].available?(ctx).should be_false
+        ctx.marked_intercept = 2
+        r["intercept.mark-clear"].available?(ctx).should be_true
+        verb_intents(r, "intercept.mark-clear").should eq([:intercept_mark_clear])
+      end
+
+      # ⇧↑/⇧↓ took these over from the read-only preview's vertical scroll (now PgUp/PgDn),
+      # so the queue reads ⇧arrow as "extend the selection" like every other list in the TUI.
+      it "extends the range on shift+arrows — hidden nav, gated on a held message" do
+        {"intercept.mark-extend-up" => "shift-up", "intercept.mark-extend-down" => "shift-down"}.each do |id, label|
+          v = r[id]
+          v.chords.map(&.label).should eq([label])
+          v.hidden?.should be_true # a nav primitive, like body.up/body.down
+          v.menu_key.should be_nil # …so it never shows in the space menu
+          v.available?(FakeExecContext.new).should be_false
+          v.available?(FakeExecContext.new.tap { |c| c.intercept_selected = 1_i64 }).should be_true
+        end
+        verb_intents(r, "intercept.mark-extend-down").should eq([:intercept_mark_extend])
+        FakeExecContext.new.tap { |c| r["intercept.mark-extend-up"].call(c) }
+          .args_for(:intercept_mark_extend).should eq(["-1"])
+      end
+    end
   end
 
   describe "navigation" do

@@ -70,6 +70,16 @@ module Gori::Tui
       @detail_xscroll = 0              # horizontal scroll offset for the read-only held-item preview
       @detail_scroll = 0               # vertical scroll offset (lines) for the read-only preview
       @reload_rev = -1                 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
+      # Multi-select marks (#442's model, ported to the hold queue), keyed by ITEM ID rather
+      # than row index: a forward/drop of an earlier entry shifts every index below it, so an
+      # index-keyed set would silently retarget on the next revision tick. Unlike History there
+      # is no hidden-mark case — `pending` returns exactly what the queue renders — so reload
+      # prunes ids that have left the queue and marks stay a subset of what's on screen.
+      @marks = Set(Int64).new
+      @mark_anchor = nil.as(Int64?) # id-keyed range anchor for the ⇧arrow extend
+      # Ids THIS ⇧arrow gesture added (vs a deliberate `t`/⇧T mark) — the set a plain arrow
+      # hands back, and the set a shrinking range gives up. Cleared whenever the anchor resets.
+      @mark_extent = Set(Int64).new
     end
 
     # Fresh snapshot (called on enter AND every frame via the 50ms loop). Gated on the
@@ -95,10 +105,24 @@ module Gori::Tui
         end
       @enabled = interceptor.enabled?
       @direction = interceptor.direction
+      prune_marks
       if @editing && (id = @loaded_id) && @items.none? { |it| it.id == id }
         @editing = false
         @loaded_id = nil
       end
+    end
+
+    # Drop marks whose held item has left the queue — forwarded/dropped here, by a batch
+    # verb, or cross-process by an MCP peer. Held ids are monotonic and never reused, so a
+    # stale mark can never retarget a different message; it would only inflate the count and
+    # make the chip lie about a set that is no longer there.
+    private def prune_marks : Nil
+      return if @marks.empty?
+      live = @items.map(&.id).to_set
+      return if @marks.all? { |id| live.includes?(id) }
+      @marks &= live
+      @mark_extent &= live
+      @mark_anchor = nil unless @mark_anchor.try { |a| live.includes?(a) }
     end
 
     def selected_item : Interceptor::Item?
@@ -109,6 +133,11 @@ module Gori::Tui
       selected_item.try(&.id)
     end
 
+    # The cursor's queue index (mouse dispatch readability; mirrors HistoryView#selected_index).
+    def selected_index : Int32
+      @selected
+    end
+
     def empty? : Bool
       @items.empty?
     end
@@ -116,12 +145,121 @@ module Gori::Tui
     def move(delta : Int32) : Nil
       return if @items.empty? || @editing
       @selected = (@selected + delta).clamp(0, @items.size - 1)
+      reset_mark_anchor # a plain move re-seeds the range anchor, like a GUI list
     end
 
     # At the first (top) queue item (and not editing) — lets the Runner pop focus
     # to the tab bar on ↑.
     def at_top? : Bool
       !@editing && @selected == 0
+    end
+
+    # --- marks (multi-select over the hold queue) -----------------------------
+
+    def marked?(id : Int64) : Bool
+      @marks.includes?(id)
+    end
+
+    def mark_count : Int32
+      @marks.size
+    end
+
+    # Marks in QUEUE order. `pending` yields the Hash's insertion order — held ids are handed
+    # out by an increasing counter, so sorting by id reproduces exactly what the list shows.
+    def marked_ids : Array(Int64)
+      @marks.to_a.sort!
+    end
+
+    # The effective target set every batch verb acts on: the marks if any are set, else the
+    # cursor row. One rule, so forward/drop need no notion of "batch mode".
+    def target_ids : Array(Int64)
+      return marked_ids unless @marks.empty?
+      [selected_id].compact
+    end
+
+    # `t` — flip the cursor row's mark, then step DOWN one, so a run of `t` marks consecutive
+    # holds. Plainly +1 (not History's follow-aware "next older"): the queue is insertion-
+    # ordered with no follow mode and no reversible sort. The anchor lands on the row just
+    # toggled, so `t` then ⇧↓ extends from it.
+    #
+    # The step CLAMPS at the last row, so one more `t` there lands on the row it just marked
+    # and takes the mark back off. Same as History at its own clamped end, and deliberate:
+    # a mark-only variant would leave the bottom hold with no way to un-mark it by key at all.
+    def toggle_mark : Nil
+      return unless id = selected_id
+      @marks.includes?(id) ? @marks.delete(id) : @marks.add(id)
+      step_cursor(1)
+      @mark_anchor = id
+      @mark_extent.clear
+    end
+
+    # ⇧T — mark every held message currently queued (the queue's Ctrl+A).
+    def mark_all : Nil
+      @items.each { |it| @marks.add(it.id) }
+      @mark_anchor = selected_id
+      @mark_extent.clear
+    end
+
+    def clear_marks : Nil
+      @marks.clear
+      reset_mark_anchor
+    end
+
+    # Forget where a range gesture started (and what it had added), so the next ⇧arrow
+    # anchors at the cursor instead of sweeping back to a stale point.
+    private def reset_mark_anchor : Nil
+      @mark_anchor = nil
+      @mark_extent.clear
+    end
+
+    # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
+    # and pressing a plain arrow does in a GUI list, where the highlight collapses instead of
+    # being left behind (#442/#457). Only the gesture's own ids go (@mark_extent): `t`/⇧T
+    # marks are deliberate tags, and dropping those too would put a discontiguous set out of
+    # reach. Returns how many marks it gave back, so the caller can say so.
+    def end_mark_gesture : Int32
+      before = @marks.size
+      @mark_extent.each { |id| @marks.delete(id) }
+      reset_mark_anchor
+      before - @marks.size
+    end
+
+    # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
+    # shift+click. The anchor is seeded from the cursor when it's unset or gone (a plain
+    # move/click clears it), so the first ⇧arrow always starts from where you are.
+    def extend_marks(delta : Int32) : Nil
+      return if @items.empty?
+      anchor_idx = @mark_anchor.try { |a| @items.index { |it| it.id == a } }
+      unless anchor_idx
+        @mark_anchor = selected_id
+        anchor_idx = @selected
+        @mark_extent.clear
+      end
+      step_cursor(delta)
+      lo, hi = {anchor_idx, @selected}.minmax
+      wanted = Set(Int64).new
+      (lo..hi).each { |i| @items[i]?.try { |it| wanted.add(it.id) } }
+      # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after
+      # ⇧↓⇧↓ leaves two rows marked rather than three. A mark made earlier by `t`/⇧T survives
+      # a range sweeping over it and back off, since it was never in @mark_extent.
+      (@mark_extent - wanted).each { |id| @marks.delete(id) }
+      added = wanted - @marks
+      @marks.concat(added)
+      @mark_extent = (@mark_extent & wanted) | added
+    end
+
+    # Cursor step used by the mark gestures. Deliberately NOT `move` — that no-ops while
+    # editing and is also the wheel's path; this one only ever runs from the queue's keyboard
+    # gestures. Clamps, so it saturates at both ends instead of wrapping.
+    private def step_cursor(delta : Int32) : Nil
+      return if @items.empty?
+      @selected = (@selected + delta).clamp(0, @items.size - 1)
+    end
+
+    # A still-held item by id (nil once it has been forwarded/dropped) — lets the controller
+    # name a batch target with the same `intercept_label` it uses for the cursor row.
+    def item_by_id(id : Int64) : Interceptor::Item?
+      @items.find { |it| it.id == id }
     end
 
     # --- catch-condition filter bar (a text sub-mode; mirrors History's QL bar) ---
@@ -440,6 +578,7 @@ module Gori::Tui
     def select_index(idx : Int32) : Nil
       return if @items.empty?
       @selected = idx.clamp(0, @items.size - 1)
+      reset_mark_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
     end
 
     # Click the queue list → focus the list (stop editing the detail editor).
@@ -511,6 +650,7 @@ module Gori::Tui
         screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
         rx -= count.size + 2
       end
+      rx = render_mark_chip(screen, rect, rx)
 
       left_w = {rx - x, 0}.max
       if @query.blank?
@@ -522,6 +662,19 @@ module Gori::Tui
         screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
+    end
+
+    # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left edge
+    # of the chip cluster. No "hidden" split (History's chip carries one): the queue renders
+    # every pending item, and reload prunes marks whose item is gone, so the count can never
+    # exceed what is on screen.
+    private def render_mark_chip(screen : Screen, rect : Rect, right_x : Int32) : Int32
+      return right_x if @marks.empty?
+      chip = "#{@marks.size} marked"
+      x = right_x - chip.size - 1
+      return right_x unless x > rect.x + 1 # too narrow — the held count wins
+      screen.text(x, rect.y, chip, Theme.accent)
+      x
     end
 
     # The Tab-completion row under the condition input: the leading candidate is what ↹
@@ -567,19 +720,34 @@ module Gori::Tui
         it = @items[idx]
         y = inner.y + i
         selected = idx == @selected
-        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
-        if selected
-          screen.fill(Rect.new(inner.x, y, inner.w, 1), bg)
-          screen.cell(inner.x, y, '▎', Theme.accent, bg)
-        end
+        marked = @marks.includes?(it.id)
+        bg = row_band(screen, inner, y, selected: selected, marked: marked, focused: focused)
         badge, bcolor = it.kind.request? ? {"REQ", Theme.yellow} : {"RES", Theme.accent}
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
         method, raw_target = effective_method_target(it) # edited values for the loaded item
         target = Url.origin_path(raw_target)             # strip scheme+authority for plaintext forward-proxy targets
         label = it.kind.request? ? "#{method} #{it.host}#{target}" : "#{it.host} #{target}"
-        screen.text(inner.x + 5, y, label, selected ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
+        screen.text(inner.x + 5, y, label, selected || marked ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
       end
       Frame.scroll_gauge(screen, inner, @items.size, @scroll, focused)
+    end
+
+    # Paint a queue row's background band + gutter glyph, returning the bg every cell on that
+    # row then draws over. A marked row reads as a dim band with a FULLER bar, so it stays
+    # distinguishable from the cursor row (accent band) and from a cursor row that is ALSO
+    # marked (accent band + full bar) — the same two glyphs History's list uses. Both glyphs
+    # are single-width, so no column offset moves and list_row_at stays valid.
+    private def row_band(screen : Screen, inner : Rect, y : Int32, *,
+                         selected : Bool, marked : Bool, focused : Bool) : Color
+      return Theme.bg unless selected || marked
+      bg = if selected
+             focused ? Theme.accent_bg : Theme.selection_dim
+           else
+             Theme.selection_dim
+           end
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg)
+      screen.cell(inner.x, y, marked ? '▌' : '▎', Theme.accent, bg)
+      bg
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil

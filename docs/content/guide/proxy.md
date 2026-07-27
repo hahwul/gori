@@ -33,6 +33,10 @@ Press `i` to enable **Intercept**. When on, matching requests (and optionally re
   <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
 </figure>
 
+The queue takes the same **multi-select** as the History list ([Marking flows](#marking-flows), below): `t` marks the held message under the cursor and steps down, `Shift-↑` / `Shift-↓` extend a contiguous range, `Shift-T` marks the whole queue, and `Esc` clears. Forward (`f`) and drop (`d`) then act on **the marks if any are set, else the cursor row**, so a burst of holds can be released or killed in one keystroke — `Shift-F` still forwards the entire queue whether anything is marked or not. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count; a mark disappears the moment its message leaves the queue, so the count never outlives what is on screen.
+
+Reading a held message needs no marks and no editor: `Shift-←` / `Shift-→` scroll the preview sideways and `PgUp` / `PgDn` / `Home` / `End` scroll it vertically, leaving the held bytes untouched.
+
 ## Scope
 
 Scope keeps a large session focused on your target. In the **Project** tab you define include/exclude rules by host, string, or regular expression. Toggle the **scope lens** with `s` to filter the views down to in-scope traffic, and use scope to gate what Intercept and the scanners act on.

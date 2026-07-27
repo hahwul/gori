@@ -814,6 +814,28 @@ class FakeExecContext < Gori::Verb::ExecContext
     @intercept_selected
   end
 
+  def intercept_mark_toggle : Nil
+    rec(:intercept_mark_toggle)
+  end
+
+  def intercept_mark_all : Nil
+    rec(:intercept_mark_all)
+  end
+
+  def intercept_mark_clear : Nil
+    rec(:intercept_mark_clear)
+  end
+
+  def intercept_mark_extend(delta : Int32) : Nil
+    rec(:intercept_mark_extend, delta)
+  end
+
+  property marked_intercept : Int32 = 0 # settable so the mark-gated verbs can be exercised
+
+  def marked_intercept_count : Int32
+    @marked_intercept
+  end
+
   def export_ca : Nil
     rec(:export_ca)
   end

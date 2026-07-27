@@ -23,6 +23,14 @@ private def hold_req(ic, host, target, raw)
   Fiber.yield
 end
 
+# Three holds so a mark range can both grow and shrink; queue order is the hold order.
+private def three_holds(ic)
+  %w[/one /two /three].each do |p|
+    hold_req(ic, "acme.test", p, "GET #{p} HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+  end
+  InterceptView.new.tap(&.reload(ic))
+end
+
 describe Gori::Tui::InterceptView do
   it "renders the held queue with a REQ badge and host+target" do
     tmp_interceptor do |ic|
@@ -85,7 +93,7 @@ describe Gori::Tui::InterceptView do
     end
   end
 
-  it "vscroll_detail scrolls a held body taller than the pane into view (shift+↑/↓)" do
+  it "vscroll_detail scrolls a held body taller than the pane into view (PgUp/PgDn)" do
     tmp_interceptor do |ic|
       filler = (1..20).map { |i| "X-#{i}: v#{i}" }.join("\r\n")
       raw = "GET /login HTTP/1.1\r\nHost: acme.test\r\nX-Top: TOPMARK\r\n#{filler}\r\nX-Bot: BOTMARK\r\n\r\n"
@@ -178,6 +186,135 @@ describe Gori::Tui::InterceptView do
       out = String.new(view.forward_bytes(it))
       out.should contain("Content-Length: 4") # synthesized so the added body is framed
       out.should end_with("\r\n\r\nBODY")
+    end
+  end
+end
+
+describe "Intercept marks (multi-select)" do
+  it "marks the cursor row with `t` and steps down, so a run of `t` marks consecutive holds" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.mark_count.should eq(0)
+      ids = [] of Int64
+      2.times { ids << view.selected_id.not_nil!; view.toggle_mark }
+      view.mark_count.should eq(2)
+      view.marked_ids.should eq(ids)   # queue order, not toggle order
+      view.selected_index.should eq(2) # stepped past both, ready for a third
+    end
+  end
+
+  # The step clamps at the last row, so `t` there is a plain toggle: press it twice and the
+  # mark you just placed comes back off. That is deliberate — it is the ONLY way `t` can
+  # un-mark the bottom hold, and the gutter bar shows the state the whole time.
+  it "re-toggles the bottom hold once the cursor has nowhere left to step" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      3.times { view.toggle_mark } # marks all three, cursor clamped on the last
+      view.mark_count.should eq(3)
+      view.selected_index.should eq(2)
+      view.toggle_mark # a fourth press is now over an already-marked row
+      view.mark_count.should eq(2)
+    end
+  end
+
+  it "un-marks on a second `t` over the same hold" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      id = view.selected_id.not_nil!
+      view.toggle_mark     # marks row 0, cursor → row 1
+      view.select_index(0) # back onto it
+      view.marked?(id).should be_true
+      view.toggle_mark
+      view.marked?(id).should be_false
+      view.mark_count.should eq(0)
+    end
+  end
+
+  it "⇧T marks the whole queue and target_ids falls back to the cursor row when clear" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      # No marks: every batch verb acts on the cursor row alone.
+      view.target_ids.should eq([view.selected_id.not_nil!])
+      view.mark_all
+      view.mark_count.should eq(3)
+      view.target_ids.should eq(view.marked_ids)
+      view.clear_marks
+      view.mark_count.should eq(0)
+      view.target_ids.size.should eq(1)
+    end
+  end
+
+  it "extends a contiguous range from the anchor, and gives rows back as it shrinks" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.extend_marks(1) # anchor seeds at row 0, cursor → row 1
+      view.mark_count.should eq(2)
+      view.extend_marks(1) # → row 2
+      view.mark_count.should eq(3)
+      view.extend_marks(-1) # back to row 1: the third row is handed back
+      view.mark_count.should eq(2)
+      view.selected_index.should eq(1)
+    end
+  end
+
+  it "keeps a deliberate `t` mark that a shrinking range sweeps back off" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.select_index(2)
+      tagged = view.selected_id.not_nil!
+      view.toggle_mark # a deliberate tag on the LAST row (cursor clamps there)
+      view.select_index(0)
+      view.extend_marks(1)
+      view.extend_marks(1) # range now covers all three, incl. the tagged row
+      view.mark_count.should eq(3)
+      view.extend_marks(-1)
+      view.extend_marks(-1)               # range collapses back to row 0 only
+      view.marked?(tagged).should be_true # the tag was never the gesture's to drop
+      view.mark_count.should eq(2)
+    end
+  end
+
+  it "end_mark_gesture hands back only what the ⇧arrow gesture added" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.select_index(2)
+      view.toggle_mark # deliberate tag
+      view.select_index(0)
+      view.extend_marks(1) # gesture marks rows 0+1
+      view.mark_count.should eq(3)
+      view.end_mark_gesture.should eq(2) # …only those two go back
+      view.mark_count.should eq(1)
+      view.end_mark_gesture.should eq(0) # nothing left to hand back → the caller stays quiet
+    end
+  end
+
+  it "prunes a mark when its hold leaves the queue (forwarded here or by a peer)" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.mark_all
+      gone = view.marked_ids.first
+      ic.forward(gone) # e.g. an MCP peer's intercept_forward
+      view.reload(ic)
+      view.mark_count.should eq(2)
+      view.marked?(gone).should be_false
+      view.item_by_id(gone).should be_nil
+    end
+  end
+
+  it "renders a marked row with the fuller gutter bar and a live count chip" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.select_index(1)
+      view.toggle_mark # mark the MIDDLE hold, so it isn't also the cursor row
+      view.select_index(0)
+
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.row(0).includes?("1 marked").should be_true # chip on the filter bar
+      # Queue rows start under the filter bar + the card's top border.
+      backend.row(2).includes?('▎').should be_true # cursor row: the thin bar
+      backend.row(3).includes?('▌').should be_true # marked row: the full bar
+      backend.row(4).includes?('▌').should be_false
     end
   end
 end

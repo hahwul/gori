@@ -39,14 +39,27 @@ module Gori::Tui
       elsif @intercept.querying?
         "type condition · ↹ complete · ↵ apply · esc clear"
       else
-        f = Hotkeys.binding_label(reg, "intercept.forward", "f")
-        d = Hotkeys.binding_label(reg, "intercept.drop", "d")
-        fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
-        filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
-        catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
-        on = Hotkeys.binding_label(reg, "intercept.toggle", "i")
-        "↑/↓ move · ⇧←/→ h-scroll · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{filt} filter · #{catch} catch · #{on} on/off · space cmds · ↹ detail · esc tabs"
+        queue_hint(reg)
       end
+    end
+
+    # The queue hint. Over a mark set it says so and names the batch keys — forward/drop then
+    # act on every mark, so a hint still reading "fwd" would understate what `f` is about to
+    # do. (`i on/off` and `↹ detail` come off the base line to make room: the i:CATCH chip
+    # already carries its own chord, and Tab is the app-wide focus ring.)
+    private def queue_hint(reg : Verb::Registry) : String
+      f = Hotkeys.binding_label(reg, "intercept.forward", "f")
+      d = Hotkeys.binding_label(reg, "intercept.drop", "d")
+      mark = Hotkeys.binding_label(reg, "intercept.mark-toggle", "t")
+      n = @intercept.mark_count
+      if n > 0
+        all = Hotkeys.binding_label(reg, "intercept.mark-all", "⇧T")
+        return "#{n} marked · #{f} fwd all · #{d} drop all · #{mark} mark · #{all} mark all · esc clear · space cmds"
+      end
+      fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
+      filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
+      catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
+      "↑/↓ move · #{mark} mark · ⇧↑/↓ range · ⇧←/→ h-scroll · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{filt} filter · #{catch} catch · space cmds · esc tabs"
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable
@@ -125,21 +138,55 @@ module Gori::Tui
       # Modified chords (^F find, etc.) must not hit list actions — bare `lower_f?`
       # would also match Ctrl+F and irreversibly forward a held message.
       return false if ev.ctrl? || ev.alt?
+      # ⇧↑/⇧↓ belong to intercept.mark-extend-* in the keymap. The arrow branches below
+      # ignore the shift modifier, so without this they would swallow the range gesture as a
+      # plain move and the verbs would never fire.
+      return false if ev.shift? && (key.up? || key.down?)
       case
-      when key.escape?              then @host.request_focus(:menu)
-      when key.lower_j?, key.down?  then @intercept.move(1)
-      when key.lower_k?, key.up?    then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
+      when key.escape?              then queue_escape
+      when key.lower_j?, key.down?  then queue_move(1)
+      when key.lower_k?, key.up?    then @intercept.at_top? ? @host.request_focus(:menu) : queue_move(-1)
       when key.enter?, key.lower_e? then @intercept.toggle_edit
-      else                               return false # f/d/⇧F/i/c/… → keymap
+      else                               return false # f/d/⇧F/i/c/t/⇧T… → keymap
       end
       true
     end
 
-    # Shift+←/→ (horizontal) and Shift+↑/↓ (vertical) scroll for the read-only held-item
-    # preview — kept OUT of handle_queue_key (called from handle_body_key instead), since
-    # that dispatch is already at ameba's complexity ceiling. Bare arrows still navigate the
-    # queue (handle_queue_key); only the shifted arrows scroll the preview, so a tall held
-    # body is fully readable without entering edit mode.
+    # esc over a mark set hands the marks back first — the reflex clear, mirroring History,
+    # where it shadows the pop-to-tab-bar ONLY while marks are set.
+    private def queue_escape : Nil
+      if @intercept.mark_count > 0
+        @intercept.clear_marks
+        @host.status("marks cleared")
+      else
+        @host.request_focus(:menu)
+      end
+    end
+
+    # A plain (unshifted) cursor key ends the ⇧arrow range gesture before it moves. Kept out
+    # of InterceptView#move deliberately: the wheel shares that method, and a wheel notch
+    # reads as "scroll the viewport", not as a selection gesture (#457).
+    private def queue_move(delta : Int32) : Nil
+      end_range_gesture
+      @intercept.move(delta)
+    end
+
+    # Hand back what the ⇧arrow gesture marked, and say so only when marks actually went away
+    # — arrowing down an unmarked queue stays silent. Names what survived, since `t`/⇧T marks
+    # are deliberately not the gesture's to drop.
+    private def end_range_gesture : Nil
+      return if @intercept.end_mark_gesture == 0
+      n = @intercept.mark_count
+      @host.status(n == 0 ? "selection cleared" : "selection cleared — #{n} still marked")
+    end
+
+    # Shift+←/→ horizontal scroll for the read-only held-item preview — kept OUT of
+    # handle_queue_key (called from handle_body_key instead), since that dispatch is already
+    # at ameba's complexity ceiling. Bare arrows still navigate the queue.
+    #
+    # ⇧↑/⇧↓ used to scroll this preview vertically; they are now the mark-range gesture
+    # (⇧arrow = "extend the selection" everywhere else in the TUI, incl. History's list and
+    # the flow detail). Vertical reading moved to PgUp/PgDn/Home/End — see #body_scroll.
     private def queue_key_scroll(ev : Termisu::Event::Key) : Bool
       key = ev.key
       return false unless ev.shift?
@@ -147,13 +194,21 @@ module Gori::Tui
         @intercept.hscroll_detail(-1)
       elsif key.right?
         @intercept.hscroll_detail(1)
-      elsif key.up?
-        @intercept.vscroll_detail(-1)
-      elsif key.down?
-        @intercept.vscroll_detail(1)
       else
         return false
       end
+      true
+    end
+
+    # PageUp/PageDown/Home/End page the read-only held-message preview (the Runner routes
+    # these here when handle_body_key declines them). The preview, not the queue: a hold
+    # queue is a handful of rows that j/k covers, while a held body runs to thousands of
+    # lines and this is now its only scroll path short of opening the editor. No editing?
+    # guard is needed — handle_body_key swallows every key while the editor is up, so these
+    # never reach here then (and vscroll_detail self-guards regardless).
+    def body_scroll(delta : Int32) : Bool
+      return false if @intercept.empty?
+      @intercept.vscroll_detail(delta)
       true
     end
 
@@ -208,6 +263,9 @@ module Gori::Tui
       if pane == :list
         @intercept.focus_list
         if idx = @intercept.list_row_at(inner, mx, my)
+          # A click on ANOTHER row is a cursor gesture, so it collapses the range exactly as a
+          # plain arrow does; re-clicking the row you are already on leaves the set alone.
+          end_range_gesture unless idx == @intercept.selected_index
           @intercept.select_index(idx)
         end
       else
@@ -258,18 +316,44 @@ module Gori::Tui
       @host.status(on ? "intercept ON — held traffic waits (HTTPS→h1 for in-scope; gRPC may fail)" : "intercept off")
     end
 
+    # Forward the effective target set: every marked hold, else the cursor row. The editor
+    # holds at most ONE item's in-progress edit, so that item forwards its edited bytes and
+    # every other target its original ones (nil ⇒ Interceptor#forward sends item.raw) — the
+    # same `overrides` reasoning intercept_forward_all uses, so a batch can never send stale
+    # bytes for the message you were just editing.
     def intercept_forward : Nil
-      return unless it = @intercept.selected_item
-      @host.session.interceptor.forward(it.id, @intercept.forward_bytes(it))
-      @intercept.reload(@host.session.interceptor)
-      @host.status("forwarded #{intercept_label(it)}")
+      ids = @intercept.target_ids
+      return if ids.empty?
+      ic = @host.session.interceptor
+      edit = @intercept.pending_edit
+      label = batch_label(ids) # built BEFORE the decisions go out — the items are gone after
+      ids.each { |id| ic.forward(id, (edit && edit[0] == id) ? edit[1] : nil) }
+      @intercept.reload(ic)
+      @host.status("forwarded #{label}")
     end
 
+    # Drop the effective target set. No confirm even in batch: a dropped hold answers the
+    # client with a canned 502 it can retry, which is not the irreversible data loss
+    # history.delete guards — and gating only the batch path would be inconsistent with the
+    # single drop right next to it. The toast carries the count instead.
     def intercept_drop : Nil
-      return unless it = @intercept.selected_item
-      @host.session.interceptor.drop(it.id)
-      @intercept.reload(@host.session.interceptor)
-      @host.status("dropped #{intercept_label(it)}")
+      ids = @intercept.target_ids
+      return if ids.empty?
+      ic = @host.session.interceptor
+      label = batch_label(ids)
+      ids.each { |id| ic.drop(id) }
+      @intercept.reload(ic)
+      @host.status("dropped #{label}")
+    end
+
+    # How a forward/drop toast names its targets: the one held message when the verb ran on
+    # the cursor row, else the count — a dozen "GET /a, GET /b …" labels would not fit, and
+    # the count is what a batch decision is actually about.
+    private def batch_label(ids : Array(Int64)) : String
+      if ids.size == 1 && (it = @intercept.item_by_id(ids.first))
+        return intercept_label(it)
+      end
+      "#{ids.size} held message#{ids.size == 1 ? "" : "s"}"
     end
 
     def intercept_forward_all : Nil
@@ -305,6 +389,48 @@ module Gori::Tui
 
     def selected_intercept_id : Int64?
       @intercept.selected_id
+    end
+
+    # --- marks (multi-select over the hold queue) ---
+    # The two gestures that MOVE the queue cursor guard on `editing?`. The keymap can't reach
+    # them there (the held-bytes editor swallows every key), but the command palette can — and
+    # stepping the cursor off the loaded item would leave @editing true over a different
+    # hold's read-only preview, with the focus ring still saying "detail".
+    def intercept_mark_toggle : Nil
+      return if @intercept.editing?
+      return @host.status("nothing held to mark") unless @intercept.selected_id
+      @intercept.toggle_mark
+      @host.status(mark_status)
+    end
+
+    def intercept_mark_all : Nil
+      return @host.status("nothing held to mark") if @intercept.empty?
+      @intercept.mark_all
+      @host.status(mark_status)
+    end
+
+    def intercept_mark_clear : Nil
+      @intercept.clear_marks
+      @host.status("marks cleared")
+    end
+
+    def intercept_mark_extend(delta : Int32) : Nil
+      return if @intercept.empty? || @intercept.editing?
+      @intercept.extend_marks(delta)
+      @host.status(mark_status)
+    end
+
+    def marked_intercept_count : Int32
+      @intercept.mark_count
+    end
+
+    # Shared mark toast. No "not visible" split (History's carries one): the queue renders
+    # every pending item and reload prunes marks whose hold is gone, so the count always
+    # describes rows that are on screen.
+    private def mark_status : String
+      n = @intercept.mark_count
+      return "no marks — forward/drop act on the cursor row" if n == 0
+      "#{n} held message#{n == 1 ? "" : "s"} marked"
     end
 
     # A short human label for a held item — "GET /path" (request) or the status line

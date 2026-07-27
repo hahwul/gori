@@ -812,6 +812,26 @@ private class FakeContext < ExecContext
     @selected
   end
 
+  def intercept_mark_toggle : Nil
+    @calls << :intercept_mark_toggle
+  end
+
+  def intercept_mark_all : Nil
+    @calls << :intercept_mark_all
+  end
+
+  def intercept_mark_clear : Nil
+    @calls << :intercept_mark_clear
+  end
+
+  def intercept_mark_extend(delta : Int32) : Nil
+    @calls << :intercept_mark_extend
+  end
+
+  def marked_intercept_count : Int32
+    0
+  end
+
   def export_ca : Nil
     @calls << :export_ca
   end

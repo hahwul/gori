@@ -4253,14 +4253,15 @@ module Gori::Tui
 
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
-      history_mark_menu_title(verb_id)
+      history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id)
     end
 
-    # The card's state label — "SPACE · 3 MARKED" while History's mark set is non-empty (#442),
-    # so opening the menu over marks announces up front that the actions below are plural.
+    # The card's state label — "SPACE · 3 MARKED" while a mark set is non-empty (#442), so
+    # opening the menu over marks announces up front that the actions below are plural. Both
+    # mark-capable lists feed it; only one can be active at a time (they are different tabs).
     # nil ⇒ the section label (or nothing at all), exactly as before.
     private def space_menu_banner : String?
-      n = history_mark_menu_count
+      n = history_mark_menu_count + intercept_mark_menu_count
       n > 0 ? "#{n} MARKED" : nil
     end
 
@@ -4314,6 +4315,31 @@ module Gori::Tui
         # comparer_add_selected falls back to (the next-slot ring on the cursor row).
       when "history.compare" then n == 2 ? "Compare the 2 marked flows" : nil
       end
+    end
+
+    # How many marks the Intercept QUEUE menu should speak for; 0 on any other tab. The
+    # held-bytes editor keeps the same target set (marks don't belong to the cursor row), so
+    # unlike History's detail there is no sub-state to exclude here.
+    private def intercept_mark_menu_count : Int32
+      @active_tab == :intercept ? intercept_controller.marked_intercept_count : 0
+    end
+
+    # Retitle the Intercept queue's menu entries while marks are set, so the menu says what
+    # will actually happen — "Forward 3 held messages". MUST return nil when nothing is
+    # marked, so every existing title stays byte-identical. forward-all is absent on purpose:
+    # it releases the whole queue regardless of the marks, and a count would misdescribe it.
+    INTERCEPT_BATCH_TITLES = {
+      "intercept.forward" => "Forward %s",
+      "intercept.drop"    => "Drop %s",
+    }
+
+    private def intercept_mark_menu_title(verb_id : String) : String?
+      n = intercept_mark_menu_count
+      return nil if n == 0
+      if fmt = INTERCEPT_BATCH_TITLES[verb_id]?
+        return fmt % plural(n, "held message")
+      end
+      "Clear #{plural(n, "mark")}" if verb_id == "intercept.mark-clear"
     end
 
     private def plural(n : Int32, noun : String) : String

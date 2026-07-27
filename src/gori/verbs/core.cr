@@ -158,19 +158,64 @@ module Gori
 
       # Forward / drop / forward-all are Intercept-scope keymap verbs (rebindable).
       # The queue defers bare f/d/⇧F to the keymap; space-menu mnemonics stay f/d/a.
+      # Forward and drop are BATCH-capable: they act on the marks if any are set, else the
+      # cursor row. No separate gate is needed for that — the view prunes marks whose hold has
+      # left the queue, so a non-empty mark set implies a non-empty queue implies a cursor row.
       intercept_selected = ->(ctx : Verb::ExecContext) { !ctx.selected_intercept_id.nil? }
       r.register Verb::Definition.new(
-        "intercept.forward", "Forward held", "Forward the selected held message (with edits)",
+        "intercept.forward", "Forward held", "Forward the marked held messages — or the selected one (with edits)",
         Verb::Scope::Intercept, [Verb::Chord.new("f")],
         available: intercept_selected, mnemonic: 'f') { |ctx| ctx.intercept_forward; nil }
       r.register Verb::Definition.new(
-        "intercept.drop", "Drop held", "Drop the selected held message",
+        "intercept.drop", "Drop held", "Drop the marked held messages — or the selected one",
         Verb::Scope::Intercept, [Verb::Chord.new("d")],
         available: intercept_selected, mnemonic: 'd') { |ctx| ctx.intercept_drop; nil }
+      # Deliberately NOT mark-aware: ⇧F stays "the whole queue, marks or not", so the pair
+      # reads f = the target set / ⇧F = everything.
       r.register Verb::Definition.new(
         "intercept.forward-all", "Forward all held", "Forward every held message",
         Verb::Scope::Intercept, [Verb::Chord.new("f", shift: true)],
         available: intercept_selected, mnemonic: 'a') { |ctx| ctx.intercept_forward_all; nil }
+
+      # --- multi-select marks over the hold queue (the History list's model, #442) ---
+      # Same keys (`t` / ⇧T / esc / ⇧arrows), same rule — "the marks if any are set, else the
+      # cursor row" — so triaging a burst of holds needs no second set of batch verbs. `t`/⇧T
+      # are free in Scope::Intercept (f/d/c/i//,e are the queue's other claims), and the queue
+      # defers them to the keymap like every other rebindable verb.
+      r.register Verb::Definition.new(
+        "intercept.mark-toggle", "Mark held", "Mark/unmark this held message and step down — forward/drop then act on every marked one",
+        Verb::Scope::Intercept, [Verb::Chord.new("t")],
+        available: intercept_selected, mnemonic: 't') { |ctx| ctx.intercept_mark_toggle; nil }
+
+      # ⇧T is the queue's Ctrl+A. Chord.new("t", shift: true), NOT Chord.new("T") —
+      # Keybind.from_event normalises a typed capital to shift+lowercase; menu_key skips shift
+      # chords, hence the explicit mnemonic (same reasoning as history.mark-all).
+      r.register Verb::Definition.new(
+        "intercept.mark-all", "Mark all held", "Mark every message currently held in the queue",
+        Verb::Scope::Intercept, [Verb::Chord.new("t", shift: true)],
+        available: intercept_selected, mnemonic: 'T') { |ctx| ctx.intercept_mark_all; nil }
+
+      # esc clears too (InterceptController#queue_escape shadows the pop-to-tab-bar only while
+      # marks are set) — that's the reflex; this is the discoverable form.
+      r.register Verb::Definition.new(
+        "intercept.mark-clear", "Clear marks", "Drop every mark (esc does the same)",
+        Verb::Scope::Intercept,
+        available: ->(ctx : Verb::ExecContext) { ctx.marked_intercept_count > 0 },
+        mnemonic: 'N') { |ctx| ctx.intercept_mark_clear; nil }
+
+      # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
+      # shift+click. These took ⇧↑/⇧↓ over from the read-only preview's vertical scroll, which
+      # moved to PgUp/PgDn/Home/End (InterceptController#body_scroll): ⇧arrow means "extend the
+      # selection" everywhere else in the TUI. Hidden like History's nav primitives.
+      r.register Verb::Definition.new(
+        "intercept.mark-extend-down", "Extend marks down", "Extend the marked range one row down",
+        Verb::Scope::Intercept, [Verb::Chord.new("down", shift: true)],
+        hidden: true, available: intercept_selected) { |ctx| ctx.intercept_mark_extend(1); nil }
+
+      r.register Verb::Definition.new(
+        "intercept.mark-extend-up", "Extend marks up", "Extend the marked range one row up",
+        Verb::Scope::Intercept, [Verb::Chord.new("up", shift: true)],
+        hidden: true, available: intercept_selected) { |ctx| ctx.intercept_mark_extend(-1); nil }
 
       # Catch controls — what to hold (direction) + a condition that narrows it. Keymap-
       # driven (Intercept scope) so they're rebindable; the queue defers `c`/`/` to here,
