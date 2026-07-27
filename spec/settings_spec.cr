@@ -11,40 +11,48 @@ private def reset_net
 end
 
 describe Gori::Settings do
-  describe ".upstream_proxy_addr" do
-    it "returns nil when unset/blank" do
+  # Driven through `upstream_route` — the one decision point `Upstream.dial` actually calls —
+  # rather than a scalar-only helper beside it. The scalar's parse is what is under test here;
+  # the rule table and the project pin have their own coverage in spec/proxy/upstream_rules_spec.
+  describe ".upstream_route (the legacy scalar as catch-all)" do
+    it "is DIRECT when the scalar is unset/blank" do
       Gori::Settings.upstream_proxy = "  "
-      Gori::Settings.upstream_proxy_addr.should be_nil
+      Gori::Settings.upstream_route("example.com").direct?.should be_true
     ensure
       Gori::Settings.upstream_proxy = ""
     end
 
     it "parses host:port" do
       Gori::Settings.upstream_proxy = "127.0.0.1:8080"
-      Gori::Settings.upstream_proxy_addr.should eq({"127.0.0.1", 8080})
+      route = Gori::Settings.upstream_route("example.com")
+      {route.kind, route.host, route.port}.should eq({"http", "127.0.0.1", 8080})
     ensure
       Gori::Settings.upstream_proxy = ""
     end
 
     it "strips an http:// scheme + trailing slash" do
       Gori::Settings.upstream_proxy = "http://proxy.local:3128/"
-      Gori::Settings.upstream_proxy_addr.should eq({"proxy.local", 3128})
+      route = Gori::Settings.upstream_route("example.com")
+      {route.host, route.port}.should eq({"proxy.local", 3128})
     ensure
       Gori::Settings.upstream_proxy = ""
     end
 
     it "defaults the port to 8080 when omitted" do
       Gori::Settings.upstream_proxy = "proxy.local"
-      Gori::Settings.upstream_proxy_addr.should eq({"proxy.local", 8080})
+      route = Gori::Settings.upstream_route("example.com")
+      {route.host, route.port}.should eq({"proxy.local", 8080})
     ensure
       Gori::Settings.upstream_proxy = ""
     end
 
     it "parses a bracketed IPv6 literal, with and without a port" do
       Gori::Settings.upstream_proxy = "[::1]"
-      Gori::Settings.upstream_proxy_addr.should eq({"::1", 8080})
+      route = Gori::Settings.upstream_route("example.com")
+      {route.host, route.port}.should eq({"::1", 8080})
       Gori::Settings.upstream_proxy = "[2001:db8::1]:3128"
-      Gori::Settings.upstream_proxy_addr.should eq({"2001:db8::1", 3128})
+      route = Gori::Settings.upstream_route("example.com")
+      {route.host, route.port}.should eq({"2001:db8::1", 3128})
     ensure
       Gori::Settings.upstream_proxy = ""
     end
@@ -935,7 +943,7 @@ describe Gori::Settings do
       reset_net
     end
 
-    it "a project override wins over the global (incl. upstream_proxy_addr)" do
+    it "a project override wins over the global (incl. the resolved route)" do
       reset_net
       Gori::Settings.upstream_proxy = "glob:3128"
       Gori::Settings.project_bind_host = "0.0.0.0"
@@ -944,7 +952,8 @@ describe Gori::Settings do
       Gori::Settings.effective_bind_host.should eq("0.0.0.0")
       Gori::Settings.effective_bind_port.should eq(9100)
       Gori::Settings.effective_upstream_proxy.should eq("corp:8888")
-      Gori::Settings.upstream_proxy_addr.should eq({"corp", 8888})
+      route = Gori::Settings.upstream_route("example.com")
+      {route.kind, route.host, route.port}.should eq({"http", "corp", 8888})
     ensure
       reset_net
     end
@@ -954,7 +963,7 @@ describe Gori::Settings do
       Gori::Settings.upstream_proxy = "glob:3128"
       Gori::Settings.project_upstream_proxy = ""
       Gori::Settings.effective_upstream_proxy.should eq("")
-      Gori::Settings.upstream_proxy_addr.should be_nil # "" ⇒ direct
+      Gori::Settings.upstream_route("example.com").direct?.should be_true # "" ⇒ direct
     ensure
       reset_net
     end

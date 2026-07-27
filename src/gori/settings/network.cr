@@ -233,21 +233,20 @@ module Gori::Settings
     end
   end
 
-  # Parse `upstream_proxy` into {host, port}, or nil when unset/blank. Accepts
-  # "host:port" with an optional "http://" scheme prefix; defaults the port to
-  # 8080 when omitted.
-  def self.upstream_proxy_addr : {String, Int32}?
-    proxy_addr(effective_upstream_proxy, default_port: DEFAULT_HTTP_PROXY_PORT)
-  end
-
   # Default proxy ports when a rule/scalar names no explicit port: the conventional HTTP-proxy
   # and SOCKS ports.
   DEFAULT_HTTP_PROXY_PORT = 8080
   DEFAULT_SOCKS_PORT      = 1080
 
-  # The shared "host:port" parse behind upstream_proxy_addr and the upstream RULE table
-  # (which needs a different default port per kind). Accepts an optional "http://" prefix and
-  # a bracketed IPv6 literal; nil when blank or when the host part is empty.
+  # The shared "host:port" parse behind the legacy scalar and the upstream RULE table (which
+  # needs a different default port per kind). Accepts an optional "http://" prefix and a
+  # bracketed IPv6 literal; nil when blank or when the host part is empty.
+  #
+  # There is deliberately no `upstream_proxy_addr` helper wrapping this over the scalar any
+  # more. It existed when the scalar WAS the routing decision; once `upstream_route` folded
+  # the project pin, the rule table and the scalar into one answer, a second entry point that
+  # saw only the scalar was a decision point that could quietly disagree with the dial path —
+  # and it had already fallen out of use. Resolve a destination through `upstream_route`.
   def self.proxy_addr(value : String, *, default_port : Int32) : {String, Int32}?
     value = value.strip
     return nil if value.empty?
