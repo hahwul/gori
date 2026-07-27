@@ -338,6 +338,46 @@ describe Gori::Store do
     end
   end
 
+  it "delete_issues removes every id and its links in ONE committed write" do
+    with_store do |store|
+      fid = store.insert_flow(sample_request(target: "/f"))
+      a = store.insert_issue("a", Gori::Store::Severity::High, "acme.test", fid)
+      b = store.insert_issue("b", Gori::Store::Severity::Low, "acme.test", fid)
+      keep = store.insert_issue("keep", Gori::Store::Severity::Info, nil, nil)
+
+      store.delete_issues([a, b]).should be_true
+      store.issues.map(&.id).should eq([keep])
+      # The per-issue cascade is the singular's, so the link rows go with them.
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, a).should be_empty
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, b).should be_empty
+      store.write_failures.should eq(0)
+      # An empty batch is a no-op success, not a write.
+      store.delete_issues([] of Int64).should be_true
+    end
+  end
+
+  it "update_issues writes one field across N issues and leaves the rest untouched" do
+    with_store do |store|
+      a = store.insert_issue("a", Gori::Store::Severity::High, nil, nil)
+      b = store.insert_issue("b", Gori::Store::Severity::Low, nil, nil)
+      other = store.insert_issue("other", Gori::Store::Severity::Critical, nil, nil)
+
+      store.update_issues([a, b], status: Gori::Store::Status::FalsePositive).should be_true
+      store.get_issue(a).not_nil!.status.should eq(Gori::Store::Status::FalsePositive)
+      store.get_issue(b).not_nil!.status.should eq(Gori::Store::Status::FalsePositive)
+      # severity is NOT in the UPDATE, so each keeps its own.
+      store.get_issue(a).not_nil!.severity.should eq(Gori::Store::Severity::High)
+      store.get_issue(b).not_nil!.severity.should eq(Gori::Store::Severity::Low)
+      store.get_issue(other).not_nil!.status.should eq(Gori::Store::Status::Open)
+
+      # A stale id in the set is simply not matched — the live ones still commit.
+      store.delete_issues([b]).should be_true
+      store.update_issues([a, b], severity: Gori::Store::Severity::Info).should be_true
+      store.get_issue(a).not_nil!.severity.should eq(Gori::Store::Severity::Info)
+      store.write_failures.should eq(0)
+    end
+  end
+
   it "migrate! serializes concurrent openers: a second opener sees the migrated version" do
     path = File.tempname("gori-migrace", ".db")
     db1 = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")

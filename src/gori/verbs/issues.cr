@@ -36,9 +36,79 @@ module Gori
         "issues.new", "New issue", "Create a blank issue", Verb::Scope::Issues,
         [Verb::Chord.new("n")]) { |ctx| ctx.issues_new; nil }
 
+      # The BATCH gate: "is there anything to act on", where anything = the marks if any are
+      # set, else the cursor row. Equivalent to "a row is selected" when nothing is marked, so
+      # it only adds the case where every mark has scrolled out from under the cursor.
+      issues_targets = ->(ctx : Verb::ExecContext) { !ctx.selected_issue_ids.empty? }
+
       r.register Verb::Definition.new(
-        "issues.delete", "Delete issue", "Delete the selected issue", Verb::Scope::Issues,
-        [Verb::Chord.new("d")]) { |ctx| ctx.issues_delete; nil }
+        "issues.delete", "Delete issue", "Delete the selected issue (or every marked one)",
+        Verb::Scope::Issues, [Verb::Chord.new("d")],
+        available: issues_targets) { |ctx| ctx.issues_delete; nil }
+
+      # Severity/status from the LIST, so re-triaging a set is one pass: mark five, pick
+      # "False positive" once. Same ExecContext methods as the detail-scope pair below —
+      # they resolve through selected_issue_ids, so there is one implementation and no
+      # `issues.batch-*` twin. Menu keys match the detail's ('s'/'c'); a different scope, so
+      # validate_menu_keys! sees no collision.
+      r.register Verb::Definition.new(
+        "issues.set-severity", "Set severity", "Pick the severity for the selected/marked issues",
+        Verb::Scope::Issues, [] of Verb::Chord,
+        available: issues_targets, mnemonic: 's') { |ctx| ctx.issue_set_severity; nil }
+
+      r.register Verb::Definition.new(
+        "issues.set-status", "Set status", "Pick the triage status for the selected/marked issues",
+        Verb::Scope::Issues, [] of Verb::Chord,
+        available: issues_targets, mnemonic: 'c') { |ctx| ctx.issue_set_status; nil }
+
+      # --- multi-select marks (the History list's gestures, #442) ---
+      # Marks make the EXISTING space menu act on N issues — every batch verb above reads
+      # ctx.selected_issue_ids ("marks if any, else the cursor row"). Scope::Issues belongs to
+      # this tab alone (unlike Scope::Body, which History shares with Project/Comparer), so no
+      # per-verb tab gate is needed here.
+      #
+      # `t` is the same mark key History uses, deliberately: it is the one gesture that has to
+      # feel identical across every list, and marking is a many-times-per-minute triage
+      # action (the L1 claim in docs/guide/hotkeys). It DOES pair with `t` = Edit title one
+      # ↵ away in Scope::IssuesDetail — the two never resolve together (Keymap#lookup is
+      # per-scope) and the detail is a modal drill-in, so the cross-tab consistency wins.
+      r.register Verb::Definition.new(
+        "issues.mark-toggle", "Mark issue", "Mark/unmark this issue and step down — the space menu then acts on every marked issue",
+        Verb::Scope::Issues, [Verb::Chord.new("t")],
+        available: ->(ctx : Verb::ExecContext) { !ctx.selected_issue_id.nil? },
+        mnemonic: 't') { |ctx| ctx.issues_mark_toggle; nil }
+
+      # ⇧T, the list's Ctrl+A: mark everything the CURRENT filter shows, so `/ severity:high`
+      # then ⇧T marks exactly those. The chord is Chord.new("t", shift: true), NOT
+      # Chord.new("T") — Keybind.from_event normalises a typed capital to shift+lowercase, so
+      # a "T" chord would never fire; menu_key skips shift chords, hence the explicit mnemonic.
+      r.register Verb::Definition.new(
+        "issues.mark-all", "Mark all (filtered)", "Mark every issue the current filter shows",
+        Verb::Scope::Issues, [Verb::Chord.new("t", shift: true)],
+        mnemonic: 'T') { |ctx| ctx.issues_mark_all; nil }
+
+      # esc clears too (IssuesController#handle_body_key shadows issues.leave only while marks
+      # are set) — that's the reflex; this is the discoverable form. Menu-only: 'N' is free in
+      # this scope, and clearing is not worth a chord of its own.
+      r.register Verb::Definition.new(
+        "issues.mark-clear", "Clear marks", "Drop every mark (esc does the same)",
+        Verb::Scope::Issues,
+        available: ->(ctx : Verb::ExecContext) { ctx.marked_issue_count > 0 },
+        mnemonic: 'N') { |ctx| ctx.issues_mark_clear; nil }
+
+      # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
+      # shift+click, and free here: Keymap#lookup matches a Chord record EXACTLY, so
+      # Chord("up", shift: true) never collided with issues.up's Chord("up"); it simply fell
+      # through to a no-op. Hidden, like the other nav primitives.
+      r.register Verb::Definition.new(
+        "issues.mark-extend-down", "Extend marks down", "Extend the marked range one row down",
+        Verb::Scope::Issues, [Verb::Chord.new("down", shift: true)],
+        hidden: true) { |ctx| ctx.issues_mark_extend(1); nil }
+
+      r.register Verb::Definition.new(
+        "issues.mark-extend-up", "Extend marks up", "Extend the marked range one row up",
+        Verb::Scope::Issues, [Verb::Chord.new("up", shift: true)],
+        hidden: true) { |ctx| ctx.issues_mark_extend(-1); nil }
 
       r.register Verb::Definition.new(
         "issues.leave", "Back to menu", "Return focus to the tab menu", Verb::Scope::Issues,

@@ -30,6 +30,18 @@ module Gori::Tui
       @links_scroll = 0
       @selected_link = 0
       @detail_focus = :links # :links | :notes — which detail region owns plain arrows
+      # Multi-select marks, keyed by ISSUE ID rather than row index (the History list's
+      # rule, #442): the list re-sorts on every severity/status edit and re-filters on
+      # every `/` keystroke, and the cursor is already id-anchored across a reload (see
+      # apply_filter), so an index-keyed set would silently retarget. A mark the current
+      # filter hides stays marked (marked_hidden_count reports it); a mark whose issue is
+      # gone simply fails to resolve at the verb.
+      @marks = Set(Int64).new
+      @mark_anchor = nil.as(Int64?) # id-keyed range anchor for the ⇧arrow extend
+      # Ids the CURRENT ⇧arrow gesture added, so shrinking the range gives them back the way
+      # a GUI shift+click does. Scoped to the gesture, so marks made by `t`/⇧T outside the
+      # range are never disturbed. Cleared whenever the anchor is.
+      @mark_extent = Set(Int64).new
       @notes_mode = InputMode::Read
       @notes_read = TextReadState.new
       @notes = TextArea.new
@@ -101,6 +113,7 @@ module Gori::Tui
       return if @issues.empty?
       @selected = (@selected + delta).clamp(0, @issues.size - 1)
       @preview_scroll = 0
+      reset_mark_anchor # a plain move re-seeds the range anchor, like a GUI list
     end
 
     # Inverts render_list's row layout (filter bar at rect.y, header at +1, divider
@@ -139,11 +152,20 @@ module Gori::Tui
       return if @issues.empty?
       @selected = idx.clamp(0, @issues.size - 1)
       @preview_scroll = 0
+      reset_mark_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
       @preview_focus = :list
     end
 
     def selected_index : Int32
       @selected
+    end
+
+    def selected_id : Int64?
+      @issues[@selected]?.try(&.id)
+    end
+
+    def empty? : Bool
+      @issues.empty?
     end
 
     # At the first (top) issue — lets the Runner pop focus to the tab bar on ↑.
@@ -336,8 +358,9 @@ module Gori::Tui
       @detail
     end
 
-    # The issue a delete would act on — the open detail, else the list selection
-    # (matches #delete's own precedence) — so the Runner can name it in the confirm.
+    # The issue a delete would act on — the open detail, else the list selection — so the
+    # Runner can name it in the confirm. Deliberately singular and mark-free: the detail is
+    # pinned to ONE issue, and the plural path is target_ids.
     def target_issue : Store::Issue?
       @detail || @issues[@selected]?
     end
@@ -348,14 +371,179 @@ module Gori::Tui
       refresh_detail(store)
     end
 
-    def delete(store : Store) : Nil
-      if issue = @detail
-        store.delete_issue(issue.id)
-        close_detail
-      elsif issue = @issues[@selected]?
-        store.delete_issue(issue.id)
+    # --- marks (multi-select) -------------------------------------------------
+
+    def marked?(id : Int64) : Bool
+      @marks.includes?(id)
+    end
+
+    def mark_count : Int32
+      @marks.size
+    end
+
+    # Marks the current filter does NOT show (or whose issue a peer deleted). Surfaced next
+    # to the count so a set larger than what's on screen is never a surprise.
+    def marked_hidden_count : Int32
+      return 0 if @marks.empty?
+      visible = 0
+      @issues.each { |f| visible += 1 if @marks.includes?(f.id) }
+      @marks.size - visible
+    end
+
+    # How many of `ids` the current filter does NOT show. Computed over the SET BEING ACTED
+    # ON rather than the whole mark set, so the number the delete confirm prints always
+    # refers to the rows that dialog names — the last thing read before data is destroyed.
+    def hidden_count(ids : Enumerable(Int64)) : Int32
+      visible = @issues.map(&.id).to_set
+      ids.count { |id| !visible.includes?(id) }
+    end
+
+    # Marks in DISPLAY order. Unlike History (where flow ids are monotonic with the list
+    # order, so sorting ids is enough), issues are ordered by severity DESC, created_at DESC
+    # — so the order has to come from the list itself. @all, not @issues: the unfiltered
+    # store list is still in display order AND still places marks the active filter hides.
+    # An id missing from @all was deleted by a peer session; dropping it here is the same
+    # "a stale mark simply fails to resolve" rule the batch handlers follow.
+    def marked_ids : Array(Int64)
+      return [] of Int64 if @marks.empty?
+      @all.compact_map { |f| f.id if @marks.includes?(f.id) }
+    end
+
+    # The effective target set every batch verb acts on: the marks if any are set, else the
+    # cursor row. One rule, so a verb needs no notion of "batch mode".
+    def target_ids : Array(Int64)
+      return marked_ids unless @marks.empty?
+      [selected_id].compact
+    end
+
+    # The ONE issue a batch verb treats as privileged when it needs a single representative —
+    # the severity/status picker's pre-selected value. NOT `target_ids.first`: that follows
+    # the severity sort, so re-triaging one issue would flip which of the marks seeds the
+    # picker. The cursor row wins when it is itself a target (it is the issue you were
+    # looking at); otherwise the oldest, which is stable under every sort and filter.
+    def primary_target_id : Int64?
+      ids = target_ids
+      return nil if ids.empty?
+      cur = selected_id
+      return cur if cur && ids.includes?(cur)
+      ids.min
+    end
+
+    # `t` — flip the cursor row's mark, then step DOWN, so a run of `t` marks consecutive
+    # rows. Plain +1 (History conditionalises this on its list order only because `follow`
+    # parks its cursor at the clamp end; Issues has one fixed sort and no tail). The anchor
+    # lands on the row just toggled, so `t` then ⇧↓ extends from it.
+    def toggle_mark : Nil
+      return unless id = selected_id
+      @marks.includes?(id) ? @marks.delete(id) : @marks.add(id)
+      step_cursor(1)
+      @mark_anchor = id
+      @mark_extent.clear
+    end
+
+    # ⇧T — mark every issue the CURRENT filter shows, unioned with what's already marked (so
+    # narrowing the filter twice accumulates rather than replaces).
+    def mark_all : Nil
+      @issues.each { |f| @marks.add(f.id) }
+      @mark_anchor = selected_id
+      @mark_extent.clear
+    end
+
+    def clear_marks : Nil
+      @marks.clear
+      reset_mark_anchor
+    end
+
+    # Forget where a range gesture started (and what it had added), so the next ⇧arrow
+    # anchors at the cursor instead of sweeping back to a stale point.
+    private def reset_mark_anchor : Nil
+      @mark_anchor = nil
+      @mark_extent.clear
+    end
+
+    # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
+    # and pressing a plain arrow does in a GUI list, where the highlight collapses instead of
+    # being left behind. Only the gesture's own ids go (@mark_extent): `t`/⇧T marks are
+    # deliberate tags, and dropping those too would put a discontiguous set out of reach
+    # ("mark this one, skip three, mark that one"). Returns how many marks it gave back, so
+    # the caller can say so rather than let a range vanish silently.
+    def end_mark_gesture : Int32
+      before = @marks.size
+      @mark_extent.each { |id| @marks.delete(id) }
+      reset_mark_anchor
+      before - @marks.size
+    end
+
+    # Drop specific marks — the post-batch-delete prune, so a deleted issue's id can't linger
+    # in the set and inflate the next count.
+    def unmark_ids(ids : Enumerable(Int64)) : Nil
+      ids.each { |id| @marks.delete(id); @mark_extent.delete(id) }
+      reset_mark_anchor if (a = @mark_anchor) && !@marks.includes?(a) && index_of(a).nil?
+    end
+
+    # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
+    # shift+click. The anchor is re-seeded from the cursor when it's unset or off-window (a
+    # plain move/click clears it), so the first ⇧arrow always starts from where you are.
+    def extend_marks(delta : Int32) : Nil
+      return if @issues.empty?
+      anchor_idx = @mark_anchor.try { |a| index_of(a) }
+      unless anchor_idx
+        @mark_anchor = selected_id
+        anchor_idx = @selected
+        @mark_extent.clear
       end
+      step_cursor(delta)
+      lo, hi = {anchor_idx, @selected}.minmax
+      wanted = Set(Int64).new
+      (lo..hi).each { |i| @issues[i]?.try { |f| wanted.add(f.id) } }
+      # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after
+      # ⇧↓⇧↓ leaves two rows marked rather than three, while a `t`/⇧T mark the range swept
+      # over and back off survives.
+      (@mark_extent - wanted).each { |id| @marks.delete(id) }
+      added = wanted - @marks
+      @marks.concat(added)
+      @mark_extent = (@mark_extent & wanted) | added
+    end
+
+    # Cursor step used by the mark gestures. Deliberately NOT `move` (which redirects to
+    # scroll_preview when the preview pane is focused) and NOT the controller's issues_move
+    # (which pops focus to the tab bar at the top row — that would eject you mid-range-
+    # selection). Clamps, so it saturates at both ends instead of wrapping.
+    private def step_cursor(delta : Int32) : Nil
+      return if @issues.empty?
+      @selected = (@selected + delta).clamp(0, @issues.size - 1)
+      @preview_scroll = 0
+    end
+
+    # Row index of an id in the VISIBLE list (nil when the filter hides it, or it's gone).
+    # A linear scan, like apply_filter's own re-anchor: the severity sort gives no key to
+    # binary-search on.
+    private def index_of(id : Int64) : Int32?
+      @issues.index { |f| f.id == id }
+    end
+
+    # Short "SEV title" label for confirm dialogs; falls back to "issue #id".
+    def issue_summary(id : Int64) : String
+      if f = @all.find { |i| i.id == id }
+        return "#{severity_badge(f.severity)} #{f.title}"
+      end
+      "issue ##{id}"
+    end
+
+    # Batch delete: one store round-trip for N issues, then the same re-anchoring the
+    # singular path did. Closes the detail when it was showing one of them and prunes the
+    # deleted ids from the mark set so a stale mark can't inflate the next count.
+    #
+    # Returns whether the write committed. On a rollback NOTHING local is touched — the marks
+    # in particular stay put, because they are the only remaining handle on the set the user
+    # asked to delete.
+    def delete_ids(store : Store, ids : Array(Int64)) : Bool
+      return true if ids.empty?
+      return false unless store.delete_issues(ids)
+      close_detail if @detail.try(&.id).try { |d| ids.includes?(d) }
+      unmark_ids(ids)
       reload(store)
+      true
     end
 
     # --- notes READ/INS (inline editor) ---
@@ -476,14 +664,7 @@ module Gori::Tui
       list_h = {rect.bottom - top, 0}.max
 
       if @issues.empty?
-        list_rect = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
-        if !filtering?
-          TrafficEmptyState.render(screen, list_rect, variant: :issues)
-        elsif querying?
-          screen.text(rect.x + 1, top, "no issues match · esc clears the filter", Theme.muted)
-        else
-          screen.text(rect.x + 1, top, "no issues match · / to edit the filter", Theme.muted)
-        end
+        render_empty_list(screen, rect, top)
         return
       end
 
@@ -495,10 +676,15 @@ module Gori::Tui
         f = @issues[idx]
         y = top + i
         selected = idx == @selected
-        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
-        if selected
+        # A marked row reads as a dim band with a FULLER gutter bar, so it stays
+        # distinguishable from the cursor row (which keeps the accent band) and from a cursor
+        # row that is ALSO marked (accent band + full bar). Both glyphs are single-width, so
+        # no column offset moves — the `top` math and list_row_at stay valid.
+        marked = @marks.includes?(f.id)
+        bg = row_bg(selected, marked, focused)
+        if selected || marked
           screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
-          screen.cell(rect.x, y, '▎', Theme.accent, bg)
+          screen.cell(rect.x, y, marked ? '▌' : '▎', Theme.accent, bg)
         end
         screen.text(rect.x + 1, y, severity_badge(f.severity), severity_color(f.severity), bg, Attribute::Bold)
         screen.text(rect.x + 6, y, status_tag(f.status), status_color(f.status), bg)
@@ -508,10 +694,29 @@ module Gori::Tui
           screen.text(rect.right - host.size - 1, y, host, Theme.muted, bg)
           right = rect.right - host.size - 2
         end
-        title_fg = selected ? Theme.text_bright : Theme.text
+        title_fg = selected || marked ? Theme.text_bright : Theme.text
         tw = {right - title_x, 0}.max
         screen.text(title_x, y, ellipsize(f.title, tw), title_fg, bg, width: tw)
       end
+    end
+
+    # The cursor row keeps the accent band; a marked row gets the dim one; a row that is both
+    # keeps the accent band (and is told apart by its fuller gutter bar).
+    private def row_bg(selected : Bool, marked : Bool, focused : Bool) : Color
+      return focused ? Theme.accent_bg : Theme.selection_dim if selected
+      marked ? Theme.selection_dim : Theme.bg
+    end
+
+    # Nothing to list: the standing empty state when no filter is on, else a no-match line
+    # that names the way out (esc while the bar is open, `/` once it isn't).
+    private def render_empty_list(screen : Screen, rect : Rect, top : Int32) : Nil
+      unless filtering?
+        list_rect = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+        TrafficEmptyState.render(screen, list_rect, variant: :issues)
+        return
+      end
+      hint = querying? ? "esc clears the filter" : "/ to edit the filter"
+      screen.text(rect.x + 1, top, "no issues match · #{hint}", Theme.muted)
     end
 
     private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -579,6 +784,7 @@ module Gori::Tui
         screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
         rx -= count.size + 2
       end
+      rx = render_mark_chip(screen, rect, rx)
       left_w = {rx - (rect.x + 1), 0}.max
       if filtering?
         # The committed query stays highlighted — this readout is what you scan to
@@ -589,6 +795,21 @@ module Gori::Tui
       else
         screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  status:open  status:closed  host:", Theme.muted, width: left_w)
       end
+    end
+
+    # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left
+    # edge of the chip cluster. Always shown while any mark is set — marks survive a tab
+    # switch, so this chip is what keeps the set from being invisible when you come back. The
+    # hidden split covers marks the current filter doesn't show, so the count never silently
+    # exceeds what's on screen.
+    private def render_mark_chip(screen : Screen, rect : Rect, right_x : Int32) : Int32
+      return right_x if @marks.empty?
+      hidden = marked_hidden_count
+      chip = hidden > 0 ? "#{@marks.size} marked ·#{hidden} hidden" : "#{@marks.size} marked"
+      x = right_x - chip.size
+      return right_x unless x > rect.x + 1 # too narrow — the match count wins
+      screen.text(x, rect.y, chip, Theme.accent)
+      x - 2
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil

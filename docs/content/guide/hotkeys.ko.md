@@ -21,7 +21,7 @@ Ctrl-P  → settings:hotkeys
 | 등급 | 가격 | 언제 | 예시 |
 |------|-------|------|----------|
 | **L0 구조적** | `Esc` `Enter` `Tab` 화살표 `Space`(리더) | 항상 | 포커스, 열기/닫기, READ/INS, space 메뉴 |
-| **L1 루프** | 맨 글자 또는 스티키 패밀리(`^R`) | 분당 여러 번 | History `j/k` `/` `y` `t`(표시), Repeater 전송 |
+| **L1 루프** | 맨 글자 또는 스티키 패밀리(`^R`) | 분당 여러 번 | History/Issues `j/k` `/` `y` `t`(표시), Repeater 전송 |
 | **L2 세션 호흡** | Global 맨 글자(상한: `c` `i` `s`만) | 세션당 여러 번 | capture, intercept, scope 렌즈 |
 | **L3 맥락적** | `Space` 다음 니모닉 | 가끔, 패널 로컬 | compare, mine, send-group, copy-as |
 | **L4 드묾 / 설정** | 팔레트(`Ctrl-P`) 전용 | 드묾 | 설정, Match & Replace, 알림 |

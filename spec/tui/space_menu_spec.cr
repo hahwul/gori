@@ -265,6 +265,31 @@ describe Gori::Tui::SpaceMenu do
     backend2.contains?("SPACE ·").should be_false
   end
 
+  # The Issues list gets the same batch surface: marking is what makes the EXISTING menu
+  # plural, so the mark verbs and the two list pickers have to front it on their own keys.
+  it "fronts the Issues list's mark + batch entries, with Clear marks appearing only over a set" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :issues
+    ctx.selected_issue = 3_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Issues, :common, ctx)
+
+    menu.entries.all?(&.scope.issues?).should be_true
+    menu.verb_for('t').try(&.id).should eq("issues.mark-toggle")
+    menu.verb_for('T').try(&.id).should eq("issues.mark-all")
+    menu.verb_for('s').try(&.id).should eq("issues.set-severity")
+    menu.verb_for('c').try(&.id).should eq("issues.set-status")
+    menu.verb_for('d').try(&.id).should eq("issues.delete")
+    menu.verb_for('N').should be_nil # nothing marked yet
+
+    ctx.issue_marks = [3_i64, 8_i64]
+    menu.open(Gori::Verb::Scope::Issues, :common, ctx, banner: "2 MARKED")
+    menu.verb_for('N').try(&.id).should eq("issues.mark-clear")
+    backend = MemoryBackend.new(100, 30)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 100, 28))
+    backend.contains?("SPACE · 2 MARKED").should be_true
+  end
+
   it "yields COMMON + the focus-area's own group when opened with a non-common section (Fuzzer)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :fuzzer

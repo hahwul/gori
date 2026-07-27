@@ -640,6 +640,39 @@ private class FakeContext < ExecContext
     @calls << :issues_delete
   end
 
+  # Issues multi-select — the same marks-else-cursor rule as the History pair above.
+  property issue_marks = [] of Int64
+  property selected_issue : Int64? = nil
+
+  def selected_issue_ids : Array(Int64)
+    return issue_marks unless issue_marks.empty?
+    [@selected_issue].compact
+  end
+
+  def selected_issue_id : Int64?
+    @selected_issue
+  end
+
+  def marked_issue_count : Int32
+    issue_marks.size
+  end
+
+  def issues_mark_toggle : Nil
+    @calls << :issues_mark_toggle
+  end
+
+  def issues_mark_all : Nil
+    @calls << :issues_mark_all
+  end
+
+  def issues_mark_clear : Nil
+    @calls << :issues_mark_clear
+  end
+
+  def issues_mark_extend(delta : Int32) : Nil
+    @calls << :issues_mark_extend
+  end
+
   def issue_severity(delta : Int32) : Nil
     @calls << :issue_severity
   end

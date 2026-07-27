@@ -44,6 +44,72 @@ describe "Gori::Verbs.register_issues" do
       verb_intents(r, "issues.filter").should eq([:issues_query])
     end
 
+    it "gates delete + the list pickers on the effective target set, not the cursor alone" do
+      # The BATCH gate: marks if any, else the cursor row. Equivalent to "a row is selected"
+      # with nothing marked; the case it adds is a mark that the filter scrolled out of view.
+      %w[issues.delete issues.set-severity issues.set-status].each do |id|
+        ctx = FakeExecContext.new
+        r[id].available?(ctx).should be_false
+        ctx.selected_issue = 7_i64
+        r[id].available?(ctx).should be_true
+        ctx.selected_issue = nil
+        ctx.issue_marks = [3_i64, 9_i64] # every mark off-window: still actionable
+        r[id].available?(ctx).should be_true
+      end
+      # The two list pickers reuse the DETAIL's intents — one implementation resolving
+      # through selected_issue_ids, so there is no issues.batch-* twin.
+      verb_intents(r, "issues.set-severity").should eq([:issue_set_severity])
+      verb_intents(r, "issues.set-status").should eq([:issue_set_status])
+      r["issues.set-severity"].chords.should be_empty # arrows must never re-triage by accident
+      r["issues.set-status"].chords.should be_empty
+    end
+
+    it "marks with t / ⇧T / ⇧arrows and clears only when something is marked" do
+      ctx = FakeExecContext.new
+      ctx.selected_issue = 1_i64
+      r["issues.mark-toggle"].available?(ctx).should be_true
+      r["issues.mark-toggle"].chords.should eq([Gori::Verb::Chord.new("t")])
+      r["issues.mark-toggle"].menu_key.should eq('t')
+      verb_intents(r, "issues.mark-toggle").should eq([:issues_mark_toggle])
+
+      # `t` toggles the CURSOR row, so it needs one — marks alone don't make it actionable.
+      empty = FakeExecContext.new
+      empty.issue_marks = [4_i64]
+      r["issues.mark-toggle"].available?(empty).should be_false
+
+      # Chord.new("T") would be DEAD (Keybind.from_event normalises a capital to
+      # shift+lowercase), and menu_key skips shift chords — hence the explicit mnemonic.
+      r["issues.mark-all"].chords.should eq([Gori::Verb::Chord.new("t", shift: true)])
+      r["issues.mark-all"].menu_key.should eq('T')
+      verb_intents(r, "issues.mark-all").should eq([:issues_mark_all])
+
+      r["issues.mark-clear"].available?(FakeExecContext.new).should be_false
+      r["issues.mark-clear"].available?(empty).should be_true
+      r["issues.mark-clear"].menu_key.should eq('N')
+      verb_intents(r, "issues.mark-clear").should eq([:issues_mark_clear])
+
+      {"issues.mark-extend-down" => {"down", "1"}, "issues.mark-extend-up" => {"up", "-1"}}.each do |id, (key, delta)|
+        verb = r[id]
+        verb.hidden?.should be_true # a nav primitive, like issues.up/down
+        verb.chords.should eq([Gori::Verb::Chord.new(key, shift: true)])
+        c = FakeExecContext.new
+        verb.call(c)
+        c.args_for(:issues_mark_extend).should eq([delta])
+      end
+    end
+
+    it "keeps the mark chords clear of the list's own bindings, and of the detail's `t`" do
+      keymap = Gori::Verb::Keymap.build(r)
+      issues = Gori::Verb::Scope::Issues
+      keymap.lookup(Gori::Verb::Chord.new("t"), issues).should eq("issues.mark-toggle")
+      keymap.lookup(Gori::Verb::Chord.new("t", shift: true), issues).should eq("issues.mark-all")
+      # Chord records match EXACTLY, so the shift arrows never shadowed plain up/down.
+      keymap.lookup(Gori::Verb::Chord.new("down", shift: true), issues).should eq("issues.mark-extend-down")
+      keymap.lookup(Gori::Verb::Chord.new("down"), issues).should eq("issues.down")
+      # One ↵ away, `t` still renames the open issue — a different scope, so no collision.
+      keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
+    end
+
     it "returns focus to the tab menu on escape only (← was a tab-bar overshoot)" do
       verb = r["issues.leave"]
       verb.chords.should eq([Gori::Verb::Chord.new("escape")])

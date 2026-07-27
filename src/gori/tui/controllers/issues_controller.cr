@@ -35,6 +35,7 @@ module Gori::Tui
     # leave those keys untouched when it's open.
     def body_scroll(delta : Int32) : Bool
       return false if @issues.detail_open?
+      end_range_gesture unless preview_scroll_focused? # a page key is cursor nav, like ↑/↓
       @issues.move(delta)
       true
     end
@@ -60,6 +61,11 @@ module Gori::Tui
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
+      elsif @issues.mark_count > 0
+        # Marks re-point what `space` acts on AND take over esc (handle_body_key shadows
+        # issues.leave while a set is live), so the standing "esc tabs" hint would be wrong.
+        mark = Hotkeys.binding_label(reg, "issues.mark-toggle", "t")
+        "#{@issues.mark_count} marked · #{mark} mark · ⇧↑/⇧↓ range · space acts on marks · esc clears"
       elsif @issues.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · space cmds · esc tabs"
       else
@@ -105,7 +111,12 @@ module Gori::Tui
       end
       return true unless idx = @issues.list_row_at(inner, mx, my)
       @issues.set_preview_focus(:list)
-      idx == @issues.selected_index ? issues_open : @issues.select_index(idx)
+      if idx == @issues.selected_index
+        issues_open
+      else
+        end_range_gesture # a plain click collapses the range, same as a plain arrow
+        @issues.select_index(idx)
+      end
       true
     end
 
@@ -117,15 +128,24 @@ module Gori::Tui
           @issues.scroll_links_wheel(step)
         end
       else
+        # Deliberately NOT end_range_gesture: a wheel reads as "scroll the viewport", not as
+        # a selection gesture, so it must not destroy a mark set the way a cursor key does.
         @issues.move(step)
       end
       true
     end
 
-    # List preview Tab + issue detail notes READ/INS (claimed before the focus ring).
+    # esc clears the marks; Tab cycles list ↔ preview focus when that layout is active. Runs
+    # BEFORE the Issues keymap, so the esc branch shadows issues.leave ONLY while marks are
+    # set — with none set, esc still pops to the tab bar. (The `/` filter bar claims every
+    # key ahead of this while it's up, so filter-esc is unaffected.)
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return false if @issues.detail_open?
       return false if ev.ctrl? || ev.alt?
+      if ev.key.escape? && @issues.mark_count > 0
+        @issues.clear_marks
+        return true
+      end
       if @issues.preview_enabled? && ev.key.tab?
         @issues.cycle_preview_focus
         return true
@@ -277,10 +297,28 @@ module Gori::Tui
         @issues.move(delta)
         return
       end
+      # ↑ at the top row pops focus up to the tab bar. The cursor stays put there, so the
+      # marks (and any range in flight) stay put with it.
       if delta < 0 && @issues.at_top?
         return @host.request_focus(:menu)
       end
+      end_range_gesture
       @issues.move(delta)
+    end
+
+    # A plain (unshifted) cursor key ends the ⇧arrow range gesture and hands its marks back
+    # (IssuesView#end_mark_gesture). Says so only when marks actually went away, so arrowing
+    # down an unmarked list stays silent — and names what survived, since `t`/⇧T marks are
+    # deliberately not the gesture's to drop.
+    private def end_range_gesture : Nil
+      return if @issues.end_mark_gesture == 0
+      n = @issues.mark_count
+      @host.status(n == 0 ? "selection cleared" : "selection cleared — #{n} still marked")
+    end
+
+    # A preview pane (not the list) holds focus, so ↑/↓ and the wheel scroll that pane.
+    private def preview_scroll_focused? : Bool
+      @issues.preview_enabled? && @issues.preview_focus != :list
     end
 
     def issues_open : Nil
@@ -291,10 +329,85 @@ module Gori::Tui
       @issues.close_detail
     end
 
+    # --- marks (multi-select) -------------------------------------------------
+
+    # The effective target set for a batch verb: the marks if any, else the cursor row.
+    # Runner#issues_target_ids wraps this with the open-detail case.
+    def target_issue_ids : Array(Int64)
+      @issues.target_ids
+    end
+
+    def marked_issue_count : Int32
+      @issues.mark_count
+    end
+
+    # The one privileged target when a batch verb needs a single representative — the value
+    # the severity/status picker opens on (see IssuesView#primary_target_id).
+    def primary_target_issue_id : Int64?
+      @issues.primary_target_id
+    end
+
+    def issues_mark_toggle : Nil
+      return @host.status("no issue to mark") unless @issues.selected_id
+      @issues.toggle_mark
+      @host.status(mark_status)
+    end
+
+    def issues_mark_all : Nil
+      return @host.status("no issues to mark") if @issues.empty?
+      @issues.mark_all
+      @host.status(mark_status)
+    end
+
+    def issues_mark_clear : Nil
+      @issues.clear_marks
+      @host.status("marks cleared")
+    end
+
+    def issues_mark_extend(delta : Int32) : Nil
+      return if @issues.empty?
+      @issues.extend_marks(delta)
+      @host.status(mark_status)
+    end
+
+    # Shared mark toast — says the count AND how much of it is off-window, matching the
+    # filter-bar chip, so a set larger than the visible list is never a surprise.
+    private def mark_status : String
+      n = @issues.mark_count
+      return "no marks — verbs act on the cursor row" if n == 0
+      hidden = @issues.marked_hidden_count
+      msg = "#{n} issue#{n == 1 ? "" : "s"} marked"
+      msg += " (#{hidden} not visible)" if hidden > 0
+      msg
+    end
+
+    # Space-menu delete. Capture the ids NOW so a peer write between the confirm opening and
+    # being accepted can't retarget it. Works from the list (marks, else the cursor row) or
+    # from the open detail, which is pinned to ONE issue.
     def issues_delete : Nil
-      return unless f = @issues.target_issue
-      @host.confirm("DELETE ISSUE", "Delete \"#{f.title}\"?\nThis can't be undone.", confirm_label: "delete", danger: true) do
-        @issues.delete(@host.session.store)
+      from_detail = @issues.detail_open?
+      ids = from_detail ? [@issues.detail_issue.try(&.id)].compact : @issues.target_ids
+      return if ids.empty?
+      # Marks can outlive the visible list (a filter change, a peer delete), so a batch
+      # confirm spells out the split: this dialog — not the list chip — is the last thing
+      # read before data is destroyed.
+      label =
+        if ids.size == 1
+          "\"#{@issues.issue_summary(ids.first)}\""
+        else
+          hidden = @issues.hidden_count(ids)
+          "#{ids.size} issues#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
+        end
+      @host.confirm(ids.size == 1 ? "DELETE ISSUE" : "DELETE ISSUES",
+        "Delete #{label}?\nThis can't be undone.", confirm_label: "delete", danger: true) do
+        # A rolled-back write (cross-process SQLite busy/lock) leaves the issues AND the marks
+        # in place — say so instead of reporting a delete that didn't happen, so the set is
+        # still there to retry.
+        unless @issues.delete_ids(@host.session.store, ids)
+          @host.status("delete failed — project busy, marks kept; try again")
+          next
+        end
+        @host.status("deleted #{label}")
       end
     end
 

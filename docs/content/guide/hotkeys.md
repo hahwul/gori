@@ -21,7 +21,7 @@ Bare letter keys are scarce. New actions should pick a **price tier** before tak
 | Tier | Price | When | Examples |
 |------|-------|------|----------|
 | **L0 Structural** | `Esc` `Enter` `Tab` arrows `Space` (leader) | Always | focus, open/close, READ/INS, space menu |
-| **L1 Loop** | bare letter or sticky family (`^R`) | many times / minute | History `j/k` `/` `y` `t` (mark), Repeater send |
+| **L1 Loop** | bare letter or sticky family (`^R`) | many times / minute | History/Issues `j/k` `/` `y` `t` (mark), Repeater send |
 | **L2 Session breath** | Global bare (cap: `c` `i` `s` only) | many times / session | capture, intercept, scope lens |
 | **L3 Contextual** | `Space` then mnemonic | occasional, pane-local | compare, mine, send-group, copy-as |
 | **L4 Rare / config** | palette (`Ctrl-P`) or Preferences (`Ctrl-,`) | rare | settings, Match & Replace, notifications |

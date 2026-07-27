@@ -46,6 +46,47 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issues_delete
   end
 
+  # The ONE resolver every batch-capable Issues verb calls: the marks if any are set, else
+  # the cursor row — and just the open issue when the detail is up, which is pinned to one
+  # (the plural of IssuesView#target_issue's own precedence).
+  #
+  # Callers must resolve each id THROUGH THE STORE, never through the view's rows: a kept
+  # mark can outlive the visible list via a filter change or a peer's write.
+  def issues_target_ids : Array(Int64)
+    if f = issues_controller.view.detail_issue
+      return [f.id]
+    end
+    issues_controller.target_issue_ids
+  end
+
+  def selected_issue_ids : Array(Int64)
+    issues_target_ids
+  end
+
+  def selected_issue_id : Int64?
+    issues_controller.view.selected_id
+  end
+
+  def marked_issue_count : Int32
+    issues_controller.marked_issue_count
+  end
+
+  def issues_mark_toggle : Nil
+    issues_controller.issues_mark_toggle
+  end
+
+  def issues_mark_all : Nil
+    issues_controller.issues_mark_all
+  end
+
+  def issues_mark_clear : Nil
+    issues_controller.issues_mark_clear
+  end
+
+  def issues_mark_extend(delta : Int32) : Nil
+    issues_controller.issues_mark_extend(delta)
+  end
+
   def issue_severity(delta : Int32) : Nil
     issues_controller.issue_severity(delta)
   end
@@ -54,16 +95,36 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issue_status(delta)
   end
 
-  # Open the colour pickers for the issue currently in the detail view. The picker (a
-  # shell overlay) writes the chosen value to the open issue on commit.
+  # Open the colour pickers over the effective target set — the open detail's issue, else
+  # the marks, else the cursor row. The picker (a shell overlay) writes the chosen value to
+  # every target on commit. The ids are captured HERE, not re-resolved at commit: the list
+  # re-sorts on the very edit this makes, so re-reading the marks afterwards would be
+  # reading a list the pick itself moved.
   def issue_set_severity : Nil
-    return unless f = issues_controller.view.detail_issue
-    open_choice_picker(ChoicePicker.for_severity(f.severity.value)) { |p| apply_issue_choice(p) }
+    ids = issues_target_ids
+    return if ids.empty?
+    seed = issues_picker_seed(ids)
+    return (@toast = "no issues left to update") unless seed
+    open_choice_picker(ChoicePicker.for_severity(seed.severity.value)) { |p| apply_issue_choice(p, ids) }
   end
 
   def issue_set_status : Nil
-    return unless f = issues_controller.view.detail_issue
-    open_choice_picker(ChoicePicker.for_status(f.status.value)) { |p| apply_issue_choice(p) }
+    ids = issues_target_ids
+    return if ids.empty?
+    seed = issues_picker_seed(ids)
+    return (@toast = "no issues left to update") unless seed
+    open_choice_picker(ChoicePicker.for_status(seed.status.value)) { |p| apply_issue_choice(p, ids) }
+  end
+
+  # Which target's current value the picker opens on: the privileged one (the cursor row when
+  # it is itself a target, else the oldest — NOT the display-order first, which the severity
+  # sort would reshuffle on every edit), falling through to the next id that still resolves
+  # so a single stale mark can't dead-end a live batch.
+  private def issues_picker_seed(ids : Array(Int64)) : Store::Issue?
+    store = @session.store
+    primary = issues_controller.view.detail_issue.try(&.id) || issues_controller.primary_target_issue_id
+    primary.try { |id| store.get_issue(id) } ||
+      ids.each.compact_map { |id| store.get_issue(id) }.first?
   end
 
   def issue_edit_notes : Nil

@@ -28,6 +28,20 @@ module Gori
     # update (no fields supplied) is a no-op → true (nothing to persist, nothing failed).
     def update_issue(id : Int64, *, title : String? = nil, severity : Severity? = nil,
                      notes : String? = nil, status : Status? = nil) : Bool
+      update_issues([id], title: title, severity: severity, notes: notes, status: status)
+    end
+
+    # Batch form of update_issue — the Issues list's multi-select severity/status set. ONE
+    # exec_task_ok, so re-triaging 12 marked issues costs one transaction and one fsync
+    # instead of 12 (P6 — never stall the data path). A batch of one is byte-identical to
+    # the singular form, which routes through here.
+    #
+    # `title`/`notes` are accepted for the singular's sake only: writing one title (or one
+    # notes buffer) across N issues would overwrite each with another's text, so the two
+    # batch verbs pass severity/status exclusively.
+    def update_issues(ids : Array(Int64), *, title : String? = nil, severity : Severity? = nil,
+                      notes : String? = nil, status : Status? = nil) : Bool
+      return true if ids.empty?
       sets = [] of String
       args = [] of DB::Any
       if t = title
@@ -44,18 +58,34 @@ module Gori
       end
       return true if sets.empty?
       sets << "updated_at = ?"; args << now_us
-      args << id
-      sql = "UPDATE issues SET #{sets.join(", ")} WHERE id = ?"
+      ids.each { |id| args << id }
+      sql = "UPDATE issues SET #{sets.join(", ")} WHERE id IN (#{Array.new(ids.size, "?").join(", ")})"
       exec_task_ok ->(c : DB::Connection) { c.exec(sql, args: args); nil }
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).
     def delete_issue(id : Int64) : Bool
+      delete_issues([id])
+    end
+
+    # Batch form of delete_issue — the Issues list's multi-select delete. ONE exec_task_ok,
+    # for the same reason delete_flows is one: 20 marked issues cost one transaction, and a
+    # DELETE reports nothing through last_insert_rowid, so exec_task could not tell a commit
+    # from a batch rolled back by an unrelated co-submitted write. The caller keeps its marks
+    # on false — they are the only remaining handle on the set it asked to delete.
+    def delete_issues(ids : Array(Int64)) : Bool
+      return true if ids.empty?
       exec_task_ok ->(c : DB::Connection) {
-        c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
-        c.exec("DELETE FROM issues WHERE id = ?", id)
+        ids.each { |id| delete_issue_one(c, id) }
         nil
       }
+    end
+
+    # One issue's cascade, on an OPEN connection (no transaction of its own) — the shared
+    # body of the singular and batch deletes.
+    private def delete_issue_one(c : DB::Connection, id : Int64) : Nil
+      c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
+      c.exec("DELETE FROM issues WHERE id = ?", id)
     end
 
     def issues : Array(Issue)

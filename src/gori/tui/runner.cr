@@ -1604,16 +1604,26 @@ module Gori::Tui
       open_overlay(p)
     end
 
-    # Persist the picked severity/status to the open issue. The detail issue can't change
-    # while the modal is up, so reading it at commit is safe.
-    private def apply_issue_choice(p : ChoicePicker) : Nil
-      return unless f = issues_controller.view.detail_issue
+    # Persist the picked severity/status to every issue the pick was opened over (`ids` was
+    # captured at open time — see Runner#issue_set_severity). One batched write, so 12 marked
+    # issues cost one transaction; ids a peer deleted meanwhile are simply not matched by the
+    # UPDATE, which is the same "a stale mark fails to resolve" rule the other batches follow.
+    private def apply_issue_choice(p : ChoicePicker, ids : Array(Int64)) : Nil
+      return if ids.empty?
       store = @session.store
-      case p.kind
-      when :severity then store.update_issue(f.id, severity: Store::Severity.new(p.selected_value))
-      when :status   then store.update_issue(f.id, status: Store::Status.new(p.selected_value))
+      ok = case p.kind
+           when :severity then store.update_issues(ids, severity: Store::Severity.new(p.selected_value))
+           when :status   then store.update_issues(ids, status: Store::Status.new(p.selected_value))
+           else                true
+           end
+      # A rolled-back write touches NOTHING locally — the same rule delete_ids follows, and
+      # re-reading the list is wasted work on the one path where the store is already busy.
+      unless ok
+        @toast = "update failed — project busy; try again"
+        return
       end
       issues_controller.view.resync(store)
+      @toast = "#{plural(ids.size, "issue")} updated" if ids.size > 1
     end
 
     # Apply the picked Probe scan MODE to the analyzer and re-read the findings list.
@@ -4254,7 +4264,8 @@ module Gori::Tui
 
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
-      history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id) || sitemap_mark_menu_title(verb_id)
+      history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id) ||
+        sitemap_mark_menu_title(verb_id) || issues_mark_menu_title(verb_id)
     end
 
     # The card's state label — "SPACE · 3 MARKED" while a mark set is non-empty (#442), so
@@ -4263,7 +4274,8 @@ module Gori::Tui
     # so the sum is always just the live one's count.
     # nil ⇒ the section label (or nothing at all), exactly as before.
     private def space_menu_banner : String?
-      n = history_mark_menu_count + intercept_mark_menu_count + sitemap_mark_menu_count
+      n = history_mark_menu_count + intercept_mark_menu_count +
+          sitemap_mark_menu_count + issues_mark_menu_count
       n > 0 ? "#{n} MARKED" : nil
     end
 
@@ -4377,6 +4389,39 @@ module Gori::Tui
       end
       return "#{@session.registry[verb_id].title} (cursor)" if SITEMAP_CURSOR_ONLY.includes?(verb_id)
       verb_id == "sitemap.mark-clear" ? "Clear #{plural(n, "mark")}" : nil
+    end
+
+    # The Issues half of the same rule. Its own table and count, like every other surface's:
+    # the lists carry different marks, and a shared table would let one tab's verb inherit
+    # another's count on a tab where it never renders.
+    ISSUES_BATCH_TITLES = {
+      "issues.delete"       => "Delete %s",
+      "issues.set-severity" => "Set severity on %s",
+      "issues.set-status"   => "Set status on %s",
+    }
+
+    # Verbs that stay SINGLE-target (or whole-store) even with marks set, and say so in the
+    # menu, so a single-only entry can never quietly do the wrong thing. `issues.export-key`
+    # writes the FULL report — the two palette export verbs share its handler and are
+    # reachable from any tab, so scoping the report to the marks in one of the three entry
+    # points would split the meaning of "export issues" three ways.
+    ISSUES_CURSOR_ONLY = {"issues.open" => "(cursor)", "issues.export-key" => "(all)"}
+
+    private def issues_mark_menu_count : Int32
+      return 0 if @active_tab != :issues || issues_controller.view.detail_open?
+      issues_controller.marked_issue_count
+    end
+
+    private def issues_mark_menu_title(verb_id : String) : String?
+      n = issues_mark_menu_count
+      return nil if n == 0
+      if fmt = ISSUES_BATCH_TITLES[verb_id]?
+        return fmt % plural(n, "issue")
+      end
+      if note = ISSUES_CURSOR_ONLY[verb_id]?
+        return "#{@session.registry[verb_id].title} #{note}"
+      end
+      "Clear #{plural(n, "mark")}" if verb_id == "issues.mark-clear"
     end
 
     private def plural(n : Int32, noun : String) : String

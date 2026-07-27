@@ -94,6 +94,26 @@ Discover sends real, unsolicited traffic to the target. Only run it against syst
 gori run issues --format markdown --export report.md
 ```
 
+### Marking issues (multi-select)
+
+The list marks the same way History does. Press `t` to **mark** the issue under the cursor and step down, so a run of `t` marks consecutive rows. `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count.
+
+Letting go of `Shift` ends the range: a plain `↑` / `↓` (or `PgUp` / `PgDn`, or a click on another row) hands the range back and moves on, the way a GUI list collapses its highlight. Marks you placed deliberately with `t` or `Shift-T` stay, which is what makes a discontiguous set possible. The mouse wheel only scrolls, so it never drops a mark.
+
+Marks change **what the space menu acts on**, not which actions exist:
+
+> the effective target is **the marks if any are set, else the cursor row**
+
+So `/ status:open severity:low` → `Shift-T` → `Space` → `c` → **False positive** re-triages the whole batch in one pick. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 issues`) so a batch is never a surprise.
+
+| Action | Key | Over marks |
+|--------|-----|-----------|
+| Set severity | `Space` `s` | One pick, written to every marked issue |
+| Set status | `Space` `c` | One pick — the bulk "false positive" / "resolved" pass |
+| Delete | `Space` `d` | One confirm for the whole set |
+
+Marks survive a filter change, a re-sort (including the one your own severity edit causes), and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Opening an issue pins the actions to that one issue — marks are a list-level idea. Export always writes the **full** report, so its menu entry says `(all)` while marks are set.
+
 ## Notes & Comparer
 
 Two more tools round out analysis:
