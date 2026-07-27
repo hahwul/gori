@@ -111,10 +111,50 @@ module Gori::Settings
   end
 
   # Every additional listener that passes validation, with duplicates of the PRIMARY bind
-  # removed — binding the same address twice would fail, and silently so on the extra socket.
+  # removed — binding the same address twice would fail, and the operator would be left with
+  # a listener error about an address they can see is configured exactly once.
   def self.valid_listeners : Array(Listener)
     listeners.reject do |l|
-      !listener_error(l).nil? || (l.host == effective_bind_host && l.port == effective_bind_port)
+      !listener_error(l).nil? || (l.port == effective_bind_port && same_bind_host?(l.host, effective_bind_host))
     end
+  end
+
+  # Whether two bind hosts name the same socket. A raw `==` missed every alternate spelling —
+  # `localhost` vs `127.0.0.1`, `[::1]` vs `::1`, `LOCALHOST` — so an entry that duplicates
+  # the primary in any of those forms survived here and then failed to bind, reported as a
+  # listener error rather than recognised as the duplicate it is.
+  #
+  # Deliberately NOT a resolver: a DNS lookup while assembling the listener list would be a
+  # blocking side effect at project open, and the loopback names are the only ones that matter
+  # in practice. Everything else falls back to the literal comparison, which is what it was.
+  # This is a best-effort de-duplication, not a bind guarantee — the kernel still has the last
+  # word, and Session collects that failure per listener.
+  private def self.same_bind_host?(a : String, b : String) : Bool
+    na = canonical_bind_host(a)
+    nb = canonical_bind_host(b)
+    return true if na == nb
+    # A wildcard bind already covers every address on the machine, so an extra listener on a
+    # concrete address of the same family and port cannot bind beside it.
+    wildcard_bind?(na) || wildcard_bind?(nb) ? na.includes?(':') == nb.includes?(':') : false
+  end
+
+  # Bracket-stripped, downcased, with the loopback NAMES folded onto their literals so the
+  # spellings a person actually types compare equal.
+  private def self.canonical_bind_host(h : String) : String
+    v = h.strip
+    v = v[1...-1] if v.starts_with?('[') && v.ends_with?(']')
+    v = v.downcase
+    # Only the spellings bind_host_error actually accepts: it rejects "*", so folding that
+    # would be inventing a syntax no one can save.
+    case v
+    when "localhost"     then "127.0.0.1"
+    when "ip6-localhost" then "::1"
+    when ""              then "0.0.0.0" # an unspecified bind IS the wildcard
+    else                      v
+    end
+  end
+
+  private def self.wildcard_bind?(h : String) : Bool
+    h == "0.0.0.0" || h == "::"
   end
 end
