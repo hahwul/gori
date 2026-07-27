@@ -25,8 +25,17 @@ module Gori::Proxy::Tls
     # never swallow bytes, or the handshake it is inspecting would break.
     #
     # `sni` is nil when the record is not a ClientHello, carries no SNI (an IP-literal target,
-    # or an old client), or is malformed. The caller decides what to do about that; parsing
-    # never raises, because this runs on an accepted socket before any authentication.
+    # or an old client), or is malformed. The caller decides what to do about that: PARSING
+    # never raises, because this runs on an accepted socket before any authentication, so a
+    # truncated or hostile ClientHello has to come back as a value.
+    #
+    # READING can still raise, and must be allowed to. `Server#serve_connection` arms
+    # SocketTuning::CLIENT_IO_TIMEOUT before this is reached, so a peer that sends the 5-byte
+    # record header and then stalls hits IO::TimeoutError here rather than parking a fiber and
+    # a connection slot forever (slowloris on an unauthenticated listener). That exception is
+    # caught by the same rescue that covers the rest of the accept path, which closes the
+    # socket. Do not wrap this call in a blanket rescue that swallows it — the timeout IS the
+    # defence, and swallowing it would leak the fd it exists to reclaim.
     def self.peek_sni(io : IO) : {String?, Bytes}
       header = Bytes.new(5)
       return {nil, Bytes.empty} unless io.read_fully?(header)

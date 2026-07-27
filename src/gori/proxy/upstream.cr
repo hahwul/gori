@@ -236,14 +236,17 @@ module Gori::Proxy
     # Reaches an origin through a SOCKS5 proxy — `ssh -D`, Tor, a jump host. The returned
     # socket sits at the start of the origin stream, exactly like the CONNECT path, so every
     # caller (dial_tls, the request forwarder) is unaffected.
-    SOCKS_VERSION              =    5_u8
-    SOCKS_AUTH_NONE            =    0_u8
-    SOCKS_AUTH_USERPWD         =    2_u8
-    SOCKS_AUTH_NONE_ACCEPTABLE = 0xFF_u8
-    SOCKS_CMD_CONNECT          =    1_u8
-    SOCKS_ATYP_IPV4            =    1_u8
-    SOCKS_ATYP_DOMAIN          =    3_u8
-    SOCKS_ATYP_IPV6            =    4_u8
+    SOCKS_VERSION      = 5_u8
+    SOCKS_AUTH_NONE    = 0_u8
+    SOCKS_AUTH_USERPWD = 2_u8
+    SOCKS_CMD_CONNECT  = 1_u8
+    SOCKS_ATYP_IPV4    = 1_u8
+    SOCKS_ATYP_DOMAIN  = 3_u8
+    SOCKS_ATYP_IPV6    = 4_u8
+    # RFC 1928's 0xFF "no acceptable methods" is deliberately NOT a constant: socks5_handshake
+    # never tests for it, because its `else` already refuses every method it did not offer,
+    # and 0xFF is one of those. A named constant would invite a branch that looks like it
+    # narrows the refusal when it cannot.
     # RFC 1928 caps a domain name at one length byte, and RFC 1929 caps each credential the
     # same way. A longer value cannot be encoded, so the dial fails rather than being truncated
     # into a request for a DIFFERENT host than the caller asked for.
