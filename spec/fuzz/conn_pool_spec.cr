@@ -154,6 +154,21 @@ describe F::ConnPool do
       F::ConnPool.reusable_response?(
         result_from("HTTP/1.0 200 OK\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\n", "pong")).should be_true
     end
+
+    # Response framing is METHOD-dependent, and the pool must decide reuse from the same
+    # method `exchange` framed by — else the two disagree about how many body bytes came off
+    # the socket. A HEAD reply is bodyless whatever its headers say, so it is reusable in both
+    # of the shapes a GET reading would get wrong.
+    it "frames by the request method rather than assuming GET" do
+      # No Content-Length: close-delimited for a GET, but bodyless (so reusable) for a HEAD.
+      headless = result_from("HTTP/1.1 200 OK\r\n\r\n")
+      F::ConnPool.reusable_response?(headless, "GET").should be_false
+      F::ConnPool.reusable_response?(headless, "HEAD").should be_true
+      # Transfer-Encoding: identity is close-delimited for a GET; a HEAD still carries no body.
+      identity = result_from("HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\n\r\n")
+      F::ConnPool.reusable_response?(identity, "GET").should be_false
+      F::ConnPool.reusable_response?(identity, "HEAD").should be_true
+    end
   end
 
   describe "over a real socket" do

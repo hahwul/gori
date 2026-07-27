@@ -69,6 +69,10 @@ module Gori::Fuzz
     # as `Repeater::Engine.send` does.
     def send(bytes : Bytes) : Repeater::Result
       keepable = @pooling && ConnPool.reusable_request?(bytes)
+      # The SAME derivation `exchange` frames the response by (Repeater::Engine.request_method),
+      # threaded down to the reuse decision so the two can never disagree about how many body
+      # bytes were consumed — see reusable_response?.
+      method = Repeater::Engine.request_method(bytes)
       if keepable && (io = @idle.pop?)
         started = Time.instant
         result = Repeater::Engine.exchange(io, bytes, @origin.host, @origin.port, started)
@@ -82,14 +86,14 @@ module Gori::Fuzz
             @pooling = false
             drain
           end
-          return dial_and_send(bytes, keepable)
+          return dial_and_send(bytes, keepable, method)
         end
         @consecutive_stale = 0
         @reused += 1
-        recycle(io, result, keepable)
+        recycle(io, result, keepable, method)
         return result
       end
-      dial_and_send(bytes, keepable)
+      dial_and_send(bytes, keepable, method)
     end
 
     # Close every parked socket. Idempotent; call when a run ends so a stopped sweep does
@@ -98,7 +102,7 @@ module Gori::Fuzz
       drain
     end
 
-    private def dial_and_send(bytes : Bytes, keepable : Bool) : Repeater::Result
+    private def dial_and_send(bytes : Bytes, keepable : Bool, method : String) : Repeater::Result
       # Timed from BEFORE the dial, like `Repeater::Engine.send` — a fresh connection's
       # handshake is part of what that request cost. A reused one honestly reports less.
       started = Time.instant
@@ -110,15 +114,15 @@ module Gori::Fuzz
       end
       @dialed += 1
       result = Repeater::Engine.exchange(io, bytes, @origin.host, @origin.port, started)
-      recycle(io, result, keepable)
+      recycle(io, result, keepable, method)
       result
     end
 
     # Park the socket for the next send, or close it. Same retirement rule `send_pipeline`
     # applies to a group's connection (error or incomplete ⇒ unusable), plus the response's
     # own keep-alive signals.
-    private def recycle(io : IO, result : Repeater::Result, keepable : Bool) : Nil
-      if @pooling && keepable && @idle.size < @max_idle && ConnPool.reusable_response?(result)
+    private def recycle(io : IO, result : Repeater::Result, keepable : Bool, method : String) : Nil
+      if @pooling && keepable && @idle.size < @max_idle && ConnPool.reusable_response?(result, method)
         @idle.push(io)
       else
         close(io)
@@ -178,7 +182,14 @@ module Gori::Fuzz
     end
 
     # Whether the origin left the connection usable for another request.
-    def self.reusable_response?(result : Repeater::Result) : Bool
+    #
+    # `request_method` is the method `exchange` framed this response by, NOT a guess: response
+    # framing is method-dependent (a HEAD reply carries no body however its Content-Length
+    # reads, and CONNECT none at all), so deriving it separately here could disagree with how
+    # many bytes were actually consumed off the socket and park one with a body still on it.
+    # It defaults to "GET" only for the direct-call specs; every runtime caller threads the
+    # value from `Repeater::Engine.request_method`.
+    def self.reusable_response?(result : Repeater::Result, request_method : String = "GET") : Bool
       return false unless result.error.nil?
       return false if result.incomplete?
       resp = result.response
@@ -192,13 +203,13 @@ module Gori::Fuzz
       else                 false
       end &&
         # A close-delimited body ended WITH the connection: there is nothing to park.
-        # `response_framing` re-derives what `exchange` already framed by, so this cannot
-        # disagree with how many bytes were actually consumed off the socket.
-        !close_delimited?(resp)
+        # `response_framing` re-derives what `exchange` already framed by — with the SAME
+        # method — so this cannot disagree with how many bytes were actually consumed.
+        !close_delimited?(resp, request_method)
     end
 
-    private def self.close_delimited?(resp : Proxy::Codec::RawResponse) : Bool
-      framing, _ = Proxy::Codec::Body.response_framing(resp, "GET")
+    private def self.close_delimited?(resp : Proxy::Codec::RawResponse, request_method : String) : Bool
+      framing, _ = Proxy::Codec::Body.response_framing(resp, request_method)
       framing.close_delimited?
     rescue
       true # unframeable ⇒ treat as unusable

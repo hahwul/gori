@@ -225,7 +225,13 @@ module Gori
       end
 
       # First whitespace-delimited token of the request = the method (for framing).
-      private def self.request_method(request : Bytes) : String
+      #
+      # NOT private: `exchange` frames the response by this, which decides how many bytes it
+      # consumes off the socket, and `Fuzz::ConnPool` must decide whether the socket is
+      # REUSABLE from the identical derivation. Two independent guesses at the method would
+      # let the pool park a socket with an unread body on it (a HEAD vs GET disagreement is
+      # exactly that shape), so there is one function and both callers use it.
+      def self.request_method(request : Bytes) : String
         head = String.new(request[0, {request.size, 16}.min])
         head.split.first? || "GET" # no-arg split collapses leading/runs of whitespace
       end
