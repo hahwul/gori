@@ -76,6 +76,16 @@ module Gori
           serve_landing: Settings.serve_landing?)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
           rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
+        # ADDITIONAL listeners (settings.json "listeners"), sharing this project's sink, rules,
+        # interceptor and host overrides — so a transparent listener captures into the same
+        # project and obeys the same scope/sandbox as the primary. `proxy` above stays THE proxy
+        # address for every surface that reports one; these are auxiliary sockets.
+        listener_errs = [] of String
+        extra = Settings.valid_listeners.map do |l|
+          Proxy::Server.new(l.host, l.port, sink, tls: tunnel,
+            rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
+            transparent: l.transparent?, target_port: l.target_port)
+        end
         # Per-PROJECT capture lock decides whether THIS instance captures. A 2nd
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
         # live-refreshes off the shared DB). A DIFFERENT project has its own lock, so
@@ -88,6 +98,15 @@ module Gori
             if lock
               begin
                 proxy.start(fallback: bind_fallback)
+                # Each extra listener binds independently: a transparent listener on a
+                # privileged port failing must not stop capture on the primary, but the failure
+                # is COLLECTED rather than swallowed — a redirect rule pointing at a socket that
+                # never bound is invisible from the client's side.
+                extra.each do |e|
+                  e.start
+                rescue ex
+                  listener_errs << "#{e.host}:#{e.port} — #{ex.message || "could not bind"}"
+                end
                 nil
               rescue ex
                 # We own this project (hold the lock) but couldn't bind the listener
@@ -117,7 +136,7 @@ module Gori
           store.clear_intercept_state!
           probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock)
+        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock, extra, listener_errs)
         session.sync_capture_status!
         session
       rescue ex
@@ -140,8 +159,30 @@ module Gori
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
                    @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
-                   @capture_lock : CaptureLock? = nil)
+                   @capture_lock : CaptureLock? = nil,
+                   @extra_listeners : Array(Proxy::Server) = [] of Proxy::Server,
+                   @listener_errors : Array(String) = [] of String)
       @intercept_token = Random::Secure.hex(8)
+    end
+
+    # Additional listeners started and stopped alongside the primary. Each failure is
+    # non-fatal and recorded: a transparent listener that cannot bind (privileged port, address
+    # in use) must not stop capture on the primary, but it must not fail silently either — a
+    # redirect rule pointing at a dead socket is invisible from the client's side.
+    getter listener_errors : Array(String)
+
+    private def start_extra_listeners : Nil
+      @listener_errors.clear
+      @extra_listeners.each do |server|
+        server.start
+      rescue ex
+        @listener_errors << "#{server.host}:#{server.port} — #{ex.message || "could not bind"}"
+        ::Log.warn { "listener #{server.host}:#{server.port} failed to bind: #{ex.message}" }
+      end
+    end
+
+    private def stop_extra_listeners : Nil
+      @extra_listeners.each { |server| server.stop rescue nil }
     end
 
     # Flip upstream TLS verification live (settings:network toggle). Updates the runtime
@@ -183,12 +224,14 @@ module Gori
       result =
         if @proxy.listening?
           @proxy.stop
+          stop_extra_listeners
           false
         else
           @capture_lock ||= CaptureLock.try_at(@project.capture_lock_path) # reuse if held, else try to take over
           return false unless @capture_lock                                # still held by another instance
           @probe.start                                                     # we now hold the lock → run the scanner (idempotent if already running)
           @proxy.start(fallback: true)                                     # cover a DIFFERENT project's port on resume
+          start_extra_listeners                                            # non-fatal; see #listener_errors
           true
         end
       sync_capture_status!
@@ -208,6 +251,7 @@ module Gori
     def close : Nil
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
+      stop_extra_listeners
       @store.abandon_pending!("proxy stopped before response")
       # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,

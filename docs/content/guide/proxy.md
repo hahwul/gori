@@ -162,6 +162,14 @@ Host overrides are a `/etc/hosts`-style map: dial a specific IP for a hostname w
 
 Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the `Host` header intact.
 
+## Clients That Cannot Use a Proxy
+
+Some clients ignore proxy settings entirely — embedded devices, statically-linked binaries, anything that never reads `HTTP_PROXY`. For those, run a **transparent listener** and redirect traffic into it with your firewall; gori derives the destination from the `Host` header for cleartext and from the TLS SNI for HTTPS, so no client-side configuration is needed at all.
+
+Add it under `listeners` in `settings.json` and point `iptables` / `pf` at it — see the [`listeners` reference](/reference/config/#listeners) for the config keys and the redirect rules. Captured flows, scope, the Sandbox and the passthrough list all behave exactly as on the normal proxy path.
+
+The certificate still has to be trusted on the client: transparent mode removes the proxy *setting*, not the need for gori's CA.
+
 ## When a Pinned App Is in the Way
 
 gori intercepts every HTTPS connection, which breaks any client that pins certificates — a mobile app, an auto-updater, a background agent. On a phone or a shared machine that traffic arrives whether you want it or not, and it fails loudly while you are trying to test something else.

@@ -8,6 +8,7 @@ require "../socket_tuning"
 require "../h2/relay"
 require "../../host_overrides"
 require "./cert_authority"
+require "./client_hello"
 
 module Gori::Proxy::Tls
   # The concrete TLS-MITM handoff. After the proxy answered 200 to a CONNECT,

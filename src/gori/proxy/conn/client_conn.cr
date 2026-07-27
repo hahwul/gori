@@ -32,13 +32,19 @@ module Gori::Proxy
     # tunnel); when nil the upstream is resolved per request from the target /
     # Host header (plaintext forward proxy). `tls_upstream` wraps the origin
     # connection in TLS.
+    #
+    # `default_port` overrides the port used when an origin-form request's Host header names
+    # none. It exists for the TRANSPARENT listener: there the client dialled a port the kernel
+    # redirected, so 80 is not necessarily right, and the socket alone cannot reveal the original
+    # destination (see Settings::Listener#target_port). nil keeps the scheme default.
     def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
                    @self_addr : {String, Int32}? = nil,
-                   @local_host : String? = nil)
+                   @local_host : String? = nil,
+                   @default_port : Int32? = nil)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -1114,7 +1120,7 @@ module Gori::Proxy
         port = uri.port || (scheme == "https" ? 443 : 80)
         {host, port, scheme, rewrite_request_line(req, origin_form(uri))}
       else
-        host, port = Upstream.split_host_port(req.host? || "", @scheme == "https" ? 443 : 80)
+        host, port = Upstream.split_host_port(req.host? || "", @default_port || (@scheme == "https" ? 443 : 80))
         {host, port, @scheme, req.raw_head}
       end
     end

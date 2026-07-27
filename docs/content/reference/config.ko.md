@@ -85,6 +85,51 @@ CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 �
 
 우회된 호스트는 flow를 남기지 않으므로, gori는 호스트별로 처음 중계할 때 로그에 한 줄을 남깁니다. History에서 빠진 호스트의 이유를 추적할 수 있게 하기 위함입니다. 목록은 Preferences → **Network & Tabs** → **Network** → **TLS passthrough**에서 쉼표로 구분해 편집합니다.
 
+### listeners
+
+기본 `network.bind_host` / `bind_port` 외에 프록시가 추가로 수신할 소켓입니다.
+
+```json
+{
+  "listeners": [
+    { "host": "192.168.1.10", "port": 8081, "mode": "proxy" },
+    { "host": "127.0.0.1", "port": 8080, "mode": "transparent", "target_port": 80 },
+    { "host": "127.0.0.1", "port": 8443, "mode": "transparent", "target_port": 443 }
+  ]
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `host` | string | — | 수신 주소. 필수 |
+| `port` | integer | — | 수신 포트. 필수 |
+| `mode` | string | `"proxy"` | `proxy` 또는 `transparent`. 알 수 없는 모드는 항목을 버립니다(`proxy`로 기본 처리하면 LAN 주소에 의도치 않은 포워드 프록시를 노출할 수 있으므로) |
+| `target_port` | integer | `80` / `443` | transparent 전용. 유도된 목적지에 포트가 없을 때 사용할 업스트림 포트 |
+
+기본 bind는 의도적으로 스칼라로 남겨 두었습니다. "프록시 주소"는 보고되는 모든 곳에서 단일값입니다 — 상태바, statusline JSON, CA 다운로드 페이지, self-loop 거부, capture-status 사이드카, 라이브 rebind. *클라이언트를 향하게 하는* 주소이기 때문입니다. 투명 리스너는 그것이 아니라 커널이 트래픽을 밀어넣는 소켓입니다.
+
+추가 리스너가 바인드에 실패해도(특권 포트, 주소 사용 중) 기본 리스너의 캡처는 멈추지 않으며, 실패는 삼키지 않고 기록됩니다 — 바인드되지 않은 소켓을 가리키는 리다이렉트 규칙은 클라이언트 쪽에서 전혀 보이지 않기 때문입니다. 기본 주소와 중복되는 항목은 건너뜁니다.
+
+#### 투명 모드 {#transparent-mode}
+
+투명 리스너는 자신이 원 서버와 통신한다고 믿는 클라이언트를 상대합니다. `CONNECT`도 절대 경로 대상도 없으므로 gori가 연결마다 목적지를 유도합니다.
+
+- **평문** — `Host` 헤더에서 (origin-form 요청에 대해 `resolve_forward`가 이미 하던 일입니다)
+- **HTTPS** — TLS **SNI**에서, 핸드셰이크 **이전에** ClientHello를 읽어서. 먼저 읽어야 하는 이유는 이후 모든 결정이 호스트를 아는 것에 달려 있기 때문입니다 — 발급할 leaf 인증서, 샌드박스 게이트, [passthrough 목록](#tls-passthrough), 원 서버 ALPN 프로브.
+
+방화벽으로 트래픽을 보내세요. Linux:
+
+```bash
+iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 8080
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
+```
+
+macOS는 `pf`의 `rdr` 규칙을 사용합니다.
+
+**`target_port`가 필요한 이유.** 리다이렉트된 소켓은 클라이언트가 원래 접속하려던 포트를 알려주지 않습니다 — 복구하려면 Linux의 `SO_ORIGINAL_DST`나 macOS의 `pf` 조회가 필요하고 gori는 둘 다 하지 않습니다. 그래서 리다이렉트 규칙의 의도를 설정에 적어 둡니다. `:443` 트래픽을 받는 리스너는 `target_port: 443`을 지정합니다. 포트가 명시된 `Host` 헤더는 이 값보다 우선합니다.
+
+그 밖의 동작은 프록시 경로와 완전히 동일합니다. 플로우는 같은 프로젝트에 캡처되고, 스코프와 샌드박스가 적용되며, passthrough 목록도 지켜집니다. 추측하지 않고 그냥 끊는 경우는 두 가지입니다 — **SNI 없는** TLS 연결(유도할 목적지가 없음. 한 번만 로그를 남깁니다), 그리고 샌드박스가 배제한 호스트(TLS 클라이언트에게 403으로 답할 방법이 없음).
+
 ### upstream_rules
 
 목적지별 업스트림 라우팅입니다. `network.upstream_proxy`는 *모든* 트래픽에 대한 단일 주소인 반면, 규칙 테이블은 "`*.corp.internal`은 사내 프록시로, 나머지는 직결"을 표현할 수 있고 자격증명을 실을 수 있으며 SOCKS 프록시에 접근할 수 있습니다.

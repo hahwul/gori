@@ -85,6 +85,51 @@ Empty (the default) means everything is intercepted, which is how gori behaved b
 
 Because a bypassed host produces no flow, gori writes one line to its log the first time each host is relayed, so a host missing from History has a traceable reason. Edit the list from Preferences → **Network & Tabs** → **Network** → **TLS passthrough** (comma-separated).
 
+### listeners
+
+Additional sockets the proxy accepts on, alongside the primary `network.bind_host` / `bind_port`.
+
+```json
+{
+  "listeners": [
+    { "host": "192.168.1.10", "port": 8081, "mode": "proxy" },
+    { "host": "127.0.0.1", "port": 8080, "mode": "transparent", "target_port": 80 },
+    { "host": "127.0.0.1", "port": 8443, "mode": "transparent", "target_port": 443 }
+  ]
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `host` | string | — | Listen address. Required |
+| `port` | integer | — | Listen port. Required |
+| `mode` | string | `"proxy"` | `proxy` or `transparent`. An unknown mode drops the entry rather than defaulting to `proxy`, which could expose an unintended forward proxy on a LAN address |
+| `target_port` | integer | `80` / `443` | Transparent only: the upstream port to use when the derived destination names none |
+
+The primary bind stays a scalar on purpose. "The proxy address" is singular everywhere it is reported — the status bar, the statusline JSON, the CA-download page, the self-loop refusal, the capture-status sidecar, the live rebind — because it is the address you *point a client at*. A transparent listener is not that; it is a socket the kernel redirects traffic into.
+
+An extra listener that fails to bind (privileged port, address in use) does **not** stop capture on the primary, and the failure is recorded rather than swallowed — a redirect rule aimed at a socket that never bound is invisible from the client's side. An entry duplicating the primary address is skipped.
+
+#### Transparent mode
+
+A transparent listener serves clients that believe they are talking to the origin. There is no `CONNECT` and no absolute-form request target, so gori derives the destination per connection:
+
+- **cleartext** — from the `Host` header (this is what `resolve_forward` already does for origin-form requests);
+- **HTTPS** — from the TLS **SNI**, read out of the ClientHello *before* the handshake. It has to be read first, because everything downstream keys on knowing the host: which leaf certificate to mint, the sandbox gate, the [passthrough list](#tls_passthrough), and the origin ALPN probe.
+
+Route traffic to it with your firewall. On Linux:
+
+```bash
+iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 8080
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
+```
+
+On macOS, an equivalent `pf` `rdr` rule.
+
+**Why `target_port` exists.** A redirected socket does not reveal the port the client originally dialled — recovering it needs `SO_ORIGINAL_DST` on Linux or a `pf` lookup on macOS, neither of which gori does. So the redirect rule's intent is declared in the config instead: the listener taking redirected `:443` traffic sets `target_port: 443`. A `Host` header that names a port still wins over it.
+
+Everything else behaves exactly as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. Two cases are dropped rather than guessed — a TLS connection with **no SNI** (no destination to derive; logged once), and a host the Sandbox rules out (there is no way to answer a TLS client with a 403).
+
 ### upstream_rules
 
 Per-destination upstream routing. `network.upstream_proxy` is a single address for *everything*; a rule table can say "route `*.corp.internal` through the internal proxy, everything else direct", carry credentials, and reach a SOCKS proxy.
