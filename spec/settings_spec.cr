@@ -971,3 +971,57 @@ describe Gori::Settings do
     end
   end
 end
+
+# #440: three keys promoted from global-only to per-project. The assertions go through the
+# three LIVE helpers (connect_timeout / io_timeout / capture_max), not the effective_* readers,
+# because those helpers are what every functional read in the codebase actually calls — testing
+# the readers alone would pass even if the helpers had been left pointing at the global value.
+describe "per-project network overrides" do
+  it "prefers the project value and falls back to the global when unset" do
+    Gori::Settings.connect_timeout_secs = 30
+    Gori::Settings.io_timeout_secs = 30
+    Gori::Settings.capture_max_mib = 2
+
+    Gori::Settings.connect_timeout.should eq(30.seconds)
+    Gori::Settings.io_timeout.should eq(30.seconds)
+    Gori::Settings.capture_max.should eq(2 * 1024 * 1024)
+
+    Gori::Settings.project_connect_timeout_secs = 5
+    Gori::Settings.project_io_timeout_secs = 120
+    Gori::Settings.project_capture_max_mib = 20
+
+    Gori::Settings.connect_timeout.should eq(5.seconds)
+    Gori::Settings.io_timeout.should eq(120.seconds)
+    Gori::Settings.capture_max.should eq(20 * 1024 * 1024)
+  ensure
+    Gori::Settings.project_connect_timeout_secs = nil
+    Gori::Settings.project_io_timeout_secs = nil
+    Gori::Settings.project_capture_max_mib = nil
+    Gori::Settings.connect_timeout_secs = Gori::Settings::DEFAULT_CONNECT_TIMEOUT_SECS
+    Gori::Settings.io_timeout_secs = Gori::Settings::DEFAULT_IO_TIMEOUT_SECS
+    Gori::Settings.capture_max_mib = Gori::Settings::DEFAULT_CAPTURE_MAX_MIB
+  end
+
+  # Clearing the override must restore inheritance, so a later global edit propagates — the
+  # reason the Project pane deletes a KV key that equals the global instead of storing it.
+  it "resumes inheriting once the override is cleared" do
+    Gori::Settings.io_timeout_secs = 30
+    Gori::Settings.project_io_timeout_secs = 99
+    Gori::Settings.io_timeout.should eq(99.seconds)
+    Gori::Settings.project_io_timeout_secs = nil
+    Gori::Settings.io_timeout_secs = 45 # a later global edit
+    Gori::Settings.io_timeout.should eq(45.seconds)
+  ensure
+    Gori::Settings.project_io_timeout_secs = nil
+    Gori::Settings.io_timeout_secs = Gori::Settings::DEFAULT_IO_TIMEOUT_SECS
+  end
+
+  # The Int32 clamp has to live at the EFFECTIVE layer: a hand-edited project value reaches
+  # capture_max the same way a global one does, and an unclamped one overflows the proxy hot path.
+  it "clamps an out-of-range project capture cap, not just the global one" do
+    Gori::Settings.project_capture_max_mib = 99_999
+    Gori::Settings.capture_max.should eq(Gori::Settings::MAX_CAPTURE_MAX_MIB * 1024 * 1024)
+  ensure
+    Gori::Settings.project_capture_max_mib = nil
+  end
+end

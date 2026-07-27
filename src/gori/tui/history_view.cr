@@ -2095,7 +2095,7 @@ module Gori::Tui
       trailer = [] of Highlight::Line
       if truncated
         trailer << Highlight::Line.new
-        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Settings.capture_max_mib} MiB); full size in the list —", Theme.yellow)]
+        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Settings.effective_capture_max_mib} MiB); full size in the list —", Theme.yellow)]
       end
 
       # gRPC: bounded framed hex view — style eagerly into `head`. Flagged binary so the

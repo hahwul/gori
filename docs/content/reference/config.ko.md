@@ -512,13 +512,15 @@ retention은 **새 기능이 아닙니다** — gori는 프로젝트 DB가 무�
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
 
-프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`), **Project** 탭의 설정 패널에서 편집합니다.
+프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **PROJECT SETTINGS** 서브탭에서 편집합니다.
+
+타임아웃과 캡처 상한 키는 머신 속성이 아니라 engagement 속성입니다 — 느린 내부 장비는 자체 유휴 타임아웃이 필요하고, 아주 큰 응답을 주는 대상은 자체 캡처 상한이 필요합니다. 어느 쪽이든 전역으로 올리면 다른 모든 프로젝트가 비용을 치릅니다.
 
 열려 있는 프로젝트의 **유효 바인드 / 업스트림**:
 
 | Priority | Source |
 |----------|--------|
-| 1 (최우선) | 설정되어 있으면 프로젝트 DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` |
+| 1 (최우선) | 설정되어 있으면 프로젝트 DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` / `net.connect_timeout_secs` / `net.io_timeout_secs` / `net.capture_max_mib` |
 | 2 | CLI `--listen` / `--port` (전역 계층의 프로세스 한정 오버라이드) |
 | 3 | `settings.json` `network.*` |
 | 4 (최하위) | 공장 기본값 `127.0.0.1:8070` / 직접 연결 |

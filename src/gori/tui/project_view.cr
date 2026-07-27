@@ -88,7 +88,7 @@ module Gori::Tui
       @set_sel = 0
       @set_values = ["", "", ""]
       @set_overridden = [false, false, false]
-      @set_baseline = {"", "", ""} # the three fields as last loaded; drives settings_dirty?
+      @set_baseline = {"", "", "", "", "", ""} # the six fields as last loaded; drives settings_dirty?
       @set_cursor = 0
       @set_preedit = ""
       load_settings_values
@@ -127,8 +127,22 @@ module Gori::Tui
     # override when pinned, else the global default (Session.open populated Settings.project_*
     # from this project's DB on open). @set_overridden drives the "· project/global" marker.
     private def load_settings_values : Nil
-      @set_values = [Settings.effective_bind_host, Settings.effective_bind_port.to_s, Settings.effective_upstream_proxy]
-      @set_overridden = [!Settings.project_bind_host.nil?, !Settings.project_bind_port.nil?, !Settings.project_upstream_proxy.nil?]
+      @set_values = [
+        Settings.effective_bind_host,
+        Settings.effective_bind_port.to_s,
+        Settings.effective_upstream_proxy,
+        Settings.effective_connect_timeout_secs.to_s,
+        Settings.effective_io_timeout_secs.to_s,
+        Settings.effective_capture_max_mib.to_s,
+      ]
+      @set_overridden = [
+        !Settings.project_bind_host.nil?,
+        !Settings.project_bind_port.nil?,
+        !Settings.project_upstream_proxy.nil?,
+        !Settings.project_connect_timeout_secs.nil?,
+        !Settings.project_io_timeout_secs.nil?,
+        !Settings.project_capture_max_mib.nil?,
+      ]
       @set_cursor = current_set_value.size
       @set_baseline = settings_values # capture the load state so "dirty" means the USER edited a field
     end
@@ -220,11 +234,15 @@ module Gori::Tui
     # NETWORK pane rows: two toggles (scope-lens, sandbox) over the three inline network
     # fields. The toggle/field boundary is FIELD_BASE — every field access is @set_sel minus
     # it (the fields still live in the 3-slot @set_values, indexed @set_sel - FIELD_BASE).
-    SETTINGS_LABELS      = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy"]
+    # Row order is the tuple order everywhere (settings_values, @set_overridden, the controller's
+    # commit). The three timeout/capture fields were global-only until #440; they are ENGAGEMENT
+    # properties, so a slow appliance or a fat-response target no longer taxes every project.
+    SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy",
+                       "Connect timeout", "Idle timeout", "Capture limit"]
     SETTINGS_SCOPE_ROW   =  0
     SETTINGS_SANDBOX_ROW =  1
     SETTINGS_FIELD_BASE  =  2 # first inline-editable network-field row
-    SETTINGS_LABEL_W     = 14 # value column starts past the widest label ("Upstream proxy")
+    SETTINGS_LABEL_W     = 16 # value column starts past the widest label ("Connect timeout")
 
     def focus_first : Nil
       @pane = :scope
@@ -289,8 +307,8 @@ module Gori::Tui
       vw < VIZ_MIN_W ? 0 : vw
     end
 
-    SETTINGS_H = 7 # 2 toggle rows + 3 network fields + the card's top/bottom border
-    MIN_DESC_H = 3
+    SETTINGS_H = 10 # 2 toggle rows + 6 network fields + the card's top/bottom border
+    MIN_DESC_H =  3
 
     private def env_pane_enabled?(content_h : Int32) : Bool
       content_h >= ENV_MIN_BODY_H
@@ -448,8 +466,9 @@ module Gori::Tui
     end
 
     # The three network fields, trimmed, for commit: {bind IP, bind port, upstream proxy}.
-    def settings_values : {String, String, String}
-      {@set_values[0].strip, @set_values[1].strip, @set_values[2].strip}
+    def settings_values : {String, String, String, String, String, String}
+      {@set_values[0].strip, @set_values[1].strip, @set_values[2].strip,
+       @set_values[3].strip, @set_values[4].strip, @set_values[5].strip}
     end
 
     # True when the user edited a network field since it was last loaded. Diffs against the

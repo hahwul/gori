@@ -132,20 +132,39 @@ module Gori::Settings
     true
   end
 
+  def self.effective_connect_timeout_secs : Int32
+    project_connect_timeout_secs || connect_timeout_secs
+  end
+
+  def self.effective_io_timeout_secs : Int32
+    project_io_timeout_secs || io_timeout_secs
+  end
+
+  def self.effective_capture_max_mib : Int32
+    project_capture_max_mib || capture_max_mib
+  end
+
   # The dial timeouts as a Time::Span (what Upstream/the engines actually pass to the socket).
+  #
+  # THESE THREE HELPERS ARE THE WHOLE WIRING. Every functional read of a timeout or the capture
+  # cap goes through connect_timeout / io_timeout / capture_max — the raw properties are read
+  # only by the settings editors and two display strings — so routing them through effective_*
+  # covers every call site by construction rather than by an audit that can miss one.
   def self.connect_timeout : Time::Span
-    connect_timeout_secs.seconds
+    effective_connect_timeout_secs.seconds
   end
 
   def self.io_timeout : Time::Span
-    io_timeout_secs.seconds
+    effective_io_timeout_secs.seconds
   end
 
   # The capture cap in BYTES — the value CaptureBuffer/import bound a body to.
   # Clamped so a large (or hand-edited) MiB value can never overflow Int32 and break
   # the proxy hot path (see MAX_CAPTURE_MAX_MIB).
+  # Clamped at the EFFECTIVE layer, so a hand-edited project value can no more overflow Int32
+  # and break the proxy hot path than a global one can (see MAX_CAPTURE_MAX_MIB).
   def self.capture_max : Int32
-    capture_max_mib.clamp(1, MAX_CAPTURE_MAX_MIB) * 1024 * 1024
+    effective_capture_max_mib.clamp(1, MAX_CAPTURE_MAX_MIB) * 1024 * 1024
   end
 
   # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
@@ -157,9 +176,18 @@ module Gori::Settings
   PROJECT_BIND_HOST_KEY = "net.bind_host"
   PROJECT_BIND_PORT_KEY = "net.bind_port"
   PROJECT_UPSTREAM_KEY  = "net.upstream_proxy"
+  # Promoted from global-only (#440). These are ENGAGEMENT properties, not machine ones: a slow
+  # internal appliance needs its own idle timeout, and one target returning fat JSON needs its
+  # own capture cap — raising either globally taxes every other project.
+  PROJECT_CONNECT_TIMEOUT_KEY = "net.connect_timeout_secs"
+  PROJECT_IO_TIMEOUT_KEY      = "net.io_timeout_secs"
+  PROJECT_CAPTURE_MAX_KEY     = "net.capture_max_mib"
   class_property project_bind_host : String? = nil
   class_property project_bind_port : Int32? = nil
   class_property project_upstream_proxy : String? = nil
+  class_property project_connect_timeout_secs : Int32? = nil
+  class_property project_io_timeout_secs : Int32? = nil
+  class_property project_capture_max_mib : Int32? = nil
 
   def self.effective_bind_host : String
     project_bind_host || bind_host

@@ -512,13 +512,15 @@ Surfaces that do not own capture never prune, whatever the cap says: `gori mcp`'
 
 ## Per-Project Overrides
 
-A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and edited from the **Project** tab's settings pane.
+A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **PROJECT SETTINGS** sub-tab.
+
+The timeout and capture-limit keys are engagement properties rather than machine ones: a slow internal appliance needs its own idle timeout, and one target returning very large responses needs its own capture cap — raising either globally would tax every other project.
 
 **Effective bind / upstream** for an open project:
 
 | Priority | Source |
 |----------|--------|
-| 1 (highest) | Project DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` when set |
+| 1 (highest) | Project DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` / `net.connect_timeout_secs` / `net.io_timeout_secs` / `net.capture_max_mib` when set |
 | 2 | CLI `--listen` / `--port` (process-only override of the global layer) |
 | 3 | `settings.json` `network.*` |
 | 4 (lowest) | Factory defaults `127.0.0.1:8070` / direct |

@@ -4443,13 +4443,22 @@ module Gori::Tui
     # stored only when it DIFFERS from the current global (else the KV key is dropped, so the
     # project inherits — and later global edits propagate). Refreshes the Settings runtime
     # override layer, then rebinds the live proxy (the upstream is already live via effective_*).
-    def apply_project_network(bind_host : String, bind_port : Int32, upstream : String) : String
+    def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
+                              connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
       set_or_clear(Settings::PROJECT_BIND_HOST_KEY, bind_host, Settings.bind_host)
       set_or_clear(Settings::PROJECT_BIND_PORT_KEY, bind_port.to_s, Settings.bind_port.to_s)
       set_or_clear(Settings::PROJECT_UPSTREAM_KEY, upstream, Settings.upstream_proxy)
+      set_or_clear(Settings::PROJECT_CONNECT_TIMEOUT_KEY, connect_secs.to_s, Settings.connect_timeout_secs.to_s)
+      set_or_clear(Settings::PROJECT_IO_TIMEOUT_KEY, io_secs.to_s, Settings.io_timeout_secs.to_s)
+      set_or_clear(Settings::PROJECT_CAPTURE_MAX_KEY, capture_mib.to_s, Settings.capture_max_mib.to_s)
       Settings.project_bind_host = bind_host == Settings.bind_host ? nil : bind_host
       Settings.project_bind_port = bind_port == Settings.bind_port ? nil : bind_port
       Settings.project_upstream_proxy = upstream == Settings.upstream_proxy ? nil : upstream
+      # Same equals-global-means-inherit rule as the three above: storing a duplicate would
+      # freeze the project against later global edits.
+      Settings.project_connect_timeout_secs = connect_secs == Settings.connect_timeout_secs ? nil : connect_secs
+      Settings.project_io_timeout_secs = io_secs == Settings.io_timeout_secs ? nil : io_secs
+      Settings.project_capture_max_mib = capture_mib == Settings.capture_max_mib ? nil : capture_mib
       apply_settings("project network saved")
     end
 

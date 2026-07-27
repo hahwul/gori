@@ -781,7 +781,7 @@ module Gori::Tui
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
     private def commit_project_network(on_leave : Bool = false) : Nil
       return unless @project_view.settings_dirty?
-      host, port_s, upstream = @project_view.settings_values
+      host, port_s, upstream, connect_s, idle_s, cap_s = @project_view.settings_values
       return settings_invalid("bind IP is required", on_leave) if host.empty?
       port = port_s.to_i?
       unless port && 0 <= port <= 65535
@@ -790,8 +790,22 @@ module Gori::Tui
       if err = Settings.upstream_proxy_port_error(upstream)
         return settings_invalid(err, on_leave)
       end
-      @host.status(@host.apply_project_network(host, port, upstream))
+      connect = positive_secs(connect_s)
+      return settings_invalid("invalid connect timeout #{connect_s.inspect} (seconds, min 1)", on_leave) unless connect
+      idle = positive_secs(idle_s)
+      return settings_invalid("invalid idle timeout #{idle_s.inspect} (seconds, min 1)", on_leave) unless idle
+      cap = positive_secs(cap_s)
+      return settings_invalid("invalid capture limit #{cap_s.inspect} (MiB, min 1)", on_leave) unless cap
+      cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 inside Int32
+      @host.status(@host.apply_project_network(host, port, upstream, connect, idle, cap))
       @project_view.refresh_settings
+    end
+
+    # A whole number of at least 1, or nil. Shared by the three numeric project fields so they
+    # reject the same things (blank, non-numeric, 0, negative) with the same wording.
+    private def positive_secs(value : String) : Int32?
+      n = value.strip.to_i?
+      n && n >= 1 ? n : nil
     end
 
     private def settings_invalid(msg : String, on_leave : Bool) : Nil
