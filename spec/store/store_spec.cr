@@ -378,6 +378,28 @@ describe Gori::Store do
     end
   end
 
+  # A set larger than ID_CHUNK is bound across several statements, because SQLite caps bound
+  # parameters (999 on a build older than 3.32) and ⇧T marks as many issues as the filter
+  # shows. What this pins is that chunking is COMPLETE — an off-by-one in the slicing would
+  # silently leave the tail of a large re-triage un-updated, which reads as a partial write
+  # nobody reported. (The limit itself can't be provoked on a modern SQLite, so the spec
+  # exercises the chunk boundary rather than the failure.)
+  it "update_issues spans chunks, updating every id in one committed write" do
+    with_store do |store|
+      n = Gori::Store::ID_CHUNK + 5
+      ids = Array.new(n) { |i| store.insert_issue("i#{i}", Gori::Store::Severity::Low, nil, nil) }
+      untouched = store.insert_issue("untouched", Gori::Store::Severity::Low, nil, nil)
+
+      store.update_issues(ids, severity: Gori::Store::Severity::Critical).should be_true
+      # Every id, not just the first chunk — check both boundaries and the seam.
+      [0, Gori::Store::ID_CHUNK - 1, Gori::Store::ID_CHUNK, n - 1].each do |i|
+        store.get_issue(ids[i]).not_nil!.severity.should eq(Gori::Store::Severity::Critical)
+      end
+      store.get_issue(untouched).not_nil!.severity.should eq(Gori::Store::Severity::Low)
+      store.write_failures.should eq(0)
+    end
+  end
+
   it "migrate! serializes concurrent openers: a second opener sees the migrated version" do
     path = File.tempname("gori-migrace", ".db")
     db1 = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")

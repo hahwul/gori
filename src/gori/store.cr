@@ -174,6 +174,13 @@ module Gori
     RETENTION_UNLIMITED = 0
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
+    # Ids per statement when a batch write binds an `IN (?,?,…)` list. SQLite caps bound
+    # parameters at SQLITE_MAX_VARIABLE_NUMBER, which is 999 on anything built before 3.32 —
+    # so a set larger than that does not merely run slower, the statement RAISES and the whole
+    # write reports as failed. The multi-select verbs can hand over a full filtered page, so
+    # any such statement chunks by this; the chunks stay inside one exec_task, so a batch is
+    # still one transaction. Well under 999 to leave room for the SET/WHERE args beside them.
+    ID_CHUNK = 400
     # Per-side ceiling on body text fed to the FTS index. Every byte becomes a 3-byte-window
     # token, so this is a WORK budget, measured at roughly 30µs per indexed KiB (SQLite 3.51,
     # arm64, one flow per transaction). Indexing runs off the capture commit (V4), so the cap

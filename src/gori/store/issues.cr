@@ -39,28 +39,41 @@ module Gori
     # `title`/`notes` are accepted for the singular's sake only: writing one title (or one
     # notes buffer) across N issues would overwrite each with another's text, so the two
     # batch verbs pass severity/status exclusively.
+    #
+    # The id list is CHUNKED (see ID_CHUNK). One `IN (?,?,…)` over the whole set is the
+    # obvious form, but the placeholder count is bounded by SQLITE_MAX_VARIABLE_NUMBER — 999
+    # on a SQLite built before 3.32 — and ⇧T over a filtered Issues list marks as many issues
+    # as the filter shows. Past the limit the statement raises, exec_task_ok reports a failed
+    # write, and re-triaging a large set simply never works. Every chunk runs inside the ONE
+    # exec_task_ok, so the batch is still a single transaction and a single fsync.
     def update_issues(ids : Array(Int64), *, title : String? = nil, severity : Severity? = nil,
                       notes : String? = nil, status : Status? = nil) : Bool
       return true if ids.empty?
       sets = [] of String
-      args = [] of DB::Any
+      set_args = [] of DB::Any
       if t = title
-        sets << "title = ?"; args << t
+        sets << "title = ?"; set_args << t
       end
       if s = severity
-        sets << "severity = ?"; args << s.value
+        sets << "severity = ?"; set_args << s.value
       end
       if n = notes
-        sets << "notes = ?"; args << n
+        sets << "notes = ?"; set_args << n
       end
       if st = status
-        sets << "status = ?"; args << st.value
+        sets << "status = ?"; set_args << st.value
       end
       return true if sets.empty?
-      sets << "updated_at = ?"; args << now_us
-      ids.each { |id| args << id }
-      sql = "UPDATE issues SET #{sets.join(", ")} WHERE id IN (#{Array.new(ids.size, "?").join(", ")})"
-      exec_task_ok ->(c : DB::Connection) { c.exec(sql, args: args); nil }
+      sets << "updated_at = ?"; set_args << now_us
+      assignments = sets.join(", ")
+      exec_task_ok ->(c : DB::Connection) {
+        ids.each_slice(ID_CHUNK) do |slice|
+          args = set_args.dup
+          slice.each { |id| args << id }
+          c.exec("UPDATE issues SET #{assignments} WHERE id IN (#{Array.new(slice.size, "?").join(", ")})", args: args)
+        end
+        nil
+      }
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).
