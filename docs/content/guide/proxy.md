@@ -210,19 +210,19 @@ Scope will not do this for you. Scope decides what is recorded and acted on; an 
 
 ## Project Tab
 
-The **Project** home tab is more than a summary. Focusable panes (cycle with `Tab`):
+The **Project** home tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.
 
 <figure class="tui-shot">
   <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
   <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>
 </figure>
 
-| Pane | Purpose |
+| Sub-tab | Purpose |
 |------|---------|
+| **DESCRIPTION** | Free-form project notes |
 | **SCOPE** | Include/exclude rules (host, string, or regex) |
 | **HOST OVERRIDES** | Per-project dial map |
 | **ENV** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
-| **DESCRIPTION** | Free-form project notes |
 | **NETWORK** | Scope-lens + **sandbox** toggles, plus per-project network pins (bind / upstream) that override the global Settings default |
 
 Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).

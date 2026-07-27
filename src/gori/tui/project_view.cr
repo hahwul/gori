@@ -37,9 +37,9 @@ module Gori::Tui
     @sev_tally : StaticArray(Int64, 5)
     @desc_area : TextArea
 
-    # The body has two focusable panes (cycled with Tab, like Repeater's panes): the
-    # SCOPE rule editor and the DESCRIPTION editor. @pane drives where keys land while
-    # the Project tab body holds focus.
+    # The body shows ONE card at a time, picked by the shell's sub-tab strip (@focus ==
+    # :subtabs owns ←/→; the card underneath is only focused once you drop in with ↓/↵).
+    # @pane names the active sub-tab, i.e. where keys land while the body holds focus.
     getter pane : Symbol
 
     def initialize(@scope : Scope, @host_overrides : HostOverrides)
@@ -58,7 +58,7 @@ module Gori::Tui
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
 
-      @pane = :scope   # :scope | :overrides | :env | :desc | :settings
+      @pane = :desc    # :desc | :scope | :overrides | :env | :settings (PANES order)
       @strip_start = 0 # first visible sub-tab chip (Chrome.render_tab_strip owns the window)
       @sel = 0         # selected rule row in the SCOPE list
       # SCOPE add/edit is a centered popup (ScopeRuleOverlay), not an inline row.
@@ -80,7 +80,6 @@ module Gori::Tui
       @env_input = ""
       @env_icx = 0
       @env_preedit = ""
-      @env_pane_enabled = false
 
       # NETWORK pane: two toggle rows (scope lens, sandbox) + inline-editable network fields
       # (bind IP / bind port / upstream proxy). @set_values holds the three text
@@ -223,13 +222,15 @@ module Gori::Tui
       @desc_read.move(@desc_area, 0, delta * 4)
     end
 
-    PANES = [:scope, :overrides, :env, :desc, :settings]
+    # Sub-tab order, left to right. DESCRIPTION leads: it's the one card you WRITE rather
+    # than configure, so it's both the most-visited chip and the natural landing spot when
+    # the tab opens; the four configuration cards follow.
+    PANES = [:desc, :scope, :overrides, :env, :settings]
     # Chip labels, in PANES order. Kept parallel rather than derived from the symbols so a
     # label can read well ("HOST OVERRIDES") without renaming the pane it addresses.
-    PANE_LABELS = ["SCOPE", "HOST OVERRIDES", "ENV", "DESCRIPTION", "PROJECT SETTINGS"]
+    PANE_LABELS = ["DESCRIPTION", "SCOPE", "HOST OVERRIDES", "ENV", "PROJECT SETTINGS"]
     # One row for the sub-tab chips.
-    STRIP_H        =  1
-    ENV_MIN_BODY_H = 11
+    STRIP_H = 1
 
     # NETWORK pane rows: two toggles (scope-lens, sandbox) over the three inline network
     # fields. The toggle/field boundary is FIELD_BASE — every field access is @set_sel minus
@@ -244,14 +245,6 @@ module Gori::Tui
     SETTINGS_FIELD_BASE  =  2 # first inline-editable network-field row
     SETTINGS_LABEL_W     = 16 # value column starts past the widest label ("Connect timeout")
 
-    def focus_first : Nil
-      @pane = :scope
-    end
-
-    def focus_last : Nil
-      @pane = enabled_panes.last? || :settings # last pane in the ring (PROJECT SETTINGS)
-    end
-
     # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row in
     # either list).
     def focus_scope : Nil
@@ -261,28 +254,16 @@ module Gori::Tui
       cancel_env_prefix_edit
     end
 
-    # Step between panes; false when there's no further pane in `dir` (the Runner ring
-    # then wraps back to the tab bar). Mirrors RepeaterView#pane_advance.
+    # Step to the neighbouring sub-tab; false at either end (the strip clamps, it does not
+    # wrap — same as the chips read). Driven by the strip's ←/→ via move_subtab.
     def pane_advance(dir : Int32) : Bool
-      panes = enabled_panes
-      i = panes.index(@pane) || 0
-      ni = i + dir
-      return false if ni < 0 || ni >= panes.size
-      @pane = panes[ni]
+      i = pane_index + dir
+      return false if i < 0 || i >= PANES.size
+      @pane = PANES[i]
       true
     end
 
-    private def enabled_panes : Array(Symbol)
-      # Every pane is always reachable now that they no longer share the body — the old
-      # height-based ENV drop-out went away with the tiling.
-      PANES
-    end
-
-    def env_pane_enabled? : Bool
-      @env_pane_enabled
-    end
-
-    # Mouse: focus a body pane directly (click-to-focus). Ignores unknown symbols.
+    # Select a sub-tab directly (a chip click / ^1-9). Ignores unknown symbols.
     def focus_pane(pane : Symbol) : Nil
       @pane = pane if PANES.includes?(pane)
     end
@@ -307,40 +288,31 @@ module Gori::Tui
       vw < VIZ_MIN_W ? 0 : vw
     end
 
-    SETTINGS_H = 10 # 2 toggle rows + 6 network fields + the card's top/bottom border
-    MIN_DESC_H =  3
-
-    private def env_pane_enabled?(content_h : Int32) : Bool
-      content_h >= ENV_MIN_BODY_H
-    end
-
     # SUB-TAB layout. The body shows ONE card at a time, under a chip strip, instead of
     # tiling all five at once.
     #
     # Tiling was the previous design and it ran out of room: five cards split a single body
     # between them, so SETTINGS got a fixed 6-row slice and ENV was DROPPED entirely below a
-    # height threshold (`env_pane_enabled?`) — a pane silently disappearing is a bad answer to
-    # "the terminal is short". One card at full size removes the threshold, and gives each
-    # editor room to grow (which is what let PROJECT SETTINGS take its per-project overrides).
+    # height threshold — a pane silently disappearing is a bad answer to "the terminal is
+    # short". One card at full size removes the threshold, and gives each editor room to grow
+    # (which is what let PROJECT SETTINGS take its per-project overrides).
     #
-    # The 5-tuple contract is kept deliberately: the ACTIVE pane gets the whole content rect and
-    # the others get zero-height rects. Every existing geometry helper (scope_row_at,
-    # ov_row_at, settings_row_at, pane_at) then keeps working unchanged, because each already
-    # indexes this tuple — an inactive pane simply can't be hit.
-    private def body_panes(rect : Rect) : {Rect, Rect, Rect, Rect, Rect}?
+    # The whole content rect belongs to whichever sub-tab is showing; nil when the body is too
+    # small to draw a card at all.
+    private def active_card(rect : Rect) : Rect?
       oh = overview_h(rect)
       content = Rect.new(rect.x, rect.y + oh, rect.w, {rect.h - oh, 0}.max)
       return nil if content.h < 3 || content.w < 4
-      body = Rect.new(content.x, content.y + STRIP_H, content.w, {content.h - STRIP_H, 0}.max)
-      empty = Rect.new(content.x, content.y + content.h, content.w, 0)
-      active = pane_index
-      {
-        active == 0 ? body : empty,
-        active == 1 ? body : empty,
-        active == 2 ? body : empty,
-        active == 3 ? body : empty,
-        active == 4 ? body : empty,
-      }
+      Rect.new(content.x, content.y + STRIP_H, content.w, {content.h - STRIP_H, 0}.max)
+    end
+
+    # The card rect IFF `pane` is the sub-tab currently showing. Every per-pane hit-test goes
+    # through this, so a sub-tab the body isn't drawing simply can't be hit — the property the
+    # retired 5-tuple (active pane gets the rect, the rest get zero-height ones) encoded
+    # positionally, and which a reorder of PANES would have silently repointed.
+    private def card_rect(rect : Rect, pane : Symbol) : Rect?
+      return nil unless @pane == pane
+      active_card(rect)
     end
 
     # The one-row chip strip above the active card.
@@ -348,47 +320,48 @@ module Gori::Tui
       Rect.new(rect.x, rect.y + overview_h(rect), rect.w, STRIP_H)
     end
 
-    private def pane_index : Int32
+    def pane_index : Int32
       PANES.index(@pane) || 0
     end
 
     # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
 
+    # The sub-tab chip under (mx,my), or nil when the point isn't on one. Public so the
+    # controller can route a chip click to the shell's :subtabs focus BEFORE it is mistaken
+    # for a click into the card below (the chip strip is how the mouse reaches a sub-tab the
+    # body isn't drawing).
+    def strip_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if rect.empty? || active_card(rect).nil?
+      strip = strip_rect(rect)
+      return nil unless strip.contains?(mx, my)
+      seg = Chrome.strip_segments(strip, PANE_LABELS, pane_index, @strip_start).find { |(_, r)| r.contains?(mx, my) }
+      seg ? PANES[seg[0]] : nil
+    end
+
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if rect.empty? || !rect.contains?(mx, my)
       return :overview if my < rect.y + overview_h(rect)
-      return nil unless panes = body_panes(rect)
-      # A click on the chip strip selects that sub-tab, so the mouse reaches every pane even
-      # though only one is rendered.
-      if strip_rect(rect).contains?(mx, my)
-        seg = Chrome.strip_segments(strip_rect(rect), PANE_LABELS, pane_index, @strip_start).find { |(_, r)| r.contains?(mx, my) }
-        return seg ? PANES[seg[0]] : nil
-      end
-      PANES.each_with_index do |pane, i|
-        return pane if panes[i].h > 0 && panes[i].contains?(mx, my)
-      end
-      nil
+      return nil unless card = active_card(rect)
+      return strip_chip_at(rect, mx, my) if strip_rect(rect).contains?(mx, my)
+      card.contains?(mx, my) ? @pane : nil
     end
 
     # Index of the scope-rule row clicked, or nil outside the populated list.
     def scope_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless pane_at(rect, mx, my) == :scope
-      return nil unless panes = body_panes(rect)
-      row_at(panes[0].inset(1, 1), mx, my, false, @sel, @scope.rules.size)
+      return nil unless card = card_rect(rect, :scope)
+      row_at(card.inset(1, 1), mx, my, false, @sel, @scope.rules.size)
     end
 
     # Index of the host-override row clicked, or nil outside the populated list. Uses the
     # SAME ov_list_inner offset render does, so the example-hint row never drifts the click.
     def ov_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless pane_at(rect, mx, my) == :overrides
-      return nil unless panes = body_panes(rect)
-      row_at(ov_list_inner(panes[1].inset(1, 1)), mx, my, @ov_adding, @ov_sel, @host_overrides.entries.size)
+      return nil unless card = card_rect(rect, :overrides)
+      row_at(ov_list_inner(card.inset(1, 1)), mx, my, @ov_adding, @ov_sel, @host_overrides.entries.size)
     end
 
     def env_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless pane_at(rect, mx, my) == :env
-      return nil unless panes = body_panes(rect)
-      row_at(env_list_inner(panes[2].inset(1, 1)), mx, my, @env_adding, @env_sel, @env_items.size)
+      return nil unless card = card_rect(rect, :env)
+      row_at(env_list_inner(card.inset(1, 1)), mx, my, @env_adding, @env_sel, @env_items.size)
     end
 
     # Shared row hit-test for the SCOPE/HOST-OVERRIDES list interiors: account for the
@@ -417,18 +390,18 @@ module Gori::Tui
       @ov_sel = idx.clamp(0, n - 1)
     end
 
-    # DESCRIPTION card outer rect (for border chrome hit-tests). Nil when layout is empty.
+    # DESCRIPTION card outer rect (for border chrome hit-tests). Nil unless it's showing.
     def desc_card_rect(rect : Rect) : Rect?
-      body_panes(rect).try &.[3]
+      card_rect(rect, :desc)
     end
 
-    # Mouse: place the description-editor cursor at a click. `rect` is the body rect
-    # render() receives; re-derive the DESCRIPTION card + its 1-cell inset via body_panes
-    # (the same geometry render uses), then map into the @desc_area editor.
+    # Mouse: place the description-editor cursor at a click INSIDE the card, entering INS
+    # like NotesView#click_to_cursor. Selecting the sub-tab (a chip click, ↓ off the strip)
+    # deliberately does NOT come through here — that lands in READ mode, so arrows navigate.
     def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless panes = body_panes(rect)
+      return unless card = card_rect(rect, :desc)
       enter_desc_insert!
-      @desc_area.click_to_cursor(panes[3].inset(1, 1), mx, my)
+      @desc_area.click_to_cursor(card.inset(1, 1), mx, my)
     end
 
     # --- PROJECT SETTINGS pane (delegated from ProjectController#handle_project_settings_key) ---
@@ -453,16 +426,10 @@ module Gori::Tui
       @set_sel >= SETTINGS_FIELD_BASE
     end
 
+    # On row 0 → ↑ pops up to the sub-tab strip. There's no matching at_bottom? / at_cursor_start?
+    # any more: the card no longer has sideways or downward exits, so both ends just clamp.
     def set_at_top? : Bool
       @set_sel <= 0
-    end
-
-    def set_at_bottom? : Bool
-      @set_sel >= SETTINGS_LABELS.size - 1
-    end
-
-    def set_at_cursor_start? : Bool
-      @set_cursor <= 0
     end
 
     # The three network fields, trimmed, for commit: {bind IP, bind port, upstream proxy}.
@@ -527,9 +494,8 @@ module Gori::Tui
 
     # Mouse hit-test: the settings row index under (mx,my), or nil outside the pane's rows.
     def set_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless pane_at(rect, mx, my) == :settings
-      return nil unless panes = body_panes(rect)
-      inner = panes[4].inset(1, 1)
+      return nil unless card = card_rect(rect, :settings)
+      inner = card.inset(1, 1)
       return nil if inner.h <= 0 || !inner.contains?(mx, my)
       row = my - inner.y
       (0 <= row < SETTINGS_LABELS.size) ? row : nil
@@ -538,8 +504,8 @@ module Gori::Tui
     # Mouse: place the caret in the focused network field at a click (no-op on the toggle row).
     def setting_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless settings_text_row?
-      return unless panes = body_panes(rect)
-      inner = panes[4].inset(1, 1)
+      return unless card = card_rect(rect, :settings)
+      inner = card.inset(1, 1)
       vx = inner.x + 1 + SETTINGS_LABEL_W + 1
       @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - SETTINGS_FIELD_BASE].size)
     end
@@ -551,16 +517,10 @@ module Gori::Tui
       @sel = (@sel + d).clamp(0, n - 1)
     end
 
-    # Selection on the first rule (or an empty list) → ↑ pops focus to the tab bar,
+    # Selection on the first rule (or an empty list) → ↑ pops focus to the sub-tab strip,
     # mirroring the DESCRIPTION editor's `at_top?`.
     def scope_at_top? : Bool
       @sel <= 0
-    end
-
-    # Selection on the last rule (or an empty list) → ↓ crosses down to the HOST
-    # OVERRIDES pane (the card directly below in the left column).
-    def scope_at_bottom? : Bool
-      @sel >= @scope.rules.size - 1
     end
 
     # The currently selected rule (nil when the list is empty) — seeds the edit popup.
@@ -608,14 +568,9 @@ module Gori::Tui
       @ov_sel = (@ov_sel + d).clamp(0, n - 1)
     end
 
-    # On the first override (or an empty list) → ↑ pops focus to the tab bar.
+    # On the first override (or an empty list) → ↑ pops focus to the sub-tab strip.
     def ov_at_top? : Bool
       @ov_sel <= 0
-    end
-
-    def ov_at_bottom? : Bool
-      n = @host_overrides.entries.size
-      n == 0 || @ov_sel >= n - 1
     end
 
     def ov_add_start : Nil
@@ -900,50 +855,33 @@ module Gori::Tui
       @desc_area.search_hl = q
     end
 
-    # Cursor on the first description line → ↑ pops focus to the tab bar (after saving).
+    # Cursor on the first description line → ↑ pops focus to the sub-tab strip (after saving).
     def at_top? : Bool
       @desc_area.at_top?
     end
 
-    # Cursor at the very start of the description → ← crosses back to the SCOPE pane.
-    def desc_at_start? : Bool
-      @desc_area.at_start?
-    end
-
-    # Cursor on the last line of the description → ↓ crosses down to the PROJECT SETTINGS pane.
-    def desc_at_bottom? : Bool
-      @desc_area.at_bottom?
-    end
-
-    # Self-framed (like Repeater/Intercept): an OVERVIEW card on top (read-only stats),
-    # then SCOPE (top-left) over HOST OVERRIDES (bottom-left) and DESCRIPTION (right) —
-    # three focusable panes. The focused pane's card lights gold.
-    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+    # Self-framed (like Repeater/Intercept): an OVERVIEW card on top (read-only stats), then
+    # the sub-tab chip strip, then the ONE card that strip selects. `focused` = the body holds
+    # focus (the card lights gold); `strip_focused` = the strip does (the chips light instead)
+    # — the two are mutually exclusive tiers of the shell's focus ring, so a focused strip
+    # must leave the card below at rest.
+    def render(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false) : Nil
       return if rect.empty?
       oh = overview_h(rect)
-      @env_pane_enabled = env_pane_enabled?({rect.h - oh, 0}.max)
-      if @pane == :env && !@env_pane_enabled
-        @pane = :overrides
-      end
-      scope_focused = focused && @pane == :scope
-      ov_focused = focused && @pane == :overrides
-      env_focused = focused && @pane == :env
-      desc_focused = focused && @pane == :desc
-      settings_focused = focused && @pane == :settings
-
       band = Rect.new(rect.x, rect.y, rect.w, oh)
       vw = viz_width(band.w)
       ov_rect = vw > 0 ? Rect.new(band.x, band.y, band.w - vw - 1, band.h) : band
       render_overview(screen, ov_rect)
       render_analytics(screen, Rect.new(band.right - vw, band.y, vw, band.h)) if vw > 0
-      return unless panes = body_panes(rect)
-      @strip_start = Chrome.render_tab_strip(screen, strip_rect(rect), PANE_LABELS, pane_index, focused, @strip_start)
-      # Only the active card is drawn; the rest are zero-height (see body_panes).
-      render_scope_card(screen, panes[0], scope_focused) if panes[0].h > 0
-      render_overrides_card(screen, panes[1], ov_focused) if panes[1].h > 0
-      render_env_card(screen, panes[2], env_focused) if panes[2].h > 0
-      render_desc_card(screen, panes[3], desc_focused) if panes[3].h > 0
-      render_settings_card(screen, panes[4], settings_focused) if panes[4].h > 0
+      return unless card = active_card(rect)
+      @strip_start = Chrome.render_tab_strip(screen, strip_rect(rect), PANE_LABELS, pane_index, strip_focused, @strip_start)
+      case @pane
+      when :scope     then render_scope_card(screen, card, focused)
+      when :overrides then render_overrides_card(screen, card, focused)
+      when :env       then render_env_card(screen, card, focused)
+      when :settings  then render_settings_card(screen, card, focused)
+      else                 render_desc_card(screen, card, focused)
+      end
     end
 
     private def render_overview(screen : Screen, rect : Rect) : Nil

@@ -1212,7 +1212,7 @@ module Gori::Tui
       end
       return if click_top_bar(layout.topbar, mx, my)
       return click_menu(layout.menu, mx, my) if layout.menu.contains?(mx, my)
-      return if subtabs_shown? && click_subtab_strip(layout.body, mx, my)
+      return if subtabs_shown? && !subtab_strip_self_drawn? && click_subtab_strip(layout.body, mx, my)
       click_body(layout.body, mx, my) if layout.body.contains?(mx, my)
     end
 
@@ -2182,6 +2182,13 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
     end
 
+    # The active tab renders its OWN chip strip away from the body's top edge (Project puts it
+    # under the OVERVIEW band), so the shell's strip rect describes the wrong rows — skip the
+    # shell's strip click path and let the controller's handle_click claim chips itself.
+    private def subtab_strip_self_drawn? : Bool
+      @tabs[@active_tab]?.try(&.subtab_strip_self_drawn?) || false
+    end
+
     # Whether the strip carve includes its hairline (must match framed_body). Repeater
     # returns false so clicks on the filter/divider rows fall through to the body.
     private def subtab_strip_divider? : Bool
@@ -2274,6 +2281,7 @@ module Gori::Tui
 
     private def subtab_commit : Nil
       case @active_tab
+      when :project   then project_controller.commit # description + a pending network edit
       when :repeater  then repeater_controller.save_current_repeater
       when :fuzzer    then fuzzer_controller.save_current
       when :miner     then miner_controller.save_current

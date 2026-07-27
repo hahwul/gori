@@ -210,19 +210,19 @@ gori는 모든 HTTPS 연결을 가로채므로, 인증서를 피닝하는 클라
 
 ## Project 탭 {#project-tab}
 
-**Project** 홈 탭은 단순한 요약 이상입니다. 포커스 가능한 패널들(`Tab`으로 순환):
+**Project** 홈 탭은 단순한 요약 이상입니다. 개요 아래에 서브탭 스트립이 있습니다. `←`/`→`로 카드를 바꾸고, `↓`/`Enter`로 열려 있는 카드 안으로 들어가며, `Esc`(또는 맨 위에서 `↑`)로 다시 스트립으로 올라옵니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/project.svg" alt="개요, 한눈에 보는 상태 바, 스코프, 호스트 오버라이드, 환경 변수, 설명, 네트워크 패널을 갖춘 gori Project 탭">
   <figcaption><strong>Project</strong> 홈: 개요와 한눈에 보는 상태, 그리고 스코프, 호스트 오버라이드, 환경 변수, 프로젝트별 네트워크 설정 패널.</figcaption>
 </figure>
 
-| 패널 | 용도 |
+| 서브탭 | 용도 |
 |------|---------|
+| **DESCRIPTION** | 자유 형식 프로젝트 노트 |
 | **SCOPE** | include/exclude 규칙 (호스트, 문자열, 정규식) |
 | **HOST OVERRIDES** | 프로젝트별 접속 맵 |
 | **ENV** | 아웃바운드 요청을 위한 프로젝트별 `$KEY` 변수. [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/#environment-variables) 참고 |
-| **DESCRIPTION** | 자유 형식 프로젝트 노트 |
 | **NETWORK** | scope 렌즈 + **샌드박스** 토글, 그리고 전역 Settings 기본값을 재정의하는 프로젝트별 네트워크 고정(bind / upstream) |
 
 스코프 규칙과 호스트 오버라이드는 스크립트로도 다룰 수 있습니다: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-project)에 있습니다.

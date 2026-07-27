@@ -133,7 +133,7 @@ module Gori::Tui
         Item.new("Issues", "list: t mark · ⇧T all · ⇧arrows range · notes: i/↵ edit · x line · y copy · space cmds"),
         Item.new("Probe", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · space cmds"),
         Item.new("Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"),
-        Item.new("Project", "desc: i/↵ edit · x line · ⇧arrows select · y copy · space cmds"),
+        Item.new("Project", "←/→ sub-tab (desc · scope · hosts · env · network) · ↓/↵ enter · desc: i/↵ edit · x line · y copy"),
         Item.new("Intercept", "↵/e edit · f fwd · d drop · ⇧F all · c catch · / condition · i on/off · ⇧←/→ h-scroll"),
       ]},
       {"DECODER", [

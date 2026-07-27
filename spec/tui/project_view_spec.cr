@@ -147,6 +147,33 @@ describe "ProjectView DESCRIPTION scrolling" do
   end
 end
 
+describe "ProjectView DESCRIPTION insert mode" do
+  # Arriving at the DESCRIPTION sub-tab must land in READ mode, where the arrows navigate;
+  # only a click INSIDE the card opens the editor. That is the regression the sub-tab
+  # promotion fixed — selecting the chip used to route through desc_click_to_cursor and drop
+  # straight into INS, where ←/→ became caret movement with no way back out to the strip.
+  it "only enters INS from a click inside its own card" do
+    tmp_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.replace_desc("one\ntwo")
+      rect = Rect.new(0, 0, 120, 30)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true)
+      view.pane.should eq(:desc)
+      view.desc_insert_mode?.should be_false # the tab opens on DESCRIPTION, in READ
+
+      view.focus_pane(:scope) # another sub-tab is showing…
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true)
+      view.desc_click_to_cursor(rect, rect.x + 2, rect.y + 14)
+      view.desc_insert_mode?.should be_false # …so a click in the body can't reach the editor
+
+      view.focus_pane(:desc)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true)
+      view.desc_click_to_cursor(rect, rect.x + 2, rect.y + 14)
+      view.desc_insert_mode?.should be_true
+    end
+  end
+end
+
 describe "ProjectView created time" do
   it "shows project creation time in the local timezone" do
     path = File.tempname("gori-projview-created", ".db")
@@ -258,11 +285,11 @@ describe "ProjectView#pane_at" do
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
 
       view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)
-      # SCOPE is active by default: both edges of the body belong to it, where the old tiling
-      # would have answered :desc on the right.
+      # DESCRIPTION is the first chip, so it's active by default: both edges of the body
+      # belong to it, where the old tiling would have answered :scope on the left.
       body_y = rect.y + 14
-      view.pane_at(rect, rect.x + 1, body_y).should eq(:scope)
-      view.pane_at(rect, rect.right - 2, body_y).should eq(:scope)
+      view.pane_at(rect, rect.x + 1, body_y).should eq(:desc)
+      view.pane_at(rect, rect.right - 2, body_y).should eq(:desc)
 
       view.focus_pane(:settings)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
@@ -271,20 +298,22 @@ describe "ProjectView#pane_at" do
     end
   end
 
-  # ENV used to drop OUT OF THE TAB RING below a height threshold, so on a short terminal it was
+  # ENV used to drop OUT OF THE RING below a height threshold, so on a short terminal it was
   # simply unreachable. Panes no longer share the body, so the ring is now height-independent —
-  # that is the behaviour worth pinning, not a pixel offset.
-  it "keeps every sub-tab in the Tab ring regardless of height" do
+  # that is the behaviour worth pinning, not a pixel offset. DESCRIPTION leads the order.
+  it "walks every sub-tab from the first chip, regardless of height" do
     tmp_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 14) # short enough that the old layout hid ENV
       view.render(Screen.new(MemoryBackend.new(120, 14)), rect, focused: false)
 
+      view.pane.should eq(:desc) # the strip opens on DESCRIPTION
       visited = [view.pane]
       while view.pane_advance(1)
         visited << view.pane
       end
       visited.should eq(Gori::Tui::ProjectView::PANES)
+      view.pane_advance(1).should be_false # the strip clamps at the last chip, it does not wrap
     end
   end
 
@@ -297,16 +326,27 @@ describe "ProjectView#pane_at" do
       # Find the strip by scanning down for the row where more than one pane is addressable —
       # that only happens on the chip row, since the body belongs to a single pane.
       hits = [] of Symbol
+      strip_y = -1
       (rect.y...rect.bottom).each do |y|
         row = (rect.x...rect.right).compact_map { |x| view.pane_at(rect, x, y) }.uniq
         next unless row.size > 1
         hits = row
+        strip_y = y
         break
       end
       # Every pane is addressable from the strip, including ones the body is not showing.
       hits.should contain(:scope)
       hits.should contain(:settings)
       hits.should contain(:env)
+
+      # strip_chip_at is the narrower question the controller asks: "is this a CHIP click?" —
+      # it must answer only on the strip row, so a body click can never be mistaken for a
+      # sub-tab switch (and a chip click never opens the DESCRIPTION editor).
+      chips = (rect.x...rect.right).compact_map { |x| view.strip_chip_at(rect, x, strip_y) }.uniq
+      chips.should eq(hits)
+      view.strip_chip_at(rect, rect.x + 1, rect.y + 14).should be_nil # inside the card
+      view.strip_chip_at(rect, rect.x + 1, rect.y).should be_nil      # OVERVIEW band
+      view.strip_chip_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil    # empty layout
     end
   end
 end

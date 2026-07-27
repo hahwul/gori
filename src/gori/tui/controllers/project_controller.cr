@@ -4,9 +4,9 @@ require "../clipboard"
 require "../../env"
 
 module Gori::Tui
-  # The Project tab: the two-pane card (SCOPE rule list + DESCRIPTION editor) plus
-  # the project overview. Owns ProjectView. The Scope object itself is session-global
-  # (shared with History/Sitemap filters), so this controller edits it through
+  # The Project tab: the project overview plus five SUB-TABS (DESCRIPTION · SCOPE · HOST
+  # OVERRIDES · ENV · PROJECT SETTINGS). Owns ProjectView. The Scope object itself is
+  # session-global (shared with History/Sitemap filters), so this controller edits it through
   # @host.session.scope; the cross-tab scope quick-actions (add-host, toggle-lens,
   # jump-to-editor) are shell mediators.
   class ProjectController < TabController
@@ -43,35 +43,36 @@ module Gori::Tui
       editing ? :editor : :body
     end
 
-    # Hints depend on the focused pane (SCOPE rule list / HOST OVERRIDES list / their
-    # add-rows vs the DESC editor).
+    # Hints depend on the focused sub-tab (SCOPE rule list / HOST OVERRIDES list / their
+    # add-rows vs the DESC editor). Switching cards is the STRIP's job (esc / ↑-at-top go
+    # back up to it), so no hint advertises a sideways jump between panes any more.
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        "↑/↓ move · a add · ↵/e edit · d del · space cmds · esc sub-tabs"
       when :overrides
-        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ move · a add · ↵/e edit · d del · space cmds · esc sub-tabs"
       when :env
         if @project_view.env_prefix_editing?
           "type prefix · ↵ save · esc cancel"
         elsif @project_view.env_adding?
           "type \"KEY VALUE\" · ↵ save · esc cancel"
         else
-          "↑/↓ move · ↑ overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
+          "↑/↓ move · a add · ↵/e edit · d del · space cmds · esc sub-tabs"
         end
       when :settings
         if @project_view.settings_text_row?
-          "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc"
+          "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
         elsif @project_view.settings_sandbox_row?
-          "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc"
+          "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
         else
-          "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
+          "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
         end
       else
         if @project_view.desc_insert_mode?
-          "type to edit · esc read · ↑/↓/↔ move · ← scope · ↓ settings · ^G goto · ^F find · ^E $EDITOR"
+          "type to edit · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR"
         else
-          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ← scope · ↓ settings · ^G goto · ^F find · esc tabs"
+          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs"
         end
       end
     end
@@ -80,9 +81,59 @@ module Gori::Tui
       @project_view.pane == :desc ? :project : nil
     end
 
+    # --- sub-tab strip (the five cards ARE the sub-tabs) ---------------------
+    # Promoting them off the body's Tab ring is what makes this tab navigate like every other
+    # one: the strip owns ←/→, and the card underneath stays UNFOCUSED until you drop in with
+    # ↓/↵/Tab. While they were body panes, arriving at DESCRIPTION could land straight in the
+    # INS editor, where the arrows are caret movement and there was no way back out sideways.
+    def subtab_labels : Array(String)?
+      ProjectView::PANE_LABELS
+    end
+
+    def subtab_index : Int32
+      @project_view.pane_index
+    end
+
+    # A FIXED chip set — no ^N/^W create/close, no rename (the shell drops those hint tokens).
+    def subtabs_fixed? : Bool
+      true
+    end
+
+    # ProjectView draws the strip itself, UNDER the OVERVIEW band rather than at the body's
+    # top edge, so the shell's strip hit-test would claim OVERVIEW rows instead. handle_click
+    # owns chip clicks here (see the strip_chip_at branch below).
+    def subtab_strip_self_drawn? : Bool
+      true
+    end
+
+    def move_subtab(dir : Int32) : Nil
+      settle_subtab
+      @project_view.pane_advance(dir) # clamps at both ends, like the chips read
+    end
+
+    def jump_subtab(idx : Int32) : Nil
+      return unless pane = ProjectView::PANES[idx]?
+      settle_subtab
+      @project_view.focus_pane(pane)
+    end
+
+    # Everything a sub-tab change has to settle, wherever it came from (strip ←/→, ^1-9, a
+    # chip click). Persist the description + any pending network edit, drop half-composed
+    # inline rows, and — the invariant that keeps the reported bug fixed — return the
+    # DESCRIPTION editor to READ mode. @desc_mode is sticky, so without this you'd only have
+    # to enter INS once for every later visit to that chip to land in the editor again.
+    private def settle_subtab : Nil
+      commit_project_network(on_leave: true)
+      save
+      @project_view.exit_desc_insert!
+      @project_view.cancel_ov_add
+      @project_view.cancel_env_add
+      @project_view.cancel_env_prefix_edit
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      # Self-frames its OVERVIEW + SCOPE|DESCRIPTION cards (multi-pane, like Repeater).
-      @project_view.render(screen, rect, focused: focus == :body)
+      # Self-frames its OVERVIEW band, the sub-tab strip, and the active card.
+      @project_view.render(screen, rect, focused: focus == :body, strip_focused: focus == :subtabs)
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
@@ -103,6 +154,14 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      # Chip strip FIRST: it sits inside this tab's body rect (under the OVERVIEW band), so a
+      # chip click reads as a body click unless it's claimed here. It lands on the STRIP, not
+      # in the card — clicking "DESCRIPTION" selects the sub-tab, it doesn't open the editor.
+      if chip = @project_view.strip_chip_at(rect, mx, my)
+        jump_subtab(ProjectView::PANES.index(chip) || 0)
+        @host.request_focus(:subtabs)
+        return true
+      end
       return true unless pane = @project_view.pane_at(rect, mx, my)
       @host.focus_body
       # Clicking OUT of the settings pane applies any pending network edit (mirrors the
@@ -153,11 +212,14 @@ module Gori::Tui
       true
     end
 
-    # A wheel notch scrolls the pane UNDER the pointer (not the focused one), so a long
-    # DESCRIPTION scrolls into view on a plain wheel-over — no click-to-focus first. The
-    # DESCRIPTION viewport-scrolls (cursor follows) instead of spilling past the card;
-    # the SCOPE rule list moves its selection (selection-follow, like the keyboard).
+    # A wheel notch scrolls the card UNDER the pointer without focusing it first, so a long
+    # DESCRIPTION scrolls into view on a plain wheel-over. The DESCRIPTION viewport-scrolls
+    # (cursor follows) instead of spilling past the card; the lists move their selection
+    # (selection-follow, like the keyboard). A notch over the chip strip is inert — pane_at
+    # answers with the CHIP's pane there, and scrolling a card the body isn't even drawing
+    # would move an invisible selection.
     def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return true if @project_view.strip_chip_at(rect, mx, my)
       case @project_view.pane_at(rect, mx, my)
       when :desc      then @project_view.desc_scroll(step)
       when :scope     then @project_view.scope_select(step)
@@ -206,19 +268,15 @@ module Gori::Tui
       true
     end
 
-    # --- focus ring (SCOPE ◂▸ HOST OVERRIDES ◂▸ DESCRIPTION ◂▸ PROJECT SETTINGS) ---
-    def pane_advance(dir : Int32) : Bool
-      # Tab-ing off the settings pane applies its pending network edit before the pane changes.
-      commit_project_network(on_leave: true) if @project_view.pane == :settings
-      @project_view.pane_advance(dir)
-    end
-
-    def focus_first : Nil
-      @project_view.focus_first
-    end
-
-    def focus_last : Nil
-      @project_view.focus_last
+    # --- focus ring ----------------------------------------------------------
+    # Each sub-tab is a single card, so the body ring has nowhere further to step: settle the
+    # card and answer false, and the shell wraps Tab back to the tab bar. Cycling CARDS is the
+    # strip's ←/→ now, not Tab's. (focus_first/focus_last are deliberately NOT overridden —
+    # the shell calls them on every :body focus, and re-picking a pane there would override
+    # the chip the user just selected on the strip.)
+    def pane_advance(_dir : Int32) : Bool
+      settle_subtab
+      false
     end
 
     def on_enter : Nil
@@ -257,6 +315,15 @@ module Gori::Tui
       @project_view.refresh_settings unless @project_view.settings_dirty?
     end
 
+    # Leave the card for the sub-tab strip above it (esc, or ↑ off the top row) — the same
+    # one-step-up gesture Notes/Repeater use, so the chips are always one key away and ←/→
+    # switch cards again. esc from the strip then reaches the tab bar.
+    private def leave_to_strip : Nil
+      save
+      @project_view.exit_desc_insert! # never sit on the strip over a live INS editor
+      @host.request_focus(:subtabs)
+    end
+
     # --- DESCRIPTION pane: READ/INS multi-line editing ---
     private def handle_project_desc_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
@@ -269,8 +336,7 @@ module Gori::Tui
           save
           @project_view.exit_desc_insert!
         else
-          save
-          @host.request_focus(:menu)
+          leave_to_strip
         end
       elsif @project_view.desc_insert_mode?
         edit_desc_insert(ev, key, c)
@@ -293,19 +359,8 @@ module Gori::Tui
       when key.enter?, c == 'i'
         @project_view.enter_desc_insert!
       when key.up?
-        if @project_view.at_top?
-          save
-          @host.request_focus(:menu)
-        else
-          @project_view.desc_read_move(-1, 0, selecting: selecting)
-        end
-      when key.down? && @project_view.desc_at_bottom?
-        save
-        @project_view.focus_pane(:settings)
-      when key.down?
-        @project_view.desc_read_move(1, 0, selecting: selecting)
-      when key.left? && @project_view.desc_at_start?
-        @project_view.focus_pane(:scope)
+        @project_view.at_top? ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
+      when key.down?               then @project_view.desc_read_move(1, 0, selecting: selecting)
       when key.left? && selecting  then @project_view.desc_read_move(0, -1, selecting: true)
       when key.right? && selecting then @project_view.desc_read_move(0, 1, selecting: true)
       when key.left?               then @project_view.desc_read_move(0, -1)
@@ -321,17 +376,7 @@ module Gori::Tui
       when ev.ctrl_z?     then @project_view.undo
       when key.backspace? then @project_view.backspace
       when key.up?
-        if @project_view.at_top?
-          save
-          @host.request_focus(:menu)
-        else
-          @project_view.move(-1, 0)
-        end
-      when key.left? && @project_view.desc_at_start?
-        @project_view.focus_pane(:scope)
-      when key.down? && @project_view.desc_at_bottom?
-        save
-        @project_view.focus_pane(:settings)
+        @project_view.at_top? ? leave_to_strip : @project_view.move(-1, 0)
       when key.down?  then @project_view.move(1, 0)
       when key.left?  then @project_view.move(0, -1)
       when key.right? then @project_view.move(0, 1)
@@ -380,23 +425,14 @@ module Gori::Tui
         save
         @host.open_palette
       elsif key.escape?
-        save
-        @host.request_focus(:menu)
+        leave_to_strip
       elsif key.up? || key.lower_k?
-        if @project_view.scope_at_top? # ↑/k on the first rule pops up to the tab bar
-          save
-          @host.request_focus(:menu)
-        else
-          @project_view.scope_select(-1)
-        end
+        @project_view.scope_at_top? ? leave_to_strip : @project_view.scope_select(-1)
       elsif key.down? || key.lower_j?
-        if @project_view.scope_at_bottom? # ↓/j on the last rule drops into HOST OVERRIDES (the card below)
-          @project_view.focus_pane(:overrides)
-        else
-          @project_view.scope_select(1)
-        end
-      elsif key.right?
-        @project_view.focus_pane(:desc) # → crosses to the DESCRIPTION (right pane)
+        @project_view.scope_select(1)
+      elsif key.left? || key.right?
+        # Inert: ←/→ belong to the STRIP one tier up, so they must not silently swap cards
+        # from inside one. Swallowed rather than deferred so the keymap can't rebind them here.
       elsif key.enter?
         scope_edit_rule # ↵ opens the same popup as 'e'
       else
@@ -498,24 +534,13 @@ module Gori::Tui
         save
         @host.open_palette
       elsif key.escape?
-        save
-        @host.request_focus(:menu)
+        leave_to_strip
       elsif key.up? || key.lower_k?
-        if @project_view.ov_at_top? # ↑/k on the first override crosses up to the SCOPE pane
-          @project_view.pane_advance(-1)
-        else
-          @project_view.ov_select(-1)
-        end
+        @project_view.ov_at_top? ? leave_to_strip : @project_view.ov_select(-1)
       elsif key.down? || key.lower_j?
-        if @project_view.ov_at_bottom? && @project_view.env_pane_enabled?
-          @project_view.focus_pane(:env)
-        else
-          @project_view.ov_select(1)
-        end
-      elsif key.left?
-        @project_view.pane_advance(-1)
-      elsif key.right?
-        @project_view.focus_pane(:desc)
+        @project_view.ov_select(1)
+      elsif key.left? || key.right?
+        # Inert — ←/→ switch sub-tabs on the strip, not from inside a card.
       elsif key.enter?
         @project_view.ov_edit_start
       else
@@ -549,11 +574,16 @@ module Gori::Tui
     end
 
     # --- HOST OVERRIDES verbs (a/e/d via the keymap + the action menu) ---
+    # Each takes body focus first: the space menu also reaches these from the sub-tab STRIP,
+    # and an inline row that opens while focus sits a tier up would draw a caret nothing types
+    # into (the strip swallows plain keys). Raw focus_body — the pane is already the right one.
     def hostov_add_entry : Nil
+      @host.focus_body
       @project_view.ov_add_start
     end
 
     def hostov_edit_entry : Nil
+      @host.focus_body
       @project_view.ov_edit_start
     end
 
@@ -584,20 +614,13 @@ module Gori::Tui
         save
         @host.open_palette
       elsif key.escape?
-        save
-        @host.request_focus(:menu)
+        leave_to_strip
       elsif key.up? || key.lower_k?
-        if @project_view.env_at_top?
-          @project_view.focus_pane(:overrides)
-        else
-          @project_view.env_select(-1)
-        end
+        @project_view.env_at_top? ? leave_to_strip : @project_view.env_select(-1)
       elsif key.down? || key.lower_j?
         @project_view.env_select(1)
-      elsif key.left?
-        @project_view.pane_advance(-1)
-      elsif key.right?
-        @project_view.focus_pane(:desc)
+      elsif key.left? || key.right?
+        # Inert — ←/→ switch sub-tabs on the strip, not from inside a card.
       elsif key.enter?
         @project_view.env_edit_start
       else
@@ -607,11 +630,14 @@ module Gori::Tui
     end
 
     # --- ENV verbs (a/e/d via the keymap + the Env action menu) ---
+    # Body focus first, for the same reason as the HOST OVERRIDES verbs above.
     def env_add_var : Nil
+      @host.focus_body
       @project_view.env_add_start
     end
 
     def env_edit_var : Nil
+      @host.focus_body
       @project_view.env_edit_start
     end
 
@@ -623,6 +649,7 @@ module Gori::Tui
     end
 
     def env_edit_prefix : Nil
+      @host.focus_body
       @project_view.env_prefix_edit_start
     end
 
@@ -710,9 +737,7 @@ module Gori::Tui
         save
         @host.open_palette
       elsif key.escape?
-        commit_project_network(on_leave: true)
-        save
-        @host.request_focus(:menu)
+        leave_settings_to_strip
       elsif key.up?
         settings_move(-1)
       elsif key.down?
@@ -722,49 +747,46 @@ module Gori::Tui
       end
     end
 
-    # ↑/↓ move between rows, crossing out at the boundaries (↑ off row 0 → DESCRIPTION above;
-    # ↓ off the last row → the tab bar). ONLY ↑/↓ move rows — the text fields need j/k as input.
+    # ↑ off row 0 pops up to the sub-tab strip; ↓ off the last row clamps (the strip is the
+    # single way out, so there's no second exit to hunt for). ONLY ↑/↓ move rows — the text
+    # fields need j/k as input.
     private def settings_move(dir : Int32) : Nil
       if dir < 0 && @project_view.set_at_top?
-        @project_view.focus_pane(:desc)
-      elsif dir > 0 && @project_view.set_at_bottom?
-        commit_project_network(on_leave: true)
-        @host.request_focus(:menu)
+        leave_settings_to_strip
       else
-        @project_view.set_select(dir)
+        @project_view.set_select(dir) # clamps at the last row
       end
+    end
+
+    # Leaving the NETWORK card always applies its pending edit first (the on_leave contract:
+    # an invalid field is dropped rather than kept half-typed).
+    private def leave_settings_to_strip : Nil
+      commit_project_network(on_leave: true)
+      leave_to_strip
     end
 
     private def handle_project_settings_action(ev : Termisu::Event::Key) : Nil
       @project_view.settings_text_row? ? handle_project_settings_field_key(ev) : handle_project_settings_toggle_key(ev)
     end
 
-    # Row 0 (scope lens): space/↵ toggles it; ← crosses to the left column.
-    # The two toggle rows (scope lens, sandbox): space/↵ flips whichever is selected, ← crosses
-    # left. ↑/↓ are handled by settings_move before we get here.
+    # The two toggle rows (scope lens, sandbox): space/↵ flips whichever is selected. ↑/↓ are
+    # handled by settings_move before we get here; ←/→ belong to the strip, so they're inert.
     private def handle_project_settings_toggle_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter? || key.space?
         @project_view.settings_sandbox_row? ? @host.toggle_sandbox : @host.toggle_scope_lens
-      elsif key.left?
-        @project_view.focus_pane(@project_view.env_pane_enabled? ? :env : :overrides)
       end
     end
 
-    # Rows 1-3 (bind IP / port / upstream): type to edit, ↵ applies, ← at the field start
-    # crosses to the left column (else moves the caret).
+    # Rows 2-7 (bind IP / port / upstream / timeouts / capture cap): type to edit, ↵ applies,
+    # ←/→ move the caret (clamped — they no longer escape the card sideways).
     private def handle_project_settings_field_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       if key.enter?
         commit_project_network(on_leave: false)
       elsif key.left?
-        if @project_view.set_at_cursor_start?
-          commit_project_network(on_leave: true)
-          @project_view.focus_pane(:overrides)
-        else
-          @project_view.set_move_cursor(-1)
-        end
+        @project_view.set_move_cursor(-1)
       elsif key.right?
         @project_view.set_move_cursor(1)
       elsif key.backspace?

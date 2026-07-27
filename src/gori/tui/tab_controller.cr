@@ -247,6 +247,14 @@ module Gori::Tui
       (subtab_labels.try(&.size) || 0) >= 2
     end
 
+    # The controller draws its own chip strip somewhere other than the body's top edge, so the
+    # shell's strip geometry does not describe it and must not hit-test with it — the
+    # controller's handle_click owns chip clicks instead. Project sets this: its strip rides
+    # UNDER the OVERVIEW band, and the shell's strip rect would land on OVERVIEW rows.
+    def subtab_strip_self_drawn? : Bool
+      false
+    end
+
     # Move the active sub-tab by ±1 (strip ←/→), or jump to an absolute index (^1-9).
     def move_subtab(dir : Int32) : Nil
     end
