@@ -46,11 +46,12 @@ gzip-decompress | json-unescape
 | 범주 | 예시 |
 |----------|----------|
 | **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58` |
-| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress` |
+| **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
+| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (헤더 없는 RFC 1951) |
 | **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음) |
-| **Hash** | `md5`, `sha1`, `sha256`, `sha512` |
+| **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape` |
-| **Text** | `rot13`, `upper`, `lower`, `reverse` |
+| **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse` |
 
 OUTPUT은 바이너리 결과를 위해 표시 모드(text → hex → base64)를 순환할 수 있습니다. READ 모드에서 `y`로 복사하거나 space 메뉴를 사용하세요.
 

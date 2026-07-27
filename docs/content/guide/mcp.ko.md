@@ -87,13 +87,21 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
-| `list_sitemap` | 고유 엔드포인트(host, method, path) |
+| `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path)와 거기에 달린 태그 |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
+| `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침 |
+| `probe_issues` | Probe 탭에 저장된 발견 항목을 트리아지 상태로 조회(기본은 open만) |
+| `list_probe_rules` | 모든 스캔 규칙(패시브, 액티브, 커스텀)과 활성화 여부, 프로젝트의 스캔 모드 |
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
+| `list_links` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
+| `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
 | `list_projects` | 이 호스트의 모든 gori 프로젝트 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_rules` | 프로젝트의 Match & Replace 규칙을 적용 순서로 나열 |
+| `list_env` | `$KEY` 치환에 쓰이는 프로젝트 env 토큰(값은 가려짐) |
+| `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
+| `list_oast_providers` | 설정된 OAST 프로바이더와 현재 활성 프로바이더 |
 | `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음) |
 | `jwt_decode` / `jwt_encode` / `jwt_attacks` | JWT 디코드, 재서명, 공격 페이로드 생성(순수 계산; `--read-only`에서도 사용 가능) |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
@@ -112,11 +120,24 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$KEY` 환경 토큰을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림) |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 관리 |
-| `create_issue` / `update_issue` | 이슈 기록 및 갱신 |
+| `minimize_repeater` | Repeater 요청을 같은 응답이 재현되는 최소 형태로 줄임 |
+| `create_issue` / `update_issue` / `delete_issue` | 이슈 기록, 갱신, 삭제 |
+| `add_link` / `remove_link` | 이슈나 노트의 증거 포인터 연결 / 해제 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(이동 중인 요청/응답 헤드 또는 본문 재작성) |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
+| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp 파일을 History로 일괄 임포트 |
+| `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |
+| `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
+| `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
+| `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
+| `set_env_var` / `delete_env_var` | `$KEY` 치환이 읽는 프로젝트 env 토큰 관리 |
+| `add_host_override` / `update_host_override` / `delete_host_override` | 호스트 → IP 다이얼 맵 관리(요청은 그대로 두고 접속 IP만 변경) |
+| `probe_promote` / `probe_dismiss` / `probe_delete` | Probe 발견 항목을 Issues로 승격, 기각, 또는 삭제 |
+| `set_probe_mode` | 스캔 모드 설정: `off`, `passive`, `active`, `aggressive`(허가된 대상 전용) |
+| `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | 커스텀 매치 규칙 관리와 스캔 규칙 활성화 / 비활성화 |
+| `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | `oast_start`가 사용할 OAST 프로바이더 관리 |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |

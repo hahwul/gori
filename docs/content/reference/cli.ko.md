@@ -55,6 +55,8 @@ gori run <subcommand> [options]
 | `capture` | 프록시를 실행하고 캡처한 플로우를 STDOUT으로 스트리밍 |
 | `history` (`ls`) | 캡처한 플로우 목록 / 쿼리 |
 | `show <flow-id>` | 플로우 하나의 요청과 응답 출력 |
+| `compare <id-a> <id-b>` | 두 플로우의 요청 또는 응답 diff |
+| `intercept` | 캡처 중인 TUI의 라이브 인터셉트 큐 조회 및 조작 |
 | `repeater <flow-id>` · `list` · `create` | 캡처한 플로우 재전송, 또는 Repeater 워크벤치 세션 목록 / 생성 |
 | `fuzz [<flow-id>]` | Intruder 스타일 퍼저 |
 | `mine [<flow-id>]` | 숨은 파라미터 탐색 |
@@ -68,6 +70,7 @@ gori run <subcommand> [options]
 | `convert <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
 | `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 |
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
+| `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
@@ -75,6 +78,7 @@ gori run <subcommand> [options]
 | `project scope` | 스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화 |
 | `project sandbox` | 하드 컨테인먼트 샌드박스 게이트 조회 / 설정 (`status`, `on`, `off`) |
 | `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$KEY` 치환) |
+| `project host-override` | 프로젝트 호스트 → IP 다이얼 오버라이드 목록 / 추가 / 수정 / 삭제 |
 
 읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`).
 
@@ -113,6 +117,45 @@ gori run show <flow-id> --format raw
 ```
 
 `--format`은 `text`, `json`, 또는 `raw`(정확한 바이트)입니다. `--request-only` / `--response-only`로 출력을 제한합니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+
+### run compare {#run-compare}
+
+두 플로우의 줄 단위 diff이며, [Comparer 탭](/ko/guide/scanning/)과 동일한 결과를 냅니다.
+
+```bash
+gori run compare 41 42 --pane response --changes-only
+```
+
+| Option | Description |
+|--------|-------------|
+| `--pane=PANE` | 비교 대상: `request` 또는 `response` (기본값) |
+| `--changes-only` | 변경되지 않은 문맥은 빼고 추가 / 삭제된 줄만 출력 |
+| `--format=FMT` | `text` (기본값) 또는 `json` |
+
+### run intercept {#run-intercept}
+
+캡처 락을 쥔 TUI의 라이브 인터셉트 큐를 조작합니다. 인터셉트는 TUI 전용입니다. 헤드리스 `gori run capture`는 메시지를 붙잡지 않으며, 여기 서브커맨드는 상태를 게시하는 캡처 인스턴스가 없으면 모두 거부합니다.
+
+```bash
+gori run intercept                              # 붙잡힌 항목 + 인터셉트 상태
+gori run intercept get 3 --format json
+gori run intercept forward 3
+gori run intercept edit 3 --raw-file edited.txt
+gori run intercept direction request
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` (기본값) | 붙잡힌 항목과 캐치 상태, 방향, 필터 |
+| `get <item-id>` | 붙잡힌 항목 하나의 전체 상세 |
+| `forward <item-id>` | 바이트 그대로 통과 |
+| `drop <item-id>` | 폐기. 클라이언트는 정해진 502를 받음 |
+| `edit <item-id>` | 편집한 바이트로 통과: `--raw=RAW` 또는 `--raw-file=PATH`. 그대로 전달되며(`$KEY` 확장 없음) `Content-Length`만 다시 맞춤 |
+| `enable` / `disable` | 라이브 캐치 켜기 / 끄기 |
+| `filter <query>` | 조건부 인터셉트 쿼리 설정. `""`를 넘기면 해제 |
+| `direction <both\|request\|response>` | 캐치가 붙잡을 구간 선택 |
+
+`list`와 `get`은 `--include-sensitive`를 주지 않으면 민감한 헤더 값을 가립니다. 쓰기 서브커맨드는 프로젝트 데이터베이스를 거쳐 TUI의 ack를 폴링합니다.
 
 ### run repeater {#run-repeater}
 
@@ -355,6 +398,26 @@ gori run notes delete 2
 | `list` | `--all`은 요약 한 줄 대신 모든 노트를 전문으로 출력 |
 | `create` | `--text=TEXT`, 위치 인자, 또는 STDIN |
 | `delete <n>` (`rm`) | 인덱스 `n`의 노트 삭제 |
+
+### run links {#run-links}
+
+이슈나 노트가 가리키는 증거입니다. 캡처된 플로우, Repeater 세션, Fuzz / Miner 실행이 대상이 됩니다. Markdown 이슈 내보내기는 이미 이 포인터를 해석해 넣고, 여기서는 목록 조회와 편집을 합니다.
+
+```bash
+gori run links --owner=issue --id=7
+gori run links add --owner=issue --id=7 --ref=flow --ref-id=42
+gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
+```
+
+| Option | Description |
+|--------|-------------|
+| `--owner=KIND` | 소유자 종류: `issue` (기본값) 또는 `note` |
+| `--id=N` | 소유 이슈 / 노트 id. 필수 |
+| `--ref=KIND` | `add` / `delete`의 대상 종류: `flow`, `repeater`, `fuzz`, `miner` |
+| `--ref-id=M` | `add` / `delete`의 대상 id |
+| `--format=FMT` | `list`에서 `text` (기본값) 또는 `json` |
+
+대상이 정리(prune)된 포인터는 사라지지 않고 `(stale)`로 표시되므로, "증거가 없음"과 "증거가 사라짐"을 구분할 수 있습니다. `add`는 멱등이며, 양쪽 대상이 모두 존재해야 합니다.
 
 ### run rewriter {#run-rewriter}
 

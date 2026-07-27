@@ -494,6 +494,80 @@ retention은 **새 기능이 아닙니다** — gori는 프로젝트 DB가 무�
 
 캡처를 소유하지 않는 표면은 상한과 무관하게 절대 prune하지 않습니다 — `gori mcp`의 스토어, 삭제 미리보기용 개수 집계로만 여는 프로젝트, 새로 생성된 프로젝트.
 
+### oast_providers {#oast-providers}
+
+한 번 정의해두고 모든 프로젝트에서 재사용하는 OAST 프로바이더입니다. 프로젝트 전용 프로바이더는 프로젝트 데이터베이스에 저장되고, 여기 있는 것은 Preferences → **OAST providers**에서 편집하는 전역 목록입니다.
+
+```json
+{
+  "oast_providers": [
+    {
+      "id": "3f9a2c11",
+      "name": "team interactsh",
+      "kind": "interactsh",
+      "host": "oast.example.com",
+      "token": "…",
+      "enabled": true
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `id` | string | 생성 시 부여되는 무작위 hex 토큰. 직접 수정하지 마세요 |
+| `name` | string | OAST 탭에 표시되는 이름 |
+| `kind` | string | 프로바이더 종류. 예: `interactsh` |
+| `host` | string | 프로바이더 호스트 |
+| `token` | string | 프로바이더 인증 토큰(선택) |
+| `enabled` | bool | 선택 가능 여부(기본값 `true`) |
+
+프로바이더를 추가하기 전까지 이 섹션은 아예 기록되지 않습니다. `id`, `name`, `kind`, `host`가 빠진 항목은 로드할 때 버려집니다.
+
+### update {#update}
+
+프로젝트 피커의 "update available" 한 줄 안내를 뒷받침하는 시작 시 업데이트 확인입니다. gori가 자동으로 내보내는 유일한 외부 요청이며, 설치 자체는 `gori update`로만 진행합니다.
+
+```json
+{
+  "update": {
+    "check_enabled": true,
+    "notified_version": "0.2.0",
+    "latest_seen": "0.2.0",
+    "checked_at": 1753600000
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `check_enabled` | bool | `true` | `false`로 두면 확인 자체를 건너뜀 |
+| `notified_version` | string | `""` | 이미 안내한 최신 버전. 릴리스당 한 번만 표시하기 위한 표식 |
+| `latest_seen` | string | `""` | 릴리스 피드에서 마지막으로 확인한 버전 |
+| `checked_at` | integer | `0` | 마지막 성공 확인의 unix 초. 하루 동안 결과를 캐시 |
+
+아래 셋은 gori가 관리하는 상태이고, 직접 수정할 값은 `check_enabled`뿐입니다. 기본 설치에서는 섹션 전체가 기록되지 않습니다.
+
+### fuzzer {#fuzzer}
+
+Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 프로젝트 데이터가 아니라 임시 상태입니다.
+
+```json
+{
+  "fuzzer": {
+    "recent_wordlists": ["/usr/share/wordlists/params.txt"],
+    "favorite_wordlists": ["/home/me/lists/api.txt"]
+  }
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `recent_wordlists` | array | 최근 적용한 워드리스트 경로. 최신순이며 최대 10개 |
+| `favorite_wordlists` | array | Path 필드에서 별표를 단 경로. 최근 목록보다 먼저 제안됨 |
+
+워드리스트를 적용하거나 별표를 달기 전까지는 기록되지 않습니다.
+
 ### 그 외 섹션 {#other-sections}
 
 | Section | Description |

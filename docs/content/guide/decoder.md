@@ -46,11 +46,12 @@ Save a chain under a name (**Save chain by name** from the space menu) and reloa
 | Category | Examples |
 |----------|----------|
 | **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58` |
-| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress` |
+| **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
+| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (headerless, RFC 1951) |
 | **Token** | `jwt-decode` (header + payload; signature shown, not verified) |
-| **Hash** | `md5`, `sha1`, `sha256`, `sha512` |
+| **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape` |
-| **Text** | `rot13`, `upper`, `lower`, `reverse` |
+| **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse` |
 
 OUTPUT can cycle display modes (text → hex → base64) for binary results. Copy with `y` in READ mode, or use the space menu.
 

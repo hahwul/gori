@@ -87,13 +87,21 @@ If a client starts MCP outside your repository directory, the server starts unbo
 | `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows |
 | `get_flow` | Full request + response for one flow |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
-| `list_sitemap` | Distinct endpoints (host, method, path) |
+| `list_sitemap` / `list_sitemap_tags` | Distinct endpoints (host, method, path), and the tags placed on them |
 | `list_issues` / `get_issue` | Read triaged issues |
+| `probe_scan` | Rescan captured flows and Repeater tabs. Passive (zero requests) unless `active:true`, which needs write access and is scope-gated |
+| `probe_issues` | The Probe tab's persisted findings, as triage state (open by default) |
+| `list_probe_rules` | Every scan rule (passive, active, custom), which are enabled, and the project's scan mode |
 | `list_scope` | Current scope include/exclude rules |
+| `list_links` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
+| `compare_flows` | Line diff of two flows' request or response |
 | `intercept_list` / `intercept_get` | Inspect the live intercept queue and one held item in full |
 | `list_projects` | Every gori project on this host |
 | `list_notes` / `get_note` | Read project notes |
 | `list_rules` | List the project's Match & Replace rules in apply order |
+| `list_env` | Project env tokens available to `$KEY` substitution (values redacted) |
+| `list_host_overrides` | The host to IP dial map in force for this project |
+| `list_oast_providers` | Configured OAST providers and which one is active |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
 | `jwt_decode` / `jwt_encode` / `jwt_attacks` | Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
 | `sequence_analyze` | Grade a pasted token list for randomness / predictability (pure) |
@@ -112,11 +120,24 @@ If a client starts MCP outside your repository directory, the server starts unbo
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested) |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage Repeater sessions |
-| `create_issue` / `update_issue` | Record and update issues |
+| `minimize_repeater` | Shrink a Repeater request to the smallest form that still reproduces the response |
+| `create_issue` / `update_issue` / `delete_issue` | Record, update, and remove issues |
+| `add_link` / `remove_link` | Attach or detach an issue's / note's evidence pointer |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body) |
 | `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
+| `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp file into History |
+| `delete_flow` / `clear_history` | Remove one flow, or wipe captured History |
+| `set_sitemap_tag` | Pin a free-text memo onto a sitemap path |
 | `create_project` / `switch_project` / `delete_project` | Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a `dry_run` first, then a confirmation token |
+| `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | Edit the project's include / exclude rules and toggle the scope lens |
+| `set_sandbox` | Hard containment: when on, the proxy forwards only what scope allows and blocks the rest |
+| `set_env_var` / `delete_env_var` | Manage the project env tokens `$KEY` substitution reads |
+| `add_host_override` / `update_host_override` / `delete_host_override` | Manage the host to IP dial map (changes only the connect IP, never the request) |
+| `probe_promote` / `probe_dismiss` / `probe_delete` | Triage a Probe finding into Issues, dismiss it, or remove it |
+| `set_probe_mode` | Set the scan mode: `off`, `passive`, `active`, or `aggressive` (authorized targets only) |
+| `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | Manage custom match rules and arm or disarm any scan rule |
+| `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | Manage the OAST providers `oast_start` can listen on |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |

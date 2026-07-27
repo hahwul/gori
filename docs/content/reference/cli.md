@@ -55,6 +55,8 @@ gori run <subcommand> [options]
 | `capture` | Run the proxy and stream captured flows to STDOUT |
 | `history` (`ls`) | List / query captured flows |
 | `show <flow-id>` | Print one flow's request and response |
+| `compare <id-a> <id-b>` | Diff two flows' request or response |
+| `intercept` | Inspect and drive a capturing TUI's live intercept queue |
 | `repeater <flow-id>` · `list` · `create` | Re-send a captured flow, or list / create Repeater workbench sessions |
 | `fuzz [<flow-id>]` | Intruder-style fuzzer |
 | `mine [<flow-id>]` | Hidden-parameter discovery |
@@ -68,6 +70,7 @@ gori run <subcommand> [options]
 | `convert <chain> [input]` | Run a Decoder encode / decode / hash chain |
 | `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes |
 | `issues` · `create` · `update` | List / export issues, or write issues |
+| `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
@@ -75,6 +78,7 @@ gori run <subcommand> [options]
 | `project scope` | List / add / delete / enable / disable scope rules |
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
 | `project env` | List / set / delete project env vars (`$KEY` substitution) |
+| `project host-override` | List / add / update / delete project host to IP dial overrides |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`).
 
@@ -113,6 +117,45 @@ gori run show <flow-id> --format raw
 ```
 
 `--format` is `text`, `json`, or `raw` (exact bytes). `--request-only` / `--response-only` limit the output. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
+
+### run compare
+
+Line diff of two flows, matching the [Comparer tab](/guide/scanning/).
+
+```bash
+gori run compare 41 42 --pane response --changes-only
+```
+
+| Option | Description |
+|--------|-------------|
+| `--pane=PANE` | What to diff: `request` or `response` (default) |
+| `--changes-only` | Print only added / removed lines, omitting unchanged context |
+| `--format=FMT` | `text` (default) or `json` |
+
+### run intercept
+
+Drive the live intercept queue of a TUI holding the capture lock. Interception is TUI-only: a headless `gori run capture` never holds a message, and every subcommand here refuses when no capturing instance is publishing state.
+
+```bash
+gori run intercept                              # held items + intercept state
+gori run intercept get 3 --format json
+gori run intercept forward 3
+gori run intercept edit 3 --raw-file edited.txt
+gori run intercept direction request
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` (default) | Held items plus catch state, direction, and filter |
+| `get <item-id>` | Full detail for one held item |
+| `forward <item-id>` | Release a held item byte-exact |
+| `drop <item-id>` | Drop it. The client gets a canned 502 |
+| `edit <item-id>` | Release with edited bytes: `--raw=RAW` or `--raw-file=PATH`. Forwarded verbatim (no `$KEY` expansion), with `Content-Length` resynced |
+| `enable` / `disable` | Arm or disarm the live catch |
+| `filter <query>` | Set the conditional-intercept query. Pass `""` to clear it |
+| `direction <both\|request\|response>` | Which leg(s) the catch holds |
+
+`list` and `get` redact sensitive header values unless `--include-sensitive` is passed. Write subcommands round-trip through the project database and poll for the TUI's ack.
 
 ### run repeater
 
@@ -355,6 +398,26 @@ gori run notes delete 2
 | `list` | `--all` prints every note in full instead of a summary line |
 | `create` | `--text=TEXT`, or a positional argument, or STDIN |
 | `delete <n>` (`rm`) | Delete the note at index `n` |
+
+### run links
+
+The evidence an Issue or Note points at: a captured Flow, a Repeater session, or a Fuzz / Miner run. The Markdown issue export resolves these already; this is the surface that lists and edits them.
+
+```bash
+gori run links --owner=issue --id=7
+gori run links add --owner=issue --id=7 --ref=flow --ref-id=42
+gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
+```
+
+| Option | Description |
+|--------|-------------|
+| `--owner=KIND` | Owner kind: `issue` (default) or `note` |
+| `--id=N` | Owner issue / note id. Required |
+| `--ref=KIND` | Target kind for `add` / `delete`: `flow`, `repeater`, `fuzz`, `miner` |
+| `--ref-id=M` | Target id for `add` / `delete` |
+| `--format=FMT` | `text` (default) or `json`, on `list` |
+
+A pointer whose target was pruned lists as `(stale)` rather than disappearing, so "no evidence" and "evidence that is gone" stay distinguishable. `add` is idempotent, and both ends must exist.
 
 ### run rewriter
 

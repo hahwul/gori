@@ -494,6 +494,80 @@ Raising the cap takes effect on the next project open. Lowering it does not imme
 
 Surfaces that do not own capture never prune, whatever the cap says: `gori mcp`'s store, a project opened only to count its objects for a delete preview, and a freshly created project.
 
+### oast_providers
+
+OAST providers defined once and reusable across every project. Project-scoped providers live in the project database instead; these are the global library, edited in Preferences → **OAST providers**.
+
+```json
+{
+  "oast_providers": [
+    {
+      "id": "3f9a2c11",
+      "name": "team interactsh",
+      "kind": "interactsh",
+      "host": "oast.example.com",
+      "token": "…",
+      "enabled": true
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `id` | string | Random hex token assigned on creation. Do not hand-edit |
+| `name` | string | Label shown in the OAST tab |
+| `kind` | string | Provider type, e.g. `interactsh` |
+| `host` | string | Provider host |
+| `token` | string | Optional auth token for the provider |
+| `enabled` | bool | Whether the provider is selectable (default `true`) |
+
+The section is omitted entirely until you add a provider. Entries missing `id`, `name`, `kind`, or `host` are dropped on load.
+
+### update
+
+The startup update check behind the project picker's one-line "update available" notice. This is the only automatic outbound call gori makes; `gori update` stays the explicit install path.
+
+```json
+{
+  "update": {
+    "check_enabled": true,
+    "notified_version": "0.2.0",
+    "latest_seen": "0.2.0",
+    "checked_at": 1753600000
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `check_enabled` | bool | `true` | Set `false` to skip the probe entirely |
+| `notified_version` | string | `""` | Latest version already surfaced, so the notice shows once per release |
+| `latest_seen` | string | `""` | Last version seen from the release feed |
+| `checked_at` | integer | `0` | Unix seconds of the last successful check. Caches the result for a day |
+
+The last three are state gori maintains; only `check_enabled` is meant to be edited. The whole section is omitted on a default install.
+
+### fuzzer
+
+Wordlist paths remembered by the Fuzzer's Payload overlay. Scratch state, not project data.
+
+```json
+{
+  "fuzzer": {
+    "recent_wordlists": ["/usr/share/wordlists/params.txt"],
+    "favorite_wordlists": ["/home/me/lists/api.txt"]
+  }
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `recent_wordlists` | array | Most-recently-applied wordlist paths, newest first, capped at 10 |
+| `favorite_wordlists` | array | Paths starred in the Path field, offered ahead of the recents |
+
+Omitted until you apply or star a wordlist.
+
 ### Other sections
 
 | Section | Description |
