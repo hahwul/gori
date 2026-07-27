@@ -60,5 +60,34 @@ describe Gori::Paths do
         mode_of(dir).should eq(0o755) # the parent it merely passed through is untouched
       end
     end
+
+    # mkdir_p answers "another instance won the race" and "a plain FILE is sitting here"
+    # with the same File::AlreadyExistsError, and ensure_dir used to swallow both as the
+    # benign one. `gori ca --ca-dir notes.txt` then failed at the first write, reporting
+    # `BIO_new_file(notes.txt/root.crt.pem) failed` — neither the operator's argument nor
+    # what was wrong with it.
+    it "raises naming the path when a file occupies it" do
+      with_tmp_dir do |dir|
+        occupied = File.join(dir, "notes.txt")
+        File.write(occupied, "not a directory")
+        ex = expect_raises(Gori::Error, /not a directory/) do
+          Gori::Paths.ensure_dir(occupied)
+        end
+        ex.message.not_nil!.should contain(occupied)
+        File.read(occupied).should eq("not a directory") # refused, not clobbered
+      end
+    end
+
+    # Same verdict on the tighten: false path — it is the one `--ca-dir` / `--config` take,
+    # so it is the one an operator reaches this error through.
+    it "raises on an occupied path with tighten: false too" do
+      with_tmp_dir do |dir|
+        occupied = File.join(dir, "gori.json")
+        File.write(occupied, "{}")
+        expect_raises(Gori::Error, /not a directory/) do
+          Gori::Paths.ensure_dir(occupied, tighten: false)
+        end
+      end
+    end
   end
 end

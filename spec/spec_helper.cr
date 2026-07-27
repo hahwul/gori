@@ -14,6 +14,12 @@ ENV["GORI_HOME"] = GORI_TEST_HOME
 
 require "../src/gori"
 
+# Several examples feed Settings a deliberately unparseable file. The warning that earns
+# is real behaviour worth keeping, but on STDERR it lands mid-dots as a "settings: ... is
+# not valid JSON" line that reads like a failure. Silence it globally; the examples that
+# assert the line swap in an IO::Memory of their own.
+Gori::Settings.warning_io = nil
+
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
 # The scope decision for a spec that is exercising something OTHER than the scope gate

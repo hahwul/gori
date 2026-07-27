@@ -61,8 +61,9 @@ module Gori
     # `open_db_path`, when given (CLI `--db=PATH`), opens that database directly —
     # skipping the picker — before ever showing it; `q` from that session still
     # falls through to the normal picker below, so navigating elsewhere afterward
-    # still works.
-    def run_tui(open_db_path : String? = nil) : Nil
+    # still works. `settings_warning` is anything Settings.load has to say about the
+    # file it loaded: it was written to STDERR, which the alt screen is about to wipe.
+    def run_tui(open_db_path : String? = nil, settings_warning : String? = nil) : Nil
       log_io = File.open(File.join(Paths.home_dir, "gori.log"), "a")
       setup_logging(log_io)
       Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
@@ -93,13 +94,28 @@ module Gori
         # the terminal if it raises. The wizard persists settings.json (even on skip),
         # so it never auto-launches again.
         Tui::SetupWizard.new(term).run unless File.exists?(Settings.path)
+        # `notice` is the picker's one-line "here is why you are looking at this screen".
+        # A failed open used to fall through to the picker in SILENCE, its reason reachable
+        # only by knowing to read ~/.gori/gori.log, so an operator who typo'd `--db` saw
+        # "no projects yet" and read it as "my capture is gone". Every `gori run` surface
+        # already names this failure; the interactive one was the only one that did not.
+        #
+        # A corrupt settings.json starts on the row and a failed --db open then displaces
+        # it, being the more immediate explanation of what is on screen. Neither is lost:
+        # the settings warning also went to STDERR and names the `.corrupt` copy it kept.
+        notice = settings_warning
         if open_db_path
-          return if open_and_run(project_for_db_path(open_db_path), term) == :quit
+          outcome, db_error = open_and_run(project_for_db_path(open_db_path), term)
+          return if outcome == :quit
+          notice = db_error || notice
         end
         loop do
-          project = Tui::ProjectPicker.new(term, projects).run
+          project = Tui::ProjectPicker.new(term, projects, notice: notice).run
           break unless project # nil => quit gori
-          break if open_and_run(project, term) == :quit
+          # Reassigned every pass: a picker-chosen project that won't open reports it the
+          # same way, and a successful open clears the previous failure's notice.
+          outcome, notice = open_and_run(project, term)
+          break if outcome == :quit
         end
       ensure
         term.close # restore the terminal even on error
@@ -157,7 +173,11 @@ module Gori
       session.close
     end
 
-    private def open_and_run(project : Project, term : Termisu) : Symbol
+    # `{outcome, error}`. `outcome` is :quit (leave gori) or :back (return to the picker);
+    # `error` is a one-line reason and is non-nil ONLY when the session never opened, so the
+    # caller can tell "the user pressed q" apart from "this project never opened" — both of
+    # which are :back, and only one of which is worth putting on screen.
+    private def open_and_run(project : Project, term : Termisu) : {Symbol, String?}
       # Pick up any bind address / verify-upstream toggle changed via Settings since startup
       # (the previous session kept its values; this one opens on the new ones).
       @config.listen = Settings.bind_host
@@ -169,11 +189,14 @@ module Gori
           # taken (a 2nd gori instance), so capture just works on a new port.
           Session.open(@config, @ca, @registry, project, bind_fallback: true)
         rescue ex
-          # A failed open (e.g. the proxy port is already in use) must not crash the
-          # TUI with a backtrace into the alt-screen — log it and fall back to the
-          # picker. Session.open already cleaned up any partially-opened resources.
+          # A failed open must not crash the TUI with a backtrace into the alt-screen — log
+          # it and fall back to the picker, WITH the reason (a silent fall-back reads as
+          # "the project is empty"). Session.open already cleaned up any partially-opened
+          # resources. Note this is not the port-taken path: the interactive open passes
+          # bind_fallback and Session treats a failed bind as non-fatal (capture-off +
+          # a toast), so what lands here is a store that could not be opened at all.
           Log.error(exception: ex) { "failed to open session for project '#{project.name}'" }
-          return :back
+          return {:back, project.open_failure_reason(ex)}
         end
       begin
         runner = Tui::Runner.new(session, term)
@@ -184,7 +207,7 @@ module Gori
         if Settings.verify_upstream? && (warning = Proxy::Upstream.trust_store_warning)
           runner.notifications.push(:warn, warning)
         end
-        runner.run
+        {runner.run, nil}
       ensure
         session.close
       end

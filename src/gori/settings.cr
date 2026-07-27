@@ -64,6 +64,7 @@ module Gori
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
       @@loaded_raw = nil
+      @@load_warning = nil # cleared here, not in load_root, so a file that is fixed OR removed drops it
       raw = load_raw
       return unless raw # no file yet / unreadable — first run, keep defaults
       root = load_root(raw)
@@ -134,17 +135,67 @@ module Gori
       nil
     end
 
+    # Why the last load fell back to defaults, or nil when it did not. Read by the TUI to
+    # put it on the project picker; every headless surface has already had it on STDERR
+    # (see load_root). Cleared by a load that parses, so it never outlives the problem.
+    class_getter load_warning : String? = nil
+
+    # Guards the warning LINE, not the state: Settings.load runs once per surface but many
+    # times per process (~10 sites in cli.cr alone), and repeating the same warning down
+    # the terminal for one bad file is noise.
+    @@load_warning_emitted = false
+
+    # Where that line goes. STDERR is safe on every surface — `gori mcp`'s purity invariant
+    # is about STDOUT — but it is injectable rather than hardcoded so the suite can capture
+    # and ASSERT the line instead of printing a scary "not valid JSON" into its own output
+    # and leaving the emission itself untested. nil silences it.
+    class_property warning_io : IO? = STDERR
+
+    # Test seam: the once-per-process guard is what makes the line hard to assert, since
+    # whichever example runs first spends it. Resetting is only meaningful for a suite
+    # driving several corrupt files through one process.
+    def self.reset_load_warning_guard : Nil
+      @@load_warning_emitted = false
+    end
+
     # Parse the settings JSON. On a PRESENT-but-unparseable file, preserve a recoverable
     # copy at "<path>.corrupt" FIRST — otherwise the next save() overwrites the file with
     # an all-defaults document (merge_with_disk gives up on an unparseable base), silently
     # and permanently losing the user's real settings — then return nil so load keeps the
     # in-memory defaults and leaves @@loaded_raw nil (the next save is a clean write, not a
     # merge against corrupt bytes).
+    #
+    # And SAY SO. Falling back to defaults is not a quiet event for this file: it carries
+    # the bind address, the upstream connection rules and the TLS pass-through list, so a
+    # hand-edited comma can drop a pass-through host into the MITM path and look like
+    # nothing happened. The .corrupt copy is a recovery route only for someone who already
+    # knows to look for it. STDERR is safe on every surface — `gori mcp`'s purity invariant
+    # is about STDOUT — and the TUI, which would lose it under the alt screen, reads
+    # `load_warning` instead.
     private def self.load_root(raw : String) : JSON::Any?
       JSON.parse(raw)
     rescue
-      # 0600 like the file it is a copy of — it carries the same secrets verbatim.
-      (write_private("#{path}.corrupt", raw) rescue nil) if raw.presence
+      # 0600 like the file it is a copy of — it carries the same secrets verbatim. Whether
+      # it landed decides the wording: pointing at a copy that isn't there is worse than
+      # not mentioning one (write_private returns Nil, so track it with a flag).
+      kept = false
+      if raw.presence
+        begin
+          write_private("#{path}.corrupt", raw)
+          kept = true
+        rescue
+          # unwritable dir / full disk — the warning still goes out, minus the recovery hint
+        end
+      end
+      warning = String.build do |s|
+        s << "settings: #{path} is not valid JSON — using defaults for this run"
+        s << "; your file is preserved at #{path}.corrupt" if kept
+      end
+      @@load_warning = warning
+      unless @@load_warning_emitted
+        @@load_warning_emitted = true
+        @@warning_io.try(&.puts(warning))
+      end
       nil
     end
 

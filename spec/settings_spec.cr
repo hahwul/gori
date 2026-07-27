@@ -544,6 +544,98 @@ describe Gori::Settings do
     end
   end
 
+  # Preserving the file was only half of it: the fallback to defaults was SILENT, so a
+  # hand-edited comma reset the bind address, the upstream connection rules and the TLS
+  # pass-through list with the only trace a `.corrupt` sibling nobody was told to look for.
+  describe ".load_warning" do
+    # The line itself, not just the recorded state. It is guarded to fire once per PROCESS,
+    # so the guard is reset here — otherwise whichever corrupt-file example ran first spends
+    # it and this passes or fails on spec ordering.
+    it "puts the warning on the warning io, once" do
+      dir = File.tempname("gori-settings-io")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      sink = IO::Memory.new
+      begin
+        ENV["GORI_HOME"] = dir
+        Gori::Settings.warning_io = sink
+        Gori::Settings.reset_load_warning_guard
+        File.write(Gori::Settings.path, "{{{")
+
+        Gori::Settings.load
+        Gori::Settings.load # a second surface loading the same bad file must not repeat it
+
+        sink.to_s.lines.size.should eq(1)
+        sink.to_s.should contain("not valid JSON")
+        sink.to_s.should contain("using defaults")
+      ensure
+        Gori::Settings.warning_io = nil # spec_helper's default: never on the suite's STDERR
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        Gori::Settings.bind_port = 8070
+      end
+    end
+
+    it "reports the fallback to defaults, naming the file and the preserved copy" do
+      dir = File.tempname("gori-settings-warn")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path, %({"network":{"bind_port":9999,))
+        Gori::Settings.load
+
+        warning = Gori::Settings.load_warning
+        warning.should_not be_nil
+        warning.not_nil!.should contain(Gori::Settings.path)
+        warning.not_nil!.should contain("using defaults")
+        warning.not_nil!.should contain("#{Gori::Settings.path}.corrupt")
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        Gori::Settings.bind_port = 8070
+      end
+    end
+
+    it "is nil after a load that parses" do
+      dir = File.tempname("gori-settings-ok")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path, %({"network":{"bind_port":9999}}))
+        Gori::Settings.load
+        Gori::Settings.load_warning.should be_nil
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        Gori::Settings.bind_port = 8070
+      end
+    end
+
+    # Cleared by load, not by load_root, so a file that is REMOVED between runs drops the
+    # warning too — load returns early on a missing file and never reaches the parser.
+    it "is nil again once the file is gone" do
+      dir = File.tempname("gori-settings-gone")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path, "{{{")
+        Gori::Settings.load
+        Gori::Settings.load_warning.should_not be_nil
+
+        File.delete(Gori::Settings.path)
+        Gori::Settings.load
+        Gori::Settings.load_warning.should be_nil
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        Gori::Settings.bind_port = 8070
+      end
+    end
+  end
+
   describe ".editor_command" do
     it "splits a configured command into program + args" do
       Gori::Settings.editor = "code --wait"

@@ -29,6 +29,22 @@ module Gori
       File.basename(@db_path) == DB_FILE ? CaptureLock.path(dir) : "#{@db_path}.capture.lock"
     end
 
+    # A one-line, operator-readable reason this project's store would not open, for a
+    # surface that has nowhere to put a backtrace (the TUI picker). The exception alone is
+    # useless there: SQLite answers "the parent directory does not exist", "this file is not
+    # a database" and "no read permission" with the same DB::ConnectionRefused. So name the
+    # case from the PATH, which is what the operator can actually act on, and fall back to
+    # the raw message only for what the path cannot explain. Wording mirrors what
+    # `gori run --db` aborts with, so both surfaces describe one failure one way.
+    def open_failure_reason(ex : Exception) : String
+      parent = File.dirname(@db_path)
+      return "cannot open #{@db_path}: no such directory: #{parent}" unless Dir.exists?(parent)
+      if File.exists?(@db_path) && (ex.is_a?(DB::Error) || ex.is_a?(SQLite3::Exception))
+        return "cannot open #{@db_path}: not a valid SQLite database (or unreadable)"
+      end
+      "could not open '#{@name}': #{ex.message.presence || ex.class}"
+    end
+
     # Best-effort last-activity time (DB file mtime), for the picker.
     def last_modified : Time?
       File.exists?(@db_path) ? File.info(@db_path).modification_time : nil

@@ -49,7 +49,13 @@ module Gori::Tui
       SpaceEntry.new('d', "Delete", :delete),
     ]
 
-    def initialize(@term : Termisu, @registry : ProjectRegistry)
+    # `notice` is why the caller is showing the picker rather than a project — a session
+    # that failed to open (a bad `--db`, an unreadable store). It rides the same h-3 row as
+    # the update notice but in red, because without it a failed open is indistinguishable
+    # from an empty gori: the operator lands on "no projects yet" and concludes their
+    # capture is gone. See App#open_and_run.
+    def initialize(@term : Termisu, @registry : ProjectRegistry, notice : String? = nil)
+      @open_error = notice
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
       @projects = @registry.list
@@ -1107,12 +1113,19 @@ module Gori::Tui
         end
       end
 
-      # Row above the hint (h-3): a transient compaction result when present, else
-      # the once-per-release "update available" notice. The compaction flash is a
-      # direct response to a keypress, so it takes the row; the notice returns when
-      # the flash clears on the next keystroke.
+      # Row above the hint (h-3): a transient compaction result when present, else why the
+      # last open failed, else the once-per-release "update available" notice. The
+      # compaction flash is a direct response to a keypress, so it takes the row; the
+      # others return when the flash clears on the next keystroke. The open error outranks
+      # the update notice — one explains the screen the operator is looking at, the other
+      # is an aside — and it persists rather than fading, since it is the ONLY on-screen
+      # trace that a project failed to open.
       if flash = @flash
         centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w)
+      elsif open_error = @open_error
+        # Capped rather than left to run off the edge: a db path makes this the one notice
+        # of unbounded length. The leading words carry the meaning, and gori.log has it all.
+        centered(screen, h - 3, open_error, Theme.red, w, width: w - 2)
       elsif notice = @update_notice
         centered(screen, h - 3, notice, Theme.yellow, w)
         # Mark this release "read" only once it has actually reached the screen, so a
@@ -1362,9 +1375,13 @@ module Gori::Tui
       centered(screen, h - 2, hint, Theme.muted, w)
     end
 
+    # `width` caps the drawn text (Screen#text ellipsizes past it). Uncapped by default,
+    # matching every caller that passes a message it has already sized; pass it for text
+    # of unbounded length (a db path in an open error), which would otherwise clamp to
+    # x=0 and run off the right edge into the hint row.
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
-                         attr : Attribute = Attribute::None) : Nil
-      screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr)
+                         attr : Attribute = Attribute::None, width : Int32? = nil) : Nil
+      screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr, width: width)
     end
 
     # Draw BRAND_ART as one centered block: every line starts at the same left

@@ -96,6 +96,13 @@ module Gori
         # created concurrently by another instance — it exists now, at DIR_MODE already
         ours = false
       end
+      # mkdir_p raises AlreadyExists for BOTH "another instance won the race" and "a plain
+      # FILE occupies this path", and only the first is benign. Say which, here, while the
+      # path is still in hand: left to the caller it surfaces however far downstream the
+      # first write happens to be — `gori ca --ca-dir notes.txt` reported
+      # `BIO_new_file(notes.txt/root.crt.pem) failed`, which names neither the argument the
+      # operator typed nor what is wrong with it.
+      raise Gori::Error.new("path exists and is not a directory: #{path}") unless Dir.exists?(path)
       # 0700 has no group/other bits for any umask to strip, so a dir we created is already
       # exact; the chmod is for a pre-0700 dir from an older install.
       File.chmod(path, DIR_MODE) rescue nil if ours || tighten

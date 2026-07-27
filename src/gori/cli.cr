@@ -69,6 +69,14 @@ module Gori
         print_main_help
         exit 1
       end
+    rescue ex : Error
+      # Gori::Error is the project's EXPECTED-error type (see gori.cr) — something the
+      # operator can act on, raised with a message written for them. One reaching the top
+      # of the process printed a Crystal backtrace instead, which says the same thing in
+      # the least usable form there is: `gori --ca-dir notes.txt`, or a GORI_HOME that is a
+      # file, both landed that way. Deliberately narrow — an IO error, a nil, anything gori
+      # did not anticipate still backtraces, because those are bugs and want a trace.
+      abort "gori: #{ex.message.presence || ex.class}"
     end
 
     # Pull `--config PATH` / `--config=PATH` out of argv, point Settings at it, and return the
@@ -158,7 +166,10 @@ module Gori
       # reflects the active state; toggling it there re-syncs the live proxy + persists.
       Settings.verify_upstream = false if insecure
       config = Config.new(listen, port, db_path, ca_dir, !Settings.verify_upstream?)
-      App.new(config).run_tui(open_db_path: db_explicit ? db_path : nil)
+      # Settings.load already put any corrupt-file warning on STDERR, which the alt screen
+      # is about to wipe — hand it to the TUI so it reaches the operator on the picker.
+      App.new(config).run_tui(open_db_path: db_explicit ? db_path : nil,
+        settings_warning: Settings.load_warning)
     end
 
     # `gori settings` prints the path to the persisted settings file (settings.json
