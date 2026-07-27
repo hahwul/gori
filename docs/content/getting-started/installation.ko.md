@@ -18,7 +18,7 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 ### GitHub rate limit에 걸린 경우 {#rate-limit}
 
-설치 스크립트는 최신 릴리스가 무엇인지 GitHub API에 묻는데, 이 API는 **비인증 요청을 IP당 시간당 60회**만 허용합니다. 공용 CI나 NAT 뒤에서는 `403`이 돌아올 수 있습니다. 설치 스크립트와 `gori update` 모두 rate limit이 없는 릴리스 리다이렉트로 자동 폴백하므로 그대로 동작하며, `resolved v0.1.4 via ... (no API call)` 같은 줄이 보입니다.
+설치 스크립트는 최신 릴리스가 무엇인지 GitHub API에 묻는데, 이 API는 **비인증 요청을 IP당 시간당 60회**만 허용합니다. 공용 CI나 NAT 뒤에서는 `403`이 돌아올 수 있습니다. 설치 스크립트와 `gori update` 모두 rate limit이 없는 릴리스 리다이렉트로 자동 폴백하므로 그대로 동작하며, `resolved v0.2.0 via ... (no API call)` 같은 줄이 보입니다.
 
 인증 시 한도인 5000회/시간을 쓰려면 토큰을 먼저 export하세요. `curl` 앞에 붙이면 안 되고 반드시 export해야 합니다 — 스크립트는 파이프로 연결된 `bash`에서 실행되므로 `curl`에만 걸린 변수는 상속되지 않습니다:
 
@@ -31,7 +31,7 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 ### 직접 다운로드 (Dockerfile, CI) {#direct-download}
 
-모든 릴리스에는 버전이 없는 사본도 함께 올라갑니다. 버전 조회도 API 호출도 없이 고정된 URL로 최신 빌드를 받을 수 있습니다. v0.1.4 다음 릴리스부터 제공되며, 그 이전 릴리스에는 버전이 붙은 이름만 있습니다:
+모든 릴리스에는 버전이 없는 사본도 함께 올라갑니다. 버전 조회도 API 호출도 없이 고정된 URL로 최신 빌드를 받을 수 있습니다. v0.2.0부터 제공되며, 그 이전 릴리스에는 버전이 붙은 이름만 있습니다:
 
 ```bash
 # Linux x86_64 / arm64 — 정적 바이너리
@@ -41,7 +41,7 @@ curl -fsSL -o gori https://github.com/hahwul/gori/releases/latest/download/gori-
 curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/download/gori-osx-arm64.tar.gz
 ```
 
-버전이 붙은 이름(`gori-v0.1.4-linux-x86_64`)도 그대로 유지되니, 특정 빌드에 고정하려면 그쪽을 쓰세요.
+버전이 붙은 이름(`gori-v0.2.0-linux-x86_64`)도 그대로 유지되니, 특정 빌드에 고정하려면 그쪽을 쓰세요.
 
 각 릴리스에는 두 이름 체계를 모두 담은 `SHA256SUMS`도 함께 올라갑니다. 설치 스크립트와 `gori update`는 이 파일로 자동 검증하며, 직접 받은 파일을 확인하려면:
 
