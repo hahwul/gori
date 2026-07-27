@@ -612,6 +612,8 @@ Import **replaces whole sections**; a section you do not select is left exactly 
 
 `env` and `decoder` are excluded from an export by default: `env` holds token values and `decoder` holds your last input and saved sessions. Naming one explicitly (`--sections env`) is how you consent to include it. Note that `upstream_rules` is safe to share — it stores a username and an environment-variable *name*, never a password.
 
+When an export **does** carry one of those sections, `-o FILE` is created `0600` and gori says so, naming what is in the file. Consenting to export a credential is not consenting to leave it world-readable. An ordinary export stays `0644`, and an export that names `env` on an install with no env vars is an ordinary export — the mode follows what the document actually contains, not what you typed.
+
 ### `--config PATH`
 
 `--config` points gori at a specific settings file for one run. It works before any subcommand:

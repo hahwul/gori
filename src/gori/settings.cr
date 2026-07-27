@@ -246,6 +246,18 @@ module Gori
     # is simply absent — the caller validates and reports). With `only` nil, everything except
     # SECRET_SECTIONS is written; naming a secret section explicitly IS the consent to include
     # it, so no separate flag is needed to leak one by accident.
+    # The secret-bearing sections `export_document(only)` would actually emit — the caller
+    # named them AND this install has something in them. Drives the export file's 0600 and the
+    # notice that names it, so neither fires on an `env`-named export of an empty env block
+    # (which would train the operator to ignore the notice on the export that matters).
+    # Returns the sections rather than a Bool so the notice can name what is in the file
+    # instead of reciting SECRET_SECTIONS at the operator.
+    def self.exported_secret_sections(only : Array(String)? = nil) : Array(String)
+      return [] of String unless list = only
+      present = JSON.parse(serialize).as_h.keys
+      SECRET_SECTIONS.select { |s| list.includes?(s) && present.includes?(s) }
+    end
+
     def self.export_document(only : Array(String)? = nil) : String
       doc = JSON.parse(serialize).as_h
       keep = only || (doc.keys - SECRET_SECTIONS)

@@ -240,10 +240,46 @@ module Gori
       end
       doc = Settings.export_document(sections)
       if path = out
-        File.write(path, doc)
-        STDERR.puts "wrote #{path}"
+        write_export(path, doc, Settings.exported_secret_sections(sections))
       else
         puts doc
+      end
+    end
+
+    # Write the profile, 0600 the moment it actually carries a secret.
+    #
+    # Naming `env`/`decoder` in --sections IS the consent to export them (that is the whole
+    # point of the SECRET_SECTIONS default), but consenting to export a credential is not
+    # consenting to leave it world-readable in a shared checkout or on a multi-user box. The
+    # mode is set at CREATE time, not by a chmod after `File.write`, so the bytes are never on
+    # disk at 0644 even briefly. The explicit chmod additionally tightens a file that already
+    # existed at a looser mode — `File.open`'s perm applies only to a file it creates.
+    #
+    # Best-effort on a filesystem that cannot represent the mode (a mounted share): an export
+    # the operator asked for must not fail over it, but they ARE told, because the file is
+    # then genuinely unprotected and that is not ours to hide.
+    private def self.write_export(path : String, doc : String, secrets : Array(String)) : Nil
+      perm = File::Permissions.new(secrets.empty? ? 0o644 : 0o600)
+      begin
+        File.open(path, "w", perm: perm) do |f|
+          File.chmod(path, perm) unless secrets.empty?
+          f.print(doc)
+        end
+      rescue ex
+        abort "gori settings export: cannot write #{path}: #{ex.message}"
+      end
+      return STDERR.puts "wrote #{path}" if secrets.empty?
+      carried = secrets.join(", ")
+      mode = begin
+        File.info(path).permissions.value & 0o777
+      rescue
+        -1
+      end
+      if mode == 0o600
+        STDERR.puts "wrote #{path} (0600 — it carries #{carried})"
+      else
+        STDERR.puts "wrote #{path} — WARNING: it carries #{carried} and this filesystem " \
+                    "would not take 0600; protect it yourself"
       end
     end
 

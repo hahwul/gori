@@ -104,6 +104,35 @@ describe "settings profiles" do
     end
   end
 
+  # Drives the export file's 0600. Must track what the document ACTUALLY carries, not just
+  # what was named: warning on an `env`-named export of an empty env block would train the
+  # operator to ignore the notice on the one that matters.
+  describe ".exported_secret_sections" do
+    it "is empty for the default export and for a non-secret selection" do
+      with_config_home do
+        Gori::Settings.env_vars = [{"TOKEN", "super-secret"}]
+        Gori::Settings.exported_secret_sections.should be_empty
+        Gori::Settings.exported_secret_sections(["network", "theme"]).should be_empty
+      end
+    end
+
+    it "names the secret sections that are both selected AND non-empty" do
+      with_config_home do
+        Gori::Settings.env_vars = [{"TOKEN", "super-secret"}]
+        Gori::Settings.exported_secret_sections(["env"]).should eq(["env"])
+        Gori::Settings.exported_secret_sections(["network", "env"]).should eq(["env"])
+      end
+    end
+
+    it "is empty when the named secret section has nothing in it (nothing to protect)" do
+      with_config_home do
+        Gori::Settings.env_vars = [] of {String, String}
+        Gori::Settings.document_keys.should_not contain("env")
+        Gori::Settings.exported_secret_sections(["env"]).should be_empty
+      end
+    end
+  end
+
   describe ".import_preview" do
     it "reports only the sections that would actually change, plus unknown keys" do
       with_config_home do
