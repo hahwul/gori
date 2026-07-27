@@ -961,7 +961,8 @@ module Gori::Tui
       # History/Sitemap tabs don't say. The proxy address lives in the status bar /
       # settings, so it isn't repeated here.
       if @flow_count == 0 && y <= max_y
-        screen.text(inner.x + 1, y, "▸ first run — point your client at the proxy · ^P: Open browser · Export CA certificate",
+        screen.text(inner.x + 1, y,
+          Hotkeys.retag("▸ first run — point your client at the proxy · ^P: Open browser · Export CA certificate"),
           Theme.muted, width: {inner.right - inner.x - 1, 0}.max)
         y += 1
       end

@@ -389,7 +389,9 @@ module Gori::Tui
                 end
         screen.text(box.x + 2, ry, "• #{fb}", color, Theme.panel, width: {box.w - 4, 1}.max)
       elsif (r = @rows[@selected]?) && r.kind == :binding && (v = @registry[r.verb_id]?)
-        screen.text(box.x + 2, ry, v.description, Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
+        # Retagged: a description may name a claimed chord (settings.editor's "opened by ^E"),
+        # and this is the one surface that renders verb descriptions.
+        screen.text(box.x + 2, ry, Hotkeys.retag(v.description), Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
       end
     end
 

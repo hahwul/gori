@@ -119,7 +119,9 @@ module Gori::Tui
         # here plays the reveal once, then freezes at ART_ANIM_DONE (static after).
         @art_frame += 1 if @art_frame < ART_ANIM_DONE
         @star_frame &+= 1
-        case ev = @term.poll_event(50)
+        # Own event loop, so the Runner's ⌥-alias fold doesn't reach it — apply it here too
+        # or ⌥N (new project) / ⌥, (preferences) would be dead on this screen.
+        case ev = Keybind.dealias_event(@term.poll_event(50))
         when Termisu::Event::Resize
           # termisu already resized its buffer to these dims; re-fit the backend grids in
           # lockstep off the same event dims, and force a full repaint next frame.

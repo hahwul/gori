@@ -402,7 +402,9 @@ module Gori::Tui
       note_y = box.bottom - 3
       hint_y = box.bottom - 2
       iw = {box.w - 4, 0}.max
-      note = @status || focused_hint
+      # Retagged: field hints name claimed chords (the external editor's ^E, the command
+      # modifier's own ^P/^N/^W/^1-9), which must read as whichever modifier is configured.
+      note = Hotkeys.retag(@status || focused_hint)
       # Same green/yellow split SettingsView uses — a rejected save must not read as a
       # successful one just because it came through the modal.
       note_fg = @status ? (@status_warn ? Theme.yellow : Theme.green) : Theme.muted

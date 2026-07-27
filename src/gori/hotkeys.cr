@@ -24,23 +24,54 @@ module Gori
     # verb to one would be silently shadowed — the editor refuses them on top of the
     # terminal-reserved set.
     #
-    # **Single source of truth for "claimed" letters.** Runner#handle_key and controllers
-    # must only hardcode Ctrl+letter guards that appear here (or the reserved set). When
-    # adding a new pre-keymap guard, append to CLAIMED_CTRL_LETTERS / CLAIMED_CTRL_DIGITS
-    # first, then wire the handler — the hotkey editor and reserved?() stay in sync.
-    #   • Runner global guards: ^G goto, ^F find, ^B reveal, ^E external editor.
+    # **Single source of truth for "claimed" keys.** Runner#handle_key and controllers
+    # must only hardcode Ctrl+key guards that appear here (or the reserved set). When
+    # adding a new pre-keymap guard, append to CLAIMED_CTRL_LETTERS / CLAIMED_CTRL_DIGITS /
+    # CLAIMED_CTRL_PUNCT first, then wire the handler — the hotkey editor, reserved?() and
+    # Tui::Keybind.dealias all derive from these, so they stay in sync.
+    #   • Runner global guards: ^G goto, ^F find, ^B reveal, ^E external editor, ^, prefs.
     #   • Controllers + Runner: ^P palette, ^N new, ^W close, ^1-9 sub-tab.
     CLAIMED_CTRL_LETTERS = %w(g f b e p n w)
     CLAIMED_CTRL_DIGITS  = ('1'..'9').map(&.to_s)
+    CLAIMED_CTRL_PUNCT   = %w(,)
 
-    CLAIMED_CHORDS = begin
-      cs = CLAIMED_CTRL_LETTERS.map { |k| Verb::Chord.new(k, ctrl: true) }
-      CLAIMED_CTRL_DIGITS.each { |d| cs << Verb::Chord.new(d, ctrl: true) }
-      cs
+    # Every claimed key, modifier-free. The ctrl and alt chord sets below are both built
+    # from this, and Keybind.dealias uses it to decide which events to rewrite.
+    CLAIMED_KEYS = CLAIMED_CTRL_LETTERS + CLAIMED_CTRL_DIGITS + CLAIMED_CTRL_PUNCT
+
+    CLAIMED_CHORDS     = CLAIMED_KEYS.map { |k| Verb::Chord.new(k, ctrl: true) }
+    CLAIMED_ALT_CHORDS = CLAIMED_KEYS.map { |k| Verb::Chord.new(k, alt: true) }
+
+    # Selectable command modifiers (the Settings.command_modifier domain). "ctrl" is the
+    # built-in family's native modifier; "alt" ADDS an ⌥ alias for it (see #alias_active?).
+    COMMAND_MODIFIERS = %w(ctrl alt)
+
+    # Clamped on READ as well as on parse (Settings.normalize_command_modifier), the same
+    # defence #chord_overrides applies to hand-edited bindings: nothing downstream should
+    # have to reason about an unknown modifier, whatever put it there.
+    def self.command_modifier : String
+      m = Settings.command_modifier
+      COMMAND_MODIFIERS.includes?(m) ? m : Settings::DEFAULT_COMMAND_MODIFIER
+    end
+
+    # Whether the ⌥ alias for the claimed family is on. The alias is ADDITIVE: the Ctrl
+    # form keeps firing, so a terminal that doesn't deliver ⌥ as Meta can never lock a
+    # user out of the palette. What the setting changes is which form gets ADVERTISED
+    # (see #binding_for / #retag) and which extra chords are claimed.
+    def self.alias_active? : Bool
+      command_modifier == "alt"
     end
 
     def self.claimed?(chord : Verb::Chord) : Bool
-      CLAIMED_CHORDS.includes?(chord)
+      CLAIMED_CHORDS.includes?(chord) || (alias_active? && CLAIMED_ALT_CHORDS.includes?(chord))
+    end
+
+    # The alt twin of a claimed ctrl chord (nil for anything else) — the form the alias
+    # advertises. Shift/alt-carrying chords are not claimed, so only the plain ctrl set
+    # maps.
+    def self.alt_twin(chord : Verb::Chord) : Verb::Chord?
+      return nil unless CLAIMED_CHORDS.includes?(chord)
+      Verb::Chord.new(chord.key, alt: true)
     end
 
     # Build the dispatch keymap from the registry under the persisted OS profile + user
@@ -86,27 +117,40 @@ module Gori
     end
 
     # A human reason if `chord` is unbindable — terminal-/structurally reserved, or claimed
-    # by a hardcoded gori shortcut before the keymap — else nil.
+    # by a hardcoded gori shortcut before the keymap — else nil. Under an active ⌥ alias
+    # BOTH forms of a claimed key are refused: the guard fires on either, so a binding on
+    # the alt form would be shadowed exactly like one on the ctrl form.
     def self.reserved?(chord : Verb::Chord) : String?
       if reason = Verb::Reserved.reserved?(chord)
         reason
       elsif claimed?(chord)
-        "#{chord.label} is reserved by a gori shortcut"
+        "#{display_label(chord)} is reserved by a gori shortcut"
       end
     end
 
     # The effective PRIMARY chord bound to `id` now (nil = unbound), honouring an optional
     # in-progress overrides map (the editor's working copy) and OS profile.
+    #
+    # Under an active ⌥ alias a CLAIMED chord is reported as its alt twin. The four
+    # FIXED_IDS verbs declare `ctrl: true` defaults (verbs/core.cr, verbs/history.cr) and
+    # can keep doing so: the palette, Help's verb-id rows and the space menu all resolve
+    # through here, so their labels follow the setting from this one place. The Ctrl form
+    # still fires — the alias is additive — but the alt form is the one worth advertising,
+    # since a user only turns the alias on when Ctrl isn't reaching gori.
     def self.binding_for(registry : Verb::Registry, id : String,
                          overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
                          profile : String = Settings.keymap_os) : Verb::Chord?
       verb = registry[id]?
       return nil unless verb
-      Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides).first?
+      chord = Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides).first?
+      return chord unless chord && alias_active?
+      alt_twin(chord) || chord
     end
 
-    # Compact status/Help token for a chord (`ctrl-r` → `^R`, `shift-i` → `⇧I`, `f` → `f`).
-    # Matches the curated prose style used in body_hint / Help before binding-truth.
+    # Compact status/Help token for a chord (`ctrl-r` → `^R`, `alt-p` → `⌥P`, `shift-i` →
+    # `⇧I`, `f` → `f`). Matches the curated prose style used in body_hint / Help before
+    # binding-truth. A MODIFIED single letter is shown uppercase (`^P`, `⌥P`) while a bare
+    # one stays as typed (`f`), which is the convention the hand-written hints use.
     def self.display_label(chord : Verb::Chord) : String
       if chord.ctrl
         rest = chord.key.size == 1 ? chord.key.upcase : chord.key
@@ -115,8 +159,9 @@ module Gori
       end
       String.build do |io|
         io << "⌥" if chord.alt
-        if chord.shift && chord.key.size == 1
-          io << "⇧" << chord.key.upcase
+        if (chord.shift || chord.alt) && chord.key.size == 1
+          io << "⇧" if chord.shift
+          io << chord.key.upcase
         else
           io << "⇧" if chord.shift
           io << case chord.key
@@ -133,6 +178,35 @@ module Gori
           end
         end
       end
+    end
+
+    # The claimed family as it appears in hand-written hint/help PROSE ("^P cmds",
+    # "^1-9 jump"). A closed set on purpose: ^R/^S/^X/^C/^D are NOT claimed and must keep
+    # their carets, so never widen this to a general `\^(\w)`.
+    CLAIMED_CARET_RE = /\^([gfbepnwGFBEPNW,1-9])/
+
+    # Rewrite the claimed family's carets to ⌥ in a DISPLAY string. Identity unless the
+    # alias is on. This is why ~86 hand-written "^P"/"^N"/"^1-9" literals across the TUI
+    # did not have to be swept: applying it at the few places hint text is drawn (Runner's
+    # key_hints funnel, Help's item rows, the empty-state cards, the tutorial) covers all
+    # of them, and it can be deleted wholesale if the guards ever move into the keymap.
+    def self.retag(s : String) : String
+      return s unless alias_active?
+      s.gsub(CLAIMED_CARET_RE) { "⌥#{$1}" }
+    end
+
+    # Verb ids whose PERSISTED override sits on an alt chord the alias has just claimed.
+    # Pure-alt chords are bindable while the alias is off (Verb::Reserved never refuses
+    # them), so turning it on shadows any such binding — the guard fires before the keymap
+    # and #chord_overrides now drops the chord as reserved, so the verb quietly reverts to
+    # its default. Callers surface these so the revert isn't silent.
+    def self.alias_conflicts(registry : Verb::Registry) : Array(String)
+      return [] of String unless alias_active?
+      Settings.keymap_overrides.compact_map do |id, labels|
+        next unless registry[id]?
+        next unless labels.any? { |l| (c = Verb::Chord.parse(l)) && CLAIMED_ALT_CHORDS.includes?(c) }
+        id
+      end.sort
     end
 
     # Effective binding as a status/Help token, or `fallback` when unbound / unknown.

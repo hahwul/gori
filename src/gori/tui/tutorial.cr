@@ -124,7 +124,9 @@ module Gori::Tui
       @running = true
       loop do
         render
-        case ev = @term.poll_event(50)
+        # Own event loop — fold ⌥P onto ^P so the "try the palette" goal below can be
+        # completed with whichever modifier the user configured.
+        case ev = Keybind.dealias_event(@term.poll_event(50))
         when Termisu::Event::Resize then (@backend.resize(ev.width, ev.height); @resized = true)
         when Termisu::Event::Key    then handle_key(ev)
         when Termisu::Event::Mouse  then handle_mouse(ev)
@@ -703,7 +705,7 @@ module Gori::Tui
       render_header(screen, w)
       render_progress_rail(screen, w)
       box = step_card(w, h)
-      Frame.card(screen, box, card_title, border: Theme.border_focus)
+      Frame.card(screen, box, Hotkeys.retag(card_title), border: Theme.border_focus)
       case @step
       when Step::Welcome   then render_welcome(screen, box)
       when Step::Navigate  then render_navigate(screen, box)
@@ -878,7 +880,7 @@ module Gori::Tui
         elsif @tried_palette
           "✓ #{tour}"
         else
-          "try ^P · #{tour} to skip"
+          Hotkeys.retag("try ^P · #{tour} to skip")
         end
       when Step::SpaceMenu
         if @overlay == :space
@@ -913,7 +915,7 @@ module Gori::Tui
       y += 1
       [
         "1.  tabs & panes     ←/→  ·  ↓  ·  esc  ·  ⇥",
-        "2.  command palette  ^P   — jump to any action",
+        Hotkeys.retag("2.  command palette  ^P   — jump to any action"),
         "3.  action menu      space — commands for this pane",
         "4.  edit mode        READ / INS — browse, then type",
       ].each do |ln|
@@ -961,10 +963,10 @@ module Gori::Tui
       y = box.y + 2
       screen.text(ix, y, "Jump to any action without hunting tabs or memorizing chords.", Theme.text_bright, Theme.panel, width: iw)
       y += 1
-      screen.text(ix, y, "^P opens it · type to fuzzy-filter · ↑/↓ move · ↵ run · esc close",
+      screen.text(ix, y, Hotkeys.retag("^P opens it · type to fuzzy-filter · ↑/↓ move · ↵ run · esc close"),
         Theme.muted, Theme.panel, width: iw)
       y += 1
-      draw_try_line(screen, ix, y, iw, "Try: press ^P, filter, ↵ to run a command.", @tried_palette)
+      draw_try_line(screen, ix, y, iw, Hotkeys.retag("Try: press ^P, filter, ↵ to run a command."), @tried_palette)
       y += 2
 
       shell = Rect.new(box.x + 2, y, box.w - 4, {box.bottom - 1 - y, 3}.max)
@@ -1045,7 +1047,7 @@ module Gori::Tui
       gx = draw_goal(screen, gx + 2, y, "enter", @p_enter)
       draw_goal(screen, gx + 2, y, "esc back", @p_up)
       y += 1
-      gx = draw_goal(screen, ix, y, "^P", @p_palette)
+      gx = draw_goal(screen, ix, y, Hotkeys.retag("^P"), @p_palette)
       gx = draw_goal(screen, gx + 2, y, "space", @p_space)
       draw_goal(screen, gx + 2, y, "i INS", @p_edit)
       y += 2
@@ -1066,7 +1068,7 @@ module Gori::Tui
             elsif @edit_insert
               "INS mode — type, then esc back to READ."
             else
-              "←/→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · ^P · space · i"
+              Hotkeys.retag("←/→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · ^P · space · i")
             end
       screen.text(ix, box.bottom - 2, msg, practice_done? ? Theme.green : Theme.muted, Theme.panel, width: iw)
     end
@@ -1102,7 +1104,7 @@ module Gori::Tui
         y += 1
       end
       y += 1
-      screen.text(ix, y, "Cheat-sheet:  ^P palette · space menu · i/↵ INS · esc READ/back", Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, y, Hotkeys.retag("Cheat-sheet:  ^P palette · space menu · i/↵ INS · esc READ/back"), Theme.muted, Theme.panel, width: iw)
       y += 1
       screen.text(ix, y, "Re-run this tour anytime:  gori tutorial", Theme.muted, Theme.panel, width: iw)
     end

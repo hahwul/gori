@@ -56,6 +56,12 @@ module Gori::Tui
       # Editor & Keys
       Section.new(:editor, "settings.editor", "Editor",
         "Set the external editor opened by ^E in editable fields", :editor, :form),
+      # Distinct from Hotkeys below: Keys sets WHICH MODIFIER fronts gori's built-in
+      # shortcut family (the chords a hardcoded guard claims before the keymap), while
+      # Hotkeys rebinds individual actions. Neither belongs in Editor — that section is
+      # text-editing prefs.
+      Section.new(:keys, "settings.keys", "Keys",
+        "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9)", :editor, :form),
       Section.new(:env, "settings.env", "Env",
         "Global environment variables for $KEY substitution in requests", :editor, :opener),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",

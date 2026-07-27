@@ -72,10 +72,13 @@ Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 
 | 섹션 | 필드 |
 |------|------|
 | **Editor** | External editor, Markdown highlight, Mouse, Pretty-print bodies |
+| **Keys** | Command modifier |
 | **Env** | 오프너: 아웃바운드 요청에 쓰는 전역 `$KEY` 변수 |
 | **Hotkeys** | 오프너: 단축키 재지정, OS 기본 프로파일 선택 |
 
-**External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi` 순으로 넘어갑니다. **Mouse**를 끄면 터미널 고유의 텍스트 선택이 돌아옵니다. [단축키](/ko/guide/hotkeys/)와 [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
+**External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi` 순으로 넘어갑니다. **Mouse**를 끄면 터미널 고유의 텍스트 선택이 돌아옵니다.
+
+**Keys**와 **Hotkeys**는 한 쌍입니다. Keys는 gori 내장 코드 패밀리(`^P` `^N` `^W` `^1-9`)를 *어떤 모디파이어로* 열지 고르고(`Option (⌥)`은 Ctrl을 포기하지 않고 `⌥` 별칭을 추가 — Ctrl 형태가 전달되지 않는 터미널에 유용), Hotkeys는 *개별 동작*을 재지정합니다. [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier), [단축키](/ko/guide/hotkeys/), [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
 
 ### Network & Tabs {#network-tabs}
 

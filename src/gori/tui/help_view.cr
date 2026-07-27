@@ -178,7 +178,10 @@ module Gori::Tui
           if (id = item.verb_id) && registry
             key = Hotkeys.binding_label(registry, id, item.key)
           end
-          rows << Row.new(:item, key, item.desc)
+          # Retag both columns: an item with a verb id already resolves through
+          # binding_label, but the keyless rows (^N/^W, ^G/^F, ^1-9) and the chords named
+          # inside descriptions are hand-written literals.
+          rows << Row.new(:item, Hotkeys.retag(key), Hotkeys.retag(item.desc))
         end
       end
       rows

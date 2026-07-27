@@ -63,7 +63,9 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Quit**: `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
+- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
+
+  You can't move an individual key out of that family, but you *can* give the whole family a second modifier — see [Command modifier](#command-modifier) below.
 
 Flow-control/signal chords like `Ctrl-S` are **not** reserved; gori runs the terminal in raw mode, so they reach the app (Repeater's SNI toggle ships on `Ctrl-S`).
 
@@ -73,6 +75,29 @@ The `←` / `→` profile selector picks which **default** key set a fresh (un-o
 
 Today the per-OS defaults are identical: in a terminal, `Ctrl`+letter chords reach the application on macOS, Linux, and Windows alike, and the genuinely hazardous keys are the reserved control characters above (blocked everywhere). The profile mechanism is in place so a real per-terminal clash can be fixed without touching dispatch. For now, `auto` is the right choice for everyone.
 
+## Command Modifier {#command-modifier}
+
+The chord family listed under *Reserved keys* is fixed because a hardcoded guard runs before the keymap. That's a problem when your terminal never delivers the Ctrl form at all:
+
+- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals** — there is no control character for it, so the sub-tab jumps simply never arrive.
+- **A multiplexer eats the chord first.** tmux's default prefix is `Ctrl-B`, which gori also uses for reveal-whitespace.
+
+**Preferences → Editor & Keys → Keys → Command modifier** (`Ctrl-,`), or **`settings:keys`** in the palette, switches that family between `Ctrl` and `Option (⌥)`. It is an **alias, not a swap**: with Option selected, `⌥P` opens the palette *and* `^P` still does. Only the advertised form changes — status hints, the Help tab and the palette all start showing `⌥P`, `⌥N`, `⌥1-9`.
+
+| Modifier | Effect |
+|----------|--------|
+| `Ctrl` (default) | `^P` `^N` `^W` `^G` `^F` `^B` `^E` `^,` `^1`-`^9` |
+| `Option (⌥)` | the above **plus** `⌥P` `⌥N` `⌥W` `⌥G` `⌥F` `⌥B` `⌥E` `⌥,` `⌥1`-`⌥9` |
+
+Because Ctrl keeps working, picking Option can never lock you out of the palette — worth knowing before you flip it, since **on macOS your terminal must be set to send Option as Meta/Esc+** or `⌥P` arrives as `π` and nothing happens:
+
+- **Terminal.app**: Settings → Profiles → Keyboard → *Use Option as Meta key*
+- **iTerm2**: Settings → Profiles → Keys → Left/Right Option key → *Esc+*
+
+Two things it does not do. It doesn't touch chords the editor can already rebind (`^R` send, `^S` SNI, …) — rebind those per action instead. And if you had bound an action to an `Option` chord in the family (`alt-n`, say), turning the alias on shadows it: the guard wins, that action reverts to its default, and the save toast names it.
+
+The first-run wizard recaps this on its Review step, so you can pick a modifier before ever reaching the app.
+
 ## Where It's Stored
 
 Saved to `~/.gori/settings.json` (override the directory with `$GORI_HOME`) under a sparse `hotkeys` block. Only the bindings you changed are written, as a list of chord labels per action id; an empty list is an explicit unbind:
@@ -81,6 +106,7 @@ Saved to `~/.gori/settings.json` (override the directory with `$GORI_HOME`) unde
 {
   "hotkeys": {
     "os": "auto",
+    "command_modifier": "alt",
     "bindings": {
       "rules.edit": ["g"],
       "scope.edit": []
@@ -88,6 +114,8 @@ Saved to `~/.gori/settings.json` (override the directory with `$GORI_HOME`) unde
   }
 }
 ```
+
+`command_modifier` is `"ctrl"` (the default) or `"alt"`; an unknown value falls back to `"ctrl"`. An untouched install writes no `hotkeys` block at all.
 
 An absent action uses the profile default. Unknown ids and unparseable chords are ignored on load, so hand-edits and version drift degrade gracefully.
 

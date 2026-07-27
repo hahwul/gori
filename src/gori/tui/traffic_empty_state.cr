@@ -146,7 +146,7 @@ module Gori::Tui
                headline
              end
       screen.text(rect.x + 1, rect.y, headline, Theme.muted, width: {rect.w - 2, 0}.max)
-      screen.text(rect.x + 1, rect.y + 2, hint, Theme.muted, width: {rect.w - 2, 0}.max) if rect.h > 2
+      screen.text(rect.x + 1, rect.y + 2, Hotkeys.retag(hint), Theme.muted, width: {rect.w - 2, 0}.max) if rect.h > 2
     end
 
     # Title rides the top edge; the card is centred in the space below it.
@@ -416,7 +416,9 @@ module Gori::Tui
         break if y >= rect.bottom
         col = i == 0 ? Theme.muted : (i == 1 ? Theme.accent : Theme.muted)
         attr = i == 1 ? Attribute::Bold : Attribute::None
-        screen.text(rect.x + 1, y, line, col, attr: attr, width: {rect.w - 2, 0}.max)
+        # The medium_* builders write "^N"/"^P" literals; retag here so the card advertises
+        # whichever modifier is configured (a no-op on the default).
+        screen.text(rect.x + 1, y, Hotkeys.retag(line), col, attr: attr, width: {rect.w - 2, 0}.max)
       end
     end
 
@@ -429,7 +431,9 @@ module Gori::Tui
       bg = Theme.bg
       screen.text(ix, y, bullet, Theme.muted, bg)
       bx = ix + bullet.size
-      x = Frame.chip(screen, bx, y, chord, true) + 1
+      # Claimed-family chips (^N/^W/^P) follow the configured modifier; ^R and the
+      # "i:CATCH"-style chips are untouched (retag's token set is closed).
+      x = Frame.chip(screen, bx, y, Hotkeys.retag(chord), true) + 1
       screen.text(x, y, " #{label}", Theme.text, bg, width: {ix + iw - x, 0}.max)
       y + 1
     end

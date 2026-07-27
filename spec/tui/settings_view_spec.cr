@@ -117,13 +117,14 @@ describe SettingsView do
     dir = File.tempname("gori-settings-reset-ed")
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
-    prev = {Gori::Settings.editor, Gori::Settings.editor_markdown, Gori::Settings.mouse, Gori::Settings.pretty_bodies_default}
+    prev = {Gori::Settings.editor, Gori::Settings.editor_markdown, Gori::Settings.mouse, Gori::Settings.pretty_bodies_default, Gori::Settings.command_modifier}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.editor = "code --wait"
       Gori::Settings.editor_markdown = false
       Gori::Settings.mouse = false
       Gori::Settings.pretty_bodies_default = false
+      Gori::Settings.command_modifier = "alt"
       v = SettingsView.new
       v.reload(:editor)
       v.reset_to_defaults
@@ -132,9 +133,46 @@ describe SettingsView do
       Gori::Settings.editor_markdown.should eq(Gori::Settings::DEFAULT_EDITOR_MARKDOWN)
       Gori::Settings.mouse.should eq(Gori::Settings::DEFAULT_MOUSE)
       Gori::Settings.pretty_bodies_default.should eq(Gori::Settings::DEFAULT_PRETTY_BODIES)
+      # The modifier lives in the KEYS section — resetting EDITOR must not touch it.
+      Gori::Settings.command_modifier.should eq("alt")
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.editor, Gori::Settings.editor_markdown, Gori::Settings.mouse, Gori::Settings.pretty_bodies_default = prev
+      Gori::Settings.editor, Gori::Settings.editor_markdown, Gori::Settings.mouse, Gori::Settings.pretty_bodies_default, Gori::Settings.command_modifier = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # Walks the KEYS section the way the modal does, proving the ←/→ cycle reaches
+  # Settings.command_modifier and that reset lands on the documented default.
+  it "saves and resets the KEYS section (command modifier)" do
+    dir = File.tempname("gori-settings-cmdmod-view")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.editor, Gori::Settings.command_modifier}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.editor = "vim"
+      Gori::Settings.command_modifier = "ctrl"
+      v = SettingsView.new
+      v.reload(:keys)
+      v.section.should eq(:keys)
+      v.toggle_or_move(1) # Ctrl → Option (⌥)
+      v.save
+      Gori::Settings.command_modifier.should eq("alt")
+      Gori::Settings.editor.should eq("vim") # a sibling section is untouched
+
+      v.toggle_or_move(-1) # cycles back — the choice list wraps both ways
+      v.save
+      Gori::Settings.command_modifier.should eq("ctrl")
+
+      Gori::Settings.command_modifier = "alt"
+      v.reload(:keys)
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.command_modifier.should eq(Gori::Settings::DEFAULT_COMMAND_MODIFIER)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.editor, Gori::Settings.command_modifier = prev
       FileUtils.rm_rf(dir)
     end
   end

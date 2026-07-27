@@ -1,5 +1,16 @@
 require "./spec_helper"
 
+# Run `blk` with Settings.command_modifier pinned, restoring it afterwards.
+private def with_modifier(mod : String, &)
+  prev = Gori::Settings.command_modifier
+  begin
+    Gori::Settings.command_modifier = mod
+    yield
+  ensure
+    Gori::Settings.command_modifier = prev
+  end
+end
+
 describe Gori::Hotkeys do
   describe ".rebindable?" do
     it "excludes hidden verbs and the FIXED guard-shadowed/keyless ids" do
@@ -42,12 +53,57 @@ describe Gori::Hotkeys do
   end
 
   describe ".claimed?" do
-    it "covers the pre-keymap ctrl letter/digit set" do
+    it "covers the pre-keymap ctrl letter/digit/punct set" do
       Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", ctrl: true)).should be_true
       Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("1", ctrl: true)).should be_true
+      Gori::Hotkeys.claimed?(Gori::Verb::Chord.new(",", ctrl: true)).should be_true # ^, preferences
       Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("c")).should be_false
       Gori::Hotkeys::CLAIMED_CTRL_LETTERS.should contain("g")
       Gori::Hotkeys::CLAIMED_CTRL_LETTERS.should contain("p")
+    end
+
+    it "claims the ⌥ twins only while the alias is on" do
+      with_modifier("ctrl") do
+        Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", alt: true)).should be_false
+      end
+      with_modifier("alt") do
+        # Both forms fire the guard under the alias, so both must be refused a binding.
+        Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", alt: true)).should be_true
+        Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", ctrl: true)).should be_true
+        Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("r", alt: true)).should be_false
+      end
+    end
+  end
+
+  describe ".retag" do
+    it "rewrites only the claimed family, and only under the alias" do
+      with_modifier("ctrl") do
+        Gori::Hotkeys.retag("^P cmds · ^R send").should eq("^P cmds · ^R send")
+      end
+      with_modifier("alt") do
+        Gori::Hotkeys.retag("^P cmds").should eq("⌥P cmds")
+        Gori::Hotkeys.retag("^1-9 jump · ^N new · ^W close").should eq("⌥1-9 jump · ⌥N new · ⌥W close")
+        Gori::Hotkeys.retag("^, preferences").should eq("⌥, preferences")
+        # NOT claimed — these keep their carets or the hints would lie.
+        Gori::Hotkeys.retag("^R send · ^S SNI · ^X hex · ^D quit").should eq("^R send · ^S SNI · ^X hex · ^D quit")
+      end
+    end
+  end
+
+  describe ".alias_conflicts" do
+    it "names verbs whose own alt binding the alias has just shadowed" do
+      reg = Gori::Verbs.registry
+      prev = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {"capture.toggle" => ["alt-n"], "scope.edit" => ["alt-r"]}
+        with_modifier("ctrl") { Gori::Hotkeys.alias_conflicts(reg).should be_empty }
+        with_modifier("alt") do
+          # alt-n is a claimed twin (^N new); alt-r is not claimed and survives.
+          Gori::Hotkeys.alias_conflicts(reg).should eq(["capture.toggle"])
+        end
+      ensure
+        Gori::Settings.keymap_overrides = prev
+      end
     end
   end
 
@@ -122,6 +178,29 @@ describe Gori::Hotkeys do
     it "allows ^S (shipped SNI default) and ordinary chords" do
       Gori::Hotkeys.reserved?(Gori::Verb::Chord.new("s", ctrl: true)).should be_nil
       Gori::Hotkeys.reserved?(Gori::Verb::Chord.new("g")).should be_nil
+    end
+
+    it "refuses the ⌥ twin under the alias and names it in the reason" do
+      with_modifier("ctrl") { Gori::Hotkeys.reserved?(Gori::Verb::Chord.new("p", alt: true)).should be_nil }
+      with_modifier("alt") do
+        Gori::Hotkeys.reserved?(Gori::Verb::Chord.new("p", alt: true)).should eq("⌥P is reserved by a gori shortcut")
+        Gori::Hotkeys.reserved?(Gori::Verb::Chord.new("s", alt: true)).should be_nil # still not claimed
+      end
+    end
+  end
+
+  describe ".binding_for under the ⌥ alias" do
+    it "advertises the alt twin for a claimed FIXED verb, and leaves others alone" do
+      reg = Gori::Verbs.registry
+      with_modifier("ctrl") do
+        Gori::Hotkeys.binding_for(reg, "app.palette").should eq(Gori::Verb::Chord.new("p", ctrl: true))
+      end
+      with_modifier("alt") do
+        Gori::Hotkeys.binding_for(reg, "app.palette").should eq(Gori::Verb::Chord.new("p", alt: true))
+        Gori::Hotkeys.binding_label(reg, "app.palette", "∅").should eq("⌥P")
+        # ^R (repeater send) is keymap-driven, not claimed — it must not move.
+        Gori::Hotkeys.binding_for(reg, "repeater.send").should eq(Gori::Verb::Chord.new("r", ctrl: true))
+      end
     end
   end
 

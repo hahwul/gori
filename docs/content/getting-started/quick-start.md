@@ -210,6 +210,8 @@ gori wizard
 
 The bind step sets the shared default in `settings.json`, the same layer as Preferences → **Network & Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.
 
+The final **Review** step recaps what you picked and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl — useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
+
 ## Guided UI tour
 
 A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and READ/INS edit mode. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist.

@@ -6,8 +6,8 @@ include Gori::Tui
 # the four dedicated overlays). If a catalog entry named a symbol outside this set, the
 # palette verb and the tab opener would both land on the "coming soon (TODO)" toast.
 KNOWN_SETTINGS_SECTIONS = [
-  :network, :editor, :theme, :layout, :statusline, :display, :notifications, :general,
-  :tabs, :hosts, :env, :hotkeys,
+  :network, :editor, :keys, :theme, :layout, :statusline, :display, :notifications,
+  :general, :tabs, :hosts, :env, :hotkeys,
 ]
 
 # SettingsCatalog is the single source of truth both the Ctrl-P palette and the Settings

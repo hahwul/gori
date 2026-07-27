@@ -503,7 +503,7 @@ Surfaces that do not own capture never prune, whatever the cap says: `gori mcp`'
 | `tabs` | Which TUI tabs are shown/hidden |
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname_overrides) above |
 | `env` | Env-token prefix and global values. See [env](#env) above |
-| `hotkeys` | Keybinding overrides (`os` layer + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
+| `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `decoder` | Last input and chain, plus saved Decoder sessions and named chains |
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |

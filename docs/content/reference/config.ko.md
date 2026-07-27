@@ -503,7 +503,7 @@ retention은 **새 기능이 아닙니다** — gori는 프로젝트 DB가 무�
 | `tabs` | 표시/숨김할 TUI 탭 |
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname_overrides) 참고 |
 | `env` | Env 토큰 접두사와 전역 값. 위의 [env](#env) 참고 |
-| `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
+| `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
 | `decoder` | 마지막 입력과 체인, 저장된 Decoder 세션과 이름 붙인 체인 |
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |

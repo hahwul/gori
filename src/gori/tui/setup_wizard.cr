@@ -55,6 +55,10 @@ module Gori::Tui
       # on finish and read by `run` (below) to launch the tour in this same terminal.
       @offer = :tour # :tour | :skip
       @launch_tutorial = false
+      # Review step also stages the command modifier (see Settings.command_modifier): a
+      # first-run chance to pick ⌥ before hitting a terminal that eats Ctrl+digit. Kept on
+      # ←/→ rather than the ↑/↓ offer ring, so Review needs no focus ring.
+      @modifier = Settings.command_modifier
     end
 
     # Run the wizard to completion (finish) or skip. Returns when the user is done;
@@ -144,14 +148,16 @@ module Gori::Tui
       end
     end
 
-    # Review step: ↑/↓ pick the tour offer; ↵ finishes (commit + persist, then
-    # launch the tour iff selected); ⇧⇥ back.
+    # Review step: ↑/↓ pick the tour offer; ←/→ flip the command modifier; ↵ finishes
+    # (commit + persist, then launch the tour iff selected); ⇧⇥ back.
     private def handle_review_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter?
         finish
       elsif key.up? || key.down?
         @offer = @offer == :tour ? :skip : :tour
+      elsif key.left? || key.right?
+        @modifier = @modifier == "alt" ? "ctrl" : "alt"
       elsif key.back_tab?
         @step = Step::Appearance
       end
@@ -243,6 +249,7 @@ module Gori::Tui
       Settings.bind_host = effective_ip
       Settings.bind_port = @port.strip.to_i? || Settings.bind_port
       Settings.theme = @theme_name
+      Settings.command_modifier = Settings.normalize_command_modifier(@modifier)
       Settings.save
       @launch_tutorial = @offer == :tour # `run` launches the tour after the loop
       @running = false
@@ -297,12 +304,13 @@ module Gori::Tui
 
     # --- geometry ------------------------------------------------------------
 
-    # The centred step card for `w`×`h`. The THEME step is wider (room for the
-    # preview panel beside the list); the rest use a settings-sized card. Height is
-    # content + 6 rows of chrome, clamped to the space between the header and the
-    # hint. The ONE source of this geometry — render and the mouse hit-tests share it.
+    # The centred step card for `w`×`h`. Only BIND uses the narrow settings-sized card —
+    # Appearance needs room for the preview panel beside the list, and Review's Shortcuts
+    # row spells out a chord family plus how to change it. Height is content + 6 rows of
+    # chrome, clamped to the space between the header and the hint. The ONE source of this
+    # geometry — render and the mouse hit-tests share it.
     private def step_card(w : Int32, h : Int32) : Rect
-      cols = @step.appearance? ? 84 : 64
+      cols = @step.bind? ? 64 : 84
       inner = {w - 4, cols}.min
       cw = {inner, 34}.max
       avail = {h - 3, 3}.max # rows between the header (y0-1) and the hint (y h-1)
@@ -318,7 +326,7 @@ module Gori::Tui
     private def content_rows : Int32
       case @step
       when Step::Bind   then 8 # heading, gap, ip, port, gap, 2 info lines, status
-      when Step::Review then 8 # title, gap, 2 recap rows, gap, offer prompt, 2 offer rows
+      when Step::Review then 9 # title, gap, 3 recap rows, gap, offer prompt, 2 offer rows
       # ≥7 so the preview panel (header + 3 status rows) is never clipped, capped so a
       # long theme list scrolls (the list viewport derives from the card height) instead
       # of demanding the whole screen.
@@ -403,7 +411,7 @@ module Gori::Tui
       hint = case @step
              when Step::Bind       then "↵ next · ↑/↓ field · esc skip"
              when Step::Appearance then "↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip"
-             else                       "↑/↓ choose · ↵ confirm · ⇧⇥ back · esc skip"
+             else                       "↑/↓ choose · ←/→ shortcuts · ↵ confirm · ⇧⇥ back · esc skip"
              end
       screen.text({(w - hint.size) // 2, 0}.max, h - 1, hint, Theme.muted, Theme.bg)
     end
@@ -536,14 +544,26 @@ module Gori::Tui
       y = box.y + 2
       screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
       y += 2
-      recap_labels = ["Proxy (global)", "Theme"]
+      recap_labels = ["Proxy (global)", "Theme", "Shortcuts"]
       vx = ix + recap_labels.max_of(&.size) + 2 # +2 = min visible gap before the value column
       recap(screen, box, ix, vx, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
-      recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 2
+      recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
+      # The only EDITABLE recap row (←/→). Spell out both the chords it moves and the
+      # macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing happen.
+      recap(screen, box, ix, vx, y, "Shortcuts", modifier_recap); y += 2
       screen.text(ix, y, "New to gori? Take a quick tour of the TUI:", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
       y += 1
       render_offer_row(screen, box, y, "Take the guided tour", @offer == :tour); y += 1
       render_offer_row(screen, box, y, "Skip — finish setup", @offer == :skip)
+    end
+
+    # The Shortcuts recap value: what's staged, plus how to change it / what it costs.
+    private def modifier_recap : String
+      if @modifier == "alt"
+        "⌥P ⌥N ⌥W ⌥1-9  (←/→ for Ctrl · needs Option-as-Meta)"
+      else
+        "^P ^N ^W ^1-9  (←/→ to add ⌥ aliases)"
+      end
     end
 
     private def recap(screen : Screen, box : Rect, ix : Int32, vx : Int32, y : Int32, key : String, value : String) : Nil

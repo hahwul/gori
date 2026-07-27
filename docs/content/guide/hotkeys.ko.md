@@ -63,7 +63,9 @@ Ctrl-P  → settings:hotkeys
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+
+  이 패밀리에서 개별 키를 옮길 수는 없지만, 패밀리 전체에 **두 번째 모디파이어**를 줄 수는 있습니다 — 아래 [커맨드 모디파이어](#command-modifier)를 참고하세요.
 
 `Ctrl-S` 같은 흐름 제어/시그널 코드는 예약되어 있지 **않습니다**. gori는 터미널을 raw 모드로 실행하므로 이들이 앱에 도달합니다(Repeater의 SNI 토글은 `Ctrl-S`로 제공됩니다).
 
@@ -73,6 +75,29 @@ Ctrl-P  → settings:hotkeys
 
 현재 OS별 기본값은 동일합니다. 터미널에서 `Ctrl`+글자 코드는 macOS, Linux, Windows 모두에서 애플리케이션에 도달하며, 정말 위험한 키는 위의 예약된 제어 문자들입니다(어디서나 차단됨). 프로파일 메커니즘은 실제 터미널별 충돌이 생겼을 때 디스패치를 건드리지 않고 바로잡을 수 있도록 마련해 둔 것입니다. 지금으로서는 `auto`가 모두에게 옳은 선택입니다.
 
+## 커맨드 모디파이어 {#command-modifier}
+
+*예약된 키*에 나열된 코드 패밀리는 키맵보다 먼저 하드코딩된 가드가 소비하기 때문에 고정입니다. 문제는 **터미널이 Ctrl 형태를 아예 전달하지 않는** 경우입니다.
+
+- **`Ctrl-1`…`Ctrl-9`는 상당수 터미널에서 전달 불가**입니다. 대응하는 제어 문자가 없어서 서브탭 점프가 애초에 도착하지 않습니다.
+- **멀티플렉서가 먼저 먹습니다.** tmux의 기본 프리픽스는 `Ctrl-B`인데, gori도 reveal-whitespace로 씁니다.
+
+**Preferences → Editor & Keys → Keys → Command modifier**(`Ctrl-,`), 또는 팔레트의 **`settings:keys`**에서 이 패밀리를 `Ctrl`과 `Option (⌥)` 사이에서 고를 수 있습니다. 이는 **교체가 아니라 별칭 추가**입니다. Option을 고르면 `⌥P`로도 팔레트가 열리고 `^P`도 그대로 동작합니다. 바뀌는 것은 *표시*뿐입니다 — 상태 힌트, Help 탭, 팔레트가 모두 `⌥P`, `⌥N`, `⌥1-9`로 표시됩니다.
+
+| 모디파이어 | 동작 |
+|-----------|------|
+| `Ctrl` (기본) | `^P` `^N` `^W` `^G` `^F` `^B` `^E` `^,` `^1`-`^9` |
+| `Option (⌥)` | 위 전부 **더하기** `⌥P` `⌥N` `⌥W` `⌥G` `⌥F` `⌥B` `⌥E` `⌥,` `⌥1`-`⌥9` |
+
+Ctrl이 계속 살아있으므로 Option을 골라도 팔레트에 못 들어가는 상황은 생기지 않습니다. 다만 바꾸기 전에 알아둘 점이 있습니다 — **macOS에서는 터미널이 Option을 Meta/Esc+로 보내도록 설정해야** 합니다. 그러지 않으면 `⌥P`가 `π`로 도착해 아무 일도 일어나지 않습니다.
+
+- **Terminal.app**: 설정 → 프로파일 → 키보드 → *Option을 Meta 키로 사용*
+- **iTerm2**: Settings → Profiles → Keys → Left/Right Option key → *Esc+*
+
+하지 않는 일 두 가지. 에디터에서 이미 재지정할 수 있는 코드(`^R` send, `^S` SNI 등)는 건드리지 않습니다 — 그건 동작별로 재지정하세요. 그리고 이 패밀리의 `Option` 코드(예: `alt-n`)에 어떤 동작을 바인딩해 뒀다면, 별칭을 켜는 순간 가려집니다. 가드가 이기고 해당 동작은 기본값으로 되돌아가며, 저장 토스트가 그 동작을 알려줍니다.
+
+첫 실행 마법사의 Review 스텝에서도 이 값을 요약해 보여주므로, 앱에 들어가기 전에 모디파이어를 고를 수 있습니다.
+
 ## 저장 위치 {#where-its-stored}
 
 `~/.gori/settings.json`(디렉터리는 `$GORI_HOME`으로 재정의)의 희소한 `hotkeys` 블록에 저장됩니다. 변경한 바인딩만 동작 id별 코드 라벨 목록으로 기록되며, 빈 목록은 명시적 바인딩 해제입니다.
@@ -81,6 +106,7 @@ Ctrl-P  → settings:hotkeys
 {
   "hotkeys": {
     "os": "auto",
+    "command_modifier": "alt",
     "bindings": {
       "rules.edit": ["g"],
       "scope.edit": []
@@ -88,6 +114,8 @@ Ctrl-P  → settings:hotkeys
   }
 }
 ```
+
+`command_modifier`는 `"ctrl"`(기본) 또는 `"alt"`이며, 알 수 없는 값은 `"ctrl"`로 되돌아갑니다. 손대지 않은 설치본은 `hotkeys` 블록 자체를 쓰지 않습니다.
 
 없는 동작은 프로파일 기본값을 사용합니다. 알 수 없는 id와 파싱 불가능한 코드는 로드할 때 무시되므로, 수동 편집이나 버전 차이가 있어도 무리 없이 동작합니다.
 

@@ -797,13 +797,14 @@ describe Gori::Settings do
     end
   end
 
-  it "omits the hotkeys block entirely when untouched (auto + no overrides)" do
+  it "omits the hotkeys block entirely when untouched (auto + default modifier + no overrides)" do
     dir = File.tempname("gori-settings-nohotkeys")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.keymap_os = "auto"
+      Gori::Settings.command_modifier = Gori::Settings::DEFAULT_COMMAND_MODIFIER
       Gori::Settings.keymap_overrides = {} of String => Array(String)
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).includes?("hotkeys").should be_false
@@ -811,6 +812,48 @@ describe Gori::Settings do
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.keymap_os = "auto"
+      Gori::Settings.command_modifier = Gori::Settings::DEFAULT_COMMAND_MODIFIER
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+    end
+  end
+
+  it "round-trips the command modifier — a modifier-only change must still write the block" do
+    dir = File.tempname("gori-settings-cmdmod")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      # Everything else at its default: the omit guard must NOT swallow the block here, or
+      # the setting would silently fail to persist.
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      Gori::Settings.command_modifier = "alt"
+      Gori::Settings.save.should be_true
+      written = File.read(Gori::Settings.path)
+      written.includes?("hotkeys").should be_true
+      written.includes?("command_modifier").should be_true
+
+      Gori::Settings.command_modifier = "ctrl"
+      Gori::Settings.load
+      Gori::Settings.command_modifier.should eq("alt")
+
+      # Tolerant: an unknown value clamps to the default.
+      File.write(Gori::Settings.path, %({"hotkeys":{"os":"auto","command_modifier":"meta"}}))
+      Gori::Settings.load
+      Gori::Settings.command_modifier.should eq(Gori::Settings::DEFAULT_COMMAND_MODIFIER)
+
+      # A hotkeys block written before this key existed must KEEP the current value rather
+      # than being reset by the absent key (the display.cr parse shape).
+      File.write(Gori::Settings.path, %({"hotkeys":{"os":"linux","bindings":{"rules.edit":["g"]}}}))
+      Gori::Settings.command_modifier = "alt"
+      Gori::Settings.load
+      Gori::Settings.command_modifier.should eq("alt")
+      Gori::Settings.keymap_os.should eq("linux")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.command_modifier = Gori::Settings::DEFAULT_COMMAND_MODIFIER
       Gori::Settings.keymap_overrides = {} of String => Array(String)
     end
   end

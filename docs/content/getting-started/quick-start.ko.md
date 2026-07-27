@@ -210,6 +210,8 @@ gori wizard
 
 바인드 단계는 `settings.json`의 공유 기본값을 설정합니다. Preferences → **Network & Tabs** → **Network**와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요.
 
+마지막 **Review** 스텝은 선택한 값을 요약하며, 편집 가능한 행이 하나 있습니다 — **Shortcuts**입니다. `←`/`→`로 gori 내장 코드 패밀리(`^P` `^N` `^W` `^1-9`)의 모디파이어를 `Ctrl`과 `Option (⌥)` 사이에서 전환합니다. Option을 고르면 Ctrl을 대체하는 게 아니라 `⌥` 별칭이 *추가*됩니다 — 터미널이나 멀티플렉서가 Ctrl 형태를 전달하지 않을 때 유용합니다. macOS의 Option-as-Meta 요구사항은 [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier)를 참고하세요.
+
 ## 가이드 UI 투어 {#guided-ui-tour}
 
 탭/패널 이동, 팔레트, space 메뉴, READ/INS 편집 모드를 목업 UI로 따라가는 안내입니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여주고 실제 키를 눌러 보도록 요청하며, 마지막 단계는 네 가지 동작 모두를 직접 해보는 실습 샌드박스와 첫 세션 체크리스트입니다.

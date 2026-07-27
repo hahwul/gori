@@ -927,6 +927,11 @@ module Gori::Tui
         dispatch_overlay_key(ov, ev)
         return
       end
+      # settings:keys "Command modifier = ⌥" folds ⌥P/⌥N/⌥1… onto ^P/^N/^1… here, so
+      # every claimed-family guard below (and in the overlays + controllers) needs no
+      # per-site change. Deliberately AFTER the quit arm (^C/^D stays Ctrl-only) and after
+      # the capture branch above (the Hotkeys editor must see ⌥ chords verbatim).
+      ev = Keybind.dealias(ev)
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
       return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
       return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
@@ -2759,7 +2764,11 @@ module Gori::Tui
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
         hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more)
       render_body(screen, layout.body)
-      Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
+      # One retag for the whole status row: key_hints already funnels the Runner's own
+      # hint literals, every overlay/prompt hint AND every controller body_hint, and the
+      # toast branch covers the "(^P)" pointers in messages like the bind-failure notice.
+      Chrome.render_status(screen, layout.status, focus: focus_label,
+        hints: Hotkeys.retag(format_status_message(@toast) || key_hints),
         activity: activity_chip, resource: @resource.label, time: clock_label)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay.palette?
@@ -4613,7 +4622,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :layout, :statusline, :display, :notifications, :general
+      when :network, :editor, :keys, :layout, :statusline, :display, :notifications, :general
         open_preferences(section)                       # the unified grouped modal, positioned at this section
       when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs    then open_overlay(tabs_editor(back))
@@ -4747,12 +4756,26 @@ module Gori::Tui
               when :theme   then apply_theme(msg)
               when :layout  then apply_layout(msg)
               when :display then apply_display(msg)
+              when :keys    then apply_keys(msg)
               else               msg
               end
       @theme_restore = Settings.theme if section == :theme # saved → don't revert this on esc
       reconcile_mouse                                      # the EDITOR section holds the Mouse toggle — apply it live
       @pretty = Settings.pretty_bodies_default             # …and the Pretty-print-bodies toggle — apply it live too
       toast
+    end
+
+    # The KEYS section carries the command modifier, which changes what every surface
+    # ADVERTISES. Status/body hints resolve per frame so they need nothing, but Help is built
+    # from the registry when the tab opens — reload it or its rows keep naming the old
+    # modifier. Also warn when the ⌥ alias has just shadowed a user's own alt binding: the
+    # guard fires before the keymap, so that override silently reverts to its default.
+    private def apply_keys(save_msg : String) : String
+      help_controller.reload_help(@session.registry)
+      @resized = true # chords are baked into rendered hint text — force a full repaint
+      shadowed = Hotkeys.alias_conflicts(@session.registry)
+      return save_msg if shadowed.empty?
+      "#{save_msg} — ⌥ alias shadows your binding for #{shadowed.join(", ")} (now back to default)"
     end
 
     # Layout prefs apply live: History reloads (list order) + preview; Sitemap rebuilds

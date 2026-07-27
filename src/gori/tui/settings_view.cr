@@ -46,11 +46,22 @@ module Gori::Tui
         readonly: true),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
+    # Command-modifier labels. The stored values are "ctrl"/"alt" (Settings.command_modifier);
+    # these are what the row shows — see #modifier_label / #modifier_from_label.
+    COMMAND_MODIFIER_CHOICES = ["Ctrl", "Option (⌥)"]
+
     EDITOR_FIELDS = [
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
       Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
       Field.new("Mouse", "click + scroll-wheel navigation (off restores native text selection)", bool: true),
       Field.new("Pretty-print bodies", "reflow JSON/XML/form/… in History detail + Repeater response — display only; ←/→/space toggles", bool: true),
+    ]
+    # KEYS is its own section rather than a row in EDITOR: it configures key INPUT, not text
+    # editing. It sits between Editor and Hotkeys in the same group, so "which modifier" and
+    # "which binding" read as the pair they are.
+    KEYS_FIELDS = [
+      Field.new("Command modifier", "which modifier fronts gori's built-in shortcuts (^P ^N ^W ^G ^F ^B ^E ^, ^1-9) — Option ADDS ⌥ as an alias, Ctrl keeps working; for terminals/multiplexers that swallow the Ctrl form (tmux's ^B, Ctrl+digit). macOS Terminal/iTerm must be set to send Option as Meta. ←/→ cycles",
+        choices: COMMAND_MODIFIER_CHOICES),
     ]
     # The THEME section is special: a single field whose value is the selected theme
     # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather
@@ -141,6 +152,7 @@ module Gori::Tui
     SECTIONS = {
       :network       => NETWORK_FIELDS,
       :editor        => EDITOR_FIELDS,
+      :keys          => KEYS_FIELDS,
       :theme         => THEME_FIELDS,
       :layout        => LAYOUT_FIELDS,
       :statusline    => STATUSLINE_FIELDS,
@@ -177,7 +189,8 @@ module Gori::Tui
       @section = section
       Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
-                when :editor        then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
+                when :editor        then editor_values
+                when :keys          then keys_values
                 when :theme         then [Theme.canonical(Settings.theme)]
                 when :layout        then layout_values
                 when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
@@ -208,8 +221,14 @@ module Gori::Tui
     # live-previews the restored default theme in the :theme section.
     def reset_to_defaults : Nil
       @values = case @section
-                when :editor then [Settings::DEFAULT_EDITOR, Settings::DEFAULT_EDITOR_MARKDOWN ? "on" : "off", Settings::DEFAULT_MOUSE ? "on" : "off", Settings::DEFAULT_PRETTY_BODIES ? "on" : "off"]
-                when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
+                when :editor then [
+                  Settings::DEFAULT_EDITOR,
+                  Settings::DEFAULT_EDITOR_MARKDOWN ? "on" : "off",
+                  Settings::DEFAULT_MOUSE ? "on" : "off",
+                  Settings::DEFAULT_PRETTY_BODIES ? "on" : "off",
+                ]
+                when :keys  then [modifier_label(Settings::DEFAULT_COMMAND_MODIFIER)]
+                when :theme then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
                   Settings::DEFAULT_PROBE_PREVIEW ? "on" : "off",
@@ -269,6 +288,33 @@ module Gori::Tui
         rule_count_label(Settings.outbound_tls.size, "entry", "entries"),
         hostnames_summary,
       ]
+    end
+
+    # The EDITOR row values, read from the live Settings — same reason as #network_values:
+    # the values are positional, so a literal per call site drifts from EDITOR_FIELDS the
+    # moment a row is inserted or removed.
+    private def editor_values : Array(String)
+      [
+        Settings.editor,
+        Settings.editor_markdown ? "on" : "off",
+        Settings.mouse ? "on" : "off",
+        Settings.pretty_bodies_default ? "on" : "off",
+      ]
+    end
+
+    # The KEYS row values (one row today — the command modifier).
+    private def keys_values : Array(String)
+      [modifier_label(Settings.command_modifier)]
+    end
+
+    # "ctrl"/"alt" ↔ the row's display labels (unknown → the Ctrl default, matching
+    # Settings.normalize_command_modifier).
+    private def modifier_label(value : String) : String
+      value == "alt" ? COMMAND_MODIFIER_CHOICES[1] : COMMAND_MODIFIER_CHOICES[0]
+    end
+
+    private def modifier_from_label(label : String) : String
+      label == COMMAND_MODIFIER_CHOICES[1] ? "alt" : "ctrl"
     end
 
     # The GENERAL row values, read from the live Settings — one helper for the load and the
@@ -490,7 +536,12 @@ module Gori::Tui
         Settings.editor_markdown = @values[1] == "on"
         Settings.mouse = @values[2] == "on"
         Settings.pretty_bodies_default = @values[3] == "on"
-        @values = [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
+        @values = editor_values
+        return persist
+      end
+      if @section == :keys
+        Settings.command_modifier = Settings.normalize_command_modifier(modifier_from_label(@values[0]))
+        @values = keys_values
         return persist
       end
       if @section == :layout
@@ -735,7 +786,7 @@ module Gori::Tui
       elsif focused
         screen.input_line(vx, ry, value, @cursor, @preedit, Theme.text_bright, bg, width: vw)
       elsif value.empty?
-        screen.text(vx, ry, field.hint, Theme.muted, bg, width: vw)
+        screen.text(vx, ry, Hotkeys.retag(field.hint), Theme.muted, bg, width: vw)
       else
         screen.text(vx, ry, value, Theme.text, bg, width: vw)
       end
@@ -818,7 +869,7 @@ module Gori::Tui
         names = Theme.available
         screen.text(box.x + 3, note_y, "theme #{(names.index(@values[0]) || 0) + 1}/#{names.size}", Theme.muted, Theme.panel, width: iw)
       else
-        screen.text(box.x + 3, note_y, fields[@focused].hint, Theme.muted, Theme.panel, width: iw)
+        screen.text(box.x + 3, note_y, Hotkeys.retag(fields[@focused].hint), Theme.muted, Theme.panel, width: iw)
       end
       hint = @section == :theme ? "↑/↓ select · ↵ apply · ^R reset · esc close" : "↑/↓ field · ↵ save · ^R reset · esc close"
       hx = {box.right - hint.size - 2, box.x + 1}.max # never start left of the box interior

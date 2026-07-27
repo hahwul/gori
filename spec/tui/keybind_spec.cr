@@ -20,6 +20,18 @@ private alias Key = Termisu::Input::Key
 private alias Mod = Termisu::Input::Modifier
 private alias Chord = Gori::Verb::Chord
 
+# Run `blk` with Settings.command_modifier pinned, restoring it afterwards (the suite
+# shares one Settings singleton — see spec_helper's GORI_HOME).
+private def with_modifier(mod : String, &)
+  prev = Gori::Settings.command_modifier
+  begin
+    Gori::Settings.command_modifier = mod
+    yield
+  ensure
+    Gori::Settings.command_modifier = prev
+  end
+end
+
 describe Gori::Tui::Keybind do
   describe ".from_event named special keys" do
     it "maps Enter to \"enter\"" do
@@ -267,6 +279,76 @@ describe Gori::Tui::Keybind do
 
     it "returns a value-equal Chord (record equality) rather than an identity" do
       chord(Key::LowerG).should eq(Chord.new("g", ctrl: false, alt: false, shift: false))
+    end
+  end
+
+  # The ⌥ alias (settings:editor "Command modifier"). dealias folds the CLAIMED family's
+  # alt form onto its ctrl form at the event boundary, which is what lets the ~51
+  # hardcoded `ev.ctrl? && key.lower_p?` guards stay untouched.
+  describe ".dealias" do
+    it "is the identity while the modifier is ctrl (the default)" do
+      with_modifier("ctrl") do
+        ev = Gori::Tui::Keybind.dealias(key_event(Key::LowerP, Mod::Alt, 'p'))
+        ev.alt?.should be_true
+        ev.ctrl?.should be_false
+      end
+    end
+
+    it "folds ⌥ + a claimed letter onto its ctrl form" do
+      with_modifier("alt") do
+        ev = Gori::Tui::Keybind.dealias(key_event(Key::LowerP, Mod::Alt, 'p'))
+        ev.ctrl?.should be_true
+        ev.alt?.should be_false
+        ev.key.lower_p?.should be_true # the guards test exactly this
+      end
+    end
+
+    it "normalizes ⌥⇧ + letter (which arrives as UpperP) down to the lowercase ctrl form" do
+      with_modifier("alt") do
+        # "\eP" → Key.from_char('P'); Ctrl+Shift+P is byte-identical to ^P, so both must land
+        # on the same event or every `key.lower_p?` guard misses.
+        ev = Gori::Tui::Keybind.dealias(key_event(Key::UpperP, Mod::Alt | Mod::Shift, 'P'))
+        ev.ctrl?.should be_true
+        ev.shift?.should be_false
+        ev.key.lower_p?.should be_true
+      end
+    end
+
+    it "folds the claimed digits and ^, too" do
+      with_modifier("alt") do
+        dig = Gori::Tui::Keybind.dealias(key_event(Key::Num1, Mod::Alt, '1'))
+        dig.ctrl?.should be_true
+        (dig.char || dig.key.to_char).should eq('1') # the ^1-9 guards read this
+        com = Gori::Tui::Keybind.dealias(key_event(Key::Comma, Mod::Alt, ','))
+        com.ctrl?.should be_true
+        com.key.comma?.should be_true
+      end
+    end
+
+    it "leaves an unclaimed alt chord alone so it still reaches the keymap" do
+      with_modifier("alt") do
+        ev = Gori::Tui::Keybind.dealias(key_event(Key::LowerR, Mod::Alt, 'r'))
+        ev.alt?.should be_true
+        ev.ctrl?.should be_false
+        Gori::Tui::Keybind.from_event(ev).should eq(Chord.new("r", alt: true))
+      end
+    end
+
+    it "leaves a plain ctrl chord alone (the alias is additive, not a swap)" do
+      with_modifier("alt") do
+        ev = Gori::Tui::Keybind.dealias(key_event(Key::LowerP, Mod::Ctrl))
+        ev.ctrl?.should be_true
+        ev.alt?.should be_false
+        ev.key.lower_p?.should be_true
+      end
+    end
+
+    it "passes Resize/nil through #dealias_event untouched" do
+      with_modifier("alt") do
+        Gori::Tui::Keybind.dealias_event(nil).should be_nil
+        resize = Termisu::Event::Resize.new(80, 24)
+        Gori::Tui::Keybind.dealias_event(resize).should eq(resize)
+      end
     end
   end
 end

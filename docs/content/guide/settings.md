@@ -72,10 +72,13 @@ The Theme row previews the current theme inline, showing its name and a swatch o
 | Section | Fields |
 |---------|--------|
 | **Editor** | External editor, Markdown highlight, Mouse, Pretty-print bodies |
+| **Keys** | Command modifier |
 | **Env** | Opener: global `$KEY` variables for outbound requests |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
 
-**External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`. Turning **Mouse** off restores your terminal's native text selection. See [Hotkeys](/guide/hotkeys/) and [environment variables](/guide/repeater-and-fuzzer/#environment-variables).
+**External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`. Turning **Mouse** off restores your terminal's native text selection.
+
+**Keys** and **Hotkeys** are the pair: Keys picks *which modifier* fronts gori's built-in chord family (`^P` `^N` `^W` `^1-9`) — `Option (⌥)` adds `⌥` aliases without giving up Ctrl, for terminals that never deliver the Ctrl form — while Hotkeys rebinds *individual actions*. See [Command modifier](/guide/hotkeys/#command-modifier), [Hotkeys](/guide/hotkeys/) and [environment variables](/guide/repeater-and-fuzzer/#environment-variables).
 
 ### Network & Tabs
 
