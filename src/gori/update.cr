@@ -302,6 +302,14 @@ module Gori
       v
     end
 
+    # One display form for every version `gori update` prints. Release tags come
+    # back as `v0.2.0` while `Gori::VERSION` is bare `0.2.0`, so a line that
+    # interpolates both raw reads as "Updating 0.1.4 → v0.2.0". Normalize first,
+    # then re-add the prefix, so a tag is never rendered as `vv0.2.0`.
+    def self.display_version(version : String) : String
+      "v#{normalize_version(version)}"
+    end
+
     def self.normalize_os(os : String) : String
       case os.downcase
       when "darwin", "macos", "osx" then "osx"
@@ -1095,11 +1103,11 @@ module Gori
 
       cmp = version_cmp(local, ver)
       if cmp == 0
-        io.puts "Already up to date (v#{ver})."
+        io.puts "Already up to date (#{display_version(ver)})."
         return
       end
       if cmp > 0
-        io.puts "Local version v#{local} is newer than latest release #{release.tag_name}; not downgrading."
+        io.puts "Local version #{display_version(local)} is newer than latest release #{display_version(release.tag_name)}; not downgrading."
         return
       end
 
@@ -1115,13 +1123,13 @@ module Gori
 
       if via_redirect
         io.puts "Note: the GitHub release API was unavailable (rate limit or outage);"
-        io.puts "      resolved #{release.tag_name} from #{RELEASES_LATEST_URL} instead."
+        io.puts "      resolved #{display_version(release.tag_name)} from #{RELEASES_LATEST_URL} instead."
         unless parse_sha256_digest(asset.digest)
-          io.puts "      #{release.tag_name} publishes no SHA256SUMS, so sha256 verification is skipped."
+          io.puts "      #{display_version(release.tag_name)} publishes no SHA256SUMS, so sha256 verification is skipped."
         end
       end
 
-      io.puts "Updating #{VERSION} → #{release.tag_name}"
+      io.puts "Updating #{display_version(VERSION)} → #{display_version(ver)}"
       size_note = asset.size > 0 ? " (#{format_size(asset.size)})" : ""
       io.puts "Downloading #{asset.name}#{size_note}"
 
@@ -1137,7 +1145,7 @@ module Gori
         install_from_download(dest, target_path, asset_is_archive?(asset.name))
       end
 
-      io.puts "Installed #{release.tag_name} → #{target_path}"
+      io.puts "Installed #{display_version(release.tag_name)} → #{target_path}"
       if current_os == "osx"
         io.puts "Note: macOS release keeps gori and lib/ side by side under #{File.dirname(target_path)}."
       end
@@ -1162,7 +1170,7 @@ module Gori
       resolved_family = os_family || load_os_family
       channel = detect_channel(path, owner: resolved_owner, os_family: resolved_family)
 
-      io.puts "gori #{VERSION}"
+      io.puts "gori #{display_version(VERSION)}"
       io.puts "install channel: #{channel.to_s.downcase} (#{path})"
       io.puts ""
 

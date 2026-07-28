@@ -462,7 +462,16 @@ describe Gori::Update do
           exe_path: "/usr/local/opt/gori/gori",
           release_json: json)
         io.to_s.should match(/not downgrading/i)
+        io.to_s.should contain("Local version v#{Gori::VERSION} is newer than latest release v0.0.1")
       end
+    end
+  end
+
+  describe ".display_version" do
+    it "renders one `v`-prefixed form whether the input carries the prefix or not" do
+      Gori::Update.display_version("0.2.0").should eq("v0.2.0")
+      Gori::Update.display_version("v0.2.0").should eq("v0.2.0")
+      Gori::Update.display_version("V0.2.0").should eq("v0.2.0")
     end
   end
 
@@ -594,7 +603,9 @@ describe Gori::Update do
           Gori::Update.update_binary(target, io, release_json: srv.release_json)
 
           out = io.to_s
-          out.should contain("Updating")
+          # Both sides carry the `v` — `Gori::VERSION` is bare and the tag is not,
+          # so this line is where the two forms used to collide.
+          out.should contain("Updating v#{Gori::VERSION} → v99.0.0")
           out.should contain("Downloading #{want}")
           out.should contain("Downloaded")
           out.should contain("Installed v99.0.0")
