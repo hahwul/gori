@@ -9,6 +9,7 @@ require "./settings/env"
 require "./settings/scan_rules"
 require "./settings/oast_providers"
 require "./settings/display"
+require "./settings/pet"
 require "./settings/tabs"
 require "./settings/keymap"
 require "./settings/decoder"
@@ -122,6 +123,7 @@ module Gori
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
       parse_display(root["display"]?)
+      parse_pet(root["pet"]?)
       parse_notifications(root["notifications"]?)
       parse_general(root["general"]?)
       parse_update(root["update"]?)
@@ -403,6 +405,7 @@ module Gori
           serialize_layout(j)
           serialize_statusline(j)
           serialize_display(j)
+          serialize_pet(j)
           serialize_notifications(j)
           serialize_general(j)
           serialize_update(j)

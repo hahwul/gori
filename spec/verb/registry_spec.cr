@@ -48,6 +48,10 @@ private class FakeContext < ExecContext
     @calls << :refresh_screen
   end
 
+  def toggle_pet : Nil
+    @calls << :toggle_pet
+  end
+
   def focus_tab(tab : Symbol) : Nil
     @calls << tab
   end

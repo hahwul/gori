@@ -53,6 +53,10 @@ module Gori
       # accidental wide/emoji graphemes left behind by desyncing cursor tracking.
       abstract def refresh_screen : Nil
 
+      # Show/hide Miss Ring (settings:pet → Pet). Persists, so the toggle survives a
+      # restart exactly like the checkbox it mirrors.
+      abstract def toggle_pet : Nil
+
       # the currently focused tab (so verbs can gate by context, P4)
       abstract def current_tab : Symbol
 

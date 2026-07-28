@@ -54,6 +54,21 @@ module Gori::Tui
       n
     end
 
+    # The newest note's id, or 0 when empty. O(1) and ALLOCATION-FREE — a per-tick
+    # watcher (the Pet) diffs this, never `all`, which materialises a reversed copy
+    # of the whole ring 20x/second. push trims with shift, so the tail is always the
+    # newest; after `clear` this drops to 0, which a `id > seen` guard reads as "nothing
+    # new" rather than re-announcing.
+    def latest_id : Int32
+      @notes.last?.try(&.id) || 0
+    end
+
+    # The newest note itself. Same reason as latest_id; read only on the tick where
+    # latest_id actually moved.
+    def latest : Note?
+      @notes.last?
+    end
+
     # Newest-first (the overlay renders top-down).
     def all : Array(Note)
       @notes.reverse

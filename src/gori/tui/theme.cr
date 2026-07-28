@@ -1054,9 +1054,29 @@ module Gori::Tui
     # legible whether the fill is a light gold (GORIDARK/ESPRESSO) or a darker one
     # (GORIDAY/LATTE) — and across custom palettes, which can set any focus_gold.
     def self.ink_on(fill : Color) : Color
-      r, g, b = fill.to_rgb_components
-      luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
-      luma > 0.6 ? Color.from_hex("#111111") : Color.from_hex("#fafafa")
+      luma(fill) > 0.6 ? Color.from_hex("#111111") : Color.from_hex("#fafafa")
+    end
+
+    # Rec. 601 perceived luminance, 0..1. Shared by ink_on and the paper/soot poles
+    # below so "how bright is this colour" is answered one way across the app.
+    def self.luma(c : Color) : Float64
+      r, g, b = c.to_rgb_components
+      (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+    end
+
+    # The palette's LIGHT pole and DARK pole.
+    #
+    # These exist because `blend(x, bg, t)` is not a direction: it darkens on a dark
+    # palette and LIGHTENS on a light one. Anything shaded that way — a drop shadow, a
+    # specular highlight — inverts on half the 28 built-ins (and on any custom theme).
+    # Shade toward `soot` and light toward `paper` instead and the same code reads
+    # correctly on GORIDARK and GORIDAY alike.
+    def self.paper : Color
+      luma(text_bright) > luma(bg) ? text_bright : bg
+    end
+
+    def self.soot : Color
+      luma(text_bright) > luma(bg) ? bg : text_bright
     end
 
     def self.method_color(method : String) : Color

@@ -1,0 +1,394 @@
+require "../spec_helper"
+require "../support/memory_backend"
+
+include Gori::Tui
+
+# Runs `block` with Miss Ring forced on/off (and a motion mode), restoring both.
+private def with_pet(enabled : Bool, motion : String = "lively", notices : Bool = true, &)
+  prev = {Gori::Settings.pet?, Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
+  Gori::Settings.pet = enabled
+  Gori::Settings.pet_motion = motion
+  Gori::Settings.pet_notices = notices
+  begin
+    yield
+  ensure
+    Gori::Settings.pet = prev[0]
+    Gori::Settings.pet_motion = prev[1]
+    Gori::Settings.pet_notices = prev[2]
+  end
+end
+
+# Step the pet forward `n` beats from `t0`, returning how many of those ticks reported a
+# change. Beats are stepped one at a time because #advance re-bases on `now`, not on
+# last + BEAT — a single jump would collapse the whole span into one beat.
+private def beats(pet : Pet, t0 : Time::Instant, n : Int32) : Int32
+  (1..n).count { |i| pet.tick(t0 + Pet::BEAT * i) }
+end
+
+describe Gori::Tui::Pet do
+  # --- the tick contract (idle-zero-CPU) ------------------------------------
+
+  it "does nothing while disabled" do
+    with_pet(false) do
+      pet = Pet.new(Notifications.new)
+      pet.tick(Time.instant).should be_false
+      pet.frame.should be_nil
+    end
+  end
+
+  it "produces an idle frame on the first tick" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      pet.tick(Time.instant).should be_true
+      pet.frame.not_nil!.pose.should eq(:idle)
+    end
+  end
+
+  it "does not re-compose before a beat elapses" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0).should be_true
+      pet.tick(t0 + Pet::BEAT - 1.millisecond).should be_false
+    end
+  end
+
+  # The repaint budget the feature is sold on: awake and quiet, she must change the drawn
+  # frame only a handful of times per minute — NOT once per beat. Asserted as a rate so
+  # retuning the schedule constants doesn't require editing a hardcoded count.
+  it "changes the drawn frame far less often than it beats" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      n = (Pet::SLEEP_AFTER.total_milliseconds / Pet::BEAT.total_milliseconds).to_i - 1
+      changed = beats(pet, t0, n)
+      changed.should be > 0                 # she is not frozen
+      changed.should be < (n * 3 / 10).to_i # …but well under a third of the beats
+    end
+  end
+
+  # THE idle-zero-CPU test. After SLEEP_AFTER with no poke she must transition to :doze
+  # exactly once and then report nothing, forever.
+  it "dozes off and then stops reporting entirely" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      pet.tick(t0 + Pet::SLEEP_AFTER).should be_true
+      pet.frame.not_nil!.pose.should eq(:doze)
+      pet.frame.not_nil!.arms.should eq(:down) # reads as asleep, not as a hang
+      pet.tick(t0 + Pet::SLEEP_AFTER + Pet::BEAT).should be_false
+      pet.tick(t0 + 1.hour).should be_false
+    end
+  end
+
+  it "wakes from a doze on input and settles back to idle" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      pet.tick(t0 + Pet::SLEEP_AFTER)
+      woke = t0 + Pet::SLEEP_AFTER + 1.second
+      pet.poke(woke)
+      pet.tick(woke + Pet::BEAT).should be_true
+      pet.frame.not_nil!.pose.should eq(:alert) # startled
+      beats(pet, woke, Pet::WAKE_BEATS + 2)
+      pet.frame.not_nil!.pose.should_not eq(:doze)
+    end
+  end
+
+  it "drops the frame once on the disable edge, then stays quiet" do
+    pet = Pet.new(Notifications.new)
+    with_pet(true) { pet.tick(Time.instant).should be_true }
+    with_pet(false) do
+      pet.tick(Time.instant).should be_true
+      pet.frame.should be_nil
+      pet.tick(Time.instant).should be_false
+    end
+  end
+
+  it "blinks less often on calm than on lively" do
+    t0 = Time.instant
+    n = 300
+    lively = with_pet(true, "lively") do
+      pet = Pet.new(Notifications.new)
+      pet.tick(t0)
+      beats(pet, t0, n)
+    end
+    calm = with_pet(true, "calm") do
+      pet = Pet.new(Notifications.new)
+      pet.tick(t0)
+      beats(pet, t0, n)
+    end
+    calm.should be < lively
+  end
+
+  # --- notifications --------------------------------------------------------
+
+  it "announces a new note in a bubble and takes on its mood" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:success, "fuzzer: 3 hits on id")
+      pet.tick(t0 + Pet::BEAT).should be_true
+      f = pet.frame.not_nil!
+      f.bubble.not_nil!.should contain("fuzzer")
+      f.mood.should eq(:happy)
+      f.pose.should eq(:happy)
+    end
+  end
+
+  it "announces a note only once" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:info, "scan complete")
+      pet.tick(t0 + Pet::BEAT).should be_true
+      before = pet.frame
+      pet.tick(t0 + Pet::BEAT + 1.millisecond).should be_false
+      pet.frame.should eq(before)
+    end
+  end
+
+  # :warning is pushed by repeater_controller and sequencer_controller even though the
+  # documented level set is :warn — she must read both, not fall through to :info.
+  it "maps the live :warning typo to the warn mood" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:warning, "repeater: aborted")
+      pet.tick(t0 + Pet::BEAT)
+      pet.frame.not_nil!.mood.should eq(:warn)
+    end
+  end
+
+  it "does not re-announce after the ring buffer is cleared" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:info, "one")
+      pet.tick(t0 + Pet::BEAT)
+      notes.clear
+      # latest_id drops to 0; the `id > seen` guard must read that as "nothing new".
+      pet.tick(t0 + Pet::BEAT * 2)
+      pet.frame.not_nil!.bubble.not_nil!.should eq("one")
+    end
+  end
+
+  it "stays silent while notices are off" do
+    with_pet(true, notices: false) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:error, "probe: boom")
+      beats(pet, t0, 3)
+      pet.frame.not_nil!.bubble.should be_nil
+      pet.frame.not_nil!.mood.should eq(:info)
+    end
+  end
+
+  # A burst of :info must not downgrade a live error reaction's FACE, but the newest
+  # message still has to be the one on screen.
+  it "keeps the higher-ranked face while replacing the bubble text" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:error, "probe: boom")
+      pet.tick(t0 + Pet::BEAT)
+      notes.push(:info, "history: 12 flows")
+      pet.tick(t0 + Pet::BEAT * 2)
+      f = pet.frame.not_nil!
+      f.mood.should eq(:alarm)
+      f.badge.should eq('×')
+      f.bubble.not_nil!.should contain("history")
+    end
+  end
+
+  it "expires the bubble" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:info, "scan complete")
+      pet.tick(t0 + Pet::BEAT)
+      pet.frame.not_nil!.bubble.should_not be_nil
+      beats(pet, t0, 60) # well past every bubble TTL
+      pet.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  it "condenses a multi-line message to one line" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      notes.push(:info, "first   line\there\nsecond line")
+      pet.tick(t0 + Pet::BEAT)
+      bubble = pet.frame.not_nil!.bubble.not_nil!
+      bubble.should eq("first line here")
+    end
+  end
+
+  # --- art integrity --------------------------------------------------------
+  #
+  # The sheet must stay honest as poses are added: every assembled row is exactly W
+  # single-codepoint, single-column glyphs. A width-2 glyph slipping in would claim its
+  # neighbour's cell and orphan-clear the one before it.
+
+  it "assembles every pose x wink x arms to exactly 9 columns of width-1 glyphs" do
+    badges = [nil, '·', '!', '×', 'z']
+    Mascot::POSES.each do |pose|
+      Mascot::WINKS.each do |wink|
+        {:rest, :wave_a, :wave_b, :down}.each do |arms|
+          badges.each do |badge|
+            frame = Mascot::Frame.new(pose: pose, wink: wink, arms: arms, badge: badge)
+            Mascot.rows(frame).each do |row|
+              row.size.should eq(Mascot::W)               # single codepoint per cell
+              Screen.draw_width(row).should eq(Mascot::W) # …and one column each
+            end
+          end
+        end
+      end
+    end
+  end
+
+  it "keeps the ink layer the same shape as the art" do
+    Mascot::INK.size.should eq(Mascot::H)
+    Mascot::INK.each(&.size.should eq(Mascot::W))
+  end
+
+  it "gives the Miss her lashes on every pose" do
+    Mascot::POSES.each do |pose|
+      face = Mascot.face(pose, :none)
+      face[0].should eq(Mascot::LASH_L)
+      face[4].should eq(Mascot::LASH_R)
+    end
+  end
+
+  # A wink is a gesture of the open-eyed idle face; on a mood pose it would read as a
+  # rendering glitch.
+  it "only winks on the idle face" do
+    Mascot.face(:idle, :left)[1].should eq('─')
+    Mascot.face(:idle, :right)[3].should eq('─')
+    Mascot.face(:alert, :left).should eq(Mascot.face(:alert, :none))
+  end
+
+  # --- palette --------------------------------------------------------------
+
+  # The whole reason Theme.paper/soot exist. Shading with `blend(x, Theme.bg, t)` darkens
+  # on a dark palette and LIGHTENS on a light one, so a highlight/shadow pair defined that
+  # way silently inverts on roughly half the built-ins. Assert the ramp holds on EVERY
+  # theme, because eyeballing one of them proves nothing about the other 27.
+  it "keeps highlight brighter than shadow on every built-in theme" do
+    prev = Theme.active_name
+    begin
+      Theme.available.each do |name|
+        Theme.apply(name)
+        pal = Mascot.palette(:info, Theme.bg)
+        hi, ring, lo = Theme.luma(pal.hi), Theme.luma(pal.ring), Theme.luma(pal.lo)
+        hi.should be > ring # lit side reads as lit …
+        ring.should be > lo # … and the turned-away side as shadow
+        # The pupils have to stay legible against the face plate they sit on.
+        (Theme.luma(pal.ink) - Theme.luma(pal.face)).abs.should be > 0.3
+      end
+    ensure
+      Theme.apply(prev)
+    end
+  end
+
+  # --- rendering ------------------------------------------------------------
+
+  describe ".draw" do
+    # What Layout.compute yields for the body at 80x24.
+    body = Rect.new(2, 4, 76, 18)
+
+    it "lands in the bottom-right of the body and paints nothing outside it" do
+      backend = MemoryBackend.new(80, 24)
+      Pet.draw(Screen.new(backend), body, Mascot::Frame.new)
+      rect, _ = Pet.place(body).not_nil!
+      # One clear row at the bottom: most tab bodies are a card whose bottom rule runs
+      # along body.bottom - 1, and sitting on it cut the border in half.
+      rect.bottom.should eq(body.bottom - Pet::BOTTOM_MARGIN)
+      # The rows below and above her plate are untouched, and so is everything left of
+      # the plate's padding.
+      (rect.bottom..body.bottom).each { |y| backend.row(y).strip.should be_empty }
+      backend.row(rect.y - 1).strip.should be_empty
+      (Mascot::H).times do |i|
+        backend.row(rect.y + i)[0, rect.x - 1].strip.should be_empty
+      end
+    end
+
+    # The only assertion that catches a width-2 glyph entering the sheet: such a glyph
+    # claims x+1 as a continuation and orphan-clears the cell before it.
+    it "never claims a continuation cell" do
+      backend = MemoryBackend.new(80, 24)
+      screen = Screen.new(backend)
+      Mascot::POSES.each do |pose|
+        Pet.draw(screen, body, Mascot::Frame.new(pose: pose, badge: '!'))
+      end
+      rect, _ = Pet.place(body).not_nil!
+      (Mascot::H).times do |i|
+        (0...80).each { |x| backend.cont_grid[rect.y + i][x].should be_false }
+      end
+    end
+
+    it "truncates a long bubble inside the body" do
+      backend = MemoryBackend.new(80, 24)
+      long = "probe " * 60
+      Pet.draw(Screen.new(backend), body, Mascot::Frame.new(bubble: long))
+      rect, _ = Pet.place(body).not_nil!
+      text_row = rect.y - Pet::BUBBLE_H + 1
+      backend.row(text_row).should contain("…")
+      (0...24).each do |y|
+        Screen.draw_width(backend.row(y).rstrip).should be <= body.right
+      end
+    end
+
+    it "drops the arms on a narrow body" do
+      narrow = Rect.new(2, 4, Pet::NARROW_W - 1, 10)
+      _, arms = Pet.place(narrow).not_nil!
+      arms.should be_false
+      wide = Rect.new(2, 4, Pet::NARROW_W, 10)
+      Pet.place(wide).not_nil![1].should be_true
+    end
+
+    # The width thresholds have to stay calibrated against what Layout can actually hand
+    # us, or they become dead code that only the specs ever exercise: Layout.usable? floors
+    # the terminal at 40x8 and Layout insets by H_PADDING, so the narrowest real body is 36.
+    # NARROW_W must sit ABOVE that (or the arms never drop) and MIN_W below it.
+    it "keeps the narrow fallback reachable from a real Layout body" do
+      floor = Layout.compute(40, 24).body
+      floor.w.should eq(36)
+      Pet::NARROW_W.should be > floor.w # the armless render is reachable …
+      Pet::MIN_W.should be < floor.w    # … and hiding on width alone is not
+      Pet.place(floor).not_nil![1].should be_false
+    end
+
+    # Height is the live guard: body.h is height - 6 (or - 7 with the statusline).
+    it "hides on a short terminal" do
+      Pet.place(Layout.compute(120, 10).body).should be_nil
+      Pet.place(Layout.compute(120, 24).body).should_not be_nil
+    end
+
+    it "paints nothing at all when the body is too small" do
+      backend = MemoryBackend.new(80, 24)
+      Pet.place(Rect.new(0, 0, Pet::MIN_W - 1, 10)).should be_nil
+      Pet.draw(Screen.new(backend), Rect.new(0, 0, 20, 4), Mascot::Frame.new)
+      backend.grid.each(&.all?(&.== ' ').should be_true)
+    end
+  end
+end

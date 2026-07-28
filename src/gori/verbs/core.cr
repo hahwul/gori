@@ -86,6 +86,15 @@ module Gori
           Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(s.sym); nil }
       end
 
+      # Palette-only (no chord — a mascot doesn't earn one of the scarce single-letter
+      # chords). Category::Action, NOT ::Settings: settings_catalog_spec asserts the
+      # Settings category holds exactly the catalog sections plus settings.open, so a
+      # Settings-category verb here would break that guard. It is an action anyway.
+      r.register Verb::Definition.new(
+        "pet.toggle", "Toggle pet (Miss Ring)",
+        "Show/hide Miss Ring, the mascot in the body's bottom-right corner",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.toggle_pet; nil }
+
       # `s` toggles the scope lens from anywhere (its original behavior — this used to jump to
       # the Project scope editor). Jumping there is now the palette-only `scope.edit` below.
       r.register Verb::Definition.new(

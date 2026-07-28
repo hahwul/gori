@@ -501,4 +501,74 @@ describe SettingsView do
     v.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
     backend.contains?("Update check").should be_true
   end
+
+  it "round-trips the PET section" do
+    dir = File.tempname("gori-settings-pet")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.pet?, Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.pet = false
+      Gori::Settings.pet_motion = "lively"
+      Gori::Settings.pet_notices = true
+      v = SettingsView.new
+      v.reload(:pet)
+      v.toggle_or_move(1) # Pet: off → on (bool)
+      v.move_field(1)
+      v.toggle_or_move(1) # Motion: lively → calm (choice)
+      v.move_field(1)
+      v.toggle_or_move(1) # Notices: on → off (bool)
+      v.save
+      Gori::Settings.pet?.should be_true
+      Gori::Settings.pet_motion.should eq("calm")
+      Gori::Settings.pet_lively?.should be_false
+      Gori::Settings.pet_notices?.should be_false
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.pet?.should eq(Gori::Settings::DEFAULT_PET)
+      Gori::Settings.pet_motion.should eq(Gori::Settings::DEFAULT_PET_MOTION)
+      Gori::Settings.pet_notices?.should eq(Gori::Settings::DEFAULT_PET_NOTICES)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.pet, Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  it "renders the Pet toggle in the PET section" do
+    backend = MemoryBackend.new(100, 30)
+    v = SettingsView.new
+    v.reload(:pet)
+    v.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("Miss Ring").should be_true
+    backend.contains?("Motion").should be_true
+  end
+
+  # @values is POSITIONAL: a section's Field array, its *_values reader, its
+  # reset_to_defaults literal and its save branch all index the same Array(String) and
+  # nothing type-checks that they agree. A mismatch is silent — either a wrong field is
+  # written, or reset_to_defaults raises IndexError inside the live modal. Round-tripping
+  # every section is the cheapest guard that catches the second, and the section-specific
+  # tests above catch the first.
+  it "round-trips every form section without an index error" do
+    dir = File.tempname("gori-settings-drift")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      SettingsView::SECTIONS.each_key do |section|
+        v = SettingsView.new
+        v.reload(section)
+        v.reset_to_defaults
+        v.move_field(1)
+        v.move_field(-1)
+        v.save
+      end
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
 end

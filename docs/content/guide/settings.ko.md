@@ -64,8 +64,11 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 | **Theme** | 오프너: 테마 선택기(내장 테마와 직접 만든 테마) |
 | **Display** | Default detail pane, History list time, Line numbers, Preview body limit (KiB), Resource meter, Terminal title |
 | **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth |
+| **Pet** | Pet (Miss Ring), Motion, Notices |
 
 Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. [테마 가이드](/ko/guide/themes/)를 참고하세요.
+
+Pet은 기본값이 off입니다. 켜면 금빛 고리 마스코트 Miss Ring이 탭 본문 우하단에 앉아 스스로 눈을 깜빡이고 윙크하며, 백그라운드 작업 결과를 말풍선으로 알려줍니다. 세 줄을 가리고 키보드 앞에 있는 동안 초당 한 번 정도 다시 그려지며, 90초간 아무 입력이 없으면 잠들어 애니메이션을 완전히 멈춥니다. Motion을 `calm`으로 두면 눈 깜빡임 주기가 절반이 되고 나머지 움직임은 꺼집니다. SSH나 배터리 환경용입니다. Notices는 하단 상태바 토스트와 독립적으로 동작합니다.
 
 ### Editor & Keys {#editor-keys}
 

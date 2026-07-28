@@ -53,6 +53,8 @@ module Gori::Tui
         "Message-body rendering: default detail pane, list time format, line numbers, preview size", :appearance, :form),
       Section.new(:layout, "settings.layout", "Layout",
         "History list Req/Res preview and Sitemap default expand depth", :appearance, :form),
+      Section.new(:pet, "settings.pet", "Pet",
+        "Miss Ring — the mascot in the body's bottom-right corner, her motion, and her notices", :appearance, :form),
       # Editor & Keys
       Section.new(:editor, "settings.editor", "Editor",
         "Set the external editor opened by ^E in editable fields", :editor, :form),

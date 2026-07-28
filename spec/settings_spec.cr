@@ -384,6 +384,45 @@ describe Gori::Settings do
     end
   end
 
+  it "persists and reloads pet prefs; omits the section at factory defaults (false survives)" do
+    dir = File.tempname("gori-settings-pet")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_pet = {Gori::Settings.pet?, Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.pet = true
+      Gori::Settings.pet_motion = "calm"
+      Gori::Settings.pet_notices = false
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("pet"))
+
+      Gori::Settings.pet = false
+      Gori::Settings.pet_motion = "lively"
+      Gori::Settings.pet_notices = true
+      Gori::Settings.load
+      Gori::Settings.pet?.should be_true
+      Gori::Settings.pet_motion.should eq("calm")
+      Gori::Settings.pet_notices?.should be_false # a stored false survives the reload
+
+      # A hand-edited motion outside the known set falls back to the default.
+      File.write(Gori::Settings.path, %({"pet":{"enabled":true,"motion":"bogus"}}))
+      Gori::Settings.load
+      Gori::Settings.pet_motion.should eq(Gori::Settings::DEFAULT_PET_MOTION)
+
+      # Back to defaults → section omitted, so a default install's file stays quiet
+      Gori::Settings.pet = Gori::Settings::DEFAULT_PET
+      Gori::Settings.pet_motion = Gori::Settings::DEFAULT_PET_MOTION
+      Gori::Settings.pet_notices = Gori::Settings::DEFAULT_PET_NOTICES
+      Gori::Settings.save
+      File.read(Gori::Settings.path).should_not contain(%("pet"))
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.pet, Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev_pet
+    end
+  end
+
   it "persists and reloads general prefs; omits the section at factory defaults (false survives)" do
     dir = File.tempname("gori-settings-general")
     Dir.mkdir_p(dir)

@@ -14,6 +14,46 @@ end
 # closure of its own state — ↵ hands the selected note to the shell's jump, and `c`
 # empties the store it was handed. Driven through OverlayHarness, which replays the
 # Runner's generic dispatch (see spec/support/overlay_harness.cr).
+# The O(1) accessors the Pet polls every tick. It must never call `all`, which
+# materialises a reversed copy of the whole ring 20x/second.
+describe Gori::Tui::Notifications do
+  it "reports 0 for latest_id on an empty buffer" do
+    Notifications.new.latest_id.should eq(0)
+    Notifications.new.latest.should be_nil
+  end
+
+  it "points latest at the most recent push" do
+    s = Notifications.new
+    s.push(:info, "a")
+    last = s.push(:info, "b")
+    s.latest_id.should eq(last.id)
+    s.latest.should be(last) # same object, not a copy
+  end
+
+  it "still points at the newest after a retention trim" do
+    prev = Gori::Settings.notify_retention
+    begin
+      Gori::Settings.notify_retention = 2
+      s = Notifications.new
+      last = nil.as(Notifications::Note?)
+      5.times { |i| last = s.push(:info, "n#{i}") }
+      # push trims with shift, so the newest is always the tail.
+      s.latest_id.should eq(last.not_nil!.id)
+      s.latest.not_nil!.message.should eq("n4")
+    ensure
+      Gori::Settings.notify_retention = prev
+    end
+  end
+
+  it "drops latest_id back to 0 after clear" do
+    s = Notifications.new
+    s.push(:info, "a")
+    s.clear
+    s.latest_id.should eq(0)
+    s.latest.should be_nil
+  end
+end
+
 describe Gori::Tui::NotificationsOverlay do
   it "exposes the chrome the collapsed ladders used to hard-code" do
     OverlayHarness.new(NotificationsOverlay.new(store("a"))).assert_chrome(OverlayKind::Notifications, "NOTIFICATIONS")

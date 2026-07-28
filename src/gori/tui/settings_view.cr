@@ -124,6 +124,19 @@ module Gori::Tui
         "what gori writes into the terminal window title — off leaves it to your shell/tmux — ←/→ cycles",
         choices: DISPLAY_TITLE_CHOICES),
     ]
+    # Pet: Miss Ring, the mascot in the body's bottom-right corner.
+    PET_MOTION_CHOICES = ["lively", "calm"]
+    PET_FIELDS         = [
+      Field.new("Pet (Miss Ring)",
+        "show the mascot in the body's bottom-right corner — she covers three rows and repaints about once a second while you're at the keyboard — ←/→/space toggles",
+        bool: true),
+      Field.new("Motion",
+        "lively = blinks, winks, a glint sweep and the odd wave; calm halves the blink rate and drops the rest (SSH/battery) — ←/→ cycles",
+        choices: PET_MOTION_CHOICES),
+      Field.new("Notices",
+        "announce new background results in a speech bubble, and react to them — independent of the bottom-bar toast — ←/→/space toggles",
+        bool: true),
+    ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
       Field.new("Bell on result",
@@ -157,6 +170,7 @@ module Gori::Tui
       :layout        => LAYOUT_FIELDS,
       :statusline    => STATUSLINE_FIELDS,
       :display       => DISPLAY_FIELDS,
+      :pet           => PET_FIELDS,
       :notifications => NOTIFICATIONS_FIELDS,
       :general       => GENERAL_FIELDS,
     }
@@ -195,6 +209,7 @@ module Gori::Tui
                 when :layout        then layout_values
                 when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
                 when :display       then display_values
+                when :pet           then pet_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then general_values
                 else                     network_values
@@ -248,6 +263,11 @@ module Gori::Tui
                   Settings::DEFAULT_PREVIEW_BODY_KIB.to_s,
                   Settings::DEFAULT_RESOURCE_METER ? "on" : "off",
                   title_label(Settings::DEFAULT_TERMINAL_TITLE),
+                ]
+                when :pet then [
+                  Settings::DEFAULT_PET ? "on" : "off",
+                  Settings::DEFAULT_PET_MOTION,
+                  Settings::DEFAULT_PET_NOTICES ? "on" : "off",
                 ]
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
@@ -381,6 +401,16 @@ module Gori::Tui
         Settings.preview_body_kib.to_s,
         Settings.resource_meter? ? "on" : "off",
         title_label(Settings.terminal_title),
+      ]
+    end
+
+    # Positional, like every other *_values reader: a literal at each call site would drift
+    # from PET_FIELDS the moment a row is inserted.
+    private def pet_values : Array(String)
+      [
+        Settings.pet? ? "on" : "off",
+        Settings.pet_motion,
+        Settings.pet_notices? ? "on" : "off",
       ]
     end
 
@@ -579,6 +609,13 @@ module Gori::Tui
         Settings.resource_meter = @values[4] == "on"
         Settings.terminal_title = title_from_label(@values[5])
         @values = display_values
+        return persist
+      end
+      if @section == :pet
+        Settings.pet = @values[0] == "on"
+        Settings.pet_motion = Settings.normalize_pet_motion(@values[1])
+        Settings.pet_notices = @values[2] == "on"
+        @values = pet_values
         return persist
       end
       if @section == :notifications
