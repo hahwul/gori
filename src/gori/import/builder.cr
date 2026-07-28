@@ -27,7 +27,7 @@ module Gori
       LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//i
       HTTP_SCHEME    = /\Ahttps?:\/\//i
 
-      # A raw control byte (CR, LF, NUL, other C0 or DEL) in the PATH or QUERY of an imported
+      # A raw control byte (CR, LF, other C0 or DEL) in the PATH or QUERY of an imported
       # URL is NOT rejected: it is the operator's own payload. Importing a HAR of a deliberately
       # CRLF-bearing request — a smuggling case — is exactly what a security-testing proxy is
       # for, so the entry is stored and replayed byte-exact, never sanitised (P7; DESIGN.md §7).
@@ -35,6 +35,15 @@ module Gori
       # writes the target onto the request line as-is, which faithfully reproduces the operator's
       # forged message on the wire — the point, not a defect. (Header/method/version smuggling is
       # a DIFFERENT boundary and keeps its own guards below; see HEADER_INJECT.)
+      #
+      # KNOWN GAP — NUL (0x00) is the one exception, and it is NOT byte-exact today. Crystal's
+      # `URI.parse` truncates `path` and `query` at a NUL, so an imported
+      # `http://h/nul\0byte` stores target `/nul` and the payload tail is silently lost — no
+      # skip, no warning. CR and LF are unaffected and do round-trip verbatim as described
+      # above. Verified against 0.2.0; `URI.parse("http://h/p?a=b\0c").query == "a=b"`. The same
+      # round-trip truncates the wire target in the proxy's absolute-form rewrite
+      # (`Proxy::Conn::ClientConn#resolve_forward` → `origin_form`), so a fix belongs with that
+      # one, not here. Until then, do not read the paragraph above as covering NUL.
 
       # The HOST is the one place import still rejects a control byte or space, because there it
       # means the string is not a URL at all — a parse failure, not a URL describing a malformed

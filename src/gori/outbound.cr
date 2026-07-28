@@ -238,10 +238,20 @@ module Gori
     # spaces, or a tab) otherwise splits to `["GET", "", "/admin", ...]`, so `[1]?` is the
     # empty string — non-nil, so `|| "/"` never fires — and the scope gate then evaluates an
     # EMPTY path, silently satisfying any string/regex include/exclude rule. That let a
-    # doubled space in the request line bypass BOTH scope layers (Sandbox included). `split`
+    # doubled space in the request line bypass the scope layers on this path. `split`
     # with no argument collapses whitespace runs and drops the empty parts, so the real
     # request-target is recovered from a malformed request line. (The bytes themselves still
     # go on the wire byte-exact — P7 — this only feeds the scope decision.)
+    #
+    # SCOPE OF THIS FIX: `Outbound` only — repeater/fuzz/mine/sequence/discover/active-probe.
+    # The PROXY path does not come through here: ClientConn passes
+    # `Codec::Http1.parse_request_head`'s `target` (a plain `split(' ')[1]?`) straight to
+    # `Interceptor#sandbox_blocks?` / `#intercepts_request?` / `#intercepts_response?`
+    # (client_conn.cr:241, :267, :494), so the same doubled-space/tab line still yields an
+    # empty target there. Verified against 0.2.0: with `include host:…` + `exclude string:/x`
+    # and Sandbox ON, `GET  /x  HTTP/1.1` reaches the origin while `GET /x HTTP/1.1` is 403'd;
+    # with a URL-keyed include it inverts and fails closed. Do not read this comment as
+    # covering the proxy gate.
     def self.request_target(bytes : Bytes) : String
       request_target_line(String.new(bytes).each_line.first? || "")
     end
