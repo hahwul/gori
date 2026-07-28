@@ -7,8 +7,11 @@ on:
       - .github/workflows/ci.yml
       - shard.yml
       - shard.lock
-      - docker/Dockerfile
       - "**/*.cr"
+      # `docker/Dockerfile` is deliberately absent: nothing in this workflow
+      # builds the image any more (see the note under `tests`), so listing it
+      # would only wake the Crystal build and the spec matrix to test nothing
+      # that changed.
   # Builds the PROSPECTIVE MERGE RESULT, not the PR branch. Without this, two PRs that
   # each pass CI alone and touch different hunks of one file can merge cleanly and leave
   # `main` broken — which is exactly what #371 + #372 did (#382): one changed a method's
@@ -80,36 +83,17 @@ jobs:
         run: shards install
       - name: Run tests
         run: crystal spec
-  build-docker:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: linux/amd64
-            runner: ubuntu-latest
-          - arch: linux/arm64
-            # Native ARM runner: the image builds a static Crystal binary from
-            # source, which is far too slow to cross-build under QEMU.
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-      - name: Setup Docker buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: ${{ matrix.arch }}
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+# No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
+# arm64 on every PR, and those two builds — each compiling a static Crystal
+# binary from source, the arm64 one on a native runner because QEMU is far too
+# slow for it — dominated PR wall-clock while catching almost nothing: the
+# Dockerfile changes far less often than the code it packages.
+#
+# It is not gated to `main` pushes either, because on a `main` push it would be
+# pure duplicate work: `publish-ghcr.yml` already builds the same Dockerfile,
+# for the same two platforms, on the same runners, on every push to `main` — it
+# just pushes the result instead of throwing it away. A Dockerfile break is
+# caught there, one merge late, before anything is released. If you ever want
+# the image validated *before* a merge again, add `pull_request` to
+# publish-ghcr.yml's build job with `push: false` rather than reviving a second
+# copy of the build here.
