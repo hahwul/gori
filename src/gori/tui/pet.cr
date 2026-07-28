@@ -103,6 +103,12 @@ module Gori::Tui
         reset
         return true
       end
+      # ENABLE edge (no frame yet: freshly constructed, or just switched back on). Baseline
+      # the notification watermark here rather than trusting whatever it held while she was
+      # hidden — otherwise everything that landed in the meantime is still "new" and she
+      # announces a stale result as though it had just happened. Deliberately swallows a
+      # note that arrives on this very tick too: "don't announce a backlog on enable".
+      @seen_id = @notes.latest_id if @frame.nil?
       @last_poke ||= now
       changed = consume_note(now)
       changed = true if expire_bubble(now)
@@ -127,11 +133,19 @@ module Gori::Tui
       poke(Time.instant)
     end
 
+    # Back to the state a freshly-constructed Pet is in. The BEAT-DERIVED deadlines have to
+    # go too, not just the timers: @wake_until_beat and @settle_beat are compared against
+    # @beat, which reset does not rewind, so leaving them set means disabling her mid-startle
+    # (or on the settle beat after a reaction) and switching back on resumes that pose
+    # instead of the fresh idle window this promises.
     private def reset : Nil
       @frame = nil
       @last_beat = nil
       @last_poke = nil
       @dozing = false
+      @wake_until_beat = @beat
+      @settle_beat = -1
+      @mood_beat = @beat
       @bubble = nil
       @bubble_until = nil
       @mood = :info

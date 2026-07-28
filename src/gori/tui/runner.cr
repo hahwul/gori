@@ -3074,11 +3074,11 @@ module Gori::Tui
       Settings.pet = !Settings.pet?
       saved = Settings.save
       @pet.wake_on_input
-      unless saved
-        status("Miss Ring: could not save (#{Settings.path})")
-        return
-      end
-      status(Settings.pet? ? "Miss Ring is here" : "Miss Ring hidden")
+      # The toggle has ALREADY applied in memory either way, so a failed save must still
+      # report the new state — "could not save" alone reads as though nothing happened.
+      # Same shape as the tabs/hotkeys/env/hosts toasts.
+      shown = Settings.pet? ? "Miss Ring is here" : "Miss Ring hidden"
+      status(saved ? shown : "#{shown} — could not save to #{Settings.path}")
     end
 
     # --- Host (the facade per-tab controllers drive the shell through) -------

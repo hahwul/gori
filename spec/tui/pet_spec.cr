@@ -108,6 +108,43 @@ describe Gori::Tui::Pet do
     end
   end
 
+  # The watermark has to stay current while she is OFF, or enabling her mid-session
+  # replays whatever landed in the meantime as if it just happened.
+  it "does not announce a backlog accumulated while she was off" do
+    notes = Notifications.new
+    pet = Pet.new(notes)
+    t0 = Time.instant
+    with_pet(false) { pet.tick(t0) }
+    notes.push(:error, "probe: boom") # arrives while she is hidden
+    with_pet(true) do
+      pet.tick(t0 + Pet::BEAT)
+      f = pet.frame.not_nil!
+      f.bubble.should be_nil
+      f.mood.should eq(:info)
+    end
+  end
+
+  # "a re-enable starts a fresh idle window" (Pet#tick) has to hold for the beat-derived
+  # state too — otherwise toggling her off mid-startle and back on resumes the startle.
+  it "starts a fresh idle window on re-enable, not mid-schedule" do
+    pet = Pet.new(Notifications.new)
+    t0 = Time.instant
+    with_pet(true) do
+      pet.tick(t0)
+      pet.tick(t0 + Pet::SLEEP_AFTER) # doze off
+      woke = t0 + Pet::SLEEP_AFTER + 1.second
+      pet.poke(woke) # …and arm the startle
+      pet.tick(woke + Pet::BEAT)
+      pet.frame.not_nil!.pose.should eq(:alert)
+    end
+    off = t0 + Pet::SLEEP_AFTER + 2.seconds
+    with_pet(false) { pet.tick(off) } # disabled mid-startle
+    with_pet(true) do
+      pet.tick(off + 1.second)
+      pet.frame.not_nil!.pose.should_not eq(:alert)
+    end
+  end
+
   it "blinks less often on calm than on lively" do
     t0 = Time.instant
     n = 300
