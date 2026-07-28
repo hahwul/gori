@@ -122,6 +122,7 @@ module Gori::Tui
     # Scroll + request/response toggle; a/b/s fall through to the verb keymap.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
+      return true if handle_body_hscroll(ev)
       case
       when key.up?, key.lower_k?
         if view.at_top?
@@ -138,6 +139,22 @@ module Gori::Tui
         true
       when key.escape?
         @host.request_focus(:subtabs)
+        true
+      else
+        false
+      end
+    end
+
+    # ⇧←/→ scrolls both diff columns sideways. Checked BEFORE the plain ←/→ pane toggle:
+    # the bare arrows keep switching REQ ⇄ RES, the shifted ones never reach that branch.
+    private def handle_body_hscroll(ev : Termisu::Event::Key) : Bool
+      return false unless ev.shift?
+      key = ev.key
+      if key.left?
+        view.hscroll(-1)
+        true
+      elsif key.right?
+        view.hscroll(1)
         true
       else
         false
@@ -166,7 +183,7 @@ module Gori::Tui
       a = Hotkeys.binding_label(reg, "comparer.pick-a", "a")
       b = Hotkeys.binding_label(reg, "comparer.pick-b", "b")
       s = Hotkeys.binding_label(reg, "comparer.swap", "s")
-      "←/→ req|res · ↑/↓ scroll · #{a}/#{b} pick · #{s} swap · ^N new · ^W close · space cmds · ↹/esc tabs"
+      "←/→ req|res · ↑/↓ scroll · ⇧←/→ h-scroll · #{a}/#{b} pick · #{s} swap · ^N new · ^W close · space cmds · ↹/esc tabs"
     end
   end
 end

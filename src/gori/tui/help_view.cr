@@ -118,6 +118,7 @@ module Gori::Tui
       {"COMPARER", [
         Item.new("a · b", "pick flow A · flow B"),
         Item.new("←/→", "compare requests ⟷ responses"),
+        Item.new("⇧←/→", "h-scroll both columns (long lines)"),
         Item.new("s", "swap A ⇄ B"),
         Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
         Item.new("Send to Comparer", "from History (space menu) — fills the active sub-tab"),

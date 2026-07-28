@@ -31,6 +31,10 @@ module Gori::Tui
       @slot_b = nil.as(Store::FlowDetail?)
       @pane = :response
       @scroll = 0
+      # Leftmost visible display COLUMN, shared by BOTH columns (⇧←/→). One offset, not
+      # two: the rows are LCS-aligned, so moving A and B together is what keeps a long
+      # line comparable — an independent per-column offset would break that alignment.
+      @xscroll = 0
       @fill_next = :a # the slot the next "Send to Comparer" fills (rings A → B → A …)
       @rows_cache = nil.as(Array(Repeater::SideBySide::Row)?)
       # Styled overlay for the UNCHANGED (same) rows only — parallel to @rows_cache, nil
@@ -88,6 +92,7 @@ module Gori::Tui
       @pane = other.@pane
       @fill_next = other.@fill_next
       @scroll = 0
+      @xscroll = 0
       invalidate
     end
 
@@ -98,6 +103,7 @@ module Gori::Tui
       @slot_b = nil
       @pane = :response
       @scroll = 0
+      @xscroll = 0
       @fill_next = :a
       invalidate
     end
@@ -160,7 +166,8 @@ module Gori::Tui
 
     def toggle_pane : Nil
       @pane = @pane == :response ? :request : :response
-      @scroll = 0 # request/response differ in length — start from the top
+      @scroll = 0  # request/response differ in length — start from the top
+      @xscroll = 0 # …and in width, so start from the left edge too
       invalidate
     end
 
@@ -170,6 +177,7 @@ module Gori::Tui
       return if @pane == pane
       @pane = pane
       @scroll = 0
+      @xscroll = 0
       invalidate
     end
 
@@ -195,8 +203,20 @@ module Gori::Tui
       @scroll = {@scroll + delta, 0}.max # render clamps the ceiling against the body height
     end
 
+    # ⇧←/→: shift BOTH columns by the same amount, 4 columns per step (Repeater/History/
+    # Intercept/Decoder/Fuzzer all use that step). Render clamps the ceiling against the
+    # widest row currently on screen.
+    def hscroll(delta : Int32) : Nil
+      @xscroll = {@xscroll + delta * 4, 0}.max
+    end
+
     def at_top? : Bool
       @scroll == 0
+    end
+
+    # Current h-offset — for the footer readout and specs.
+    def xscroll : Int32
+      @xscroll
     end
 
     # --- diff (memoized; rebuilt only on a slot/pane change) ----------------
@@ -303,6 +323,10 @@ module Gori::Tui
       data = rows
       sr = styled_same
       clamp_scroll(body_h, data.size)
+      # Clamp against the NARROWER column: the two differ by at most one cell (odd frame
+      # width), and pinning to the wider one would leave the narrow column's last cell of
+      # the widest line permanently unreachable.
+      clamp_hscroll(data, body_h, {left_w, right_w}.min)
       (0...body_h).each do |i|
         di = @scroll + i
         break if di >= data.size
@@ -362,15 +386,23 @@ module Gori::Tui
                                       end
       # Unchanged rows get syntax highlighting (both columns hold identical text); changed/
       # added/deleted rows keep the red/green diff colours so the diff signal stays legible.
+      # The centre marker band rides the frame, not the text: it stays put while the two
+      # columns scroll under it, so the ~/-/+ signal survives any h-offset.
       if styled && r.kind.same?
-        Highlight.draw(screen, x, y, styled, bg: Theme.bg, width: left_w) if left_w > 0
+        shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
+        Highlight.draw(screen, x, y, shown, bg: Theme.bg, width: left_w) if left_w > 0
         screen.cell(sep_x + 1, y, glyph, gcolor)
-        Highlight.draw(screen, right_x, y, styled, bg: Theme.bg, width: right_w) if right_w > 0
+        Highlight.draw(screen, right_x, y, shown, bg: Theme.bg, width: right_w) if right_w > 0
       else
-        screen.text(x, y, r.left || "", lcolor, width: left_w) if left_w > 0
+        screen.text(x, y, sliced(r.left), lcolor, width: left_w) if left_w > 0
         screen.cell(sep_x + 1, y, glyph, gcolor)
-        screen.text(right_x, y, r.right || "", rcolor, width: right_w) if right_w > 0
+        screen.text(right_x, y, sliced(r.right), rcolor, width: right_w) if right_w > 0
       end
+    end
+
+    private def sliced(text : String?) : String
+      t = text || ""
+      @xscroll > 0 ? Highlight.slice_left_text(t, @xscroll) : t
     end
 
     private def draw_footer(screen : Screen, rect : Rect, y : Int32) : Nil
@@ -378,11 +410,34 @@ module Gori::Tui
       changed = @change_count
       note = changed == 0 ? "identical" : "#{changed} changed line#{changed == 1 ? "" : "s"}"
       note += " · truncated to #{Repeater::Diff::MAX_LINES}/side" if @truncated
+      note += " · col #{@xscroll}" if @xscroll > 0                              # only when scrolled: otherwise it's noise
       screen.text(rect.x + 1, y, note, Theme.muted, width: {rect.w - 2, 1}.max) # pane + ←/→ moved to the divider selector
     end
 
     private def clamp_scroll(body_h : Int32, total : Int32) : Nil
       @scroll = @scroll.clamp(0, {total - body_h, 0}.max)
+    end
+
+    # Pin the h-offset to the widest row CURRENTLY ON SCREEN, across both columns — the
+    # same rule the Repeater response uses. Measured with draw_width_upto so a minified
+    # multi-MB body line is never fully walked once per frame.
+    private def clamp_hscroll(data : Array(Repeater::SideBySide::Row), body_h : Int32, cw : Int32) : Nil
+      if cw <= 0
+        @xscroll = 0
+        return
+      end
+      limit = @xscroll + cw + 1
+      widest = 0
+      (0...body_h).each do |i|
+        r = data[@scroll + i]?
+        break unless r
+        {r.left, r.right}.each do |t|
+          next unless t
+          w = Screen.draw_width_upto(t, limit)
+          widest = w if w > widest
+        end
+      end
+      @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
     end
   end
 end

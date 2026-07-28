@@ -4,13 +4,13 @@ require "../../src/gori/tui/comparer_view"
 
 include Gori::Tui
 
-private def flow(method, target, host = "h.test")
+private def flow(method, target, host = "h.test", body = "body")
   row = Gori::Store::FlowRow.new(
     1_i64, 1_i64, "https", method, host, 443, target,
     200, 100_i64, Gori::Store::FlowState::Complete, 50_i64, 1_i64, "text/plain")
   head = "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice
-  resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nbody".to_slice
-  Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, nil, resp, "body".to_slice)
+  resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+  Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, nil, resp, body.to_slice)
 end
 
 describe ComparerView do
@@ -123,5 +123,76 @@ describe ComparerView do
     v.pane_chip_at(rect, res + 4, divider_y).should be_nil
     # Wrong row never hits.
     v.pane_chip_at(rect, req, divider_y + 1).should be_nil
+  end
+
+  # A body line wider than a diff column used to be clipped with no way to see the tail,
+  # which is exactly where a comparison matters (a long JSON line, a JWT, a query string).
+  # ⇧←/→ now shifts BOTH columns by one shared offset so the LCS alignment survives.
+  describe "horizontal scroll" do
+    # 40 filler cols + an 8-col tail = 48, past the 38-col column of a width-80 frame.
+    same_line = "#{"x" * 40}SAMETAIL"
+    a_line = "#{"y" * 40}LEFTTAIL"
+    b_line = "#{"y" * 40}RGHTTAIL"
+    left_w = (80 - ComparerView::SEP_W) // 2 # 38
+
+    paint = ->(v : ComparerView) {
+      backend = MemoryBackend.new(80, 20)
+      v.render(Screen.new(backend), Rect.new(0, 0, 80, 20), focused: true)
+      (0...20).map { |y| backend.row(y) }
+    }
+
+    pair = ->(v : ComparerView) {
+      v.set_pair(
+        flow("GET", "/a", body: "#{same_line}\n#{a_line}"),
+        flow("GET", "/a", body: "#{same_line}\n#{b_line}"))
+    }
+
+    it "reveals the clipped tail in BOTH columns, on the styled and the plain path" do
+      v = ComparerView.new
+      pair.call(v)
+      before = paint.call(v)
+      before.any?(&.includes?("SAMETAIL")).should be_false # clipped at col 0
+      before.any?(&.includes?("LEFTTAIL")).should be_false
+
+      100.times { v.hscroll(1) } # clamps to the widest visible row
+      after = paint.call(v)
+      # Unchanged row → the syntax-highlighted path; both columns hold the same text, so
+      # the tail must land twice on that one row (once per column).
+      same_row = after.select(&.includes?("SAMETAIL"))
+      same_row.size.should eq(1)
+      (same_row[0].split("SAMETAIL").size - 1).should eq(2)
+      # Changed row → the plain-text path (diff colours, no syntax overlay).
+      chg = after.find(&.includes?("LEFTTAIL")).not_nil!
+      chg.should contain("RGHTTAIL")
+    end
+
+    it "clamps to the widest row on screen instead of scrolling into blank space" do
+      v = ComparerView.new
+      pair.call(v)
+      100.times { v.hscroll(1) }
+      paint.call(v)
+      v.xscroll.should eq(48 - left_w) # widest line is 48 cols
+    end
+
+    it "steps 4 columns and never goes negative" do
+      v = ComparerView.new
+      pair.call(v)
+      v.hscroll(2)
+      v.xscroll.should eq(8)
+      v.hscroll(-5)
+      v.xscroll.should eq(0)
+    end
+
+    it "returns to the left edge when the compared half changes" do
+      v = ComparerView.new
+      pair.call(v)
+      v.hscroll(1)
+      v.xscroll.should eq(4)
+      v.toggle_pane # RES → REQ: different content, different widths
+      v.xscroll.should eq(0)
+      v.hscroll(2)
+      v.set_pane(:response)
+      v.xscroll.should eq(0)
+    end
   end
 end
