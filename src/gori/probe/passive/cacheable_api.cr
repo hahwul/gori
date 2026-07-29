@@ -7,6 +7,14 @@ module Gori
       # Sensitive payloads (tokens, PII, account data) left cacheable via missing or weak
       # Cache-Control are a common API footgun — especially `application/json` without
       # `no-store`. Response-gated; document (HTML) headers stay in SecurityHeaders.
+      #
+      # Gated on the response being AUTHENTICATED — the request carried a Cookie or an
+      # Authorization header, or the response sets a cookie. The whole risk is a cache retaining
+      # one user's data and serving it to another, which requires the data to be one user's in the
+      # first place: a public, unauthenticated JSON endpoint left cacheable is a performance
+      # decision, not a finding. Without that gate this fired Medium on every Cache-Control-less
+      # 2xx JSON response, which is most of them on most servers — the rule's volume came almost
+      # entirely from endpoints with nothing to leak.
       class CacheableApi < Rule
         def info : RuleInfo
           RuleInfo.new("cacheable_api", "Cacheable API responses",
@@ -20,6 +28,8 @@ module Gori
           return unless success?(resp)
           # Empty bodies have nothing sensitive to cache; skip pure ACKs.
           return if body_empty?(ctx)
+          # Nothing user-specific in the response ⇒ nothing for a cache to leak across users.
+          return unless authenticated?(ctx, resp)
 
           cc = resp.headers.get?("Cache-Control")
           return if no_store?(cc)
@@ -45,6 +55,17 @@ module Gori
           media = (semi ? ct[0...semi] : ct).strip
           media == "application/json" || media == "text/json" ||
             media.ends_with?("+json") || media.includes?("json")
+        end
+
+        # The response is tied to a particular caller: the request authenticated with a Cookie or
+        # an Authorization header, or the response hands back a Set-Cookie (so it is establishing
+        # or refreshing a session). Any of those means a shared cache serving this body to the
+        # next visitor is a real disclosure; without them it is public data.
+        private def authenticated?(ctx : Context, resp : Proxy::Codec::RawResponse) : Bool
+          req = ctx.req.headers
+          return true if req.get?("Cookie").try { |v| !v.strip.empty? }
+          return true if req.get?("Authorization").try { |v| !v.strip.empty? }
+          !resp.headers.get_all("Set-Cookie").empty?
         end
 
         private def success?(resp : Proxy::Codec::RawResponse) : Bool

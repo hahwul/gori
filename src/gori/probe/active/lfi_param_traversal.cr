@@ -36,11 +36,21 @@ module Gori
         ENC_FOLD = "x/%2e%2e/"  # value -> x/%2e%2e/value      (encoded .. — defeats a literal-".." filter)
         CONTROL  = "x/zzznope/" # value -> x/zzznope/value     (a real subdir that cannot normalize back)
 
-        # Query-param names that conventionally carry a filesystem path/filename.
-        KNOWN_FILE_PARAMS = Set{"file", "filename", "path", "page", "template", "doc", "document",
-                                "download", "view", "include", "load", "name", "url", "dir", "folder"}
-        # File-extension tells (lower-cased, substring match — a value carrying one looks file-like).
-        FILE_EXTS = %w[.pdf .js .css .png .jpg .jpeg .gif .svg .txt .json .xml .html .htm .php .log .csv .md .yml .yaml .ini .conf]
+        # Query-param names that conventionally carry a filesystem path/filename — and little else.
+        # `name`, `url`, `view`, `page`, and `load` were dropped: `?name=John`, `?view=grid`, and
+        # `?page=2` are ordinary application parameters, and this name list is checked REGARDLESS
+        # of the value, so each of them alone sent three probes at a large share of all traffic.
+        # Nothing is lost by dropping them — a genuinely file-shaped value under any name still
+        # qualifies through the `/` or file-extension tests below.
+        KNOWN_FILE_PARAMS = Set{"file", "filename", "filepath", "path", "template", "doc",
+                                "document", "download", "include", "dir", "folder"}
+        # File-extension tells. The extension must not be followed by another word character, so
+        # `.js` no longer matches inside `.json` and `.md` no longer matches inside `.mdx` — the
+        # old plain `includes?` treated both as file-like.
+        FILE_EXT = /\.(?:pdf|js|css|png|jpe?g|gif|svg|txt|json|xml|html?|php|log|csv|md|ya?ml|ini|conf)(?![0-9a-z])/i
+        # A value that is only digits is an identifier, never a traversal-useful filename. Guards
+        # the NAME-based branch, where the value is otherwise unconstrained (`?doc=1234`).
+        NUMERIC_VALUE = /\A\d+\z/
 
         def info : RuleInfo
           RuleInfo.new("lfi_param_traversal", "Parameter path traversal",
@@ -152,12 +162,11 @@ module Gori
         end
 
         # Path-like: the value carries a `/` or a file-extension tell, or the name is a conventional
-        # file/path parameter.
+        # file/path parameter AND the value is not a bare identifier.
         private def path_like?(name : String, value : String) : Bool
           return true if value.includes?('/')
-          low = value.downcase
-          return true if FILE_EXTS.any? { |ext| low.includes?(ext) }
-          KNOWN_FILE_PARAMS.includes?(name.downcase)
+          return true if FILE_EXT.matches?(value)
+          KNOWN_FILE_PARAMS.includes?(name.downcase) && !NUMERIC_VALUE.matches?(value)
         end
 
         # A copy of the query pairs with pair `idx`'s value prefixed (name kept verbatim, every other

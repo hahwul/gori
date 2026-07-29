@@ -1035,11 +1035,14 @@ describe "Gori::Probe::Passive (new patterns)" do
   end
 
   describe "cacheable JSON API responses" do
+    # The risk is a cache serving ONE user's data to another, so every case here authenticates.
+    authed = "Cookie: sid=abc\r\n"
+
     it "flags application/json without Cache-Control (sensitive data may be stored)" do
       with_store do |store|
         dets = analyze(store,
           resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
-          content_type: "application/json", body: %({"token":"x"}))
+          content_type: "application/json", body: %({"token":"x"}), req_headers: authed)
         hit = dets.find(&.code.==("cacheable_json")).not_nil!
         hit.severity.should eq(Gori::Store::Severity::Medium)
         hit.title.should contain("missing Cache-Control")
@@ -1055,8 +1058,35 @@ describe "Gori::Probe::Passive (new patterns)" do
         ].each do |cc|
           head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n#{cc}\r\n\r\n"
           codes_of(analyze(store, resp_head: head, content_type: "application/json",
-            body: "{}")).should contain("cacheable_json")
+            body: "{}", req_headers: authed)).should contain("cacheable_json")
         end
+      end
+    end
+
+    # A public endpoint has nothing user-specific for a cache to leak, and leaving it cacheable is
+    # a performance decision. Without this gate the rule fired on most 2xx JSON on most servers.
+    it "does not flag an UNAUTHENTICATED response" do
+      with_store do |store|
+        codes_of(analyze(store,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+          content_type: "application/json", body: %({"public":true}))).should_not contain("cacheable_json")
+      end
+    end
+
+    it "counts an Authorization request header or a Set-Cookie response as authenticated" do
+      with_store do |store|
+        codes_of(analyze(store,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+          content_type: "application/json", body: %({"me":1}),
+          req_headers: "Authorization: Bearer x\r\n")).should contain("cacheable_json")
+        codes_of(analyze(store,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: sid=new\r\n\r\n",
+          content_type: "application/json", body: %({"me":1}))).should contain("cacheable_json")
+        # An empty Cookie header is not authentication.
+        codes_of(analyze(store,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+          content_type: "application/json", body: %({"me":1}),
+          req_headers: "Cookie:  \r\n")).should_not contain("cacheable_json")
       end
     end
 
@@ -1084,7 +1114,7 @@ describe "Gori::Probe::Passive (new patterns)" do
       with_store do |store|
         head = "HTTP/1.1 200 OK\r\nContent-Type: application/problem+json\r\n\r\n"
         codes_of(analyze(store, resp_head: head, content_type: "application/problem+json",
-          body: %({"title":"err"}))).should contain("cacheable_json")
+          body: %({"title":"err"}), req_headers: authed)).should contain("cacheable_json")
       end
     end
   end
@@ -2548,6 +2578,50 @@ describe Gori::Probe::Passive::PostMessage do
     end
   end
 
+  # The origin test used to run over the WHOLE fragment, so one unrelated `.origin` anywhere in a
+  # bundle suppressed every finding in it — the rule detected nothing on real bundles.
+  it "still flags an unchecked handler when an unrelated .origin exists elsewhere in the bundle" do
+    with_store do |store|
+      js = %(var o = location.origin + "/api";) + ("var pad#{1};" * 5) +
+           %(window.addEventListener("message", function(e){ handle(e.data); });)
+      codes_of(analyze_js(store, js)).should contain("postmessage_no_origin")
+    end
+  end
+
+  it "judges each handler separately — a checked one does not vouch for an unchecked one" do
+    with_store do |store|
+      checked = %(window.addEventListener("message", function(e){ if (e.origin === "https://x") a(e.data); });)
+      unchecked = %(window.addEventListener("message", function(e){ b(e.data); });)
+      codes_of(analyze_js(store, checked + unchecked)).should contain("postmessage_no_origin")
+      codes_of(analyze_js(store, checked + checked)).should_not contain("postmessage_no_origin")
+    end
+  end
+
+  # A handler passed by NAME has its body elsewhere, so no window around the call site can say
+  # whether it checks the origin — guessing there would be a false positive.
+  it "does not judge a handler passed by name (body not visible here)" do
+    with_store do |store|
+      js = %(function onMsg(e){ handle(e.data); } window.addEventListener("message", onMsg);)
+      codes_of(analyze_js(store, js)).should_not contain("postmessage_no_origin")
+    end
+  end
+
+  it "flags an arrow-function handler with no origin check" do
+    with_store do |store|
+      js = %(window.addEventListener("message", (e) => { handle(e.data); });)
+      codes_of(analyze_js(store, js)).should contain("postmessage_no_origin")
+    end
+  end
+
+  it "does not flag an origin check that sits far past the handler window" do
+    with_store do |store|
+      js = %(window.onmessage = function(e){ ) + ("noop();" * 400) + %( if (e.origin) ok(); };)
+      # The check is beyond HANDLER_WINDOW, so the handler reads as unchecked — the deliberate
+      # cost of scoping the test to a window rather than the whole fragment.
+      codes_of(analyze_js(store, js)).should contain("postmessage_no_origin")
+    end
+  end
+
   it "flags a wildcard target origin and document.domain relaxation" do
     with_store do |store|
       codes_of(analyze_js(store, %(parent.postMessage(payload, "*");))).should contain("postmessage_wildcard")
@@ -3185,6 +3259,35 @@ describe "Gori::Probe::Active::LfiParamTraversal" do
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf")).should be_nil
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=../etc/passwd", body: "X")).should be_nil
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/dl?file=doc.pdf", body: "X", method: "POST")).should be_nil
+    end
+  end
+
+  # The name list is checked REGARDLESS of the value, so an everyday application parameter in it
+  # sent three probes at a large share of all traffic for nothing.
+  it "does not treat ordinary application parameters as file parameters" do
+    with_store do |store|
+      ["/u?name=John", "/l?view=grid", "/l?page=2", "/l?load=more", "/go?url=alpha"].each do |t|
+        probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t, body: "X")).should be_nil, t
+      end
+      # A bare identifier under a real file param is an id, not a filename.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/d?doc=1234", body: "X")).should be_nil
+      # …but a file-SHAPED value still qualifies under ANY name, so nothing is lost.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/l?page=home.html", body: "X")).should_not be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/go?url=a/b", body: "X")).should_not be_nil
+    end
+  end
+
+  # `includes?(".js")` fired inside `.json`, and `.md` inside `.mdx`.
+  it "requires a real extension boundary, not a substring of a longer one" do
+    with_store do |store|
+      # `data.jsonp` / `notes.mdx` are not the .js / .md files the old substring test saw — and
+      # neither name is a file param, so nothing else qualifies them.
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?q=data.jsonp", body: "X")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?q=notes.mdx", body: "X")).should be_nil
+      # The real extensions still qualify.
+      ["/a?q=app.js", "/a?q=data.json", "/a?q=notes.md"].each do |t|
+        probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t, body: "X")).should_not be_nil, t
+      end
     end
   end
 

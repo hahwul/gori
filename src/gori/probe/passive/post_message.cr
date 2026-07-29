@@ -19,11 +19,22 @@ module Gori
             Category::CLIENT)
         end
 
-        # A window message handler (addEventListener('message', …) or an onmessage= assignment).
-        LISTENER = /addEventListener\s*\(\s*["'`]message["'`]|\bonmessage\s*=(?!=)/
-        # Any origin consultation; its mere presence in the script suppresses the no-origin
-        # finding (conservative — we would rather miss than cry wolf).
+        # A window message handler whose body we can actually SEE: the listener must be followed
+        # by an inline function literal (`function (e) {` or `(e) => {`). A handler passed by NAME
+        # (`addEventListener("message", onMsg)`) is deliberately not matched — its body is defined
+        # elsewhere, so no window around this call site can tell whether it checks the origin, and
+        # guessing would be a false positive.
+        LISTENER = /(?:addEventListener\s*\(\s*["'`]message["'`]\s*,|\bonmessage\s*=(?!=))\s*(?:async\s+)?(?:function\b[^(]*\(|\()[^)]*\)\s*(?:=>\s*)?\{/
+        # Any origin consultation. Searched in a WINDOW after the handler opens, not across the
+        # whole fragment: `.origin` is ubiquitous in a bundled SPA, so a whole-fragment test meant
+        # one unrelated occurrence anywhere in a 256 KiB bundle suppressed every finding in it —
+        # the rule detected nothing at all on exactly the targets it matters most for. Scoping the
+        # test to the handler body restores that, and pairing it with the inline-function gate
+        # above keeps the conservative bias: we only judge handlers we can read.
         ORIGIN_CHECK = /\.origin\b/
+        # How far past the handler's opening brace to look. Generous — a real message handler with
+        # its dispatch table still fits, and over-reaching only makes the rule quieter.
+        HANDLER_WINDOW = 2000
         # postMessage(<data>, "*") — the wildcard target origin as the (last) argument.
         WILDCARD_POST = /\.postMessage\s*\([^;\n]*,\s*["'`]\*["'`]\s*\)/
         # document.domain = … (assignment, not the === comparison).
@@ -34,7 +45,7 @@ module Gori
           return if scripts.empty?
           emitted = Set(String).new
           scripts.each do |code|
-            if LISTENER.matches?(code) && !ORIGIN_CHECK.matches?(code) && emitted.add?("no_origin")
+            if unchecked_handler?(code) && emitted.add?("no_origin")
               acc << pm(ctx, "postmessage_no_origin", "postMessage handler without origin check",
                 Store::Severity::Medium, "message listener, no .origin check")
             end
@@ -47,6 +58,18 @@ module Gori
                 Store::Severity::Low, "document.domain =")
             end
           end
+        end
+
+        # True when `code` registers an INLINE message handler whose body does not consult
+        # `.origin` within HANDLER_WINDOW characters of its opening brace. Scans every handler in
+        # the fragment: a bundle can register several, and one that checks its sender must not
+        # vouch for one that does not.
+        private def unchecked_handler?(code : String) : Bool
+          code.scan(LISTENER) do |m|
+            body = code[m.end(0), HANDLER_WINDOW]?
+            return true if body.nil? || !ORIGIN_CHECK.matches?(body)
+          end
+          false
         end
 
         private def pm(ctx : Context, code : String, title : String, sev : Store::Severity, evidence : String) : Detection
