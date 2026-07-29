@@ -39,6 +39,7 @@ module Gori
       Decoder       # the Decoder tab has focus
       Jwt           # the JWT workbench tab has focus
       Notes         # the Notes tab has focus (sub-tab strip space menu)
+      ProjectDesc   # the Project tab's DESCRIPTION pane has focus (read mode)
       Project       # the Project tab's SCOPE rule list has focus
       HostOverrides # the Project tab's HOST OVERRIDES list has focus
       Env           # the Project tab's ENVIRONMENT var list has focus

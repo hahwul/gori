@@ -32,6 +32,7 @@ module Gori::Tui
       when :scope     then Verb::Scope::Project
       when :overrides then Verb::Scope::HostOverrides
       when :env       then Verb::Scope::Env
+      when :desc      then Verb::Scope::ProjectDesc
       else                 Verb::Scope::Body
       end
     end

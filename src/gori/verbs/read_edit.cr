@@ -113,17 +113,24 @@ module Gori
         "issue.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
-      in_project_desc = ->(ctx : Verb::ExecContext) { ctx.project_desc_read_mode? }
+      # Verb::Scope::ProjectDesc, not Body — see project.copy in verbs/core.cr for why the
+      # description pane stopped borrowing the History list's scope. The read-mode flag itself
+      # is tab-blind (ProjectView's pane defaults to :desc, so it reads true from boot), so the
+      # gate carries the current_tab half the way in_notes_read / in_repeater_read do.
+      # No chord on select-line: ProjectController raw-dispatches 'x' in the desc pane and
+      # handle_body_key returns true there, so the Keymap never sees it (same reasoning as
+      # project.copy's dropped 'y') — a chord would only ever be dead weight in the rebind editor.
+      in_project_desc = ->(ctx : Verb::ExecContext) { ctx.current_tab == :project && ctx.project_desc_read_mode? }
       r.register Verb::Definition.new(
         "project.select-line", "Select line", "Select the entire current line",
-        Verb::Scope::Body, [Verb::Chord.new("x")],
+        Verb::Scope::ProjectDesc,
         available: in_project_desc, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "project.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Body, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::ProjectDesc, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "project.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Body, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::ProjectDesc, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       in_detail_nav = ->(ctx : Verb::ExecContext) { ctx.detail_navigable? }
       r.register Verb::Definition.new(

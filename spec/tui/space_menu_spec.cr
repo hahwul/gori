@@ -31,6 +31,39 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('Q').should be_nil # no entry bound to this key
   end
 
+  # The regression: project.copy ('Y') and project.select-line ('x') sat in Verb::Scope::Body
+  # gated only on project_desc_read_mode?, which is tab-blind and true from boot (ProjectView's
+  # pane defaults to :desc). Both rendered in the History list's menu, where their handlers'
+  # :history branch does nothing outside the detail drill-in — two entries that copied nothing
+  # and selected nothing. The scope split plus the current_tab check keeps them out.
+  it "never shows the Project description pane's verbs in the History list menu" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    ctx.project_desc_read_mode = true # ProjectView's boot default, whatever tab is up
+    ctx.selection_active = true       # …and a live selection, so the 'v'/'S' pair would qualify too
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+
+    ids = menu.entries.map(&.id)
+    %w[project.copy project.select-line project.clear-selection project.send-to].each do |id|
+      ids.should_not contain(id)
+    end
+  end
+
+  it "lists the Project description pane's own verbs under its own scope" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :project
+    ctx.project_desc_read_mode = true
+    ctx.selection_active = true
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::ProjectDesc, :common, ctx)
+
+    menu.entries.all?(&.scope.project_desc?).should be_true
+    menu.verb_for('y').try(&.id).should eq("project.copy") # the key the pane raw-dispatches
+    menu.verb_for('x').try(&.id).should eq("project.select-line")
+    menu.verb_for('S').try(&.id).should eq("project.send-to")
+  end
+
   it "moves the selection within entries (clamped both ends)" do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
@@ -547,7 +580,8 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Repeater, Gori::Verb::Scope::Issues,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::IssuesDetail,
-      Gori::Verb::Scope::Project, Gori::Verb::Scope::Decoder, Gori::Verb::Scope::Notes,
+      Gori::Verb::Scope::Project, Gori::Verb::Scope::ProjectDesc,
+      Gori::Verb::Scope::Decoder, Gori::Verb::Scope::Notes,
       Gori::Verb::Scope::Sitemap,
       Gori::Verb::Scope::Miner, Gori::Verb::Scope::Probe, Gori::Verb::Scope::ProbeDetail,
     ]
@@ -613,7 +647,7 @@ describe "send-to verbs" do
     "fuzzer.send-to"   => Gori::Verb::Scope::Fuzzer,
     "decoder.send-to"  => Gori::Verb::Scope::Decoder,
     "issue.send-to"    => Gori::Verb::Scope::IssuesDetail,
-    "project.send-to"  => Gori::Verb::Scope::Body,
+    "project.send-to"  => Gori::Verb::Scope::ProjectDesc,
     "detail.send-to"   => Gori::Verb::Scope::HistoryDetail,
   }
 

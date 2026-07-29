@@ -117,17 +117,21 @@ describe "Gori::Verbs.register_core" do
   end
 
   describe "project description copy" do
-    # The chord was dropped deliberately: plain 'y' collided with history.copy in the same
-    # (Body, :common) space-menu view AND as a raw Chord in the same scope. Re-adding one
-    # would make validate_menu_keys! / the keymap conflict guard fail at boot.
-    it "carries the 'Y' menu key with no chord, gated on the description read pane" do
+    # The chord stays dropped: ProjectController raw-dispatches 'y' in the description pane and
+    # handle_body_key returns true there, so the shared Keymap is never consulted — a chord could
+    # only ever be dead weight in the rebind editor. The mnemonic mirrors that real key.
+    it "carries the 'y' menu key with no chord, in its own scope, gated on tab AND pane" do
       verb = r["project.copy"]
       verb.chords.should be_empty
-      verb.menu_key.should eq('Y')
+      verb.menu_key.should eq('y')
+      verb.scope.should eq(Gori::Verb::Scope::ProjectDesc) # NOT Body — see the History list
       ctx = FakeExecContext.new
+      ctx.current_tab = :project
       verb.available?(ctx).should be_false # the description pane is not in read mode
       ctx.project_desc_read_mode = true
       verb.available?(ctx).should be_true
+      ctx.current_tab = :history
+      verb.available?(ctx).should be_false # pane flag alone must not leak it into History
       verb_intents(r, "project.copy").should eq([:read_copy])
     end
   end

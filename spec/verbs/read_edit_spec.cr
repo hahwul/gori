@@ -19,7 +19,7 @@ describe "Gori::Verbs.register_read_edit" do
     {"fuzzer", Gori::Verb::Scope::Fuzzer, :template},
     {"jwt", Gori::Verb::Scope::Jwt, :input},
     {"issue", Gori::Verb::Scope::IssuesDetail, :common},
-    {"project", Gori::Verb::Scope::Body, :common},
+    {"project", Gori::Verb::Scope::ProjectDesc, :common},
     {"detail", Gori::Verb::Scope::HistoryDetail, :common},
   ]
 
@@ -27,7 +27,14 @@ describe "Gori::Verbs.register_read_edit" do
     per_scope.each do |(prefix, scope, section)|
       select_line = r["#{prefix}.select-line"]
       select_line.scope.should eq(scope)
-      select_line.chords.should eq([Gori::Verb::Chord.new("x")])
+      # Every scope but the Project description reaches the Keymap. That pane's handle_body_key
+      # returns true for every key, raw-dispatching 'x' itself, so a chord there could never
+      # fire — it is menu-only, like project.copy.
+      if prefix == "project"
+        select_line.chords.should be_empty
+      else
+        select_line.chords.should eq([Gori::Verb::Chord.new("x")])
+      end
       select_line.menu_key.should eq('x')
       select_line.section.should eq(section)
 
@@ -105,13 +112,27 @@ describe "Gori::Verbs.register_read_edit" do
     r["detail.select-line"].available?(ctx).should be_true
   end
 
-  it "gates the Project description's select-line on its read pane, not on a tab symbol" do
-    # Project shares Verb::Scope::Body with the History list, so the gate is the pane's own
-    # read-mode flag — current_tab would not distinguish them.
+  it "gates the Project description's select-line on the tab AND its read pane" do
+    # project_desc_read_mode? is tab-blind — ProjectView's pane defaults to :desc, so it reads
+    # true from boot onward. The lambda carries the current_tab check the way in_notes_read /
+    # in_repeater_read do; without it this verb surfaced in the HISTORY list's space menu,
+    # where read_select_line's :history branch is a no-op outside the detail drill-in.
     ctx = FakeExecContext.new
     ctx.current_tab = :history
-    r["project.select-line"].available?(ctx).should be_false
     ctx.project_desc_read_mode = true
-    r["project.select-line"].available?(ctx).should be_true # still :history — the pane decides
+    r["project.select-line"].available?(ctx).should be_false # right pane, wrong tab
+    ctx.current_tab = :project
+    r["project.select-line"].available?(ctx).should be_true
+    ctx.project_desc_read_mode = false
+    r["project.select-line"].available?(ctx).should be_false # right tab, wrong pane
+  end
+
+  it "keeps the Project description verbs out of the History list's scope" do
+    # The structural half of the fix: the description pane has its own Verb::Scope, so the two
+    # tabs' verbs can no longer land in one (scope, :common) space-menu view at all.
+    %w[project.select-line project.clear-selection project.send-to].each do |id|
+      r[id].scope.should eq(Gori::Verb::Scope::ProjectDesc)
+      r[id].chords.should be_empty # the desc pane raw-dispatches its keys; the Keymap never runs
+    end
   end
 end

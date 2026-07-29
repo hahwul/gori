@@ -136,23 +136,27 @@ module Gori
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # Was `hidden: true` (the menu only ever showed "Copy description"); now that
-      # this IS the one Copy action, it needs to be visible. Project shares
-      # Verb::Scope::Body with the History list (Body is the generic "content pane
-      # focus" scope), so plain 'y' would collide with history.copy — both in the
-      # SAME (scope, :common) space-menu view (validate_menu_keys! doesn't know the
-      # two are gated to different tabs at runtime) AND as a raw Chord in the SAME
-      # scope (keymap_spec's rebindable-conflict guard: two verbs can't default-bind
-      # the same chord in one scope). Dropping the chord resolves both — the direct
-      # 'y' keypress in the Project description pane is already raw-dispatched by
-      # ProjectController (`when c == 'y' then project_copy`, never touching the
-      # shared Keymap), so the chord here was vestigial. Capital 'Y' keeps a
-      # "copy"-flavored mnemonic for the space menu while staying distinct from
-      # history.copy's 'y' (mirrors fuzzer.select-line's 'S' dodging lowercase 's').
-      in_project_desc_read = ->(ctx : Verb::ExecContext) { ctx.project_desc_read_mode? }
+      # this IS the one Copy action, it needs to be visible.
+      #
+      # Lives in Verb::Scope::ProjectDesc, NOT Body: the description pane used to borrow
+      # Body (the generic "content pane focus" scope) from the History list, which put both
+      # tabs' verbs in one (scope, :common) space-menu view. available? was the only thing
+      # separating them, and `project_desc_read_mode?` is tab-blind (ProjectView's pane
+      # defaults to :desc at boot), so this entry rendered in the HISTORY menu too — where
+      # read_copy's :history branch is a no-op without an open detail. A dedicated scope
+      # makes the separation structural instead of a lambda's promise, and it hands Body's
+      # 'Y' back to history.copy-as.
+      #
+      # No chord: the direct 'y' keypress in the description pane is raw-dispatched by
+      # ProjectController (`when c == 'y' then project_copy`) — handle_body_key returns
+      # true for :desc, so the shared Keymap is never consulted there and a chord could
+      # only ever be dead weight in the rebind editor. Mnemonic 'y' matches the key that
+      # actually works in the pane.
+      in_project_desc_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :project && ctx.project_desc_read_mode? }
       r.register Verb::Definition.new(
         "project.copy", "Copy", "Copy the selected description text, or the whole description if nothing is selected, to the clipboard",
-        Verb::Scope::Body,
-        available: in_project_desc_read, mnemonic: 'Y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::ProjectDesc,
+        available: in_project_desc_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # Match & Replace now lives in the Rewriter tab; this palette entry jumps there
       # (kept under the familiar "Match & Replace" name so a search still finds it).
