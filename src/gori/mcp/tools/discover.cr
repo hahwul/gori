@@ -26,7 +26,7 @@ module Gori
         audit = JobAudit.new(plan.seed, plan.config.rps, plan.config.concurrency,
           plan.config.max_requests, Time.utc.to_unix_ms)
         engine = plan.engine
-        djob = DiscoverJob.new(id, engine, audit)
+        djob = DiscoverJob.new(id, engine, audit, @db_path)
         evict_finished_jobs(@discover_jobs)
         @discover_jobs[id] = djob
         Log.info { "discover_start #{id} #{plan.seed} scope=#{sc.decision}" }
@@ -239,7 +239,9 @@ module Gori
       private def lookup_discover_job(h) : DiscoverJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        @discover_jobs[id]? || not_found("no discover job #{id}")
+        job = @discover_jobs[id]?
+        return not_found("no discover job #{id}") unless job
+        job_project_mismatch(job) || job
       end
     end
   end

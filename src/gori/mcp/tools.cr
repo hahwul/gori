@@ -308,9 +308,11 @@ module Gori
         getter? http2 : Bool
         getter audit : JobAudit
 
+        getter db_path : String?
+
         def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine,
                        @record_history : Symbol, @origin : Fuzz::Origin, @http2 : Bool,
-                       @audit : JobAudit)
+                       @audit : JobAudit, @db_path : String? = nil)
         end
 
         def stop : Nil
@@ -339,7 +341,10 @@ module Gori
         property stop_requested_at_ms : Int64? = nil
         getter audit : JobAudit
 
-        def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit)
+        getter db_path : String?
+
+        def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit,
+                       @db_path : String? = nil)
         end
 
         def stop : Nil
@@ -365,7 +370,10 @@ module Gori
         property stop_requested_at_ms : Int64? = nil
         getter audit : JobAudit
 
-        def initialize(@id : String, @goal : Int32, @engine : Sequencer::Engine, @audit : JobAudit)
+        getter db_path : String?
+
+        def initialize(@id : String, @goal : Int32, @engine : Sequencer::Engine, @audit : JobAudit,
+                       @db_path : String? = nil)
         end
 
         def report : Sequencer::Stats::Report
@@ -394,7 +402,10 @@ module Gori
         property stop_requested_at_ms : Int64? = nil
         getter audit : JobAudit
 
-        def initialize(@id : String, @engine : Discover::Engine, @audit : JobAudit)
+        getter db_path : String?
+
+        def initialize(@id : String, @engine : Discover::Engine, @audit : JobAudit,
+                       @db_path : String? = nil)
         end
 
         def stop : Nil
@@ -1735,6 +1746,19 @@ module Gori
           victims << key if job.status != :running
         end
         victims.each { |k| jobs.delete(k) }
+      end
+
+      # A job's buffered results — and above all the History `flow_id`s recorded alongside
+      # them — only mean anything against the project it ran in. `jobs_running?` stops a
+      # switch mid-run, but a FINISHED job outlives one, and after the rebind those ids
+      # resolve to unrelated rows in the NEW database. Refuse the read instead of handing
+      # back evidence pointers that silently changed meaning; the results are kept, so
+      # switching back makes them readable again.
+      private def job_project_mismatch(job : FuzzJob | MineJob | SequenceJob | DiscoverJob) : Result?
+        return nil if job.db_path == @db_path
+        err("job #{job.id} ran against a different project (#{job.db_path || "unknown"}); " \
+            "switch back to that project to read its results",
+          "PROJECT_CHANGED", details: JSON.parse({"job_db_path" => job.db_path, "current_db_path" => @db_path}.to_json))
       end
 
       # A background job's fiber must never exit with the job still :running — that

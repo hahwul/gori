@@ -20,7 +20,7 @@ module Gori
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
-        mjob = MineJob.new(id, total, engine, audit)
+        mjob = MineJob.new(id, total, engine, audit, @db_path)
         evict_finished_jobs(@mine_jobs)
         @mine_jobs[id] = mjob
         Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} names=#{total}" }
@@ -130,7 +130,9 @@ module Gori
       private def lookup_mine_job(h) : MineJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        @mine_jobs[id]? || not_found("no mine job #{id}")
+        job = @mine_jobs[id]?
+        return not_found("no mine job #{id}") unless job
+        job_project_mismatch(job) || job
       end
 
       private def mine_finding_json(j : JSON::Builder, f : Miner::Finding) : Nil

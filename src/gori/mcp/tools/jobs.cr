@@ -20,6 +20,7 @@ module Gori
                     j.field "total", f.total
                     j.field "matched", f.matched
                     j.field "target", Serialize.text(f.audit.target)
+                    emit_job_project(j, f)
                   end
                 end
                 @mine_jobs.each_value do |m|
@@ -31,6 +32,7 @@ module Gori
                     j.field "names_total", m.total
                     j.field "found", m.found
                     j.field "target", Serialize.text(m.audit.target)
+                    emit_job_project(j, m)
                   end
                 end
                 @discover_jobs.each_value do |d|
@@ -41,6 +43,7 @@ module Gori
                     j.field "sent", d.sent
                     j.field "found", d.found
                     j.field "target", Serialize.text(d.audit.target)
+                    emit_job_project(j, d)
                   end
                 end
                 @sequence_jobs.each_value do |s|
@@ -51,12 +54,21 @@ module Gori
                     j.field "goal", s.goal
                     j.field "collected", s.collected
                     j.field "target", Serialize.text(s.audit.target)
+                    emit_job_project(j, s)
                   end
                 end
               end
             end
           end
         end)
+      end
+
+      # A job started before a switch_project is still LISTED (so an agent can see why an id
+      # it remembers now refuses), but flagged — its *_results/*_status read PROJECT_CHANGED.
+      private def emit_job_project(j : JSON::Builder, job : FuzzJob | MineJob | DiscoverJob | SequenceJob) : Nil
+        return if job.db_path == @db_path
+        j.field "project_changed", true
+        j.field "job_db_path", job.db_path
       end
 
       # Unified status for a fuzz, mine, discover, or sequence job (dispatch by the id prefix),
@@ -86,6 +98,9 @@ module Gori
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
         job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]?
         return not_found("no job #{id}") unless job
+        if mismatch = job_project_mismatch(job)
+          return mismatch
+        end
         job.stop
         wait = bool(h, "wait") || false
         waited_out = false

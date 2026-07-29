@@ -39,7 +39,7 @@ module Gori
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
-        sjob = SequenceJob.new(id, goal, plan.engine, audit)
+        sjob = SequenceJob.new(id, goal, plan.engine, audit, @db_path)
         evict_finished_jobs(@sequence_jobs)
         @sequence_jobs[id] = sjob
         Log.info { "sequence_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} goal=#{goal} loc=#{plan.config.token_loc.label}" }
@@ -136,7 +136,9 @@ module Gori
       private def lookup_sequence_job(h) : SequenceJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        @sequence_jobs[id]? || not_found("no sequence job #{id}")
+        job = @sequence_jobs[id]?
+        return not_found("no sequence job #{id}") unless job
+        job_project_mismatch(job) || job
       end
 
       # Normalize the tool args into `Sequencer::PlanOptions` and let the shared builder

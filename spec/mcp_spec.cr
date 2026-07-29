@@ -3150,3 +3150,49 @@ describe "MCP intercept_forward_edit" do
     end
   end
 end
+
+describe "MCP job project binding" do
+  # A finished job outlives a switch_project (only a RUNNING one blocks the switch), and its
+  # buffered results carry History flow ids that resolve to unrelated rows in the new DB.
+  # Isolated GORI_HOME, like the project-lifecycle spec — switch_project touches the registry.
+  it "refuses to serve a finished job's results after switch_project" do
+    root = File.tempname("gori-jobhome")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    cur_db = File.join(root, "current.db")
+    store = Gori::Store.open(cur_db)
+    tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: cur_db)
+    begin
+      Gori::Scope.load(store).add("include", "host", "127.0.0.1")
+      started = ok_json(tools, "fuzz_start",
+        %({"url":"http://127.0.0.1:1","template":"GET /§x§ HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n\\r\\n",) +
+        %("payloads":[{"list":["a"]}],"max_requests":1,"retries":0,"timeout_ms":50}))
+      job_id = started["job_id"].as_s
+
+      # Let the job reach a terminal state so it does not block the switch.
+      40.times do
+        break unless JSON.parse(tools.call("fuzz_status", JSON.parse(%({"job_id":"#{job_id}"}))).text)["status"].as_s == "running"
+        sleep 25.milliseconds
+      end
+      ok_json(tools, "fuzz_status", %({"job_id":"#{job_id}"}))["job_complete"].as_bool.should be_true
+
+      other = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Other"}))).text)["slug"].as_s
+      ok_json(tools, "switch_project", %({"project":#{other.to_json}}))
+
+      # The job is still remembered, but its results are no longer meaningful here.
+      %w[fuzz_status fuzz_results fuzz_stop get_job stop_job].each do |verb|
+        r = tools.call(verb, JSON.parse(%({"job_id":"#{job_id}"})))
+        r.error_code.should eq "PROJECT_CHANGED"
+      end
+      # list_jobs still SHOWS it, flagged, so the agent can see why its id refuses.
+      listed = ok_json(tools, "list_jobs", "{}")["jobs"].as_a.find { |x| x["job_id"].as_s == job_id }
+      listed.should_not be_nil
+      listed.not_nil!["project_changed"].as_bool.should be_true
+    ensure
+      store.close rescue nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+end
