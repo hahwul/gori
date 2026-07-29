@@ -90,6 +90,13 @@ module Gori
       # @store, so a post-hoc append would land in the wrong DB) — only in-project side effects.
       AGENT_ACTION_TOOLS = Set{
         "send_request", "send_websocket",
+        # The intercept write verbs act on LIVE traffic the human is holding — forwarding,
+        # dropping, or rewriting bytes mid-flight is the single most consequential thing an
+        # agent can do here, so it belongs in the feed more than any store mutation does.
+        # toggle/set_filter/set_direction change what the proxy HOLDS next, which silently
+        # reshapes the human's queue; they are recorded for the same reason.
+        "intercept_forward", "intercept_drop", "intercept_forward_edit",
+        "intercept_toggle", "intercept_set_filter", "intercept_set_direction",
         "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop", "stop_job",
         "create_issue", "update_issue",
         "probe_dismiss", "probe_promote", "probe_delete",
@@ -1425,11 +1432,20 @@ module Gori
         result = read_tool(name, h) || action_tool(name, h) ||
                  err("unknown tool: #{name}", "UNKNOWN_TOOL")
         result = classify(result)
-        log_agent_action(name, result) if @allow_actions && AGENT_ACTION_TOOLS.includes?(name)
+        log_agent_action(name, result) if @allow_actions && agent_action?(name, h)
         result
       rescue ex
         Log.warn(exception: ex) { "tool #{name} failed" }
         err("tool error: #{ex.message}", "INTERNAL")
+      end
+
+      # Whether this CALL (not just this tool) is an agent action worth recording. Most are a
+      # flat name lookup, but `probe_scan` is a READ tool whose active:true mode SENDS real
+      # requests — the argument, not the name, decides. Logging every passive rescan would
+      # bury the outbound ones it exists to surface.
+      private def agent_action?(name : String, h) : Bool
+        return true if AGENT_ACTION_TOOLS.includes?(name)
+        name == "probe_scan" && (bool(h, "active") || false)
       end
 
       # #124 — record a completed agent mutation/send into the store event feed so the AI's

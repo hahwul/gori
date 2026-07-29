@@ -3031,3 +3031,35 @@ describe "MCP host overrides" do
     end
   end
 end
+
+describe "MCP agent event feed" do
+  it "records the intercept write verbs the human needs to see" do
+    with_store do |store|
+      tools = tools_for(store)
+      # No live capturing instance, so each verb fails — the feed logs failures too, which is
+      # exactly what an operator wants to see an agent attempting on held traffic.
+      tools.call("intercept_forward", JSON.parse(%({"item_id":1}))).is_error.should be_true
+      tools.call("intercept_toggle", JSON.parse(%({"enable":false}))).is_error.should be_true
+
+      logged = store.events_after(0_i64, 50).select { |e| e.kind == "agent_action" }.map(&.payload)
+      logged.should contain "intercept_forward"
+      logged.should contain "intercept_toggle"
+    end
+  end
+
+  it "records an ACTIVE probe scan but not a passive one" do
+    with_store do |store|
+      seed_flow(store, "/a")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      tools = tools_for(store)
+
+      ok_json(tools, "probe_scan", "{}")                       # passive — sends nothing
+      tools.call("probe_scan", JSON.parse(%({"active":true}))) # sends real requests
+
+      logged = store.events_after(0_i64, 50).select { |e| e.kind == "agent_action" && e.payload == "probe_scan" }
+      # The argument decides, not the tool name: a passive rescan would bury the outbound ones.
+      logged.size.should eq 1
+    end
+  end
+end
