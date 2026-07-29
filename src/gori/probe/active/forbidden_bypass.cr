@@ -11,14 +11,21 @@ module Gori
       # tell such a control apart from any other 403/401; re-sending the SAME request with a
       # spoofed loopback IP in those headers surfaces a candidate header-controllable gate.
       #
-      # For one in-scope flow whose captured response was 401/403, it re-sends ONE request with the
-      # full IP-spoofing header set (all 127.0.0.1) and flags a Medium "possible bypass" when the
-      # response flips to 2xx. It is a single-shot probe against the CAPTURED baseline (no control
-      # re-send without the headers), so a transient/rate-limited 403 that later clears can also
-      # flip — hence "possible", to be confirmed by re-sending without the headers. Gated to
-      # safe methods (GET/HEAD) so an automatic probe never mutates server state, and to originally-
-      # denied responses so a normally-200 endpoint is never probed. A control that correctly keys
-      # on the socket peer ignores the headers and still returns 401/403, so it is never flagged.
+      # For one in-scope flow whose captured response was 401/403, it sends TWO requests:
+      #   probe   = the same request + the full IP-spoofing header set (all 127.0.0.1)
+      #   control = the same request, UNCHANGED
+      # and flags a Medium "possible bypass" only when the probe is 2xx AND the control is still
+      # denied. The control is what makes the finding attributable: comparing against the CAPTURED
+      # status alone could not tell "the headers opened the gate" from "the 403 was transient and
+      # had already cleared by the time we probed" — a rate-limited or flapping endpoint produced a
+      # bypass finding with no bypass. The control is sent AFTER the probe, so a 403 that cleared on
+      # its own answers 2xx there too and the finding is suppressed.
+      #
+      # Still Medium, not High: two adjacent requests cannot rule out a load balancer whose backends
+      # disagree, so this remains a lead to confirm — just no longer one that fires on ordinary
+      # flapping. Gated to safe methods (GET/HEAD) so an automatic probe never mutates server state,
+      # and to originally-denied responses so a normally-200 endpoint is never probed. A control
+      # that correctly keys on the socket peer ignores the headers and still returns 401/403.
       #
       # Header set + loopback value follow https://www.hahwul.com/blog/2021/bypass-403/.
       class ForbiddenBypass < Rule
@@ -88,31 +95,55 @@ module Gori
           key_string(detail, method.upcase, target)
         end
 
+        # probe (spoofed headers) + control (the request UNCHANGED).
+        def requests_per_flow : Range(Int32, Int32)
+          2..2
+        end
+
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
           return nil unless method_allowed?(req.method.upcase, opts)
           return nil unless denied_status?(detail.row.status)
           request = rebuild_with_bypass_headers(detail.request_head, detail.request_body, opts.aggressive)
-          Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target))
+          # The control carries NO spoofing headers — but is otherwise rebuilt through the same
+          # path (origin-form request line, browser-sent copies of those headers dropped), so the
+          # two legs differ in exactly one thing: whether our forged values are present.
+          control = rebuild_with_bypass_headers(detail.request_head, detail.request_body,
+            opts.aggressive, insert: false)
+          Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target), [control])
         end
 
-        def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
-          return [] of Detection unless result.ok?
-          status = probe_status(result)
-          # Only a flip INTO 2xx is a confirmed bypass. A 3xx (login redirect) or another 4xx is
+        # results = [probe, control]. Flag only when the spoofed request succeeded AND the control
+        # — the same request without the headers, sent right after — is still denied.
+        def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
+          probe = results[0]?
+          return [] of Detection unless probe && probe.ok?
+          status = probe_status(probe)
+          # Only a flip INTO 2xx is a candidate bypass. A 3xx (login redirect) or another 4xx is
           # ambiguous and would inflate false positives, so it is intentionally not flagged.
           return [] of Detection unless (200..299).includes?(status)
+          control = results[1]?
+          # No usable control ⇒ no attribution. Refuse rather than fall back to the captured
+          # status: that fallback IS the false positive this leg exists to remove.
+          return [] of Detection unless control && control.ok?
+          control_status = probe_status(control)
+          # The control succeeded too ⇒ the resource is simply open now (a transient/rate-limited
+          # 403 that cleared), and the headers proved nothing.
+          return [] of Detection unless denied_status?(control_status)
           orig = detail.row.status
-          # A single-shot flip against the CAPTURED baseline (no control re-send without the
-          # headers at probe time) can't prove the header caused it — a transient/rate-limited
-          # 403 that later clears looks identical. Report it as a Medium "possible" lead, not a
-          # confirmed High bypass, so a naturally-varying 403 doesn't produce a false High.
           [Detection.new("forbidden_bypass", Category::ACTIVE, detail.row.host, detail.row.url,
             "Possible access-control bypass via spoofed client-IP header", Store::Severity::Medium,
-            "#{orig} → #{status} with X-Forwarded-For/X-Real-IP=#{BYPASS_VALUE} (single-shot; confirm by re-sending WITHOUT the headers)", detail.row.id)]
+            "#{orig} → #{status} with X-Forwarded-For/X-Real-IP=#{BYPASS_VALUE}; control without the headers still #{control_status}"[0, 120], detail.row.id)]
         rescue
           [] of Detection
+        end
+
+        # Single-response fallback (module facade / a one-shot caller): the control leg is what
+        # makes this rule's finding attributable, so one response alone yields nothing. The
+        # analyzer always calls detections_all with the full set.
+        def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
+          detections_all(plan, [result], detail)
         end
 
         # Only responses that DENIED access are worth probing: a normally-served (2xx) endpoint has
@@ -148,7 +179,14 @@ module Gori
         # line: first drop any of those headers the browser already sent (so exactly one authoritative
         # copy of each remains), then insert ours. The body is untouched — none of the inserted names
         # is Content-Length — so no resync is needed. `aggressive` selects the wider header set.
-        private def rebuild_with_bypass_headers(head : Bytes, body : Bytes?, aggressive : Bool) : Bytes
+        #
+        # `insert: false` builds the CONTROL: the same rebuild — same dropped headers, same
+        # origin-form request line — but without our forged values, so the only difference between
+        # the two legs is the thing under test. Dropping the browser's own copies on the control
+        # too is deliberate: if the browser sent an X-Forwarded-For and we kept it only there, a
+        # difference between the legs could come from ITS value rather than ours.
+        private def rebuild_with_bypass_headers(head : Bytes, body : Bytes?, aggressive : Bool,
+                                                insert : Bool = true) : Bytes
           headers = aggressive ? BYPASS_HEADERS_AGGRESSIVE : BYPASS_HEADERS
           drop_set = aggressive ? BYPASS_HEADER_SET_AGGRESSIVE : BYPASS_HEADER_SET
           combined = if body && !body.empty?
@@ -173,7 +211,7 @@ module Gori
           unless kept.empty?
             rl = kept[0].split(' ')
             kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-            headers.each_with_index { |name, i| kept.insert(1 + i, "#{name}: #{BYPASS_VALUE}") }
+            headers.each_with_index { |name, i| kept.insert(1 + i, "#{name}: #{BYPASS_VALUE}") } if insert
           end
           io = IO::Memory.new
           io << kept.join(eol) << eol << eol

@@ -15,17 +15,26 @@ module Gori
       # were DELIBERATELY excluded from ForbiddenBypass (which forges a single flat client-IP value);
       # this is their dedicated probe.
       #
-      # For one in-scope flow whose captured response was 401/403/404, it sends TWO requests:
-      #   probe   = `GET /` + X-Original-URL/X-Rewrite-URL naming the original (gated) path
-      #   control = plain `GET /` (no rewrite headers)
-      # and flags Medium "possible bypass" when the probe is 2xx AND its response differs from the
-      # control's. The control is the crucial guard: `GET /` usually 200s regardless, so a bare "probe
-      # 200" is meaningless — only a probe response that DIFFERS from the plain-root control shows the
-      # rewrite header actually selected the gated resource. Comparison is a coarse {status, body-size}
-      # fingerprint: it tolerates FIXED-length root jitter (a same-length rotating token) but can still
-      # miss a gated page that happens to match the root's length, or fire when the root's body length
-      # varies between the two sends — hence Medium/"possible", to be confirmed manually. Gated to
-      # body-comparable methods (GET by default, HEAD out; Options#allow_unsafe widens).
+      # For one in-scope flow whose captured response was 401/403/404, it sends THREE requests:
+      #   probe    = `GET /` + X-Original-URL/X-Rewrite-URL naming the original (gated) path
+      #   control  = plain `GET /` (no rewrite headers)
+      #   control2 = plain `GET /` again
+      # and flags Medium "possible bypass" when the probe is 2xx AND its {status, body-size}
+      # fingerprint differs from the control's. `GET /` usually 200s regardless, so a bare "probe
+      # 200" is meaningless — only a probe response that DIFFERS from the plain-root control shows
+      # the rewrite header actually selected the gated resource.
+      #
+      # The SECOND control is what makes that difference trustworthy. With one control, any root
+      # page whose body length moves between two requests — a CSRF token of varying length, a
+      # timestamp, a rotating ad slot, a served-in-N-ms footer — read as "differs from the control"
+      # and fired a bypass finding on EVERY 401/403/404 path on the site. Sending the plain root
+      # twice measures that jitter directly: if the two controls disagree, the root is not stable
+      # enough for a size comparison to mean anything and the rule declines to report rather than
+      # guess. A stable root costs nothing and behaves exactly as before.
+      #
+      # Still Medium/"possible": the fingerprint is coarse, so a gated page that happens to match
+      # the root's status AND length is a miss. Gated to body-comparable methods (GET by default,
+      # HEAD out; Options#allow_unsafe widens).
       class UrlRewriteBypass < Rule
         def info : RuleInfo
           RuleInfo.new("url_rewrite_bypass", "Access-control bypass (URL-rewrite headers)",
@@ -34,7 +43,7 @@ module Gori
         end
 
         def requests_per_flow : Range(Int32, Int32)
-          2..2 # probe + control
+          3..3 # probe + control + a second control (root-stability check)
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
@@ -47,23 +56,22 @@ module Gori
           method_up, path, orig_full = g
           probe = rebuild_root(detail.request_head, detail.request_body, orig_full)
           control = rebuild_root(detail.request_head, detail.request_body, nil)
-          Plan.new(probe, [] of Param, key_string(detail, method_up, path), [control])
+          control2 = rebuild_root(detail.request_head, detail.request_body, nil)
+          Plan.new(probe, [] of Param, key_string(detail, method_up, path), [control, control2])
         end
 
+        # results = [probe, control, control2].
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
           probe = results[0]?
-          control = results[1]?
-          return [] of Detection unless probe && probe.ok? && control && control.ok?
+          return [] of Detection unless probe && probe.ok?
           ps = probe_status(probe)
           return [] of Detection unless (200..299).includes?(ps)
-          cs = probe_status(control)
-          psize = body_size(probe)
-          csize = body_size(control)
+          cs, csize = stable_root(results) || return [] of Detection
           # Header ignored ⇒ the probe is just the plain-root response (same status + size) ⇒ no bypass.
-          return [] of Detection if ps == cs && psize == csize
+          return [] of Detection if ps == cs && body_size(probe) == csize
           [Detection.new("url_rewrite_bypass", Category::ACTIVE, detail.row.host, detail.row.url,
             "Possible access-control bypass via URL-rewrite header", Store::Severity::Medium,
-            "#{detail.row.status} → #{ps} via X-Original-URL/X-Rewrite-URL (differs from root; single-shot, confirm)"[0, 120],
+            "#{detail.row.status} → #{ps} via X-Original-URL/X-Rewrite-URL (differs from a root that answered identically twice)"[0, 120],
             detail.row.id)]
         rescue
           [] of Detection
@@ -90,6 +98,19 @@ module Gori
 
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
           "url_rewrite_bypass|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}"
+        end
+
+        # The plain-root {status, body-size} fingerprint — but only when the root reproduced it on a
+        # SECOND identical request (results[1] and results[2]). nil when either control is missing or
+        # failed to send, or when the two disagree: this whole finding is "the probe differs from the
+        # root", so a root whose own size moves between requests (a varying CSRF token, a timestamp)
+        # makes every difference meaningless. Returning nil makes the rule decline rather than guess.
+        private def stable_root(results : Array(Repeater::Result)) : {Int32, Int32}?
+          a = results[1]?
+          b = results[2]?
+          return nil unless a && a.ok? && b && b.ok?
+          fp = {probe_status(a), body_size(a)}
+          fp == {probe_status(b), body_size(b)} ? fp : nil
         end
 
         # Rebuild the request as `<method> / <version>`: drop any X-Original-URL/X-Rewrite-URL the

@@ -54,7 +54,7 @@ module Gori
       end
 
       # Compact per-flow request-count label for the Rules sub-tab + manual-run estimate:
-      # "1 req/flow" for the fixed-cost rules, "3–7 req/flow" for the differential BackslashPowered.
+      # "1 req/flow" for the fixed-cost rules, "4–8 req/flow" for the differential BackslashPowered.
       def self.estimate_label(rng : Range(Int32, Int32)) : String
         rng.begin == rng.end ? "#{rng.begin} req/flow" : "#{rng.begin}–#{rng.end} req/flow"
       end

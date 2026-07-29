@@ -26,9 +26,15 @@ module Gori
       # cleanly. So the tell is an ASYMMETRY: `single` differs from `baseline` while `double` matches
       # it. That asymmetry — not any single error string — is what flags a probable injection surface.
       #
-      # This is the active scanner's first DIFFERENTIAL (multi-probe) rule: `plan` builds a baseline
-      # plus a `\`/`\\` pair per param into `Plan.followups`, the analyzer sends them all, and
-      # `detections_all` compares the responses. The differential compares BODIES, so HEAD is always
+      # The comparison assumes the endpoint answers the same request the same way twice, so it sends
+      # the baseline TWICE and reports nothing unless the two agree: on an endpoint that varies on
+      # its own (an intermittent 503, a rate limiter, a rotating backend) noise landing on a `\` leg
+      # but not its `\\` leg reproduces this exact asymmetry, once per probed param. Measuring the
+      # endpoint against itself turns "we cannot tell" into a decline instead of a finding.
+      #
+      # This is the active scanner's first DIFFERENTIAL (multi-probe) rule: `plan` builds two
+      # baselines plus a `\`/`\\` pair per param into `Plan.followups`, the analyzer sends them all,
+      # and `detections_all` compares the responses. The differential compares BODIES, so HEAD is always
       # out; by default GET only (POST/PUT/… are never auto-probed — they mutate state), but an
       # explicit opt-in (Options#allow_unsafe: the manual per-flow scan or AGGRESSIVE mode) widens
       # it to any body-bearing method. Capped at MAX_PROBE_PARAMS params (raised under AGGRESSIVE)
@@ -51,11 +57,11 @@ module Gori
             Category::ACTIVE)
         end
 
-        # baseline + a (`\`, `\\`) pair per probed param: 1 param → 3 requests, MAX_PROBE_PARAMS → 7.
-        # Static annotation for the Rules sub-tab + the manual-run estimate (the analyzer sends the
-        # exact count for the flow at hand).
+        # TWO baselines + a (`\`, `\\`) pair per probed param: 1 param → 4 requests,
+        # MAX_PROBE_PARAMS → 8. Static annotation for the Rules sub-tab + the manual-run estimate
+        # (the analyzer sends the exact count for the flow at hand).
         def requests_per_flow : Range(Int32, Int32)
-          3..(1 + 2 * MAX_PROBE_PARAMS)
+          4..(2 + 2 * MAX_PROBE_PARAMS)
         end
 
         # Dedup key WITHOUT rebuilding probes — derived from the same `injectables` gate `plan` uses,
@@ -74,7 +80,14 @@ module Gori
           method_up, path, pairs, probe = g
           body = detail.request_body
           baseline = rebuild_query(detail.request_head, body, path, pairs.join('&'))
-          followups = [] of Bytes
+          # A SECOND, identical baseline, sent first among the follow-ups. The whole rule is a
+          # difference test against the baseline fingerprint, which silently assumed the endpoint
+          # answers the same request the same way twice. When it does not — an intermittent 503, a
+          # rate limiter kicking in, a health-checked backend rotating — noise that happens to land
+          # on a `\` leg and not its `\\` leg reproduces the exact asymmetry this rule reports, and
+          # every param gets its own roll of that die. Measuring the endpoint against itself costs
+          # one request and turns "we cannot tell" into a decline instead of a finding.
+          followups = [rebuild_query(detail.request_head, body, path, pairs.join('&'))]
           params = [] of Param
           probe.each do |idx|
             pair = pairs[idx]
@@ -82,7 +95,8 @@ module Gori
             name = pair[0...eq]
             value = pair[(eq + 1)..]
             # Order matters: single (`\`) then double (`\\`) — detections_all reads them back at
-            # results[1 + 2*i] / results[2 + 2*i] for the i-th param.
+            # results[2 + 2*i] / results[3 + 2*i] for the i-th param (results[0] and results[1]
+            # are the two baselines).
             followups << rebuild_query(detail.request_head, body, path, with_value(pairs, idx, name, value + SINGLE))
             followups << rebuild_query(detail.request_head, body, path, with_value(pairs, idx, name, value + DOUBLE))
             params << Param.new("query", decode_name(name), value)
@@ -94,14 +108,13 @@ module Gori
         # Compare the responses: for each probed param, fire when the lone `\` changed the response
         # (status or a surfaced interpreter error) AND the doubled `\\` reverted to baseline. One
         # grouped Detection per host, listing the affected params.
+        # results = [baseline, baseline2, single_0, double_0, single_1, double_1, …].
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
-          baseline = results.first?
-          return [] of Detection unless baseline && baseline.ok?
-          base = attrs(baseline)
+          base = stable_baseline(results) || return [] of Detection
           hits = [] of String
           plan.params.each_with_index do |param, i|
-            single = results[1 + 2 * i]?
-            double = results[2 + 2 * i]?
+            single = results[2 + 2 * i]?
+            double = results[3 + 2 * i]?
             next unless single && double
             next unless single.ok? && double.ok? # a failed leg ⇒ incomplete comparison, skip
             sa = attrs(single)
@@ -174,6 +187,19 @@ module Gori
           dup = pairs.dup
           dup[idx] = "#{name}=#{value}"
           dup.join('&')
+        end
+
+        # The baseline fingerprint — but only when the endpoint reproduced it on a SECOND identical
+        # request (results[0] and results[1]). nil when either baseline is missing or failed to
+        # send, or when the two disagree: an endpoint whose answer to one request varies on its own
+        # cannot support a difference test, so every asymmetry below would be a coin flip. Returning
+        # nil makes the rule decline rather than guess.
+        private def stable_baseline(results : Array(Repeater::Result)) : {Int32, String?}?
+          first = results[0]?
+          second = results[1]?
+          return nil unless first && first.ok? && second && second.ok?
+          base = attrs(first)
+          attrs(second) == base ? base : nil
         end
 
         # A comparable response fingerprint: status code + a coarse interpreter-error class (nil when

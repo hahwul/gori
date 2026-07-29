@@ -1548,7 +1548,7 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
     end
   end
 
-  it "uses the wider bypass-header set under aggressive opts (still one request)" do
+  it "uses the wider bypass-header set under aggressive opts (still one probe + one control)" do
     with_store do |store|
       forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
       base = String.new(probe.plan(forbidden).not_nil!.request)
@@ -1558,8 +1558,8 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
         base.should_not contain("\r\n#{name}: ")
         aggr.scan("\r\n#{name}: 127.0.0.1").size.should eq(1), "expected exactly one #{name} (aggressive)"
       end
-      # Still a single request (a wider header set, not more probes).
-      probe.plan(forbidden, Gori::Probe::Active::Options.new(aggressive: true)).not_nil!.followups.should be_empty
+      # A wider header SET, not more probes: still exactly one control follow-up.
+      probe.plan(forbidden, Gori::Probe::Active::Options.new(aggressive: true)).not_nil!.followups.size.should eq(1)
     end
   end
 
@@ -1589,27 +1589,56 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
     end
   end
 
-  it "flags a possible bypass (Medium) only when the denied response flips to 2xx" do
+  it "flags a possible bypass (Medium) only when the probe flips to 2xx and the control still denies" do
     with_store do |store|
       forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
       plan = probe.plan(forbidden).not_nil!
+      ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      denied = Gori::Repeater::Result.new("HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
 
-      bypassed = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
-      dets = probe.detections(plan, bypassed, forbidden)
+      dets = probe.detections_all(plan, [ok, denied], forbidden)
       dets.size.should eq(1)
       dets.first.code.should eq("forbidden_bypass")
-      # Single-shot flip vs the captured baseline (no control re-send) → Medium "possible", not High.
+      # Two adjacent requests can't rule out disagreeing backends → Medium "possible", not High.
       dets.first.severity.should eq(Gori::Store::Severity::Medium)
+      dets.first.evidence.not_nil!.should contain("control without the headers still 403")
 
-      # Still denied → the gate held → not flagged.
-      still_denied = Gori::Repeater::Result.new("HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
-      probe.detections(plan, still_denied, forbidden).should be_empty
+      # Still denied WITH the headers → the gate held → not flagged.
+      probe.detections_all(plan, [denied, denied], forbidden).should be_empty
       # A redirect (e.g. to login) is ambiguous → not flagged.
       redirect = Gori::Repeater::Result.new("HTTP/1.1 302 Found\r\nLocation: /login\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
-      probe.detections(plan, redirect, forbidden).should be_empty
+      probe.detections_all(plan, [redirect, denied], forbidden).should be_empty
       # A send failure never flags.
       errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
-      probe.detections(plan, errored, forbidden).should be_empty
+      probe.detections_all(plan, [errored, denied], forbidden).should be_empty
+    end
+  end
+
+  # The control leg is the point of the rule: a 403 that had already cleared on its own answers
+  # 2xx WITHOUT the spoofed headers too, and must not be reported as a header-driven bypass.
+  it "does not flag when the control also succeeds (the gate simply opened)" do
+    with_store do |store|
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
+      plan = probe.plan(forbidden).not_nil!
+      ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections_all(plan, [ok, ok], forbidden).should be_empty
+      # A missing or errored control is no attribution either — never fall back to the captured status.
+      probe.detections_all(plan, [ok], forbidden).should be_empty
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections_all(plan, [ok, errored], forbidden).should be_empty
+    end
+  end
+
+  # The two legs must differ in exactly one thing: our forged values. Both drop whatever the
+  # browser sent, so a difference can never come from the browser's own X-Forwarded-For.
+  it "builds a control that is the same request WITHOUT the spoofed headers" do
+    with_store do |store|
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403,
+        req_headers: "X-Forwarded-For: 9.9.9.9\r\n", content_type: nil)
+      control = String.new(probe.plan(forbidden).not_nil!.followups.first)
+      control.should start_with("GET /admin ")
+      control.should_not contain("127.0.0.1") # none of our forged values
+      control.should_not contain("9.9.9.9")   # nor the browser's own, dropped on both legs
     end
   end
 
@@ -2559,13 +2588,19 @@ describe "Gori::Probe::Active (manual run estimate)" do
       r = rule.requests_per_flow
       r.begin.should be >= 1
       r.end.should be >= r.begin
-      r.end.should be <= 7 # nothing floods a single flow with probes
+      r.end.should be <= 8 # nothing floods a single flow with probes
     end
-    # BackslashPowered is the only DIFFERENTIAL (multi-probe) rule: a baseline plus a `\`/`\\`
-    # pair per param, capped at 3 params (3..7). Every other built-in sends exactly one request.
     by_id = Gori::Probe::Active::RULES.to_h { |rule| {rule.info.id, rule.requests_per_flow} }
-    by_id["backslash_powered"].should eq(3..7)
-    ["reflected_param", "cors_reflection", "forbidden_bypass"].each { |id| by_id[id].should eq(1..1) }
+    # BackslashPowered: TWO baselines (the second proves the endpoint is stable enough to diff
+    # against) plus a `\`/`\\` pair per param, capped at 3 params → 4..8.
+    by_id["backslash_powered"].should eq(4..8)
+    # The bypass family each carry a control leg, so none of them is a single request:
+    # forbidden_bypass probe+control, url_rewrite_bypass probe+control+control2,
+    # path_normalization_bypass 5-6 variants + the canonical-path control.
+    by_id["forbidden_bypass"].should eq(2..2)
+    by_id["url_rewrite_bypass"].should eq(3..3)
+    by_id["path_normalization_bypass"].should eq(6..7)
+    ["reflected_param", "cors_reflection"].each { |id| by_id[id].should eq(1..1) }
   end
 
   it "estimate_label renders a fixed count and a range" do
@@ -2584,8 +2619,8 @@ describe "Gori::Probe::Active (manual run estimate)" do
       # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection and ssti,
       # which reuse the same reflectable-query-param gate.
       est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "ssti"])
-      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤7) + crlf_injection (1) + ssti (2) = 12
-      est.sum { |e| e.requests.end }.should eq(12)
+      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) = 13
+      est.sum { |e| e.requests.end }.should eq(13)
     end
   end
 
@@ -2655,10 +2690,11 @@ describe "Gori::Probe::Active::BackslashPowered" do
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
       plan = probe.plan(detail).not_nil!
       plan.params.map(&.name).should eq(["q"])
-      plan.followups.size.should eq(2)
+      plan.followups.size.should eq(3)
       String.new(plan.request).should contain("/s?q=hi ")         # baseline: value unchanged
-      String.new(plan.followups[0]).should contain("q=hi%5C ")    # single: value\
-      String.new(plan.followups[1]).should contain("q=hi%5C%5C ") # double: value\\
+      String.new(plan.followups[0]).should contain("/s?q=hi ")    # baseline again (stability check)
+      String.new(plan.followups[1]).should contain("q=hi%5C ")    # single: value\
+      String.new(plan.followups[2]).should contain("q=hi%5C%5C ") # double: value\\
     end
   end
 
@@ -2667,7 +2703,7 @@ describe "Gori::Probe::Active::BackslashPowered" do
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2&c=3&d=4")
       plan = probe.plan(detail).not_nil!
       plan.params.map(&.name).should eq(["a", "b", "c"])
-      plan.followups.size.should eq(6)                               # 2 per probed param
+      plan.followups.size.should eq(7)                               # 2nd baseline + 2 per probed param
       String.new(plan.request).should contain("/s?a=1&b=2&c=3&d=4 ") # every param kept in the baseline
     end
   end
@@ -2718,7 +2754,8 @@ describe "Gori::Probe::Active::BackslashPowered" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
       plan = probe.plan(detail).not_nil!
-      dets = probe.detections_all(plan, [resp.call(200, ""), resp.call(500, ""), resp.call(200, "")], detail)
+      dets = probe.detections_all(plan,
+        [resp.call(200, ""), resp.call(200, ""), resp.call(500, ""), resp.call(200, "")], detail)
       dets.size.should eq(1)
       dets.first.code.should eq("backslash_powered")
       dets.first.category.should eq(Gori::Probe::Category::ACTIVE)
@@ -2731,7 +2768,8 @@ describe "Gori::Probe::Active::BackslashPowered" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
       plan = probe.plan(detail).not_nil!
-      results = [resp.call(200, "welcome"), resp.call(200, "You have an error in your SQL syntax"), resp.call(200, "welcome")]
+      results = [resp.call(200, "welcome"), resp.call(200, "welcome"),
+                 resp.call(200, "You have an error in your SQL syntax"), resp.call(200, "welcome")]
       dets = probe.detections_all(plan, results, detail)
       dets.size.should eq(1)
       dets.first.evidence.not_nil!.downcase.should contain("sql")
@@ -2742,7 +2780,8 @@ describe "Gori::Probe::Active::BackslashPowered" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
       plan = probe.plan(detail).not_nil!
-      probe.detections_all(plan, [resp.call(200, ""), resp.call(500, ""), resp.call(500, "")], detail).should be_empty
+      probe.detections_all(plan,
+        [resp.call(200, ""), resp.call(200, ""), resp.call(500, ""), resp.call(500, "")], detail).should be_empty
     end
   end
 
@@ -2750,7 +2789,8 @@ describe "Gori::Probe::Active::BackslashPowered" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
       plan = probe.plan(detail).not_nil!
-      probe.detections_all(plan, [resp.call(200, ""), resp.call(200, ""), resp.call(200, "")], detail).should be_empty
+      probe.detections_all(plan,
+        [resp.call(200, ""), resp.call(200, ""), resp.call(200, ""), resp.call(200, "")], detail).should be_empty
     end
   end
 
@@ -2759,7 +2799,8 @@ describe "Gori::Probe::Active::BackslashPowered" do
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
       plan = probe.plan(detail).not_nil!
       errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
-      probe.detections_all(plan, [resp.call(200, ""), errored, resp.call(200, "")], detail).should be_empty
+      probe.detections_all(plan,
+        [resp.call(200, ""), resp.call(200, ""), errored, resp.call(200, "")], detail).should be_empty
     end
   end
 
@@ -2767,13 +2808,42 @@ describe "Gori::Probe::Active::BackslashPowered" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2")
       plan = probe.plan(detail).not_nil!
-      # baseline, a\, a\\, b\, b\\  — only `a` shows the escape asymmetry
-      results = [resp.call(200, ""), resp.call(500, ""), resp.call(200, ""), resp.call(200, ""), resp.call(200, "")]
+      # baseline, baseline2, a\, a\\, b\, b\\  — only `a` shows the escape asymmetry
+      results = [resp.call(200, ""), resp.call(200, ""),
+                 resp.call(500, ""), resp.call(200, ""), resp.call(200, ""), resp.call(200, "")]
       dets = probe.detections_all(plan, results, detail)
       dets.size.should eq(1)
       ev = dets.first.evidence.not_nil!
       ev.should contain("a")
       ev.should_not contain("b")
+    end
+  end
+
+  # The whole rule is a difference test against the baseline, which assumes the endpoint answers
+  # the same request the same way twice. When it does not, an asymmetry carries no information.
+  it "declines when the two baselines disagree (endpoint is not stable enough to diff)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      # Exactly the asymmetry the rule reports — but the endpoint already contradicted itself
+      # on two identical requests, so the `\` leg's 500 proves nothing.
+      probe.detections_all(plan,
+        [resp.call(200, ""), resp.call(503, ""), resp.call(500, ""), resp.call(200, "")], detail).should be_empty
+      # An error signature that appears on only one baseline is the same problem.
+      probe.detections_all(plan,
+        [resp.call(200, "welcome"), resp.call(200, "You have an error in your SQL syntax"),
+         resp.call(500, ""), resp.call(200, "welcome")], detail).should be_empty
+    end
+  end
+
+  it "declines when the second baseline is missing or failed to send" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections_all(plan, [resp.call(200, "")], detail).should be_empty
+      probe.detections_all(plan,
+        [resp.call(200, ""), errored, resp.call(500, ""), resp.call(200, "")], detail).should be_empty
     end
   end
 end
@@ -3258,7 +3328,9 @@ describe "Gori::Probe::Active::PathNormalizationBypass" do
       detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
       plan = probe.plan(detail).not_nil!
       plan.params.size.should eq(5)
-      plan.followups.size.should eq(4)
+      plan.followups.size.should eq(5) # 4 remaining variants + the canonical-path control
+      # The control is LAST and asks for the canonical path verbatim.
+      String.new(plan.followups.last).should contain("GET /admin ")
       String.new(plan.request).should contain("/admin/..;/admin ")
       # None of the variants collapse to the bare `/admin/` (a known false-positive vector).
       plan.params.map(&.name).should_not contain("double-slash")
@@ -3272,13 +3344,30 @@ describe "Gori::Probe::Active::PathNormalizationBypass" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
       plan = probe.plan(detail).not_nil!
-      # Variant index 1 is `leading-dot-slash`.
-      results = [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403)]
+      # Variant index 1 is `leading-dot-slash`; the last entry is the canonical-path control.
+      results = [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403), resp.call(403)]
       dets = probe.detections_all(plan, results, detail)
       dets.size.should eq(1)
       dets.first.code.should eq("path_normalization_bypass")
       dets.first.severity.should eq(Gori::Store::Severity::Medium)
       dets.first.evidence.not_nil!.should contain("leading-dot-slash")
+      dets.first.evidence.not_nil!.should contain("canonical path still denied")
+    end
+  end
+
+  # Without the control, a 403 that cleared on its own made EVERY variant look like a bypass.
+  it "does not fire when the canonical path is served too (the gate simply opened)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      all_open = [resp.call(200), resp.call(200), resp.call(200), resp.call(200), resp.call(200), resp.call(200)]
+      probe.detections_all(plan, all_open, detail).should be_empty
+      # A missing or errored control is no attribution either.
+      probe.detections_all(plan, [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403)],
+        detail).should be_empty
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections_all(plan, [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403), errored],
+        detail).should be_empty
     end
   end
 
@@ -3286,8 +3375,8 @@ describe "Gori::Probe::Active::PathNormalizationBypass" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
       plan = probe.plan(detail).not_nil!
-      probe.detections_all(plan, Array.new(5) { resp.call(403) }, detail).should be_empty
-      redir = [resp.call(302), resp.call(403), resp.call(403), resp.call(403), resp.call(403)]
+      probe.detections_all(plan, Array.new(6) { resp.call(403) }, detail).should be_empty
+      redir = [resp.call(302), resp.call(403), resp.call(403), resp.call(403), resp.call(403), resp.call(403)]
       probe.detections_all(plan, redir, detail).should be_empty
     end
   end
@@ -3406,8 +3495,9 @@ describe "Gori::Probe::Active::UrlRewriteBypass" do
       req.should contain("GET / ")
       req.should contain("X-Original-URL: /admin")
       req.should contain("X-Rewrite-URL: /admin")
-      plan.followups.size.should eq(1)
-      String.new(plan.followups[0]).should_not contain("X-Original-URL")
+      plan.followups.size.should eq(2) # control + a second control (root-stability check)
+      plan.followups.each { |f| String.new(f).should_not contain("X-Original-URL") }
+      String.new(plan.followups[0]).should eq(String.new(plan.followups[1]))
     end
   end
 
@@ -3415,10 +3505,31 @@ describe "Gori::Probe::Active::UrlRewriteBypass" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403)
       plan = probe.plan(detail).not_nil!
-      dets = probe.detections_all(plan, [resp.call(200, "ADMINPAGE"), resp.call(404, "nf")], detail)
+      dets = probe.detections_all(plan,
+        [resp.call(200, "ADMINPAGE"), resp.call(404, "nf"), resp.call(404, "nf")], detail)
       dets.size.should eq(1)
       dets.first.code.should eq("url_rewrite_bypass")
       dets.first.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  # The finding rests entirely on "probe differs from root". A root whose body length moves
+  # between requests (a varying CSRF token, a timestamp) made EVERY 401/403/404 path differ.
+  it "declines when the two root controls disagree (root is not stable enough to diff)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      # Same status, body length jitters by one byte between the two identical root requests.
+      probe.detections_all(plan,
+        [resp.call(200, "ADMINPAGE"), resp.call(200, "HOME"), resp.call(200, "HOME2")], detail).should be_empty
+      # A status that flaps is the same problem.
+      probe.detections_all(plan,
+        [resp.call(200, "ADMINPAGE"), resp.call(200, "HOME"), resp.call(503, "HOME")], detail).should be_empty
+      # A missing or errored second control means the stability question was never answered.
+      probe.detections_all(plan, [resp.call(200, "ADMINPAGE"), resp.call(404, "nf")], detail).should be_empty
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections_all(plan,
+        [resp.call(200, "ADMINPAGE"), resp.call(404, "nf"), errored], detail).should be_empty
     end
   end
 
@@ -3426,8 +3537,10 @@ describe "Gori::Probe::Active::UrlRewriteBypass" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 403 F\r\n\r\n", target: "/admin", status: 403)
       plan = probe.plan(detail).not_nil!
-      probe.detections_all(plan, [resp.call(200, "HOME"), resp.call(200, "HOME")], detail).should be_empty
-      probe.detections_all(plan, [resp.call(403, "denied"), resp.call(200, "HOME")], detail).should be_empty
+      probe.detections_all(plan,
+        [resp.call(200, "HOME"), resp.call(200, "HOME"), resp.call(200, "HOME")], detail).should be_empty
+      probe.detections_all(plan,
+        [resp.call(403, "denied"), resp.call(200, "HOME"), resp.call(200, "HOME")], detail).should be_empty
     end
   end
 

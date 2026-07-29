@@ -12,13 +12,19 @@ module Gori
       # `/admin` and serves it. Passive analysis cannot tell such a control apart from any 401/403.
       #
       # For one in-scope flow whose captured response was 401/403, it re-requests the SAME resource
-      # through a small set of normalization tricks and flags a Medium "possible bypass" when any
-      # variant flips to 2xx. Single-shot against the captured baseline (no control re-send of the
-      # canonical path), so a transient/rate-limited 403 that clears could also flip — hence
-      # "possible", to be confirmed by re-requesting the canonical path. Gated to safe methods
-      # (GET/HEAD — the confirmation is a status flip, which HEAD provides) and to originally-denied
-      # responses, so a normally-served endpoint is never probed. A control that normalizes correctly
-      # answers every variant with the same 401/403 and is never flagged.
+      # through a small set of normalization tricks, plus a CONTROL request for the canonical path
+      # exactly as captured, and flags a Medium "possible bypass" when a variant flips to 2xx AND
+      # the control is still denied. The control is what makes the flip attributable: judging the
+      # variants against the CAPTURED status alone could not tell "the proxy ACL disagrees with the
+      # backend" from "the 403 was transient and had already cleared", so a rate-limited or flapping
+      # endpoint produced a bypass finding for every variant at once. The control is sent LAST, so a
+      # gate that opened on its own answers 2xx there too and the whole finding is suppressed.
+      #
+      # Still Medium: two adjacent requests cannot rule out backends that disagree, so this remains
+      # a lead — just no longer one that fires on ordinary flapping. Gated to safe methods (GET/HEAD
+      # — the confirmation is a status flip, which HEAD provides) and to originally-denied responses,
+      # so a normally-served endpoint is never probed. A control that normalizes correctly answers
+      # every variant with the same 401/403 and is never flagged.
       #
       # Every variant is chosen to resolve to the ORIGINAL resource (`/admin`), NOT to `/admin/`: a
       # bare trailing slash legitimately 200s on many servers, so tricks that canonicalize to `path/`
@@ -30,9 +36,9 @@ module Gori
             Category::ACTIVE)
         end
 
-        # baseline .. worst case (aggressive) — the manual-run estimate / Rules sub-tab annotation.
+        # 5 variants (+1 under aggressive) plus the canonical-path control.
         def requests_per_flow : Range(Int32, Int32)
-          5..6
+          6..7
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
@@ -46,12 +52,23 @@ module Gori
           vs = variants(path, opts.aggressive)
           requests = vs.map { |(_, np)| rebuild_target(detail.request_head, detail.request_body, np) }
           params = vs.map { |(label, np)| Param.new("path", label, np) }
+          # The control is the CANONICAL path, appended LAST so it is sent after every variant:
+          # `params` keeps indexing results 0..n-1 and the control lands at results[params.size].
+          requests << rebuild_target(detail.request_head, detail.request_body, path)
           Plan.new(requests.first, params, key_string(detail, method_up, path, opts), requests[1..])
         end
 
-        # Flag when ANY variant flipped the denied status to 2xx. One grouped Detection per host,
-        # listing which tricks worked.
+        # results = [variant…, control]. Flag when a variant flipped the denied status to 2xx AND
+        # the canonical path is still denied. One grouped Detection per host, listing which tricks
+        # worked.
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
+          control = results[plan.params.size]?
+          # No usable control ⇒ no attribution. Refuse rather than fall back to the captured status:
+          # that fallback IS the false positive this leg exists to remove.
+          return [] of Detection unless control && control.ok?
+          # The canonical path serves 2xx now too ⇒ the gate is simply open (a transient/rate-limited
+          # 403 that cleared), and every variant "flip" below is that same clearing, not a bypass.
+          return [] of Detection if (200..299).includes?(probe_status(control))
           orig = detail.row.status
           hits = [] of String
           plan.params.each_with_index do |param, i|
@@ -63,7 +80,7 @@ module Gori
           return [] of Detection if hits.empty?
           [Detection.new("path_normalization_bypass", Category::ACTIVE, detail.row.host, detail.row.url,
             "Possible access-control bypass via path normalization", Store::Severity::Medium,
-            "#{orig} → 2xx via #{hits.join(", ")} (single-shot; confirm against the canonical path)"[0, 120],
+            "#{orig} → 2xx via #{hits.join(", ")}; canonical path still denied"[0, 120],
             detail.row.id)]
         rescue
           [] of Detection
