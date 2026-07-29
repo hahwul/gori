@@ -82,7 +82,9 @@ module Gori
               j.field "note", raw.nil? ? "No UI state recorded for this project — the gori TUI may not have run against it." : "Recorded UI state was unreadable."
             else
               j.field "available", true
-              j.field "project", @project_name
+              # NB: "project" is emitted once, above this branch — repeating it here put a
+              # DUPLICATE key in the object (first/last-wins varies by parser, strict ones
+              # reject it). Only the slug/id belong in the available branch.
               j.field "project_slug", @project_slug
               j.field "project_id", @project_id
               j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)

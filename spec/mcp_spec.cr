@@ -3252,3 +3252,19 @@ describe "MCP update_repeater" do
     end
   end
 end
+
+describe "MCP get_current_context" do
+  it "emits each key exactly once" do
+    with_store do |store|
+      store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"history","focus_pane":"body"}))
+      lines = drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}}),
+        project_name: "acme")
+      raw = lines[0]["result"]["content"][0]["text"].as_s
+      # A duplicate key is first/last-wins by parser and rejected outright by strict ones,
+      # so count the RAW text — JSON.parse would silently collapse it.
+      raw.scan(/"project":/).size.should eq 1
+      JSON.parse(raw)["project"].as_s.should eq "acme"
+      JSON.parse(raw)["active_tab"].as_s.should eq "history"
+    end
+  end
+end
