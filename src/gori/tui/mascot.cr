@@ -61,18 +61,28 @@ module Gori::Tui
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
     #   H hoop highlight (lit, upper-left)   R hoop base (brand gold)
-    #   S hoop shadow (turned away)          f face field (pupils)
-    #   L lash (mascara — warmer than the pupil)
-    #   X mood badge                         . plate (background only)
+    #   S hoop shadow (turned away)          C corner, dimmed toward the plate
+    #   e pupil, in the hole                 l lash, in the hole
+    #   o the hole itself                    X mood badge   . plate
     #
-    # ONE grid for every pose: poses only ever change cells inside the face, and the face
-    # is uniformly typed, so adding an expression never means restating the hoop's shading.
-    # The light source is fixed upper-left — hence HH then RR across the crown, H on the
-    # left wall, S on the right wall, and a single R of bounce light at the bottom-left.
+    # THE INTERIOR IS A HOLE, not a face plate. Filling the five cavity cells with a light
+    # colour laid a bright horizontal bar straight through the middle of a three-row
+    # sprite, and the eye read that bar before it read the ring — the single thing most
+    # responsible for the hoop not looking round. Dropping the interior to the plate lets
+    # the terminal show through the way a real ring's hole does, and leaves the silhouette
+    # as the only thing to look at.
+    #
+    # THE CORNERS ARE DIMMED. A terminal cannot anti-alias, but a corner cell held at a
+    # mid-tone between the band and the plate reads as a partly-covered pixel, which
+    # softens the stair-step where the arc turns.
+    #
+    # ONE grid for every pose: poses only ever change cells inside the hole, so adding an
+    # expression never means restating the hoop's shading. The light source is fixed
+    # upper-left — hence H then RR across the crown, H on the left wall, S on the right.
     INK = {
-      ".HHRRS.X",
-      "HLfffLS.",
-      ".RSSSS..",
+      ".CHRRC.X",
+      "HleoelS.",
+      ".CSSSC..",
     }
 
     # Where the specular walks during a glint sweep — up the left wall and across the
@@ -96,7 +106,7 @@ module Gori::Tui
     # the current mood.
     record Palette,
       ring : Color, hi : Color, lo : Color, glint : Color,
-      face : Color, ink : Color, lash : Color,
+      corner : Color, eye : Color, lash : Color,
       badge : Color, plate : Color
 
     def self.eyes(pose : Symbol) : {Char, Char}
@@ -185,18 +195,20 @@ module Gori::Tui
       # darkens on GORIDARK and lightens on GORIDAY, so a shadow defined that way inverts
       # on every light palette. See Theme.paper/soot.
       paper, soot = Theme.paper, Theme.soot
-      # Cartoon-eye rule: the face plate always sits on the light pole so the pupils read
-      # dark-on-light; ink_on then guarantees contrast even on a custom focus_gold.
-      face = Theme.blend(gold, paper, 0.38)
-      ink = Theme.ink_on(face)
+      # The pole that CONTRASTS with the plate she is stamped on — paper on a dark palette,
+      # soot on a light one. The pupils and lashes sit in the HOLE, directly on that plate,
+      # so pushing the gold toward this pole is what keeps them legible on both: "make them
+      # brighter" is only the right answer on half the themes.
+      pole = Theme.luma(plate) > 0.5 ? soot : paper
       Palette.new(
         ring: gold,
         hi: Theme.blend(gold, paper, 0.60),
         lo: Theme.blend(gold, soot, 0.62),
         glint: Theme.blend(gold, paper, 0.18),
-        face: face,
-        ink: ink,
-        lash: Theme.blend(gold, ink, 0.25), # mostly ink, warmed toward the gold
+        # Halfway to the plate: a partly-covered pixel, so the arc's stair-step softens.
+        corner: Theme.blend(gold, plate, 0.55),
+        eye: Theme.blend(gold, pole, 0.45),  # mostly the contrasting pole — reads as a pupil
+        lash: Theme.blend(gold, pole, 0.70), # closer to the band, so it stays a hint
         badge: badge_color(mood),
         plate: plate,
       )
@@ -216,18 +228,21 @@ module Gori::Tui
       when 'H' then {pal.hi, pal.plate, Attribute::Bold}
       when 'R' then {pal.ring, pal.plate, Attribute::Bold}
       when 'S' then {pal.lo, pal.plate, Attribute::Bold}
+      when 'C' then {pal.corner, pal.plate, Attribute::Bold}
       when 'X' then {pal.badge, pal.plate, Attribute::Bold}
-      when 'L' then {pal.lash, pal.face, Attribute::Bold}
-      when 'f' then {pal.ink, pal.face, Attribute::Bold}
-      else          {pal.plate, pal.plate, Attribute::None}
+      when 'e' then {pal.eye, pal.plate, Attribute::Bold}
+      when 'l' then {pal.lash, pal.plate, Attribute::Bold}
+      else          {pal.plate, pal.plate, Attribute::None} # 'o' hole and '.' plate alike
       end
     end
 
     # Paint the sprite with col 0 at `x`.
     #
-    # The '.' plate role still writes an opaque background space: the pet OCCLUDES body
-    # content, so the whole box must be claimed or the tab's text bleeds through the
-    # hoop's corners. On a still beat the diff renderer forwards none of it.
+    # The plate and hole roles still write an OPAQUE background space rather than skipping
+    # the cell: the pet occludes body content, so the whole box has to be claimed or the
+    # tab's text bleeds through the hole and the hoop's corners. The hole reads as a hole
+    # because it is painted the plate colour, not because it is left unpainted. On a still
+    # beat the diff renderer forwards none of it.
     def self.draw(screen : Screen, x : Int32, y : Int32, frame : Frame, pal : Palette) : Nil
       gx, gy = frame.glint >= 0 ? (GLINT_PATH[frame.glint]? || {-1, -1}) : {-1, -1}
       H.times do |ry|

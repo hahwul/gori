@@ -349,7 +349,14 @@ describe Gori::Tui::Pet do
         hi.should be > ring # lit side reads as lit …
         ring.should be > lo # … and the turned-away side as shadow
         # The pupils have to stay legible against the face plate they sit on.
-        (Theme.luma(pal.ink) - Theme.luma(pal.face)).abs.should be > 0.3
+        # The pupils sit in the HOLE, directly on the plate — that is the pair that has to
+        # stay legible, and it is the one "make it brighter" gets wrong on light themes.
+        (Theme.luma(pal.eye) - Theme.luma(pal.plate)).abs.should be > 0.25
+        # …and the dimmed corner has to land between the band and the plate, or it stops
+        # reading as a partly-covered pixel and just looks like a different colour.
+        lo, hi = {Theme.luma(pal.ring), Theme.luma(pal.plate)}.minmax
+        Theme.luma(pal.corner).should be >= lo
+        Theme.luma(pal.corner).should be <= hi
       end
     ensure
       Theme.apply(prev)
