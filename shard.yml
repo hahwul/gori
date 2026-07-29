@@ -22,15 +22,17 @@ dependencies:
   termisu:
     github: hahwul/termisu
     branch: main
-    # Temporarily on the fork again. Upstream 0.5.0/0.5.1 still `require`s
-    # `crystal/thread_local_value`, which Crystal 1.21 removed from the stdlib, so
-    # upstream does not compile on 1.21 at all. The fork carries only that fix
-    # (thread-keyed Hash in Termisu::FFI::ErrorState, no API change); it is queued
-    # for upstream. Go back to `omarluq/termisu` once it lands in a release.
+    # Temporarily on the fork again. Synced to upstream v0.6.0; the fork carries
+    # only one patch on top — input/parser: a Ctrl/Alt/Meta CSI-u report must not
+    # arm the one-shot dup guard, or the chord eats the next plain key (^P then
+    # "pet" produced "et"). It is queued for upstream. Go back to
+    # `omarluq/termisu` once it lands in a release.
     #
-    # The earlier fork — input/preedit (double-English + jamo-separation:
-    # protocol_active dup-guard + Preedit for key=0 text events) — is upstream as of
-    # v0.5.0 and is included here via the fork's synced main.
+    # Earlier fork carries, both upstream now and included via the synced main:
+    # input/preedit (double-English + jamo-separation: protocol_active dup-guard +
+    # Preedit for key=0 text events) as of v0.5.0, and the Crystal 1.21
+    # `crystal/thread_local_value` removal (thread-keyed Hash in
+    # Termisu::FFI::ErrorState) as of v0.6.0.
 
   db:
     github: crystal-lang/crystal-db
