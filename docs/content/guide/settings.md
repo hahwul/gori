@@ -64,11 +64,13 @@ Notifications fire on background results from the Miner, Fuzzer, Probe, and Disc
 | **Theme** | Opener: the theme picker (built-ins plus your own) |
 | **Display** | Default detail pane, History list time, Line numbers, Preview body limit (KiB), Resource meter, Terminal title |
 | **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth |
-| **Pet** | Pet (Miss Ring), Motion, Notices |
+| **Pet** | Pet (Miss Ring), Placement, Motion, Notices |
 
 The Theme row previews the current theme inline, showing its name and a swatch of its palette. See the [Themes guide](/guide/themes/).
 
-Pet is off by default. Turned on, Miss Ring — a gilded ring mascot — sits in the bottom-right of the tab body, blinks and winks on her own, and announces background results in a speech bubble. She covers three rows and repaints about once a second while you are at the keyboard, then dozes off after 90 seconds of inactivity and stops animating entirely. Motion `calm` halves her blink rate and drops the rest, for SSH sessions and battery. Notices is independent of the bottom-bar toast.
+Pet is off by default. Turned on, Miss Ring — a gilded ring mascot — blinks and winks on her own and reacts to background results, then dozes off after 90 seconds of inactivity and stops animating entirely. Motion `calm` halves her blink rate and drops the rest, for SSH sessions and battery.
+
+Placement decides what she costs. `body` puts an 8&times;3 sprite in the bottom-right of the tab body, where she covers three rows and announces results in a speech bubble. `bar` puts a seven-cell chip in the status row beside CPU/MEM and the clock: she covers nothing, and the bubble goes away because the status row already carries the toast for those same notifications — at the price of one row being too little space for a face. Notices is independent of the bottom-bar toast either way.
 
 ### Editor & Keys
 

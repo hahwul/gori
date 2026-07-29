@@ -2789,7 +2789,8 @@ module Gori::Tui
       # toast branch covers the "(^P)" pointers in messages like the bind-failure notice.
       Chrome.render_status(screen, layout.status, focus: focus_label,
         hints: Hotkeys.retag(format_status_message(@toast) || key_hints),
-        activity: activity_chip, resource: @resource.label, time: clock_label)
+        activity: activity_chip, resource: @resource.label, time: clock_label,
+        pet: pet_bar_frame)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay.palette?
       @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay.tabs_more?
@@ -2988,9 +2989,19 @@ module Gori::Tui
     # failure TrafficEmptyState.suppressed exists to prevent. So the gate hides her
     # outright rather than relying on z-order.
     private def render_pet(screen : Screen, body : Rect) : Nil
+      return if Settings.pet_in_bar? # she rides the status row instead
       return unless frame = @pet.frame
       return unless pet_visible?
       Pet.draw(screen, body, frame)
+    end
+
+    # The status-bar placement. Nil unless she is both enabled and set to `bar`, which is
+    # what keeps the chip out of the run entirely rather than reserving an empty slot.
+    # Unlike the body form this needs no visibility gate: the status row is drawn after the
+    # body and nothing but the ^F/^G prompts is ever laid over it.
+    private def pet_bar_frame : Mascot::Frame?
+      return nil unless Settings.pet_in_bar?
+      @pet.frame
     end
 
     private def pet_visible? : Bool

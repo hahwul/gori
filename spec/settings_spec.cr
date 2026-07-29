@@ -388,20 +388,24 @@ describe Gori::Settings do
     dir = File.tempname("gori-settings-pet")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
-    prev_pet = {Gori::Settings.pet?, Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
+    prev_pet = {Gori::Settings.pet?, Gori::Settings.pet_placement,
+                Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.pet = true
+      Gori::Settings.pet_placement = "bar"
       Gori::Settings.pet_motion = "calm"
       Gori::Settings.pet_notices = false
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).should contain(%("pet"))
 
       Gori::Settings.pet = false
+      Gori::Settings.pet_placement = "body"
       Gori::Settings.pet_motion = "lively"
       Gori::Settings.pet_notices = true
       Gori::Settings.load
       Gori::Settings.pet?.should be_true
+      Gori::Settings.pet_placement.should eq("bar")
       Gori::Settings.pet_motion.should eq("calm")
       Gori::Settings.pet_notices?.should be_false # a stored false survives the reload
 
@@ -410,8 +414,14 @@ describe Gori::Settings do
       Gori::Settings.load
       Gori::Settings.pet_motion.should eq(Gori::Settings::DEFAULT_PET_MOTION)
 
+      # A hand-edited placement outside the known set falls back too.
+      File.write(Gori::Settings.path, %({"pet":{"enabled":true,"placement":"corner"}}))
+      Gori::Settings.load
+      Gori::Settings.pet_placement.should eq(Gori::Settings::DEFAULT_PET_PLACEMENT)
+
       # Back to defaults → section omitted, so a default install's file stays quiet
       Gori::Settings.pet = Gori::Settings::DEFAULT_PET
+      Gori::Settings.pet_placement = Gori::Settings::DEFAULT_PET_PLACEMENT
       Gori::Settings.pet_motion = Gori::Settings::DEFAULT_PET_MOTION
       Gori::Settings.pet_notices = Gori::Settings::DEFAULT_PET_NOTICES
       Gori::Settings.save
@@ -419,7 +429,8 @@ describe Gori::Settings do
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.pet, Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev_pet
+      Gori::Settings.pet, Gori::Settings.pet_placement = prev_pet[0], prev_pet[1]
+      Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev_pet[2], prev_pet[3]
     end
   end
 

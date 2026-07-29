@@ -81,7 +81,8 @@ module Gori::Tui
     #   H hoop highlight (lit, upper-left)   R hoop base (brand gold)
     #   S hoop shadow (turned away)          C corner, dimmed toward the plate
     #   e pupil, in the hole                 l lash, in the hole
-    #   o the hole itself                    X mood badge   . plate
+    #   m mouth, in the hole                 o the hole itself
+    #   X mood badge                         . plate
     #
     # THE INTERIOR IS A HOLE, not a face plate. Filling the five cavity cells with a light
     # colour laid a bright horizontal bar straight through the middle of a three-row
@@ -97,9 +98,13 @@ module Gori::Tui
     # ONE grid for every pose: poses only ever change cells inside the hole, so adding an
     # expression never means restating the hoop's shading. The light source is fixed
     # upper-left — hence H then RR across the crown, H on the left wall, S on the right.
+    # The centre cell is 'm', NOT 'o'. It holds the mouth glyph, and the hole role paints
+    # plate-on-plate — so typing it as a hole drew the mouth in the background colour and
+    # made it invisible. A tmux capture cannot catch that: capture-pane returns the
+    # character buffer regardless of what colour it was painted in.
     INK = {
       ".CHRRC.X",
-      "HleoelS.",
+      "HlemelS.",
       ".CSSSC..",
     }
 
@@ -124,7 +129,7 @@ module Gori::Tui
     # the current mood.
     record Palette,
       ring : Color, hi : Color, lo : Color, glint : Color,
-      corner : Color, eye : Color, lash : Color,
+      corner : Color, eye : Color, lash : Color, mouth : Color,
       badge : Color, plate : Color
 
     def self.eyes(pose : Symbol) : {Char, Char}
@@ -226,8 +231,9 @@ module Gori::Tui
         glint: Theme.blend(gold, paper, 0.18),
         # Halfway to the plate: a partly-covered pixel, so the arc's stair-step softens.
         corner: Theme.blend(gold, plate, 0.55),
-        eye: Theme.blend(gold, pole, 0.45),  # mostly the contrasting pole — reads as a pupil
-        lash: Theme.blend(gold, pole, 0.70), # closer to the band, so it stays a hint
+        eye: Theme.blend(gold, pole, 0.45),   # mostly the contrasting pole — reads as a pupil
+        mouth: Theme.blend(gold, pole, 0.55), # between the pupil and the lash
+        lash: Theme.blend(gold, pole, 0.70),  # closer to the band, so it stays a hint
         badge: badge_color(mood),
         plate: plate,
       )
@@ -242,7 +248,9 @@ module Gori::Tui
       end
     end
 
-    private def self.role_style(role : Char, pal : Palette) : {Color, Color, Attribute}
+    # Public because the spec asserts the one property this table can silently violate: an
+    # inked cell whose fg equals its bg is drawn and invisible.
+    def self.role_style(role : Char, pal : Palette) : {Color, Color, Attribute}
       case role
       when 'H' then {pal.hi, pal.plate, Attribute::Bold}
       when 'R' then {pal.ring, pal.plate, Attribute::Bold}
@@ -250,8 +258,25 @@ module Gori::Tui
       when 'C' then {pal.corner, pal.plate, Attribute::Bold}
       when 'X' then {pal.badge, pal.plate, Attribute::Bold}
       when 'e' then {pal.eye, pal.plate, Attribute::Bold}
+      when 'm' then {pal.mouth, pal.plate, Attribute::Bold}
       when 'l' then {pal.lash, pal.plate, Attribute::Bold}
       else          {pal.plate, pal.plate, Attribute::None} # 'o' hole and '.' plate alike
+      end
+    end
+
+    # The one-row form, for the status bar: columns 0..6 of the middle row — the hoop's
+    # equator with the whole face still in it. Deliberately NOT a second art table; it is a
+    # slice of the same sprite, so the two placements cannot drift apart.
+    BAR_W = 7
+
+    def self.bar_label(frame : Frame) : String
+      String.build { |io| BAR_W.times { |c| io << glyph(frame, c, 1) } }
+    end
+
+    def self.draw_row(screen : Screen, x : Int32, y : Int32, frame : Frame, pal : Palette) : Nil
+      BAR_W.times do |col|
+        fg, bg, attr = role_style(INK[1][col], pal)
+        screen.cell(x + col, y, glyph(frame, col, 1), fg, bg, attr)
       end
     end
 

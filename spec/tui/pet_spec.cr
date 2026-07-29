@@ -312,6 +312,54 @@ describe Gori::Tui::Pet do
     (6.5 - 0.5).should eq(Mascot::H * 2.0)
   end
 
+  # Every inked cell must resolve to a fg that differs from its bg, or the glyph is drawn
+  # but invisible. This is exactly how the mouth shipped broken: the cell held ˘ while its
+  # ink role still said "hole", which paints plate-on-plate. A tmux capture cannot catch
+  # it — capture-pane returns the character buffer whatever colour it was painted in.
+  it "never paints an inked cell in the background colour" do
+    prev = Theme.active_name
+    begin
+      Theme.available.each do |name|
+        Theme.apply(name)
+        Mascot::POSES.each do |pose|
+          frame = Mascot::Frame.new(pose: pose, badge: '!')
+          pal = Mascot.palette(:info, Theme.bg)
+          rows = Mascot.rows(frame)
+          Mascot::H.times do |r|
+            Mascot::W.times do |c|
+              next if rows[r][c] == ' ' # a blank cell is allowed to be plate-on-plate
+              fg, bg, _ = Mascot.role_style(Mascot::INK[r][c], pal)
+              fg.should_not eq(bg)
+            end
+          end
+        end
+      end
+    ensure
+      Theme.apply(prev)
+    end
+  end
+
+  # The bar placement is a SLICE of the body sprite, not a second art table — if these ever
+  # disagree the two placements have drifted.
+  it "draws the bar chip from the body sprite's own middle row" do
+    Mascot::POSES.each do |pose|
+      frame = Mascot::Frame.new(pose: pose)
+      Mascot.bar_label(frame).should eq(Mascot.rows(frame)[1][0, Mascot::BAR_W])
+    end
+  end
+
+  # The chip run is ordered so the fixed-width clock anchors the right edge; a chip that
+  # changes width would shift every readout to its left on each blink.
+  it "keeps the bar chip a constant width across every pose and wink" do
+    Mascot::POSES.each do |pose|
+      Mascot::WINKS.each do |wink|
+        label = Mascot.bar_label(Mascot::Frame.new(pose: pose, wink: wink))
+        label.size.should eq(Mascot::BAR_W)
+        Screen.draw_width(label).should eq(Mascot::BAR_W)
+      end
+    end
+  end
+
   it "keeps the ink layer the same shape as the art" do
     Mascot::INK.size.should eq(Mascot::H)
     Mascot::INK.each(&.size.should eq(Mascot::W))
