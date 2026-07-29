@@ -507,13 +507,11 @@ describe SettingsView do
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
     prev = {Gori::Settings.pet?, Gori::Settings.pet_placement,
-            Gori::Settings.pet_motion, Gori::Settings.pet_notices?,
-            Gori::Settings.pet_face}
+            Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.pet = false
       Gori::Settings.pet_placement = "body"
-      Gori::Settings.pet_face = "safe"
       Gori::Settings.pet_motion = "lively"
       Gori::Settings.pet_notices = true
       v = SettingsView.new
@@ -522,8 +520,6 @@ describe SettingsView do
       v.move_field(1)
       v.toggle_or_move(1) # Placement: body → bar (choice)
       v.move_field(1)
-      v.toggle_or_move(1) # Face: safe → soft (choice)
-      v.move_field(1)
       v.toggle_or_move(1) # Motion: lively → calm (choice)
       v.move_field(1)
       v.toggle_or_move(1) # Notices: on → off (bool)
@@ -531,8 +527,6 @@ describe SettingsView do
       Gori::Settings.pet?.should be_true
       Gori::Settings.pet_placement.should eq("bar")
       Gori::Settings.pet_in_bar?.should be_true
-      Gori::Settings.pet_face.should eq("soft")
-      Gori::Settings.pet_face_sym.should eq(:soft)
       Gori::Settings.pet_motion.should eq("calm")
       Gori::Settings.pet_lively?.should be_false
       Gori::Settings.pet_notices?.should be_false
@@ -541,14 +535,12 @@ describe SettingsView do
       v.save
       Gori::Settings.pet?.should eq(Gori::Settings::DEFAULT_PET)
       Gori::Settings.pet_placement.should eq(Gori::Settings::DEFAULT_PET_PLACEMENT)
-      Gori::Settings.pet_face.should eq(Gori::Settings::DEFAULT_PET_FACE)
       Gori::Settings.pet_motion.should eq(Gori::Settings::DEFAULT_PET_MOTION)
       Gori::Settings.pet_notices?.should eq(Gori::Settings::DEFAULT_PET_NOTICES)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.pet, Gori::Settings.pet_placement = prev[0], prev[1]
       Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev[2], prev[3]
-      Gori::Settings.pet_face = prev[4]
       FileUtils.rm_rf(dir)
     end
   end

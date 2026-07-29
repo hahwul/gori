@@ -62,35 +62,27 @@ module Gori::Tui
     # cap height, which is exactly where the lashes are — so ˘ (U+02D8), the obvious cup
     # shape, put the mouth ABOVE the eyes and level with the lashes.
     #
-    # ᴗ (U+1D17 BOTTOM HALF O) is that cup at the right height. It is absent from most
-    # monospace cmaps, which does NOT disqualify it: the terminal owns the grid, so a
-    # fallback glyph is drawn INTO the cell and the advance still comes from East Asian
-    # Width — ᴗ is Neutral, so it stays one column. Measured in a real terminal, ▐´●ᴗ●`▌
-    # is the same 7 cells as the all-mono spelling, and 30 of them fill 30 columns of a
-    # 40-column pane without wrapping.
+    # ᴗ (U+1D17 BOTTOM HALF O) is the same cup at the right height, and rounder. It was
+    # tried and dropped, so: it is NOT a width problem — the terminal owns the grid, a
+    # fallback glyph is drawn INTO the cell, and the advance comes from East Asian Width,
+    # where ᴗ is Neutral. Measured in a real terminal, ▐´●ᴗ●`▌ is the same 7 cells as the
+    # spelling below, and 30 of them fill 30 columns of a 40-column pane without wrapping.
+    # It is a COVERAGE problem: most monospace cmaps lack it, so it renders through a
+    # proportional fallback face, and an environment with no fallback pool at all draws a
+    # box. u is the same cup at the same x-height and is in every monospace font, which is
+    # why the mouth is spelled with it and there is no setting to change that.
     #
-    # What being outside the cmap DOES risk is tofu, and only where there is no fallback
-    # pool to reach for — a stripped container, not a desktop. So u, the same cup at the
-    # same x-height and in every monospace cmap, is the DEFAULT (:safe), and ᴗ is the
-    # opt-in rounder one for anyone whose terminal will find it. That single cell is the
-    # ONLY difference between the two repertoires: the expression, the ink grid and the
-    # 7-cell width are shared, and a spec pins that.
-    REST_MOUTH = {safe: 'u', soft: 'ᴗ'}
-
-    # CAP_HEIGHT_MARKS is what a spec checks this against — no mouth in EITHER repertoire
-    # may be one, or it would ride up level with the lashes.
+    # CAP_HEIGHT_MARKS is what a spec checks the mouth against — it may never be one.
     CAP_HEIGHT_MARKS = {'˘', '¯', '^', '´', '`', '¨', '˙', '˚', '˜', '‾'}
-    MOUTHS           = {'ᴗ', 'u', 'o', '_', '·'}
+    MOUTHS           = {'u', 'o', '_', '·'}
 
-    # Only the resting mouth varies by repertoire: the expressive poses are already spelled
-    # in glyphs every font ships, so there is nothing for :safe to substitute.
-    def self.mouth(pose : Symbol, face : Symbol = :safe) : Char
+    def self.mouth(pose : Symbol) : Char
       case pose
       when :happy then 'o' # delighted, open — x-height
       when :alert then '_' # tense, flat — baseline
       when :error then '_'
       when :doze  then '·' # slack — mid
-      else             face == :soft ? REST_MOUTH[:soft] : REST_MOUTH[:safe]
+      else             'u' # the resting smile — a cup below the eyes
       end
     end
 
@@ -98,9 +90,6 @@ module Gori::Tui
     # wink/badge/glint axes below rather than from growing this table.
     POSES = {:idle, :blink, :happy, :alert, :error, :doze}
     WINKS = {:none, :left, :right}
-    # The glyph repertoires, parallel to Settings::PET_FACES — a spec pins the two together,
-    # since a name added on one side alone is a setting that silently draws the default.
-    FACES = {:safe, :soft}
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
     #   H hoop highlight (lit, upper-left)   R hoop base (brand gold)
@@ -148,10 +137,7 @@ module Gori::Tui
       glint : Int32 = -1, # index into GLINT_PATH; -1 = no specular this frame
       mood : Symbol = :info,
       bubble : String? = nil,
-      shake : Int32 = 0,    # -1 | 0 | 1 column offset (the :error reaction)
-      face : Symbol = :safe # glyph repertoire; see REST_MOUTH. Lives here so that changing
-    # Settings.pet_face shows up in Pet#tick's field-wise frame compare like any other
-    # visible change, and repaints on the next beat without a special case.
+      shake : Int32 = 0 # -1 | 0 | 1 column offset (the :error reaction)
 
     # Every colour the mascot can wear, resolved once per draw from the live theme and
     # the current mood.
@@ -172,17 +158,17 @@ module Gori::Tui
     end
 
     # Cols 1..5 of the middle row: lash, left eye, mouth, right eye, lash. Named for the
-    # hole it fills — "face" is the glyph-repertoire axis (REST_MOUTH), not this row.
+    # hole it fills, which is what the ink layer calls it too.
     #
     # A wink only applies to the open-eyed idle pose — a winking :alert or :doze would
     # read as a rendering glitch rather than a gesture.
-    def self.cavity(pose : Symbol, wink : Symbol, face : Symbol = :safe) : {Char, Char, Char, Char, Char}
+    def self.cavity(pose : Symbol, wink : Symbol) : {Char, Char, Char, Char, Char}
       l, r = eyes(pose)
       if pose == :idle
         l = '─' if wink == :left
         r = '─' if wink == :right
       end
-      {LASH_L, l, mouth(pose, face), r, LASH_R}
+      {LASH_L, l, mouth(pose), r, LASH_R}
     end
 
     # The glyph at (col, row) of the 8x3 grid. Allocation-free — this is what the draw
@@ -196,7 +182,7 @@ module Gori::Tui
         when 0     then WALL_L
         when 6     then WALL_R
         when W - 1 then ' '
-        else            cavity(frame.pose, frame.wink, frame.face)[col - 1]
+        else            cavity(frame.pose, frame.wink)[col - 1]
         end
       end
     end

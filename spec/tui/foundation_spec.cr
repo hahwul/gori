@@ -429,22 +429,20 @@ describe Gori::Tui::Chrome do
     xs = [] of Int32
     ["CPU 9% MEM 48M", "CPU 12% MEM 48M", "CPU 100% MEM 1.4G"].each do |resource|
       Mascot::POSES.each do |pose|
-        Mascot::FACES.each do |face|
-          backend = MemoryBackend.new(90, 1)
-          frame = Mascot::Frame.new(pose: pose, face: face)
-          Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
-            focus: "BODY", hints: "↹ pane · esc tabs",
-            resource: resource, time: "01:37 PM", pet: frame)
-          row = backend.row(0)
-          label = Mascot.bar_label(frame)
-          px = row.index(label).not_nil!
-          row.index("01:37 PM").not_nil!.should be < px # she is right of the clock
-          (px + label.size).should eq(90 - 1)           # …and flush against the right pad
-          xs << row.index("01:37 PM").not_nil!
-        end
+        backend = MemoryBackend.new(90, 1)
+        frame = Mascot::Frame.new(pose: pose)
+        Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+          focus: "BODY", hints: "↹ pane · esc tabs",
+          resource: resource, time: "01:37 PM", pet: frame)
+        row = backend.row(0)
+        label = Mascot.bar_label(frame)
+        px = row.index(label).not_nil!
+        row.index("01:37 PM").not_nil!.should be < px # she is right of the clock
+        (px + label.size).should eq(90 - 1)           # …and flush against the right pad
+        xs << row.index("01:37 PM").not_nil!
       end
     end
-    xs.uniq.size.should eq(1) # the clock never budged, for any face or any readout width
+    xs.uniq.size.should eq(1) # the clock never budged, for any pose or any readout width
   end
 
   it "gilds the shell only for single-pane body focus" do

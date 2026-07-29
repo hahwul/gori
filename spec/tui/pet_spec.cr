@@ -361,76 +361,33 @@ describe Gori::Tui::Pet do
   # so a cup-shaped one like ˘ puts the mouth above the eyes instead of below them. That is
   # exactly how it shipped. Nothing about the glyph tables catches it, so pin it directly.
   it "never puts the mouth at cap height, where the lashes are" do
-    Mascot::FACES.each do |face|
-      Mascot::POSES.each do |pose|
-        m = Mascot.mouth(pose, face)
-        Mascot::CAP_HEIGHT_MARKS.includes?(m).should be_false
-        Mascot::MOUTHS.includes?(m).should be_true
-      end
+    Mascot::POSES.each do |pose|
+      m = Mascot.mouth(pose)
+      Mascot::CAP_HEIGHT_MARKS.includes?(m).should be_false
+      Mascot::MOUTHS.includes?(m).should be_true
     end
     # …and the lashes are exactly the marks the mouth must avoid.
     Mascot::CAP_HEIGHT_MARKS.includes?(Mascot::LASH_L).should be_true
     Mascot::CAP_HEIGHT_MARKS.includes?(Mascot::LASH_R).should be_true
   end
 
-  # :safe exists for one reason — a terminal with no fallback font to borrow ᴗ from. If it
-  # ever picked up a second substitution, or stopped substituting at all, that reason would
-  # no longer hold and the setting would be cosmetic drift instead of a compatibility knob.
-  it "differs between face repertoires in the resting mouth and nothing else" do
-    differing = [] of Symbol
-    Mascot::POSES.each do |pose|
-      Mascot::WINKS.each do |wink|
-        next if Mascot.cavity(pose, wink, :soft) == Mascot.cavity(pose, wink, :safe)
-        differing << pose
-      end
-    end
-    differing.uniq.should eq([:idle, :blink])                       # the resting poses
-    Mascot.mouth(:idle, :safe).should eq(Mascot::REST_MOUTH[:safe]) # …by exactly one cell
-    Mascot.cavity(:idle, :none, :safe)[2].should eq('u')
-    Mascot.cavity(:idle, :none, :soft)[2].should eq('ᴗ')
-  end
-
-  # The art's repertoire list and the settings vocabulary are written in two files; a name
-  # in one and not the other is a choice the user can pick that silently draws the default.
-  it "keeps the art's face list and the settings vocabulary in step" do
-    Mascot::FACES.map(&.to_s).to_a.sort.should eq(Gori::Settings::PET_FACES.to_a.sort)
-    Gori::Settings::PET_FACES.should contain(Gori::Settings::DEFAULT_PET_FACE)
-    Mascot::FACES.should contain(Gori::Settings.pet_face_sym)
-    # The art carries its OWN default, on Frame and on the two glyph lookups, so that
-    # "unspecified" is answerable without reaching for Settings. Nothing makes those two
-    # defaults agree — so if they ever drift, a Frame built without a face silently draws
-    # the repertoire the operator did not choose.
-    # Derived from the constants, never from live Settings — a sibling spec that leaves
-    # pet_face set would otherwise decide whether this one passes.
-    default_face = Mascot::Frame.new.face
-    default_face.to_s.should eq(Gori::Settings::DEFAULT_PET_FACE)
-    Mascot.mouth(:idle).should eq(Mascot.mouth(:idle, default_face))
-    Mascot.cavity(:idle, :none).should eq(Mascot.cavity(:idle, :none, default_face))
-  end
-
   # The bar placement is a SLICE of the body sprite, not a second art table — if these ever
   # disagree the two placements have drifted.
   it "draws the bar chip from the body sprite's own middle row" do
-    Mascot::FACES.each do |face|
-      Mascot::POSES.each do |pose|
-        frame = Mascot::Frame.new(pose: pose, face: face)
-        Mascot.bar_label(frame).should eq(Mascot.rows(frame)[1][0, Mascot::BAR_W])
-      end
+    Mascot::POSES.each do |pose|
+      frame = Mascot::Frame.new(pose: pose)
+      Mascot.bar_label(frame).should eq(Mascot.rows(frame)[1][0, Mascot::BAR_W])
     end
   end
 
   # The chip run is ordered so the fixed-width clock anchors the right edge; a chip that
-  # changes width would shift every readout to its left on each blink. The face repertoire
-  # is in here because that is the whole bet on ᴗ: a substituted glyph keeps its column,
-  # so :soft and :safe have to measure the same or the bet was wrong.
-  it "keeps the bar chip a constant width across every pose, wink and face" do
-    Mascot::FACES.each do |face|
-      Mascot::POSES.each do |pose|
-        Mascot::WINKS.each do |wink|
-          label = Mascot.bar_label(Mascot::Frame.new(pose: pose, wink: wink, face: face))
-          label.size.should eq(Mascot::BAR_W)
-          Screen.draw_width(label).should eq(Mascot::BAR_W)
-        end
+  # changes width would shift every readout to its left on each blink.
+  it "keeps the bar chip a constant width across every pose and wink" do
+    Mascot::POSES.each do |pose|
+      Mascot::WINKS.each do |wink|
+        label = Mascot.bar_label(Mascot::Frame.new(pose: pose, wink: wink))
+        label.size.should eq(Mascot::BAR_W)
+        Screen.draw_width(label).should eq(Mascot::BAR_W)
       end
     end
   end
@@ -441,12 +398,10 @@ describe Gori::Tui::Pet do
   end
 
   it "gives the Miss her lashes on every pose" do
-    Mascot::FACES.each do |face|
-      Mascot::POSES.each do |pose|
-        cav = Mascot.cavity(pose, :none, face)
-        cav[0].should eq(Mascot::LASH_L)
-        cav[4].should eq(Mascot::LASH_R)
-      end
+    Mascot::POSES.each do |pose|
+      cav = Mascot.cavity(pose, :none)
+      cav[0].should eq(Mascot::LASH_L)
+      cav[4].should eq(Mascot::LASH_R)
     end
   end
 

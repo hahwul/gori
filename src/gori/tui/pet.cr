@@ -196,15 +196,12 @@ module Gori::Tui
     # wall clock — or the same beat could yield two different frames and the diff would
     # stop being meaningful (or specifiable).
     private def compose : Mascot::Frame
-      # Read live, like every other Settings lookup here: a face change lands in the frame,
-      # the frame differs, and the next beat repaints it. No invalidation to remember.
-      face = Settings.pet_face_sym
       if @dozing
-        return Mascot::Frame.new(pose: :doze, badge: 'z', mood: :doze, bubble: @bubble, face: face)
+        return Mascot::Frame.new(pose: :doze, badge: 'z', mood: :doze, bubble: @bubble)
       end
       if @beat < @wake_until_beat
         # Startled awake, then settles.
-        return Mascot::Frame.new(pose: :alert, badge: '·', bubble: @bubble, face: face)
+        return Mascot::Frame.new(pose: :alert, badge: '·', bubble: @bubble)
       end
       mood = @mood
       Mascot::Frame.new(
@@ -215,7 +212,6 @@ module Gori::Tui
         mood: mood,
         bubble: @bubble,
         shake: shake_for(mood),
-        face: face,
       )
     end
 

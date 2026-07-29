@@ -389,15 +389,13 @@ describe Gori::Settings do
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     prev_pet = {Gori::Settings.pet?, Gori::Settings.pet_placement,
-                Gori::Settings.pet_motion, Gori::Settings.pet_notices?,
-                Gori::Settings.pet_face}
+                Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.pet = true
       Gori::Settings.pet_placement = "bar"
       Gori::Settings.pet_motion = "calm"
       Gori::Settings.pet_notices = false
-      Gori::Settings.pet_face = "soft"
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).should contain(%("pet"))
 
@@ -405,14 +403,11 @@ describe Gori::Settings do
       Gori::Settings.pet_placement = "body"
       Gori::Settings.pet_motion = "lively"
       Gori::Settings.pet_notices = true
-      Gori::Settings.pet_face = "safe"
       Gori::Settings.load
       Gori::Settings.pet?.should be_true
       Gori::Settings.pet_placement.should eq("bar")
       Gori::Settings.pet_motion.should eq("calm")
       Gori::Settings.pet_notices?.should be_false # a stored false survives the reload
-      Gori::Settings.pet_face.should eq("soft")
-      Gori::Settings.pet_face_sym.should eq(:soft)
 
       # A hand-edited motion outside the known set falls back to the default.
       File.write(Gori::Settings.path, %({"pet":{"enabled":true,"motion":"bogus"}}))
@@ -424,25 +419,11 @@ describe Gori::Settings do
       Gori::Settings.load
       Gori::Settings.pet_placement.should eq(Gori::Settings::DEFAULT_PET_PLACEMENT)
 
-      # …and so does a face, which matters more than the others: an unknown name here
-      # would otherwise reach Mascot as a symbol no repertoire answers to.
-      File.write(Gori::Settings.path, %({"pet":{"enabled":true,"face":"kaomoji"}}))
-      Gori::Settings.load
-      Gori::Settings.pet_face.should eq(Gori::Settings::DEFAULT_PET_FACE)
-      Gori::Settings.pet_face_sym.should eq(:safe)
-
-      # Face alone off-default still writes the section — it is the only non-default field
-      # here, so a guard that forgot it would drop the setting on the next save.
+      # Back to defaults → section omitted, so a default install's file stays quiet
       Gori::Settings.pet = Gori::Settings::DEFAULT_PET
       Gori::Settings.pet_placement = Gori::Settings::DEFAULT_PET_PLACEMENT
       Gori::Settings.pet_motion = Gori::Settings::DEFAULT_PET_MOTION
       Gori::Settings.pet_notices = Gori::Settings::DEFAULT_PET_NOTICES
-      Gori::Settings.pet_face = "soft"
-      Gori::Settings.save
-      File.read(Gori::Settings.path).should contain(%("face": "soft"))
-
-      # Back to defaults → section omitted, so a default install's file stays quiet
-      Gori::Settings.pet_face = Gori::Settings::DEFAULT_PET_FACE
       Gori::Settings.save
       File.read(Gori::Settings.path).should_not contain(%("pet"))
     ensure
@@ -450,7 +431,6 @@ describe Gori::Settings do
       FileUtils.rm_rf(dir)
       Gori::Settings.pet, Gori::Settings.pet_placement = prev_pet[0], prev_pet[1]
       Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev_pet[2], prev_pet[3]
-      Gori::Settings.pet_face = prev_pet[4]
     end
   end
 
