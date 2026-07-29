@@ -1828,7 +1828,7 @@ module Gori
       private def emit_scope(j : JSON::Builder, sc : ScopeCheck) : Nil
         j.field "scope_decision", sc.decision
         j.field "scope_rule_id", sc.rule_id if sc.rule_id
-        j.field "effective_host", sc.host
+        j.field "effective_host", Serialize.text(sc.host)
       end
 
       private def str(h, key : String) : String?

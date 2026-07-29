@@ -19,7 +19,7 @@ module Gori
                     j.field "sent", f.sent
                     j.field "total", f.total
                     j.field "matched", f.matched
-                    j.field "target", f.audit.target
+                    j.field "target", Serialize.text(f.audit.target)
                   end
                 end
                 @mine_jobs.each_value do |m|
@@ -30,7 +30,7 @@ module Gori
                     j.field "sent", m.sent
                     j.field "names_total", m.total
                     j.field "found", m.found
-                    j.field "target", m.audit.target
+                    j.field "target", Serialize.text(m.audit.target)
                   end
                 end
                 @discover_jobs.each_value do |d|
@@ -40,7 +40,7 @@ module Gori
                     j.field "status", d.status.to_s
                     j.field "sent", d.sent
                     j.field "found", d.found
-                    j.field "target", d.audit.target
+                    j.field "target", Serialize.text(d.audit.target)
                   end
                 end
                 @sequence_jobs.each_value do |s|
@@ -50,7 +50,7 @@ module Gori
                     j.field "status", s.status.to_s
                     j.field "goal", s.goal
                     j.field "collected", s.collected
-                    j.field "target", s.audit.target
+                    j.field "target", Serialize.text(s.audit.target)
                   end
                 end
               end

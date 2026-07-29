@@ -216,13 +216,15 @@ module Gori
         j.object do
           j.field "db_id", r.id
           j.field "position", r.position
-          j.field "target", r.target
+          # target/name/tags/sni are seeded from a captured request without scrubbing, so
+          # they can carry invalid UTF-8 into the JSON-RPC line (see Serialize.text).
+          j.field "target", Serialize.text(r.target)
           j.field "http2", r.http2?
           j.field "auto_content_length", r.auto_content_length?
           j.field "flow_id", r.flow_id if r.flow_id
-          j.field "name", r.name if r.name
-          j.field "tags", r.tags if r.tags
-          j.field "sni", r.sni if r.sni
+          j.field "name", Serialize.text(r.name) if r.name
+          j.field "tags", Serialize.text(r.tags) if r.tags
+          j.field "sni", Serialize.text(r.sni) if r.sni
           r_request_text = String.new(r.request).scrub
           emit_capped_text(j, "request", Serialize.redact_head(r_request_text, include_sensitive)) if include_content
 
@@ -254,7 +256,7 @@ module Gori
           end
 
           if err = r.response_error
-            j.field "last_error", err
+            j.field "last_error", Serialize.text(err)
           end
           if d = r.response_duration_us
             j.field "last_duration_us", d
@@ -267,7 +269,7 @@ module Gori
             end
             if resp
               j.field "last_status", resp.status
-              j.field "last_reason", resp.reason
+              j.field "last_reason", Serialize.text(resp.reason)
             end
             j.field "last_response_head", Serialize.redact_head_opt(Serialize.head_text(head), include_sensitive) if include_content
           end

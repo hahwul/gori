@@ -252,10 +252,22 @@ module Gori
         j.field("id") { id ? id.to_json(j) : j.null }
       end
 
+      # Last line of defence for the transport's UTF-8 contract. Every emit site that
+      # touches outside-origin text already routes through `Serialize.text`; this catches
+      # the one a future change forgets. A single invalid byte anywhere in the payload
+      # makes a strict client reject the WHOLE line, so a lossy U+FFFD in one field beats
+      # losing the response. `valid_encoding?` is ~13x cheaper than `scrub` and the
+      # overwhelmingly common case, so the scrub only runs when something slipped through.
+      private def wire_safe(payload : String) : String
+        return payload if payload.valid_encoding?
+        Log.warn { "mcp: response carried invalid UTF-8; scrubbed at the transport (an emit site is missing Serialize.text)" }
+        payload.scrub
+      end
+
       private def send(payload : String) : Nil
         return if @closed
-        @output.puts(payload) # newline framing
-        @output.flush         # or the client blocks on the unterminated line
+        @output.puts(wire_safe(payload)) # newline framing
+        @output.flush                    # or the client blocks on the unterminated line
       rescue ex : IO::Error
         # The client is gone (broken pipe). Stop writing and let the run loop end
         # cleanly instead of unwinding an unhandled exception out of a handler.

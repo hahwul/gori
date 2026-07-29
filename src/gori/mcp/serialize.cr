@@ -30,6 +30,22 @@ module Gori
         SENSITIVE_HEADERS.includes?(name.strip.downcase)
       end
 
+      # Every string that ORIGINATED OUTSIDE gori — a captured request target/host, a
+      # response header, a regex-extracted fuzz capture, a crawled URL — must pass through
+      # here before it reaches JSON::Builder. The stdio JSON-RPC transport carries UTF-8
+      # text, but `Codec::Http1.parse_request_head` builds `target`/`method` with a plain
+      # `String.new` over raw wire bytes (no scrub), and SQLite round-trips those bytes
+      # verbatim — so a request line like `GET /caf\xE9 HTTP/1.1` puts an invalid byte on
+      # the wire and a strict client rejects the WHOLE response line, not just that field.
+      # `scrub` returns self (zero allocation) for the overwhelmingly common valid case.
+      def self.text(s : String) : String
+        s.scrub
+      end
+
+      def self.text(s : Nil) : Nil
+        nil
+      end
+
       # Replace the value of any sensitive header line in a raw HTTP head/request
       # with [REDACTED], leaving names, the request/status line, and the body
       # untouched. Line endings are preserved. Returns `text` verbatim when
@@ -62,17 +78,17 @@ module Gori
           j.field "id", row.id
           j.field "created_at", row.created_at
           j.field "created_at_iso", unix_micros_iso(row.created_at)
-          j.field "scheme", row.scheme
-          j.field "method", row.method
-          j.field "host", row.host
+          j.field "scheme", text(row.scheme)
+          j.field "method", text(row.method)
+          j.field "host", text(row.host)
           j.field "port", row.port
-          j.field "target", row.target
+          j.field "target", text(row.target)
           j.field "status", row.status
           j.field "state", row.state.to_s.downcase
           j.field "size", row.size
           j.field "response_size", row.response_size
           j.field "duration_us", row.duration_us
-          j.field "content_type", row.content_type
+          j.field "content_type", text(row.content_type)
         end
       end
 
@@ -82,14 +98,14 @@ module Gori
           j.field "id", row.id
           j.field "created_at", row.created_at
           j.field "created_at_iso", unix_micros_iso(row.created_at)
-          j.field "source", row.source
-          j.field "kind", row.kind
-          j.field "level", row.level
-          j.field "message", row.message
-          j.field "goto_tab", row.goto_tab
+          j.field "source", text(row.source)
+          j.field "kind", text(row.kind)
+          j.field "level", text(row.level)
+          j.field "message", text(row.message)
+          j.field "goto_tab", text(row.goto_tab)
           j.field "goto_session_id", row.goto_session_id
           j.field "flow_id", row.flow_id
-          j.field "payload", row.payload
+          j.field "payload", text(row.payload)
         end
       end
 
@@ -123,12 +139,12 @@ module Gori
         preview = "#{preview[0, 1024]}…" if preview.size > 1024
         j.object do
           j.field "item_id", row.item_id
-          j.field "kind", row.kind
-          j.field "method", row.method
-          j.field "host", row.host
+          j.field "kind", text(row.kind)
+          j.field "method", text(row.method)
+          j.field "host", text(row.host)
           j.field "port", row.port
-          j.field "scheme", row.scheme
-          j.field "target", row.target
+          j.field "scheme", text(row.scheme)
+          j.field "target", text(row.target)
           j.field "flow_id", row.flow_id if row.flow_id
           j.field "held_at_ms", row.held_at_ms
           j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
@@ -148,12 +164,12 @@ module Gori
         head, body = head_and_body(row.raw)
         j.object do
           j.field "item_id", row.item_id
-          j.field "kind", row.kind
-          j.field "method", row.method
-          j.field "host", row.host
+          j.field "kind", text(row.kind)
+          j.field "method", text(row.method)
+          j.field "host", text(row.host)
           j.field "port", row.port
-          j.field "scheme", row.scheme
-          j.field "target", row.target
+          j.field "scheme", text(row.scheme)
+          j.field "target", text(row.target)
           j.field "flow_id", row.flow_id if row.flow_id
           j.field "held_at_ms", row.held_at_ms
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
@@ -177,15 +193,17 @@ module Gori
       def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
         j.object do
           j.field "index", r.index
-          j.field("payloads") { j.array { r.payloads.each { |p| j.string p } } }
+          # payloads can come from a caller-supplied wordlist FILE (arbitrary bytes) and
+          # `extracted` is a regex capture out of the RESPONSE body — both are outside-origin.
+          j.field("payloads") { j.array { r.payloads.each { |p| j.string text(p) } } }
           j.field "position", r.position
           j.field "status", r.status
           j.field "length", r.length
           j.field "words", r.words
           j.field "lines", r.lines
           j.field "duration_us", r.duration_us
-          j.field "error", r.error
-          j.field "extracted", r.extracted
+          j.field "error", text(r.error)
+          j.field "extracted", text(r.extracted)
           # Present when record_history recorded this result as a History flow —
           # fetch its full request/response with get_flow (headers redacted).
           j.field "flow_id", flow_id if flow_id
@@ -209,17 +227,17 @@ module Gori
           j.field "id", row.id
           j.field "created_at", row.created_at
           j.field "created_at_iso", unix_micros_iso(row.created_at)
-          j.field "scheme", row.scheme
-          j.field "method", row.method
-          j.field "host", row.host
+          j.field "scheme", text(row.scheme)
+          j.field "method", text(row.method)
+          j.field "host", text(row.host)
           j.field "port", row.port
-          j.field "target", row.target
-          j.field "http_version", detail.http_version
+          j.field "target", text(row.target)
+          j.field "http_version", text(detail.http_version)
           j.field "status", row.status
           j.field "state", row.state.to_s.downcase
           j.field "duration_us", row.duration_us
-          j.field "content_type", row.content_type
-          j.field "error", detail.error
+          j.field "content_type", text(row.content_type)
+          j.field "error", text(detail.error)
           j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
           emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?, body_cap, body_omit)
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
@@ -316,8 +334,8 @@ module Gori
               j.array do
                 events.first(SSE_EVENTS_MAX).each do |e|
                   j.object do
-                    j.field "type", e.type
-                    j.field "id", e.id
+                    j.field "type", text(e.type)
+                    j.field "id", text(e.id)
                     j.field "retry", e.retry
                     data = e.data.scrub
                     cut = data.size > SSE_DATA_MAX

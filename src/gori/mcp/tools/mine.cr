@@ -135,11 +135,12 @@ module Gori
 
       private def mine_finding_json(j : JSON::Builder, f : Miner::Finding) : Nil
         j.object do
-          j.field "name", f.name
+          # name comes from a caller-supplied wordlist FILE (arbitrary bytes on disk).
+          j.field "name", Serialize.text(f.name)
           j.field "location", f.location.label
           j.field "evidence", f.evidence.label
           j.field "confidence", f.confidence.label
-          j.field "canary", f.canary
+          j.field "canary", Serialize.text(f.canary)
           j.field "status", f.status
           j.field "delta", f.delta
         end

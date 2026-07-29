@@ -80,11 +80,13 @@ module Gori
         j.field "effective_request" do
           j.object do
             j.field "scheme", built.scheme
-            j.field "host", built.host
+            j.field "host", Serialize.text(built.host)
             j.field "port", built.port
-            j.field "method", parts[0]? || ""
-            j.field "target", parts[1]? || "/"
-            j.field "http_version", http2 ? "HTTP/2" : (parts[2]? || "HTTP/1.1")
+            # A `raw` send is byte-exact by contract (P7), so the request line here can hold
+            # any octet the caller typed — scrub the ECHO without touching the wire bytes.
+            j.field "method", Serialize.text(parts[0]? || "")
+            j.field "target", Serialize.text(parts[1]? || "/")
+            j.field "http_version", http2 ? "HTTP/2" : Serialize.text(parts[2]? || "HTTP/1.1")
           end
         end
       end
@@ -274,8 +276,10 @@ module Gori
             end
             if response = result.response
               j.field "status", response.status
-              j.field "reason", response.reason
-              j.field "http_version", response.version
+              # The status line and every header come straight off the REMOTE socket —
+              # the least trustworthy source on this surface for JSON-RPC UTF-8 validity.
+              j.field "reason", Serialize.text(response.reason)
+              j.field "http_version", Serialize.text(response.version)
               redacted = false
               j.field "headers" do
                 j.array do
@@ -283,8 +287,8 @@ module Gori
                     sensitive = sensitive_header?(header.name) && !include_sensitive_headers
                     redacted ||= sensitive
                     j.object do
-                      j.field "name", header.name
-                      j.field "value", sensitive ? "[REDACTED]" : header.value
+                      j.field "name", Serialize.text(header.name)
+                      j.field "value", sensitive ? "[REDACTED]" : Serialize.text(header.value)
                     end
                   end
                 end

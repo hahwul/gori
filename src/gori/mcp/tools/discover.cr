@@ -218,11 +218,11 @@ module Gori
 
       private def discover_finding_json(j : JSON::Builder, f : Discover::Finding) : Nil
         j.object do
-          j.field "url", f.url
-          j.field "method", f.method
+          j.field "url", Serialize.text(f.url)
+          j.field "method", Serialize.text(f.method)
           j.field "status", f.status
           j.field "length", f.length
-          j.field "content_type", f.content_type
+          j.field "content_type", Serialize.text(f.content_type)
           j.field "source", f.source.label
           j.field "depth", f.depth
           j.field "confidence", f.confidence.round(2)

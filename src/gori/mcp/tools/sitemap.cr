@@ -21,12 +21,12 @@ module Gori
           j.array do
             entries.each do |e|
               j.object do
-                j.field "scheme", e.scheme
-                j.field "host", e.host
+                j.field "scheme", Serialize.text(e.scheme)
+                j.field "host", Serialize.text(e.host)
                 j.field "port", e.port
-                j.field "http_version", e.http_version
-                j.field "method", e.method
-                j.field "target", e.target
+                j.field "http_version", Serialize.text(e.http_version)
+                j.field "method", Serialize.text(e.method)
+                j.field "target", Serialize.text(e.target)
                 j.field "statuses", e.statuses
                 j.field "count", e.count
                 j.field "success_count", e.ok
@@ -38,7 +38,7 @@ module Gori
                 # The operator's free-text memo for this endpoint, when one is pinned. The key
                 # is the tree's node path, which includes any query string.
                 if tag = tags[{e.host, sitemap_tag_path(e.target)}]?
-                  j.field "tag", tag
+                  j.field "tag", Serialize.text(tag)
                 end
               end
             end
@@ -84,9 +84,9 @@ module Gori
             tags.each do |(hst, path), tag|
               next if host && hst != host
               j.object do
-                j.field "host", hst
-                j.field "path", path
-                j.field "tag", tag
+                j.field "host", Serialize.text(hst)
+                j.field "path", Serialize.text(path)
+                j.field "tag", Serialize.text(tag)
               end
             end
           end
@@ -118,7 +118,11 @@ module Gori
         Result.new(JSON.build do |j|
           j.array do
             entries.each do |(host, method, target)|
-              j.object { j.field "host", host; j.field "method", method; j.field "target", target }
+              j.object do
+                j.field "host", Serialize.text(host)
+                j.field "method", Serialize.text(method)
+                j.field "target", Serialize.text(target)
+              end
             end
           end
         end)

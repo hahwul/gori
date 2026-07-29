@@ -2857,3 +2857,66 @@ describe "code-review follow-ups" do
     end
   end
 end
+
+# A captured request line is parsed with a plain `String.new` over wire bytes (no scrub) and
+# SQLite round-trips those bytes verbatim, so anything derived from captured traffic can be
+# invalid UTF-8. The stdio JSON-RPC transport carries UTF-8 TEXT: one bad byte anywhere makes
+# a strict client reject the entire response line, not just the offending field.
+private def seed_invalid_utf8_flow(store) : Int64
+  bad_target = String.new(Bytes[0x2f, 0x63, 0x61, 0x66, 0xe9]) # "/caf\xE9" — not valid UTF-8
+  bad_target.valid_encoding?.should be_false
+  store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: bad_target, http_version: "HTTP/1.1",
+    head: "GET #{bad_target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+end
+
+describe "MCP JSON-RPC UTF-8 validity" do
+  # Assert on the tool's RAW payload string, never on a parsed field: Crystal's JSON parser
+  # reassembles an escaped string char-by-char and silently turns an invalid byte into
+  # U+FFFD, so `JSON.parse(...)["target"]` reports clean text for a payload that is NOT.
+  # Going through Tools (not Server) also bypasses the transport safety net, so these pin
+  # the per-site Serialize.text calls rather than the net that backstops them.
+  it "keeps an invalid-UTF-8 captured target out of list_history's payload" do
+    with_store do |store|
+      seed_invalid_utf8_flow(store)
+      # Round-trip check: the store really does hand the invalid bytes back.
+      store.recent_flows(10, nil, nil).first.target.valid_encoding?.should be_false
+
+      payload = tools_for(store).call("list_history", JSON.parse("{}")).text
+      payload.valid_encoding?.should be_true
+      payload.should contain("caf")
+    end
+  end
+
+  it "keeps it out of list_sitemap's and get_flow's payloads" do
+    with_store do |store|
+      id = seed_invalid_utf8_flow(store)
+      tools = tools_for(store)
+      tools.call("list_sitemap", JSON.parse("{}")).text.valid_encoding?.should be_true
+      tools.call("get_flow", JSON.parse(%({"id":#{id}}))).text.valid_encoding?.should be_true
+    end
+  end
+
+  it "keeps a repeater seeded from a captured request out of its payload" do
+    with_store do |store|
+      bad_host = String.new(Bytes[0x61, 0xe9, 0x2e, 0x74, 0x65, 0x73, 0x74]) # "a\xE9.test"
+      store.insert_repeater("https://#{bad_host}/", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      tools_for(store).call("get_repeater_context", JSON.parse("{}")).text.valid_encoding?.should be_true
+    end
+  end
+
+  it "scrubs at the transport as a last resort so the whole line stays parseable" do
+    with_store do |store|
+      seed_invalid_utf8_flow(store)
+      input = IO::Memory.new(%({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{}}}) + "\n")
+      output = IO::Memory.new
+      Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+        input: input, output: output).run
+      # The emitted BYTES, not just the decoded field: this is the transport contract.
+      output.to_s.each_line.reject(&.strip.empty?).each do |line|
+        line.valid_encoding?.should be_true
+      end
+    end
+  end
+end
