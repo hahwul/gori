@@ -13,6 +13,7 @@ require "./active/path_normalization_bypass"
 require "./active/url_rewrite_bypass"
 require "./active/ssti"
 require "./active/nextjs_action_no_auth"
+require "./active/custom_active_rule"
 require "../outbound"
 require "../scope"
 require "../fuzz/engine"
@@ -70,10 +71,15 @@ module Gori
       # `disabled` holds the RuleInfo#ids the operator turned off in the Rules sub-tab — the same
       # set the TUI analyzer filters on before enqueueing (analyzer.cr's maybe_enqueue_active), so
       # a headless scan honours that config too instead of silently running every built-in.
+      # The empty "no user rules" list — a shared constant so the common no-custom call path never
+      # allocates. Mirrors NO_DISABLED / Passive::NO_CUSTOM.
+      NO_CUSTOM = [] of CustomActiveRule
+
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
                        timeout : Time::Span = 10.seconds, *, outbound : Outbound,
                        backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
-                       disabled : Set(String) = NO_DISABLED) : Array(Detection)
+                       disabled : Set(String) = NO_DISABLED,
+                       custom : Array(CustomActiveRule) = NO_CUSTOM) : Array(Detection)
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
@@ -86,7 +92,11 @@ module Gori
                    Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout)
                  end
 
-        RULES.each do |rule|
+        # Built-ins first, then the operator's enabled custom active rules (each adapted to the
+        # same Rule contract, so the send/confirm loop is identical). A disabled custom rule is
+        # skipped at load, and its RuleInfo#id also honours the Rules sub-tab disabled set.
+        rules = RULES.each.chain(custom.select(&.enabled).map(&.to_rule).each)
+        rules.each do |rule|
           next if disabled.includes?(rule.info.id)
           plan = rule.plan(detail, opts)
           next unless plan
