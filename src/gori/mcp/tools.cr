@@ -1812,15 +1812,6 @@ module Gori
         end
       end
 
-      private def fuzz_origin(h, default_target : String?) : Fuzz::Origin
-        url_raw = str(h, "url").presence || default_target
-        raise FuzzArgError.new("provide a 'url' target (scheme://host) or a flow_id that carries one") unless url_raw
-        url = Env.expand(url_raw)
-        scheme, host, port = Repeater::FlowRequest.parse_target(url)
-        raise FuzzArgError.new("could not parse a host from '#{url}'") if host.empty?
-        Fuzz::Origin.new(scheme, host, port)
-      end
-
       private def fuzz_timeout(h) : Time::Span?
         int(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end

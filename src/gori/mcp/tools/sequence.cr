@@ -182,8 +182,7 @@ module Gori
 
       # {raw request bytes, the seeding flow's target, http2} for a collection. Deliberately
       # UNEXPANDED — `Sequencer::Plan.build` owns `Env.expand`, and expanding here as well
-      # (as the shared `mine_request_source` does for the miner) would resolve a var whose
-      # value itself contains a `$TOKEN` twice.
+      # would resolve a var whose value itself contains a `$TOKEN` twice.
       private def sequence_request_source(h) : {Bytes, String?, Bool}
         if t = str(h, "template")
           return {t.to_slice, nil, false} unless t.strip.empty?

@@ -193,9 +193,9 @@ module Gori
       end
 
       # {raw request text (BEFORE Env expansion — Miner::Plan owns that), default target,
-      # http2}. The target is handed over raw too: expanding it here AND in fuzz_origin was
-      # a double pass, so a var whose value contained a token resolved one level deeper on
-      # MCP than on the CLI.
+      # http2}. The target is handed over raw too: expanding it here as well as in the plan
+      # builder was a double pass, so a var whose value contained a token resolved one level
+      # deeper on MCP than on the CLI.
       private def mine_template_source(h) : {String, String?, Bool}
         if t = str(h, "template")
           return {t, nil, false} unless t.strip.empty?
@@ -205,22 +205,6 @@ module Gori
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
           return {String.new(built.bytes), built.target, built.http2}
-        end
-        raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
-      end
-
-      # The pre-expanded Bytes shape, still used by `sequence_start` (which assembles its
-      # engine by hand). `mine_start` goes through `mine_template_source` + Miner::Plan
-      # instead, so that Env.expand runs exactly once for a mining run.
-      private def mine_request_source(h) : {Bytes, String?, Bool}
-        if t = str(h, "template")
-          return {Env.expand_wire(t), nil, false} unless t.strip.empty?
-        end
-        if id = int(h, "flow_id")
-          detail = store.get_flow(id)
-          raise FuzzArgError.new("no flow with id #{id}") unless detail
-          built = Repeater::FlowRequest.build(detail)
-          return {Env.expand_wire(String.new(built.bytes)), Env.expand(built.target), built.http2}
         end
         raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
       end
