@@ -2015,19 +2015,91 @@ describe "Gori::Probe::Active (safety + coverage)" do
     end
   end
 
-  it "rates an HTML reflection Medium and a non-HTML (JSON) reflection Low" do
+  # The canary carries a `"'<>` marker; the grade is decided by which of those characters came
+  # back VERBATIM, not by "the value came back" (which is true of correctly-escaped output too).
+  it "grades a reflection by which marker characters survived" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
       plan = Gori::Probe::Active.plan(detail).not_nil!
       canary = plan.params.first.canary
-      html = Gori::Repeater::Result.new(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
-        "<p>#{canary}</p>".to_slice, nil, 1_i64)
-      Gori::Probe::Active.detections(plan, html, detail).first.severity.should eq(Gori::Store::Severity::Medium)
-      json = Gori::Repeater::Result.new(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
-        %({"q":"#{canary}"}).to_slice, nil, 1_i64)
-      Gori::Probe::Active.detections(plan, json, detail).first.severity.should eq(Gori::Store::Severity::Low)
+      raw = Gori::Probe::Active::ReflectedParam.probe_value(canary)
+      html_head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+      res = ->(head : String, body : String) do
+        Gori::Repeater::Result.new(head.to_slice, body.to_slice, nil, 1_i64)
+      end
+
+      # `<` came back raw in HTML → tag injection possible → the historic Medium.
+      d = Gori::Probe::Active.detections(plan, res.call(html_head, "<p>#{raw}</p>"), detail).first
+      d.severity.should eq(Gori::Store::Severity::Medium)
+      d.title.should contain("unencoded")
+
+      # Same raw echo in a JSON body: not an HTML sink → Low.
+      json_head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+      Gori::Probe::Active.detections(plan, res.call(json_head, %({"q":"#{raw}"})), detail)
+        .first.severity.should eq(Gori::Store::Severity::Low)
+
+      # Quotes survived but `<` was escaped → attribute context only → Low.
+      attr_echo = %(<a title="#{canary}"'&lt;&gt;">x</a>)
+      d2 = Gori::Probe::Active.detections(plan, res.call(html_head, attr_echo), detail).first
+      d2.severity.should eq(Gori::Store::Severity::Low)
+      d2.title.should contain("attribute context")
+
+      # Everything escaped → a reflection POINT, not a vulnerability → Info, not Medium.
+      escaped = "<p>#{canary}&quot;&#39;&lt;&gt;</p>"
+      d3 = Gori::Probe::Active.detections(plan, res.call(html_head, escaped), detail).first
+      d3.severity.should eq(Gori::Store::Severity::Info)
+      d3.title.should contain("escaped or filtered")
+    end
+  end
+
+  # A value routinely lands in several places in one response, and the ESCAPED one is as likely
+  # to come first as the raw one — a value is only as safe as its weakest sink.
+  it "grades on the weakest sink when the value is reflected more than once" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      plan = Gori::Probe::Active.plan(detail).not_nil!
+      canary = plan.params.first.canary
+      raw = Gori::Probe::Active::ReflectedParam.probe_value(canary)
+      # Escaped in the page text FIRST, raw inside a later script block.
+      body = "<p>#{canary}&quot;&#39;&lt;&gt;</p><script>var q=\"#{raw}\";</script>"
+      d = Gori::Probe::Active.detections(plan,
+        Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
+          body.to_slice, nil, 1_i64), detail).first
+      d.severity.should eq(Gori::Store::Severity::Medium)
+      d.title.should contain("unencoded")
+    end
+  end
+
+  # Same reasoning across the head/body split: a header echo must not mask a raw body echo.
+  it "grades on the weakest sink across the response head and body" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      plan = Gori::Probe::Active.plan(detail).not_nil!
+      canary = plan.params.first.canary
+      raw = Gori::Probe::Active::ReflectedParam.probe_value(canary)
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Echo: #{canary}\r\n\r\n"
+      d = Gori::Probe::Active.detections(plan,
+        Gori::Repeater::Result.new(head.to_slice, "<p>#{raw}</p>".to_slice, nil, 1_i64), detail).first
+      d.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  # The marker has to reach the server as real characters, and the canary must still be findable.
+  it "sends the marker URL-encoded in the query and JSON-escaped in a body" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      plan = Gori::Probe::Active.plan(detail).not_nil!
+      canary = plan.params.first.canary
+      req = String.new(plan.request)
+      req.should contain("q=#{canary}%22%27%3C%3E")
+      req.should_not contain("<") # nothing raw on the request line
+
+      body_detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api", method: "POST",
+        req_headers: "Content-Type: application/json\r\n", req_body: %({"q":"hi"}), content_type: nil)
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+      jplan = Gori::Probe::Active::ReflectedParam.new.plan(body_detail, unsafe).not_nil!
+      jc = jplan.params.first.canary
+      String.new(jplan.request).should contain(%(#{jc}\\"'<>))
     end
   end
 
@@ -2833,6 +2905,42 @@ describe "Gori::Probe::Active::BackslashPowered" do
       probe.detections_all(plan,
         [resp.call(200, "welcome"), resp.call(200, "You have an error in your SQL syntax"),
          resp.call(500, ""), resp.call(200, "welcome")], detail).should be_empty
+    end
+  end
+
+  # The technique's central signal is a body that CHANGED, which a {status, error-class}
+  # fingerprint alone could not see: same 200, no recognised error string, completely different
+  # page read as "identical". Body length joins the fingerprint only when the two baselines
+  # proved the endpoint reproduces its own length.
+  it "fires on a body that changed shape with no status flip and no error string" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      # Both baselines are byte-identical → length is trustworthy → the `\` leg's shorter body
+      # is a real difference, and the `\\` leg reverting to baseline is the escape asymmetry.
+      dets = probe.detections_all(plan,
+        [resp.call(200, "the full rendered page"), resp.call(200, "the full rendered page"),
+         resp.call(200, "oops"), resp.call(200, "the full rendered page")], detail)
+      dets.size.should eq(1)
+      dets.first.evidence.not_nil!.should contain("body")
+    end
+  end
+
+  # …but a length-jittery endpoint must NOT get the sharper comparison, or every page with a
+  # timestamp in it becomes a finding. It falls back to status + error-class, not to nothing.
+  it "falls back to the status/error fingerprint when the baseline length is not reproducible" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      # Baselines differ ONLY in length → length is dropped from the fingerprint → a `\` leg that
+      # differs only in length is no longer a difference.
+      probe.detections_all(plan,
+        [resp.call(200, "rendered at 10:00:00"), resp.call(200, "rendered at 10:00:01x"),
+         resp.call(200, "short"), resp.call(200, "rendered at 10:00:02")], detail).should be_empty
+      # The status flip still fires on that same jittery endpoint — the check is not lost.
+      probe.detections_all(plan,
+        [resp.call(200, "rendered at 10:00:00"), resp.call(200, "rendered at 10:00:01x"),
+         resp.call(500, "boom"), resp.call(200, "rendered at 10:00:02")], detail).size.should eq(1)
     end
   end
 

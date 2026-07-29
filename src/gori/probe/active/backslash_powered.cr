@@ -110,15 +110,15 @@ module Gori
         # grouped Detection per host, listing the affected params.
         # results = [baseline, baseline2, single_0, double_0, single_1, double_1, …].
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
-          base = stable_baseline(results) || return [] of Detection
+          base, with_size = stable_baseline(results) || return [] of Detection
           hits = [] of String
           plan.params.each_with_index do |param, i|
             single = results[2 + 2 * i]?
             double = results[3 + 2 * i]?
             next unless single && double
             next unless single.ok? && double.ok? # a failed leg ⇒ incomplete comparison, skip
-            sa = attrs(single)
-            da = attrs(double)
+            sa = attrs(single, with_size)
+            da = attrs(double, with_size)
             # The asymmetry that marks an escape being interpreted. A reflecting/echoing endpoint
             # changes for BOTH the `\` and `\\` forms (no asymmetry) and is never flagged here.
             hits << "#{param.name}#{describe_break(base, sa)}" if sa != base && da == base
@@ -189,24 +189,37 @@ module Gori
           dup.join('&')
         end
 
-        # The baseline fingerprint — but only when the endpoint reproduced it on a SECOND identical
-        # request (results[0] and results[1]). nil when either baseline is missing or failed to
-        # send, or when the two disagree: an endpoint whose answer to one request varies on its own
-        # cannot support a difference test, so every asymmetry below would be a coin flip. Returning
-        # nil makes the rule decline rather than guess.
-        private def stable_baseline(results : Array(Repeater::Result)) : {Int32, String?}?
+        # {baseline fingerprint, whether body LENGTH is part of it} — but only when the endpoint
+        # reproduced that fingerprint on a SECOND identical request (results[0] and results[1]).
+        # nil when either baseline is missing or failed to send, or when the two disagree even
+        # ignoring length: an endpoint whose answer to one request varies on its own cannot support
+        # a difference test, so every asymmetry below would be a coin flip.
+        #
+        # The length decision is what the second baseline buys beyond the stability check. Status +
+        # error-class alone missed the technique's central signal — a body that changes COMPLETELY
+        # with no status flip and no recognised error string read as "identical" — but adding length
+        # blindly would have fired on every page with a timestamp in it. Asking the endpoint whether
+        # its own length is reproducible answers that per target instead of guessing globally: a
+        # length-stable endpoint gets the sharper comparison, a jittery one falls back to the
+        # historic status + error-class fingerprint rather than losing the check entirely.
+        private def stable_baseline(results : Array(Repeater::Result)) : { {Int32, String?, Int32}, Bool }?
           first = results[0]?
           second = results[1]?
           return nil unless first && first.ok? && second && second.ok?
-          base = attrs(first)
-          attrs(second) == base ? base : nil
+          sized = attrs(first, true)
+          return {sized, true} if sized == attrs(second, true)
+          blind = attrs(first, false)
+          blind == attrs(second, false) ? {blind, false} : nil
         end
 
-        # A comparable response fingerprint: status code + a coarse interpreter-error class (nil when
-        # the body shows none). Two responses are "the same" iff both match — deliberately NOT a
-        # byte diff, so ordinary dynamic-content jitter doesn't read as a difference.
-        private def attrs(result : Repeater::Result) : {Int32, String?}
-          {response_status(result), error_signature(result)}
+        # A comparable response fingerprint: status code, a coarse interpreter-error class (nil when
+        # the body shows none), and — when `with_size` — the decoded body length. Two responses are
+        # "the same" iff all three match. Still not a byte diff: length moves only when the body
+        # really changed shape, so ordinary same-length content jitter doesn't read as a difference.
+        # `with_size: false` substitutes a constant, so a jittery endpoint compares on the other two.
+        private def attrs(result : Repeater::Result, with_size : Bool) : {Int32, String?, Int32}
+          body = decoded_body(result)
+          {response_status(result), error_signature_of(body), with_size ? body.bytesize : -1}
         end
 
         private def response_status(result : Repeater::Result) : Int32
@@ -229,8 +242,7 @@ module Gori
                        "syntaxerror", "parse error", "invalid escape", "eol while scanning"],
         }
 
-        private def error_signature(result : Repeater::Result) : String?
-          body = decoded_body(result)
+        private def error_signature_of(body : String) : String?
           return nil if body.empty?
           hay = body.downcase
           ERROR_SIGNATURES.each do |label, needles|
@@ -250,11 +262,15 @@ module Gori
 
         # A short human tag for the evidence line: prefer the interpreter-error class, else the
         # status flip, else nothing (a difference the fingerprint can't name).
-        private def describe_break(base : {Int32, String?}, single : {Int32, String?}) : String
+        private def describe_break(base : {Int32, String?, Int32}, single : {Int32, String?, Int32}) : String
           if err = single[1]
             " (#{err} error)"
           elsif single[0] != base[0]
             " (#{base[0]}→#{single[0]})"
+          elsif single[2] >= 0 && single[2] != base[2]
+            # Same status, no recognised error string, but the body changed shape — the case the
+            # old status-only fingerprint reported as "identical" and silently dropped.
+            " (body #{base[2]}→#{single[2]} bytes)"
           else
             ""
           end
