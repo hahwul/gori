@@ -396,6 +396,16 @@ describe Gori::Tui::Pet do
     Mascot::FACES.map(&.to_s).to_a.sort.should eq(Gori::Settings::PET_FACES.to_a.sort)
     Gori::Settings::PET_FACES.should contain(Gori::Settings::DEFAULT_PET_FACE)
     Mascot::FACES.should contain(Gori::Settings.pet_face_sym)
+    # The art carries its OWN default, on Frame and on the two glyph lookups, so that
+    # "unspecified" is answerable without reaching for Settings. Nothing makes those two
+    # defaults agree — so if they ever drift, a Frame built without a face silently draws
+    # the repertoire the operator did not choose.
+    # Derived from the constants, never from live Settings — a sibling spec that leaves
+    # pet_face set would otherwise decide whether this one passes.
+    default_face = Mascot::Frame.new.face
+    default_face.to_s.should eq(Gori::Settings::DEFAULT_PET_FACE)
+    Mascot.mouth(:idle).should eq(Mascot.mouth(:idle, default_face))
+    Mascot.cavity(:idle, :none).should eq(Mascot.cavity(:idle, :none, default_face))
   end
 
   # The bar placement is a SLICE of the body sprite, not a second art table — if these ever
@@ -497,6 +507,36 @@ describe Gori::Tui::Pet do
       backend.row(rect.y - 1).strip.should be_empty
       (Mascot::H).times do |i|
         backend.row(rect.y + i)[0, rect.x - 1].strip.should be_empty
+      end
+    end
+
+    # The bug this reproduces: the gutter was sized for the SPRITE, but Pet.draw claims a
+    # column of plate either side of it, so the right strip landed on the nested pane rule
+    # and Repeater's Response pane lost its right border for her three rows. The outer
+    # card's border one column further out survived, which is what made it read as a
+    # rendering glitch rather than as occlusion.
+    #
+    # Driven by painting the rules FIRST and asserting they survive, rather than by pinning
+    # the gutter to a number: the number is the thing that was wrong.
+    it "leaves both stacked pane rules intact, on the right and at the bottom" do
+      backend = MemoryBackend.new(80, 24)
+      screen = Screen.new(backend)
+      # A sub-tabbed tab's shape: the outer card's rule on the body edge, and a nested
+      # Frame.card's one cell inside it. Discover, Sitemap and Repeater all draw this.
+      [1, 2].each do |inset|
+        (body.y...body.bottom).each { |y| screen.cell(body.right - inset, y, '│', Theme.text, Theme.bg) }
+        (body.x...body.right).each { |x| screen.cell(x, body.bottom - inset, '─', Theme.text, Theme.bg) }
+      end
+      Pet.draw(screen, body, Mascot::Frame.new)
+      rect = Pet.place(body).not_nil!
+      Mascot::H.times do |i|
+        row = backend.row(rect.y + i)
+        row[body.right - 1].should eq('│') # the outer card's rule
+        row[body.right - 2].should eq('│') # …and the nested pane's, the one she ate
+      end
+      [1, 2].each do |inset|
+        rule = backend.row(body.bottom - inset)
+        (rect.x - 1..rect.right).each { |x| rule[x].should eq('─') }
       end
     end
 

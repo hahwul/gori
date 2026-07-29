@@ -19,20 +19,20 @@ module Gori::Settings
   # bar form occludes nothing and needs no speech bubble: the status row already carries
   # the toast for exactly these notifications.
   DEFAULT_PET_PLACEMENT = "body" # "body" | "bar"
-  # Which glyph repertoire her face is drawn from. This is a FONT-COMPATIBILITY knob, not
-  # a second mascot: both faces are the same character with the same expressions, and only
-  # the cells a monospace font might not carry differ.
+  # Which glyph repertoire her face is drawn from. Both are the same character wearing the
+  # same expressions; they differ in exactly one cell, the resting mouth, and a spec pins
+  # that they differ in nothing else.
   #
-  # "soft" is the intended look. Its resting mouth is ᴗ (U+1D17), which most monospace
-  # cmaps lack — harmless on a desktop, where the terminal serves it from a fallback face
-  # at the same one-column advance, but a stripped container with no fallback pool has
-  # nowhere to serve it from and draws a box. "safe" spells the same expression with
-  # glyphs every monospace font ships, for exactly that case.
+  # "safe" spells it u — in every monospace cmap, so it renders identically everywhere.
+  # "soft" spells it ᴗ (U+1D17), a rounder cup that most monospace fonts lack. That is
+  # harmless on a desktop, where the terminal serves it from a fallback face at the same
+  # one-column advance, but a stripped container with no fallback pool has nowhere to
+  # serve it from and draws a box.
   #
-  # Default is "soft" because the fallback pool is there on every normal install; someone
-  # seeing a box can fix it in one keypress, whereas defaulting to "safe" would mean
-  # nobody ever sees the face as designed.
-  DEFAULT_PET_FACE = "soft" # "soft" | "safe"
+  # Default is "safe": it is the one that cannot fail, and it is the face the look was
+  # signed off on. "soft" is there for anyone who prefers the rounder mouth and knows
+  # their terminal will find it.
+  DEFAULT_PET_FACE = "safe" # "safe" | "soft"
 
   # All read live at the tick/draw sites, so a save takes effect on the next frame.
   class_property? pet : Bool = DEFAULT_PET
@@ -43,7 +43,7 @@ module Gori::Settings
 
   PET_MOTIONS    = {"lively", "calm"}
   PET_PLACEMENTS = {"body", "bar"}
-  PET_FACES      = {"soft", "safe"}
+  PET_FACES      = {"safe", "soft"}
 
   def self.pet_lively? : Bool
     pet_motion != "calm"
@@ -56,7 +56,7 @@ module Gori::Settings
   # The symbol Mascot draws with. Anything unrecognised has already been normalised on the
   # way in, so this only has to name the one non-default case.
   def self.pet_face_sym : Symbol
-    pet_face == "safe" ? :safe : :soft
+    pet_face == "soft" ? :soft : :safe
   end
 
   # Allowed motion modes; anything else falls back to the default.

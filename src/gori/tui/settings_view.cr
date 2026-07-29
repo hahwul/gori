@@ -127,7 +127,7 @@ module Gori::Tui
     # Pet: Miss Ring, the mascot in the body's bottom-right corner.
     PET_MOTION_CHOICES    = ["lively", "calm"]
     PET_PLACEMENT_CHOICES = ["body", "bar"]
-    PET_FACE_CHOICES      = ["soft", "safe"]
+    PET_FACE_CHOICES      = ["safe", "soft"]
     PET_FIELDS            = [
       Field.new("Pet (Miss Ring)",
         "show the mascot in the body's bottom-right corner — she covers three rows and repaints about once a second while you're at the keyboard — ←/→/space toggles",
@@ -136,7 +136,7 @@ module Gori::Tui
         "body = an 8x3 sprite in the tab body's bottom-right corner; bar = a one-row chip in the status row beside CPU/MEM, which covers nothing and drops the speech bubble — ←/→ cycles",
         choices: PET_PLACEMENT_CHOICES),
       Field.new("Face",
-        "soft = her mouth is ᴗ, which most monospace fonts borrow from a fallback face; safe spells the same smile with u, which every font ships — switch if you see a box — ←/→ cycles",
+        "safe = her mouth is u, which every monospace font ships; soft is the rounder ᴗ, which most fonts borrow from a fallback face and a bare container may draw as a box — ←/→ cycles",
         choices: PET_FACE_CHOICES),
       Field.new("Motion",
         "lively = blinks, winks, a glint sweep and the odd wave; calm halves the blink rate and drops the rest (SSH/battery) — ←/→ cycles",

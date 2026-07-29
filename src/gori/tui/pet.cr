@@ -50,14 +50,24 @@ module Gori::Tui
     #
     # Calibrated against the REAL floor: Layout.usable? refuses to render below 40x8, and
     # Layout insets by H_PADDING/V_PADDING, so the smallest body this can ever be handed is
-    # 36 wide — against which the sprite plus its gutter is 10 columns. MIN_W is therefore a
+    # 36 wide — against which the sprite plus its gutter is 11 columns. MIN_W is therefore a
     # defensive guard for non-Layout callers (and the specs) rather than something a user
     # reaches. Height is the live constraint (body.h is height - 6, so 6 needs 12 rows).
     MIN_W = 30
     MIN_H =  6
-    # Columns kept clear at the body's right edge: a pane hairline plus Frame.scroll_gauge's
-    # thumb column, so she never lands on a scrollbar.
-    GUTTER = 2
+    # Columns kept clear at the body's right edge: the same two rules BOTTOM_MARGIN clears
+    # (a pane hairline at body.right - 1 and a nested Frame.card's at body.right - 2, which
+    # doubles as Frame.scroll_gauge's thumb column), PLUS ONE for the plate strip.
+    #
+    # That last column is the whole reason this is 3 and not 2. Pet.draw claims a column of
+    # plate either side of the sprite, so the box it actually paints is Mascot::W + 2 wide,
+    # not Mascot::W — and a gutter sized for the sprite alone put the right strip exactly on
+    # the nested rule. It showed up as Repeater's Response pane losing its right border for
+    # the three rows she occupies, while the outer card's border one column further out
+    # survived: a single missing hairline, which reads as a rendering bug.
+    #
+    # The vertical side needs no such term because the plate strips are left/right only.
+    GUTTER = 3
     # …and TWO rows at the bottom, for the same reason. She occludes body content by
     # design, but a chewed BORDER reads as a rendering bug rather than as a mascot, and
     # tab bodies stack up to two rules there: the pane's own at body.bottom - 1, plus a

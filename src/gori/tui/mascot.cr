@@ -70,11 +70,12 @@ module Gori::Tui
     # 40-column pane without wrapping.
     #
     # What being outside the cmap DOES risk is tofu, and only where there is no fallback
-    # pool to reach for — a stripped container, not a desktop. That is the entire reason
-    # Settings.pet_face exists: :safe swaps this one cell for u, the same cup at the same
-    # x-height, which every monospace font carries. It is the ONLY difference between the
-    # two repertoires, so the expression, the ink grid and the 7-cell width are shared.
-    REST_MOUTH = {soft: 'ᴗ', safe: 'u'}
+    # pool to reach for — a stripped container, not a desktop. So u, the same cup at the
+    # same x-height and in every monospace cmap, is the DEFAULT (:safe), and ᴗ is the
+    # opt-in rounder one for anyone whose terminal will find it. That single cell is the
+    # ONLY difference between the two repertoires: the expression, the ink grid and the
+    # 7-cell width are shared, and a spec pins that.
+    REST_MOUTH = {safe: 'u', soft: 'ᴗ'}
 
     # CAP_HEIGHT_MARKS is what a spec checks this against — no mouth in EITHER repertoire
     # may be one, or it would ride up level with the lashes.
@@ -83,13 +84,13 @@ module Gori::Tui
 
     # Only the resting mouth varies by repertoire: the expressive poses are already spelled
     # in glyphs every font ships, so there is nothing for :safe to substitute.
-    def self.mouth(pose : Symbol, face : Symbol = :soft) : Char
+    def self.mouth(pose : Symbol, face : Symbol = :safe) : Char
       case pose
       when :happy then 'o' # delighted, open — x-height
       when :alert then '_' # tense, flat — baseline
       when :error then '_'
       when :doze  then '·' # slack — mid
-      else             face == :safe ? REST_MOUTH[:safe] : REST_MOUTH[:soft]
+      else             face == :soft ? REST_MOUTH[:soft] : REST_MOUTH[:safe]
       end
     end
 
@@ -99,7 +100,7 @@ module Gori::Tui
     WINKS = {:none, :left, :right}
     # The glyph repertoires, parallel to Settings::PET_FACES — a spec pins the two together,
     # since a name added on one side alone is a setting that silently draws the default.
-    FACES = {:soft, :safe}
+    FACES = {:safe, :soft}
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
     #   H hoop highlight (lit, upper-left)   R hoop base (brand gold)
@@ -148,7 +149,7 @@ module Gori::Tui
       mood : Symbol = :info,
       bubble : String? = nil,
       shake : Int32 = 0,    # -1 | 0 | 1 column offset (the :error reaction)
-      face : Symbol = :soft # glyph repertoire; see REST_MOUTH. Lives here so that changing
+      face : Symbol = :safe # glyph repertoire; see REST_MOUTH. Lives here so that changing
     # Settings.pet_face shows up in Pet#tick's field-wise frame compare like any other
     # visible change, and repaints on the next beat without a special case.
 
@@ -175,7 +176,7 @@ module Gori::Tui
     #
     # A wink only applies to the open-eyed idle pose — a winking :alert or :doze would
     # read as a rendering glitch rather than a gesture.
-    def self.cavity(pose : Symbol, wink : Symbol, face : Symbol = :soft) : {Char, Char, Char, Char, Char}
+    def self.cavity(pose : Symbol, wink : Symbol, face : Symbol = :safe) : {Char, Char, Char, Char, Char}
       l, r = eyes(pose)
       if pose == :idle
         l = '─' if wink == :left

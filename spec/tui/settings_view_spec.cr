@@ -513,7 +513,7 @@ describe SettingsView do
       ENV["GORI_HOME"] = dir
       Gori::Settings.pet = false
       Gori::Settings.pet_placement = "body"
-      Gori::Settings.pet_face = "soft"
+      Gori::Settings.pet_face = "safe"
       Gori::Settings.pet_motion = "lively"
       Gori::Settings.pet_notices = true
       v = SettingsView.new
@@ -522,7 +522,7 @@ describe SettingsView do
       v.move_field(1)
       v.toggle_or_move(1) # Placement: body → bar (choice)
       v.move_field(1)
-      v.toggle_or_move(1) # Face: soft → safe (choice)
+      v.toggle_or_move(1) # Face: safe → soft (choice)
       v.move_field(1)
       v.toggle_or_move(1) # Motion: lively → calm (choice)
       v.move_field(1)
@@ -531,8 +531,8 @@ describe SettingsView do
       Gori::Settings.pet?.should be_true
       Gori::Settings.pet_placement.should eq("bar")
       Gori::Settings.pet_in_bar?.should be_true
-      Gori::Settings.pet_face.should eq("safe")
-      Gori::Settings.pet_face_sym.should eq(:safe)
+      Gori::Settings.pet_face.should eq("soft")
+      Gori::Settings.pet_face_sym.should eq(:soft)
       Gori::Settings.pet_motion.should eq("calm")
       Gori::Settings.pet_lively?.should be_false
       Gori::Settings.pet_notices?.should be_false

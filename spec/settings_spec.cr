@@ -397,7 +397,7 @@ describe Gori::Settings do
       Gori::Settings.pet_placement = "bar"
       Gori::Settings.pet_motion = "calm"
       Gori::Settings.pet_notices = false
-      Gori::Settings.pet_face = "safe"
+      Gori::Settings.pet_face = "soft"
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).should contain(%("pet"))
 
@@ -405,14 +405,14 @@ describe Gori::Settings do
       Gori::Settings.pet_placement = "body"
       Gori::Settings.pet_motion = "lively"
       Gori::Settings.pet_notices = true
-      Gori::Settings.pet_face = "soft"
+      Gori::Settings.pet_face = "safe"
       Gori::Settings.load
       Gori::Settings.pet?.should be_true
       Gori::Settings.pet_placement.should eq("bar")
       Gori::Settings.pet_motion.should eq("calm")
       Gori::Settings.pet_notices?.should be_false # a stored false survives the reload
-      Gori::Settings.pet_face.should eq("safe")
-      Gori::Settings.pet_face_sym.should eq(:safe)
+      Gori::Settings.pet_face.should eq("soft")
+      Gori::Settings.pet_face_sym.should eq(:soft)
 
       # A hand-edited motion outside the known set falls back to the default.
       File.write(Gori::Settings.path, %({"pet":{"enabled":true,"motion":"bogus"}}))
@@ -429,7 +429,7 @@ describe Gori::Settings do
       File.write(Gori::Settings.path, %({"pet":{"enabled":true,"face":"kaomoji"}}))
       Gori::Settings.load
       Gori::Settings.pet_face.should eq(Gori::Settings::DEFAULT_PET_FACE)
-      Gori::Settings.pet_face_sym.should eq(:soft)
+      Gori::Settings.pet_face_sym.should eq(:safe)
 
       # Face alone off-default still writes the section — it is the only non-default field
       # here, so a guard that forgot it would drop the setting on the next save.
@@ -437,9 +437,9 @@ describe Gori::Settings do
       Gori::Settings.pet_placement = Gori::Settings::DEFAULT_PET_PLACEMENT
       Gori::Settings.pet_motion = Gori::Settings::DEFAULT_PET_MOTION
       Gori::Settings.pet_notices = Gori::Settings::DEFAULT_PET_NOTICES
-      Gori::Settings.pet_face = "safe"
+      Gori::Settings.pet_face = "soft"
       Gori::Settings.save
-      File.read(Gori::Settings.path).should contain(%("face": "safe"))
+      File.read(Gori::Settings.path).should contain(%("face": "soft"))
 
       # Back to defaults → section omitted, so a default install's file stays quiet
       Gori::Settings.pet_face = Gori::Settings::DEFAULT_PET_FACE
