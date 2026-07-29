@@ -206,8 +206,9 @@ module Gori
           store.update_repeater_ws_messages(id, messages)
         end
 
-        # Derive summary
-        line = request.each_line.first?.try(&.strip) || ""
+        # Derive the summary from the MASKED request, like create_repeater: the raw request may
+        # carry a secret in the request-target (e.g. ?token=…) and this field goes to the LLM.
+        line = masked_request.each_line.first?.try(&.strip) || ""
         parts = line.split(' ')
         s = "#{parts[0]?} #{parts[1]?}".strip
         s = line if s.empty?

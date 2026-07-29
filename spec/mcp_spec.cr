@@ -3196,3 +3196,59 @@ describe "MCP job project binding" do
     end
   end
 end
+
+describe "MCP create_issue evidence" do
+  it "refuses a flow_id that names no flow" do
+    with_store do |store|
+      r = tools_for(store).call("create_issue", JSON.parse(%({"title":"boom","flow_id":9999})))
+      r.error_code.should eq "NOT_FOUND"
+      # ...and nothing was persisted.
+      store.issues.should be_empty
+    end
+  end
+
+  it "still accepts a real flow_id" do
+    with_store do |store|
+      id = seed_flow(store, "/a")
+      ok_json(tools_for(store), "create_issue", %({"title":"boom","flow_id":#{id}}))["id"].as_i64.should be > 0
+    end
+  end
+end
+
+describe "MCP update_scope_rule" do
+  it "refuses a blank pattern instead of silently keeping the old one" do
+    with_store do |store|
+      tools = tools_for(store)
+      added = ok_json(tools, "add_scope_rule", %({"kind":"include","match_type":"host","pattern":"acme.test"}))
+      r = tools.call("update_scope_rule", JSON.parse(%({"id":#{added["id"]},"pattern":"   "})))
+      r.error_code.should eq "INVALID_ARGUMENT"
+      r.field.should eq "pattern"
+      # Unchanged, and still gating traffic.
+      Gori::Scope.load(store).rules.first.pattern.should eq "acme.test"
+    end
+  end
+
+  it "still keeps the current pattern when it is omitted entirely" do
+    with_store do |store|
+      tools = tools_for(store)
+      added = ok_json(tools, "add_scope_rule", %({"kind":"include","match_type":"host","pattern":"acme.test"}))
+      ok_json(tools, "update_scope_rule", %({"id":#{added["id"]},"kind":"exclude"}))["pattern"].as_s.should eq "acme.test"
+    end
+  end
+end
+
+describe "MCP update_repeater" do
+  it "masks a secret in the summary it hands back" do
+    with_store do |store|
+      Gori::Env.save_project(store, [{"TOKEN", "s3cr3t-value"}])
+      tools = tools_for(store)
+      created = ok_json(tools, "create_repeater",
+        %({"target":"https://acme.test","request":"GET / HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
+
+      updated = ok_json(tools, "update_repeater",
+        %({"id":#{created["id"]},"request":"GET /a?token=s3cr3t-value HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
+      updated["summary"].as_s.should_not contain "s3cr3t-value"
+      updated["summary"].as_s.should contain "$TOKEN"
+    end
+  end
+end

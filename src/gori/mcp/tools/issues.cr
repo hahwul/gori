@@ -53,6 +53,13 @@ module Gori
         # reject it, consistent with how get_flow rejects a non-integer id.
         flow_id = int(h, "flow_id")
         return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
+        # ...and a well-formed id that names NO flow is just as broken: it produces an issue
+        # whose evidence pointer resolves to nothing, reported as a success. repeater_id has
+        # always been checked; flow_id was not. flow_row is the row-only read (get_flow would
+        # materialize both BLOBs just to answer "does this exist?").
+        if flow_id && !store.flow_row(flow_id)
+          return not_found("no flow with id #{flow_id}")
+        end
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) if repeater_id.nil? && present?(h, "repeater_id")
         if repeater_id && !store.get_repeater(repeater_id)

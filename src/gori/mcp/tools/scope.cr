@@ -54,6 +54,13 @@ module Gori
         return err("invalid 'kind' (expected include|exclude)", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
         match_type = str(h, "match_type").try(&.strip.downcase) || existing.match_type
         return err("invalid 'match_type' (expected host|string|regex)", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
+        # An ABSENT pattern keeps the current one; a SUPPLIED blank one is a mistake, not a
+        # no-op — silently keeping the old pattern would report success for an edit that
+        # never happened, on the rule that gates outbound traffic.
+        if present?(h, "pattern") && str(h, "pattern").try(&.strip).presence.nil?
+          return err("'pattern' must not be blank (omit it to keep the current pattern)",
+            "INVALID_ARGUMENT", field: "pattern")
+        end
         pattern = str(h, "pattern").try(&.strip).presence || existing.pattern
         if e = Scope.validation_error(match_type, pattern)
           return err(e, "INVALID_ARGUMENT", field: "pattern")
