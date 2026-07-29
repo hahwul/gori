@@ -2009,21 +2009,16 @@ kbd {
   text-wrap: balance;
 }
 
+/* The page title closes with the same hairline every h2 opens with, so the
+   whole column is ruled by one device. (The first h2 drops its own rule
+   below, otherwise the two would stack.) */
 .docs-main > h1:first-child {
-  position: relative;
+  /* The 13em cap above would end this rule mid-column, out of line with every
+     h2 rule below it. Page titles are short enough to wrap on their own. */
+  max-width: none;
   margin-bottom: 1.35rem;
   padding-bottom: 1.1rem;
-}
-
-.docs-main > h1:first-child::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 7rem;
-  height: 2px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--accent-strong), var(--accent) 46%, transparent);
+  border-bottom: 1px solid var(--line);
 }
 
 .docs-main h2 {
@@ -2081,7 +2076,7 @@ kbd {
 }
 
 .docs-main li::marker {
-  color: var(--accent);
+  color: var(--quiet);
 }
 
 .docs-main strong {
@@ -2155,15 +2150,16 @@ hr {
   height: 1px;
   margin: 3.5rem 0;
   border: 0;
-  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+  background: var(--line);
 }
 
+/* Links already own the accent in running text. A neutral chip keeps inline
+   code from reading as a link, and keeps the gold for things you can click. */
 code {
-  padding: 0.16rem 0.38rem;
-  border: 1px solid var(--line-soft);
-  border-radius: 6px;
-  background: rgb(var(--accent-rgb) / 0.1);
-  color: var(--accent-strong);
+  padding: 0.14rem 0.36rem;
+  border-radius: 5px;
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--heading);
   font-family: var(--font-mono);
   font-size: 0.86em;
 }
@@ -2175,10 +2171,7 @@ pre {
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, rgb(var(--ink-rgb) / 0.03), transparent),
-    var(--pre-bg);
-  box-shadow: var(--shadow-soft);
+  background: var(--pre-bg);
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -2373,61 +2366,63 @@ tbody tr:hover {
   background: rgb(var(--ink-rgb) / 0.035);
 }
 
-blockquote {
-  max-width: 48rem;
+/* Callouts. In this doc set a blockquote is an aside, not a quotation, and the
+   alert shortcode says the same thing in HTML, so the three share one look: a
+   hairline box and a faint tint. No accent stripe, no coloured shouting label —
+   the bold lead-in ("Before you begin.") carries the emphasis. */
+blockquote,
+.alert,
+.info-box {
+  max-width: var(--content-max-w);
   margin: 1.5rem 0;
-  padding: 1rem 1.2rem;
+  padding: 0.95rem 1.1rem;
   border: 1px solid var(--line);
-  border-left: 2px solid rgb(var(--accent-rgb) / 0.5);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: rgb(var(--ink-rgb) / 0.04);
-  color: var(--muted);
+  color: var(--text);
 }
 
-blockquote p:last-child {
+blockquote > :last-child,
+.alert > :last-child,
+.info-box > :last-child {
   margin-bottom: 0;
 }
 
-.info-box {
-  max-width: var(--content-max-w);
-  margin: 1rem 0;
-  padding: 0.95rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: rgb(var(--ink-rgb) / 0.045);
+/* markdownify wraps the shortcode body in its own <p>, which would drop the
+   "Note." lead-in onto a line of its own. Inline the first paragraph so an
+   alert reads exactly like the blockquote asides beside it. */
+.alert > strong:first-child + p {
+  display: inline;
 }
 
-.info-box > strong:first-child {
-  color: var(--accent-strong);
-}
-
+/* An index of page titles, nothing more: a ruled two-column list, not a grid
+   of cards sized for descriptions this listing does not carry. */
 ul.section-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 2.5rem;
+  max-width: var(--content-max-w);
+  margin: 0 0 1.6rem;
   padding: 0;
   list-style: none;
 }
 
 ul.section-list li {
-  min-height: 6rem;
   margin: 0;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: rgb(var(--ink-rgb) / 0.045);
-  transition: border-color var(--transition), background var(--transition);
-}
-
-ul.section-list li:hover {
-  border-color: var(--accent);
-  background: rgb(var(--accent-rgb) / 0.08);
+  border-bottom: 1px solid var(--line);
 }
 
 ul.section-list li a {
-  color: var(--heading);
-  font-weight: 760;
+  display: block;
+  padding: 0.62rem 0;
+  color: var(--text);
+  font-weight: 600;
   text-decoration: none;
+  transition: color var(--transition);
+}
+
+ul.section-list li a:hover {
+  color: var(--accent-strong);
 }
 
 nav.pagination {
