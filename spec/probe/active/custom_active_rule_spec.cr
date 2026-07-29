@@ -71,8 +71,15 @@ describe Gori::Probe::Active::CustomActiveRule do
       rule(match_kind: "regex", match_pattern: "root:.:0:").valid?.should be_true
     end
 
+    it "accepts every supported inject target" do
+      %w[query header body cookie path].each do |loc|
+        hn = loc == "header" ? "X-H" : ""
+        rule(inject: loc, header_name: hn).valid?.should be_true, loc
+      end
+    end
+
     it "rejects an unknown inject target, an empty payload, and an empty pattern" do
-      rule(inject: "cookie").valid?.should be_false
+      rule(inject: "referer").valid?.should be_false
       rule(payload: "").valid?.should be_false
       rule(match_pattern: "").valid?.should be_false
     end
@@ -127,6 +134,30 @@ describe Gori::Probe::Active::CustomActiveRule do
         probe.should contain("Content-Length: 9")               # "orig-EVIL"
         String.new(plan.followups.first).should contain("orig") # control body unchanged
         String.new(plan.followups.first).should_not contain("EVIL")
+      end
+    end
+
+    it "appends the RAW payload to every cookie value and leaves the control unchanged" do
+      with_store do |store|
+        detail = capture_flow(store, req_headers: "Cookie: sid=abc; theme=dark\r\n")
+        plan = probe_and_control(rule(inject: "cookie", payload: "'||1"), detail)
+        probe = String.new(plan.request)
+        # raw (not URL-encoded — a cookie value isn't URL-decoded server-side), every value, one line
+        probe.should contain("Cookie: sid=abc'||1; theme=dark'||1")
+        probe.scan("Cookie:").size.should eq(1)
+        String.new(plan.followups.first).should contain("Cookie: sid=abc; theme=dark")
+        String.new(plan.followups.first).should_not contain("'||1")
+      end
+    end
+
+    it "appends the RAW payload to the path, preserving the query, control unchanged" do
+      with_store do |store|
+        detail = capture_flow(store, target: "/files/report?fmt=pdf")
+        plan = probe_and_control(rule(inject: "path", payload: "..%2f..%2fetc%2fpasswd"), detail)
+        line = String.new(plan.request).each_line.first
+        # raw payload kept (traversal must survive), query preserved after it
+        line.should start_with("GET /files/report..%2f..%2fetc%2fpasswd?fmt=pdf ")
+        String.new(plan.followups.first).each_line.first.should start_with("GET /files/report?fmt=pdf ")
       end
     end
   end
@@ -207,6 +238,12 @@ describe Gori::Probe::Active::CustomActiveRule do
         # body rule but no body
         rule(inject: "body").to_rule.plan(
           capture_flow(store, method: "GET", target: "/s")).should be_nil
+        # cookie rule but no Cookie header (or a blank one)
+        rule(inject: "cookie").to_rule.plan(capture_flow(store, target: "/s")).should be_nil
+        rule(inject: "cookie").to_rule.plan(
+          capture_flow(store, target: "/s", req_headers: "Cookie:  \r\n")).should be_nil
+        # path rule always applies — a path is always present
+        rule(inject: "path").to_rule.plan(capture_flow(store, target: "/s")).should_not be_nil
       end
     end
 

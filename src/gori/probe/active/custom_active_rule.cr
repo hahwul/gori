@@ -38,7 +38,7 @@ module Gori
         severity : Store::Severity,
         scope : String, # "global" | "project"
         enabled : Bool do
-        INJECTS = %w[query header body]
+        INJECTS = %w[query header body cookie path]
         KINDS   = %w[string regex]
         REGIONS = %w[whole header body]
 
@@ -148,7 +148,8 @@ module Gori
           end
 
           # There must be somewhere for the payload to go: query injection needs a query param,
-          # body injection needs a body, header injection always applies.
+          # body needs a body, cookie needs a Cookie header. header and path always apply (a path is
+          # always present, and header sets its own line).
           private def injectable?(detail : Store::FlowDetail, method_up : String) : Bool
             case @rule.inject
             when "query"
@@ -156,7 +157,9 @@ module Gori
               !query.empty?
             when "body"
               (b = detail.request_body) ? !b.empty? : false
-            else # "header"
+            when "cookie"
+              cookie_header(detail) != nil
+            else # "header" | "path"
               true
             end
           end
@@ -175,6 +178,15 @@ module Gori
               body = detail.request_body
               return nil if body.nil? || body.empty?
               rebuild_body(detail.request_head, inject_body(body), Active.origin_form(target))
+            when "cookie"
+              return nil unless cookie_header(detail)
+              rebuild_cookie(detail.request_head, detail.request_body, Active.origin_form(target))
+            when "path"
+              # Append the RAW payload to the path — path injection's whole point is traversal /
+              # normalization tricks (`..%2f`, `;`, `%2e`), and URL-encoding the `/` and `.` the
+              # operator typed would defeat exactly that. Any query is preserved after it.
+              np = "#{path}#{@rule.payload}"
+              rebuild(detail.request_head, detail.request_body, query.empty? ? np : "#{np}?#{query}")
             else # "header"
               rebuild_header(detail.request_head, detail.request_body, Active.origin_form(target))
             end
@@ -200,6 +212,29 @@ module Gori
             io.write(body)
             io << @rule.payload
             io.to_slice
+          end
+
+          # Append the RAW payload to every cookie VALUE in a `name=value; name2=value2` Cookie
+          # header. Raw, not URL-encoded: a cookie value is not URL-decoded by the server the way a
+          # query value is, so encoding here would change what the app actually receives. Bare
+          # segments with no `=` pass through untouched.
+          private def inject_cookie(value : String) : String
+            value.split(';').map do |part|
+              lead = part[0...(part.size - part.lstrip.size)] # keep the original leading space
+              seg = part.strip
+              next part if seg.empty?
+              eq = seg.index('=')
+              next part unless eq
+              "#{lead}#{seg[0...eq]}=#{seg[(eq + 1)..]}#{@rule.payload}"
+            end.join(';')
+          end
+
+          # The request's Cookie header value, or nil when absent/blank — the cookie-injection gate.
+          private def cookie_header(detail : Store::FlowDetail) : String?
+            req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+            req.headers.get?("Cookie").try { |v| v.strip.empty? ? nil : v }
+          rescue
+            nil
           end
 
           # --- response matching --------------------------------------------------------------
@@ -327,6 +362,36 @@ module Gori
             end
             io = IO::Memory.new
             io << kept.join(eol) << eol << eol
+            io.write(bbytes) unless bbytes.empty?
+            Fuzz::ContentLength.sync(io.to_slice, false)
+          end
+
+          # Rebuild with the Cookie header rewritten so every cookie value carries the payload;
+          # origin-form request line, body untouched. A request with no Cookie header never reaches
+          # here (injectable? gates it), so exactly one Cookie line is rewritten in place.
+          private def rebuild_cookie(orig_head : Bytes, body : Bytes?, origin_target : String) : Bytes
+            combined = if body && !body.empty?
+                         io = IO::Memory.new(orig_head.size + body.size)
+                         io.write(orig_head)
+                         io.write(body)
+                         io.to_slice
+                       else
+                         orig_head
+                       end
+            hbytes, bbytes, eol = Miner::Inject.split(combined)
+            lines = String.new(hbytes).split(eol)
+            lines.each_with_index do |l, i|
+              next if i == 0
+              next unless header_named?(l, "cookie")
+              c = l.index!(':') # header_named? already proved the colon is there
+              lines[i] = "#{l[0...c]}:#{inject_cookie(l[(c + 1)..])}"
+            end
+            unless lines.empty?
+              rl = lines[0].split(' ')
+              lines[0] = "#{rl[0]} #{origin_target} #{rl[2]}" if rl.size == 3
+            end
+            io = IO::Memory.new
+            io << lines.join(eol) << eol << eol
             io.write(bbytes) unless bbytes.empty?
             Fuzz::ContentLength.sync(io.to_slice, false)
           end
