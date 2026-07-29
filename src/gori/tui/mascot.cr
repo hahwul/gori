@@ -58,17 +58,23 @@ module Gori::Tui
 
     # The centre cell of the cavity: a small mouth between the eyes.
     #
-    # ˘ (U+02D8 BREVE) rather than ᴗ (U+1D17), which is the same cup shape but reaches only
-    # 3 of the 8 monospace faces on this machine — SF Mono, the current macOS default, is one
-    # of the misses. × (U+00D7) rather than ✘ (U+2718) for the same reason: ✘ is in 2 of 8.
-    # Both substitutes are in all 8 and carry the same read at cell size.
+    # EVERY MOUTH HAS TO SIT AT OR BELOW MID-CELL. A combining-style diacritic is drawn at
+    # cap height, which is exactly where the lashes are — so ˘ (U+02D8), the obvious cup
+    # shape, put the mouth ABOVE the eyes and level with the lashes. `u` is the same cup at
+    # x-height and is in all eight faces; ᴗ (U+1D17) and ᵕ (U+1D55) sit right too but reach
+    # only 3 of 8, and SF Mono, the current macOS default, is one of the misses.
+    #
+    # CAP_HEIGHT_MARKS is what a spec checks this against — the mouth may never be one.
+    CAP_HEIGHT_MARKS = {'˘', '¯', '^', '´', '`', '¨', '˙', '˚', '˜', '‾'}
+    MOUTHS           = {'u', 'o', '_', '·'}
+
     def self.mouth(pose : Symbol) : Char
       case pose
-      when :happy then 'o' # delighted, open
-      when :alert then '_' # tense, flat
+      when :happy then 'o' # delighted, open — x-height
+      when :alert then '_' # tense, flat — baseline
       when :error then '_'
-      when :doze  then '·' # slack
-      else             '˘' # the resting smile
+      when :doze  then '·' # slack — mid
+      else             'u' # the resting smile — an x-height cup, below the eyes
       end
     end
 

@@ -70,7 +70,7 @@ The Theme row previews the current theme inline, showing its name and a swatch o
 
 Pet is off by default. Turned on, Miss Ring — a gilded ring mascot — blinks and winks on her own and reacts to background results, then dozes off after 90 seconds of inactivity and stops animating entirely. Motion `calm` halves her blink rate and drops the rest, for SSH sessions and battery.
 
-Placement decides what she costs. `body` puts an 8&times;3 sprite in the bottom-right of the tab body, where she covers three rows and announces results in a speech bubble. `bar` puts a seven-cell chip in the status row beside CPU/MEM and the clock: she covers nothing, and the bubble goes away because the status row already carries the toast for those same notifications — at the price of one row being too little space for a face. Notices is independent of the bottom-bar toast either way.
+Placement decides what she costs. `body` puts an 8&times;3 sprite in the bottom-right of the tab body, where she covers three rows and announces results in a speech bubble. `bar` puts a seven-cell chip in the status row beside CPU/MEM and the clock: she covers nothing, and the bubble goes away because her line goes through the status row's own text slot instead — at the price of one row being too little space for a face. That slot holds one message, so the toast and her notice are resolved by whichever is newer. Notices is independent of the bottom-bar toast either way.
 
 ### Editor & Keys
 

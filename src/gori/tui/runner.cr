@@ -226,12 +226,16 @@ module Gori::Tui
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @menu_more = false               # tab-bar focus is on the far-right ⋯ "more" affordance (only meaningful when @focus == :menu)
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
-      @outcome = :running              # :running | :quit | :back
-      @quit_armed = false              # first ^D/^C arms quit; second confirms (avoids accidental exit)
-      @resized = false                 # set on a Resize event → next frame full-repaints
-      @body_h = 24                     # last body rect height (captured at render); drives PageUp/Down step size
-      @title_text = nil.as(String?)    # last string emitted as the terminal-window title (memo; see sync_terminal_title)
-      @title_written = false           # have we ever written a title? gates the neutral restore on leave when the pref is "off"
+      # When the toast was set. The status row has ONE text slot and Miss Ring's bar
+      # placement also writes to it, so the two are resolved by recency rather than by a
+      # fixed precedence — see #pet_notice for why a fixed one is wrong.
+      @toast_at = nil.as(Time::Instant?)
+      @outcome = :running           # :running | :quit | :back
+      @quit_armed = false           # first ^D/^C arms quit; second confirms (avoids accidental exit)
+      @resized = false              # set on a Resize event → next frame full-repaints
+      @body_h = 24                  # last body rect height (captured at render); drives PageUp/Down step size
+      @title_text = nil.as(String?) # last string emitted as the terminal-window title (memo; see sync_terminal_title)
+      @title_written = false        # have we ever written a title? gates the neutral restore on leave when the pref is "off"
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -2788,7 +2792,7 @@ module Gori::Tui
       # hint literals, every overlay/prompt hint AND every controller body_hint, and the
       # toast branch covers the "(^P)" pointers in messages like the bind-failure notice.
       Chrome.render_status(screen, layout.status, focus: focus_label,
-        hints: Hotkeys.retag(format_status_message(@toast) || key_hints),
+        hints: Hotkeys.retag(status_line || key_hints),
         activity: activity_chip, resource: @resource.label, time: clock_label,
         pet: pet_bar_frame)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
@@ -3004,6 +3008,29 @@ module Gori::Tui
       @pet.frame
     end
 
+    # In BAR placement she has no bubble to speak in, so her line goes through the status
+    # row's own text slot instead — BEHIND a real toast, ahead of the key hints.
+    #
+    # This closes a gap rather than duplicating the toast. Her Notices setting is
+    # deliberately independent of Settings.notify_toast?, so with the toast off and Notices
+    # on she would otherwise change face with nothing on screen to explain why. When the
+    # toast IS on it wins, and the two never both appear — it is one slot.
+    # The status row's single text slot. Two things want it: the toast (action feedback)
+    # and, in BAR placement, Miss Ring's notice — she has no bubble there to speak in.
+    #
+    # NEWER WINS, rather than "the toast always does". A job's START toast is plain action
+    # feedback cleared only by the next keypress, so with nothing pressed while the job
+    # runs it is still sitting there when the job FINISHES, masking her completion line for
+    # the whole few seconds it is alive. Recency is the only rule that also gets the
+    # opposite case right — fresh action feedback while an older notice is still up.
+    private def status_line : String?
+      toast = @toast
+      notice = Settings.pet_in_bar? ? @pet.frame.try(&.bubble) : nil
+      return format_status_message(toast) unless notice
+      return notice unless toast && (at = @toast_at)
+      @pet.bubble_at.try { |b| b > at } ? notice : format_status_message(toast)
+    end
+
     private def pet_visible? : Bool
       return false unless @overlay.none? # palette / detail / tabs_more / every modal
       return false if @space_menu_open || copy_as_shown? || send_to_shown?
@@ -3060,6 +3087,7 @@ module Gori::Tui
 
     def status(message : String) : Nil
       @toast = message
+      @toast_at = Time.instant
     end
 
     def open_palette : Nil

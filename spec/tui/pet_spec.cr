@@ -267,6 +267,24 @@ describe Gori::Tui::Pet do
     end
   end
 
+  # The bar placement shares the status row's single text slot with the toast, and Runner
+  # picks between them by recency — which needs a timestamp on her side of the comparison.
+  it "stamps when the bubble was set, and clears it with the bubble" do
+    with_pet(true) do
+      notes = Notifications.new
+      pet = Pet.new(notes)
+      t0 = Time.instant
+      pet.tick(t0)
+      pet.bubble_at.should be_nil
+      notes.push(:info, "scan complete")
+      pet.tick(t0 + Pet::BEAT)
+      pet.bubble_at.should eq(t0 + Pet::BEAT)
+      beats(pet, t0, 60) # past every TTL
+      pet.frame.not_nil!.bubble.should be_nil
+      pet.bubble_at.should be_nil
+    end
+  end
+
   it "condenses a multi-line message to one line" do
     with_pet(true) do
       notes = Notifications.new
@@ -337,6 +355,20 @@ describe Gori::Tui::Pet do
     ensure
       Theme.apply(prev)
     end
+  end
+
+  # A combining-style diacritic is drawn at CAP HEIGHT — the same band the lashes occupy —
+  # so a cup-shaped one like ˘ puts the mouth above the eyes instead of below them. That is
+  # exactly how it shipped. Nothing about the glyph tables catches it, so pin it directly.
+  it "never puts the mouth at cap height, where the lashes are" do
+    Mascot::POSES.each do |pose|
+      m = Mascot.mouth(pose)
+      Mascot::CAP_HEIGHT_MARKS.includes?(m).should be_false
+      Mascot::MOUTHS.includes?(m).should be_true
+    end
+    # …and the lashes are exactly the marks the mouth must avoid.
+    Mascot::CAP_HEIGHT_MARKS.includes?(Mascot::LASH_L).should be_true
+    Mascot::CAP_HEIGHT_MARKS.includes?(Mascot::LASH_R).should be_true
   end
 
   # The bar placement is a SLICE of the body sprite, not a second art table — if these ever

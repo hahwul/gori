@@ -71,6 +71,9 @@ module Gori::Tui
     BUBBLE_MAX_W = 34
 
     getter frame : Mascot::Frame?
+    # When the live bubble was set. The bar placement shares the status row's single text
+    # slot with the toast, and the two are resolved by recency (Runner#pet_notice).
+    getter bubble_at : Time::Instant?
 
     def initialize(@notes : Notifications)
       @frame = nil.as(Mascot::Frame?)
@@ -82,6 +85,7 @@ module Gori::Tui
       @settle_beat = -1
       @seen_id = @notes.latest_id # don't announce a backlog on enable
       @bubble = nil.as(String?)
+      @bubble_at = nil.as(Time::Instant?)
       @bubble_until = nil.as(Time::Instant?)
       @mood = :info
       @mood_beat = 0
@@ -144,6 +148,7 @@ module Gori::Tui
       @settle_beat = -1
       @mood_beat = @beat
       @bubble = nil
+      @bubble_at = nil
       @bubble_until = nil
       @mood = :info
       @mood_until = nil
@@ -290,6 +295,7 @@ module Gori::Tui
       return false unless note = @notes.latest
       return false unless Settings.pet_notices?
       @bubble = condense(note.message)
+      @bubble_at = now
       @bubble_until = now + bubble_ttl(mood_of(note.level))
       apply_mood(mood_of(note.level), now)
       poke(now) # a result is worth waking up for
@@ -337,6 +343,7 @@ module Gori::Tui
       return false unless until_ = @bubble_until
       return false if now < until_
       @bubble = nil
+      @bubble_at = nil
       @bubble_until = nil
       true
     end
