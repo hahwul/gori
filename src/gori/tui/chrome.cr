@@ -602,25 +602,27 @@ module Gori::Tui
 
     # The right-aligned status chips, TAGGED so render and (were there a clickable
     # chip here) a hit-test would share one ordered source. Ordered least-stable first, so
-    # the fixed-width CLOCK anchors the right edge and the transient activity chip shifts
+    # the fixed-width chips anchor the right edge and the transient activity chip shifts
     # only what is to its right. The resource readout is NOT fixed-width — `human_bytes`
     # grows on a digit or GiB boundary (see Resource#format) — so it cannot hold that
-    # anchor; it sits between the two. Both render in `muted`: passive readouts, not states
-    # the operator must act on.
+    # anchor; it sits left of the clock. Activity and resource render in `muted`: passive
+    # readouts, not states the operator must act on.
     private def self.status_chips(*, activity : {String, Color}?, resource : String? = nil,
                                   time : String? = nil, pet : Mascot::Frame? = nil) : Array(Chip)
       chips = [] of Chip
-      # Miss Ring rides leftmost. Her width is fixed (Mascot::BAR_W) whatever her face is
-      # doing, so she never shifts the readouts to her right — the property this ordering
-      # exists to protect. The colour here is only a placeholder: render_status overdraws
-      # these cells per-role once the layout is known.
-      chips << Chip.new(:pet, Mascot.bar_label(pet), Theme.focus_gold) if pet
       chips << Chip.new(:activity, activity[0], activity[1]) if activity
       chips << Chip.new(:resource, resource, Theme.muted) if resource
-      # The clock anchors the far right. It moved off the top bar so that row can be read as
-      # "everything here is pressable" — a wall clock never is. Fixed-width (%I:%M %p is always
-      # 8 cells) so, like the resource readout, it never shifts the chips to its left.
+      # The clock moved off the top bar so that row can be read as "everything here is
+      # pressable" — a wall clock never is. Fixed-width (%I:%M %p is always 8 cells), so it
+      # never shifts the chips to its left.
       chips << Chip.new(:time, time, Theme.muted) if time
+      # Miss Ring rides last, past the clock, so she reads as sitting ON the edge of the
+      # bar rather than wedged into the readouts. That only works because she is fixed at
+      # Mascot::BAR_W whatever her face is doing (a spec pins it across every pose, wink
+      # and face repertoire) — a chip that breathed out here would drag the entire row with
+      # it on every blink. The colour is a placeholder: render_status overdraws these cells
+      # per-role once the layout is known.
+      chips << Chip.new(:pet, Mascot.bar_label(pet), Theme.focus_gold) if pet
       chips
     end
 

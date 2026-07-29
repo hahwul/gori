@@ -127,6 +127,7 @@ module Gori::Tui
     # Pet: Miss Ring, the mascot in the body's bottom-right corner.
     PET_MOTION_CHOICES    = ["lively", "calm"]
     PET_PLACEMENT_CHOICES = ["body", "bar"]
+    PET_FACE_CHOICES      = ["soft", "safe"]
     PET_FIELDS            = [
       Field.new("Pet (Miss Ring)",
         "show the mascot in the body's bottom-right corner — she covers three rows and repaints about once a second while you're at the keyboard — ←/→/space toggles",
@@ -134,6 +135,9 @@ module Gori::Tui
       Field.new("Placement",
         "body = an 8x3 sprite in the tab body's bottom-right corner; bar = a one-row chip in the status row beside CPU/MEM, which covers nothing and drops the speech bubble — ←/→ cycles",
         choices: PET_PLACEMENT_CHOICES),
+      Field.new("Face",
+        "soft = her mouth is ᴗ, which most monospace fonts borrow from a fallback face; safe spells the same smile with u, which every font ships — switch if you see a box — ←/→ cycles",
+        choices: PET_FACE_CHOICES),
       Field.new("Motion",
         "lively = blinks, winks, a glint sweep and the odd wave; calm halves the blink rate and drops the rest (SSH/battery) — ←/→ cycles",
         choices: PET_MOTION_CHOICES),
@@ -271,6 +275,7 @@ module Gori::Tui
                 when :pet then [
                   Settings::DEFAULT_PET ? "on" : "off",
                   Settings::DEFAULT_PET_PLACEMENT,
+                  Settings::DEFAULT_PET_FACE,
                   Settings::DEFAULT_PET_MOTION,
                   Settings::DEFAULT_PET_NOTICES ? "on" : "off",
                 ]
@@ -415,6 +420,7 @@ module Gori::Tui
       [
         Settings.pet? ? "on" : "off",
         Settings.pet_placement,
+        Settings.pet_face,
         Settings.pet_motion,
         Settings.pet_notices? ? "on" : "off",
       ]
@@ -620,8 +626,9 @@ module Gori::Tui
       if @section == :pet
         Settings.pet = @values[0] == "on"
         Settings.pet_placement = Settings.normalize_pet_placement(@values[1])
-        Settings.pet_motion = Settings.normalize_pet_motion(@values[2])
-        Settings.pet_notices = @values[3] == "on"
+        Settings.pet_face = Settings.normalize_pet_face(@values[2])
+        Settings.pet_motion = Settings.normalize_pet_motion(@values[3])
+        Settings.pet_notices = @values[4] == "on"
         @values = pet_values
         return persist
       end

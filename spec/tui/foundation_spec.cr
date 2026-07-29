@@ -418,6 +418,35 @@ describe Gori::Tui::Chrome do
     backend.bg_at(tx, 0).should eq(Theme.panel) # nothing on this bar is a button
   end
 
+  # Miss Ring in "bar" placement sits PAST the clock, on the edge of the bar. She can do
+  # that only because she is the one animated thing here that never changes width; if she
+  # ever did, she would drag the clock and the readout left on every blink. So the width
+  # claim is asserted the way it is actually relied on — as the clock not moving.
+  it "seats the pet chip at the far right, past the clock, without moving it" do
+    # The resource readout varies too: it is the one chip here that genuinely breathes
+    # (`CPU 9%` → `CPU 12%`), and it sits LEFT of the clock, so in a right-aligned run its
+    # width must not reach the clock or the pet either.
+    xs = [] of Int32
+    ["CPU 9% MEM 48M", "CPU 12% MEM 48M", "CPU 100% MEM 1.4G"].each do |resource|
+      Mascot::POSES.each do |pose|
+        Mascot::FACES.each do |face|
+          backend = MemoryBackend.new(90, 1)
+          frame = Mascot::Frame.new(pose: pose, face: face)
+          Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+            focus: "BODY", hints: "↹ pane · esc tabs",
+            resource: resource, time: "01:37 PM", pet: frame)
+          row = backend.row(0)
+          label = Mascot.bar_label(frame)
+          px = row.index(label).not_nil!
+          row.index("01:37 PM").not_nil!.should be < px # she is right of the clock
+          (px + label.size).should eq(90 - 1)           # …and flush against the right pad
+          xs << row.index("01:37 PM").not_nil!
+        end
+      end
+    end
+    xs.uniq.size.should eq(1) # the clock never budged, for any face or any readout width
+  end
+
   it "gilds the shell only for single-pane body focus" do
     BodyChrome.shell_focused(:body, multi_pane: false).should be_true
     BodyChrome.shell_focused(:body, multi_pane: true).should be_false

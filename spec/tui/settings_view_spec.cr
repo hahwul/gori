@@ -507,11 +507,13 @@ describe SettingsView do
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
     prev = {Gori::Settings.pet?, Gori::Settings.pet_placement,
-            Gori::Settings.pet_motion, Gori::Settings.pet_notices?}
+            Gori::Settings.pet_motion, Gori::Settings.pet_notices?,
+            Gori::Settings.pet_face}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.pet = false
       Gori::Settings.pet_placement = "body"
+      Gori::Settings.pet_face = "soft"
       Gori::Settings.pet_motion = "lively"
       Gori::Settings.pet_notices = true
       v = SettingsView.new
@@ -520,6 +522,8 @@ describe SettingsView do
       v.move_field(1)
       v.toggle_or_move(1) # Placement: body → bar (choice)
       v.move_field(1)
+      v.toggle_or_move(1) # Face: soft → safe (choice)
+      v.move_field(1)
       v.toggle_or_move(1) # Motion: lively → calm (choice)
       v.move_field(1)
       v.toggle_or_move(1) # Notices: on → off (bool)
@@ -527,6 +531,8 @@ describe SettingsView do
       Gori::Settings.pet?.should be_true
       Gori::Settings.pet_placement.should eq("bar")
       Gori::Settings.pet_in_bar?.should be_true
+      Gori::Settings.pet_face.should eq("safe")
+      Gori::Settings.pet_face_sym.should eq(:safe)
       Gori::Settings.pet_motion.should eq("calm")
       Gori::Settings.pet_lively?.should be_false
       Gori::Settings.pet_notices?.should be_false
@@ -535,12 +541,14 @@ describe SettingsView do
       v.save
       Gori::Settings.pet?.should eq(Gori::Settings::DEFAULT_PET)
       Gori::Settings.pet_placement.should eq(Gori::Settings::DEFAULT_PET_PLACEMENT)
+      Gori::Settings.pet_face.should eq(Gori::Settings::DEFAULT_PET_FACE)
       Gori::Settings.pet_motion.should eq(Gori::Settings::DEFAULT_PET_MOTION)
       Gori::Settings.pet_notices?.should eq(Gori::Settings::DEFAULT_PET_NOTICES)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.pet, Gori::Settings.pet_placement = prev[0], prev[1]
       Gori::Settings.pet_motion, Gori::Settings.pet_notices = prev[2], prev[3]
+      Gori::Settings.pet_face = prev[4]
       FileUtils.rm_rf(dir)
     end
   end
@@ -560,6 +568,10 @@ describe SettingsView do
   # written, or reset_to_defaults raises IndexError inside the live modal. Round-tripping
   # every section is the cheapest guard that catches the second, and the section-specific
   # tests above catch the first.
+  #
+  # The render calls are the length check: render_fields_into walks the Field array and
+  # indexes @values by the SAME index, so a reader (or a reset literal) that fell a row
+  # behind its section's fields raises here instead of in the live modal.
   it "round-trips every form section without an index error" do
     dir = File.tempname("gori-settings-drift")
     Dir.mkdir_p(dir)
@@ -567,9 +579,13 @@ describe SettingsView do
     begin
       ENV["GORI_HOME"] = dir
       SettingsView::SECTIONS.each_key do |section|
+        screen = Screen.new(MemoryBackend.new(120, 40))
+        box = Rect.new(0, 0, 120, 40)
         v = SettingsView.new
         v.reload(section)
+        v.render(screen, box) # the *_values reader must cover every field
         v.reset_to_defaults
+        v.render(screen, box) # …and so must the reset_to_defaults literal
         v.move_field(1)
         v.move_field(-1)
         v.save

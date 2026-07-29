@@ -14,19 +14,36 @@ module Gori::Settings
   DEFAULT_PET_MOTION  = "lively" # "lively" | "calm"
   DEFAULT_PET_NOTICES = true
   # Where she sits. "body" is the 8x3 sprite in the tab body's bottom-right corner; "bar"
-  # is a 7-cell one-row chip in the status row, alongside CPU/MEM and the clock. The bar
-  # form occludes nothing and needs no speech bubble — the status row already carries the
-  # toast for exactly these notifications — at the cost of having no room for a face.
+  # is a 7-cell one-row chip in the status row, alongside CPU/MEM and the clock — her
+  # middle row alone, so the face survives and only the crown and floor are dropped. The
+  # bar form occludes nothing and needs no speech bubble: the status row already carries
+  # the toast for exactly these notifications.
   DEFAULT_PET_PLACEMENT = "body" # "body" | "bar"
+  # Which glyph repertoire her face is drawn from. This is a FONT-COMPATIBILITY knob, not
+  # a second mascot: both faces are the same character with the same expressions, and only
+  # the cells a monospace font might not carry differ.
+  #
+  # "soft" is the intended look. Its resting mouth is ᴗ (U+1D17), which most monospace
+  # cmaps lack — harmless on a desktop, where the terminal serves it from a fallback face
+  # at the same one-column advance, but a stripped container with no fallback pool has
+  # nowhere to serve it from and draws a box. "safe" spells the same expression with
+  # glyphs every monospace font ships, for exactly that case.
+  #
+  # Default is "soft" because the fallback pool is there on every normal install; someone
+  # seeing a box can fix it in one keypress, whereas defaulting to "safe" would mean
+  # nobody ever sees the face as designed.
+  DEFAULT_PET_FACE = "soft" # "soft" | "safe"
 
   # All read live at the tick/draw sites, so a save takes effect on the next frame.
   class_property? pet : Bool = DEFAULT_PET
   class_property pet_motion : String = DEFAULT_PET_MOTION
   class_property? pet_notices : Bool = DEFAULT_PET_NOTICES
   class_property pet_placement : String = DEFAULT_PET_PLACEMENT
+  class_property pet_face : String = DEFAULT_PET_FACE
 
   PET_MOTIONS    = {"lively", "calm"}
   PET_PLACEMENTS = {"body", "bar"}
+  PET_FACES      = {"soft", "safe"}
 
   def self.pet_lively? : Bool
     pet_motion != "calm"
@@ -34,6 +51,12 @@ module Gori::Settings
 
   def self.pet_in_bar? : Bool
     pet_placement == "bar"
+  end
+
+  # The symbol Mascot draws with. Anything unrecognised has already been normalised on the
+  # way in, so this only has to name the one non-default case.
+  def self.pet_face_sym : Symbol
+    pet_face == "safe" ? :safe : :soft
   end
 
   # Allowed motion modes; anything else falls back to the default.
@@ -45,6 +68,10 @@ module Gori::Settings
     PET_PLACEMENTS.includes?(s) ? s : DEFAULT_PET_PLACEMENT
   end
 
+  def self.normalize_pet_face(s : String) : String
+    PET_FACES.includes?(s) ? s : DEFAULT_PET_FACE
+  end
+
   # Tolerant pet section: absent/non-object keeps current.
   private def self.parse_pet(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
@@ -53,6 +80,7 @@ module Gori::Settings
     self.pet_notices = load_bool_h(o, "notices", pet_notices?)
     o["motion"]?.try(&.as_s?).try { |v| self.pet_motion = normalize_pet_motion(v) }
     o["placement"]?.try(&.as_s?).try { |v| self.pet_placement = normalize_pet_placement(v) }
+    o["face"]?.try(&.as_s?).try { |v| self.pet_face = normalize_pet_face(v) }
   end
 
   # Omitted entirely while every field is at its factory default, so a default install's
@@ -61,11 +89,13 @@ module Gori::Settings
     unless pet? == DEFAULT_PET &&
            pet_motion == DEFAULT_PET_MOTION &&
            pet_notices? == DEFAULT_PET_NOTICES &&
-           pet_placement == DEFAULT_PET_PLACEMENT
+           pet_placement == DEFAULT_PET_PLACEMENT &&
+           pet_face == DEFAULT_PET_FACE
       j.field "pet" do
         j.object do
           j.field "enabled", pet?
           j.field "placement", pet_placement
+          j.field "face", pet_face
           j.field "motion", pet_motion
           j.field "notices", pet_notices?
         end

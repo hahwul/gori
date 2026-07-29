@@ -66,20 +66,30 @@ module Gori::Tui
     # monospace cmaps, which does NOT disqualify it: the terminal owns the grid, so a
     # fallback glyph is drawn INTO the cell and the advance still comes from East Asian
     # Width — ᴗ is Neutral, so it stays one column. Measured in a real terminal, ▐´●ᴗ●`▌
-    # is the same 7 cells as the all-mono spelling. 28 installed faces supply it here, so
-    # it does not tofu; a minimal container with no fallback pool is the residual risk.
+    # is the same 7 cells as the all-mono spelling, and 30 of them fill 30 columns of a
+    # 40-column pane without wrapping.
     #
-    # CAP_HEIGHT_MARKS is what a spec checks this against — the mouth may never be one.
-    CAP_HEIGHT_MARKS = {'˘', '¯', '^', '´', '`', '¨', '˙', '˚', '˜', '‾'}
-    MOUTHS           = {'ᴗ', 'o', '_', '·'}
+    # What being outside the cmap DOES risk is tofu, and only where there is no fallback
+    # pool to reach for — a stripped container, not a desktop. That is the entire reason
+    # Settings.pet_face exists: :safe swaps this one cell for u, the same cup at the same
+    # x-height, which every monospace font carries. It is the ONLY difference between the
+    # two repertoires, so the expression, the ink grid and the 7-cell width are shared.
+    REST_MOUTH = {soft: 'ᴗ', safe: 'u'}
 
-    def self.mouth(pose : Symbol) : Char
+    # CAP_HEIGHT_MARKS is what a spec checks this against — no mouth in EITHER repertoire
+    # may be one, or it would ride up level with the lashes.
+    CAP_HEIGHT_MARKS = {'˘', '¯', '^', '´', '`', '¨', '˙', '˚', '˜', '‾'}
+    MOUTHS           = {'ᴗ', 'u', 'o', '_', '·'}
+
+    # Only the resting mouth varies by repertoire: the expressive poses are already spelled
+    # in glyphs every font ships, so there is nothing for :safe to substitute.
+    def self.mouth(pose : Symbol, face : Symbol = :soft) : Char
       case pose
       when :happy then 'o' # delighted, open — x-height
       when :alert then '_' # tense, flat — baseline
       when :error then '_'
       when :doze  then '·' # slack — mid
-      else             'ᴗ' # the resting smile — a cup below the eyes
+      else             face == :safe ? REST_MOUTH[:safe] : REST_MOUTH[:soft]
       end
     end
 
@@ -87,6 +97,9 @@ module Gori::Tui
     # wink/badge/glint axes below rather than from growing this table.
     POSES = {:idle, :blink, :happy, :alert, :error, :doze}
     WINKS = {:none, :left, :right}
+    # The glyph repertoires, parallel to Settings::PET_FACES — a spec pins the two together,
+    # since a name added on one side alone is a setting that silently draws the default.
+    FACES = {:soft, :safe}
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
     #   H hoop highlight (lit, upper-left)   R hoop base (brand gold)
@@ -134,7 +147,10 @@ module Gori::Tui
       glint : Int32 = -1, # index into GLINT_PATH; -1 = no specular this frame
       mood : Symbol = :info,
       bubble : String? = nil,
-      shake : Int32 = 0 # -1 | 0 | 1 column offset (the :error reaction)
+      shake : Int32 = 0,    # -1 | 0 | 1 column offset (the :error reaction)
+      face : Symbol = :soft # glyph repertoire; see REST_MOUTH. Lives here so that changing
+    # Settings.pet_face shows up in Pet#tick's field-wise frame compare like any other
+    # visible change, and repaints on the next beat without a special case.
 
     # Every colour the mascot can wear, resolved once per draw from the live theme and
     # the current mood.
@@ -154,17 +170,18 @@ module Gori::Tui
       end
     end
 
-    # Cols 1..5 of the middle row: lash, left eye, mouth, right eye, lash.
+    # Cols 1..5 of the middle row: lash, left eye, mouth, right eye, lash. Named for the
+    # hole it fills — "face" is the glyph-repertoire axis (REST_MOUTH), not this row.
     #
-    # A wink only applies to the open-eyed idle face — a winking :alert or :doze would
+    # A wink only applies to the open-eyed idle pose — a winking :alert or :doze would
     # read as a rendering glitch rather than a gesture.
-    def self.face(pose : Symbol, wink : Symbol) : {Char, Char, Char, Char, Char}
+    def self.cavity(pose : Symbol, wink : Symbol, face : Symbol = :soft) : {Char, Char, Char, Char, Char}
       l, r = eyes(pose)
       if pose == :idle
         l = '─' if wink == :left
         r = '─' if wink == :right
       end
-      {LASH_L, l, mouth(pose), r, LASH_R}
+      {LASH_L, l, mouth(pose, face), r, LASH_R}
     end
 
     # The glyph at (col, row) of the 8x3 grid. Allocation-free — this is what the draw
@@ -178,7 +195,7 @@ module Gori::Tui
         when 0     then WALL_L
         when 6     then WALL_R
         when W - 1 then ' '
-        else            face(frame.pose, frame.wink)[col - 1]
+        else            cavity(frame.pose, frame.wink, frame.face)[col - 1]
         end
       end
     end
