@@ -202,8 +202,9 @@ module Gori::Tui
 
     private def pose_for(mood : Symbol) : Symbol
       case mood
-      when :happy        then :happy
-      when :warn, :alarm then :alert
+      when :happy then :happy
+      when :warn  then :alert
+      when :alarm then :error # ×_× — its own face now, not :alert with a different badge
       else
         # The settle beat right after a reaction expires reads as her composing herself.
         @beat == @settle_beat || blink? ? :blink : :idle

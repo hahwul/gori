@@ -46,17 +46,35 @@ module Gori::Tui
     WALL_L = '▐'
     WALL_R = '▌'
 
-    # She is a MISS, so she has lashes. These are thin strokes, not blocks, and both sit
-    # at cap height while the pupil sits mid-cell — so they read as lashes floating at the
-    # outer-upper corner of each eye. The slants are outward: ` is a \ (top end to the
-    # left) beside the left eye, ´ is a / (top end to the right) beside the right eye.
-    LASH_L = '`' # U+0060
-    LASH_R = '´' # U+00B4 ACUTE ACCENT
+    # She is a MISS, so she has lashes. These are thin strokes, not blocks, and both sit at
+    # cap height while the pupil sits mid-cell, so they float at the upper corner of each eye.
+    #
+    # THE SLANTS POINT INWARD, and that is the whole expression. ´ rises to the right and `
+    # rises to the left, so putting ´ on the left and ` on the right raises both brows toward
+    # the middle — the soft, open look. Swap them and the high ends point outward instead,
+    # which drops the inner brow and reads as stern. Same two glyphs, opposite character.
+    LASH_L = '´' # U+00B4 ACUTE ACCENT — rises to the right, so it lifts the inner brow
+    LASH_R = '`' # U+0060 GRAVE ACCENT — rises to the left, mirroring it
 
-    # Every pose. FIVE, deliberately — expression variety comes from the independent
-    # wink/badge/glint axes below, not from growing this table. :error reuses the :alert
-    # face and is told apart by its badge, its red-shifted gold and a shake.
-    POSES = {:idle, :blink, :happy, :alert, :doze}
+    # The centre cell of the cavity: a small mouth between the eyes.
+    #
+    # ˘ (U+02D8 BREVE) rather than ᴗ (U+1D17), which is the same cup shape but reaches only
+    # 3 of the 8 monospace faces on this machine — SF Mono, the current macOS default, is one
+    # of the misses. × (U+00D7) rather than ✘ (U+2718) for the same reason: ✘ is in 2 of 8.
+    # Both substitutes are in all 8 and carry the same read at cell size.
+    def self.mouth(pose : Symbol) : Char
+      case pose
+      when :happy then 'o' # delighted, open
+      when :alert then '_' # tense, flat
+      when :error then '_'
+      when :doze  then '·' # slack
+      else             '˘' # the resting smile
+      end
+    end
+
+    # Every pose. Kept small on purpose — most expression variety comes from the independent
+    # wink/badge/glint axes below rather than from growing this table.
+    POSES = {:idle, :blink, :happy, :alert, :error, :doze}
     WINKS = {:none, :left, :right}
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
@@ -114,12 +132,13 @@ module Gori::Tui
       when :blink then {'─', '─'}
       when :happy then {'^', '^'}
       when :alert then {'O', 'O'}
+      when :error then {'×', '×'} # the ✘_✘ read, with a glyph every face actually has
       when :doze  then {'~', '~'}
       else             {'●', '●'} # :idle
       end
     end
 
-    # Cols 1..5 of the middle row: lash, left eye, gap, right eye, lash.
+    # Cols 1..5 of the middle row: lash, left eye, mouth, right eye, lash.
     #
     # A wink only applies to the open-eyed idle face — a winking :alert or :doze would
     # read as a rendering glitch rather than a gesture.
@@ -129,7 +148,7 @@ module Gori::Tui
         l = '─' if wink == :left
         r = '─' if wink == :right
       end
-      {LASH_L, l, ' ', r, LASH_R}
+      {LASH_L, l, mouth(pose), r, LASH_R}
     end
 
     # The glyph at (col, row) of the 8x3 grid. Allocation-free — this is what the draw
