@@ -2963,3 +2963,34 @@ describe "MCP project env vars" do
     end
   end
 end
+
+describe "MCP send_websocket scope gate" do
+  it "honours a path-scoped include the way send_request does" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "/chat")
+      scope.enable
+      ws = "GET /chat HTTP/1.1\r\nHost: acme.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+           "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+      rid = store.insert_repeater("https://acme.test", ws.to_slice, false, true, nil, 0)
+
+      # Anchoring the check on a bare "/" refused this — the include names a PATH.
+      r = tools_for(store).call("send_websocket", JSON.parse(%({"repeater_id":#{rid}})))
+      r.error_code.should_not eq "SCOPE_BLOCKED"
+    end
+  end
+
+  it "still refuses a target the scope does not include" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "/chat")
+      scope.enable
+      ws = "GET /admin HTTP/1.1\r\nHost: acme.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+           "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+      rid = store.insert_repeater("https://acme.test", ws.to_slice, false, true, nil, 0)
+
+      r = tools_for(store).call("send_websocket", JSON.parse(%({"repeater_id":#{rid}})))
+      r.error_code.should eq "SCOPE_BLOCKED"
+    end
+  end
+end

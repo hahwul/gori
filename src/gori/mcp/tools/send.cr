@@ -359,7 +359,10 @@ module Gori
           return send_plan_error(ex, "repeater_id")
         end
         host = plan.host
-        sc = ob.check("#{plan.scheme}://#{host}/", host)
+        # Anchor on the same scheme://host/TARGET url send_request uses (Outbound.scope_url).
+        # Checking a bare "/" made a path-scoped include (e.g. string:/chat) refuse the very
+        # WS repeater it was written to allow, while the identical send_request passed.
+        sc = ob.check(request_scope_url(plan), host)
         return scope_blocked(sc) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
         if reason = plan.refusal
