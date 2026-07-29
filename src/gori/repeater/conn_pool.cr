@@ -1,9 +1,16 @@
 require "../proxy/codec/body"
 require "../proxy/codec/http1"
-require "../repeater/engine"
+require "./engine"
 
-module Gori::Fuzz
+module Gori::Repeater
   # HTTP/1.1 keep-alive connection pool for a sweep's sends.
+  #
+  # Lives beside `Repeater::Engine` rather than under `Fuzz` because it is pure transport
+  # over that engine's own primitives (`dial` / `exchange` / `error`) and has two callers
+  # now: `Fuzz::Sender`, which pools ONE origin for a whole sweep, and `Discover::Sender`,
+  # which keeps one of these per origin because a crawl derives URLs on several in-scope
+  # hosts. Nothing in here knows which sweep it is serving. `Fuzz::ConnPool` remains as an
+  # alias, so the fuzz-side name in specs and comments still resolves.
   #
   # `Repeater::Engine.send` dials a fresh connection, exchanges one request, and closes —
   # correct for the Repeater (one operator-triggered send) but the dominant cost of a
@@ -58,7 +65,11 @@ module Gori::Fuzz
     getter stale_retries : Int64 = 0_i64
     getter? pooling : Bool = true
 
-    def initialize(@origin : Origin, @verify : Bool, @sni : String?, @timeout : Time::Span?,
+    # The origin is taken apart rather than as a struct: `Fuzz::Origin` (which folds ws→http)
+    # and a Discover URL's `Url::Parts` are different types carrying the same three fields,
+    # and the pool needs nothing else from either.
+    def initialize(@scheme : String, @host : String, @port : Int32, @verify : Bool,
+                   @sni : String?, @timeout : Time::Span?,
                    @overrides : Gori::HostOverrides?, @max_idle : Int32)
       @idle = [] of IO
       @consecutive_stale = 0
@@ -75,7 +86,7 @@ module Gori::Fuzz
       method = Repeater::Engine.request_method(bytes)
       if keepable && (io = @idle.pop?)
         started = Time.instant
-        result = Repeater::Engine.exchange(io, bytes, @origin.host, @origin.port, started)
+        result = Repeater::Engine.exchange(io, bytes, @host, @port, started)
         if stale?(result)
           close(io)
           @stale_retries += 1
@@ -106,14 +117,14 @@ module Gori::Fuzz
       # Timed from BEFORE the dial, like `Repeater::Engine.send` — a fresh connection's
       # handshake is part of what that request cost. A reused one honestly reports less.
       started = Time.instant
-      io = Repeater::Engine.dial(@origin.scheme, @origin.host, @origin.port, @verify,
+      io = Repeater::Engine.dial(@scheme, @host, @port, @verify,
         @sni, @timeout, @overrides)
       unless io
         return Repeater::Engine.error(
-          Repeater::Engine.connect_error(@origin.scheme, @origin.host, @origin.port, @verify), started)
+          Repeater::Engine.connect_error(@scheme, @host, @port, @verify), started)
       end
       @dialed += 1
-      result = Repeater::Engine.exchange(io, bytes, @origin.host, @origin.port, started)
+      result = Repeater::Engine.exchange(io, bytes, @host, @port, started)
       recycle(io, result, keepable, method)
       result
     end
@@ -130,7 +141,7 @@ module Gori::Fuzz
     end
 
     private def stale?(result : Repeater::Result) : Bool
-      result.error == Repeater::Engine.no_response_error(@origin.host, @origin.port)
+      result.error == Repeater::Engine.no_response_error(@host, @port)
     end
 
     private def drain : Nil

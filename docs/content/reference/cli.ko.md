@@ -270,11 +270,14 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `-H`, `--header=HEADER` | 모든 프로브에 붙일 커스텀 헤더(반복 가능) |
 | `--containment=MODE` | `same-origin` \| `scope-aware`(기본) \| `host+subdomains` |
 | `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어 |
+| `--no-keep-alive` | origin별 연결 재사용 대신 프로브마다 새로 연결 |
 | `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
 | `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 실행 |
 | `--force` | 무제한 실행 안전 게이트 우회 |
 | `--no-store` | 결과를 프로젝트에 기록하지 않음 |
 | `--format` | `text`, `json`, 또는 `jsonl` |
+
+기본적으로 origin별로 연결을 재사용합니다. 브루트포스 한 번이 프로브마다가 아니라 워커마다 TCP(https라면 TLS) 핸드셰이크를 한 번씩만 치릅니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄에서 대상이 이를 지켰는지 확인할 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
 
 ### run import {#run-import}
 

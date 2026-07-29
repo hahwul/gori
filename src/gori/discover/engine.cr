@@ -6,6 +6,7 @@ require "./extract"
 require "./calibrate"
 require "../repeater/engine"
 require "../repeater/h2_engine"
+require "../repeater/conn_pool"
 require "../proxy/codec/content_decode"
 
 module Gori::Discover
@@ -38,9 +39,25 @@ module Gori::Discover
   # the engine deterministically without a socket.
   abstract class Backend
     abstract def fetch(scheme : String, host : String, port : Int32, target : String) : Repeater::Result
+
+    # Release any transport the backend is holding open (the keep-alive pools' parked
+    # sockets). Called once when a run ends — including a stopped or failed one, or the
+    # sockets sit open until GC. A no-op by default so the spec doubles stay three-line
+    # classes, matching `Fuzz::Backend#close`.
+    def close : Nil
+    end
   end
 
-  # Production backend over the Repeater engine (fresh connection per send). GET only.
+  # What a run's transport actually cost, summed over every origin's keep-alive pool.
+  # `dialed ≈ sent` means the origins closed after every response (or refused reuse), which
+  # is the one thing that explains a slow run the request counts do not.
+  record PoolStats,
+    dialed : Int64,
+    reused : Int64,
+    stale_retries : Int64,
+    pooling : Bool
+
+  # Production backend over the Repeater engine. GET only.
   class Sender < Backend
     # A send refused because the URL cannot be framed. `target` and `host` are spliced
     # verbatim into the request line and the `Host` header by `build_get`, so a raw CR/LF in
@@ -58,15 +75,64 @@ module Gori::Discover
     # percent-encoded it upstream — this line only ever sees a target no repair applies to.
     UNSAFE_URL = "url contains whitespace or a control character"
 
-    @header_block : String
+    # How many origins may hold a keep-alive pool at once. A crawl is overwhelmingly
+    # single-origin (same-origin containment, or scope-aware with the seed's host), but
+    # host+subdomains and a multi-host include boundary can spread it, and each pool parks its
+    # own sockets — so an unbounded map is an unbounded file-descriptor count. Past the cap a
+    # new origin simply dials per send, which is what every origin did before.
+    MAX_POOLS = 4
 
+    # Ceiling on the sockets ONE origin's pool may park, applied on top of the run's
+    # concurrency. Unlike `Fuzz::Sender` (one origin, so concurrency IS the ceiling), here the
+    # worst case is every worker having touched every pooled origin — MAX_POOLS × concurrency
+    # sockets alive at once. At the default concurrency of 20 this changes nothing; it only
+    # bites the wide runs (the TUI offers 80, `--concurrency` more), where it trades some
+    # reuse for a bounded descriptor count.
+    MAX_IDLE_PER_POOL = 32
+
+    @header_block : String
+    @pools : Hash(String, Repeater::ConnPool)?
+    @keep_alive : Bool
+    @idle_conns : Int32
+
+    # `keep_alive` reuses one HTTP/1.1 connection across many sends per origin (see
+    # `Repeater::ConnPool`). It is the single largest cost of a run against a remote origin:
+    # a brute-force pass is ~278 sends PER DIRECTORY, and dial-per-send paid a TCP — and on
+    # https a TLS — handshake for every one of them. `idle_conns` bounds the sockets one
+    # origin may park and should be the run's concurrency (one per worker fiber is the most
+    # that can ever be checked out at once), capped at MAX_IDLE_PER_POOL.
     def initialize(@verify : Bool, @timeout : Time::Span? = nil, @http2 : Bool = false,
                    headers : Array({String, String}) = [] of {String, String},
-                   @overrides : Gori::HostOverrides? = nil)
+                   @overrides : Gori::HostOverrides? = nil,
+                   keep_alive : Bool = false, idle_conns : Int32 = 0)
       # Merge the user headers over the defaults once — the block is identical for
       # every send (only Host varies, per target). Host + Connection are emitted
       # separately in build_get and never come from user input.
       @header_block = Headers.merge(headers).map { |name, value| "#{name}: #{value}\r\n" }.join
+      # h2 is excluded for the reason Fuzz::Sender excludes it: H2Engine frames its own
+      # connection per send, and multiplexing it is a separate change with its own
+      # stream-state rules.
+      @keep_alive = keep_alive && !@http2
+      @idle_conns = idle_conns.clamp(1, MAX_IDLE_PER_POOL)
+      @pools = @keep_alive ? Hash(String, Repeater::ConnPool).new : nil
+    end
+
+    # Handshake accounting summed over every origin's pool. Nil when keep-alive is off — the
+    # question "how many handshakes did this run pay" has no pool to ask.
+    def pool_stats : PoolStats?
+      pools = @pools
+      return nil unless pools
+      dialed = 0_i64
+      reused = 0_i64
+      stale = 0_i64
+      pooling = true
+      pools.each_value do |p|
+        dialed += p.dialed
+        reused += p.reused
+        stale += p.stale_retries
+        pooling = false unless p.pooling?
+      end
+      PoolStats.new(dialed, reused, stale, pooling)
     end
 
     def fetch(scheme : String, host : String, port : Int32, target : String) : Repeater::Result
@@ -82,16 +148,51 @@ module Gori::Discover
       if @http2
         Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
           verify_upstream: @verify, timeout: @timeout, overrides: @overrides)
+      elsif pool = pool_for(scheme, host, port)
+        pool.send(req)
       else
         Repeater::Engine.send(req, scheme: scheme, host: host, port: port,
           verify_upstream: @verify, timeout: @timeout, overrides: @overrides)
       end
     end
 
+    def close : Nil
+      @pools.try(&.each_value(&.close_all))
+    end
+
+    # The pool for one origin, created on first use. Nil when keep-alive is off or the
+    # origin arrived after MAX_POOLS were already taken — both mean "dial per send".
+    #
+    # N worker fibers call this concurrently, and the lookup-then-insert below is not atomic
+    # in general. It is here: the scheduler is single-threaded (no `-Dpreview_mt`) and nothing
+    # between the `[]?` and the store yields — `ConnPool.new` only allocates — so no worker
+    # can observe the map mid-insert or race a second pool onto the same origin. Same argument
+    # the pool itself relies on for its idle list.
+    private def pool_for(scheme : String, host : String, port : Int32) : Repeater::ConnPool?
+      pools = @pools
+      return nil unless pools
+      key = "#{scheme}://#{host}:#{port}"
+      if existing = pools[key]?
+        return existing
+      end
+      return nil if pools.size >= MAX_POOLS
+      pool = Repeater::ConnPool.new(scheme, host, port, @verify, nil, @timeout,
+        @overrides, @idle_conns)
+      pools[key] = pool
+      pool
+    end
+
     private def build_get(scheme : String, host : String, port : Int32, target : String) : Bytes
       default = scheme == "https" ? 443 : 80
       hostline = port == default ? host : "#{host}:#{port}"
-      "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\n#{@header_block}Connection: close\r\n\r\n".to_slice
+      # `Connection: close` only when NOT pooling. It is what made every send single-use, and
+      # `ConnPool.reusable_request?` refuses to park a socket that carried it — so leaving it
+      # in would turn keep-alive into a silent no-op. Omitting it is not a request for
+      # keep-alive so much as the absence of a request to close: HTTP/1.1's default is
+      # persistent, and an origin that disagrees says so in its own `Connection` header,
+      # which `reusable_response?` reads.
+      conn = @keep_alive ? "" : "Connection: close\r\n"
+      "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\n#{@header_block}#{conn}\r\n".to_slice
     end
   end
 
@@ -113,6 +214,10 @@ module Gori::Discover
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
       @sent += 1
       @inner.fetch(scheme, host, port, target)
+    end
+
+    def close : Nil
+      @inner.close
     end
   end
 
@@ -358,6 +463,12 @@ module Gori::Discover
       drain_pending
       @jobs.close
       @concurrency.times { @finished.receive }
+      # Every worker has exited, so nothing holds a checked-out socket: release the parked
+      # ones now rather than leaving a run's worth of file descriptors to the GC. AFTER the
+      # join, deliberately — closing while a worker is mid-exchange would only close the
+      # sockets it is NOT using, but the join is already the point where "the run is over"
+      # becomes true, and doing it in one place keeps that readable.
+      @capped.close
       # A run that put nothing on the wire ends in a terminal ErrorEvent — no trailing
       # DoneEvent, so a consumer cannot settle a "0 found" success over it, the same shape
       # `start`'s setup-error path uses (see NOTHING_TO_SEND). Decided HERE rather than right
@@ -382,6 +493,10 @@ module Gori::Discover
       # makes each worker's receive? return nil, so they run their `ensure @finished.send`
       # and exit (their one in-flight outcome fits in @discovered's conc*2 buffer).
       @jobs.close rescue nil
+      # Same reason: the parked sockets are nobody's, and this path does not join the workers,
+      # so nothing else will ever close them. A socket a worker still holds is checked OUT and
+      # therefore not in the pool's idle list, so this cannot pull one out from under it.
+      @capped.close rescue nil
       @events.send(ErrorEvent.new(ex.message || "discover error")) rescue nil
       @events.close rescue nil
     end

@@ -270,11 +270,14 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `-H`, `--header=HEADER` | Custom header on every probe (repeatable) |
 | `--containment=MODE` | `same-origin` \| `scope-aware` (default) \| `host+subdomains` |
 | `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control |
+| `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one per origin |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
 | `--allow-unscoped` | Run even if the target is outside the project scope |
 | `--force` | Bypass the unbounded-run safety gate |
 | `--no-store` | Do not write findings into the project |
 | `--format` | `text`, `json`, or `jsonl` |
+
+Connections are reused per origin by default, so a brute-force pass pays one TCP (and on https one TLS) handshake per worker rather than one per probe. The `connections · N dialed · M reused` line at the end of a run is where you see whether the target honoured it. Turn it off with `--no-keep-alive` when the target behaves per-connection.
 
 ### run import
 

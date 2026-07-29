@@ -114,6 +114,29 @@ describe Gori::Discover::Extract do
     E.sitemap_body?(io.to_slice).should be_true
   end
 
+  # The scrub is only reached for a body that is ACTUALLY invalid: `String#scrub` walks the
+  # whole string through a Char::Reader whether or not it finds anything (130µs on a valid
+  # 40 KB page against 9µs for `valid_encoding?`), and EVERY crawled page and probe response
+  # pays that, so `Extract.text` asks the cheap question first. This pins both branches — a
+  # guard that skipped the scrub on an invalid body would raise `ArgumentError` from PCRE2.
+  it "extracts links from a body with invalid UTF-8 in it, on every extractor" do
+    bad = Bytes[0xff, 0xfe, 0x80, 0xc0]
+    html = IO::Memory.new
+    html.write(bad)
+    html << %(<a href="/ok">x</a>)
+    E.from_html(html.to_slice).should eq(["/ok"])
+
+    robots = IO::Memory.new
+    robots.write(bad)
+    robots << "\nDisallow: /admin\n"
+    E.from_robots(robots.to_slice).should eq(["/admin"])
+
+    sitemap = IO::Memory.new
+    sitemap.write(bad)
+    sitemap << %(<urlset><url><loc>http://h/p</loc></url></urlset>)
+    E.from_sitemap(sitemap.to_slice).should eq(["http://h/p"])
+  end
+
   # (8) Adversarial regex regression guard (spec/fuzz_spec.cr style): a long unclosed
   # <meta ... url= with a multi-KB attribute value must complete and RETURN (from_html does not
   # rescue Regex::Error, so a hang → harness timeout and a raise → spec failure). NOT a known-vuln claim.

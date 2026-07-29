@@ -8,11 +8,12 @@ module Gori::Discover
   # "reuse this flow's headers" prefill).
   #
   # Discover sends a fixed GET per URL, so the Sender builds ONE merged header block
-  # at construction. `Host` and `Connection` are always emitted by the Sender itself
-  # — Host must match each crawled origin (a crawl spans several in-scope hosts) and
-  # every send opens a fresh connection (`Connection: close`) — so they are never
-  # taken from user input. `Accept` and `User-Agent` are defaults the user MAY
-  # override; anything else the user supplies is appended.
+  # at construction. `Host` and `Connection` are owned by the Sender itself — Host must
+  # match each crawled origin (a crawl spans several in-scope hosts), and `Connection`
+  # is what decides whether the socket can be reused, so it follows the run's keep-alive
+  # setting (`Connection: close` when off, omitted when on) rather than user input.
+  # `Accept` and `User-Agent` are defaults the user MAY override; anything else the user
+  # supplies is appended.
   module Headers
     # Emitted defaults, in wire order; overridable by name (case-insensitive).
     DEFAULTS = [{"Accept", "*/*"}, {"User-Agent", "gori-discover"}]

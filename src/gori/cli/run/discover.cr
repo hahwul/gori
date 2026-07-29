@@ -20,6 +20,7 @@ module Gori
         timeout : Time::Span? = nil
         retries = 1
         max_requests : Int64? = nil
+        keep_alive = true
         insecure = false
         allow_unscoped = false
         force = false
@@ -45,6 +46,7 @@ module Gori
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
+          p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--allow-unscoped", "Run even if the target is outside the project scope") { allow_unscoped = true }
           p.on("--force", "Bypass the unbounded-run safety gate") { force = true }
@@ -67,7 +69,8 @@ module Gori
 
         config = Discover::Config.new(
           concurrency: concurrency, rps: rate, throttle_ms: throttle, timeout: timeout,
-          retries: retries, max_requests: max_requests, spider: spider, bruteforce: bruteforce,
+          retries: retries, max_requests: max_requests, keep_alive: keep_alive,
+          spider: spider, bruteforce: bruteforce,
           max_depth: max_depth, user_wordlist: wordlist, extensions: extensions,
           containment: containment, headers: Discover::Headers.parse_lines(headers))
 
@@ -87,7 +90,7 @@ module Gori
           end
           guard_discover_scope(plan, outbound)
           discover_preflight(plan, force)
-          run_discover_stream(plan.engine, store, format, no_store)
+          run_discover_stream(plan.engine, store, format, no_store, ->{ plan.sender.pool_stats })
         ensure
           store.close
         end
@@ -162,7 +165,8 @@ module Gori
       end
 
       private def self.run_discover_stream(engine : Discover::Engine, store : Store,
-                                           format : Symbol, no_store : Bool) : Nil
+                                           format : Symbol, no_store : Bool,
+                                           pool_stats : Proc(Discover::PoolStats?)) : Nil
         findings = [] of Discover::Finding
         pending = [] of {Store::CapturedRequest, Store::CapturedResponse?}
         base_ts = Time.utc.to_unix * 1_000_000
@@ -180,7 +184,7 @@ module Gori
               flush_discover(store, pending) if pending.size >= 200
             end
           when Discover::ProgressEvent then discover_progress(ev)
-          when Discover::DoneEvent     then discover_done(ev)
+          when Discover::DoneEvent     then discover_done(ev, pool_stats)
           when Discover::ErrorEvent    then had_error = true; STDERR.puts "discover error: #{ev.message}"
           end
         end
@@ -247,12 +251,22 @@ module Gori
         STDERR.flush
       end
 
-      private def self.discover_done(ev : Discover::DoneEvent) : Nil
+      private def self.discover_done(ev : Discover::DoneEvent, pool_stats : Proc(Discover::PoolStats?)) : Nil
         STDERR.print "\r" if STDERR.tty?
         s = ev.stats
         STDERR.puts "done · #{s.found} found · #{s.sent} sent · #{ev.progress.errors} errors" \
                     " · calibrated-out #{s.calibrated_out} · dedup #{s.dedup_suppressed}" \
                     " · template #{s.template_suppressed} · cluster #{s.cluster_suppressed}#{ev.stopped ? " (stopped)" : ""}"
+        # Handshakes actually paid for — the one thing the request counts above cannot show.
+        # `dialed ≈ sent` means the origin closed after every response, which is the usual
+        # explanation for a run that took far longer than its request count suggests.
+        # Read through a proc rather than passed in: the pool only has final numbers once the
+        # engine has finished, which is exactly when this event arrives.
+        p = pool_stats.call
+        return unless p && p.dialed > 0
+        STDERR.puts "connections · #{p.dialed} dialed · #{p.reused} reused" \
+                    "#{p.stale_retries > 0 ? " · #{p.stale_retries} re-sent on a closed connection" : ""}" \
+                    "#{p.pooling ? "" : " · keep-alive gave up (origin closes every connection)"}"
       end
     end
   end

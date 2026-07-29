@@ -105,9 +105,14 @@ module Gori::Discover
     getter config : Config
     # Brute-force candidate count (built-in list + the user wordlist), for the CLI preflight.
     getter word_count : Int32
+    # The wire seam the engine was built over. Exposed for ONE thing the Engine's own events
+    # cannot answer: `Sender#pool_stats`, i.e. how many handshakes the run actually paid
+    # (`gori run discover` prints it, the same way the fuzz CLI reports its pool).
+    getter sender : Sender
 
     def initialize(@engine : Engine, @seed : String, @host : String,
-                   @policy : ScopePolicy, @config : Config, @word_count : Int32)
+                   @policy : ScopePolicy, @config : Config, @word_count : Int32,
+                   @sender : Sender)
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
@@ -134,10 +139,13 @@ module Gori::Discover
       end
       words = load_words(config.user_wordlist)
       policy = resolve_policy(outbound, seed, parts.host)
+      # `idle_conns` is the run's concurrency for the reason Fuzz uses it: one worker fiber
+      # can hold at most one socket per origin, so a larger pool would only keep dead ones open.
       sender = Sender.new(verify: options.verify?, timeout: config.timeout,
-        headers: Headers.expand(config.headers), overrides: options.overrides)
+        headers: Headers.expand(config.headers), overrides: options.overrides,
+        keep_alive: config.keep_alive?, idle_conns: config.concurrency)
       new(engine: Engine.new(seed, words, sender, config, policy), seed: seed, host: parts.host,
-        policy: policy, config: config, word_count: words.size)
+        policy: policy, config: config, word_count: words.size, sender: sender)
     end
 
     # ONE `Env.expand` over the seed, then the scheme default: `acme.test/admin` means

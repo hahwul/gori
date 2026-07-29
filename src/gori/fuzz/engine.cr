@@ -4,9 +4,14 @@ require "../repeater/h2_engine"
 require "../proxy/codec/http1"
 require "../outbound"
 require "../scope"
-require "./conn_pool"
+require "../repeater/conn_pool"
 
 module Gori::Fuzz
+  # The keep-alive pool moved to `Repeater::ConnPool` when Discover became its second caller
+  # (it is transport over `Repeater::Engine`, not anything fuzz-specific). The fuzz-side name
+  # is what the sweep code, its spec and half a dozen comments say, so it stays spelled here.
+  alias ConnPool = Repeater::ConnPool
+
   # The origin a run targets (also the boundary for redirect following).
   #
   # The scheme is folded ws→http / wss→https at construction so the TLS decision is correct
@@ -73,8 +78,8 @@ module Gori::Fuzz
                    keep_alive : Bool = false, idle_conns : Int32 = 0)
       # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
       # a separate change with its own stream-state rules.
-      @pool = (keep_alive && !@http2) ? ConnPool.new(@origin, @verify, @sni, @timeout,
-        @overrides, Math.max(idle_conns, 1)) : nil
+      @pool = (keep_alive && !@http2) ? ConnPool.new(@origin.scheme, @origin.host, @origin.port,
+        @verify, @sni, @timeout, @overrides, Math.max(idle_conns, 1)) : nil
     end
 
     def send(bytes : Bytes) : Repeater::Result

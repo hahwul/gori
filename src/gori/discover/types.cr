@@ -138,6 +138,15 @@ module Gori
       property retries : Int32
       property retry_pause : Time::Span
       property max_requests : Int64? # GLOBAL hard ceiling (CappedBackend) across BOTH engines
+      # Reuse one HTTP/1.1 connection per origin across many sends instead of dialing per
+      # request (see `Repeater::ConnPool`). On by default, and worth more here than anywhere
+      # else in gori: a brute-force pass is one send per wordlist entry per DIRECTORY, so a
+      # run pays one TCP — and on https one TLS — handshake per worker instead of per probe.
+      # Turn it off to make every request a fresh connection: per-connection origin state (a
+      # connection-scoped rate limit, a load balancer pinning by connection, a target whose
+      # keep-alive handling is itself what you are probing) is then observable per request
+      # again. A response the pool cannot prove unambiguous gets a fresh connection anyway.
+      property? keep_alive : Bool
 
       # techniques (default BOTH)
       property? spider : Bool
@@ -172,6 +181,7 @@ module Gori
 
       def initialize(@concurrency = 20, @rps = nil, @throttle_ms = nil, @jitter_ms = 0,
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds, @max_requests = nil,
+                     @keep_alive = true,
                      @spider = true, @bruteforce = true,
                      @max_depth = 4, @max_pages = 5000, @follow_redirects = true, @template_saturation = 20,
                      @user_wordlist = nil, @extensions = [] of String, @per_dir_cap = 0, @calibrate_probes = 3,

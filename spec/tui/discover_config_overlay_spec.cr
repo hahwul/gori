@@ -86,6 +86,18 @@ describe Gori::Tui::DiscoverConfigOverlay do
     h.commits.should eq(0)
   end
 
+  it "␣ on the keep-alive row turns connection reuse off in the built config" do
+    # On by default — a run's largest cost against a remote origin is the handshake per probe
+    # — but the row exists because a target with per-connection behaviour needs it off.
+    ov = DiscoverConfigOverlay.new(dseed)
+    ov.build_config.keep_alive?.should be_true
+    h = OverlayHarness.new(ov)
+    ov.set_selected(DiscoverConfigOverlay::ROW_KEEP)
+    h.press(Termisu::Input::Key::Space).should eq(:open)
+    ov.build_config.keep_alive?.should be_false
+    h.commits.should eq(0)
+  end
+
   it "←/→ cycles the row under the cursor" do
     ov = DiscoverConfigOverlay.new(dseed)
     h = OverlayHarness.new(ov)
@@ -134,7 +146,7 @@ describe Gori::Tui::DiscoverConfigOverlay do
 
   it "still hit-tests its rows in the rect the shell actually passes (layout.body)" do
     # Production hands an overlay `layout.body` — 6 rows shorter and offset from the screen,
-    # which for this 9-row card is where it starts getting clipped.
+    # which for this card is where it starts getting clipped.
     body = Gori::Tui::Rect.new(2, 4, 76, 18)
     ov = DiscoverConfigOverlay.new(dseed)
     h = OverlayHarness.new(ov, area: body)

@@ -64,6 +64,7 @@ module Gori
           timeout: discover_timeout(h),
           retries: (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i,
           max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
+          keep_alive: bool_arg(h, "keep_alive", true),
           spider: spider, bruteforce: bruteforce,
           max_depth: clamp(int(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
           user_wordlist: str(h, "wordlist").presence,

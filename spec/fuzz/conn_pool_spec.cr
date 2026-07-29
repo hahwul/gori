@@ -257,8 +257,7 @@ describe F::ConnPool do
       # The Content-Length under-declares the body. Reusing here would leave "X" in the
       # origin's read buffer as the start of the next request.
       origin = KeepAliveOrigin.new
-      pool = F::ConnPool.new(F::Origin.new("http", "127.0.0.1", origin.port),
-        false, nil, nil, nil, 4)
+      pool = F::ConnPool.new("http", "127.0.0.1", origin.port, false, nil, nil, nil, 4)
       2.times do
         pool.send(req("POST /a HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1\r\n\r\naX"))
           .response.try(&.status).should eq(200)

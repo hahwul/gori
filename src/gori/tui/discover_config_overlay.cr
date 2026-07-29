@@ -24,16 +24,17 @@ module Gori::Tui
     CONTAINMENTS = [Discover::Containment::ScopeAware, Discover::Containment::SameOrigin, Discover::Containment::HostAndSubdomains]
     COMMON_EXT   = %w(php asp aspx jsp html json txt bak zip)
 
-    ROW_TARGET  = 0
-    ROW_SPIDER  = 1
-    ROW_BRUTE   = 2
-    ROW_DEPTH   = 3
-    ROW_CONTAIN = 4
-    ROW_CONC    = 5
-    ROW_EXT     = 6
-    ROW_HEADERS = 7
-    ROW_START   = 8
-    ROWS        = 9
+    ROW_TARGET  =  0
+    ROW_SPIDER  =  1
+    ROW_BRUTE   =  2
+    ROW_DEPTH   =  3
+    ROW_CONTAIN =  4
+    ROW_CONC    =  5
+    ROW_EXT     =  6
+    ROW_KEEP    =  7
+    ROW_HEADERS =  8
+    ROW_START   =  9
+    ROWS        = 10
 
     getter seed : DiscoverSeed
     # Custom request headers ({name, value}) prefilled from a History flow and/or
@@ -53,6 +54,7 @@ module Gori::Tui
       @contain_idx = 0
       @conc_idx = CONCS.index(20) || 1
       @ext = false
+      @keep_alive = true
       @selected = 0
       restore_saved_prefs
     end
@@ -77,7 +79,7 @@ module Gori::Tui
     # Remember the last confirmed overlay for the next Sitemap/History discovery.
     def save_prefs : Nil
       Settings.save_discover_prefs(CONTAINMENTS[@contain_idx].label, DEPTHS[@depth_idx],
-        CONCS[@conc_idx], @spider, @bruteforce, @ext)
+        CONCS[@conc_idx], @spider, @bruteforce, @ext, @keep_alive)
     end
 
     private def restore_saved_prefs : Nil
@@ -85,6 +87,7 @@ module Gori::Tui
       @spider = Settings.discover_spider?
       @bruteforce = Settings.discover_bruteforce?
       @ext = Settings.discover_extensions?
+      @keep_alive = Settings.discover_keep_alive?
       DEPTHS.index(Settings.discover_max_depth).try { |i| @depth_idx = i }
       CONCS.index(Settings.discover_concurrency).try { |i| @conc_idx = i }
       if c = Discover::Containment.parse?(Settings.discover_containment)
@@ -168,6 +171,7 @@ module Gori::Tui
       when ROW_SPIDER                                   then @spider = !@spider
       when ROW_BRUTE                                    then @bruteforce = !@bruteforce
       when ROW_EXT                                      then @ext = !@ext
+      when ROW_KEEP                                     then @keep_alive = !@keep_alive
       when ROW_TARGET, ROW_DEPTH, ROW_CONTAIN, ROW_CONC then adjust(1)
       end
     end
@@ -182,6 +186,7 @@ module Gori::Tui
         max_depth: DEPTHS[@depth_idx], concurrency: CONCS[@conc_idx],
         containment: CONTAINMENTS[@contain_idx],
         extensions: @ext ? COMMON_EXT.dup : [] of String,
+        keep_alive: @keep_alive,
         headers: @headers)
     end
 
@@ -219,6 +224,7 @@ module Gori::Tui
       when ROW_SPIDER  then check(screen, x, py, bg, sel, @spider, "spider (follow links)")
       when ROW_BRUTE   then check(screen, x, py, bg, sel, @bruteforce, "bruteforce (probe paths)")
       when ROW_EXT     then check(screen, x, py, bg, sel, @ext, "probe common extensions")
+      when ROW_KEEP    then check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)")
       when ROW_DEPTH   then cyc(screen, x, py, bg, sel, "max depth:", DEPTHS[@depth_idx].to_s)
       when ROW_CONTAIN then cyc(screen, x, py, bg, sel, "scope:", CONTAINMENTS[@contain_idx].label)
       when ROW_CONC    then cyc(screen, x, py, bg, sel, "concurrency:", CONCS[@conc_idx].to_s)
