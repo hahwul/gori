@@ -79,11 +79,20 @@ HTML_FLOW = flow("GET", "/dashboard", "text/html; charset=utf-8",
 # A minified-bundle-shaped JS response at the Context::CLIENT_BODY_CAP ceiling (256 KiB). This
 # is the worst case for the client-side rules: `client_scripts` is the WHOLE body, and both
 # strip (client_code) and strip_comments (client_scripts_nocomment) lex all of it.
+#
+# The body MUST carry real DOM sinks (`.html(`, `.innerHTML=`, `setTimeout(`) plus a taint
+# source — every shipped jQuery/SPA bundle does. This fixture originally had neither, so
+# `JsScan.source_sink_pairs` bailed on its first miss and the bench reported a healthy 6.2ms
+# while a sink-bearing bundle really cost 240ms (a `Regex#match(code, pos)` loop, since replaced
+# by `scan` + a whole-script source prefilter). A perf fixture that skips the expensive branch is
+# worse than no fixture — keep the sinks and the source here.
 JS_BODY = begin
   io = IO::Memory.new
   i = 0
   while io.bytesize < 256 * 1024
-    io << "function f" << i << "(a,b){var c=\"str" << i << "\",d=/*x*/a+b;return c+d};"
+    io << "function f" << i << "(a,b){var c=\"str" << i << "\",d=/*x*/a+b;$(e).html(c);"
+    io << "setTimeout(function(){o.innerHTML=d},10);return c+d};"
+    io << "o.innerHTML=location.hash+d;" if i % 200 == 0 # a real source→sink pair to correlate
     i += 1
   end
   io.to_slice.dup

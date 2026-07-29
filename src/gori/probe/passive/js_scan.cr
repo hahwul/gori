@@ -343,19 +343,35 @@ module Gori
         # within WINDOW chars each side). Empty when no sink co-occurs with a source.
         def self.source_sink_pairs(code : String) : Array({String, String})
           pairs = [] of {String, String}
+          # Whole-script source prefilter. A sink can only pair with a source that exists SOMEWHERE
+          # in the script, so a bundle with no source at all cannot produce a pair no matter how
+          # many sinks it carries — and a minified SPA/jQuery bundle carries thousands (`.html(`,
+          # `.innerHTML=`, `setTimeout(`). Without this, that bundle paid the full sink walk to
+          # return []: measured 230ms per flow, on the fiber the passive scan shares with the proxy.
+          # 14 whole-body `matches?` passes instead ⇒ 1.0ms (228× — bench/probe_passive_bench).
+          return pairs unless SOURCES.any? { |(re, _)| re.matches?(code) }
           SINKS.each do |(sink_re, sink_label)|
-            pos = 0
-            while m = sink_re.match(code, pos)
-              b = m.begin(0)
-              e = m.end(0)
-              if src = source_in_window(code, b, e)
+            # `scan`, NOT a `while m = sink_re.match(code, pos)` loop: re-entering `match` with a
+            # start offset is ~515× slower than one `scan` walk for the SAME matches and the SAME
+            # allocation (74.00ms vs 143.64µs over 2448 hits in a 256 KiB body — pure CPU inside
+            # the match call; `match_at_byte_index` is just as slow, so it is not char↔byte
+            # conversion). `scan` yields the same MatchData, so begin/end are unchanged.
+            code.scan(sink_re) do |m|
+              if src = source_in_window(code, m.begin(0), m.end(0))
                 pairs << {src, sink_label}
               end
-              pos = e > pos ? e : pos + 1
             end
           end
           pairs
         end
+
+        # The characters that end a statement, hence bound a source↔sink window. Scanned as four
+        # Char searches rather than one `/[;{}\n]/`: `String#rindex(Regex)` walks the whole subject
+        # FORWARD keeping the last match and allocates a MatchData per boundary, and a minified
+        # statement is dense with them. Same idea as the `[a.index('/'), a.index('?'),
+        # a.index('#')].compact.min?` idiom in active/types.cr, written allocation-free here
+        # because this runs once per sink occurrence.
+        BOUNDS = {';', '{', '}', '\n'}
 
         # The first taint source inside the statement window around [from, to), or nil.
         private def self.source_in_window(code : String, from : Int32, to : Int32) : String?
@@ -363,10 +379,20 @@ module Gori
           floor = 0 if floor < 0
           ceil = to + WINDOW
           ceil = code.size if ceil > code.size
+          # Statement start: the LAST boundary before the sink (else the window floor).
           pre = code[floor...from]
-          lo = (rel = pre.rindex(/[;{}\n]/)) ? floor + rel + 1 : floor
+          lo = floor
+          BOUNDS.each do |c|
+            r = pre.rindex(c)
+            lo = floor + r + 1 if r && floor + r + 1 > lo
+          end
+          # Statement end: the FIRST boundary after the sink (else the window ceiling).
           post = code[to...ceil]
-          hi = (rel2 = post.index(/[;{}\n]/)) ? to + rel2 : ceil
+          hi = ceil
+          BOUNDS.each do |c|
+            r = post.index(c)
+            hi = to + r if r && to + r < hi
+          end
           seg = code[lo...hi]
           SOURCES.each { |(re, label)| return label if re.matches?(seg) }
           nil
