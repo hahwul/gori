@@ -77,7 +77,7 @@ describe Gori::Tui::Pet do
       pet.tick(t0)
       pet.tick(t0 + Pet::SLEEP_AFTER).should be_true
       pet.frame.not_nil!.pose.should eq(:doze)
-      pet.frame.not_nil!.arms.should eq(:down) # reads as asleep, not as a hang
+      pet.frame.not_nil!.badge.should eq('z') # reads as asleep, not as a hang
       pet.tick(t0 + Pet::SLEEP_AFTER + Pet::BEAT).should be_false
       pet.tick(t0 + 1.hour).should be_false
     end
@@ -286,21 +286,30 @@ describe Gori::Tui::Pet do
   # single-codepoint, single-column glyphs. A width-2 glyph slipping in would claim its
   # neighbour's cell and orphan-clear the one before it.
 
-  it "assembles every pose x wink x arms to exactly 9 columns of width-1 glyphs" do
+  it "assembles every pose x wink x badge to exactly W columns of width-1 glyphs" do
     badges = [nil, '·', '!', '×', 'z']
     Mascot::POSES.each do |pose|
       Mascot::WINKS.each do |wink|
-        {:rest, :wave_a, :wave_b, :down}.each do |arms|
-          badges.each do |badge|
-            frame = Mascot::Frame.new(pose: pose, wink: wink, arms: arms, badge: badge)
-            Mascot.rows(frame).each do |row|
-              row.size.should eq(Mascot::W)               # single codepoint per cell
-              Screen.draw_width(row).should eq(Mascot::W) # …and one column each
-            end
+        badges.each do |badge|
+          frame = Mascot::Frame.new(pose: pose, wink: wink, badge: badge)
+          Mascot.rows(frame).each do |row|
+            row.size.should eq(Mascot::W)               # single codepoint per cell
+            Screen.draw_width(row).should eq(Mascot::W) # …and one column each
           end
         end
       end
     end
+  end
+
+  # The whole point of this cut: three rows buy six units of height, so the equator has to
+  # be six CELLS across or the hoop reads as an oval. That falls out of the half-block
+  # walls, and a spec is the only thing that stops a future edit from widening it back.
+  it "keeps the equator exactly as wide as the sprite is tall" do
+    row = Mascot.rows(Mascot::Frame.new)[1]
+    row[0].should eq(Mascot::WALL_L) # ▐ — inks the RIGHT half, x[0.5,1]
+    row[6].should eq(Mascot::WALL_R) # ▌ — inks the LEFT half,  x[6,6.5]
+    # 6.5 - 0.5 = 6.0 cells wide; 3 rows x 2 units = 6.0 units tall.
+    (6.5 - 0.5).should eq(Mascot::H * 2.0)
   end
 
   it "keeps the ink layer the same shape as the art" do
@@ -356,7 +365,7 @@ describe Gori::Tui::Pet do
     it "lands in the bottom-right of the body and paints nothing outside it" do
       backend = MemoryBackend.new(80, 24)
       Pet.draw(Screen.new(backend), body, Mascot::Frame.new)
-      rect, _ = Pet.place(body).not_nil!
+      rect = Pet.place(body).not_nil!
       # One clear row at the bottom: most tab bodies are a card whose bottom rule runs
       # along body.bottom - 1, and sitting on it cut the border in half.
       rect.bottom.should eq(body.bottom - Pet::BOTTOM_MARGIN)
@@ -377,7 +386,7 @@ describe Gori::Tui::Pet do
       Mascot::POSES.each do |pose|
         Pet.draw(screen, body, Mascot::Frame.new(pose: pose, badge: '!'))
       end
-      rect, _ = Pet.place(body).not_nil!
+      rect = Pet.place(body).not_nil!
       (Mascot::H).times do |i|
         (0...80).each { |x| backend.cont_grid[rect.y + i][x].should be_false }
       end
@@ -387,7 +396,7 @@ describe Gori::Tui::Pet do
       backend = MemoryBackend.new(80, 24)
       long = "probe " * 60
       Pet.draw(Screen.new(backend), body, Mascot::Frame.new(bubble: long))
-      rect, _ = Pet.place(body).not_nil!
+      rect = Pet.place(body).not_nil!
       text_row = rect.y - Pet::BUBBLE_H + 1
       backend.row(text_row).should contain("…")
       (0...24).each do |y|
@@ -395,24 +404,17 @@ describe Gori::Tui::Pet do
       end
     end
 
-    it "drops the arms on a narrow body" do
-      narrow = Rect.new(2, 4, Pet::NARROW_W - 1, 10)
-      _, arms = Pet.place(narrow).not_nil!
-      arms.should be_false
-      wide = Rect.new(2, 4, Pet::NARROW_W, 10)
-      Pet.place(wide).not_nil![1].should be_true
-    end
-
-    # The width thresholds have to stay calibrated against what Layout can actually hand
-    # us, or they become dead code that only the specs ever exercise: Layout.usable? floors
-    # the terminal at 40x8 and Layout insets by H_PADDING, so the narrowest real body is 36.
-    # NARROW_W must sit ABOVE that (or the arms never drop) and MIN_W below it.
-    it "keeps the narrow fallback reachable from a real Layout body" do
+    # The width guard has to stay calibrated against what Layout can actually hand us:
+    # Layout.usable? floors the terminal at 40x8 and Layout insets by H_PADDING, so the
+    # narrowest real body is 36 — MIN_W must sit below that, or she would be hidden on a
+    # terminal gori is perfectly happy to render.
+    it "fits the narrowest body a real Layout can hand it" do
       floor = Layout.compute(40, 24).body
       floor.w.should eq(36)
-      Pet::NARROW_W.should be > floor.w # the armless render is reachable …
-      Pet::MIN_W.should be < floor.w    # … and hiding on width alone is not
-      Pet.place(floor).not_nil![1].should be_false
+      Pet::MIN_W.should be < floor.w
+      rect = Pet.place(floor).not_nil!
+      rect.w.should eq(Mascot::W)
+      rect.right.should be <= floor.right - Pet::GUTTER
     end
 
     # Height is the live guard: body.h is height - 6 (or - 7 with the statusline).

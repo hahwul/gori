@@ -2,79 +2,82 @@ require "./screen"
 require "./theme"
 
 module Gori::Tui
-  # Miss Ring's art: a 3-row x 9-column gilded hoop with a lashed cartoon face in it.
-  # Motif is Loki's Miss Minutes (huge eyes, stubby arms) crossed with Claude's mascot
-  # (soft rounded forms, minimal face); the SHAPE is the gori mark itself — a ring —
-  # painted in the live palette's brand gold.
+  # Miss Ring's art: a 3-row x 8-column gilded hoop with a lashed cartoon face in it.
+  # Motif is Loki's Miss Minutes (huge eyes, lashes) crossed with Claude's mascot (soft
+  # rounded forms, minimal face); the SHAPE is the gori mark itself — a ring — painted in
+  # the live palette's brand gold.
   #
   # Pure and stateless: art tables, an ink (role) layer, a palette resolver and a draw
   # loop. Everything about WHEN she moves lives in Pet; everything about HOW she looks
   # lives here.
   #
-  # WHY THE SILHOUETTE READS ROUND. A cell is 1 unit wide and 2 units tall, so a half
-  # block is a square pixel and the hoop is drawn in half-pixels rather than characters:
+  # WHY THE SILHOUETTE IS ROUND AND NOT OVAL. A terminal row is about twice as tall as a
+  # cell is wide, so three rows buy six units of height — and to read as a circle rather
+  # than an oval the equator has to be six CELLS across, not seven. Half-block walls put
+  # it exactly there, and the crown then tapers half a cell per step:
   #
-  #       col: 0    1     2 3 4 5 6     7    8
-  #   row 0:   ' '  ▗     ▀ ▀ ▀ ▀ ▀     ▖   badge
-  #   row 1:   ╺    █     <- face 5 ->  █    ╸
-  #   row 2:   ' '  ▝     ▄ ▄ ▄ ▄ ▄     ▘   ' '
+  #       col:  0    1   2 3 4   5    6    7
+  #   row 0:   ' '   ▄   ▀ ▀ ▀   ▄   ' '  badge
+  #   row 1:    ▐   <-- face 5 -->    ▌   ' '
+  #   row 2:   ' '   ▀   ▄ ▄ ▄   ▀   ' '  ' '
   #
-  # Going up the left side the ink starts at x=1 (the full-block wall), then 1.5 (the ▗
-  # quadrant), then 2 (the ▀ top edge) — a three-step arc, mirrored at every corner. The
-  # hoop spans x∈[1,8] (7 cells) and y∈[0,3] (3 rows ≈ 6 cell-widths), i.e. a near-square
-  # bounding box, and the wall (1 cell) and the top/bottom stroke (half a row ≈ 1 cell
-  # width) are the same weight. That is what makes it a ring and not a rounded rectangle.
+  #   equator  ▐ x[0.5,1] .. ▌ x[6,6.5]        = 6.0 cells
+  #   y 0.5-1  ▄ at col 1 and col 5            = 5.0 cells
+  #   y 0-0.5  ▀ at cols 2..4                  = 3.0 cells
   #
-  # The walls MUST be full blocks. With half-block walls (▐ / ▌) the ink stops at x=1.5
-  # and the ╺ arm ends at x=1.0, leaving a half-cell gap that reads as a detached dash.
+  # A circle of diameter six wants 6 / 5.2 / 3.3 at those bands, so the profile lands on
+  # it. Every step is half a cell, which is what keeps the arc smooth instead of notched.
+  #
+  # THE COST IS THE ARMS. A half-block wall starts at x=0.5, but a `╺` stub in the column
+  # to its left ends at x=1.0 of that column — half a cell short. Nothing can bridge it
+  # without making the wall a full block, which would push the equator back to seven cells
+  # and lose the circle. So she has no arms, and the badge column carries mood instead.
   module Mascot
-    W = 9
+    W = 8
     H = 3
 
-    # Cols 1..7 of the top and bottom rows. Col 0 is the left arm slot, col 8 the right
-    # arm (row 1) / mood badge (row 0).
+    # Cols 0..6 of the top and bottom rows; col 7 is the mood badge (row 0 only).
     #
     # Char tuples, not Strings: she is drawn on EVERY frame the Runner paints, and
     # String#[](Int) walks the codepoints on non-ASCII text — indexing these per cell
     # would make the hot path scale with the art's byte length for no reason.
-    RING_TOP = {'▗', '▀', '▀', '▀', '▀', '▀', '▖'}
-    RING_BOT = {'▝', '▄', '▄', '▄', '▄', '▄', '▘'}
-    WALL     = '█'
+    CROWN  = {' ', '▄', '▀', '▀', '▀', '▄', ' '}
+    FLOOR  = {' ', '▀', '▄', '▄', '▄', '▀', ' '}
+    WALL_L = '▐'
+    WALL_R = '▌'
 
     # She is a MISS, so she has lashes. These are thin strokes, not blocks, and both sit
     # at cap height while the pupil sits mid-cell — so they read as lashes floating at the
     # outer-upper corner of each eye. The slants are outward: ` is a \ (top end to the
     # left) beside the left eye, ´ is a / (top end to the right) beside the right eye.
-    # Quadrant blocks (▘ ▝) would land in the same place but butt against the █ wall and
-    # read as the wall thickening.
     LASH_L = '`' # U+0060
     LASH_R = '´' # U+00B4 ACUTE ACCENT
 
     # Every pose. FIVE, deliberately — expression variety comes from the independent
-    # wink/arms/badge/glint axes below, not from growing this table. :error reuses the
-    # :alert face and is told apart by its badge, its red-shifted gold and a shake.
+    # wink/badge/glint axes below, not from growing this table. :error reuses the :alert
+    # face and is told apart by its badge, its red-shifted gold and a shake.
     POSES = {:idle, :blink, :happy, :alert, :doze}
     WINKS = {:none, :left, :right}
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
     #   H hoop highlight (lit, upper-left)   R hoop base (brand gold)
-    #   S hoop shadow (turned away)          A arm
-    #   f face field (pupils)                L lash (mascara — warmer than the pupil)
+    #   S hoop shadow (turned away)          f face field (pupils)
+    #   L lash (mascara — warmer than the pupil)
     #   X mood badge                         . plate (background only)
     #
     # ONE grid for every pose: poses only ever change cells inside the face, and the face
     # is uniformly typed, so adding an expression never means restating the hoop's shading.
-    # The light source is fixed upper-left — hence HHH then RRRR across the top, H on the
+    # The light source is fixed upper-left — hence HH then RR across the crown, H on the
     # left wall, S on the right wall, and a single R of bounce light at the bottom-left.
     INK = {
-      ".HHHRRRRX",
-      "AHLfffLSA",
-      ".RSSSSSS.",
+      ".HHRRS.X",
+      "HLfffLS.",
+      ".RSSSS..",
     }
 
     # Where the specular walks during a glint sweep — up the left wall and across the
-    # top. Indices into this are what Frame#glint holds; -1 is "no specular".
-    GLINT_PATH = { {1, 1}, {1, 0}, {2, 0}, {3, 0}, {4, 0} }
+    # crown. Indices into this are what Frame#glint holds; -1 is "no specular".
+    GLINT_PATH = { {0, 1}, {1, 0}, {2, 0}, {3, 0}, {4, 0} }
 
     # EVERYTHING drawn on one frame — the sprite and the speech bubble both, so Pet#tick
     # can answer "did the drawn thing change" with a single field-wise compare instead of
@@ -83,7 +86,6 @@ module Gori::Tui
     record Frame,
       pose : Symbol = :idle,
       wink : Symbol = :none,
-      arms : Symbol = :rest, # :rest | :wave_a | :wave_b | :down
       badge : Char? = nil,
       glint : Int32 = -1, # index into GLINT_PATH; -1 = no specular this frame
       mood : Symbol = :info,
@@ -94,7 +96,7 @@ module Gori::Tui
     # the current mood.
     record Palette,
       ring : Color, hi : Color, lo : Color, glint : Color,
-      face : Color, ink : Color, lash : Color, arm : Color,
+      face : Color, ink : Color, lash : Color,
       badge : Color, plate : Color
 
     def self.eyes(pose : Symbol) : {Char, Char}
@@ -107,7 +109,7 @@ module Gori::Tui
       end
     end
 
-    # Cols 2..6: lash, left eye, gap, right eye, lash.
+    # Cols 1..5 of the middle row: lash, left eye, gap, right eye, lash.
     #
     # A wink only applies to the open-eyed idle face — a winking :alert or :doze would
     # read as a rendering glitch rather than a gesture.
@@ -120,33 +122,18 @@ module Gori::Tui
       {LASH_L, l, ' ', r, LASH_R}
     end
 
-    # ASCII / and \ rather than the box-drawing ╱ ╲: at this size they read identically
-    # and they are the only glyphs in the sheet that would have thin font coverage.
-    def self.arms(kind : Symbol) : {Char, Char}
-      case kind
-      when :down   then {' ', ' '} # asleep — the arms hang
-      when :wave_a then {'╺', '/'}
-      when :wave_b then {'╺', '\\'}
-      else              {'╺', '╸'}
-      end
-    end
-
-    # The glyph at (col, row) of the 9x3 grid. Allocation-free — this is what the draw
+    # The glyph at (col, row) of the 8x3 grid. Allocation-free — this is what the draw
     # loop reads, so a frame costs no String building at all.
     def self.glyph(frame : Frame, col : Int32, row : Int32) : Char
       case row
-      when 0
-        return frame.badge || ' ' if col == 8
-        col == 0 ? ' ' : RING_TOP[col - 1]
-      when 2
-        col == 0 || col == 8 ? ' ' : RING_BOT[col - 1]
+      when 0 then col == W - 1 ? (frame.badge || ' ') : CROWN[col]
+      when 2 then col == W - 1 ? ' ' : FLOOR[col]
       else
-        al, ar = arms(frame.arms)
         case col
-        when 0    then al
-        when 1, 7 then WALL
-        when 8    then ar
-        else           face(frame.pose, frame.wink)[col - 2]
+        when 0     then WALL_L
+        when 6     then WALL_R
+        when W - 1 then ' '
+        else            face(frame.pose, frame.wink)[col - 1]
         end
       end
     end
@@ -169,9 +156,9 @@ module Gori::Tui
     #
     # MEMOISED on (theme revision, mood, plate). She is drawn on every frame but her mood
     # changes a few times a minute at most, so resolving the ramp — two luma poles and
-    # seven blends, each converting colours to RGB components — per frame was pure waste.
-    # Theme.revision is the same invalidation signal the other colour-baking caches use, so
-    # a theme swap re-derives on the next access.
+    # several blends, each converting colours to RGB components — per frame was pure
+    # waste. Theme.revision is the same invalidation signal the other colour-baking caches
+    # use, so a theme swap re-derives on the next access.
     @@cache_key : {UInt32, Symbol, Color}? = nil
     @@cached : Palette? = nil
 
@@ -210,7 +197,6 @@ module Gori::Tui
         face: face,
         ink: ink,
         lash: Theme.blend(gold, ink, 0.25), # mostly ink, warmed toward the gold
-        arm: Theme.blend(gold, soot, 0.72),
         badge: badge_color(mood),
         plate: plate,
       )
@@ -230,7 +216,6 @@ module Gori::Tui
       when 'H' then {pal.hi, pal.plate, Attribute::Bold}
       when 'R' then {pal.ring, pal.plate, Attribute::Bold}
       when 'S' then {pal.lo, pal.plate, Attribute::Bold}
-      when 'A' then {pal.arm, pal.plate, Attribute::Bold}
       when 'X' then {pal.badge, pal.plate, Attribute::Bold}
       when 'L' then {pal.lash, pal.face, Attribute::Bold}
       when 'f' then {pal.ink, pal.face, Attribute::Bold}
@@ -243,18 +228,11 @@ module Gori::Tui
     # The '.' plate role still writes an opaque background space: the pet OCCLUDES body
     # content, so the whole box must be claimed or the tab's text bleeds through the
     # hoop's corners. On a still beat the diff renderer forwards none of it.
-    #
-    # `arms: false` is the narrow-terminal fallback — it drops cols 0 and 8, which also
-    # drops the mood badge; mood is then carried by the gold's hue shift and the pose
-    # alone. The caller positions x for the full 9-column grid either way.
-    def self.draw(screen : Screen, x : Int32, y : Int32, frame : Frame, pal : Palette,
-                  *, arms : Bool = true) : Nil
-      lo = arms ? 0 : 1
-      hi = arms ? W - 1 : W - 2
+    def self.draw(screen : Screen, x : Int32, y : Int32, frame : Frame, pal : Palette) : Nil
       gx, gy = frame.glint >= 0 ? (GLINT_PATH[frame.glint]? || {-1, -1}) : {-1, -1}
       H.times do |ry|
         ink = INK[ry]
-        (lo..hi).each do |col|
+        W.times do |col|
           role = ink[col]
           fg, bg, attr = role_style(role, pal)
           # The specular overrides one hoop cell — polished metal turning under a light.

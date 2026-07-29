@@ -38,7 +38,6 @@ module Gori::Tui
     BLINK_SHIFT = 4 #  16 beats = 3.2s
     WINK_SHIFT  = 6 #  64 beats = 12.8s
     GLINT_SHIFT = 7 # 128 beats = 25.6s
-    WAVE_SHIFT  = 8 # 256 beats = 51.2s
 
     # Beats she stays startled after being woken from a doze.
     WAKE_BEATS = 3
@@ -51,13 +50,11 @@ module Gori::Tui
     #
     # Calibrated against the REAL floor: Layout.usable? refuses to render below 40x8, and
     # Layout insets by H_PADDING/V_PADDING, so the smallest body this can ever be handed is
-    # 36 wide. A width threshold under that is unreachable dead code — MIN_W is therefore a
-    # defensive guard for non-Layout callers (and the specs), while NARROW_W is set where it
-    # actually bites: a ~50-column terminal, at which 11 columns of mascot is a real bite out
-    # of the pane. Height is the live constraint (body.h is height - 6, so 6 needs 12 rows).
-    MIN_W    = 30
-    MIN_H    =  6
-    NARROW_W = 46 # below this the arms — and with them the badge column — are dropped
+    # 36 wide — against which the sprite plus its gutter is 10 columns. MIN_W is therefore a
+    # defensive guard for non-Layout callers (and the specs) rather than something a user
+    # reaches. Height is the live constraint (body.h is height - 6, so 6 needs 12 rows).
+    MIN_W = 30
+    MIN_H =  6
     # Columns kept clear at the body's right edge: a pane hairline plus Frame.scroll_gauge's
     # thumb column, so she never lands on a scrollbar.
     GUTTER = 2
@@ -185,8 +182,7 @@ module Gori::Tui
     # stop being meaningful (or specifiable).
     private def compose : Mascot::Frame
       if @dozing
-        return Mascot::Frame.new(pose: :doze, arms: :down, badge: 'z', mood: :doze,
-          bubble: @bubble)
+        return Mascot::Frame.new(pose: :doze, badge: 'z', mood: :doze, bubble: @bubble)
       end
       if @beat < @wake_until_beat
         # Startled awake, then settles.
@@ -196,7 +192,6 @@ module Gori::Tui
       Mascot::Frame.new(
         pose: pose_for(mood),
         wink: mood == :info ? wink_for : :none,
-        arms: arms_for(mood),
         badge: badge_for(mood),
         glint: glint_for,
         mood: mood,
@@ -230,16 +225,6 @@ module Gori::Tui
       when 0 then -1
       when 1 then 1
       else        0
-      end
-    end
-
-    private def arms_for(mood : Symbol) : Symbol
-      if mood == :happy && (d = @beat - @mood_beat) < 4
-        d.even? ? :wave_a : :wave_b # a little wave on a good result
-      elsif mood == :info
-        wave_for || :rest
-      else
-        :rest
       end
     end
 
@@ -293,16 +278,6 @@ module Gori::Tui
       d = off - at
       return -1 if d < 0 || d >= Mascot::GLINT_PATH.size * 2
       d // 2
-    end
-
-    private def wave_for : Symbol?
-      return nil unless Settings.pet_lively?
-      h, off = window(WAVE_SHIFT, 4_u32)
-      return nil unless (h & 1) == 0
-      at = ((h >> 7) % 248).to_i
-      d = off - at
-      return nil if d < 0 || d >= 4
-      (d // 2) == 0 ? :wave_a : :wave_b
     end
 
     # --- notifications -------------------------------------------------------
@@ -384,17 +359,15 @@ module Gori::Tui
 
     # --- geometry + rendering (pure; explicit Frame, so specs need no clock) ----
 
-    # Where the 9x3 sprite grid lands, and whether the arms fit. nil when the body is too
-    # small for her at all. Nothing is cached — this is recomputed from the live body every
-    # frame, so a resize needs no invalidation.
-    def self.place(body : Rect) : {Rect, Bool}?
+    # Where the 8x3 sprite grid lands, or nil when the body is too small for her at all.
+    # Nothing is cached — this is recomputed from the live body every frame, so a resize
+    # needs no invalidation.
+    def self.place(body : Rect) : Rect?
       return nil if body.w < MIN_W || body.h < MIN_H
-      arms = body.w >= NARROW_W
-      w = arms ? Mascot::W : Mascot::W - 2
-      x = body.right - GUTTER - w
+      x = body.right - GUTTER - Mascot::W
       y = body.bottom - Mascot::H - BOTTOM_MARGIN
       return nil if x < body.x || y < body.y
-      {Rect.new(x, y, w, Mascot::H), arms}
+      Rect.new(x, y, Mascot::W, Mascot::H)
     end
 
     # Above the sprite, right-aligned to it, tail pointing down at her cap. Above rather
@@ -412,8 +385,7 @@ module Gori::Tui
     end
 
     def self.draw(screen : Screen, body : Rect, frame : Mascot::Frame) : Nil
-      return unless placed = place(body)
-      rect, arms = placed
+      return unless rect = place(body)
       pal = Mascot.palette(frame.mood, Theme.bg)
 
       if msg = frame.bubble
@@ -426,16 +398,14 @@ module Gori::Tui
       x = (rect.x + frame.shake).clamp(body.x, body.right - rect.w)
       # A column of plate either side so she never butts against body text. Only the two
       # STRIPS — Mascot.draw already claims every cell it covers opaquely, so filling the
-      # whole box first would rewrite 27 cells that are about to be overwritten, on every
+      # whole box first would rewrite cells that are about to be overwritten, on every
       # frame she is drawn (which is every frame, not just the ones where she moves).
       rect.h.times do |i|
         screen.cell(x - 1, rect.y + i, ' ', pal.plate, pal.plate) if x - 1 >= body.x
         r = x + rect.w
         screen.cell(r, rect.y + i, ' ', pal.plate, pal.plate) if r < body.right
       end
-      # Mascot.draw positions by the full 9-column grid, so a narrow (armless) render
-      # starts one column further left for col 1 to land on rect.x.
-      Mascot.draw(screen, x - (arms ? 0 : 1), rect.y, frame, pal, arms: arms)
+      Mascot.draw(screen, x, rect.y, frame, pal)
     end
 
     private def self.draw_bubble(screen : Screen, box : Rect, msg : String,
