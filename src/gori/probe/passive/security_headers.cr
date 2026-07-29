@@ -185,6 +185,18 @@ module Gori
         # lowercases, so the value's original case is irrelevant to this prefix test).
         SCRIPT_NONCE_HASH = /\A'(?:nonce|sha256|sha384|sha512)-/
 
+        # CSP source-list keywords, matched as WHOLE tokens. These used to be tested with
+        # `includes?`, which fires on any source that merely CONTAINS the word: a script-src of
+        # `https://unsafe-evaluation.example` read as 'unsafe-eval', and `https://cdn.x/unsafe-
+        # inline.js` read as 'unsafe-inline' — both scoring a safe policy as weak_csp. parse_csp
+        # splits on whitespace and downcases, so each source is already a clean lowercase token
+        # and an exact compare is both correct and cheaper. The unquoted spelling is accepted
+        # alongside the quoted one: browsers require the quotes, but policies in the wild omit
+        # them, and a policy that means 'unsafe-eval' should be judged as one either way.
+        UNSAFE_EVAL    = {"'unsafe-eval'", "unsafe-eval"}
+        UNSAFE_INLINE  = {"'unsafe-inline'", "unsafe-inline"}
+        STRICT_DYNAMIC = {"'strict-dynamic'", "strict-dynamic"}
+
         # Weak when the SCRIPT context (script-src, else the default-src fallback) is unsafe —
         # accounting for CSP Level 3 nullification so a modern, safe policy is NOT a false
         # positive:
@@ -204,10 +216,10 @@ module Gori
         private def weak_csp?(dirs : Hash(String, Array(String))) : Bool
           script = dirs["script-src"]? || dirs["default-src"]?
           return true if script.nil?
-          return true if script.any?(&.includes?("unsafe-eval"))
+          return true if script.any? { |s| UNSAFE_EVAL.includes?(s) }
           nonce_or_hash = script.any? { |s| SCRIPT_NONCE_HASH.matches?(s) }
-          strict_dynamic = script.includes?("'strict-dynamic'")
-          return true if !nonce_or_hash && !strict_dynamic && script.any?(&.includes?("unsafe-inline"))
+          strict_dynamic = script.any? { |s| STRICT_DYNAMIC.includes?(s) }
+          return true if !nonce_or_hash && !strict_dynamic && script.any? { |s| UNSAFE_INLINE.includes?(s) }
           return true if !strict_dynamic && script.any? { |s| s == "*" || s == "data:" || s == "http:" || s == "https:" }
           false
         end

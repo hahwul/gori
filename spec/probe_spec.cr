@@ -780,6 +780,37 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
+  # The keyword tests were `includes?`, so any source merely CONTAINING the word scored the
+  # whole policy weak — an allowlisted host or path is not a keyword.
+  it "does not read an allowlisted host/path that merely contains a keyword as that keyword" do
+    with_store do |store|
+      ["script-src 'self' https://unsafe-evaluation.example",
+       "script-src 'self' https://cdn.example.com/unsafe-inline.js",
+       "script-src 'self' https://unsafe-inline-demo.example"].each do |policy|
+        dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: #{policy}\r\n\r\n",
+          content_type: "text/html")
+        codes_of(dets).should_not contain("weak_csp"), policy
+      end
+    end
+  end
+
+  # …while the real keywords still fire, quoted (per spec) or bare (as seen in the wild).
+  it "flags the real keywords whether or not they are quoted" do
+    with_store do |store|
+      ["script-src 'self' 'unsafe-eval'", "script-src 'self' unsafe-eval",
+       "script-src 'self' 'unsafe-inline'", "script-src 'self' unsafe-inline"].each do |policy|
+        dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: #{policy}\r\n\r\n",
+          content_type: "text/html")
+        codes_of(dets).should contain("weak_csp"), policy
+      end
+      # An unquoted strict-dynamic must still nullify 'unsafe-inline', like the quoted form.
+      lenient = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                          "script-src 'self' strict-dynamic 'unsafe-inline'\r\n\r\n",
+        content_type: "text/html")
+      codes_of(lenient).should_not contain("weak_csp")
+    end
+  end
+
   it "rates a wildcard CORS with credentials Medium (the combination is browser-rejected, not High)" do
     with_store do |store|
       dets = analyze(store,
@@ -2455,14 +2486,59 @@ describe "Gori::Probe::Passive::BodyLeaks (client-side HTML sinks)" do
       codes_of(analyze_html(store, %(<a target="_blank" rel="noopener" href="http://x/">x</a>))).should_not contain("reverse_tabnabbing")
     end
   end
+
+  # ANCHOR_BLANK is /i, so it matches uppercase markup; the rel suppression must be too, or the
+  # very attribute that makes the tag safe goes unrecognised.
+  it "recognises rel=noopener/noreferrer regardless of case" do
+    with_store do |store|
+      [%(<a TARGET="_blank" REL="NOOPENER" href="/x">x</a>),
+       %(<a Target="_blank" Rel="NoReferrer" href="/x">x</a>),
+       %(<a target="_blank" rel="NOREFERRER NOOPENER" href="/x">x</a>)].each do |tag|
+        codes_of(analyze_html(store, tag)).should_not contain("reverse_tabnabbing"), tag
+      end
+    end
+  end
+
+  # Browsers have defaulted target=_blank to noopener since 2021, so this is markup hygiene,
+  # not a vulnerability — an external link is on nearly every page.
+  it "reports reverse-tabnabbing at Info, not Low" do
+    with_store do |store|
+      d = analyze_html(store, %(<a target="_blank" href="http://x/">x</a>))
+        .find(&.code.== "reverse_tabnabbing")
+      d.not_nil!.severity.should eq(Gori::Store::Severity::Info)
+    end
+  end
 end
 
 describe "Gori::Probe::Passive::Secrets (client-side shapes)" do
-  it "flags a JWT and a Slack webhook embedded in a JS bundle" do
+  it "flags a Slack webhook embedded in a JS bundle" do
     with_store do |store|
-      codes_of(analyze_js(store, "var t = '#{JWT}';")).should contain("secret_in_body")
       hook = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
       codes_of(analyze_js(store, "var w = '#{hook}';")).should contain("secret_in_body")
+    end
+  end
+
+  # A JWT is the one shape in this family an app legitimately hands its own client, so it is
+  # NOT a High secret_in_body — it gets its own Info code (see Secrets::JWT).
+  it "reports a JWT as Info jwt_in_body, never as a High secret_in_body" do
+    with_store do |store|
+      dets = analyze_js(store, "var t = '#{JWT}';")
+      codes_of(dets).should_not contain("secret_in_body")
+      d = dets.find(&.code.== "jwt_in_body").not_nil!
+      d.severity.should eq(Gori::Store::Severity::Info)
+      d.category.should eq(Gori::Probe::Category::INFOLEAK)
+    end
+  end
+
+  # The High tier must still fire on the shapes a server has no business sending a browser,
+  # and a body carrying BOTH must report both — the JWT split must not swallow the real leak.
+  it "still reports a High secret_in_body alongside the JWT note" do
+    with_store do |store|
+      dets = analyze_js(store, "var k='AKIAIOSFODNN7EXAMPLE',t='#{JWT}';")
+      sec = dets.find(&.code.== "secret_in_body").not_nil!
+      sec.severity.should eq(Gori::Store::Severity::High)
+      sec.evidence.should eq("AWS access key id")
+      codes_of(dets).should contain("jwt_in_body")
     end
   end
 end

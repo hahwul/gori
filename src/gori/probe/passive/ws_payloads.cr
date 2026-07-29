@@ -19,6 +19,7 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return if ctx.ws_messages.empty?
           seen = Set(String).new # distinct type labels per flow (avoid ×N from echo/repeater)
+          jwt_seen = false
           ctx.ws_messages.each do |msg|
             next unless msg.text?
             text = payload_text(msg.payload)
@@ -30,6 +31,13 @@ module Gori
               acc << Detection.new("secret_in_ws", Category::INFOLEAK, ctx.host, ctx.url,
                 "Credential/secret disclosed in WebSocket message", Store::Severity::High,
                 label, ctx.fid)
+            end
+            # Reported apart from the High shapes above: a socket carrying the session token it
+            # was authenticated with is the normal design, not a leak (see Secrets::JWT).
+            if !jwt_seen && Secrets::JWT[0].matches?(text)
+              jwt_seen = true
+              acc << Detection.new("jwt_in_ws", Category::INFOLEAK, ctx.host, ctx.url,
+                "JSON Web Token in a WebSocket message", Store::Severity::Info, nil, ctx.fid)
             end
           end
         end

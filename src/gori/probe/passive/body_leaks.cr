@@ -87,6 +87,11 @@ module Gori
         INLINE_JS_URI = /(?<![-\w])(?:href|src|action|formaction)\s*=\s*["']?javascript:(?!\s*(?:void|;|"|'))/i
         # An <a target="_blank"> tag; reverse-tabnabbing risk unless it carries rel=noopener.
         ANCHOR_BLANK = /<a\b[^>]*(?<![-\w])target\s*=\s*["']?_blank\b[^>]*>/i
+        # The rel token that defuses it. Matched case-INSENSITIVELY: ANCHOR_BLANK is /i, so it
+        # happily matched `<a TARGET="_blank" REL="NOOPENER">`, and the suppression test was a
+        # case-SENSITIVE `includes?` that then failed to recognise the very rel that made the tag
+        # safe — a guaranteed false positive on any uppercase markup.
+        REL_NOOPENER = /\bno(?:opener|referrer)\b/i
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -124,6 +129,10 @@ module Gori
           Secrets::PATTERNS.each do |(pat, label)|
             acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, label) if pat.matches?(text)
           end
+          # A JWT is reported separately at Info, NOT as a High `secret_in_body`: shipping the
+          # client its own token is the normal design, not a disclosure (see Secrets::JWT).
+          acc << leak(ctx, "jwt_in_body", "JSON Web Token in a response body",
+            Store::Severity::Info, nil) if Secrets::JWT[0].matches?(text)
           check_html_sinks(ctx, acc, text) if ctx.html?
         end
 
@@ -154,12 +163,20 @@ module Gori
 
         # A target="_blank" anchor with no rel=noopener/noreferrer lets the opened page repoint
         # this tab via window.opener. Report once (grouped by code+host anyway).
+        #
+        # Info, not Low, and deliberately: every current browser has applied `noopener` implicitly
+        # to `target="_blank"` for years (Chrome 88, Firefox 79, Safari 12.1), so the attack this
+        # describes does not reproduce on anything a real user is running. What is left is a
+        # markup-hygiene note that matters only for legacy embedded webviews — and an external
+        # link is on nearly every page, so scoring it as a vulnerability buried the findings that
+        # are one. Kept rather than deleted because the note is still true, and Info is the tier
+        # this codebase already uses for it (mixed_passive, missing_referrer_policy).
         private def flag_reverse_tabnabbing(ctx : Context, acc : Array(Detection), text : String) : Nil
           text.scan(ANCHOR_BLANK) do |m|
             tag = m[0]
-            next if tag.includes?("noopener") || tag.includes?("noreferrer")
+            next if REL_NOOPENER.matches?(tag)
             acc << Detection.new("reverse_tabnabbing", Category::HEADERS, ctx.host, ctx.url,
-              "target=\"_blank\" link without rel=noopener", Store::Severity::Low, nil, ctx.fid)
+              "target=\"_blank\" link without rel=noopener", Store::Severity::Info, nil, ctx.fid)
             break
           end
         end

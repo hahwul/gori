@@ -89,6 +89,8 @@ module Gori
       "error_stack_leak"               => "Return generic errors to clients; log stack traces server-side only.",
       "secret_in_body"                 => "Rotate the exposed credential and remove it from the response; never ship keys/tokens to clients.",
       "secret_in_ws"                   => "Rotate the exposed credential and stop sending secrets over the WebSocket; treat frames like any other client-visible channel.",
+      "jwt_in_body"                    => "Informational: a JWT rides in this response body. Usually intended (a login/refresh response hands the client its own token), so this is a note on where tokens flow, not a leak. Worth a look only if the token is not the caller's — e.g. another user's token in a list payload, or a service token embedded in a page.",
+      "jwt_in_ws"                      => "Informational: a JWT rides in this WebSocket traffic. Usually intended (the socket authenticates with the session token), so this is a note on where tokens flow, not a leak. Worth a look only if the token is not the caller's.",
       "mixed_content"                  => "Load all sub-resources over HTTPS; active http:// scripts/iframes on an HTTPS page are blocked and insecure.",
       "insecure_form_action"           => "Point the form action at an HTTPS URL; a form submitting to http:// sends everything the user enters (credentials included) in cleartext.",
       "reflected_param"                => "Context-encode reflected input; this parameter echoes attacker-controlled data and may enable XSS.",
@@ -118,7 +120,7 @@ module Gori
       "document_domain_set"            => "Avoid assigning document.domain; it relaxes the same-origin policy for the whole page. Use postMessage (with an origin check) or CORS for cross-subdomain communication instead.",
       "inline_js_uri"                  => "Replace javascript: URLs in href/src/action with real handlers/URLs; they execute script in the page's origin and are blocked by a script-src CSP.",
       "mixed_passive"                  => "Load images/media over HTTPS; passive http:// sub-resources on an HTTPS page are tampered in transit and downgrade the page's security indicator.",
-      "reverse_tabnabbing"             => "Add rel=\"noopener\" (or noreferrer) to target=\"_blank\" links so the opened page can't repoint this tab via window.opener.",
+      "reverse_tabnabbing"             => "Informational: add rel=\"noopener\" (or noreferrer) to target=\"_blank\" links. Every current browser already applies noopener implicitly to target=\"_blank\" (Chrome 88, Firefox 79, Safari 12.1), so this does not reproduce on a modern browser — it is markup hygiene, and only matters for legacy embedded webviews.",
     } of String => String
 
     TECH_REMEDIATION = "Detected technology — informational; recorded as a project fact."
