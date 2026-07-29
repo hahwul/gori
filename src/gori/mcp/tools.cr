@@ -109,18 +109,25 @@ module Gori
         "import_flows",
       }
 
-      # R2-3 — active/outbound tools that expand or mask `$KEY` env tokens at call
-      # time. Env vars live in a process-global (Settings.project_env_vars) loaded
-      # once at bind time (initialize / switch_project's Env.load_project), so a
-      # mid-session CLI change (`gori run project env set KEY val`) is otherwise
-      # invisible to an already-running MCP server. `call` reloads from the store
-      # before dispatching any of these so the fresh value is picked up without a
-      # switch_project. Deliberately EXCLUDES read tools and the async *_status /
-      # *_results / *_stop pollers (a running job already captured its fully
-      # expanded template at build time).
+      # R2-3 — tools that READ or WRITE the per-project `$KEY` env vars. Env vars live in a
+      # process-global (Settings.project_env_vars) loaded once at bind time (initialize /
+      # switch_project's Env.load_project), so a mid-session CLI change (`gori run project
+      # env set KEY val`) is otherwise invisible to an already-running MCP server. `call`
+      # reloads from the store before dispatching any of these.
+      #
+      # Three populations, all of which need the fresh value:
+      #   - active/outbound tools that EXPAND or MASK `$KEY` at call time;
+      #   - `list_env`, which would otherwise REPORT a stale set as fact;
+      #   - `set_env_var`/`delete_env_var`, which read-modify-WRITE the whole array
+      #     (Env.save_project persists it wholesale) — on a stale copy that silently
+      #     DELETES every var another process added since we bound.
+      # Deliberately EXCLUDES other read tools and the async *_status / *_results /
+      # *_stop pollers (a running job already captured its fully expanded template at
+      # build time).
       ENV_REFRESH_TOOLS = Set{
         "send_request", "send_websocket",
         "fuzz_start", "mine_start", "sequence_start", "discover_start",
+        "list_env", "set_env_var", "delete_env_var",
       }
 
       # A live OAST listening session held server-side across tool calls (oast_start →

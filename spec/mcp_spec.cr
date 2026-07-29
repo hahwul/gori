@@ -2920,3 +2920,46 @@ describe "MCP JSON-RPC UTF-8 validity" do
     end
   end
 end
+
+describe "MCP project env vars" do
+  it "reports an out-of-band env change instead of a stale in-process copy" do
+    with_store do |store|
+      tools = tools_for(store)
+      ok_json(tools, "list_env", "{}").as_a.should be_empty
+
+      # Another process (`gori run project env set`) writes to the same project DB.
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY, %([{"key":"CLI_TOKEN","value":"abc"}]))
+
+      listed = ok_json(tools, "list_env", %({"include_sensitive":true}))
+      listed.as_a.map { |v| v["key"].as_s }.should eq ["CLI_TOKEN"]
+    end
+  end
+
+  it "does not clobber an out-of-band env var when setting another" do
+    with_store do |store|
+      tools = tools_for(store)
+      ok_json(tools, "list_env", "{}") # bind with an empty set, as a long-lived server would
+
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY, %([{"key":"CLI_TOKEN","value":"abc"}]))
+      ok_json(tools, "set_env_var", %({"key":"MCP_KEY","value":"v"}))
+
+      # set_env_var read-modify-WRITES the whole array; on a stale copy CLI_TOKEN vanished.
+      keys = ok_json(tools, "list_env", "{}").as_a.map { |v| v["key"].as_s }
+      keys.should contain "CLI_TOKEN"
+      keys.should contain "MCP_KEY"
+    end
+  end
+
+  it "does not resurrect a var another process deleted when deleting one" do
+    with_store do |store|
+      tools = tools_for(store)
+      ok_json(tools, "set_env_var", %({"key":"A","value":"1"}))
+      ok_json(tools, "set_env_var", %({"key":"B","value":"2"}))
+
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY, %([{"key":"B","value":"2"}])) # CLI removed A
+      ok_json(tools, "delete_env_var", %({"key":"B"}))
+
+      ok_json(tools, "list_env", "{}").as_a.should be_empty
+    end
+  end
+end
