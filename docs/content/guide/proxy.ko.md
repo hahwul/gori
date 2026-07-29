@@ -120,12 +120,12 @@ gori run history -q 'status:5xx host:api.example.com'
 
 > 실제 대상 = **표시된 것이 있으면 그것들, 없으면 커서 행**
 
-따라서 `/ status:5xx` → `Shift-T` → `Space` → `X`면 모든 오류 플로우를 확인 한 번으로 삭제하고, `Space` → `F`면 그 URL들을 한꺼번에 복사합니다. 메뉴 제목이 `SPACE · 3 MARKED`로 바뀌고 항목 이름도 `Delete 3 flows`, `Mine 3 flows`처럼 바뀌므로, 일괄 처리가 예상 밖에 일어나는 일은 없습니다.
+따라서 `/ status:5xx` → `Shift-T` → `Space` → `X`면 모든 오류 플로우를 확인 한 번으로 삭제하고, `Space` → `Y`면 그 URL들을 한꺼번에 복사합니다. 메뉴 제목이 `SPACE · 3 MARKED`로 바뀌고 항목 이름도 `Delete 3 flows`, `Mine 3 flows`처럼 바뀌므로, 일괄 처리가 예상 밖에 일어나는 일은 없습니다.
 
 | 동작 | 키 | 표시된 플로우에 대해 |
 |------|-----|--------------------|
 | 복사 | `y` | URL 목록(한 줄에 하나) |
-| 형식 지정 복사 | `Space` `F` | urls / host 목록 / cURL / 원본 요청 / 원본 응답 |
+| 형식 지정 복사 | `Space` `Y` | urls / host 목록 / cURL / 원본 요청 / 원본 응답 / 요청+응답 쌍 |
 | 삭제 | `Space` `X` | 전체를 확인 한 번으로 |
 | 이슈/노트에 연결 | `Space` `k` / `u` | 대상은 한 번만 선택, 전체를 첨부 |
 | 이슈 추가 | `Shift-F` | 표시된 전체를 근거로 가진 이슈 하나 |

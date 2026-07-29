@@ -79,7 +79,7 @@ describe "Gori::Verbs.register_history" do
         r["history.mark-clear"].chords.should be_empty
         r["history.mark-clear"].menu_key.should eq('N')
         r["history.copy-as"].chords.should be_empty
-        r["history.copy-as"].menu_key.should eq('F') # 'Y' is taken in Body by project.copy
+        r["history.copy-as"].menu_key.should eq('Y') # pairs with copy's 'y', like Repeater/detail
       end
 
       it "extends the range on shift+arrows — hidden nav, but still tab-gated" do

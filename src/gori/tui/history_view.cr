@@ -996,13 +996,17 @@ module Gori::Tui
         # Resolved through the store, not @rows: a mark can outlive the visible window.
         d = store.get_flow(ids.first)
         return {"COPY AS", [] of CopyMenu::Option} unless d
-        opts = CopyMenu.request_options(request_wire(d), copy_target(d))
+        req = request_wire(d)
+        opts = CopyMenu.request_options(req, copy_target(d))
         # …plus the response, on the same 's' key the multi-flow set uses. Without it, marking a
         # SECOND flow would be the only way to reach the raw response, and the guide advertises
         # the format unconditionally. 's' rather than response_options' own keys because those
         # collide with the request list's 'h'/'b'/'r', and CopyPicker dispatches on unique keys.
         if bytes = combine_bytes(d.response_head, d.response_body)
           opts << CopyMenu::Option.new("Raw response", 's', String.new(bytes))
+        end
+        if pair = pair_option(d, req)
+          opts << pair
         end
         return {"COPY REQUEST AS", opts}
       end
@@ -1041,7 +1045,31 @@ module Gori::Tui
         end
         opts << CopyMenu::Option.new(label, key, parts.join("\n\n")) unless parts.empty?
       end
+      # The per-flow exchange (single-flow 'p'): request then response under one separator,
+      # so a marked set pastes as N complete transactions rather than two disjoint lists.
+      # A flow still in flight has no response — it contributes its request alone.
+      pairs = details.compact_map do |d|
+        next nil unless req = combine_bytes(d.request_head, d.request_body)
+        res = combine_bytes(d.response_head, d.response_body)
+        body = res ? "#{String.new(req)}\n\n#{String.new(res)}" : String.new(req)
+        "#{copy_separator(d.row)}\n#{body}"
+      end
+      opts << CopyMenu::Option.new("Req + Res pairs", 'p', pairs.join("\n\n")) unless pairs.empty?
       opts
+    end
+
+    # The whole exchange — request, one blank line, response — both messages verbatim (P7).
+    # Neither raw variant carries it, and it is what actually goes into a ticket or a note.
+    # Offered wherever a SINGLE flow is in hand: the list menu and BOTH detail panes. The
+    # detail's pane-local format list describes what that pane SHOWS; it is not a rule that
+    # the exchange has to be reassembled by hand, and a flow you are staring at is exactly
+    # when you want it whole. `req` is passed in where the caller already built it.
+    private def pair_option(d : Store::FlowDetail, req : String? = nil) : CopyMenu::Option?
+      request = req || request_wire(d)
+      return nil if request.empty?
+      res = combine_bytes(d.response_head, d.response_body)
+      return nil unless res
+      CopyMenu::Option.new("Req + Res pair", 'p', "#{request}\n\n#{String.new(res)}")
     end
 
     private def request_wire(d : Store::FlowDetail) : String
@@ -1064,7 +1092,11 @@ module Gori::Tui
         wire = String.new(combine_bytes(detail.request_head, detail.request_body) || Bytes.empty)
         row = detail.row
         target = Repeater::FlowRequest.build_target(row.scheme, row.host, row.port)
-        {"COPY REQUEST AS", CopyMenu.request_options(wire, target)}
+        opts = CopyMenu.request_options(wire, target)
+        if pair = pair_option(detail, wire)
+          opts << pair
+        end
+        {"COPY REQUEST AS", opts}
       when :response
         # The WS MESSAGES pane reuses the :response slot but renders the transcript
         # (ws_messages), NOT the bare 101 handshake that response_head/body still hold —
@@ -1079,6 +1111,11 @@ module Gori::Tui
                else
                  [] of CopyMenu::Option
                end
+        # …and the exchange, on the same 'p' as everywhere else — the response pane is where
+        # you decide a flow is worth reporting, and the request half is one pane away.
+        if pair = pair_option(detail)
+          opts << pair
+        end
         {"COPY RESPONSE AS", opts}
       else
         {"COPY AS", [] of CopyMenu::Option}

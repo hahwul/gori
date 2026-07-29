@@ -99,13 +99,13 @@ module Gori
         available: history_targets) { |ctx| ctx.copy_selection; nil }
 
       # "Copy as X" for the list, mirroring repeater.copy-as / detail.copy-as: a picker over
-      # urls / host list / curl / raw requests / raw responses, spanning the whole marked set.
-      # Menu key 'F' (format) rather than the 'Y' that pairs with 'y' everywhere else — 'Y' is
-      # taken in Body COMMON by project.copy, and validate_menu_keys! ignores availability, so
-      # reusing it raises at boot even though project.copy never renders in History.
+      # urls / host list / curl / raw requests / raw responses / req+res pairs, spanning the
+      # whole marked set. Menu key 'Y' pairs with copy's 'y', the same way it does in the
+      # Repeater and the detail drill-in. (It was 'F' while project.copy squatted Body's 'Y'
+      # from the Project tab — that verb now lives in Verb::Scope::ProjectDesc.)
       r.register Verb::Definition.new(
         "history.copy-as", "Copy as…", "Pick a copy format for the selected/marked flows (urls/hosts/curl/raw)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'F') { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Body, available: history_targets, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
         "history.repeater", "Repeater flow", "Open the selected flow in the Repeater tab",

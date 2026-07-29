@@ -120,12 +120,12 @@ Marks change **what the space menu acts on**, not which actions exist:
 
 > the effective target is **the marks if any are set, else the cursor row**
 
-So `/ status:5xx` → `Shift-T` → `Space` → `X` deletes every error in one confirm, and `Space` → `F` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
+So `/ status:5xx` → `Shift-T` → `Space` → `X` deletes every error in one confirm, and `Space` → `Y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
 | Copy | `y` | The URL list (one per line) |
-| Copy as… | `Space` `F` | urls / host list / cURL / raw requests / raw responses |
+| Copy as… | `Space` `Y` | urls / host list / cURL / raw requests / raw responses / req+res pairs |
 | Delete | `Space` `X` | One confirm for the whole set |
 | Link to issue / note | `Space` `k` / `u` | Pick the owner once, attach every flow |
 | Add issue | `Shift-F` | One issue with every flow as evidence |

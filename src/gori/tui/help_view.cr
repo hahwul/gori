@@ -61,6 +61,7 @@ module Gori::Tui
         Item.new("f", "follow newest", "history.toggle-follow"),
         Item.new("/", "filter (query language)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
+        Item.new("space → Y", "copy as… — urls · hosts · cURL · raw · req+res pair"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
         Item.new("detail", "↑/↓ move · x line · ⇧arrows select · y copy · space cmds · ⇧←/→ h-scroll"),
         Item.new("^X · b · p", "in detail: hex · whitespace · pretty bodies"),

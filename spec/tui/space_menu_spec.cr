@@ -25,6 +25,7 @@ describe Gori::Tui::SpaceMenu do
     menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     menu.verb_for('y').try(&.id).should eq("history.copy")
+    menu.verb_for('Y').try(&.id).should eq("history.copy-as") # pairs with 'y' (was 'F')
     menu.verb_for('r').try(&.id).should eq("history.repeater")
     menu.verb_for('X').try(&.id).should eq("history.delete")
     menu.verb_for('C').try(&.id).should eq("history.clear")

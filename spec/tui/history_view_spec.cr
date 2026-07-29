@@ -1486,6 +1486,82 @@ describe "Gori::Tui::HistoryView marks" do
     end
   end
 
+  # The exchange, which neither raw variant carries alone: request then response, both verbatim.
+  it "offers the req+res pair for one flow and per-flow pairs for a set" do
+    tmp_store do |store|
+      a = add_flow(store, "GET", "/a", 200, host: "one.test")
+      b = add_flow(store, "POST", "/b", 500, host: "two.test")
+      view = HistoryView.new
+      view.reload(store)
+
+      _, opts = view.list_copy_as_menu(store, [a])
+      pair = opts.find { |o| o.key == 'p' }.not_nil!
+      pair.label.should eq("Req + Res pair")
+      pair.text.should eq("GET /a HTTP/1.1\r\nHost: one.test\r\n\r\n\n\nHTTP/1.1 200 X\r\n\r\nbodybody")
+
+      _, opts = view.list_copy_as_menu(store, [a, b])
+      pairs = opts.find { |o| o.key == 'p' }.not_nil!
+      pairs.label.should eq("Req + Res pairs")
+      pairs.text.should contain("===== flow ##{a}")
+      pairs.text.should contain("===== flow ##{b}")
+      pairs.text.should contain("HTTP/1.1 500 X") # the response rides along with its request
+    end
+  end
+
+  # The drill-in offers the pair from BOTH panes. The pane-local format list says what that
+  # pane shows; it is not a rule that the exchange must be reassembled by hand.
+  it "offers the req+res pair from both detail panes" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      title, opts = view.detail_copy_as_menu
+      title.should eq("COPY REQUEST AS")
+      pair = opts.find { |o| o.key == 'p' }.not_nil!
+      pair.label.should eq("Req + Res pair")
+      pair.text.should eq("GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n\n\nHTTP/1.1 200 X\r\n\r\nbodybody")
+
+      view.toggle_pane # request → response
+      title, opts = view.detail_copy_as_menu
+      title.should eq("COPY RESPONSE AS")
+      opts.find { |o| o.key == 'p' }.not_nil!.text.should eq(pair.text) # same exchange, same key
+    end
+  end
+
+  it "offers no pair for a flow with no response yet" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/pending", nil)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      _, opts = view.detail_copy_as_menu
+      opts.map(&.key).should contain('r')     # the raw request is still there
+      opts.map(&.key).should_not contain('p') # …but there is no exchange to copy
+    end
+  end
+
+  # A flow still in flight has no response — it contributes its request rather than dropping out.
+  it "keeps a response-less flow in the pair set, request only" do
+    tmp_store do |store|
+      a = add_flow(store, "GET", "/pending", nil)
+      b = add_flow(store, "GET", "/done", 200)
+      view = HistoryView.new
+      view.reload(store)
+
+      _, opts = view.list_copy_as_menu(store, [a, b])
+      pairs = opts.find { |o| o.key == 'p' }.not_nil!
+      pairs.text.should contain("GET /pending HTTP/1.1")
+      pairs.text.should contain("HTTP/1.1 200 X")
+
+      # …and with no response at all there is no pair to offer for a single flow.
+      _, one = view.list_copy_as_menu(store, [a])
+      one.map(&.key).should_not contain('p')
+      one.map(&.key).should_not contain('s')
+    end
+  end
+
   # Past the cap the byte-carrying formats are not offered — AND the bodies are never read.
   # get_flow pulls the full request+response (2 MiB each); ⇧T can hand this a whole page, and
   # this all runs on the single-threaded render loop, so loading N bodies to print N URLs would
@@ -1503,6 +1579,7 @@ describe "Gori::Tui::HistoryView marks" do
       keys.should_not contain('l')      # cURL
       keys.should_not contain('r')      # raw requests
       keys.should_not contain('s')      # raw responses
+      keys.should_not contain('p')      # req+res pairs
       store.get_flow_calls.should eq(0) # rows only — no body reads past the cap
       store.flow_row_calls.should eq(ids.size)
     end
