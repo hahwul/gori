@@ -1189,9 +1189,10 @@ module Gori::Tui
 
     def repeater_send : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      view.commit_chain_pane        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
-      view.sync_host_to_target_once # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
-      if view.inflight?             # one outstanding round-trip per view — don't pile up fibers on ^R mashing
+      view.commit_chain_pane                        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
+      view.sync_host_to_target_once                 # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
+      view.downgrade_h2_request_lines(group: false) # a request line pasted from an h2 view can't ride this h1 socket (origins answer 400)
+      if view.inflight?                             # one outstanding round-trip per view — don't pile up fibers on ^R mashing
         @host.status("repeater already in flight…")
         return
       end
@@ -1331,6 +1332,7 @@ module Gori::Tui
         @host.status(view.http2? ? "send group is HTTP/1.1 only — ^V to switch off h2" : "send group needs plain text mode (not hex/gRPC/WS/decode)")
         return
       end
+      view.downgrade_h2_request_lines(group: true) # every chunk rides the same h1 connection
       reqs = view.pipeline_requests
       labels = reqs.map(&.[0])
       results = @group_results

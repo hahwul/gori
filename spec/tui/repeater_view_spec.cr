@@ -1267,6 +1267,107 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("RESPONSE").should be_true
   end
 
+  # Everything below is about text that came from ANOTHER tool's clipboard. The editor is a
+  # line buffer (TextArea strips \r off every line), so a request pasted from Burp reaches
+  # the wire only through these three repairs; without them the origin answers 400 and the
+  # only visible symptom is a status code.
+  describe "requests pasted from another tool" do
+    it "terminates a head-only request that has no trailing blank line" do
+      view = RepeaterView.new
+      view.restore("http://h.test", "GET /x HTTP/1.1\nHost: h.test", false, true)
+
+      # Without the terminator the origin waits for more headers until something times out:
+      # the user sees "no response", the origin logs a 400/408.
+      String.new(view.request_bytes).should eq("GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n")
+    end
+
+    it "terminates once, whatever trailing newlines the paste carried" do
+      view = RepeaterView.new
+      view.restore("http://h.test", "GET /x HTTP/1.1\nHost: h.test\n", false, true)
+
+      String.new(view.request_bytes).should eq("GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n")
+    end
+
+    it "leaves a request that already has a body alone" do
+      view = RepeaterView.new
+      view.restore("http://h.test", "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 2\n\nhi", false, true)
+
+      String.new(view.request_bytes).should end_with("\r\n\r\nhi")
+    end
+
+    # RFC 2046 §5.1.1: parts are delimited by CRLF + boundary. A bare-LF multipart body is
+    # unparseable, and auto-CL re-frames it to the shortened length so nothing even hangs.
+    it "restores CRLF delimiters in a multipart body" do
+      view = RepeaterView.new
+      view.restore("http://h.test",
+        "POST /u HTTP/1.1\nHost: h.test\nContent-Type: multipart/form-data; boundary=B\nContent-Length: 9\n\n--B\nContent-Disposition: form-data; name=\"f\"\n\nhi\n--B--\n",
+        false, true)
+
+      sent = String.new(view.request_bytes)
+      body = sent.split("\r\n\r\n", limit: 2)[1]
+      body.should eq("--B\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\nhi\r\n--B--\r\n")
+      # Auto-CL frames the body it actually sends, not the pre-normalization one.
+      sent.should contain("Content-Length: #{body.bytesize}")
+    end
+
+    # The head-only CRLF rule exists to protect bodies where 0x0A is a BYTE, not a line
+    # ending. Only multipart opts out of it.
+    it "leaves a non-multipart body's bare LFs alone" do
+      view = RepeaterView.new
+      view.restore("http://h.test",
+        "POST /x HTTP/1.1\nHost: h.test\nContent-Type: application/json\nContent-Length: 9\n\n{\n\"a\":1\n}",
+        false, true)
+
+      String.new(view.request_bytes).should end_with("\r\n\r\n{\n\"a\":1\n}")
+    end
+
+    it "downgrades an HTTP/2 request line before an h1 send" do
+      view = RepeaterView.new
+      view.restore("https://h.test", "GET /x HTTP/2\nHost: h.test\n\n", false, true)
+
+      view.downgrade_h2_request_lines(group: false).should be_true
+      view.request_text.lines.first.should eq("GET /x HTTP/1.1") # display agrees with the wire
+      String.new(view.request_bytes).should start_with("GET /x HTTP/1.1\r\n")
+    end
+
+    # Narrow on purpose: this runs unasked on every send, so a version the operator meant
+    # must survive it. Only a version h1 CANNOT carry is rewritten.
+    it "leaves a deliberate version alone" do
+      ["GET /x HTTP/1.0", "GET /x HTTP/9.9", "GET /x", "GET /x FTP/1.1"].each do |line|
+        view = RepeaterView.new
+        view.restore("https://h.test", "#{line}\nHost: h.test\n\n", false, true)
+
+        view.downgrade_h2_request_lines(group: false).should be_false
+        view.request_text.lines.first.should eq(line)
+      end
+    end
+
+    it "never rewrites while the tab is on h2 — that request line is correct" do
+      view = RepeaterView.new
+      view.restore("https://h.test", "GET /x HTTP/2\nHost: h.test\n\n", true, true)
+
+      view.downgrade_h2_request_lines(group: false).should be_false
+      view.request_text.lines.first.should eq("GET /x HTTP/2")
+    end
+
+    # A `%%%` means "next request" only for a send group. For a single ^R the whole buffer
+    # is ONE request, so the lines under it are body text and must not be touched.
+    it "downgrades every chunk of a send group, but only the first line of a single send" do
+      text = "GET /a HTTP/2\nHost: h.test\n\n%%%\nGET /b HTTP/2\nHost: h.test\n"
+
+      grouped = RepeaterView.new
+      grouped.restore("https://h.test", text, false, true)
+      grouped.downgrade_h2_request_lines(group: true).should be_true
+      grouped.request_text.should_not contain("HTTP/2")
+
+      single = RepeaterView.new
+      single.restore("https://h.test", text, false, true)
+      single.downgrade_h2_request_lines(group: false).should be_true
+      single.request_text.lines.first.should eq("GET /a HTTP/1.1")
+      single.request_text.should contain("GET /b HTTP/2") # body text — left alone
+    end
+  end
+
   describe "pretty_print_request" do
     it "pretty-prints JSON request body in-place and preserves markers" do
       view = RepeaterView.new

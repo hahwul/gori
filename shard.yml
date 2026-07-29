@@ -23,10 +23,17 @@ dependencies:
     github: hahwul/termisu
     branch: main
     # Temporarily on the fork again. Synced to upstream v0.6.0; the fork carries
-    # only one patch on top — input/parser: a Ctrl/Alt/Meta CSI-u report must not
-    # arm the one-shot dup guard, or the chord eats the next plain key (^P then
-    # "pet" produced "et"). It is queued for upstream. Go back to
-    # `omarluq/termisu` once it lands in a release.
+    # two patches on top, both queued for upstream. Go back to `omarluq/termisu`
+    # once they land in a release.
+    #
+    # 1. input/parser: a Ctrl/Alt/Meta CSI-u report must not arm the one-shot dup
+    #    guard, or the chord eats the next plain key (^P then "pet" produced "et").
+    # 2. termios: `set_mode` passed its `LibC::Termios` (a STRUCT — by value) to
+    #    apply_input_flags/apply_output_flags, so every c_iflag/c_oflag write was
+    #    discarded and raw mode kept ICRNL/IXON/OPOST set. With ICRNL on, the line
+    #    discipline turns CR into NL before gori sees it, so a pasted CRLF is two
+    #    newlines and `Tui::PasteNewline` cannot collapse it (and ^S froze the TUI).
+    #    Ships with `Event::Key#char` reporting which byte produced an Enter.
     #
     # Earlier fork carries, both upstream now and included via the synced main:
     # input/preedit (double-English + jamo-separation: protocol_active dup-guard +

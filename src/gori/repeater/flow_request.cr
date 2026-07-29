@@ -1,4 +1,5 @@
 require "uri"
+require "../env"
 require "../store"
 
 module Gori
@@ -149,6 +150,67 @@ module Gori
         want = http2 ? "HTTP/2" : "HTTP/1.1"
         return nil if version == want
         "#{line[0, sp]} #{want}"
+      end
+
+      # HTTP versions an HTTP/1.x connection cannot carry. A request line pasted from
+      # another tool's HTTP/2 view ("GET /p HTTP/2" — Burp renders h2 requests that way)
+      # is put on the wire VERBATIM by the h1 `Engine`, and an origin handed a version
+      # token it doesn't speak answers 400.
+      UNSENDABLE_OVER_H1 = {"HTTP/2", "HTTP/2.0", "HTTP/3", "HTTP/3.0"}
+
+      # The request line rewritten to HTTP/1.1 when it declares a version h1 can't carry,
+      # else nil (nothing to do). Version = the LAST space-delimited token, as in
+      # `retarget_version_line`.
+      #
+      # Deliberately NARROWER than `retarget_version_line`: that one normalizes ANY
+      # mismatch because it backs the explicit ^V toggle, while this runs unasked on every
+      # send, so it must leave a version the operator meant alone. "HTTP/1.0" is a
+      # legitimate thing to hand-type at an origin (and "HTTP/9.9" a legitimate thing to
+      # probe with); "HTTP/2" down an h1 socket is never anything but a mistake.
+      def self.downgrade_version_line(line : String) : String?
+        sp = line.rindex(' ')
+        return nil unless sp
+        return nil unless UNSENDABLE_OVER_H1.includes?(line[(sp + 1)..])
+        "#{line[0, sp]} HTTP/1.1"
+      end
+
+      # Normalize bare LFs in a MULTIPART body to CRLF. Multipart parts are delimited by
+      # CRLF + boundary (RFC 2046 §5.1.1), so a body carrying bare LFs is unparseable and
+      # the origin answers 400 — usually with no hint as to why, because auto-Content-Length
+      # re-frames the shortened body so nothing hangs.
+      #
+      # EDITOR-DERIVED TEXT ONLY — never call this on captured or hand-supplied bytes.
+      # `Env.expand_wire` normalizes the HEAD alone on purpose: a raw 0x0A in a body is a
+      # BYTE (binary/compressed data), not a line ending, and rewriting it corrupts the
+      # request. That reasoning still holds for every verbatim-bytes path (`Repeater::Plan`,
+      # `Miner::Plan`, `Sequencer::Plan`, `FlowRequest.build`), which is why the fix lives
+      # here as an opt-in step rather than inside `expand_wire`. It is sound only where the
+      # CRs are already gone: the TUI editors hold the request as an LF-joined line buffer
+      # (`TextArea#set_text` strips \r off every line), so a multipart body typed or pasted
+      # there cannot reach the wire intact by any other route. ^X hex mode remains the
+      # byte-exact escape hatch for a multipart body with binary parts.
+      def self.normalize_multipart_body(bytes : Bytes) : Bytes
+        text = String.new(bytes)
+        sep = text.index("\r\n\r\n")
+        return bytes unless sep
+        body_at = sep + 4
+        return bytes if body_at >= bytes.size
+        return bytes unless multipart_head?(text[0, sep])
+        head = bytes[0, body_at]
+        body = Env.normalize_crlf(bytes[body_at..])
+        io = IO::Memory.new(head.size + body.size)
+        io.write(head)
+        io.write(body)
+        io.to_slice
+      end
+
+      # True when the head declares a `multipart/*` Content-Type. Case-insensitive on both
+      # the header name and the media type, per RFC 9110 §5.1/§8.3.
+      private def self.multipart_head?(head : String) : Bool
+        head.split("\r\n").any? do |line|
+          next false unless line.lstrip[0, 13]?.try(&.downcase) == "content-type:"
+          line.split(':', 2)[1].lstrip.downcase.starts_with?("multipart/")
+        end
       end
 
       # Returns the origin-form request line for an absolute-form one, else nil

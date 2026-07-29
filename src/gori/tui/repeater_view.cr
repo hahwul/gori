@@ -834,8 +834,7 @@ module Gori::Tui
     # the envelope, then send the envelope (the authoritative request) with CL synced.
     private def decoded_request_bytes : Bytes
       commit_decoded
-      raw = expanded_text_to_bytes(@editor.text)
-      @auto_content_length ? sync_content_length(raw) : raw
+      finalize_wire(expanded_text_to_bytes(@editor.text))
     end
 
     # The request HEAD as origin-form text (request line rewritten, headers), WITHOUT
@@ -919,9 +918,7 @@ module Gori::Tui
         end
         unless lines.empty?
           label = lines.first.strip
-          raw = expanded_text_to_bytes(lines.join('\n'))
-          raw = terminate_head(raw) unless has_head_terminator?(raw) # bodyless → add \r\n\r\n
-          reqs << {label, @auto_content_length ? sync_content_length(raw) : raw}
+          reqs << {label, finalize_wire(expanded_text_to_bytes(lines.join('\n')))}
         end
         chunk.clear
       end
@@ -1212,12 +1209,37 @@ module Gori::Tui
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode
       return decoded_request_bytes if @decode_kind             # envelope + re-encoded decoded payload
       return marked_request_bytes unless marker_regions.empty? # §…§ inline Decoder chains applied on send
-      raw = expanded_editor_bytes
-      @auto_content_length ? sync_content_length(raw) : raw
+      finalize_wire(expanded_editor_bytes)
     end
 
     private def expanded_editor_bytes : Bytes
       expanded_text_to_bytes(@editor.text)
+    end
+
+    # Head terminator + auto-Content-Length: the last two steps every plain-text send
+    # shares. Kept in one place so the single send and `pipeline_requests` cannot disagree
+    # about the bytes they put on the wire.
+    private def finalize_wire(raw : Bytes) : Bytes
+      raw = ensure_head_terminator(raw)
+      @auto_content_length ? sync_content_length(raw) : raw
+    end
+
+    # Append the CRLFCRLF head terminator to a request that carries none. Editor text with
+    # no trailing blank line produced a request the origin could only wait on — it has no
+    # way to know the headers ended — until something timed out, which the user saw as
+    # "no response" and the origin logged as a 400/408. `pipeline_requests` has always
+    # terminated its chunks; the single-send path did not.
+    #
+    # Only a HEAD-ONLY buffer can reach the append (expand_wire turns the editor's blank
+    # line into CRLFCRLF, so a request WITH a body always has a terminator), which is why
+    # trailing newlines here are line noise rather than body bytes: trim them, terminate once.
+    private def ensure_head_terminator(raw : Bytes) : Bytes
+      return raw if has_head_terminator?(raw)
+      n = raw.size
+      while n > 0 && (raw[n - 1] == 0x0A_u8 || raw[n - 1] == 0x0D_u8)
+        n -= 1
+      end
+      terminate_head(raw[0, n])
     end
 
     # Env-expand the LF editor text and normalize to CRLF wire form. Uses
@@ -1225,8 +1247,15 @@ module Gori::Tui
     # whose value itself carries a CRLF isn't doubled into `\r\r\n`, which would corrupt
     # the header line (or the head/body separator). Shared logic with the CLI/MCP repeater
     # send paths so the TUI can't disagree with them on the bytes it puts on the wire.
+    #
+    # Plus the one body-level fixup the editor OWES the wire: `expand_wire` normalizes the
+    # head alone (a raw 0x0A in a body is a byte, not a line ending), but this editor holds
+    # the request as an LF-joined line buffer, so a multipart body could never reach an
+    # origin with the CRLF delimiters RFC 2046 requires. See
+    # `FlowRequest.normalize_multipart_body` for why that step is opt-in here and not
+    # inside `expand_wire`.
     private def expanded_text_to_bytes(text : String) : Bytes
-      Env.expand_wire(text)
+      Repeater::FlowRequest.normalize_multipart_body(Env.expand_wire(text))
     end
 
     # §…§ marker send: parse the CRLF wire form as a Fuzz template and render each marked
@@ -1235,8 +1264,7 @@ module Gori::Tui
     # keeps render's output in wire form so the existing CRLF-based sync_content_length works
     # unchanged. A chain-less `§v§` renders `v`; a failing chain passes the value through.
     private def marked_request_bytes : Bytes
-      raw = render_marked(expanded_editor_bytes)
-      @auto_content_length ? sync_content_length(raw) : raw
+      finalize_wire(render_marked(expanded_editor_bytes))
     end
 
     # Render the §…§ template in `raw` (each marked default through its inline Decoder
@@ -1292,6 +1320,44 @@ module Gori::Tui
       updated = Repeater::FlowRequest.retarget_version_line(first, @http2) || return
       @editor.replace_line(0, updated)
       reflect_content_length_in_editor if @auto_content_length
+    end
+
+    # Bring a request line down to HTTP/1.1 before an h1 send when it declares a version h1
+    # cannot carry — a request line pasted from another tool's HTTP/2 view. Returns true
+    # when it changed anything.
+    #
+    # Runs at SEND PREP (like `sync_host_to_target_once`) rather than on edit: there is no
+    # paste event to hook, and rewriting mid-typing would fight the cursor. Rewriting the
+    # VISIBLE line rather than only the wire bytes is the point — the editor is what the
+    # user reads, so display and wire must agree, exactly as ^V and auto-CL already keep
+    # them. Refused in the byte-exact/own-framing modes; `downgrade_version_line` is itself
+    # narrow enough to leave a deliberate version alone.
+    #
+    # `group` says whether a lone `%%%` line starts a new request. It does for a send-group
+    # (each chunk carries its own request line, and every one of them rides the same h1
+    # connection); for a single ^R the whole buffer is ONE request, so a `%%%` there is body
+    # text and the lines under it must not be touched.
+    def downgrade_h2_request_lines(*, group : Bool) : Bool
+      return false if @http2 || @req_hex_edit || @grpc_mode || @ws_mode
+      changed = false
+      at_request_line = true # line 0 starts a request; with `group`, so does the line after a `%%%`
+      @editor.lines_snapshot.each_with_index do |line, i|
+        stripped = line.strip
+        if group && stripped == PIPELINE_SEP
+          at_request_line = true
+          next
+        end
+        next unless at_request_line
+        next if stripped.empty? # blank padding around a separator — the request line is below it
+        at_request_line = false
+        next unless updated = Repeater::FlowRequest.downgrade_version_line(line)
+        @editor.replace_line(i, updated)
+        changed = true
+      end
+      return false unless changed
+      @dirty = true
+      reflect_content_length_in_editor if @auto_content_length
+      true
     end
 
     def pretty_print_request : String?

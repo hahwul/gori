@@ -83,4 +83,64 @@ describe Gori::Repeater::FlowRequest do
       Gori::Repeater::FlowRequest.retarget_version_line("GET /a", false).should be_nil
     end
   end
+
+  describe ".downgrade_version_line" do
+    it "rewrites a version an HTTP/1.x connection cannot carry" do
+      Gori::Repeater::FlowRequest.downgrade_version_line("GET /a HTTP/2").should eq("GET /a HTTP/1.1")
+      Gori::Repeater::FlowRequest.downgrade_version_line("POST /a HTTP/2.0").should eq("POST /a HTTP/1.1")
+      Gori::Repeater::FlowRequest.downgrade_version_line("GET /a HTTP/3").should eq("GET /a HTTP/1.1")
+    end
+
+    # It runs unasked on every send, so — unlike `retarget_version_line`, which backs the
+    # explicit ^V toggle — it must leave a version the operator meant alone.
+    it "leaves every other version alone (nil)" do
+      ["GET /a HTTP/1.1", "GET /a HTTP/1.0", "GET /a HTTP/0.9", "GET /a HTTP/9.9",
+       "GET /a", "not a request line", "GET /a http/2"].each do |line|
+        Gori::Repeater::FlowRequest.downgrade_version_line(line).should be_nil
+      end
+    end
+
+    it "bounds the version by the LAST space, tolerating a raw space in the target" do
+      Gori::Repeater::FlowRequest.downgrade_version_line("GET /a b HTTP/2").should eq("GET /a b HTTP/1.1")
+    end
+  end
+
+  describe ".normalize_multipart_body" do
+    it "restores the CRLF delimiters a multipart body needs" do
+      raw = "POST /u HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n--B\nX: 1\n\nhi\n--B--\n".to_slice
+      String.new(Gori::Repeater::FlowRequest.normalize_multipart_body(raw))
+        .should eq("POST /u HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n--B\r\nX: 1\r\n\r\nhi\r\n--B--\r\n")
+    end
+
+    it "is idempotent on a body that already has CRLF" do
+      raw = "POST /u HTTP/1.1\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n--B\r\n\r\nhi\r\n--B--\r\n".to_slice
+      Gori::Repeater::FlowRequest.normalize_multipart_body(raw).should eq(raw)
+    end
+
+    it "matches the header name and media type case-insensitively" do
+      raw = "POST /u HTTP/1.1\r\ncontent-type: MULTIPART/Form-Data; boundary=B\r\n\r\n--B\n--B--\n".to_slice
+      String.new(Gori::Repeater::FlowRequest.normalize_multipart_body(raw)).should end_with("--B\r\n--B--\r\n")
+    end
+
+    # A bare 0x0A in any other body is a BYTE, not a line ending — this is the one media
+    # type that opts out of `Env.expand_wire`'s head-only rule.
+    it "leaves every other body untouched" do
+      [
+        "POST /x HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\n\"a\":1\n}",
+        "POST /x HTTP/1.1\r\nContent-Type: application/octet-stream\r\n\r\n\x01\n\x02",
+        "POST /x HTTP/1.1\r\n\r\nno content-type\nhere",
+        "GET /x HTTP/1.1\r\nContent-Type: multipart/form-data\r\n\r\n", # head-only: no body to touch
+        "GET /x HTTP/1.1\r\nContent-Type: multipart/form-data",         # not even a separator
+      ].each do |text|
+        raw = text.to_slice
+        Gori::Repeater::FlowRequest.normalize_multipart_body(raw).should eq(raw)
+      end
+    end
+
+    # A header VALUE that merely mentions multipart doesn't make the body one.
+    it "keys on the Content-Type header, not on the text anywhere" do
+      raw = "POST /x HTTP/1.1\r\nX-Note: multipart/form-data\r\n\r\na\nb".to_slice
+      Gori::Repeater::FlowRequest.normalize_multipart_body(raw).should eq(raw)
+    end
+  end
 end

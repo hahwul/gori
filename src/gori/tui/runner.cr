@@ -6,6 +6,7 @@ require "../session"
 require "./screen"
 require "./theme"
 require "./layout"
+require "./paste_newline"
 require "./chrome"
 require "./preferences_view"
 require "./tab_controller"
@@ -849,7 +850,12 @@ module Gori::Tui
       nil
     end
 
+    # Collapses a pasted CRLF into one newline — see `PasteNewline`. Filtered here, at the
+    # single funnel every terminal event passes through, so every editor gets it.
+    @paste_newline = PasteNewline.new
+
     private def handle(ev : Termisu::Event::Any) : Nil
+      return if @paste_newline.swallow?(ev)
       case ev
       when Termisu::Event::Key
         handle_key(ev)
