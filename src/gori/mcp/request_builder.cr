@@ -160,9 +160,14 @@ module Gori
       # block are promoted to CRLF, so a hand-typed request still frames. The body
       # (everything after the first blank line) is left UNTOUCHED — rewriting a bare
       # LF there would grow the payload past the caller's Content-Length and desync
-      # the origin (request smuggling). The header terminator is the first blank
-      # line (`\r\n\r\n` or `\n\n`, whichever comes first).
-      private def self.normalize_raw(raw : String) : Bytes
+      # the origin (request smuggling), and would corrupt any body whose bytes are
+      # not line-oriented text. The header terminator is the first blank line
+      # (`\r\n\r\n` or `\n\n`, whichever comes first).
+      #
+      # PUBLIC because `intercept_forward_edit` needs the identical rule: it used to
+      # gsub the WHOLE message, silently rewriting 0x0A bytes inside the body it was
+      # meant to forward verbatim. One rule, one implementation.
+      def self.normalize_raw(raw : String) : Bytes
         crlf = raw.index("\r\n\r\n")
         lf = raw.index("\n\n")
         ends = [] of Int32

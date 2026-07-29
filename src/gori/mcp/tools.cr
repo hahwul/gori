@@ -452,8 +452,9 @@ module Gori
 
           tool j, "intercept_get",
             "Full detail for ONE held intercept item (redacted head + body size). Pass " \
-            "include_sensitive:true to ALSO get the full raw message base64 (unredacted, for " \
-            "byte-exact editing with intercept_forward_edit) — otherwise raw is withheld " \
+            "include_sensitive:true to ALSO get the full raw message base64 (unredacted; edit it " \
+            "and send it back as intercept_forward_edit's raw_base64 for a byte-exact round " \
+            "trip) — otherwise raw is withheld " \
             "(raw_redacted:true) since base64 is not redaction. NOT_FOUND if the item was " \
             "already forwarded/dropped or never held. Header values redacted unless " \
             "include_sensitive:true." do |s|
@@ -777,14 +778,17 @@ module Gori
 
             tool j, "intercept_forward_edit",
               "Forward a held intercept item with EDITED bytes. Supply the full replacement wire " \
-              "message in `raw` (fetch the current bytes from intercept_get with " \
-              "include_sensitive:true → raw_base64, edit, send back). Content-Length is recomputed " \
-              "to match the body; otherwise the bytes are " \
-              "forwarded byte-exact (NO variable expansion — a security tool forwards exactly what " \
-              "you send). Applied by the capturing instance + surfaced to the human. Returns " \
+              "message in EITHER `raw_base64` (byte-exact; the round trip for the bytes " \
+              "intercept_get returns as raw_base64, and the only channel a binary body survives) " \
+              "OR `raw` (plain text, for an ordinary edit). Content-Length is recomputed to match " \
+              "the body; otherwise the bytes are forwarded byte-exact (NO variable expansion — a " \
+              "security tool forwards exactly what you send). In `raw`, a lone LF in the HEADER " \
+              "block becomes CRLF so a hand-typed message still frames; the BODY is untouched. " \
+              "Applied by the capturing instance + surfaced to the human. Returns " \
               "forwarded (edited:true) | no_such_item | not_confirmed." do |s|
               s.field "item_id", intprop("held item id from intercept_list"), required: true
-              s.field "raw", strprop("the full edited HTTP wire message (request/status line + headers + body)"), required: true
+              s.field "raw", strprop("the full edited HTTP wire message as text (request/status line + headers + body)")
+              s.field "raw_base64", strprop("the full edited wire message, base64 — byte-exact; use this for a binary body")
             end
 
             tool j, "intercept_toggle",

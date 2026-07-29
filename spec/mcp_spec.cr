@@ -3063,3 +3063,90 @@ describe "MCP agent event feed" do
     end
   end
 end
+
+# Publish the bridge blob a capturing TUI would, so the intercept write verbs enqueue for
+# real, and auto-ack the first queued command so the tool returns without its 3s poll.
+private def with_live_intercept(store, &)
+  store.set_intercept_bridge({
+    "capturing" => true, "enabled" => true, "direction" => "both", "filter" => "",
+    "session_token" => "sess-1", "heartbeat_ms" => Time.utc.to_unix_ms,
+  }.to_json)
+  spawn do
+    120.times do
+      if row = store.intercept_commands_after(0_i64, 10).first?
+        store.ack_intercept_command(row.id, "edited", "ok")
+        break
+      end
+      sleep 5.milliseconds
+    end
+  end
+  yield
+end
+
+# The bytes actually handed to the capturing instance — the only thing that matters here.
+private def queued_intercept_bytes(store) : Bytes
+  store.intercept_commands_after(0_i64, 10).first.bytes.not_nil!
+end
+
+describe "MCP intercept_forward_edit" do
+  it "forwards a binary body from raw_base64 byte-for-byte" do
+    with_store do |store|
+      # A PNG-ish body holding a bare LF and a non-UTF-8 octet: neither survives a JSON
+      # string, and the old whole-message CRLF gsub rewrote the 0x0A into 0x0D 0x0A.
+      body = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0a, 0xff]
+      wire = IO::Memory.new
+      wire.print "POST /upload HTTP/1.1\r\nHost: acme.test\r\nContent-Length: #{body.size}\r\n\r\n"
+      wire.write body
+
+      with_live_intercept(store) do
+        r = tools_for(store).call("intercept_forward_edit",
+          JSON.parse(%({"item_id":1,"raw_base64":"#{Base64.strict_encode(wire.to_slice)}"})))
+        r.is_error.should be_false
+      end
+
+      queued = queued_intercept_bytes(store)
+      sep = Gori::MCP::Serialize.head_body_split(queued).not_nil!
+      queued[(sep + 4)..].should eq body # untouched, 0x0A and 0xFF included
+    end
+  end
+
+  it "normalizes CRLF in raw's HEADER block but never in its body" do
+    with_store do |store|
+      with_live_intercept(store) do
+        # Hand-typed LF-only head (must still frame) with an LF-separated text body (must not
+        # grow — rewriting it is what desyncs a Content-Length and corrupts non-text bodies).
+        raw = "POST /a HTTP/1.1\\nHost: acme.test\\n\\nline1\\nline2"
+        tools_for(store).call("intercept_forward_edit",
+          JSON.parse(%({"item_id":1,"raw":"#{raw}"}))).is_error.should be_false
+      end
+
+      String.new(queued_intercept_bytes(store))
+        .should eq "POST /a HTTP/1.1\r\nHost: acme.test\r\nContent-Length: 11\r\n\r\nline1\nline2"
+    end
+  end
+
+  it "rejects raw and raw_base64 together instead of silently picking one" do
+    with_store do |store|
+      r = tools_for(store).call("intercept_forward_edit",
+        JSON.parse(%({"item_id":1,"raw":"GET / HTTP/1.1\\r\\n\\r\\n","raw_base64":"R0VUIC8gSFRUUC8xLjENCg0K"})))
+      r.error_code.should eq "INVALID_ARGUMENT"
+      r.text.should contain "only one"
+    end
+  end
+
+  it "rejects invalid base64 with an actionable message" do
+    with_store do |store|
+      r = tools_for(store).call("intercept_forward_edit", JSON.parse(%({"item_id":1,"raw_base64":"!!!not base64!!!"})))
+      r.error_code.should eq "INVALID_ARGUMENT"
+      r.field.should eq "raw_base64"
+    end
+  end
+
+  it "still requires one of the two" do
+    with_store do |store|
+      r = tools_for(store).call("intercept_forward_edit", JSON.parse(%({"item_id":1})))
+      r.error_code.should eq "INVALID_ARGUMENT"
+      r.field.should eq "raw"
+    end
+  end
+end

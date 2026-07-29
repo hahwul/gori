@@ -1,5 +1,7 @@
+require "base64"
 require "json"
 require "../../store"
+require "../request_builder"
 require "../serialize"
 require "../../fuzz"
 
@@ -97,16 +99,43 @@ module Gori
       private def intercept_forward_edit(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
-        raw = str(h, "raw")
-        return err("missing required 'raw' (the full edited wire message)", "INVALID_ARGUMENT", field: "raw") if raw.nil? || raw.empty?
-        # Normalize line endings to CRLF (like the human intercept editor), then sync
-        # Content-Length to the edited body. Bytes are LITERAL — no Env.expand_wire, so a remote
-        # agent's $SECRET references are never expanded into forwarded traffic; and no smuggling
-        # guard, because byte-exact forwarding of arbitrary edits is the whole point of an
-        # intercept editor in a security tool (matches the human forward_bytes contract).
-        wire = raw.gsub(/\r?\n/, "\r\n")
-        bytes = Fuzz::ContentLength.sync(wire.to_slice, add_when_missing: true)
+        edited = intercept_edit_bytes(h)
+        return edited if edited.is_a?(Result)
+        # Sync Content-Length to the edited body. Bytes are LITERAL — no Env.expand_wire, so a
+        # remote agent's $SECRET references are never expanded into forwarded traffic; and no
+        # smuggling guard, because byte-exact forwarding of arbitrary edits is the whole point of
+        # an intercept editor in a security tool (matches the human forward_bytes contract).
+        bytes = Fuzz::ContentLength.sync(edited, add_when_missing: true)
         enqueue_intercept("forward_edit", item_id: id, bytes: bytes)
+      end
+
+      # The replacement wire message. `raw_base64` is the byte-exact channel — a JSON string
+      # cannot carry arbitrary octets, so it is the ONLY way a binary body survives the round
+      # trip `intercept_get` starts when it hands back `raw_base64`. `raw` stays for the common
+      # text edit; there, lone LFs in the HEADER block become CRLF (a hand-typed message still
+      # frames) while the BODY is left untouched, via the same rule send_request's `raw` uses.
+      # Exactly one of the two, so a caller that sends both is told rather than silently having
+      # one ignored.
+      private def intercept_edit_bytes(h) : Bytes | Result
+        b64 = str(h, "raw_base64").presence
+        raw = str(h, "raw").presence
+        if b64 && raw
+          return err("pass only one of 'raw' or 'raw_base64'", "INVALID_ARGUMENT", field: "raw_base64")
+        end
+        if b64
+          decoded = begin
+            Base64.decode(b64)
+          rescue
+            return err("invalid 'raw_base64' (not valid base64)", "INVALID_ARGUMENT", field: "raw_base64")
+          end
+          return err("'raw_base64' decoded to an empty message", "INVALID_ARGUMENT", field: "raw_base64") if decoded.empty?
+          return decoded
+        end
+        unless raw
+          return err("missing required 'raw' (the full edited wire message) — or 'raw_base64' for byte-exact bytes",
+            "INVALID_ARGUMENT", field: "raw")
+        end
+        RequestBuilder.normalize_raw(raw)
       end
 
       private def intercept_toggle(h) : Result
