@@ -2994,3 +2994,40 @@ describe "MCP send_websocket scope gate" do
     end
   end
 end
+
+describe "MCP host overrides" do
+  it "reports a duplicate host as a permanent error, not a retryable one" do
+    with_store do |store|
+      tools = tools_for(store)
+      ok_json(tools, "add_host_override", %({"host":"acme.test","ip":"127.0.0.1"}))
+
+      dup = tools.call("add_host_override", JSON.parse(%({"host":"acme.test","ip":"127.0.0.2"})))
+      dup.is_error.should be_true
+      # PROJECT_BUSY/retryable:true made an agent that trusts `retryable` loop forever (#414).
+      dup.error_code.should eq "INVALID_ARGUMENT"
+      dup.retryable.should be_false
+      dup.text.should contain("already exists")
+    end
+  end
+
+  it "reports a collision on update as a permanent error too" do
+    with_store do |store|
+      tools = tools_for(store)
+      ok_json(tools, "add_host_override", %({"host":"a.test","ip":"127.0.0.1"}))
+      second = ok_json(tools, "add_host_override", %({"host":"b.test","ip":"127.0.0.2"}))
+
+      clash = tools.call("update_host_override", JSON.parse(%({"id":#{second["id"]},"host":"a.test","ip":"127.0.0.3"})))
+      clash.error_code.should eq "INVALID_ARGUMENT"
+      clash.retryable.should be_false
+    end
+  end
+
+  it "still allows editing an entry's ip without renaming it" do
+    with_store do |store|
+      tools = tools_for(store)
+      added = ok_json(tools, "add_host_override", %({"host":"a.test","ip":"127.0.0.1"}))
+      edited = ok_json(tools, "update_host_override", %({"id":#{added["id"]},"host":"a.test","ip":"10.0.0.1"}))
+      edited["ip"].as_s.should eq "10.0.0.1"
+    end
+  end
+end

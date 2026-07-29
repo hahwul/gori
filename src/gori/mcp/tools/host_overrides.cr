@@ -26,10 +26,20 @@ module Gori
         return err("missing required 'ip'", "INVALID_ARGUMENT", field: "ip") if ip.nil? || ip.empty?
         return err("invalid host/ip (host hostname-shaped, ip an IPv4/IPv6 literal)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
         ov = HostOverrides.load(store)
-        unless ov.add(host, ip)
-          return busy("failed to add host override (duplicate host, empty, or invalid)")
+        normalized = host.strip.downcase
+        # host/ip are already validated above and HostOverrides#add reports NOTHING about the
+        # store write, so its only remaining false is a DUPLICATE — a deterministic condition
+        # that can never succeed on retry. Reporting it as retryable PROJECT_BUSY made an agent
+        # that trusts `retryable` loop forever (the #414 shape, fixed there in add_scope_rule).
+        if ov.entries.any? { |e| e.host == normalized }
+          return err("a host override for '#{normalized}' already exists (update it by id with update_host_override)",
+            "INVALID_ARGUMENT", field: "host")
         end
-        entry = ov.entries.find { |e| e.host == host.strip.downcase }
+        unless ov.add(host, ip)
+          return err("host override rejected (host must be hostname-shaped, ip an IPv4/IPv6 literal)",
+            "INVALID_ARGUMENT", field: "host")
+        end
+        entry = ov.entries.find { |e| e.host == normalized }
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", entry.try(&.id)
@@ -48,8 +58,14 @@ module Gori
         ip = str(h, "ip").try(&.strip)
         return err("'host' and 'ip' are both required", "INVALID_ARGUMENT") if host.nil? || host.empty? || ip.nil? || ip.empty?
         return err("invalid host/ip (host hostname-shaped, ip an IPv4/IPv6 literal)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
+        # Split the two causes HostOverrides#update collapses into one `false`: a collision with
+        # ANOTHER entry is deterministic (never retry), a rolled-back store write is transient.
+        normalized = host.strip.downcase
+        if ov.entries.any? { |e| e.id != id && e.host == normalized }
+          return err("another host override already covers '#{normalized}'", "INVALID_ARGUMENT", field: "host")
+        end
         unless ov.update(id, host, ip)
-          return busy("failed to update host override (duplicate host, empty, or invalid)")
+          return busy("host override NOT updated (store busy or unwritable); it is unchanged")
         end
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "host", host.strip.downcase; j.field "ip", ip } })
       end
