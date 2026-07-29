@@ -60,13 +60,18 @@ module Gori::Tui
     #
     # EVERY MOUTH HAS TO SIT AT OR BELOW MID-CELL. A combining-style diacritic is drawn at
     # cap height, which is exactly where the lashes are — so ˘ (U+02D8), the obvious cup
-    # shape, put the mouth ABOVE the eyes and level with the lashes. `u` is the same cup at
-    # x-height and is in all eight faces; ᴗ (U+1D17) and ᵕ (U+1D55) sit right too but reach
-    # only 3 of 8, and SF Mono, the current macOS default, is one of the misses.
+    # shape, put the mouth ABOVE the eyes and level with the lashes.
+    #
+    # ᴗ (U+1D17 BOTTOM HALF O) is that cup at the right height. It is absent from most
+    # monospace cmaps, which does NOT disqualify it: the terminal owns the grid, so a
+    # fallback glyph is drawn INTO the cell and the advance still comes from East Asian
+    # Width — ᴗ is Neutral, so it stays one column. Measured in a real terminal, ▐´●ᴗ●`▌
+    # is the same 7 cells as the all-mono spelling. 28 installed faces supply it here, so
+    # it does not tofu; a minimal container with no fallback pool is the residual risk.
     #
     # CAP_HEIGHT_MARKS is what a spec checks this against — the mouth may never be one.
     CAP_HEIGHT_MARKS = {'˘', '¯', '^', '´', '`', '¨', '˙', '˚', '˜', '‾'}
-    MOUTHS           = {'u', 'o', '_', '·'}
+    MOUTHS           = {'ᴗ', 'o', '_', '·'}
 
     def self.mouth(pose : Symbol) : Char
       case pose
@@ -74,7 +79,7 @@ module Gori::Tui
       when :alert then '_' # tense, flat — baseline
       when :error then '_'
       when :doze  then '·' # slack — mid
-      else             'u' # the resting smile — an x-height cup, below the eyes
+      else             'ᴗ' # the resting smile — a cup below the eyes
       end
     end
 
