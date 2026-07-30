@@ -90,24 +90,38 @@ module Gori
       {argv[0], argv[1..]}
     end
 
-    # A version flag belongs to the TOP LEVEL — `gori -v`, `gori --version`, `gori run -v` —
-    # which is exactly what print_main_help promises ("Flags like --version and --help work at
-    # the top level too"), and exactly the FIRST token of the subcommand's own args.
+    # A version flag belongs to the TOP LEVEL — `gori -v`, `gori --version`, `gori run -v`,
+    # `gori mcp --read-only --version` — which is what print_main_help and
+    # docs/reference/cli.md both promise ("Flags like --version and --help work at the top
+    # level too").
     #
-    # It must not be claimed once a NESTED subcommand has been named, because there the same
+    # It must NOT be claimed once a NESTED subcommand has been named, because there the same
     # token is that command's own option, or worse its option VALUE. A blanket `argv.any?`
     # claimed all of them, so `gori run rewriter add --find X -v boom` (rewriter's own
     # documented `-vVALUE`) and `gori run decoder base64-encode --input -v` printed the version
     # and returned 0 WITHOUT doing the work — a silent no-op carrying a SUCCESS status, the
     # worst failure mode there is for a surface scripts consume (`… || die` never fires).
     #
-    # Keying on the first token excludes those STRUCTURALLY rather than by counting them: a
-    # value-taking flag always sits ahead of its own value, so a VALUE can never be at position
-    # 0. That covers `gori run --project -v` too, which no positional scan could — deciding it
-    # by inspection would need to know which flags take values, and that lives in each
-    # subcommand's OptionParser, which does not exist yet at this layer.
+    # So scan only the LEADING FLAG RUN of the subcommand's own args and stop dead at the first
+    # bare word: that word is a nested verb, and everything after it belongs to whoever owns it.
+    # Keying on `subargs[0]` alone was too narrow and regressed the promise above — a version
+    # flag sitting after a top-level subcommand's own flag (`gori mcp --read-only --version`,
+    # `gori ca --pem -v`) reached that subcommand's parser and aborted with "unknown option",
+    # while `--help` in the very same position still worked because every parser owns `-h`.
+    #
+    # KNOWN RESIDUAL, and why it is the right trade: a `-v` that is the VALUE of a top-level
+    # flag (`gori run --project -v`) is still read as the flag, because telling a value from a
+    # flag needs to know which flags take values — that lives in each subcommand's OptionParser,
+    # which is not built yet at this layer. It only misfires on input that is already invalid
+    # (`gori run --project x` is not a subcommand either), whereas the alternative broke a
+    # documented, working invocation. Every NESTED case — the ones that actually bit — stays
+    # excluded, because a nested verb is a bare word and ends the scan.
     private def self.global_version_flag?(subargs : Array(String)) : Bool
-      (first = subargs.first?) ? VERSION_FLAGS.includes?(first) : false
+      subargs.each do |arg|
+        return true if VERSION_FLAGS.includes?(arg)
+        return false unless arg.starts_with?('-')
+      end
+      false
     end
 
     # Pull `--config PATH` / `--config=PATH` out of argv, point Settings at it, and return the

@@ -60,12 +60,32 @@ describe "gori — global version flag" do
     Gori::CLI.global_version_flag_for_spec(["run", "show", "1", "--version"]).should be_false
   end
 
-  # Keying on the FIRST token of the tail rules a flag's own value out structurally: a
-  # value-taking flag always precedes its value, so a value can never sit at position 0.
-  it "leaves a top-level subcommand flag's own value alone" do
-    Gori::CLI.global_version_flag_for_spec(["run", "--project", "-v"]).should be_false
-    Gori::CLI.global_version_flag_for_spec(["tui", "--db", "-v"]).should be_false
-    Gori::CLI.global_version_flag_for_spec(["mcp", "--project", "--version"]).should be_false
+  # Regression: keying on subargs[0] ALONE was too narrow. A version flag after a top-level
+  # subcommand's own flag reached that subcommand's parser and aborted with "unknown option",
+  # while `--help` in the same position worked because every parser owns `-h` — and
+  # print_main_help plus docs/reference/cli.md both promise version works at the top level.
+  it "claims a version flag after a top-level subcommand's own flags" do
+    Gori::CLI.global_version_flag_for_spec(["mcp", "--read-only", "--version"]).should be_true
+    Gori::CLI.global_version_flag_for_spec(["ca", "--pem", "-v"]).should be_true
+    Gori::CLI.global_version_flag_for_spec(["tui", "--insecure-upstream", "-V"]).should be_true
+  end
+
+  # The scan stops dead at the first bare word, because that word is a nested verb and owns
+  # everything after it. This is what keeps every case from the original bug excluded.
+  it "stops at the first bare word, so a nested verb owns its own flags" do
+    Gori::CLI.global_version_flag_for_spec(["run", "oast", "listen", "--version"]).should be_false
+    Gori::CLI.global_version_flag_for_spec(["run", "probe", "rules", "-v"]).should be_false
+    Gori::CLI.global_version_flag_for_spec(["run", "issues", "create", "-v", "x"]).should be_false
+  end
+
+  # KNOWN RESIDUAL, pinned so it is a decision and not a surprise: a `-v` that is the VALUE of a
+  # top-level flag still reads as the flag, because telling a value from a flag needs to know
+  # which flags take values, and that lives in each subcommand's OptionParser. Accepted because
+  # it only misfires on input that is already invalid (`gori run --project x` is not a
+  # subcommand either), whereas excluding it broke `gori mcp --read-only --version` above.
+  it "still misreads a version flag used as a top-level flag's value" do
+    Gori::CLI.global_version_flag_for_spec(["run", "--project", "-v"]).should be_true
+    Gori::CLI.global_version_flag_for_spec(["tui", "--db", "-v"]).should be_true
   end
 
   it "is false when there is no version flag at all" do
