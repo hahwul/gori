@@ -1,5 +1,6 @@
 require "./frame"
 require "./hpack"
+require "./head_codec"
 require "../codec/body"
 require "../upstream"
 require "../sink"
@@ -22,6 +23,18 @@ module Gori::Proxy::H2
   # client-streaming / bidi requests therefore surface only once the client ends
   # its half — acceptable for now (the raw frames are always captured live).
   class Assembler
+    # A header block the CALLER already decoded. The rewrite path (`HeadRewrite`, #492
+    # step 2) has to decode before it can forward, and the decoder that tracks the
+    # SENDER's encoder is the one in here — a second decoder on the same direction is a
+    # second dynamic table and is wrong the first time the peer uses an index. So it
+    # decodes through `decode_head_block` and hands the RESULT back here.
+    #
+    # Passing this is MANDATORY for such a caller: a stateful HPACK decoder run twice over
+    # one block is desynced from the sender for the rest of the connection. `fields` nil
+    # means that decode FAILED, so the projection is dropped exactly as `feed`'s own rescue
+    # does — and, again, without decoding the block a second time.
+    record HeadBlock, fields : Array({String, String})?
+
     # Cap on one stream's accumulated HEADERS(+CONTINUATION) block, so a peer that
     # never sends END_HEADERS can't grow header_buf without bound.
     MAX_HEADER_BLOCK = 1 << 20 # 1 MiB
@@ -73,22 +86,35 @@ module Gori::Proxy::H2
       @resp_decoder = HPACK::Decoder.new
     end
 
-    # Feed one frame. `direction` is "out" (client→server) or "in".
-    def feed(direction : String, frame : Frame::Header) : Nil
+    # Decode one COMPLETE header block with this connection's per-direction decoder,
+    # advancing it exactly once. Only the rewrite path calls this — see `HeadBlock` for
+    # why it must, and for the obligation it takes on by doing so. nil on malformed or
+    # hostile HPACK, matching `feed`'s rescue.
+    def decode_head_block(direction : String, block : Bytes) : Array(HPACK::Field)?
+      @mutex.synchronize do
+        (direction == "out" ? @req_decoder : @resp_decoder).decode_fields(block)
+      end
+    rescue Gori::Error | IndexError | OverflowError
+      nil
+    end
+
+    # Feed one frame. `direction` is "out" (client→server) or "in". `pre` is set only by a
+    # caller that already decoded this frame's header block (see `HeadBlock`).
+    def feed(direction : String, frame : Frame::Header, pre : HeadBlock? = nil) : Nil
       return if frame.stream_id == 0 # connection-level (SETTINGS/PING/...) — not a stream
-      @mutex.synchronize { feed_locked(direction, frame) }
+      @mutex.synchronize { feed_locked(direction, frame, pre) }
     rescue Gori::Error | IndexError | OverflowError
       # malformed/hostile HPACK or framing (bad pad length, overflowing integer,
       # oversized/truncated block): skip the decoded projection. The raw frame log
       # is the truth (P7) and the live relay already forwarded the bytes.
     end
 
-    private def feed_locked(direction : String, frame : Frame::Header) : Nil
+    private def feed_locked(direction : String, frame : Frame::Header, pre : HeadBlock?) : Nil
       # PUSH_PROMISE opens the PROMISED stream itself (with its own cap check) and never touches
       # frame.stream_id's slot, so handle it before the lookup below — otherwise it would
       # allocate an unused Stream for the associated id.
       if frame.frame_type == Frame::Type::PushPromise
-        handle_push_promise(direction, frame, direction == "out" ? @req_decoder : @resp_decoder)
+        handle_push_promise(direction, frame, direction == "out" ? @req_decoder : @resp_decoder, pre)
         return
       end
 
@@ -127,7 +153,7 @@ module Gori::Proxy::H2
         append_header_fragment(side, header_block(frame))
         if frame.end_headers?
           side.awaiting_continuation = false
-          finish_header_block(side, decoder)
+          finish_header_block(side, decoder, pre)
         else
           side.awaiting_continuation = true # a CONTINUATION may now legally follow
         end
@@ -141,7 +167,7 @@ module Gori::Proxy::H2
         append_header_fragment(side, frame.payload)
         if frame.end_headers?
           side.awaiting_continuation = false
-          finish_header_block(side, decoder)
+          finish_header_block(side, decoder, pre)
         end
         # END_STREAM is illegal on CONTINUATION (RFC 7540 §6.10) but a hostile peer
         # can set it; mirror HEADERS/DATA so the request still emits and the stream
@@ -183,8 +209,16 @@ module Gori::Proxy::H2
     # then reset the buffer. Merging (not replacing) is what makes h2 TRAILERS
     # work — the trailing HEADERS frame (e.g. gRPC's grpc-status) appends to the
     # initial headers rather than clobbering them.
-    private def finish_header_block(side : Side, decoder : HPACK::Decoder) : Nil
-      decoded = decoder.decode(side.header_buf.to_slice)
+    private def finish_header_block(side : Side, decoder : HPACK::Decoder, pre : HeadBlock?) : Nil
+      # `pre` means the caller already ran (and owns) this block's decode — never decode it
+      # a second time, that desyncs the decoder from the sender for the rest of the
+      # connection. A nil `fields` inside it is a failed decode: raise into feed's rescue,
+      # which drops the projection and (via the ensure below) clears the buffer.
+      decoded = if pre
+                  pre.fields || raise Gori::Error.new("h2 header block failed to decode")
+                else
+                  decoder.decode(side.header_buf.to_slice)
+                end
       added = decoded.sum { |(n, v)| n.bytesize + v.bytesize + HPACK::Decoder::ENTRY_OVERHEAD }
       if (existing = side.headers) && !decoded.any? { |(n, _)| n == ":status" }
         # Trailers (no :status) append to the existing header list — grpc-status et al.
@@ -218,7 +252,8 @@ module Gori::Proxy::H2
     # HEADERS+DATA on the (even) promised stream. The header block shares the
     # server's HPACK context (the response decoder). v1 handles the END_HEADERS
     # case (no CONTINUATION across a PUSH_PROMISE).
-    private def handle_push_promise(direction : String, frame : Frame::Header, decoder : HPACK::Decoder) : Nil
+    private def handle_push_promise(direction : String, frame : Frame::Header, decoder : HPACK::Decoder,
+                                    pre : HeadBlock?) : Nil
       return unless direction == "in" # push is server-initiated only
       return unless frame.end_headers?
       promised_id, block = parse_push_promise(frame)
@@ -232,7 +267,8 @@ module Gori::Proxy::H2
         promised = @streams[promised_id] = Stream.new
       end
       return if promised.req.headers # already promised
-      promised.req.headers = decoder.decode(block)
+      # Same rule as finish_header_block: `pre` means the block is already decoded.
+      promised.req.headers = pre ? (pre.fields || raise Gori::Error.new("h2 push block failed to decode")) : decoder.decode(block)
       promised.req.ended = true
       emit_request(promised_id, promised)
     end
@@ -306,7 +342,7 @@ module Gori::Proxy::H2
       cap = stream.req.body
       body = cap.total == 0 ? nil : cap.to_slice
 
-      head = synth_request_head(method, path, headers, authority)
+      head = synth_request_head(headers, authority)
       captured = Store::CapturedRequest.new(
         created_at: @created_at, scheme: scheme, host: host, port: port,
         method: method, target: path, http_version: "HTTP/2", head: head, body: body,
@@ -325,7 +361,7 @@ module Gori::Proxy::H2
       body = cap.total == 0 ? nil : cap.to_slice
       content_type = header_value(headers, "content-type")
       content_encoding = header_value(headers, "content-encoding")
-      head = synth_response_head(status, headers)
+      head = synth_response_head(headers)
       now = Time.instant
       duration_us = (now - stream.started_at).total_microseconds.to_i64
       ttfb_us = stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 }
@@ -381,32 +417,19 @@ module Gori::Proxy::H2
       Upstream.split_host_port(authority, @port)
     end
 
-    # A readable HTTP/2 request head (the bytes shown in the detail view). The
-    # authoritative octets are the raw frames; this is a normalized view.
+    # A readable HTTP/2 request/response head (the bytes shown in the detail view). The
+    # authoritative octets are the raw frames; this is the normalized view.
     #
-    # HTTP/2 carries the request's host in the `:authority` pseudo-header
-    # (RFC 7540 §8.1.2.3) rather than a `Host:` field, and the loop below skips
-    # ALL pseudo-headers — so without this, the synthesized head has no host at
-    # all, breaking `gori run show` / MCP get_flow / QL `header:host` for every
-    # h2 flow. Emit `Host: <authority>` first (authority is the caller's
-    # already-resolved `:authority` pseudo value, falling back to @host),
-    # unless the headers already carry an explicit (non-pseudo) `host` field.
-    private def synth_request_head(method : String, path : String, headers : Array({String, String}), authority : String) : Bytes
-      String.build do |io|
-        io << method << ' ' << path << " HTTP/2\r\n"
-        has_host = headers.any? { |(n, _)| n.compare("host", case_insensitive: true) == 0 }
-        io << "Host: " << authority << "\r\n" if !authority.empty? && !has_host
-        headers.each { |(n, v)| io << n << ": " << v << "\r\n" unless n.starts_with?(':') }
-        io << "\r\n"
-      end.to_slice
+    # The synthesis itself lives in `HeadCodec` because the Match&Replace path has to
+    # produce the SAME bytes to run rules against — that is what makes the Rewriter tab's
+    # preview (`rules.cr:331-345`, which reads exactly this head off a stored flow) agree
+    # with what the live proxy does to an h2 head. Two copies would drift; there is one.
+    private def synth_request_head(headers : Array({String, String}), authority : String) : Bytes
+      HeadCodec.synth_request(headers, authority)
     end
 
-    private def synth_response_head(status : Int32, headers : Array({String, String})) : Bytes
-      String.build do |io|
-        io << "HTTP/2 " << status << "\r\n"
-        headers.each { |(n, v)| io << n << ": " << v << "\r\n" unless n.starts_with?(':') }
-        io << "\r\n"
-      end.to_slice
+    private def synth_response_head(headers : Array({String, String})) : Bytes
+      HeadCodec.synth_response(headers)
     end
   end
 end

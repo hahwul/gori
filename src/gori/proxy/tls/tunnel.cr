@@ -182,10 +182,21 @@ module Gori::Proxy::Tls
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
     # ClientConn path — when HTTP/2 is switched off, the sandbox is on, intercept is on for this
-    # host, OR Match&Replace rules are live: h2's HPACK-encoded heads never reach the
-    # HeadRewriter/interceptor seams (nor ClientConn's sandbox block), so the relay would
-    # silently skip all of them. Out-of-scope, sandbox-off, intercept-off, rule-less hosts are
-    # candidates (subject to the origin actually speaking h2 — see reflect_origin_h2).
+    # host, OR a Match&Replace BODY rule is live: those seams are not reachable from the h2
+    # relay, so it would silently skip them. Out-of-scope, sandbox-off, intercept-off hosts
+    # with no body rule are candidates (subject to the origin actually speaking h2 — see
+    # reflect_origin_h2).
+    #
+    # The rewriter gate used to be `active?`, and #492 step 2 narrowed it rather than removing
+    # it. HEAD rules now reach h2 (`H2::HeadRewrite`), which is the whole point of that step —
+    # a single Match&Replace rule no longer kills every gRPC client on the host by forcing a
+    # downgrade the client cannot take (`conn/client_conn.cr:158`). But `Rules#active?` is
+    # true for a BODY-only rule set too (`rules.cr:48-50` counts any enabled rule regardless of
+    # part), and a body rule works today PRECISELY because this gate downgrades: the h1 path is
+    # where `rewrites_request_body?`/`rewrites_response_body?` and the buffered-body rewrite
+    # live. Dropping the gate outright would have regressed body rules from working to silently
+    # not working — the exact failure this epic exists to remove. Body rewriting on h2 is #492
+    # step 5; until then a body rule still earns the downgrade, and only that.
     #
     # `http2_disabled?` is one MORE reason to downgrade, deliberately not a way to override the
     # others: those three are correctness requirements, not preferences, so no setting may turn
@@ -194,7 +205,8 @@ module Gori::Proxy::Tls
     private def h2_candidate?(host : String) : Bool
       !(Gori::Settings.http2_disabled? ||
         @interceptor.try(&.sandbox_enabled?) ||
-        @interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
+        @interceptor.try(&.intercepts_host?(host)) ||
+        @rewriter.try { |rw| rw.rewrites_request_body? || rw.rewrites_response_body? })
     end
 
     # End-to-end h2 relay over an upstream ALREADY dialed (and confirmed h2) by `intercept`.
@@ -207,7 +219,7 @@ module Gori::Proxy::Tls
       # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
       Proxy::SocketTuning.relax(client_tls)
       Proxy::SocketTuning.relax(upstream)
-      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink)
+      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter)
     ensure
       upstream.close rescue nil
     end

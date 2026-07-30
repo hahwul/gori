@@ -1,5 +1,7 @@
 require "./frame"
 require "./assembler"
+require "./head_rewrite"
+require "../head_rewriter"
 require "../sink"
 
 module Gori::Proxy::H2
@@ -7,16 +9,21 @@ module Gori::Proxy::H2
   # upstream legs, gori forwards the client preface and every subsequent frame in
   # both directions byte-faithfully (P7), capturing each raw frame to the sink.
   #
-  # This slice does NOT decode HPACK or assemble streams — it proves end-to-end
-  # h2 passthrough plus the raw frame log. Higher layers (HPACK, stream→flow)
-  # read that log. Forwarding happens BEFORE capture so a slow writer never
-  # delays the peer (same discipline as the WebSocket relay).
+  # Forwarding happens BEFORE capture so a slow writer never delays the peer (same
+  # discipline as the WebSocket relay). The ONE exception is a header block when a
+  # `rewriter` is wired in: a rewritten head does not exist to forward until END_HEADERS
+  # has arrived and the rules have run. See `HeadRewrite` for why that costs nothing here
+  # and why DATA deliberately keeps the forward-first path (#492 step 2).
+  #
+  # With no `rewriter` this is exactly the byte-faithful relay it has always been.
   class Relay
-    def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink) : Nil
-      new(client, upstream, host, port, sink).run
+    def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink,
+                 rewriter : Proxy::HeadRewriter? = nil) : Nil
+      new(client, upstream, host, port, sink, rewriter).run
     end
 
-    def initialize(@client : IO, @upstream : IO, @host : String, @port : Int32, @sink : FlowSink)
+    def initialize(@client : IO, @upstream : IO, @host : String, @port : Int32, @sink : FlowSink,
+                   @rewriter : Proxy::HeadRewriter? = nil)
     end
 
     def run : Nil
@@ -41,18 +48,43 @@ module Gori::Proxy::H2
     end
 
     private def pump(src : IO, dst : IO, conn_id : Int64, direction : String, assembler : Assembler) : Nil
-      loop do
-        frame = Frame.read(src)
-        break if frame.nil?         # clean EOF at a frame boundary
-        dst.write(frame.wire_bytes) # original wire bytes — no re-serialize/copy
-        dst.flush
-        @sink.on_h2_frame(conn_id, direction, frame.type, frame.flags, frame.stream_id, frame.payload)
-        assembler.feed(direction, frame)
+      rw = @rewriter
+      heads = rw ? HeadRewrite.new(direction, rw, assembler, @host) : nil
+      begin
+        loop do
+          frame = Frame.read(src)
+          break if frame.nil? # clean EOF at a frame boundary
+          if heads
+            heads.accept(frame) { |f, pre| emit(dst, conn_id, direction, assembler, f, pre) }
+          else
+            emit(dst, conn_id, direction, assembler, frame, nil)
+          end
+        end
+      rescue
+        # peer reset / parse error ends this direction
+      ensure
+        # A header block still buffered at teardown never got END_HEADERS — release it
+        # rather than swallowing frames the peer did send (P7). The write can itself fail
+        # (this path is usually reached BECAUSE the peer went away), which is fine: the
+        # capture and the projection are what still matter here.
+        if h = heads
+          h.drain { |f, pre| emit(dst, conn_id, direction, assembler, f, pre) rescue nil }
+        end
       end
-    rescue
-      # peer reset / parse error ends this direction
     ensure
       dst.close rescue nil # propagate close so the opposite pump unblocks
+    end
+
+    # Forward one frame, then capture it, then project it. Order is deliberate for every
+    # frame the rewrite path does not hold back: a slow writer must never delay the peer
+    # (P6). `pre` is the already-decoded projection for a header block the rewrite path
+    # owns — the assembler must not decode such a block a second time.
+    private def emit(dst : IO, conn_id : Int64, direction : String, assembler : Assembler,
+                     frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
+      dst.write(frame.wire_bytes) # original wire bytes when untouched — no re-serialize/copy
+      dst.flush
+      @sink.on_h2_frame(conn_id, direction, frame.type, frame.flags, frame.stream_id, frame.payload)
+      assembler.feed(direction, frame, pre)
     end
 
     private def now_us : Int64

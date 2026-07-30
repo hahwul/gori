@@ -109,6 +109,36 @@ private def start_h2_origin(reply : Bytes, ack : Channel(Nil)) : Int32
   port
 end
 
+# A minimal HTTP/2 origin that HPACK-decodes the first HEADERS block it receives and reports
+# that block's `:path`. Enough to prove a Match&Replace HEAD rule reached an h2 request head
+# end-to-end — the relay re-encodes the block literal-only, so a fresh decoder reads it.
+private def start_h2_head_origin(path_seen : Channel(String), ack : Channel(Nil)) : Int32
+  cert, key = CertBuilder.build_root("origin.test")
+  ctx = ContextFactory.server_context(cert, key, advertise_h2: true)
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    if raw = origin.accept?
+      begin
+        ssl = OpenSSL::SSL::Socket::Server.new(raw, ctx, sync_close: true)
+        ssl.sync = true
+        Gori::Proxy::H2::Frame.read_preface(ssl)
+        decoder = Gori::Proxy::H2::HPACK::Decoder.new
+        while frame = Gori::Proxy::H2::Frame.read(ssl)
+          next unless frame.frame_type == Gori::Proxy::H2::Frame::Type::Headers
+          fields = decoder.decode(frame.payload)
+          path_seen.send(fields.find { |(n, _)| n == ":path" }.try(&.[1]) || "")
+          break
+        end
+        ack.receive
+        ssl.close rescue nil
+      rescue
+      end
+    end
+  end
+  port
+end
+
 describe Gori::Proxy::Tls::Tunnel do
   it "intercepts an HTTPS CONNECT and captures the decrypted flow byte-exact (P7)" do
     dir = File.tempname("gori-ca")
@@ -207,7 +237,73 @@ describe Gori::Proxy::Tls::Tunnel do
     end
   end
 
-  it "downgrades an h2 client to HTTP/1.1 so live Match&Replace rules still apply" do
+  it "keeps h2 for a HEAD rule and applies it to the h2 request head (#492)" do
+    # The reason #492 step 2 exists. Before it, ANY live Match&Replace rule forced the
+    # connection to HTTP/1.1, and an h2/gRPC client that cannot take that downgrade had its
+    # preface rejected outright (`conn/client_conn.cr:158`) — one rule killed every gRPC
+    # client on the host. The head now reaches the rewriter over h2 instead.
+    dir = File.tempname("gori-ca-h2mr")
+    dbpath = File.tempname("gori-h2mr", ".db")
+    path_seen = Channel(String).new(1)
+    ack = Channel(Nil).new(1)
+    done = Channel(Nil).new(4) # relay uses on_h2_*; buffered so teardown can't wedge
+    store : Gori::Store? = nil
+    begin
+      origin_port = start_h2_head_origin(path_seen, ack)
+      ca = CertAuthority.load_or_create(dir)
+      store = Gori::Store.open(dbpath)
+      rules = Gori::Rules.load(store.not_nil!)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/secret", "/rewritten")
+      rules.active?.should be_true
+
+      sink = RecordingSink.new(done)
+      proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false, rewriter: rules))
+      proxy.start
+
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT localhost:#{origin_port} HTTP/1.1\r\nHost: localhost:#{origin_port}\r\n\r\n"
+      raw.flush
+      Codec::Http1.read_head(raw).not_nil!
+
+      client_ctx = OpenSSL::SSL::Context::Client.new
+      client_ctx.alpn_protocol = "h2"
+      ca_cert = Cert.read_pem(File.join(dir, "root.crt.pem"))
+      st = LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe)
+      LibCrypto.x509_store_add_cert(st, ca_cert.handle)
+
+      tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
+      tls.sync = true
+      tls.alpn_protocol.should eq("h2") # a head rule no longer costs the connection its protocol
+
+      encoder = Gori::Proxy::H2::HPACK::Encoder.new
+      block = encoder.encode([{":method", "GET"}, {":scheme", "https"},
+                              {":authority", "localhost"}, {":path", "/secret"}])
+      tls.write(Gori::Proxy::H2::Frame::PREFACE)
+      tls.write(Gori::Proxy::H2::Frame::Header.new(0x4_u8, 0_u8, 0_u32, Bytes.new(0)).wire_bytes) # SETTINGS
+      tls.write(Gori::Proxy::H2::Frame::Header.new(
+        Gori::Proxy::H2::Frame::Type::Headers.value,
+        Gori::Proxy::H2::Frame::END_HEADERS | Gori::Proxy::H2::Frame::END_STREAM,
+        1_u32, block).wire_bytes)
+      tls.flush
+
+      path_seen.receive.should eq("/rewritten") # the rule reached the h2 head — no downgrade
+      ack.send(nil)
+      tls.close rescue nil
+      proxy.stop
+    ensure
+      store.try(&.close)
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+      File.delete?(dbpath)
+      File.delete?("#{dbpath}-wal")
+      File.delete?("#{dbpath}-shm")
+    end
+  end
+
+  it "still downgrades an h2 client when a BODY rule is live (body rewrite is #492 step 5)" do
+    # The gate narrowed from `active?` to a body-rule test rather than being removed. A body
+    # rule works TODAY precisely because it downgrades — the buffered-body rewrite lives on the
+    # ClientConn path — and `Rules#active?` is true for a body-only rule set, so dropping the
+    # gate outright would have regressed body rules from working to silently not working.
     dir = File.tempname("gori-ca-mr")
     dbpath = File.tempname("gori-mr", ".db")
     seen = Channel(String).new(1)
@@ -218,8 +314,9 @@ describe Gori::Proxy::Tls::Tunnel do
       ca = CertAuthority.load_or_create(dir)
       store = Gori::Store.open(dbpath)
       rules = Gori::Rules.load(store.not_nil!)
-      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/secret", "/rewritten") # one enabled rule → active
-      rules.active?.should be_true
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/secret", "/rewritten")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "aaa", "bbb")
+      rules.rewrites_request_body?.should be_true
 
       sink = RecordingSink.new(done)
       proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false, rewriter: rules))
@@ -237,7 +334,7 @@ describe Gori::Proxy::Tls::Tunnel do
       LibCrypto.x509_store_add_cert(st, ca_cert.handle)
 
       tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
-      tls.alpn_protocol.should_not eq("h2") # gori refused to advertise h2 → the rewritable h1 path
+      tls.alpn_protocol.should_not eq("h2") # a live BODY rule still refuses h2 → the h1 path
       tls << "GET /secret HTTP/1.1\r\nHost: localhost\r\n\r\n"
       tls.flush
       tls.gets_to_end

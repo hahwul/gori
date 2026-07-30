@@ -13,10 +13,12 @@ module Gori::Proxy
     abstract def rewrite_request(head : Bytes, host : String) : Bytes
     abstract def rewrite_response(head : Bytes, host : String) : Bytes
 
-    # Whether any rewrite is actually configured. The TLS MITM uses this to decide
-    # NOT to advertise h2 (forcing the client to HTTP/1.1) when rules are live — h2's
-    # HPACK-encoded heads never reach this seam, so without the downgrade a Match&
-    # Replace rule would silently no-op on every h2 flow. Default false (a no-op stub).
+    # Whether any rewrite is actually configured. The h2 relay checks this before paying
+    # to synthesize a head to run rules against (`H2::HeadRewrite`), and the TUI reads it
+    # for the Rewriter tab. It used to also be the TLS MITM's reason to force HTTP/1.1;
+    # since #492 step 2 h2 HEADS reach this seam, so that gate narrowed to body rules only
+    # (`tls/tunnel.cr`) — head rules no longer cost the connection its protocol.
+    # Default false (a no-op stub).
     def active? : Bool
       false
     end
