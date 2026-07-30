@@ -67,14 +67,21 @@ module Gori
       # settings.json and is shared across every project.
 
       private def self.cmd_oast_providers(args : Array(String)) : Nil
-        case args.first?
+        case sub = args.first?
         when "add"          then cmd_oast_provider_write(args[1..], update: false)
         when "update"       then cmd_oast_provider_write(args[1..], update: true)
         when "enable"       then cmd_oast_provider_enabled(args[1..], true)
         when "disable"      then cmd_oast_provider_enabled(args[1..], false)
         when "delete", "rm" then cmd_oast_provider_delete(args[1..])
-        when "list", nil    then cmd_oast_providers_list(args.empty? ? args : args[1..])
-        else                     cmd_oast_providers_list(args)
+        when "list"         then cmd_oast_providers_list(args[1..])
+        else
+          # Same guard, same reason as cmd_issues / cmd_links — see `verb_token?`.
+          # `oast providers remove p_1` listed the providers and exited 0, deleting nothing.
+          if verb_token?(sub)
+            abort "gori run oast providers: unknown subcommand '#{sub}' " \
+                  "(add, update, enable, disable, delete/rm, list)"
+          end
+          cmd_oast_providers_list(args)
         end
       end
 
@@ -301,6 +308,13 @@ module Gori
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--json", "Emit each callback as a JSON line (same shape as MCP)") { json = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          # This was the ONE parser of 74 under src/gori/cli/ missing these, so OptionParser's
+          # default raised straight past `Run.dispatch` (rescues IO::Error) and `CLI.run`
+          # (rescues Gori::Error) to `main`, printing a Crystal backtrace — the form cli.cr's own
+          # top-level rescue calls "the least usable there is". `gori run oast listen --bogus`
+          # already did it; narrowing the global version scan just routed `--version` there too.
+          p.invalid_option { |f| abort "gori run oast listen: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast listen: missing value for #{f}" }
         end
         parser.parse(args)
 

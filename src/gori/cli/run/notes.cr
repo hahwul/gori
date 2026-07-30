@@ -6,11 +6,21 @@ module Gori
   module CLI
     module Run
       private def self.cmd_notes(args : Array(String)) : Nil
-        case args.first?
+        case sub = args.first?
         when "create"       then cmd_notes_create(args[1..])
         when "delete", "rm" then cmd_notes_delete(args[1..])
         when "list"         then cmd_notes_read(args[1..])
-        else                     cmd_notes_read(args)
+        else
+          # `notes` takes a bare `<n>`, so `verb_token?` alone cannot decide: "3" is a verb token
+          # but is legitimately DATA. Only a NON-NUMERIC bare word can have been meant as a verb.
+          # Without this, `notes remove 2` aborted with "too many arguments (expected at most one
+          # note number)" — non-zero, so never the silent no-op class, but it never told the
+          # operator that notes has verbs and `remove` is not one, unlike its issues/links siblings.
+          if (s = sub) && verb_token?(s) && s.to_i?.nil?
+            abort "gori run notes: unknown subcommand '#{s}' (create, delete/rm, list) — " \
+                  "or pass a note number"
+          end
+          cmd_notes_read(args)
         end
       end
 

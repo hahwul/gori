@@ -342,13 +342,20 @@ module Gori
       # --- scan rules + mode ----------------------------------------------------------------
 
       private def self.cmd_probe_rules(args : Array(String)) : Nil
-        case args.first?
+        case sub = args.first?
         when "enable"       then cmd_probe_rule_enabled(args[1..], true)
         when "disable"      then cmd_probe_rule_enabled(args[1..], false)
         when "add"          then cmd_probe_rule_add(args[1..])
         when "delete", "rm" then cmd_probe_rule_delete(args[1..])
-        when "list", nil    then cmd_probe_rules_list(args.empty? ? args : args[1..])
-        else                     cmd_probe_rules_list(args)
+        when "list"         then cmd_probe_rules_list(args[1..])
+        else
+          # Same guard, same reason as cmd_issues / cmd_links — see `verb_token?`.
+          # `probe rules remove my-rule` (or `disble`) listed the rules and exited 0.
+          if verb_token?(sub)
+            abort "gori run probe rules: unknown subcommand '#{sub}' " \
+                  "(add, enable, disable, delete/rm, list)"
+          end
+          cmd_probe_rules_list(args)
         end
       end
 

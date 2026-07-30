@@ -15,7 +15,7 @@ module Gori
           # unlinking; with a mutate-only flag present it did fail, but blamed the flag
           # (`unknown option: --ref`) and never said `remove` is not a verb.
           if verb_token?(sub)
-            abort "gori run links: unknown subcommand '#{sub}' (add, delete, list)"
+            abort "gori run links: unknown subcommand '#{sub}' (add, delete/rm, list)"
           end
           cmd_links_list(args)
         end

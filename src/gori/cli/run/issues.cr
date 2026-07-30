@@ -16,7 +16,7 @@ module Gori
           # fallthrough swallowed a positional query, so `issues severity:high` listed EVERY
           # issue rather than narrowing, because only the TUI implements Issues::Filter.
           if verb_token?(sub)
-            abort "gori run issues: unknown subcommand '#{sub}' (create, update, delete, list)"
+            abort "gori run issues: unknown subcommand '#{sub}' (create, update, delete/rm, list)"
           end
           cmd_issues_list(args)
         end

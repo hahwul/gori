@@ -215,7 +215,7 @@ module Gori
       # changes how they treat an empty-string token, so it wants its own change rather than
       # riding along with a bug fix.
       private def self.verb_token?(sub : String?) : Bool
-        !sub.nil? && !sub.empty? && !sub.starts_with?("-")
+        !sub.nil? && !sub.empty? && !sub.starts_with?('-')
       end
 
       # --db wins → else --project resolved via ProjectRegistry#find (exact short id
