@@ -70,10 +70,13 @@ module Gori
       # `disabled` holds the RuleInfo#ids the operator turned off in the Rules sub-tab — the same
       # set the TUI analyzer filters on before enqueueing (analyzer.cr's maybe_enqueue_active), so
       # a headless scan honours that config too instead of silently running every built-in.
+      # `on_error` (optional) is called with the failing rule's id when a rule raises; see the
+      # per-rule rescue below for why that isolation exists at all.
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
                        timeout : Time::Span = 10.seconds, *, outbound : Outbound,
                        backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
-                       disabled : Set(String) = NO_DISABLED) : Array(Detection)
+                       disabled : Set(String) = NO_DISABLED,
+                       on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
@@ -88,14 +91,25 @@ module Gori
 
         RULES.each do |rule|
           next if disabled.includes?(rule.info.id)
-          plan = rule.plan(detail, opts)
-          next unless plan
-          result = sender.send(plan.request)
-          next unless result.ok?
-          results = [result]
-          plan.followups.each { |req| results << sender.send(req) }
-          dets = rule.detections_all(plan, results, detail)
-          out.concat(dets)
+          # ISOLATE each rule. Without this, one rule raising in plan/detections_all took down
+          # the whole scan — every rule after it AND (via Scan.scan_flows) every remaining flow,
+          # discarding findings already collected. The TUI path has always had this: the analyzer
+          # wraps each rule in its own rescue (analyzer.cr's execute_active), so the same rule
+          # that merely gets skipped in the TUI used to kill a `gori run probe` / MCP probe_scan
+          # batch outright. Send FAILURES are not exceptions (Fuzz returns an errored Result and
+          # `result.ok?` skips), so what this catches is a rule bug on hostile input.
+          begin
+            plan = rule.plan(detail, opts)
+            next unless plan
+            result = sender.send(plan.request)
+            next unless result.ok?
+            results = [result]
+            plan.followups.each { |req| results << sender.send(req) }
+            dets = rule.detections_all(plan, results, detail)
+            out.concat(dets)
+          rescue ex
+            on_error.try &.call(rule.info.id, ex)
+          end
         end
         out
       end

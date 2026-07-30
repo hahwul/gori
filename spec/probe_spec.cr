@@ -29,6 +29,42 @@ private class FixedBackend < Gori::Fuzz::Backend
   end
 end
 
+# A backend whose send ALWAYS raises — the "a rule blew up on this input" case. Before
+# Active.analyze isolated each rule, one of these aborted the entire scan: every rule after it
+# AND (through Scan.scan_flows) every remaining flow, discarding findings already collected.
+private class RaisingBackend < Gori::Fuzz::Backend
+  getter origin : Gori::Fuzz::Origin
+  getter sent = 0
+
+  def initialize(@origin : Gori::Fuzz::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    raise "backend exploded"
+  end
+end
+
+# Raises on the FIRST send only, then answers every later probe with a CORS response echoing the
+# probe origin — so a rule that runs AFTER the one that died can be shown to still produce its
+# finding, which is the actual promise of per-rule isolation.
+private class FlakyCorsBackend < Gori::Fuzz::Backend
+  getter origin : Gori::Fuzz::Origin
+  getter sent = 0
+
+  def initialize(@origin : Gori::Fuzz::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    raise "first probe exploded" if @sent == 1
+    head = "HTTP/1.1 200 OK\r\n" \
+           "Access-Control-Allow-Origin: #{Gori::Probe::Active::CorsReflection::PROBE_ORIGIN}\r\n" \
+           "Access-Control-Allow-Credentials: true\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, Bytes.empty, nil, 1_i64)
+  end
+end
+
 private def with_store(&)
   path = File.tempname("gori-probe", ".db")
   store = Gori::Store.open(path)
@@ -2028,6 +2064,62 @@ describe "Gori::Probe::Active (safety + coverage)" do
       fake = CountingBackend.new(Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port))
       Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), backend: fake)
       fake.sent.should be > 0 # an include rule (no exclude, sandbox off) lets the probe through
+    end
+  end
+
+  # --- per-rule error isolation (the headless path used to have none) ---------------------
+  #
+  # The TUI analyzer has always wrapped each rule in its own rescue (execute_active), so a rule
+  # that raised was merely skipped there. Active.analyze — the CLI / MCP path — had no such
+  # rescue, so the SAME rule killed a whole `gori run probe` batch. These pin the parity.
+
+  it "isolates a rule that raises and keeps running the rest" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      origin = Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port)
+      backend = RaisingBackend.new(origin)
+      failed = [] of String
+      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope),
+        backend: backend, on_error: ->(where : String, _ex : Exception) { failed << where; nil })
+      dets.should be_empty # nothing could be detected — every send blew up
+      # ...but the loop did not abort on the first raise: more than one rule got to run and
+      # report. Without the rescue this example never reaches an assertion at all.
+      failed.size.should be > 1
+      backend.sent.should eq(failed.size)
+    end
+  end
+
+  it "still produces a later rule's finding after an earlier rule raises" do
+    with_store do |store|
+      # An ACAO on the captured response is cors_reflection's gate; reflected_param (RULES[0])
+      # sends first and is the one that dies.
+      detail = capture_flow(store,
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://app.acme.test\r\n\r\n",
+        target: "/s?q=hi", content_type: nil)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      origin = Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port)
+      failed = [] of String
+      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope),
+        backend: FlakyCorsBackend.new(origin),
+        on_error: ->(where : String, _ex : Exception) { failed << where; nil })
+      # on_error carries the RULE id; the Detection carries its own finding CODE.
+      failed.should eq(["reflected_param"])                    # the first rule died...
+      dets.map(&.code).should contain("cors_arbitrary_origin") # ...a later rule still reported
+    end
+  end
+
+  it "reports no scan errors on a clean Scan.scan_flows run" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?token=aaaaaaaa", content_type: nil)
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+      failed = [] of String
+      dets = Gori::Probe::Scan.scan_flows(store, ids, active: false,
+        on_error: ->(where : String, _ex : Exception) { failed << where; nil })
+      failed.should be_empty
+      dets.should_not be_empty
     end
   end
 

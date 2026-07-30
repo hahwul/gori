@@ -109,9 +109,19 @@ module Gori
           meter = STDERR.tty?
           # --aggressive implies --unsafe (it also raises caps + widens bypass sets).
           opts = Probe::Active::Options.new(allow_unsafe: unsafe || aggressive, aggressive: aggressive)
+          # A scan now SKIPS an item that blows up instead of losing the whole batch, so the
+          # skips have to be reported — otherwise a partial scan prints the same summary as a
+          # complete one and reads as "clean".
+          scan_errors = [] of String
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
-            allow_unscoped: allow_unscoped, opts: opts, progress: probe_progress_meter(meter))
+            allow_unscoped: allow_unscoped, opts: opts, progress: probe_progress_meter(meter),
+            on_error: ->(where : String, ex : Exception) { scan_errors << "#{where}: #{ex.message}"; nil })
           STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
+          unless scan_errors.empty?
+            n = scan_errors.size
+            STDERR.puts "gori run probe: #{n} item#{n == 1 ? "" : "s"} skipped after an error " \
+                        "(results are INCOMPLETE) — first: #{scan_errors.first}"
+          end
           {Probe.group(dets), ids.size, rn}
         ensure
           store.close

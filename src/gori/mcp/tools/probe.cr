@@ -41,12 +41,16 @@ module Gori
         # covers every flow. (An earlier version truncated `ids`, which silently dropped
         # passive coverage of the newest flows under active:true.)
         capped = active && ids.size > PROBE_ACTIVE_MAX_FLOWS
+        # A scan SKIPS an item that blows up rather than losing the batch; count the skips so the
+        # agent can tell an incomplete result from a clean one (surfaced as `scan_errors`).
+        scan_errors = 0
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: @verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_limit: active ? PROBE_ACTIVE_MAX_FLOWS : nil)
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_limit: active ? PROBE_ACTIVE_MAX_FLOWS : nil,
+          on_error: ->(_where : String, _ex : Exception) { scan_errors += 1; nil })
 
         groups = probe_filter_groups(Probe.group(dets), severity_from(str(h, "severity")), category.as(String?))
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
-          scope_configured, capped, unsafe, aggressive, clamp(int(h, "limit"), 200, 2000)))
+          scope_configured, capped, unsafe, aggressive, clamp(int(h, "limit"), 200, 2000), scan_errors))
       end
 
       # --- persisted probe issues + triage (parity with the TUI Probe tab) -------------------
@@ -373,11 +377,15 @@ module Gori
 
       private def probe_scan_json(groups : Array(Probe::Group), flows_scanned : Int32, repeater_n : Int32,
                                   active : Bool, allow_unscoped : Bool, scope_configured : Bool,
-                                  capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32) : String
+                                  capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32,
+                                  scan_errors : Int32 = 0) : String
         JSON.build do |j|
           j.object do
             j.field "flows_scanned", flows_scanned
             j.field "repeaters_scanned", repeater_n
+            # Only present when something was skipped: coverage is INCOMPLETE, so a clean-looking
+            # empty result must not be read as "nothing found".
+            j.field "scan_errors", scan_errors if scan_errors > 0
             j.field "active", active
             if active
               j.field "scope_configured", scope_configured

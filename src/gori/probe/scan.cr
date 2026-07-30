@@ -66,19 +66,24 @@ module Gori
       # `progress.call(i, total)` is invoked per flow so a CLI can draw a meter; MCP passes nil.
       # `active_limit` caps how many flows receive an ACTIVE probe (network volume) WITHOUT
       # limiting the request-free PASSIVE scan — nil means no active cap (the CLI).
+      # `on_error` (optional) is called once per SKIPPED item — "flow <id>" / "repeater <id>" /
+      # a rule id — with the exception that caused it. A scan that hits one keeps going and
+      # returns everything else, so the caller must report the count or a partial result reads
+      # as a clean one.
       def scan_all(store : Store, ids : Array(Int64), *, active : Bool,
                    verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
                    active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
                    rules : RuleConfig? = nil,
-                   progress : Proc(Int32, Int32, Nil)? = nil) : {Array(Detection), Int32}
+                   progress : Proc(Int32, Int32, Nil)? = nil,
+                   on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
         # Read the Rules config ONCE per scan (not per flow) — same as the Analyzer, which
         # loads it at construction and only re-reads on an explicit rules reload.
         cfg = rules || RuleConfig.load(store)
         detections = scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, active_limit: active_limit, opts: opts,
-          rules: cfg, progress: progress)
+          rules: cfg, progress: progress, on_error: on_error)
         repeater_dets, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg)
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg, on_error: on_error)
         detections.concat(repeater_dets)
         {detections, repeater_n}
       end
@@ -87,22 +92,34 @@ module Gori
                      verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
                      active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
                      rules : RuleConfig? = nil,
-                     progress : Proc(Int32, Int32, Nil)? = nil) : Array(Detection)
+                     progress : Proc(Int32, Int32, Nil)? = nil,
+                     on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
         active_sent = 0
         ids.each_with_index do |id, i|
-          detail = store.get_flow(id)
-          if detail && detail.response_head
-            ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
-            # passive is request-free — NEVER capped
-            detections.concat(Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom))
-            if active && outbound.allows?(detail.row.url, detail.row.host) && !(active_limit && active_sent >= active_limit)
-              detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
-                disabled: cfg.disabled))
-              active_sent += 1
+          begin
+            detail = store.get_flow(id)
+            if detail && detail.response_head
+              ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
+              # passive is request-free — NEVER capped
+              detections.concat(Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom))
+              if active && outbound.allows?(detail.row.url, detail.row.host) && !(active_limit && active_sent >= active_limit)
+                detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
+                  disabled: cfg.disabled, on_error: on_error))
+                active_sent += 1
+              end
             end
+          rescue ex : DB::Error | SQLite3::Exception
+            # The store is the substrate, not one flow's data: if it is closing or broken every
+            # remaining flow fails too, so surface it rather than looping over thousands of
+            # doomed reads. Same stance as Analyzer#scan_detail, which re-raises these too.
+            raise ex
+          rescue ex
+            # Anything else is THIS flow's problem — skip it and keep the batch (and everything
+            # already collected) alive. See the per-rule rescue in Active.analyze.
+            on_error.try &.call("flow #{id}", ex)
           end
           progress.try &.call(i, ids.size)
         end
@@ -113,7 +130,8 @@ module Gori
       def scan_repeaters(store : Store, *, active : Bool, verify_upstream : Bool = true,
                          scope : Scope? = nil, allow_unscoped : Bool = false,
                          opts : Active::Options = Active::Options::DEFAULT,
-                         rules : RuleConfig? = nil) : {Array(Detection), Int32}
+                         rules : RuleConfig? = nil,
+                         on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
@@ -121,14 +139,22 @@ module Gori
         store.repeaters.each do |rec|
           next unless detail = Probe.detail_from_repeater(rec)
           n += 1
-          ws = store.ws_messages_for_repeater(rec.id, 200)
-          Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom).each do |d|
-            detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
-          end
-          if active && outbound.allows?(detail.row.url, detail.row.host)
-            Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts, disabled: cfg.disabled).each do |d|
+          # Isolated per repeater tab, exactly like scan_flows isolates per flow.
+          begin
+            ws = store.ws_messages_for_repeater(rec.id, 200)
+            Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
+            if active && outbound.allows?(detail.row.url, detail.row.host)
+              Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
+                disabled: cfg.disabled, on_error: on_error).each do |d|
+                detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
+              end
+            end
+          rescue ex : DB::Error | SQLite3::Exception
+            raise ex
+          rescue ex
+            on_error.try &.call("repeater #{rec.id}", ex)
           end
         end
         {detections, n}
