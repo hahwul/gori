@@ -90,10 +90,7 @@ module Gori
         # operator's only other signal is traffic that never arrives).
         listener_errs = Settings.listener_config_errors
         extra = Settings.valid_listeners.map do |l|
-          Proxy::Server.new(l.host, l.port, sink, tls: tunnel,
-            rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
-            transparent: l.transparent?, target_port: l.target_port,
-            origin: l.origin_target, rewrite_host: l.rewrite_host)
+          build_listener(l, sink, tunnel, rules, interceptor, host_overrides)
         end
         # Per-PROJECT capture lock decides whether THIS instance captures. A 2nd
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
@@ -112,12 +109,12 @@ module Gori
                 # is COLLECTED rather than swallowed — a redirect rule pointing at a socket that
                 # never bound is invisible from the client's side.
                 extra.each do |e|
-                  e.start
+                  e.server.start
                 rescue ex
                   # BindAddress.authority, not bare interpolation: `listener_rows` matches a
                   # failure back to its server by this prefix, and a raw `::1` bind renders as
                   # the unparseable "::1:8070" (the same bug BindAddress exists to kill).
-                  listener_errs << "#{Gori::BindAddress.authority(e.host, e.port)} — #{ex.message || "could not bind"}"
+                  listener_errs << bind_failure(e.server, ex)
                 end
                 nil
               rescue ex
@@ -148,7 +145,7 @@ module Gori
           store.clear_intercept_state!
           probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock, extra, listener_errs)
+        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, sink, bind_error, lock, extra, listener_errs)
         session.sync_capture_status!
         session
       rescue ex
@@ -164,31 +161,191 @@ module Gori
       end
     end
 
+    # One additional listener: the settings record it was built from, paired with the socket
+    # serving it. Paired rather than kept in two index-aligned arrays because `reconcile_listeners!`
+    # diffs the RECORDS to decide which sockets to touch, and a pairing that could slip would mean
+    # restarting the wrong one — the exact failure the diff exists to avoid.
+    record ExtraListener, spec : Settings::Listener, server : Proxy::Server
+
+    # Build (but do not start) the socket for one listener entry. Shared by `open` and the live
+    # reconcile so a listener added at runtime is wired to the same sink, TLS tunnel, rewriter,
+    # interceptor and host overrides as one that was there at startup — a second construction
+    # site is how a reconciled listener would quietly stop obeying the project's scope.
+    def self.build_listener(l : Settings::Listener, sink : Proxy::FlowSink,
+                            tunnel : Proxy::Tls::Tunnel, rules : Rules,
+                            interceptor : Interceptor,
+                            host_overrides : HostOverrides) : ExtraListener
+      ExtraListener.new(l, Proxy::Server.new(l.host, l.port, sink, tls: tunnel,
+        rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
+        transparent: l.transparent?, target_port: l.target_port,
+        origin: l.origin_target, rewrite_host: l.rewrite_host))
+    end
+
+    # The one spelling of a bind failure. `listener_rows` matches a failure back to its server by
+    # the address prefix, so open, capture-toggle and reconcile must all format it identically.
+    def self.bind_failure(server : Proxy::Server, ex : Exception) : String
+      "#{Gori::BindAddress.authority(server.host, server.port)} — #{ex.message || "could not bind"}"
+    end
+
     # A random per-session token stamped on every #123 intercept snapshot/command row, so a
     # stale command from a prior session (whose interceptor item ids reset to 0) can never be
     # applied against a different new held item — the drain acks a token mismatch as stale.
     getter intercept_token : String
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
-                   @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
+                   @rules, @scope, @host_overrides, @interceptor, @sink : Proxy::FlowSink,
+                   @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil,
-                   @extra_listeners : Array(Proxy::Server) = [] of Proxy::Server,
+                   @extra_listeners : Array(ExtraListener) = [] of ExtraListener,
                    @listener_errors : Array(String) = [] of String)
       @intercept_token = Random::Secure.hex(8)
-      @listeners_at_open = Settings.listeners.dup
+      @listeners_applied = Settings.listeners.dup
     end
 
     # True when the `listeners` section on disk no longer matches the one these sockets were
-    # built from (#508). Nothing here reconciles — applying the change live is a lifecycle
-    # problem with its own failure modes and is deliberately out of scope — but the operator
-    # has to be TOLD, because a reverse listener is retargeted interactively and silence after
-    # an edit reads as "applied".
+    # built from (#508) — i.e. there is an edit `reconcile_listeners!` has not applied yet.
     #
-    # Compared against what THIS session opened with, not against `Settings.listeners`: the two
-    # are the same object today, and pinning the comparison to the session is what keeps this
-    # honest if the runtime copy ever starts being refreshed.
+    # Compared against what this session last APPLIED, not against `Settings.listeners`: the
+    # class property is the copy read at startup and is deliberately never refreshed (see
+    # `Settings.listener_error`'s `among` for why writing it back would clobber hand edits), so
+    # only the session knows which section its sockets currently answer to.
     def listeners_changed_on_disk? : Bool
-      Settings.disk_listeners != @listeners_at_open
+      Settings.disk_listeners != @listeners_applied
+    end
+
+    # What one reconcile did. `added`/`removed` count entries the section GAINED and LOST;
+    # `retargeted` counts the ones that kept their address and changed everything else (a
+    # reverse listener pointed at a new origin — the case #499 made interactive and therefore
+    # the case this whole issue is about), which would otherwise read as one of each.
+    #
+    # `dropped` is the wording the issue asked for: an address that WAS serving, is still
+    # wanted, and did not come back. It is the only outcome the operator must act on, and it is
+    # deliberately separate from `failed` (which also covers a listener that never bound).
+    record ListenerReconcile,
+      added : Int32,
+      removed : Int32,
+      retargeted : Int32,
+      serving : Int32,
+      failed : Array(String),
+      dropped : Array(String),
+      capturing : Bool do
+      def changed? : Bool
+        added > 0 || removed > 0 || retargeted > 0
+      end
+
+      # What the reconcile did, in one line. Lives on the record rather than in the TUI shell
+      # for the same reason `ListenerRow` does: it is a pure function of the outcome, and the
+      # branch that matters most (`dropped`) is the one a shell method would be hardest to
+      # exercise. The counts come first because they answer "did my edit land"; a bind failure
+      # comes last and NAMES the address, because that is the part the operator has to go fix.
+      def summary : String
+        parts = [] of String
+        parts << "#{added} added" if added > 0
+        parts << "#{removed} removed" if removed > 0
+        parts << "#{retargeted} retargeted" if retargeted > 0
+        head = parts.empty? ? "listeners: settings.json already matches the running sockets" : "listeners: #{parts.join(", ")}"
+        # Capture off means nothing was bound and nothing could be — "0 serving" would read as a
+        # failure of the reconcile rather than as the state the operator put gori in.
+        return "#{head} — capture is off, press c to start" unless capturing
+        "#{head}#{tail}"
+      end
+
+      private def tail : String
+        # The wording #508 asked for: it WAS serving, it is STILL wanted, and it did not come
+        # back. Distinct from `failed`, which also covers a listener that never bound at all.
+        return " — #{dropped.join(", ")} was serving and could not rebind" if dropped.present?
+        return " — #{failed.size} could not bind (see the listeners chip)" unless failed.empty?
+        changed? ? " · #{serving} serving" : ""
+      end
+    end
+
+    # Re-read the `listeners` section from settings.json and make this session's additional
+    # sockets match it, without a restart (#508). Returns what moved, or nil when the file could
+    # not be read — a reconcile driven by a fallback would tear sockets down over a typo in an
+    # unrelated section, so it refuses instead.
+    #
+    # The shape is the primary bind's live rebind (`runner.cr` `apply_settings`), one level up:
+    # that one early-returns when the address has not moved, this one leaves alone every listener
+    # whose record has not moved. **A listener that is unchanged AND already serving is never
+    # touched** — which is what makes an edit to one row incapable of dropping a working socket
+    # somewhere else in the array. Stop-all/start-all would have done exactly that.
+    #
+    # Fates, all of them defined by `Proxy::Server#stop` closing only the ACCEPT socket:
+    #
+    #   - removed from the section → stops accepting; connections already established finish on
+    #     their own fibers. Same fate as capture-off and as a primary rebind.
+    #   - same address, changed config → stopped then rebuilt, in that order, because the new
+    #     socket wants the address the old one holds. In-flight connections keep running against
+    #     the configuration they were accepted under, which is the only answer that does not
+    #     retarget a request mid-flight.
+    #   - unchanged but NOT serving (its bind failed earlier, or capture was off) → retried. A
+    #     reconcile is also how an operator recovers a listener after freeing its port.
+    #
+    # Nothing is started while capture is off: the sockets are rebuilt so the next `c` opens the
+    # right set, which is `Server#rebind`'s "not listening → just record the new bind" rule.
+    def reconcile_listeners! : ListenerReconcile?
+      desired_raw = Settings.disk_listeners?
+      return nil unless desired_raw
+      desired = Settings.valid_listeners(desired_raw)
+      before = @extra_listeners.map(&.spec)
+      up_before = @extra_listeners.select(&.server.listening?).map { |e| authority_of(e.server) }
+
+      # Phase 1 — every stop, BEFORE any start, so a listener that kept its address can rebind.
+      pending = desired.dup
+      keep = [] of ExtraListener
+      @extra_listeners.each do |e|
+        idx = pending.index(e.spec)
+        if idx && e.server.listening?
+          pending.delete_at(idx)
+          keep << e
+        else
+          e.server.stop rescue nil
+        end
+      end
+
+      # Phase 2 — build and start whatever has no surviving socket.
+      failed = [] of String
+      @extra_listeners = keep
+      pending.each do |l|
+        e = Session.build_listener(l, @sink, @tunnel, @rules, @interceptor, @host_overrides)
+        @extra_listeners << e
+        next unless capturing?
+        begin
+          e.server.start
+        rescue ex
+          failed << Session.bind_failure(e.server, ex)
+          ::Log.warn { "listener #{e.server.host}:#{e.server.port} failed to bind: #{ex.message}" }
+        end
+      end
+
+      # Config-time rejections first, then this reconcile's bind failures — the same two-part
+      # list `start_extra_listeners` maintains, so the readout cannot tell a reconciled session
+      # from a freshly opened one.
+      @listener_errors.clear
+      @listener_errors.concat(Settings.listener_config_errors(desired_raw))
+      @listener_errors.concat(failed)
+      @listeners_applied = desired_raw
+
+      gone = before.reject { |s| desired.includes?(s) }
+      fresh = desired.reject { |s| before.includes?(s) }
+      # Matched by CONSUMING an address, not by `count`: two entries can name the same address
+      # (only one of them ever binds), and an `any?` test would match both against one survivor
+      # and drive `added` negative.
+      unclaimed = fresh.map { |f| {f.host, f.port} }
+      moved = gone.count do |s|
+        (i = unclaimed.index({s.host, s.port})) ? (unclaimed.delete_at(i); true) : false
+      end
+      up_after = @extra_listeners.select(&.server.listening?).map { |e| authority_of(e.server) }
+      ListenerReconcile.new(
+        added: fresh.size - moved, removed: gone.size - moved, retargeted: moved,
+        serving: up_after.size, failed: failed,
+        dropped: up_before.reject { |a| up_after.includes?(a) }
+          .select { |a| desired.any? { |l| Gori::BindAddress.authority(l.host, l.port) == a } },
+        capturing: capturing?)
+    end
+
+    private def authority_of(server : Proxy::Server) : String
+      Gori::BindAddress.authority(server.host, server.port)
     end
 
     # Additional listeners started and stopped alongside the primary. Each failure is
@@ -207,8 +364,9 @@ module Gori
       origin : String, listening : Bool, error : String?
 
     def listener_rows : Array(ListenerRow)
-      rows = @extra_listeners.map do |s|
-        addr = Gori::BindAddress.authority(s.host, s.port)
+      rows = @extra_listeners.map do |e|
+        s = e.server
+        addr = authority_of(s)
         org = s.origin
         ListenerRow.new(s.host, s.port,
           s.origin ? "reverse" : (s.transparent? ? "transparent" : "proxy"),
@@ -230,17 +388,20 @@ module Gori
       # capture toggle, and clearing them would make an unusable listener disappear from the
       # readout on the first `c` press.
       @listener_errors.clear
-      @listener_errors.concat(Settings.listener_config_errors)
-      @extra_listeners.each do |server|
-        server.start
+      # The config errors of the section these sockets were built from — `@listeners_applied`,
+      # not `Settings.listeners`, so a capture toggle after a reconcile does not resurrect the
+      # rejections of the startup section.
+      @listener_errors.concat(Settings.listener_config_errors(@listeners_applied))
+      @extra_listeners.each do |e|
+        e.server.start
       rescue ex
-        @listener_errors << "#{Gori::BindAddress.authority(server.host, server.port)} — #{ex.message || "could not bind"}"
-        ::Log.warn { "listener #{server.host}:#{server.port} failed to bind: #{ex.message}" }
+        @listener_errors << Session.bind_failure(e.server, ex)
+        ::Log.warn { "listener #{e.server.host}:#{e.server.port} failed to bind: #{ex.message}" }
       end
     end
 
     private def stop_extra_listeners : Nil
-      @extra_listeners.each { |server| server.stop rescue nil }
+      @extra_listeners.each { |e| e.server.stop rescue nil }
     end
 
     # Flip upstream TLS verification live (settings:network toggle). Updates the runtime

@@ -3242,14 +3242,39 @@ module Gori::Tui
     end
 
     # Open the additional-listener inventory (the `listeners:N` top-bar chip + the
-    # app.listeners verb). Read-only, so there is no on_commit — the section is edited in
-    # settings.json and is not applied until restart (#508).
+    # app.listeners verb). No on_commit — the section is edited in settings.json, so the only
+    # action is `r`, which re-reads it and reconciles the sockets (#508).
     def open_listeners : Nil
       ov = ListenersOverlay.new(@session)
       # Same ordering rule as open_passthrough: drop this modal BEFORE raising the palette,
       # and via leave_overlay so no pop-back lands on top of it.
       ov.on_palette = -> { leave_overlay; open_palette }
+      # The reconcile, then a re-snapshot so the rows show the sockets it just moved. The
+      # message goes to the notification list rather than the toast: this modal is covering the
+      # screen, and "nothing changed" is an answer the operator asked for and must still get.
+      ov.on_reload = -> { reload_listeners(quiet_when_unchanged: false); ov.reload }
       open_overlay(ov)
+    end
+
+    # Re-read the `listeners` section and make this session's sockets match it (#508). Returns
+    # the line describing what moved and pushes it as a notification unless nothing changed and
+    # the caller only wanted to hear about changes (the settings-save path, where the toast is
+    # already reporting the save itself).
+    #
+    # A notification rather than a toast for the same reason #509 chose one: this is about the
+    # listener sockets, not about whatever the operator was doing when it ran, and a failed
+    # rebind is something they need to still be able to read a minute later.
+    def reload_listeners(quiet_when_unchanged : Bool = true) : String
+      result = @session.reconcile_listeners!
+      unless result
+        msg = "listeners: settings.json could not be read — sockets left as they are"
+        @notifications.push(:warn, msg)
+        return msg
+      end
+      msg = result.summary
+      return msg if quiet_when_unchanged && !result.changed? && result.failed.empty?
+      @notifications.push(result.failed.empty? ? :info : :warn, msg)
+      msg
     end
 
     # What the chip counts. Deliberately `listener_rows` rather than the running-server count:
@@ -4689,14 +4714,13 @@ module Gori::Tui
     # (existing connections are kept — only the accept socket moves). A failed
     # rebind (port in use / bad address) keeps the current bind.
     private def apply_settings(save_msg : String) : String
-      # The `listeners` section has no TUI editor and is not reconciled live (#508), so a save
-      # is the one moment gori holds both the running sockets and the edited file and can say
-      # they differ. A notification rather than a toast: the toast is about the save that just
-      # happened, and this is about work that has NOT happened yet.
-      if @session.listeners_changed_on_disk?
-        @notifications.push(:warn,
-          "listeners: settings.json no longer matches the running sockets — restart gori to apply")
-      end
+      # The `listeners` section has no TUI editor — it is hand-edited in settings.json — so a
+      # save is one of the two moments gori holds both the running sockets and the edited file.
+      # #509 could only announce the difference here; now it is applied, on the same
+      # edit-then-apply trigger as the primary rebind below. Gated on the drift check for the
+      # same reason that rebind early-returns on an unmoved address: a save that did not touch
+      # this section must not restart anything.
+      reload_listeners if @session.listeners_changed_on_disk?
       proxy = @session.proxy
       # Rebind against the EFFECTIVE bind (a project override wins over the global). So a global
       # settings:network edit while a project pins its own bind is a no-op here (effective

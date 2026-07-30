@@ -125,22 +125,31 @@ module Gori::Settings
 
   # The `listeners` section AS IT IS ON DISK RIGHT NOW. `Settings.listeners` is the copy read
   # at startup and never re-read, and the running sockets were built from THAT — so the two
-  # disagreeing is exactly the #508 drift, and a settings save is the one moment gori is
-  # holding both halves and can say so.
+  # disagreeing is exactly the #508 drift, and a settings save is one of the moments gori is
+  # holding both halves.
   #
   # A missing key means an EMPTY section here, not "keep current" as the tolerant load path
   # has it: deleting every listener is a change the operator should hear about, and the load
   # rule exists to protect a running config from a partial file, which is not this question.
   # An unreadable or unparseable file falls back to "unchanged" — the corrupt-file warning is
-  # `load_root`'s job and crying restart on top of it would just be noise.
+  # `load_root`'s job and crying drift on top of it would just be noise.
   def self.disk_listeners : Array(Listener)
+    disk_listeners? || listeners
+  end
+
+  # Same read, but distinguishing "the file could not be read or parsed" (nil) from "the
+  # section is absent" (an empty array). The drift CHECK can fall back to "unchanged" on an
+  # unreadable file, because all it decides is whether to say something. A RECONCILE cannot:
+  # acting on that fallback would tear live sockets down and rebuild them because of a typo
+  # somewhere else in the document.
+  def self.disk_listeners? : Array(Listener)?
     return [] of Listener unless File.exists?(path)
     node = JSON.parse(File.read(path)).as_h?.try(&.[]?("listeners"))
     arr = node.try(&.as_a?)
     return [] of Listener unless arr
     listeners_from(arr)
   rescue
-    listeners
+    nil
   end
 
   private def self.listeners_from(arr : Array(JSON::Any)) : Array(Listener)
@@ -181,7 +190,15 @@ module Gori::Settings
 
   # nil if `listener` is usable; an error message otherwise. Checked at save time so a bad
   # address surfaces here rather than as an opaque bind failure on the next project open.
-  def self.listener_error(listener : Listener) : String?
+  #
+  # `among` is the set the loop check reads as "gori's other configured sockets". It defaults
+  # to `Settings.listeners` — the startup copy — but a live reconcile (#508) validates a set it
+  # read from disk and deliberately did NOT write back over the class property, so it has to be
+  # able to say which set it means. Writing it back would make the next `Settings.save` treat
+  # `listeners` as a section this process changed, and its 3-way merge would then let our copy
+  # WIN over a hand edit made in between — turning a fix for a silent no-op into a silent
+  # clobber of the operator's own file.
+  def self.listener_error(listener : Listener, among : Array(Listener) = listeners) : String?
     if err = bind_host_error(listener.host)
       return err
     end
@@ -196,13 +213,13 @@ module Gori::Settings
     if listener.target_port > 0 && !listener.transparent?
       return "settings: target_port only applies to a transparent listener"
     end
-    reverse_listener_error(listener)
+    reverse_listener_error(listener, among)
   end
 
   # Same discipline as the target_port check above, for the reverse listener's two fields and
   # in BOTH directions: a missing origin cannot be defaulted (there is nothing to forward to),
   # and a present one in the wrong mode is a mode mistake rather than a field to drop.
-  private def self.reverse_listener_error(listener : Listener) : String?
+  private def self.reverse_listener_error(listener : Listener, among : Array(Listener)) : String?
     unless listener.reverse?
       return "settings: origin only applies to a reverse listener" unless listener.origin.strip.empty?
       return "settings: rewrite_host only applies to a reverse listener" if listener.rewrite_host
@@ -215,7 +232,7 @@ module Gori::Settings
     # validated, but `listener_error` is also called on a candidate that is not yet (and the
     # tightest loop of all — an origin naming this listener's own socket — would be the one
     # missed if this relied on the array alone).
-    if self_target?(target[1], target[2], listener)
+    if self_target?(target[1], target[2], listener, among)
       return "settings: listener origin #{listener.origin} points back at gori itself (forwarding loop)"
     end
     nil
@@ -232,10 +249,11 @@ module Gori::Settings
   # per-connection `Upstream.loops_to_self?` backstop covers the residue for a reverse listener
   # whose origin names ITS OWN port; a cross-port loop through a hostname is not caught by
   # either, and would surface as the 2048-connection wedge described in `upstream.cr:100-119`.
-  private def self.self_target?(host : String, port : Int32, own : Listener) : Bool
+  private def self.self_target?(host : String, port : Int32, own : Listener,
+                                among : Array(Listener)) : Bool
     return true if port == own.port && same_bind_host?(host, own.host)
     return true if port == effective_bind_port && same_bind_host?(host, effective_bind_host)
-    listeners.any? { |l| l.port == port && same_bind_host?(host, l.host) }
+    among.any? { |l| l.port == port && same_bind_host?(host, l.host) }
   end
 
   # The upstream port a transparent connection should use: the listener's configured
@@ -249,9 +267,9 @@ module Gori::Settings
   # Every additional listener that passes validation, with duplicates of the PRIMARY bind
   # removed — binding the same address twice would fail, and the operator would be left with
   # a listener error about an address they can see is configured exactly once.
-  def self.valid_listeners : Array(Listener)
-    listeners.reject do |l|
-      !listener_error(l).nil? || (l.port == effective_bind_port && same_bind_host?(l.host, effective_bind_host))
+  def self.valid_listeners(among : Array(Listener) = listeners) : Array(Listener)
+    among.reject do |l|
+      !listener_error(l, among).nil? || (l.port == effective_bind_port && same_bind_host?(l.host, effective_bind_host))
     end
   end
 
@@ -259,9 +277,9 @@ module Gori::Settings
   # Dropping is right — an unusable entry must not become a socket — but dropping silently is
   # not: the operator's only other signal is that traffic never arrives. Session seeds its
   # `listener_errors` from this so a rejected entry reads the same as one that failed to bind.
-  def self.listener_config_errors : Array(String)
-    listeners.compact_map do |l|
-      if err = listener_error(l)
+  def self.listener_config_errors(among : Array(Listener) = listeners) : Array(String)
+    among.compact_map do |l|
+      if err = listener_error(l, among)
         "#{BindAddress.authority(l.host, l.port)} — #{err.lchop("settings: ")}"
       end
     end

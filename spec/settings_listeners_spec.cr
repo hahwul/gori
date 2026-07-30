@@ -205,4 +205,61 @@ describe Gori::Settings do
       listener("127.0.0.1", 8080, "transparent").effective_target_port(false).should eq(80)
     end
   end
+
+  # #508: the live reconcile validates a set it read from DISK and deliberately does not write
+  # back over `Settings.listeners` (that would let the next save clobber a hand edit), so every
+  # validator has to be able to say which set it means.
+  describe "validating a candidate set (#508)" do
+    it "checks the loop rule against `among`, not the class property" do
+      other = listener("127.0.0.1", 9100)
+      rev = listener("127.0.0.1", 9000, "reverse", origin: "http://127.0.0.1:9100")
+      with_listeners("127.0.0.1", 8070, [] of Gori::Settings::Listener) do
+        # Not in Settings.listeners: nothing to loop against, so it validates.
+        Gori::Settings.listener_error(rev).should be_nil
+        # Named in the candidate set: the origin points at another socket in the same edit.
+        Gori::Settings.listener_error(rev, [rev, other]).should_not be_nil
+      end
+    end
+
+    it "filters and reports errors over the given set" do
+      set = [listener("127.0.0.1", 9000), listener("127.0.0.1", 9001, "reverse")]
+      with_listeners("127.0.0.1", 8070, [] of Gori::Settings::Listener) do
+        Gori::Settings.valid_listeners(set).map(&.port).should eq([9000])
+        Gori::Settings.listener_config_errors(set).size.should eq(1)
+        # The class property is untouched by validating somebody else's array.
+        Gori::Settings.valid_listeners.should be_empty
+        Gori::Settings.listeners.should be_empty
+      end
+    end
+  end
+
+  describe ".disk_listeners?" do
+    it "separates an unreadable file from an absent section" do
+      dir = File.tempname("gori-disk-listeners")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "settings.json")
+      begin
+        Gori::Settings.path_override = path
+        # No file at all, and a file with no `listeners` key, both mean "the section is empty".
+        Gori::Settings.disk_listeners?.should eq([] of Gori::Settings::Listener)
+        File.write(path, %({"theme": "dark"}))
+        Gori::Settings.disk_listeners?.should eq([] of Gori::Settings::Listener)
+
+        File.write(path, %({"listeners": [{"host": "127.0.0.1", "port": 9000}]}))
+        Gori::Settings.disk_listeners?.try(&.map(&.port)).should eq([9000])
+
+        # Unparseable is NOT "empty": a reconcile acting on that would tear sockets down over a
+        # typo in an unrelated section, so it gets nil and refuses.
+        File.write(path, "{not json")
+        Gori::Settings.disk_listeners?.should be_nil
+        # The drift CHECK keeps its old fallback — it only decides whether to say something.
+        with_listeners("127.0.0.1", 8070, [listener("127.0.0.1", 9000)]) do
+          Gori::Settings.disk_listeners.map(&.port).should eq([9000])
+        end
+      ensure
+        Gori::Settings.path_override = nil
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
 end

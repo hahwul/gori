@@ -31,14 +31,19 @@ module Gori::Tui
     # raising another modal is the shell's job (see Runner#open_listeners).
     property on_palette : Proc(Nil)?
 
+    # `r`: re-read the `listeners` section from settings.json and make the sockets match it
+    # (#508). Injected rather than called on `@session` here because the reconcile is a
+    # lifecycle change and reporting what it moved is the shell's job — the overlay only asks,
+    # then re-snapshots. Left nil (a plain re-snapshot) this is still the read-only list it was.
+    property on_reload : Proc(Nil)?
+
     def initialize(@session : Gori::Session)
       @selected = 0
       @rows = @session.listener_rows
     end
 
     # Re-snapshot from the live session. The overlay holds a COPY rather than reading per draw
-    # so the rows can't shift under a click hit-tested against the previous frame; `r`
-    # refreshes it on demand (a capture toggle flips every row's `up`/`down`).
+    # so the rows can't shift under a click hit-tested against the previous frame.
     def reload : Nil
       @rows = @session.listener_rows
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
@@ -58,10 +63,11 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ scroll · r refresh · esc close"
+      "↑/↓ scroll · r reload settings.json · esc close"
     end
 
-    # Read-only: no ↵ commit, nothing to apply. esc closes, r re-snapshots, ↑/↓ scroll.
+    # No ↵ commit — there is nothing here to edit, so the only action is `r`, which re-reads the
+    # section and applies it. esc closes, ↑/↓ scroll.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       if ev.ctrl? && k.lower_p?
@@ -73,7 +79,7 @@ module Gori::Tui
       elsif k.down? || k.lower_j?
         move(1)
       elsif (ev.char || k.to_char) == 'r'
-        reload
+        (cb = on_reload) ? cb.call : reload
       end
       :stay
     end
@@ -140,13 +146,14 @@ module Gori::Tui
     #
     #   - the PRIMARY bind is not in this list and is not supposed to be (#499). Naming it here
     #     is cheaper than letting "why isn't :8070 listed?" become a bug report.
-    #   - the section is not applied live (#508). A reverse listener is the first listener kind
-    #     anyone retargets interactively, so silence about that is a trap this feature creates.
+    #   - where the edit happens and what makes it take effect (#508). The section has no editor
+    #     here, so without this the operator has no way to know an edit needs `r` — which is the
+    #     same silence the reconcile exists to end.
     private def draw_footer(screen : Screen, box : Rect) : Nil
       y = box.bottom - 2 # box.bottom - 1 is the card's bottom border (Frame.card)
       return if y <= box.y + 1
       primary = Gori::BindAddress.display(@session.proxy.host, @session.proxy.port, terse: true)
-      screen.text(box.x + 3, y, "#{primary} is the proxy address · restart to apply edits",
+      screen.text(box.x + 3, y, "#{primary} is the proxy address · edit settings.json, then r",
         Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
     end
 
