@@ -40,8 +40,14 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
-    QL_FIELDS      = %w(host method status path scheme proto body header size reqsize respsize dur flag)
-    METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
+    # Tab-completion offers exactly what `QL.field_cond` implements — no more, no less.
+    # `flag` used to head this list, so `f` + Tab deterministically produced `flag:`, a
+    # field with no store behind it (Store#flags_for is a stub): it free-texts, matches
+    # nothing, and the empty list reads as "no flows match". `url` is the reverse case —
+    # a real, working field that was never suggested. spec/tui/history_view_spec.cr pins
+    # this list against ql.cr so the two cannot drift apart again.
+    QL_FIELDS  = %w(host url method status path scheme proto body header size reqsize respsize dur)
+    METHOD_VAL = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
     # Discoverability hints for the QL filter, kept loosely in sync with QL_FIELDS.
     # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits
     # on the suggestion row at a cold start (already editing, nothing to Tab-complete

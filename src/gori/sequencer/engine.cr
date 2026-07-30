@@ -40,6 +40,14 @@ module Gori::Sequencer
     @last_dispatch : Time::Instant
     @token_re : Regex? = nil # Regex token descriptor compiled ONCE per run (see run_live)
 
+    # Final per-run counters, read by a consumer AFTER `run` returns (the block form is
+    # synchronous, so they are settled). `first_error` is the first real per-send failure —
+    # a max-requests cap is a budget, not a failure, so it is excluded. Without this the
+    # reason for a wholly-refused run was counted into `@errors` and the string thrown away,
+    # and `gori run sequence` reported "0 collected" and exited 0.
+    getter errors : Int32
+    getter first_error : String? = nil
+
     # `backend` is nil ONLY for manual mode, which analyses pasted tokens offline. Live
     # replay without one is rejected here rather than discovered inside a worker fiber —
     # and modelling it as absent is why manual mode no longer needs a throwaway sender
@@ -207,7 +215,10 @@ module Gori::Sequencer
       status = raw.response.try(&.status)
       len = token.try(&.bytesize) || 0
       err = raw.error || (token ? nil : "no token matched")
-      @errors += 1 if raw.error
+      if e = raw.error
+        @errors += 1
+        @first_error ||= e unless e == Fuzz::CappedBackend::CAP_ERROR
+      end
       @collected += 1 if token
       @events.send(SampleEvent.new(Sample.new(idx, token, status, len, raw.duration_us, err)))
       emit_progress

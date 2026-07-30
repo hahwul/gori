@@ -1696,9 +1696,7 @@ module Gori::Tui
       cp.on_commit = -> {
         if opt = cp.selected_option
           written = Clipboard.copy(opt.text)
-          msg = "copied #{opt.label.downcase} (#{written}b)"
-          msg += " — clipped from #{opt.text.bytesize}b (64KB cap)" if written < opt.text.bytesize
-          @toast = msg
+          @toast = "copied #{opt.label.downcase} (#{written}b)#{Clipboard.note(written, opt.text.bytesize)}"
         end
         true
       }

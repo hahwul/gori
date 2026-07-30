@@ -88,7 +88,13 @@ module Gori
         # in-place reload buys nothing here) and confirm it committed — a busy/locked
         # rollback must not report the rule deleted while it still gates active requests.
         return busy("scope rule NOT deleted (store busy or unwritable); it is unchanged and still gates traffic") unless store.remove_scope_rule(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        # `set_sandbox` reports `blocks_all` for exactly this state; a delete that CAUSES
+        # it used to return a bare {id, deleted:true}, so an agent could black-hole the
+        # proxy and read the write as ordinary success. Re-load — the removal went through
+        # the store, not this throwaway Scope.
+        after = Scope.load(store)
+        blocks_all = after.sandbox? && after.include_count.zero?
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true; j.field "blocks_all", blocks_all } })
       end
 
       private def set_scope_enabled(h) : Result

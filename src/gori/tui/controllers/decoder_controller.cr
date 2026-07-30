@@ -481,8 +481,8 @@ module Gori::Tui
       if text.empty?
         @host.status("nothing to copy")
       else
-        Clipboard.copy(text)
-        @host.status("output copied to clipboard")
+        written = Clipboard.copy(text)
+        @host.status("output copied to clipboard#{Clipboard.note(written, text.bytesize)}")
       end
     end
 
@@ -496,8 +496,8 @@ module Gori::Tui
       if text.empty?
         @host.status("nothing to copy")
       else
-        Clipboard.copy(text)
-        @host.status("copied #{text.bytesize}b to clipboard")
+        written = Clipboard.copy(text)
+        @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text.bytesize)}")
       end
     end
 
@@ -516,9 +516,7 @@ module Gori::Tui
         @host.status("nothing to copy")
       else
         written = Clipboard.copy(text)
-        msg = "copied all (#{written}b)"
-        msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
-        @host.status(msg)
+        @host.status("copied all (#{written}b)#{Clipboard.note(written, text.bytesize)}")
       end
     end
 

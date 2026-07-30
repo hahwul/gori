@@ -694,7 +694,7 @@ describe F::GatedBackend do
       backend = F::GatedBackend.new(inner, Gori::Outbound.interactive(scope))
       req = "GET / HTTP/1.1\r\nHost: target.test\r\n\r\n".to_slice
 
-      backend.send(req).error.should eq(Gori::Outbound::SCOPE_ERROR)
+      backend.send(req).error.should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
       calls.should eq(0)
       backend.blocked.should eq(1_i64)
     ensure

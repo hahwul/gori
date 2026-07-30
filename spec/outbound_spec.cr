@@ -150,8 +150,33 @@ describe Gori::Outbound do
          Gori::Outbound.cli(scope, false), Gori::Outbound.cli(scope, true),
          Gori::Outbound.interactive(scope), Gori::Outbound.allowlist(scope)].each do |ob|
           ob.send_block("https", "acme.test", "/s?q=hi").should eq(Gori::Outbound::SANDBOX_ERROR)
-          ob.sweep_block("https", "acme.test", "/s?q=hi").should eq(Gori::Outbound::SCOPE_ERROR)
+          ob.sweep_block("https", "acme.test", "/s?q=hi").should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
         end
+      end
+    end
+
+    it "names WHICH Layer-2 gate refused, preferring the more specific EXCLUDE" do
+      # Both reasons used to collapse into one bare "blocked by scope" — the same wording as
+      # the Layer-1 abort, so an operator who had just passed --allow-unscoped read those
+      # three words back and concluded the flag had done nothing.
+      #
+      # With the sandbox ON an excluded URL trips BOTH gates (`sandbox_blocks?` is
+      # `sandbox && !allowlisted?`, and an exclude un-allowlists). The exclude wins the
+      # report: telling someone who already HAS a matching include to "add an include rule"
+      # is advice that cannot work, while naming the exclude names the rule to delete.
+      with_scope do |scope, _store|
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "string", "/admin")
+        scope.enable_sandbox
+        ob = Gori::Outbound.interactive(scope)
+        # included host, excluded path → the exclude is the actionable reason
+        ob.sweep_block("https", "acme.test", "/admin/panel").should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+        # not in the allowlist at all, and no exclude matches → sandbox
+        ob.sweep_block("https", "other.test", "/dashboard").should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
+        # the two sentences are distinguishable, and each names its own exit
+        Gori::Outbound::SANDBOX_SWEEP_ERROR.should_not eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+        Gori::Outbound::SANDBOX_SWEEP_ERROR.should contain("Sandbox off")
+        Gori::Outbound::EXCLUDE_SWEEP_ERROR.should contain("--allow-unscoped")
       end
     end
 
@@ -164,7 +189,7 @@ describe Gori::Outbound do
         scope.add("exclude", "string", "/admin")
         [Gori::Outbound.agent(scope, false), Gori::Outbound.cli(scope, false),
          Gori::Outbound.interactive(scope)].each do |ob|
-          ob.sweep_block("https", "acme.test", "/admin/panel").should eq(Gori::Outbound::SCOPE_ERROR)
+          ob.sweep_block("https", "acme.test", "/admin/panel").should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
           ob.send_block("https", "acme.test", "/admin/panel").should be_nil
           ob.sweep_block("https", "acme.test", "/s?q=hi").should be_nil
         end
@@ -192,11 +217,13 @@ describe Gori::Outbound do
       with_scope do |scope, _store|
         scope.add("include", "host", "acme.test")
         scope.enable_sandbox
-        scope.add("exclude", "host", "acme.test") # sandbox now blocks acme.test outright
+        scope.add("exclude", "host", "acme.test") # un-allowlists it: both Layer-2 gates fire
         sender = Gori::Fuzz::Sender.new(ORIGIN, Gori::Outbound.interactive(scope),
           http2: false, verify: false, timeout: 1.second)
         result = sender.send(REQ)
-        result.error.should eq(Gori::Outbound::SCOPE_ERROR)
+        # The exclude is the reported reason (see the gate-naming spec above): it is the rule
+        # the operator can act on, whereas "add an include" is moot — one is already there.
+        result.error.should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
         result.duration_us.should eq(0_i64) # never dialled
         sender.blocked.should eq(1_i64)
       end
@@ -207,7 +234,7 @@ describe Gori::Outbound do
         scope.add("exclude", "host", "acme.test")
         inner = RecordingBackend.new(ORIGIN)
         gated = Gori::Fuzz::GatedBackend.new(inner, Gori::Outbound.interactive(scope))
-        gated.send(REQ).error.should eq(Gori::Outbound::SCOPE_ERROR)
+        gated.send(REQ).error.should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
         inner.sent.should eq(0)
       end
     end
@@ -258,7 +285,7 @@ describe Gori::Outbound do
         # …and past it, every surface stops sending. All three share ONE Scope object here,
         # so assert on separately-loaded scopes too (the CLI/MCP shape) below.
         surfaces.each do |name, ob|
-          ob.sweep_block("https", "acme.test", "/s").should(eq(Gori::Outbound::SCOPE_ERROR), "#{name} after reload")
+          ob.sweep_block("https", "acme.test", "/s").should(eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR), "#{name} after reload")
         end
       end
     end
@@ -272,7 +299,7 @@ describe Gori::Outbound do
 
         store.add_scope_rule("exclude", "host", "acme.test")
         sleep(Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds)
-        ob.sweep_block("https", "acme.test", "/s").should eq(Gori::Outbound::SCOPE_ERROR)
+        ob.sweep_block("https", "acme.test", "/s").should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
       end
     end
 
@@ -289,7 +316,7 @@ describe Gori::Outbound do
         # The reload raises against the closed store and is swallowed; the rules loaded
         # before the close stay in force rather than degrading to "allow everything".
         ob.sweep_block("https", "acme.test", "/s").should be_nil
-        ob.sweep_block("https", "other.test", "/s").should eq(Gori::Outbound::SCOPE_ERROR)
+        ob.sweep_block("https", "other.test", "/s").should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
       ensure
         File.delete?(path)
         File.delete?("#{path}-wal")
@@ -339,7 +366,7 @@ describe Gori::Outbound do
         # Dialling the allowed origin is fine…
         ob.sweep_block("https", "acme.test", "/x").should be_nil
         # …but dialling evil.test with an acme.test request line must NOT inherit its rule.
-        ob.sweep_block("https", "evil.test", "http://acme.test/x").should eq(Gori::Outbound::SCOPE_ERROR)
+        ob.sweep_block("https", "evil.test", "http://acme.test/x").should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
         ob.send_block("https", "evil.test", "http://acme.test/x").should eq(Gori::Outbound::SANDBOX_ERROR)
       end
     end

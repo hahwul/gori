@@ -1634,8 +1634,27 @@ describe Gori::MCP::Server do
         listed["rules"][0]["pattern"].as_s.should eq("api.example.com")
 
         del = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"delete_scope_rule","arguments":{"id":#{id}}}})
-        tool_payload(drive(store, del)[0])["deleted"].as_bool.should be_true
+        deleted = tool_payload(drive(store, del)[0])
+        deleted["deleted"].as_bool.should be_true
+        deleted["blocks_all"].as_bool.should be_false # sandbox is off here
         store.scope_rules.should be_empty
+      end
+    end
+
+    it "reports blocks_all when the delete leaves Sandbox holding an empty allowlist" do
+      # set_sandbox already returns blocks_all for exactly this state, but a delete that
+      # CAUSES it returned a bare {id, deleted:true} — so an agent could black-hole the
+      # proxy and read the write as ordinary success. Same question, both edges.
+      with_store do |store|
+        add = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_scope_rule","arguments":{"kind":"include","match_type":"host","pattern":"api.example.com"}}})
+        id = tool_payload(drive(store, add)[0])["id"].as_i64
+        sandbox = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"set_sandbox","arguments":{"enabled":true}}})
+        tool_payload(drive(store, sandbox)[0])["blocks_all"].as_bool.should be_false # an include still stands
+
+        del = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"delete_scope_rule","arguments":{"id":#{id}}}})
+        deleted = tool_payload(drive(store, del)[0])
+        deleted["deleted"].as_bool.should be_true
+        deleted["blocks_all"].as_bool.should be_true
       end
     end
 

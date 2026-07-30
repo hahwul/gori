@@ -396,7 +396,7 @@ module Gori::Tui
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard")
+      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text.bytesize)}")
     end
 
     # The description selection (or current line) text without copying — "Send selection to".
@@ -411,9 +411,7 @@ module Gori::Tui
         return
       end
       written = Clipboard.copy(text)
-      msg = "copied description to clipboard (#{written}b)"
-      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
-      @host.status(msg)
+      @host.status("copied description to clipboard (#{written}b)#{Clipboard.note(written, text.bytesize)}")
     end
 
     # --- SCOPE pane: browse the rule list; a/e open the Miner-style popup overlay ---
@@ -458,8 +456,21 @@ module Gori::Tui
 
     def scope_delete_rule : Nil
       if pat = @project_view.scope_delete
-        @host.status("removed scope rule: #{pat}")
+        @host.status("removed scope rule: #{pat}#{scope_blackhole_note}")
       end
+    end
+
+    # The warning to append to a scope-rule WRITE that has just left Sandbox holding an
+    # empty allowlist — i.e. the proxy now refuses everything. The danger-confirm at
+    # Runner#toggle_sandbox only fires on the ENABLE edge, so a scope already ON was never
+    # re-checked and deleting the last include reported a plain "removed scope rule" while
+    # black-holing every request. The live "no scope → ALL blocked" note on the PROJECT
+    # SETTINGS card cannot cover this: one pane card renders at a time, so it is off-screen
+    # while you are editing rules on the SCOPE pane.
+    private def scope_blackhole_note : String
+      scope = @host.session.scope
+      return "" unless scope.sandbox? && scope.include_count == 0
+      " — ⚠ sandbox ON with NO include rules: ALL traffic is now blocked"
     end
 
     # Apply a rule from the SCOPE popup. Returns true when the overlay should close
@@ -483,6 +494,9 @@ module Gori::Tui
         # a rule but nothing filtered" confusion — the space menu's 's' enables it).
         msg = "scope rule #{verb} — #{n} rule#{n == 1 ? "" : "s"}"
         msg += " · space → s to enable the lens" unless @host.session.scope.enabled? || edited
+        # An EDIT can black-hole the proxy too (flip the last include to an exclude), so
+        # this path re-asks the same question the delete path does.
+        msg += scope_blackhole_note
         @host.status(msg)
         true
       else

@@ -522,7 +522,16 @@ module Gori::Tui
 
     # --- marking -------------------------------------------------------------
     def auto_mark : String
-      text = Fuzz::Template.auto_mark(@editor.text)
+      before = @editor.text
+      text = Fuzz::Template.auto_mark(before)
+      # `Template.auto_mark` is a deliberate no-op once ANY § is present — it will not
+      # double-mark, and it must not clear the operator's own markers to re-derive them.
+      # Say so instead of counting the markers in the UNCHANGED text and reporting them
+      # as if this keystroke had placed them (mark_word already refuses honestly).
+      if text == before
+        n = Fuzz::Template.parse(before).position_count
+        return n.zero? ? "nothing to auto-mark — no query, cookie or body values found" : "already marked (#{n} position#{n == 1 ? "" : "s"}) — Clear markers first to re-derive"
+      end
       @editor.set_text(text)
       @dirty = true
       n = Fuzz::Template.parse(text).position_count
@@ -1844,7 +1853,14 @@ module Gori::Tui
       x = screen.text(inner.x + 2, y, line, selected ? Theme.text_bright : Theme.text, bg)
       sc = r.status.try(&.to_s) || (r.error ? "ERR" : "—")
       x = screen.text(x + 1, y, sc.ljust(7), status_color(r), bg)
-      screen.text(x, y, "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}", selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+      # A send that never got a response has no length/words/duration worth showing — the
+      # reason does. `cli/output.cr:fuzz_row_text` already appends `r.error` per row; the
+      # TUI used to drop it entirely, so a scope/sandbox refusal read as a bare "ERR".
+      if err = r.error
+        screen.text(x, y, err, Theme.red, bg, width: {inner.right - x, 1}.max)
+      else
+        screen.text(x, y, "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}", selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+      end
     end
 
     private def status_color(r : Fuzz::Result) : Color
@@ -2148,6 +2164,13 @@ module Gori::Tui
     end
 
     private def detail_response_lines(r : Fuzz::Result) : Array(String)
+      # The send failed, so there is no response to retain — say THAT, not the retention
+      # policy. Fuzz::Engine builds a refused/failed Result with an empty head (engine.cr,
+      # the scope/sandbox path), and Matcher#present returns nil for it under every
+      # keep_bodies setting, so this branch is the only place the reason can surface.
+      if err = r.error
+        return ["(send failed: #{err})"]
+      end
       head = r.head
       return ["(response not retained — only matched results keep the response)"] unless head
       body = r.body

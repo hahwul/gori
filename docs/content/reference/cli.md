@@ -272,7 +272,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control |
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one per origin |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
-| `--allow-unscoped` | Run even if the target is outside the project scope |
+| `--allow-unscoped` | Run even if the target is outside the project scope. Waives the up-front (Layer 1) check only — Sandbox mode and explicit exclude rules still refuse each send, and the refusal now names which of the two fired. |
 | `--force` | Bypass the unbounded-run safety gate |
 | `--no-store` | Do not write findings into the project |
 | `--format` | `text`, `json`, or `jsonl` |

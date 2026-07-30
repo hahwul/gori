@@ -446,6 +446,9 @@ module Gori
             abort "gori run project scope update: rule NOT updated (store busy or unwritable); it is unchanged and still gates traffic"
           end
           puts "Scope rule ##{id} updated: #{new_kind} #{new_type} #{new_pattern}"
+          # Re-read: the write went through the store, not this Scope instance, so the
+          # in-memory rule list is one edit stale.
+          warn_scope_blackhole(Scope.load(store), "gori run project scope update")
         ensure
           store.close
         end
@@ -492,6 +495,18 @@ module Gori
         end
       end
 
+      # A scope WRITE that leaves Sandbox holding an empty allowlist turns the proxy into a
+      # black hole — every captured request refused. `sandbox on` already warns on its own
+      # edge (see cmd_sandbox), but the scope-rule paths never re-asked, so deleting the
+      # last include printed a plain "deleted successfully" and the next capture died
+      # silently. Same question, same wording, now on both edges.
+      private def self.warn_scope_blackhole(scope : Scope, prefix : String) : Nil
+        return unless scope.sandbox? && scope.include_count == 0
+        STDERR.puts "#{prefix}: warning — the sandbox is ON and the scope now has no include " \
+                    "rules, so ALL captured traffic is blocked until you add one " \
+                    "(gori run project scope add ...)"
+      end
+
       private def self.cmd_scope_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -523,6 +538,7 @@ module Gori
           end
           scope.remove(id)
           puts "Scope rule ##{id} deleted successfully."
+          warn_scope_blackhole(scope, "gori run project scope delete")
         ensure
           store.close
         end

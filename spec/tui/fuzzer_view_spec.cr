@@ -17,6 +17,54 @@ private def loaded_fuzzer : FuzzerView
 end
 
 describe Gori::Tui::FuzzerView do
+  describe "a failed send's reason" do
+    # Fuzz::Engine returns a scope/sandbox refusal as a Result whose `error` carries the
+    # reason and whose head is EMPTY — and Matcher#present nils an empty head, so no
+    # keep_bodies setting makes it reachable. The detail pane used to print "(response not
+    # retained — only matched results keep the response)", blaming a retention policy the
+    # TUI does not even expose for a send that never happened. `gori run fuzz` has always
+    # appended r.error per row (cli/output.cr); this is the TUI catching up.
+    it "names the failure instead of the retention policy" do
+      view = loaded_fuzzer
+      view.focus_pane(:results)
+      view.append_result(fuzz_result(0, nil, 0, error: Gori::Outbound::SANDBOX_SWEEP_ERROR))
+      view.detail_plain_lines.first.should eq("(send failed: #{Gori::Outbound::SANDBOX_SWEEP_ERROR})")
+    end
+
+    it "still reports a genuinely unretained response as unretained" do
+      view = loaded_fuzzer
+      view.focus_pane(:results)
+      view.append_result(fuzz_result(0, 200, 1200)) # succeeded, but keep_bodies dropped it
+      view.detail_plain_lines.first.should contain("response not retained")
+    end
+  end
+
+  describe "#auto_mark" do
+    # Fuzz::Template.auto_mark is a deliberate no-op once ANY § is present: it will not
+    # double-mark, and it must not clear the operator's own markers to re-derive them.
+    # The view used to set_text the unchanged string, then COUNT the markers already in it
+    # and report them as "auto-marked N positions" — a success sentence for work it did not
+    # do. mark_word (^K) next door has always refused honestly; these pin the parity.
+    it "reports the positions it actually placed" do
+      view = loaded_fuzzer
+      view.auto_mark.should eq("auto-marked 1 position")
+    end
+
+    it "refuses instead of re-counting when the template is already marked" do
+      view = FuzzerView.new
+      view.load_request("https://h", "GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.auto_mark.should contain("already marked (1 position)")
+      # …and the template is untouched, so the refusal is real, not a silent rewrite.
+      view.template_text.should contain("§1§")
+    end
+
+    it "says so when there is nothing to mark" do
+      view = FuzzerView.new
+      view.load_request("https://h", "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.auto_mark.should eq("nothing to auto-mark — no query, cookie or body values found")
+    end
+  end
+
   it "CHAIN pane: focus a template marker, type a chain, commit writes it back" do
     view = FuzzerView.new
     # marker at offset 0 → set_text zeroes the cursor, so it sits inside §x§

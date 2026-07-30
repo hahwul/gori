@@ -629,7 +629,7 @@ module Gori::Tui
       else
         written = Clipboard.copy(text)
         prefix = label ? "copied \"#{label}\"" : "copied"
-        @host.status("#{prefix} (#{written}b)")
+        @host.status("#{prefix} (#{written}b)#{Clipboard.note(written, text.bytesize)}")
       end
     end
 

@@ -46,7 +46,7 @@ module Gori
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -183,6 +183,25 @@ module Gori
         end
         puts CLI::Output.mine_array_json(findings) if format == :json
         exit 1 if had_error
+        exit 1 if mine_all_refused?(engine, findings.size)
+      end
+
+      # A run that found nothing because every send was REFUSED is a failure, not a clean
+      # "no hidden parameters" — `had_error` only fires on an orchestration raise, so a
+      # scope-blocked sweep used to print "0 found" and exit 0, and CI read that as a
+      # verdict. Same backstop `gori run fuzz` was given in #410, plus the reason string the
+      # engine now retains instead of counting and discarding. Returns true → exit 1.
+      #
+      # The predicate is "nothing got through", NOT `errors >= sent`: `sent` counts attempts
+      # including Baseline's probes, whose failures never reach the error counter, so the
+      # two are not comparable. `first_error` excludes a --max-requests cap (a budget, not a
+      # failure), so a capped run still exits 0.
+      private def self.mine_all_refused?(engine : Miner::Engine, found : Int32) : Bool
+        return false unless found.zero? && engine.successful_sends.zero?
+        reason = engine.first_error
+        return false unless reason
+        STDERR.puts "mine: every request failed — #{reason}"
+        true
       end
 
       private def self.mine_baseline(ev : Miner::BaselineEvent) : Nil

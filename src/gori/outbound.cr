@@ -30,9 +30,17 @@ module Gori
   # MCP did this; `gori run` snapshotted the rules at start-up and the TUI honoured a
   # change only as a side effect of its own data_version poll.
   class Outbound
-    # The per-send error string an automated sweep's blocked Result carries. Stable —
-    # `Fuzz::Engine` surfaces it as a row error and specs assert on it.
-    SCOPE_ERROR = "blocked by scope"
+    # The per-send error strings an automated sweep's blocked Result carries. Stable —
+    # `Fuzz::Engine` surfaces them as a row error and specs assert on them.
+    #
+    # Layer 2 has TWO independent reasons with different remedies, so they get different
+    # sentences. They used to collapse into one bare "blocked by scope", which is also the
+    # wording of the Layer-1 abort — so an operator who had just passed `--allow-unscoped`
+    # read the same three words back and reasonably concluded the flag had done nothing.
+    # `Discover::Engine::SCOPE_REFUSED` already names both possibilities for the same
+    # gate; this splits them so the message names the ONE that fired, and its exit.
+    SANDBOX_SWEEP_ERROR = "blocked by sandbox (out of scope) — add a scope include rule, or turn Sandbox off"
+    EXCLUDE_SWEEP_ERROR = "blocked by a scope exclude rule — excludes hold even under --allow-unscoped"
     # The refusal for ONE hand-authored Repeater send. Distinct wording because Sandbox
     # is the only rule that stops these (see `send_block`), and the TUI/CLI show it verbatim.
     SANDBOX_ERROR = "blocked by sandbox (out of scope)"
@@ -202,7 +210,13 @@ module Gori
       s = @scope
       return nil unless s
       url = Outbound.scope_url(scheme, host, target)
-      (s.sandbox_blocks?(url, host) || s.excluded?(url, host)) ? SCOPE_ERROR : nil
+      # EXCLUDE is tested FIRST because it is the more specific answer. `sandbox_blocks?` is
+      # `sandbox && !allowlisted?`, and an excluded URL is never allowlisted — so with the
+      # sandbox on, an exclude match trips BOTH. Reporting sandbox there would tell an
+      # operator who already has a matching include rule to "add a scope include rule",
+      # which is advice that cannot work. Naming the exclude names the rule they can delete.
+      return EXCLUDE_SWEEP_ERROR if s.excluded?(url, host)
+      s.sandbox_blocks?(url, host) ? SANDBOX_SWEEP_ERROR : nil
     end
 
     # The refusal reason for ONE hand-authored Repeater send, or nil to proceed. Sandbox

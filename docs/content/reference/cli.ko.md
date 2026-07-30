@@ -272,7 +272,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | origin별 연결 재사용 대신 프로브마다 새로 연결 |
 | `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
-| `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 실행 |
+| `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 실행. 사전(Layer 1) 검사만 면제되며 Sandbox 모드와 명시적 exclude 룰은 매 전송마다 그대로 거부합니다. 거부 메시지는 둘 중 어느 게이트가 막았는지 이름을 밝힙니다. |
 | `--force` | 무제한 실행 안전 게이트 우회 |
 | `--no-store` | 결과를 프로젝트에 기록하지 않음 |
 | `--format` | `text`, `json`, 또는 `jsonl` |

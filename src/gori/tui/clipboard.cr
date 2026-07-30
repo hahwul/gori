@@ -43,5 +43,20 @@ module Gori::Tui
       io.flush
       data.bytesize
     end
+
+    # The status suffix for a copy, derived from what `copy` actually wrote versus the
+    # source size. Callers append this instead of re-deriving the comparison themselves:
+    # the `— clipped from Nb` half used to be hand-written at six call sites and simply
+    # absent at five more, so `y` on a large selection reported the TRUNCATED count as
+    # the copy size. One formula, one home — the omission can't recur per-caller.
+    #
+    # A disabled clipboard is its own answer: `copy` returns 0 without touching the tty,
+    # and "copied 0b" alone reads as an empty selection rather than a switched-off
+    # setting. Empty source is not an error — it returns "".
+    def self.note(written : Int32, source_bytes : Int32) : String
+      return "" if source_bytes.zero?
+      return " — clipboard is off (Settings → General)" if written.zero?
+      written < source_bytes ? " — clipped from #{source_bytes}b (64KB cap)" : ""
+    end
   end
 end

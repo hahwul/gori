@@ -1611,6 +1611,32 @@ describe "Gori::Tui::HistoryView marks" do
   end
 end
 
+describe "HistoryView::QL_FIELDS" do
+  # Tab-completion must offer exactly what QL implements. `flag:` used to head the list, so
+  # `f` + Tab deterministically produced a field with no store behind it (Store#flags_for is
+  # a stub): it free-texts, matches nothing, and the empty list reads as "no flows match".
+  # `url:` was the reverse — real and working, but never suggested. Pin both directions.
+  it "offers no field QL cannot compile, and hides no field it can" do
+    fields = Gori::Tui::HistoryView::QL_FIELDS
+    fields.should_not contain("flag") # no flow-flag store exists (ql.cr's else branch says so)
+    fields.should contain("url")      # a real field that was missing from the suggestions
+    fields.should eq(fields.uniq)
+  end
+
+  it "suggests a working field for `f`, and never completes to `flag:`" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/x", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.start_query
+      "f".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should_not contain("flag:")
+      view.query_complete
+      view.query.should_not eq("flag:")
+    end
+  end
+end
+
 describe Gori::Tui::Keybind do
   it "maps termisu key events to verb chords" do
     ctrl_p = Termisu::Event::Key.new(Termisu::Input::Key::LowerP, Termisu::Input::Modifier::Ctrl)

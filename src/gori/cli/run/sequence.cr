@@ -57,7 +57,7 @@ module Gori
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -203,6 +203,14 @@ module Gori
         end
         emit_sequence_report(Sequencer::Stats.analyze(tokens), format)
         exit 1 if had_error
+        # Collecting NO token because every replay was refused is a failure, not a clean
+        # "0 collected" — `had_error` only fires on an orchestration raise. Gated on
+        # `first_error` so a run that merely hit --max-requests (a budget, not a failure)
+        # still exits 0. Mirrors `gori run fuzz`'s #410 backstop and mine's above.
+        if tokens.empty? && (reason = engine.first_error)
+          STDERR.puts "sequence: every replay failed — #{reason}"
+          exit 1
+        end
       end
 
       private def self.sequence_progress(ev : Sequencer::ProgressEvent, goal : Int32) : Nil

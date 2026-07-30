@@ -66,6 +66,20 @@ private class FixedBodyBackend < F::Backend
   end
 end
 
+private class BlockedBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin, @reason : String)
+  end
+
+  # The shape Outbound-gated senders return: no head, no response, the reason in `error`.
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, @reason)
+  end
+end
+
 private def mine(backend : F::Backend, names : Array(String), config : M::Config) : Array(M::Finding)
   base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
   engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: config)
@@ -204,5 +218,29 @@ describe Gori::Miner::Engine do
     engine.run { |ev| done_progress = ev.progress if ev.is_a?(M::DoneEvent) }
     done_progress.should_not be_nil
     done_progress.not_nil!.errors.should eq(0)
+  end
+
+  describe "a wholly-refused run" do
+    # `@errors` used to count refusals and throw the STRING away, so a scope-blocked sweep
+    # ended "0 found · N sent · N errors" with the reason nowhere and `gori run mine` exiting
+    # 0 — CI read that as "no hidden parameters". The engine stays surface-free; it just
+    # retains the two facts a consumer needs to tell a verdict from a failure.
+    it "retains the first reason and reports that nothing got through" do
+      backend = BlockedBackend.new(F::Origin.new("http", "h", 80), "blocked by sandbox (out of scope)")
+      base = "GET /api?a=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engine = M::Engine.new(base, http2: false, names: ["alpha", "beta"], backend: backend, config: cfg)
+      engine.run { }
+      engine.first_error.should eq("blocked by sandbox (out of scope)")
+      engine.successful_sends.should eq(0)
+    end
+
+    it "counts successes, so a run that got answers is not mistaken for a refused one" do
+      backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), reflect: ["secret"])
+      base = "GET /api?a=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engine = M::Engine.new(base, http2: false, names: ["alpha", "secret"], backend: backend, config: cfg)
+      engine.run { }
+      engine.first_error.should be_nil
+      engine.successful_sends.should be > 0
+    end
   end
 end

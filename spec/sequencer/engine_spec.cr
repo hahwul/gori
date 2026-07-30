@@ -27,6 +27,18 @@ private class CounterCookieBackend < F::Backend
   end
 end
 
+private class BlockedBackend < F::Backend
+  getter origin : F::Origin
+
+  def initialize(@origin : F::Origin, @reason : String)
+  end
+
+  # The shape Outbound-gated senders return: no head, no response, the reason in `error`.
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, @reason)
+  end
+end
+
 private def drain(engine : Q::Engine) : Array(Q::Sample)
   samples = [] of Q::Sample
   engine.run { |ev| samples << ev.sample if ev.is_a?(Q::SampleEvent) }
@@ -110,5 +122,29 @@ describe Gori::Sequencer::Engine do
       done = ev if ev.is_a?(Q::DoneEvent)
     end
     done.not_nil!.collected.should eq(10) # lands exactly on the goal, no overshoot
+  end
+
+  # A run that collects nothing because every replay was REFUSED is a failure, not a clean
+  # "0 collected" — the reason used to be counted into @errors and the string discarded, so
+  # `gori run sequence` printed "0 collected" and exited 0.
+  it "retains the first refusal reason of a wholly-blocked run" do
+    backend = BlockedBackend.new(F::Origin.new("http", "h", 80), "blocked by a scope exclude rule")
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 5, concurrency: 1, retries: 0)
+    req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    engine = Q::Engine.new(req, http2: false, backend: backend, config: config)
+    engine.run { }
+    engine.first_error.should eq("blocked by a scope exclude rule")
+    engine.errors.should be > 0
+  end
+
+  it "leaves first_error nil when replays succeed but no token matches" do
+    # The control case the CLI backstop depends on: "responded, but the descriptor found
+    # nothing" is a real verdict and must NOT be reported as a failed run.
+    backend = CounterCookieBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("NOPE"), goal: 3, concurrency: 1, retries: 0)
+    req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    engine = Q::Engine.new(req, http2: false, backend: backend, config: config)
+    engine.run { }
+    engine.first_error.should be_nil
   end
 end

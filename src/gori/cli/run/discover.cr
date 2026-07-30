@@ -48,7 +48,7 @@ module Gori
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-          p.on("--allow-unscoped", "Run even if the target is outside the project scope") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Run even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--force", "Bypass the unbounded-run safety gate") { force = true }
           p.on("--no-store", "Do not write findings into the project (Sitemap)") { no_store = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
@@ -90,7 +90,7 @@ module Gori
           end
           guard_discover_scope(plan, outbound)
           discover_preflight(plan, force)
-          run_discover_stream(plan.engine, store, format, no_store, ->{ plan.sender.pool_stats })
+          run_discover_stream(plan.engine, store, format, no_store, -> { plan.sender.pool_stats })
         ensure
           store.close
         end

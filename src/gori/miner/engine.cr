@@ -49,6 +49,19 @@ module Gori::Miner
     @names_total : Int64
     @last_dispatch : Time::Instant
 
+    # The first per-send failure reason of the run. `@errors` counts refusals and drops the
+    # string, which is how a scope-blocked run could report "0 found" and exit 0 with the
+    # reason nowhere on screen. Kept as ONE string rather than a list: every send in a
+    # wholly-blocked run fails for the same reason, and the point is to name it, not to
+    # tally it. The engine stays surface-free — consumers read it and decide (DESIGN.md §2.1).
+    getter first_error : String? = nil
+
+    # Mining sends that came back WITHOUT an error. `Progress#sent` counts attempts (and
+    # includes Baseline's probes, whose failures never reach `@errors`), so `errors >= sent`
+    # is not the same question as "did anything get through". Zero here with `first_error`
+    # set means the run produced no verdict at all — it was refused, not answered.
+    getter successful_sends : Int64 = 0_i64
+
     def initialize(@base : Bytes, @http2 : Bool, @names : Array(String),
                    backend : Fuzz::Backend, @config : Config)
       # Wrap the backend so max_requests is enforced at every real send (baseline,
@@ -180,9 +193,12 @@ module Gori::Miner
       # detector (decide), so no per-bucket name→canary / canary→name hashes are built.
       pairs = task.names.map { |n| {n, Canary.fresh} }
       raw = send_with_retries(Inject.apply(@base, task.location, pairs, @config.add_content_length_when_missing?))
-      if raw.error
+      if err = raw.error
         # A max-requests cap refusal isn't a network error — don't let it inflate @errors.
-        @errors += 1 unless raw.error == Fuzz::CappedBackend::CAP_ERROR
+        unless err == Fuzz::CappedBackend::CAP_ERROR
+          @errors += 1
+          @first_error ||= err
+        end
         mark_done(task.names.size) # keep the bar monotonic; this bucket is inconclusive
         return [] of Task
       end
@@ -371,7 +387,11 @@ module Gori::Miner
       attempts = 0
       loop do
         raw = @backend.send(bytes)
-        return raw if raw.error.nil? || attempts >= @config.retries
+        if raw.error.nil?
+          @successful_sends += 1
+          return raw
+        end
+        return raw if attempts >= @config.retries
         attempts += 1
         sleep @config.retry_pause
       end

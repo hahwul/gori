@@ -444,9 +444,7 @@ module Gori::Tui
       io.write(detail.request_head)
       io.write(detail.request_body.not_nil!) if detail.request_body
       written = Clipboard.copy(String.new(io.to_slice))
-      msg = "copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{written}b)"
-      msg += " — clipped from #{io.size}b (64KB cap)" if written < io.size
-      @host.status(msg)
+      @host.status("copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{written}b)#{Clipboard.note(written, io.size)}")
     end
 
     # Multi-mark copy (#442): concatenating N raw request dumps is not what anyone marking
@@ -458,10 +456,9 @@ module Gori::Tui
       return @host.status("copy: no flows left to copy") if urls.empty?
       text = urls.join('\n')
       written = Clipboard.copy(text)
-      msg = "copied #{urls.size} URL#{urls.size == 1 ? "" : "s"} to clipboard (#{written}b)"
       # A thousand marked URLs overrun the 64KB clipboard cap, and a severed list that CLAIMS a
-      # thousand is worse than a short one that admits it (mirrors copy_selection above).
-      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+      # thousand is worse than a short one that admits it (Clipboard.note owns that formula).
+      msg = "copied #{urls.size} URL#{urls.size == 1 ? "" : "s"} to clipboard (#{written}b)#{Clipboard.note(written, text.bytesize)}"
       msg += " — #{ids.size - urls.size} no longer available" if urls.size < ids.size
       @host.status(msg)
     end
@@ -539,7 +536,7 @@ module Gori::Tui
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard")
+      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text.bytesize)}")
     end
 
     # The detail pane's selection (or current line) text without copying — "Send selection to".
