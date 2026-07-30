@@ -1,4 +1,5 @@
 require "./config"
+require "./bind_address"
 require "./project"
 require "./capture_lock"
 require "./capture_status"
@@ -83,11 +84,16 @@ module Gori
         # interceptor and host overrides — so a transparent listener captures into the same
         # project and obeys the same scope/sandbox as the primary. `proxy` above stays THE proxy
         # address for every surface that reports one; these are auxiliary sockets.
-        listener_errs = [] of String
+        #
+        # Seeded with the entries `valid_listeners` DROPPED as unusable, so a misconfigured
+        # listener reads the same as one that failed to bind rather than vanishing (the
+        # operator's only other signal is traffic that never arrives).
+        listener_errs = Settings.listener_config_errors
         extra = Settings.valid_listeners.map do |l|
           Proxy::Server.new(l.host, l.port, sink, tls: tunnel,
             rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
-            transparent: l.transparent?, target_port: l.target_port)
+            transparent: l.transparent?, target_port: l.target_port,
+            origin: l.origin_target, rewrite_host: l.rewrite_host)
         end
         # Per-PROJECT capture lock decides whether THIS instance captures. A 2nd
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
@@ -108,7 +114,10 @@ module Gori
                 extra.each do |e|
                   e.start
                 rescue ex
-                  listener_errs << "#{e.host}:#{e.port} — #{ex.message || "could not bind"}"
+                  # BindAddress.authority, not bare interpolation: `listener_rows` matches a
+                  # failure back to its server by this prefix, and a raw `::1` bind renders as
+                  # the unparseable "::1:8070" (the same bug BindAddress exists to kill).
+                  listener_errs << "#{Gori::BindAddress.authority(e.host, e.port)} — #{ex.message || "could not bind"}"
                 end
                 nil
               rescue ex
@@ -166,6 +175,20 @@ module Gori
                    @extra_listeners : Array(Proxy::Server) = [] of Proxy::Server,
                    @listener_errors : Array(String) = [] of String)
       @intercept_token = Random::Secure.hex(8)
+      @listeners_at_open = Settings.listeners.dup
+    end
+
+    # True when the `listeners` section on disk no longer matches the one these sockets were
+    # built from (#508). Nothing here reconciles — applying the change live is a lifecycle
+    # problem with its own failure modes and is deliberately out of scope — but the operator
+    # has to be TOLD, because a reverse listener is retargeted interactively and silence after
+    # an edit reads as "applied".
+    #
+    # Compared against what THIS session opened with, not against `Settings.listeners`: the two
+    # are the same object today, and pinning the comparison to the session is what keeps this
+    # honest if the runtime copy ever starts being refreshed.
+    def listeners_changed_on_disk? : Bool
+      Settings.disk_listeners != @listeners_at_open
     end
 
     # Additional listeners started and stopped alongside the primary. Each failure is
@@ -174,12 +197,44 @@ module Gori
     # redirect rule pointing at a dead socket is invisible from the client's side.
     getter listener_errors : Array(String)
 
+    # One row per ADDITIONAL listener for the readout (the `listeners:N` chip and its overlay).
+    # `error` is the bind failure for this specific socket, matched by address — `listener_errors`
+    # is a flat list because it also carries config-time rejections, which have no live server.
+    #
+    # Deliberately a snapshot of plain values, not the `Proxy::Server` objects: the TUI must not
+    # be able to reach a live listener's socket through a readout.
+    record ListenerRow, host : String, port : Int32, mode : String,
+      origin : String, listening : Bool, error : String?
+
+    def listener_rows : Array(ListenerRow)
+      rows = @extra_listeners.map do |s|
+        addr = Gori::BindAddress.authority(s.host, s.port)
+        org = s.origin
+        ListenerRow.new(s.host, s.port,
+          s.origin ? "reverse" : (s.transparent? ? "transparent" : "proxy"),
+          org ? "#{org[0]}://#{Gori::BindAddress.authority(org[1], org[2])}" : "",
+          s.listening?,
+          @listener_errors.find(&.starts_with?("#{addr} —")))
+      end
+      # Config-time rejections have no server object, so they would otherwise be counted by the
+      # chip and then missing from the list it opens.
+      @listener_errors.each do |err|
+        next if rows.any? { |r| r.error == err }
+        rows << ListenerRow.new(err.split(" —").first, 0, "invalid", "", false, err)
+      end
+      rows
+    end
+
     private def start_extra_listeners : Nil
+      # Reset to the CONFIG-time rejections rather than to empty: those are still true after a
+      # capture toggle, and clearing them would make an unusable listener disappear from the
+      # readout on the first `c` press.
       @listener_errors.clear
+      @listener_errors.concat(Settings.listener_config_errors)
       @extra_listeners.each do |server|
         server.start
       rescue ex
-        @listener_errors << "#{server.host}:#{server.port} — #{ex.message || "could not bind"}"
+        @listener_errors << "#{Gori::BindAddress.authority(server.host, server.port)} — #{ex.message || "could not bind"}"
         ::Log.warn { "listener #{server.host}:#{server.port} failed to bind: #{ex.message}" }
       end
     end

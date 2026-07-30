@@ -1,15 +1,33 @@
 require "json"
+require "uri"
+require "../bind_address"
 
 # LISTENERS section (settings.json "listeners"): ADDITIONAL sockets the proxy accepts on,
 # alongside the primary `network.bind_host`/`bind_port`. See settings.cr for the load/save
 # orchestration.
 #
 # The primary bind deliberately stays a scalar rather than becoming element 0 of this array.
-# "The proxy address" is singular everywhere it matters — the status bar, the statusline JSON,
-# the CA-download page, the self-loop refusal, `CaptureStatus`, and the live rebind — because it
-# is the address you point a client at. A transparent listener is not that; it is a socket the
-# kernel redirects traffic into. Folding them into one list would make every one of those
-# surfaces answer "which one?" for no gain.
+# It is not "an address gori listens on" — it is THE FORWARD-PROXY ENDPOINT A CLIENT IS
+# CONFIGURED AGAINST, and that is singular by construction. The status bar, the statusline
+# JSON, the CA-download page, the self-loop refusal, `CaptureStatus` and the live rebind all
+# keep answering about it; the additional listeners here are an INVENTORY, never element 0 of
+# a merged list. See #499 for the full argument, which is worth summarising because it is not
+# what the original version of this comment claimed:
+#
+#   - The CA page and the self-loop refusal are ALREADY per-listener — both ride `self_addr`,
+#     the accepting `Proxy::Server`'s own address (`server.cr:161-162`), and the page prefers
+#     the concrete address the device reached (`client_conn.cr:1371-1373`). A plural model
+#     would have regressed them from exactly right to right-on-average.
+#   - The statusline `proxy` object and `CaptureStatus` are contracts read OUTSIDE this
+#     process (a user's script; another gori instance's project picker). Turning either scalar
+#     into an array breaks them for no new information — the statusline already solved this
+#     shape additively when upstream routing stopped being singular.
+#   - The `listen` chip is a CONTROL (a click toggles capture), so a plural chip would have no
+#     defined click target.
+#
+# The asymmetry is real rather than cosmetic: gori can move the primary bind under the
+# operator (`server.cr:63-75`, the fallback ladder), so it has to be announced. Every address
+# in this array was typed here by the operator, so it only has to be confirmed.
 module Gori::Settings
   # proxy       — an ordinary forward proxy: clients send absolute-form requests or CONNECT.
   #               Use it to expose a second address (e.g. a LAN interface for a phone) without
@@ -18,20 +36,38 @@ module Gori::Settings
   #               absolute-form target, so the destination comes from the `Host` header for
   #               cleartext and from the TLS SNI for HTTPS. Requires the kernel to redirect
   #               traffic here (pf / iptables REDIRECT).
-  LISTENER_MODES = ["proxy", "transparent"]
+  # reverse     — the client believes it is talking to the origin, and the origin is DECLARED
+  #               (`origin`) rather than derived. Same pinned-destination path as transparent
+  #               with none of the derivation's failure modes, and no kernel rule: the client
+  #               just has to reach this socket. This is what makes gori usable against a
+  #               client that cannot be pointed at a proxy at all.
+  LISTENER_MODES = ["proxy", "transparent", "reverse"]
 
   # One additional listener. `target_port` is the port gori dials upstream for a TRANSPARENT
   # connection whose derived host names no port: a transparent listener cannot know the original
   # destination port from the socket alone (that needs SO_ORIGINAL_DST on Linux or a pf lookup on
   # macOS, neither of which gori does), so the redirect rule's intent is declared here instead —
   # the listener taking redirected :443 traffic sets 443. Ignored in proxy mode.
+  #
+  # `origin` is the REVERSE listener's declared destination, as an absolute URL
+  # ("https://api.example.com", "http://127.0.0.1:3000"). Deliberately NOT `target_port`
+  # reused: that field answers a different question (which port a DERIVED host should be
+  # dialled on) and `listener_error` already refuses it in the wrong mode rather than
+  # ignoring it. Reusing it would have meant one field with two meanings selected by `mode`,
+  # which is the thing that precedent exists to prevent.
   record Listener,
     host : String,
     port : Int32,
     mode : String = "proxy",
-    target_port : Int32 = 0 do
+    target_port : Int32 = 0,
+    origin : String = "",
+    rewrite_host : Bool = false do
     def transparent? : Bool
       mode == "transparent"
+    end
+
+    def reverse? : Bool
+      mode == "reverse"
     end
 
     # The upstream port for a transparent connection, when the derived host carries none.
@@ -41,6 +77,39 @@ module Gori::Settings
       return target_port if target_port > 0
       tls ? 443 : 80
     end
+
+    # `origin` split into {scheme, host, port}, or nil when it is absent or unusable.
+    # One parse shared by validation, the Session wiring and the readout, so a string that
+    # saves cannot then fail to dial — and so no two of them can disagree about which port
+    # a scheme-only origin means.
+    def origin_target : {String, String, Int32}?
+      Settings.parse_origin(origin)
+    end
+  end
+
+  # Parse a reverse listener's declared origin. Strict on purpose: an absolute URL with an
+  # http/https scheme and a host, port optional (the scheme's default). A bare
+  # "api.example.com:8443" is REFUSED rather than assumed http — the assumption would decide,
+  # silently, whether gori speaks TLS to the operator's origin.
+  def self.parse_origin(origin : String) : {String, String, Int32}?
+    raw = origin.strip
+    return nil if raw.empty?
+    uri = URI.parse(raw)
+    scheme = uri.scheme.try(&.downcase) || ""
+    return nil unless scheme == "http" || scheme == "https"
+    # Crystal's URI KEEPS the brackets on an IPv6 literal. Strip them: what comes out of here
+    # is dialled (`TCPSocket.new` wants a bare address) and used as the SNI / leaf name, and
+    # `BindAddress.authority` re-adds them wherever the host is displayed as an authority.
+    host = unbracket(uri.host.try(&.strip) || "")
+    return nil if host.empty?
+    port = uri.port || (scheme == "https" ? 443 : 80)
+    1 <= port <= 65535 ? {scheme, host, port} : nil
+  rescue URI::Error
+    nil
+  end
+
+  private def self.unbracket(h : String) : String
+    h.starts_with?('[') && h.ends_with?(']') ? h[1...-1] : h
   end
 
   class_property listeners : Array(Listener) = [] of Listener
@@ -51,6 +120,30 @@ module Gori::Settings
   private def self.parse_listeners(node : JSON::Any?) : Array(Listener)
     arr = node.try(&.as_a?)
     return listeners unless arr
+    listeners_from(arr)
+  end
+
+  # The `listeners` section AS IT IS ON DISK RIGHT NOW. `Settings.listeners` is the copy read
+  # at startup and never re-read, and the running sockets were built from THAT — so the two
+  # disagreeing is exactly the #508 drift, and a settings save is the one moment gori is
+  # holding both halves and can say so.
+  #
+  # A missing key means an EMPTY section here, not "keep current" as the tolerant load path
+  # has it: deleting every listener is a change the operator should hear about, and the load
+  # rule exists to protect a running config from a partial file, which is not this question.
+  # An unreadable or unparseable file falls back to "unchanged" — the corrupt-file warning is
+  # `load_root`'s job and crying restart on top of it would just be noise.
+  def self.disk_listeners : Array(Listener)
+    return [] of Listener unless File.exists?(path)
+    node = JSON.parse(File.read(path)).as_h?.try(&.[]?("listeners"))
+    arr = node.try(&.as_a?)
+    return [] of Listener unless arr
+    listeners_from(arr)
+  rescue
+    listeners
+  end
+
+  private def self.listeners_from(arr : Array(JSON::Any)) : Array(Listener)
     out = [] of Listener
     arr.each do |e|
       next unless o = e.as_h?
@@ -61,7 +154,9 @@ module Gori::Settings
       next unless LISTENER_MODES.includes?(mode)
       target = o["target_port"]?.try(&.as_i?) || 0
       target = 0 unless 0 <= target <= 65535
-      out << Listener.new(host, port, mode, target)
+      origin = o["origin"]?.try(&.as_s?).try(&.strip) || ""
+      rewrite_host = o["rewrite_host"]?.try(&.as_bool?) || false
+      out << Listener.new(host, port, mode, target, origin, rewrite_host)
     end
     out
   end
@@ -76,6 +171,8 @@ module Gori::Settings
             j.field "port", l.port
             j.field "mode", l.mode
             j.field "target_port", l.target_port if l.target_port > 0
+            j.field "origin", l.origin unless l.origin.empty?
+            j.field "rewrite_host", l.rewrite_host if l.rewrite_host
           end
         end
       end
@@ -99,7 +196,46 @@ module Gori::Settings
     if listener.target_port > 0 && !listener.transparent?
       return "settings: target_port only applies to a transparent listener"
     end
+    reverse_listener_error(listener)
+  end
+
+  # Same discipline as the target_port check above, for the reverse listener's two fields and
+  # in BOTH directions: a missing origin cannot be defaulted (there is nothing to forward to),
+  # and a present one in the wrong mode is a mode mistake rather than a field to drop.
+  private def self.reverse_listener_error(listener : Listener) : String?
+    unless listener.reverse?
+      return "settings: origin only applies to a reverse listener" unless listener.origin.strip.empty?
+      return "settings: rewrite_host only applies to a reverse listener" if listener.rewrite_host
+      return nil
+    end
+    return "settings: a reverse listener needs an origin (e.g. \"https://api.example.com\")" if listener.origin.strip.empty?
+    target = listener.origin_target
+    return "settings: listener origin must be an absolute http(s) URL, e.g. \"https://api.example.com\"" unless target
+    # `listener` first, then the rest: an entry is normally IN `Settings.listeners` when it is
+    # validated, but `listener_error` is also called on a candidate that is not yet (and the
+    # tightest loop of all — an origin naming this listener's own socket — would be the one
+    # missed if this relied on the array alone).
+    if self_target?(target[1], target[2], listener)
+      return "settings: listener origin #{listener.origin} points back at gori itself (forwarding loop)"
+    end
     nil
+  end
+
+  # True when dialing `host:port` would land back on a socket gori is serving — the primary
+  # bind or any configured listener. A reverse listener's destination is CONFIGURED, so unlike
+  # the transparent/forward cases this loop is one an operator creates by typing, and it is
+  # detectable here rather than only once traffic arrives.
+  #
+  # Best-effort in exactly the way `same_bind_host?` is (which is what this reuses, so the
+  # wildcard and localhost-alias spellings fold the same way here as they do there): NO name
+  # resolution, so an origin hostname that happens to resolve to the bind escapes this. The
+  # per-connection `Upstream.loops_to_self?` backstop covers the residue for a reverse listener
+  # whose origin names ITS OWN port; a cross-port loop through a hostname is not caught by
+  # either, and would surface as the 2048-connection wedge described in `upstream.cr:100-119`.
+  private def self.self_target?(host : String, port : Int32, own : Listener) : Bool
+    return true if port == own.port && same_bind_host?(host, own.host)
+    return true if port == effective_bind_port && same_bind_host?(host, effective_bind_host)
+    listeners.any? { |l| l.port == port && same_bind_host?(host, l.host) }
   end
 
   # The upstream port a transparent connection should use: the listener's configured
@@ -116,6 +252,18 @@ module Gori::Settings
   def self.valid_listeners : Array(Listener)
     listeners.reject do |l|
       !listener_error(l).nil? || (l.port == effective_bind_port && same_bind_host?(l.host, effective_bind_host))
+    end
+  end
+
+  # The listeners `valid_listeners` DROPPED for being unusable, each with its reason.
+  # Dropping is right — an unusable entry must not become a socket — but dropping silently is
+  # not: the operator's only other signal is that traffic never arrives. Session seeds its
+  # `listener_errors` from this so a rejected entry reads the same as one that failed to bind.
+  def self.listener_config_errors : Array(String)
+    listeners.compact_map do |l|
+      if err = listener_error(l)
+        "#{BindAddress.authority(l.host, l.port)} — #{err.lchop("settings: ")}"
+      end
     end
   end
 

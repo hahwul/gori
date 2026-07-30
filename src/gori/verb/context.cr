@@ -50,6 +50,7 @@ module Gori
       # captured for them. Its own intent rather than a settings jump — the answer is runtime
       # state (which hosts actually got bypassed), not the rule list settings:network edits.
       abstract def open_passthrough : Nil
+      abstract def open_listeners : Nil
       abstract def close_overlay : Nil
 
       # Emergency full repaint: redraw every cell (a full sync, not a diff). Recovers from

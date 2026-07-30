@@ -44,6 +44,10 @@ private class FakeContext < ExecContext
     @calls << :open_passthrough
   end
 
+  def open_listeners : Nil
+    @calls << :open_listeners
+  end
+
   def close_overlay : Nil
     @calls << :close_overlay
   end

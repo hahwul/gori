@@ -173,7 +173,8 @@ module Gori::Tui
                             scope : String, rules : String = "", intercept : String = "",
                             sandbox : String = "",
                             unread : Int32 = 0, capturing : Bool = true,
-                            write_failures : Int32 = 0, bypass : Int32 = 0) : Nil
+                            write_failures : Int32 = 0, bypass : Int32 = 0,
+                            listeners : Int32 = 0, listener_errors : Int32 = 0) : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
@@ -192,7 +193,8 @@ module Gori::Tui
       # only read" holds by POSITION. Nothing here is tinted to advertise that: see `Chip`.
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
-        write_failures: write_failures, bypass: bypass)
+        write_failures: write_failures, bypass: bypass,
+        listeners: listeners, listener_errors: listener_errors)
 
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
@@ -208,7 +210,8 @@ module Gori::Tui
     private def self.top_bar_chips(*, scope : String, probe : String, rules : String,
                                    intercept : String, sandbox : String, listen : String,
                                    unread : Int32, capturing : Bool,
-                                   write_failures : Int32, bypass : Int32 = 0) : Array(Chip)
+                                   write_failures : Int32, bypass : Int32 = 0,
+                                   listeners : Int32 = 0, listener_errors : Int32 = 0) : Array(Chip)
       chips = [] of Chip
       chips << Chip.new(:notify, "notify:#{unread}", Theme.accent, clickable: true) if unread > 0
       unless scope.empty?
@@ -233,6 +236,15 @@ module Gori::Tui
       # hot gate sandbox/intercept use red for. Absent until a bypass actually happens, so
       # its APPEARANCE is the discoverability signal a gori.log line structurally cannot be.
       chips << Chip.new(:bypass, "bypass:#{bypass}", Theme.yellow, clickable: true) if bypass > 0
+      # Additional listeners (#499). The primary bind keeps the `● host:port` chip to itself —
+      # it is the address a client is CONFIGURED against, and the only one gori can move under
+      # the operator, so it is the one that has to be announced. Everything counted here was
+      # typed into settings.json, so it is confirmed rather than announced: a count, with the
+      # per-listener facts in the drill-down. Absent when none are configured, so it costs
+      # nothing on the common single-socket session.
+      unless listeners <= 0
+        chips << listeners_chip(listeners, listener_errors)
+      end
       label, color = listen_chip(listen, capturing, write_failures)
       # Clickable: toggles capture on/off, the same action as the `bind`/capture verb — the
       # dot the user is already reading for capture state is the natural thing to press.
@@ -260,6 +272,21 @@ module Gori::Tui
     # the chip's colour: green while capturing, muted while paused, and red (with
     # the drop count appended) when writes are silently failing — that last case is
     # the one an operator can't afford to miss, so it outranks plain on/off.
+    # The additional-listener chip. `listeners:2` while every socket is up; `listeners:1/2`
+    # in RED when one is not — red rather than the passthrough chip's yellow because these
+    # are two different claims: yellow means "you are not seeing everything", red means a
+    # socket the operator configured is NOT there, which is the same class of fact as a
+    # blocked gate. The healthy count stays muted: a working listener is a fact, not a state
+    # to watch.
+    private def self.listeners_chip(listeners : Int32, errors : Int32) : Chip
+      if errors > 0
+        up = {listeners - errors, 0}.max
+        Chip.new(:listeners, "listeners:#{up}/#{listeners}", Theme.red, clickable: true)
+      else
+        Chip.new(:listeners, "listeners:#{listeners}", Theme.muted, clickable: true)
+      end
+    end
+
     private def self.listen_chip(listen : String, capturing : Bool, write_failures : Int32) : {String, Color}
       return {"● #{listen} (#{write_failures})", Theme.red} if write_failures > 0
       {"● #{listen}", capturing ? Theme.green : Theme.muted}
@@ -298,11 +325,13 @@ module Gori::Tui
                              probe : String = "", rules : String = "", intercept : String = "",
                              sandbox : String = "", listen : String, unread : Int32 = 0,
                              capturing : Bool = true, write_failures : Int32 = 0,
-                             bypass : Int32 = 0) : Symbol?
+                             bypass : Int32 = 0, listeners : Int32 = 0,
+                             listener_errors : Int32 = 0) : Symbol?
       return nil unless rect.contains?(mx, my)
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
-        write_failures: write_failures, bypass: bypass)
+        write_failures: write_failures, bypass: bypass,
+        listeners: listeners, listener_errors: listener_errors)
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
       rects = chip_layout(rect, chips, name_x + 1)
       chips.each_with_index do |chip, i|

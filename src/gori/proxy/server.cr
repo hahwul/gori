@@ -35,11 +35,25 @@ module Gori::Proxy
     # read off the socket.
     getter? transparent : Bool
 
+    # A REVERSE server serves clients that believe they are talking to the origin, like a
+    # transparent one — but the origin is DECLARED, not derived. `origin` is {scheme, host,
+    # port} from the listener's configuration, so there is no Host header to trust, no SNI to
+    # read, and none of the derivation failure modes those two carry. Nil for every other mode.
+    getter origin : {String, String, Int32}?
+
+    # Rewrite the forwarded `Host` header to the declared origin's authority. OFF by default,
+    # and that is a P7 decision rather than a convenience one: the client's bytes go upstream
+    # byte-exact unless the operator declares otherwise. A conventional reverse proxy does this
+    # implicitly; doing it implicitly here would mutate operator-supplied bytes on the live
+    # path, which is the one thing the provenance rule forbids.
+    getter? rewrite_host : Bool
+
     def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
                    max_connections : Int32 = MAX_CONNECTIONS,
-                   @transparent : Bool = false, @target_port : Int32 = 0)
+                   @transparent : Bool = false, @target_port : Int32 = 0,
+                   @origin : {String, String, Int32}? = nil, @rewrite_host : Bool = false)
       @server = nil.as(TCPServer?)
       @running = false
       @slots = Channel(Nil).new(max_connections) # counting semaphore: send=acquire, receive=release
@@ -155,7 +169,9 @@ module Gori::Proxy
         # a peer that RST'd between accept and here makes local_address raise, which
         # the rescue below turns into a clean close.
         local_host = (client.local_address.address rescue nil)
-        if @transparent
+        if org = @origin
+          serve_reverse(client, org)
+        elsif @transparent
           serve_transparent(client)
         else
           ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor,
@@ -170,6 +186,75 @@ module Gori::Proxy
       ensure
         @slots.receive # release the slot (even on error) so a new connection can be accepted
       end
+    end
+
+    # A reverse connection. Routed on the same first-byte discriminator as the transparent and
+    # CONNECT paths, so one reverse listener serves a cleartext client and a TLS one without the
+    # operator declaring which they will send.
+    #
+    # `self_addr:` IS passed here, and that is the one place reverse deliberately parts company
+    # with transparent (`serve_transparent` below omits it). Both guards it arms behave
+    # correctly for a declared origin:
+    #
+    #   - The self-PAGE cannot fire, because no `tls:` is passed and the guard at
+    #     `client_conn.cr:188` requires one. That is the same outcome transparent gets, for the
+    #     same reason — an origin-form request here means the client thinks it reached the
+    #     origin, not gori.
+    #   - The self-LOOP refusal SHOULD fire. Transparent can do without it (its destination
+    #     comes from the client, so a loop needs an odd client); a reverse origin is
+    #     configuration, so `Settings.listener_error` refuses the loop at save time and this is
+    #     the backstop for what a save-time string comparison cannot see — a hostname that
+    #     resolves to our own port, or a host override added after the save.
+    #
+    # SCOPE. Layer 2 (Sandbox + EXCLUDE) applies unchanged and is not optional: `@interceptor`
+    # is threaded in, so `ClientConn#handle_request`'s `sandbox_blocks?` gate runs per request
+    # exactly as it does for the forward proxy, and `serve_reverse_tls` adds the same
+    # pre-handshake host gate the CONNECT and transparent paths use.
+    #
+    # Layer 1 (include) is INHERITED UNCHANGED, and that is a decision rather than an
+    # oversight. "The operator configured this listener to point here" is a strong Layer-1
+    # argument — but only on a surface where Layer 1 AUTHORISES AN OUTBOUND SEND gori
+    # originates (the Repeater, fuzz, discover). A reverse listener originates nothing: it
+    # forwards a request a client made, and on the capture path Layer 1 is a LENS over what
+    # was captured, not a gate on what may be sent. There is no send here to authorise, so the
+    # argument has nothing to attach to, and giving this listener its own Layer-1 answer would
+    # only make the History lens treat identical traffic differently depending on which socket
+    # it arrived through.
+    private def serve_reverse(client : TCPSocket, origin : {String, String, Int32}) : Nil
+      scheme, host, port = origin
+      first = client.peek
+      if first && !first.empty? && first[0] == 0x16_u8
+        return serve_reverse_tls(client, origin)
+      end
+      ClientConn.new(client, scheme, @sink,
+        fixed_host: host, fixed_port: port, tls_upstream: scheme == "https",
+        rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
+        self_addr: {@host, @port}, rewrite_fixed_host: @rewrite_host).run
+    end
+
+    # TLS terminated by a reverse listener. The leaf is minted for the CONFIGURED origin host,
+    # never for the client's SNI — that is the whole point of the mode, and preferring SNI here
+    # would quietly reintroduce the derivation this mode exists to remove (a client offering a
+    # name we do not forward to would get a certificate for a host gori never contacts).
+    # Practically it means the client must reach this socket under the origin's name, which is
+    # the ordinary reverse-proxy arrangement: a hosts entry, or a DNS record, pointing at it.
+    #
+    # From `intercept` onward this is byte-for-byte the CONNECT path, so ALPN reflection and
+    # capture behave identically. Every DROP path closes the client socket explicitly, for the
+    # reason spelled out on `serve_transparent_tls`.
+    private def serve_reverse_tls(client : TCPSocket, origin : {String, String, Int32}) : Nil
+      scheme, host, port = origin
+      tls = @tls
+      return close_client(client) unless tls
+      # Same pre-handshake sandbox gate as the transparent and CONNECT paths. The host is
+      # configured rather than derived, so this can only fire on a listener the operator
+      # pointed at a host their own sandbox excludes — but Layer 2 is the layer that must be
+      # identical on every surface, so it is applied here exactly as everywhere else.
+      return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
+      # No PrefixIO: `peek` above did not consume, so the ClientHello is still in the socket's
+      # buffer for OpenSSL to read. (The transparent path needs one only because peek_sni does
+      # consume what it parses.)
+      tls.intercept(host, port, client, @sink, tls_upstream: scheme == "https")
     end
 
     # A transparent connection. Route on the first byte, the same discriminator the CONNECT path

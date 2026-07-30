@@ -66,6 +66,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:open_passthrough)
   end
 
+  def open_listeners : Nil
+    rec(:open_listeners)
+  end
+
   def close_overlay : Nil
     rec(:close_overlay)
   end

@@ -63,6 +63,7 @@ require "./notifications"
 require "./pet"
 require "./notifications_overlay"
 require "./passthrough_overlay"
+require "./listeners_overlay"
 require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
@@ -1369,17 +1370,19 @@ module Gori::Tui
         rules: rules_label, intercept: intercept_label, sandbox: sandbox_label,
         listen: listen_chip_label,
         unread: @notifications.unread, capturing: @session.capturing?,
-        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count)
+        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
+        listeners: listener_chip_count, listener_errors: @session.listener_errors.size)
       return false unless tag
 
       case tag
-      when :notify   then open_notifications
-      when :scope    then scope_toggle_lens
-      when :probe    then probe_set_mode
-      when :bypass   then open_passthrough
-      when :listen   then toggle_capture
-      when :palette  then open_palette
-      when :settings then open_preferences
+      when :notify    then open_notifications
+      when :scope     then scope_toggle_lens
+      when :probe     then probe_set_mode
+      when :bypass    then open_passthrough
+      when :listeners then open_listeners
+      when :listen    then toggle_capture
+      when :palette   then open_palette
+      when :settings  then open_preferences
       end
       true
     end
@@ -2792,7 +2795,8 @@ module Gori::Tui
         scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
         sandbox: sandbox_label,
         unread: @notifications.unread, capturing: @session.capturing?,
-        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count)
+        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
+        listeners: listener_chip_count, listener_errors: @session.listener_errors.size)
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
       # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
@@ -3235,6 +3239,24 @@ module Gori::Tui
       # and via leave_overlay so no pop-back lands on top of it.
       ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
+    end
+
+    # Open the additional-listener inventory (the `listeners:N` top-bar chip + the
+    # app.listeners verb). Read-only, so there is no on_commit — the section is edited in
+    # settings.json and is not applied until restart (#508).
+    def open_listeners : Nil
+      ov = ListenersOverlay.new(@session)
+      # Same ordering rule as open_passthrough: drop this modal BEFORE raising the palette,
+      # and via leave_overlay so no pop-back lands on top of it.
+      ov.on_palette = -> { leave_overlay; open_palette }
+      open_overlay(ov)
+    end
+
+    # What the chip counts. Deliberately `listener_rows` rather than the running-server count:
+    # an entry REJECTED as unusable never became a server, and a chip that omitted it would
+    # read `listeners:1` for a two-entry config — the silent drop this readout exists to end.
+    private def listener_chip_count : Int32
+      @session.listener_rows.size
     end
 
     # Announce hosts newly added to the session-global passthrough inventory
@@ -4667,6 +4689,14 @@ module Gori::Tui
     # (existing connections are kept — only the accept socket moves). A failed
     # rebind (port in use / bad address) keeps the current bind.
     private def apply_settings(save_msg : String) : String
+      # The `listeners` section has no TUI editor and is not reconciled live (#508), so a save
+      # is the one moment gori holds both the running sockets and the edited file and can say
+      # they differ. A notification rather than a toast: the toast is about the save that just
+      # happened, and this is about work that has NOT happened yet.
+      if @session.listeners_changed_on_disk?
+        @notifications.push(:warn,
+          "listeners: settings.json no longer matches the running sockets — restart gori to apply")
+      end
       proxy = @session.proxy
       # Rebind against the EFFECTIVE bind (a project override wins over the global). So a global
       # settings:network edit while a project pins its own bind is a no-op here (effective

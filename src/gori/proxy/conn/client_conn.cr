@@ -37,6 +37,13 @@ module Gori::Proxy
     # none. It exists for the TRANSPARENT listener: there the client dialled a port the kernel
     # redirected, so 80 is not necessarily right, and the socket alone cannot reveal the original
     # destination (see Settings::Listener#target_port). nil keeps the scheme default.
+    #
+    # `rewrite_fixed_host` replaces the forwarded `Host` header with `fixed_host`'s authority.
+    # It exists ONLY for a reverse listener whose operator declared `rewrite_host: true`, and it
+    # is off everywhere else including the post-CONNECT tunnel — a conventional reverse proxy
+    # rewrites Host implicitly, but that is a mutation of operator-supplied bytes on the live
+    # path (P7), so here it has to be asked for. What is CAPTURED is unaffected: the client's
+    # original head is what History shows, exactly as with a Match&Replace-free forward.
     def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
@@ -44,7 +51,8 @@ module Gori::Proxy
                    @host_overrides : Gori::HostOverrides? = nil,
                    @self_addr : {String, Int32}? = nil,
                    @local_host : String? = nil,
-                   @default_port : Int32? = nil)
+                   @default_port : Int32? = nil,
+                   @rewrite_fixed_host : Bool = false)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -1106,10 +1114,13 @@ module Gori::Proxy
     end
 
     private def resolve_forward(req : Codec::RawRequest) : {String, Int32, String, Bytes}
-      # Post-CONNECT tunnel: all requests go to the pinned origin, byte-exact
-      # (they arrive origin-form over the decrypted channel).
+      # Post-CONNECT tunnel, or a reverse listener: all requests go to the pinned origin,
+      # byte-exact (they arrive origin-form over the decrypted channel / straight off the
+      # reverse socket). The declared Host rewrite is the one exception, and only when the
+      # operator asked for it.
       if fixed = @fixed_host
-        return {fixed, @fixed_port, @scheme, req.raw_head}
+        head = @rewrite_fixed_host ? rewrite_host_header(req, fixed, @fixed_port) : req.raw_head
+        return {fixed, @fixed_port, @scheme, head}
       end
 
       target = req.target
@@ -1133,6 +1144,61 @@ module Gori::Proxy
 
     # New request-line + the original header block (everything from the first
     # CRLF onward), so only the request-target changes.
+    # Replace the forwarded `Host` header with the pinned origin's authority (see
+    # `rewrite_fixed_host`). Every other byte of the head is copied through verbatim, including
+    # the request line, the header order, and any oddity in the client's spelling — this
+    # rewrites ONE field, it does not normalise a head.
+    #
+    # Only the FIRST Host header is replaced and any later duplicate is dropped: a head with two
+    # Host values is a request-smuggling shape, and leaving a second one behind after declaring
+    # the origin would hand the origin the ambiguity we were asked to remove. A head with none
+    # gains one immediately after the request line (where a client would have put it).
+    private def rewrite_host_header(req : Codec::RawRequest, host : String, port : Int32) : Bytes
+      raw = req.raw_head
+      nl = raw.index(0x0a_u8) || return raw # no LF at all? leave as-is
+      default_port = @scheme == "https" ? 443 : 80
+      authority = port == default_port ? bracketed(host) : "#{bracketed(host)}:#{port}"
+      io = IO::Memory.new(raw.size + authority.bytesize + 16)
+      io.write(raw[0, nl + 1]) # request line, verbatim, including its LF
+      seen = false
+      pos = nl + 1
+      while pos < raw.size
+        eol = raw[pos..].index(0x0a_u8)
+        line_end = eol ? pos + eol + 1 : raw.size
+        line = raw[pos, line_end - pos]
+        if host_header_line?(line)
+          # First one becomes the declared authority; a duplicate is dropped entirely.
+          unless seen
+            seen = true
+            io << "Host: " << authority << "\r\n"
+          end
+        else
+          io.write(line)
+        end
+        pos = line_end
+      end
+      return io.to_slice if seen
+      # No Host at all (a bare HTTP/1.0 client): insert one rather than forward a head the
+      # origin will reject, since we know the authority by declaration.
+      out = IO::Memory.new(raw.size + authority.bytesize + 16)
+      out.write(raw[0, nl + 1])
+      out << "Host: " << authority << "\r\n"
+      out.write(raw[(nl + 1)..])
+      out.to_slice
+    end
+
+    # A header line whose NAME is `Host`. Compared before the colon so a value containing
+    # "host:" cannot match, and case-insensitively because the field name is.
+    private def host_header_line?(line : Bytes) : Bool
+      colon = line.index(0x3a_u8)
+      return false unless colon == 4
+      String.new(line[0, 4]).compare("Host", case_insensitive: true) == 0
+    end
+
+    private def bracketed(host : String) : String
+      host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+    end
+
     private def rewrite_request_line(req : Codec::RawRequest, origin_target : String) : Bytes
       raw = req.raw_head
       nl = raw.index(0x0a_u8) || return raw # no LF at all? leave as-is

@@ -94,7 +94,8 @@ Additional sockets the proxy accepts on, alongside the primary `network.bind_hos
   "listeners": [
     { "host": "192.168.1.10", "port": 8081, "mode": "proxy" },
     { "host": "127.0.0.1", "port": 8080, "mode": "transparent", "target_port": 80 },
-    { "host": "127.0.0.1", "port": 8443, "mode": "transparent", "target_port": 443 }
+    { "host": "127.0.0.1", "port": 8443, "mode": "transparent", "target_port": 443 },
+    { "host": "0.0.0.0", "port": 9000, "mode": "reverse", "origin": "https://api.example.com" }
   ]
 }
 ```
@@ -103,12 +104,20 @@ Additional sockets the proxy accepts on, alongside the primary `network.bind_hos
 |-----|------|---------|-------------|
 | `host` | string | — | Listen address. Required |
 | `port` | integer | — | Listen port. Required |
-| `mode` | string | `"proxy"` | `proxy` or `transparent`. An unknown mode drops the entry rather than defaulting to `proxy`, which could expose an unintended forward proxy on a LAN address |
+| `mode` | string | `"proxy"` | `proxy`, `transparent` or `reverse`. An unknown mode drops the entry rather than defaulting to `proxy`, which could expose an unintended forward proxy on a LAN address |
 | `target_port` | integer | `80` / `443` | Transparent only: the upstream port to use when the derived destination names none |
+| `origin` | string | — | Reverse only, required: the absolute `http(s)` URL to forward to |
+| `rewrite_host` | boolean | `false` | Reverse only: replace the forwarded `Host` with the origin's authority |
 
-The primary bind stays a scalar on purpose. "The proxy address" is singular everywhere it is reported — the status bar, the statusline JSON, the CA-download page, the self-loop refusal, the capture-status sidecar, the live rebind — because it is the address you *point a client at*. A transparent listener is not that; it is a socket the kernel redirects traffic into.
+A field used in the wrong mode is **rejected**, not ignored — `target_port` outside transparent, `origin` or `rewrite_host` outside reverse. Silently dropping it would leave a config that reads as if it does something it does not.
 
-An extra listener that fails to bind (privileged port, address in use) does **not** stop capture on the primary, and the failure is recorded rather than swallowed — a redirect rule aimed at a socket that never bound is invisible from the client's side. An entry duplicating the primary address is skipped.
+The primary bind stays a scalar on purpose. It is not "an address gori listens on"; it is *the forward-proxy endpoint you configure a client against*, and that is singular by construction. It stays what the status bar, the statusline JSON, the capture-status sidecar and the live rebind all report. Additional listeners are an **inventory** instead: a `listeners:N` chip appears beside the listen chip whenever any are configured, and opens a read-only list of every one with its mode, address, origin and status. The chip turns red as `listeners:N/M` when one of them is not up.
+
+The asymmetry is deliberate. gori can move the primary bind under you (a taken port falls back), so it has to be announced. Every address in `listeners` was typed there by you, so it only has to be confirmed.
+
+An extra listener that fails to bind (privileged port, address in use) does **not** stop capture on the primary, and the failure is recorded rather than swallowed — it shows in the `listeners:N/M` chip and names its reason in the list. An entry that is unusable for any other reason (a missing `origin`, a field in the wrong mode) is dropped from the running set and listed there too, rather than vanishing. An entry duplicating the primary address is skipped.
+
+The section is read at startup and is **not** applied live: editing it and saving raises a notification telling you a restart is needed.
 
 #### Transparent mode
 
@@ -129,6 +138,26 @@ On macOS, an equivalent `pf` `rdr` rule.
 **Why `target_port` exists.** A redirected socket does not reveal the port the client originally dialled — recovering it needs `SO_ORIGINAL_DST` on Linux or a `pf` lookup on macOS, neither of which gori does. So the redirect rule's intent is declared in the config instead: the listener taking redirected `:443` traffic sets `target_port: 443`. A `Host` header that names a port still wins over it.
 
 Everything else behaves exactly as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. Two cases are dropped rather than guessed — a TLS connection with **no SNI** (no destination to derive; logged once), and a host the Sandbox rules out (there is no way to answer a TLS client with a 403).
+
+#### Reverse mode
+
+A reverse listener also serves clients that believe they are talking to the origin, but the origin is **declared** rather than derived. gori answers as if it were the origin and forwards to `origin`.
+
+```json
+{ "host": "0.0.0.0", "port": 9000, "mode": "reverse", "origin": "https://api.example.com" }
+```
+
+This is the mode for a client that cannot be pointed at a proxy at all: a mobile app with no proxy setting, a CI step, an appliance. There is no `CONNECT`, no proxy configuration, and no firewall rule — the client just has to reach the socket.
+
+Because the destination is configuration rather than derivation, it has none of transparent mode's failure modes. A request with no `Host` header is served. A `Host` naming somewhere else is served, and forwarded to `origin` regardless — the header is not consulted for routing.
+
+`origin` must be an absolute URL with an `http` or `https` scheme; the port defaults from the scheme. A bare `api.example.com:8443` is refused rather than assumed `http`, because the assumption would silently decide whether gori speaks TLS to your origin. An origin pointing back at gori's own primary bind or at another listener is refused when you save, since that is a forwarding loop you can create by typing.
+
+**TLS.** The listener terminates TLS when the client opens with one, using a leaf minted for the **configured** origin host, never for the client's SNI — reading the SNI would reintroduce exactly the derivation this mode removes. In practice the client must reach the socket under the origin's name, which is the ordinary reverse-proxy arrangement: a hosts entry or a DNS record. The origin leg follows the origin's own scheme, so `"origin": "http://127.0.0.1:3000"` gives you TLS in front of a cleartext backend.
+
+**`rewrite_host`.** A conventional reverse proxy rewrites `Host` to the upstream's name. gori does not do that implicitly: rewriting is a mutation of your client's bytes on the live path, so it is opt-in. With `rewrite_host: false` (the default) the client's `Host` reaches the origin byte for byte. With it on, the `Host` is replaced with the origin's authority — one field, with the rest of the head untouched, and a duplicated `Host` collapsed to one.
+
+Scope works as everywhere else: the Sandbox and `exclude` rules apply unchanged, gated per request and before the TLS handshake. The `include` list stays a lens over captured traffic rather than a gate here, because a reverse listener forwards what a client sent and never originates a request of its own.
 
 ### upstream_rules
 

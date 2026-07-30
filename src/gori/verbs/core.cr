@@ -43,6 +43,13 @@ module Gori
         "app.passthrough", "TLS passthrough hosts", "List hosts relayed without decryption (nothing captured for them)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_passthrough; nil }
 
+      # The additional-listener inventory (#499). Palette + the `listeners:N` top-bar chip,
+      # no chord — like app.passthrough, the chip is how you find out there is something to
+      # look at, and this entry is what makes it keyboard-reachable rather than mouse-only.
+      r.register Verb::Definition.new(
+        "app.listeners", "Listeners", "List the additional sockets this session serves (the primary bind is on the listen chip)",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_listeners; nil }
+
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
         [Verb::Chord.new("c")]) { |ctx| ctx.toggle_capture; nil }

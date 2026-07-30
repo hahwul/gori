@@ -14,7 +14,15 @@ module Gori::Proxy
     # Wrap `client` (already past the 200 reply) as a TLS server using a
     # per-host leaf, dial host:port as a TLS client, and run the decrypted
     # HTTP/1.1 request loop, capturing flows to `sink`.
-    abstract def intercept(host : String, port : Int32, client : IO, sink : FlowSink) : Nil
+    #
+    # `tls_upstream: false` terminates TLS with the client but speaks CLEARTEXT to the origin.
+    # Only a REVERSE listener can ask for that (`server.cr#serve_reverse_tls`), and only
+    # because its origin scheme is declared: on the CONNECT and transparent paths the client
+    # asked for `https://host`, so downgrading the origin leg would be gori silently weakening
+    # a connection the client believes is end-to-end TLS. Defaulted to true so those two paths
+    # keep their exact behaviour.
+    abstract def intercept(host : String, port : Int32, client : IO, sink : FlowSink,
+                           tls_upstream : Bool = true) : Nil
 
     # Serve the self-page over TLS after a CONNECT to a RESERVED host (SelfPage.magic_host?)
     # — a proxy-configured client that browsed to `https://gori.proxy/`. No origin is dialed

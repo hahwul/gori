@@ -39,6 +39,7 @@ module Gori::Tui
     Hotkeys
     Notifications
     Passthrough
+    Listeners
     ProbeActive
     DiscoverConfig
     DiscoverHeaders

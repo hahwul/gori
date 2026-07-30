@@ -91,11 +91,16 @@ module Gori::Proxy::Tls
       client_tls.try(&.close) rescue nil
     end
 
-    def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink) : Nil
+    def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink,
+                  tls_upstream : Bool = true) : Nil
       # ALPN reflection (#323): advertise h2 to the client only when the ORIGIN speaks it. A
       # non-nil result is a live upstream already confirmed h2 (reflect_origin_h2 dials it and
       # keeps it for reuse); nil means fall the client back to the h1 path. See that helper.
-      upstream = reflect_origin_h2(host, port)
+      #
+      # Skipped entirely for a CLEARTEXT origin: reflection is an ALPN probe, and ALPN only
+      # exists inside a TLS handshake. gori has no h2c support to reflect instead, so the
+      # client is kept on h1 — which is what the nil path already means.
+      upstream = tls_upstream ? reflect_origin_h2(host, port) : nil
 
       server_ctx = @ca.context_for(host, advertise_h2: !upstream.nil?)
       # sync_close: true is REQUIRED, not cosmetic. The h2/ws relays tear down by
@@ -127,9 +132,9 @@ module Gori::Proxy::Tls
         # request resolves to the pinned CONNECT authority (resolve_forward short-circuits on
         # @fixed_host), so arming them here would test the wrong host on every request.
         Proxy::ClientConn.new(
-          client_tls, "https", sink,
+          client_tls, tls_upstream ? "https" : "http", sink,
           fixed_host: host, fixed_port: port,
-          tls_upstream: true, verify_upstream: @verify_upstream,
+          tls_upstream: tls_upstream, verify_upstream: @verify_upstream,
           rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides,
         ).run
