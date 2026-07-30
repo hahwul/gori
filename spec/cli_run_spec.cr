@@ -130,6 +130,53 @@ describe Gori::Repeater::FlowRequest do
     Gori::Repeater::FlowRequest.parse_target("http://h:8080").should eq({"http", "h", 8080})
     Gori::Repeater::FlowRequest.parse_target("h:9000").should eq({"http", "h", 9000}) # bare → http
     Gori::Repeater::FlowRequest.parse_target("https://h:8443/p").should eq({"https", "h", 8443})
+    # ws/wss carry their own defaults, and an IPv6 literal comes back BRACKET-FREE (what
+    # TCPSocket dials) — which is why `authority` has to put the brackets back.
+    Gori::Repeater::FlowRequest.parse_target("wss://h").should eq({"wss", "h", 443})
+    Gori::Repeater::FlowRequest.parse_target("ws://h").should eq({"ws", "h", 80})
+    Gori::Repeater::FlowRequest.parse_target("https://[::1]:8443").should eq({"https", "::1", 8443})
+  end
+
+  # The `Host:` header value, shared by the engine, the CLI's --target sync and the TUI editor.
+  # Both surfaces used to hand-roll it, and both got it wrong — see the authority specs below.
+  describe "Gori::Repeater::FlowRequest.authority" do
+    auth = ->(s : String, h : String, p : Int32) { Gori::Repeater::FlowRequest.authority(s, h, p) }
+
+    it "omits the port when it is the scheme default, ws/wss included" do
+      auth.call("http", "h", 80).should eq("h")
+      auth.call("https", "h", 443).should eq("h")
+      auth.call("ws", "h", 80).should eq("h")
+      # The CLI omitted `wss` from this test, so a wss target (parse_target → 443) produced
+      # `Host: h:443` while the TUI produced `Host: h` for the same session.
+      auth.call("wss", "h", 443).should eq("h")
+    end
+
+    it "keeps a non-default port, including one that is default for the other scheme" do
+      auth.call("http", "h", 8080).should eq("h:8080")
+      auth.call("wss", "h", 8443).should eq("h:8443")
+      auth.call("http", "h", 443).should eq("h:443")
+      auth.call("https", "h", 80).should eq("h:80")
+    end
+
+    it "brackets an IPv6 literal (RFC 7230 §5.4) — neither surface did" do
+      # `Host: ::1:8443` is not a valid authority; a strict origin rejects it and any splitter
+      # reading it back gets host "::" and garbage for the port. Verified on the wire.
+      auth.call("https", "::1", 8443).should eq("[::1]:8443")
+      auth.call("https", "::1", 443).should eq("[::1]")
+      auth.call("wss", "fe80::1", 443).should eq("[fe80::1]")
+    end
+
+    it "does not double-bracket a host that already carries them" do
+      auth.call("https", "[::1]", 8443).should eq("[::1]:8443")
+    end
+
+    it "is the authority half of build_target, so the two cannot drift" do
+      {"https://h", "http://h:8080", "wss://h", "https://[::1]:8443", "wss://[::1]"}.each do |t|
+        scheme, host, port = Gori::Repeater::FlowRequest.parse_target(t)
+        Gori::Repeater::FlowRequest.build_target(scheme, host, port)
+          .should eq("#{scheme}://#{auth.call(scheme, host, port)}")
+      end
+    end
   end
 
   it "only rewrites a well-formed absolute request line" do

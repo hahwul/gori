@@ -1579,8 +1579,10 @@ module Gori::Tui
       return if @req_hex_edit || @ws_mode || @grpc_mode
       scheme, host, port = parse_target
       return if host.empty?
-      default_port = (scheme == "https" || scheme == "wss") ? 443 : 80
-      authority = port == default_port ? host : "#{host}:#{port}"
+      # Shared with the engine and the CLI (build_target derives from the same call), so the
+      # three cannot drift. The local formula this replaced never re-bracketed an IPv6 literal —
+      # parse_target hands back a bracket-free host — and so wrote the malformed `Host: ::1:8443`.
+      authority = Repeater::FlowRequest.authority(scheme, host, port)
       env_sep = @editor.text.index("\n\n")
       return unless env_sep
       head_lines = @editor.text[0, env_sep].split('\n')

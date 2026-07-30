@@ -83,14 +83,36 @@ module Gori
         "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
       end
 
+      # The default port for a scheme, **ws/wss included**.
+      #
+      # Deliberately NOT `Discover::Url.default_port?`, which knows only http/https: it answers
+      # false for wss/443 and so would hang a redundant `:443` on every secure-WebSocket
+      # authority. The crawler never speaks ws; the repeater does. Keep the two apart rather
+      # than "unifying" them into that bug.
+      def self.default_port(scheme : String) : Int32
+        (scheme == "https" || scheme == "wss") ? 443 : 80
+      end
+
+      def self.default_port?(scheme : String, port : Int32) : Bool
+        port == default_port(scheme)
+      end
+
+      # The authority — `host[:port]`, IPv6 literal bracketed, port omitted when it is the
+      # scheme default. This is BOTH the `Host:` header value (RFC 7230 §5.4) and the part
+      # `build_target` hangs off `scheme://`, so both derive from here and cannot drift.
+      #
+      # An IPv6 literal (contains ':') must be bracketed, else the `:port` suffix and
+      # `URI.parse` in `parse_target` split it wrong (host → ""). `parse_target` returns a
+      # BRACKET-FREE host (what TCPSocket wants to dial), so this is where they come back.
+      def self.authority(scheme : String, host : String, port : Int32) : String
+        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+        default_port?(scheme, port) ? h : "#{h}:#{port}"
+      end
+
       # "scheme://host[:port]", omitting the port when it's the scheme default —
       # matches RepeaterView#build_target so the parsed {scheme,host,port} round-trips.
       def self.build_target(scheme : String, host : String, port : Int32) : String
-        default = (scheme == "https" || scheme == "wss") ? 443 : 80
-        # An IPv6 literal host (contains ':') must be bracketed in a URL, else both the
-        # `:port` suffix below and URI.parse in parse_target split it wrong (host → "").
-        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
-        port == default ? "#{scheme}://#{h}" : "#{scheme}://#{h}:#{port}"
+        "#{scheme}://#{authority(scheme, host, port)}"
       end
 
       # {scheme, host, port} parsed back out of a target string (the inverse of
@@ -101,7 +123,7 @@ module Gori
         uri = URI.parse(raw)
         scheme = uri.scheme || "http"
         host = strip_ipv6_brackets(uri.host || "")
-        port = uri.port || ((scheme == "https" || scheme == "wss") ? 443 : 80)
+        port = uri.port || default_port(scheme)
         {scheme, host, port}
       rescue
         {"http", "", 0}

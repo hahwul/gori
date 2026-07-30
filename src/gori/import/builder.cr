@@ -134,12 +134,15 @@ module Gori
       # already-bracketed host cannot double-bracket to `[[::1]]` — the same guard every sibling
       # carries (`store/models.cr:107`, `repeater/h2_engine.cr:300`, `proxy/upstream.cr:206`).
       #
-      # NOTE: several other places build this same authority (those three, plus
-      # `mcp/request_builder.cr:90`, `discover/engine.cr:187`, `tui/repeater_view.cr:1582`,
-      # `cli/run/repeater.cr:581`) and they do NOT agree — some omit the bracketing, and the CLI
-      # and TUI repeater paths disagree about `wss`. Only the scheme/port half has one home so
-      # far (`Discover::Url.default_port?`, reused here); consolidating the rest spans the h2,
-      # repeater, MCP and discover paths and wants its own change.
+      # NOTE: other places build this same authority and do not all agree — `store/models.cr`,
+      # `repeater/h2_engine.cr` and `proxy/upstream.cr` bracket; `mcp/request_builder.cr:90` and
+      # `discover/engine.cr:187` still do not. The repeater pair that used to be wrong here is
+      # now one home, `Repeater::FlowRequest.authority`.
+      #
+      # This does NOT delegate to that one, deliberately: it is ws/wss-aware, and import speaks
+      # only http/https (`normalize_url`), so `Discover::Url.default_port?` is the right
+      # predicate here and reaching into `Repeater` from `Import` would be the wrong dependency
+      # for no behavioural gain. The remaining MCP/discover copies want their own change.
       def self.host_header(scheme : String, host : String, port : Int32) : String
         authority = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
         Discover::Url.default_port?(scheme, port) ? authority : "#{authority}:#{port}"

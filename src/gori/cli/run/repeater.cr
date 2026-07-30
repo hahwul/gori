@@ -578,8 +578,12 @@ module Gori
         # with a different claimed Host, so that override must win.
         if (override = target_override) && !custom_headers.has_key?("host")
           scheme_part, host_part, port_part = Repeater::FlowRequest.parse_target(override)
-          default_port = scheme_part == "https" ? 443 : 80
-          host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
+          # FlowRequest.authority, not a local formula: the two it replaced were both wrong.
+          # This one omitted `wss` from the default-port test, so a `wss://h` target — which
+          # parse_target resolves to port 443 — got `Host: h:443` while the TUI wrote `Host: h`
+          # for the same session. It also never re-bracketed an IPv6 literal (parse_target
+          # returns it bracket-free), emitting the malformed `Host: ::1:8443`.
+          host_hdr_val = Repeater::FlowRequest.authority(scheme_part, host_part, port_part)
           host_idx = new_lines.index { |l| line_name.call(l).compare("Host", case_insensitive: true) == 0 }
           if host_idx
             new_lines[host_idx] = "#{line_name.call(new_lines[host_idx])}: #{host_hdr_val}"
