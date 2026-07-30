@@ -89,6 +89,11 @@ module Gori
           j.field "response_size", row.response_size
           j.field "duration_us", row.duration_us
           j.field "content_type", text(row.content_type)
+          # gori answered this one itself from a short-circuit rule — no origin was involved
+          # (#511). Emitted on EVERY row, not only the true ones, because a model reading this
+          # feed has no other way to tell a fabricated response from a real one, and an absent
+          # field reads as "not applicable" rather than "false".
+          j.field "short_circuited", row.short_circuited?
         end
       end
 

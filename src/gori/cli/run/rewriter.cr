@@ -26,16 +26,29 @@ module Gori
       private def self.rewriter_rule_row(r : Store::MatchRule) : String
         mark = r.enabled? ? "x" : " "
         side = r.target.request? ? "REQ" : "RES"
-        tag = case r.op
-              when .replace?    then "#{r.match_kind.regex? ? "re" : "sub"}/#{r.part.body? ? 'B' : 'H'}"
-              when .add_header? then "+hdr"
-              when .set_header? then "~hdr"
-              else                   "-hdr"
-              end
-        body = r.op.remove_header? ? r.pattern : "#{r.pattern} -> #{r.replacement}"
         name = r.name.empty? ? "" : " [#{r.name}]"
         host = r.host.empty? ? "" : " @#{r.host}"
-        "##{r.id} [#{mark}] #{side} #{tag.ljust(5)}#{name}#{host}  #{body}"
+        "##{r.id} [#{mark}] #{side} #{rewriter_op_tag(r).ljust(5)}#{name}#{host}  #{rewriter_rule_body(r)}"
+      end
+
+      private def self.rewriter_op_tag(r : Store::MatchRule) : String
+        case r.op
+        when .replace?       then "#{r.match_kind.regex? ? "re" : "sub"}/#{r.part.body? ? 'B' : 'H'}"
+        when .add_header?    then "+hdr"
+        when .set_header?    then "~hdr"
+        when .short_circuit? then "stub"
+        else                      "-hdr"
+        end
+      end
+
+      # `=>` rather than `->` for a stub: it answers instead of forwarding, so the row should
+      # not read like the four rewrite ops.
+      private def self.rewriter_rule_body(r : Store::MatchRule) : String
+        case r.op
+        when .remove_header? then r.pattern
+        when .short_circuit? then "#{r.pattern} => #{RuleStub.summary(r.replacement, r.body_file)}"
+        else                      "#{r.pattern} -> #{r.replacement}"
+        end
       end
 
       private def self.cmd_rewriter_list(args : Array(String)) : Nil
@@ -77,6 +90,7 @@ module Gori
                     j.field "host", r.host
                     j.field "pattern", r.pattern
                     j.field "replacement", r.replacement
+                    j.field "body_file", r.body_file
                   end
                 end
               end
@@ -98,8 +112,20 @@ module Gori
         when "add_header"    then Store::RuleOp::AddHeader
         when "set_header"    then Store::RuleOp::SetHeader
         when "remove_header" then Store::RuleOp::RemoveHeader
-        else                      abort "gori run rewriter: invalid --op '#{s}' (replace|add_header|set_header|remove_header)"
+        when "short_circuit" then Store::RuleOp::ShortCircuit
+        else                      abort "gori run rewriter: invalid --op '#{s}' (replace|add_header|set_header|remove_header|short_circuit)"
         end
+      end
+
+      # `--value` for a short-circuit rule is the whole canned response, which is multi-line
+      # and awkward to pass on a command line. `--response-file` reads it from a file instead
+      # (`-` reads stdin), so `gori run rewriter add --op=short_circuit --find=/admin
+      # --response-file=stub.http` is the natural spelling. Distinct from `--body-file`, which
+      # points at the BODY the live proxy reads per request; this one is read ONCE, now.
+      private def self.read_stub_response(path : String) : String
+        path == "-" ? STDIN.gets_to_end : File.read(path)
+      rescue ex : File::Error
+        abort "gori run rewriter: cannot read --response-file '#{path}': #{ex.message}"
       end
 
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
@@ -114,21 +140,28 @@ module Gori
         find : String? = nil
         value = ""
         disabled = false
+        body_file = ""
+        response_file : String? = nil
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter add [options]\n\n" \
                      "For replace: --find is the substring/regex, --value the replacement.\n" \
-                     "For a header op: --find is the header NAME, --value the value."
+                     "For a header op: --find is the header NAME, --value the value.\n" \
+                     "For short_circuit: --find matches the request head and --value (or\n" \
+                     "--response-file) is the canned response gori answers with — nothing is\n" \
+                     "sent upstream. --body-file replaces the response BODY, read per request."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
-          p.on("--op=OP", "replace|add_header|set_header|remove_header (default replace)") { |v| op_s = v }
-          p.on("--match=KIND", "literal|regex (default literal; replace only)") { |v| match_s = v }
+          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit (default replace)") { |v| op_s = v }
+          p.on("--match=KIND", "literal|regex (default literal; replace/short_circuit only)") { |v| match_s = v }
           p.on("--part=PART", "head|body (default head; replace only)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
-          p.on("-vVALUE", "--value=VALUE", "Replacement, or header value (default empty)") { |v| value = v }
+          p.on("-vVALUE", "--value=VALUE", "Replacement, header value, or canned response (default empty)") { |v| value = v }
+          p.on("--response-file=PATH", "short_circuit: read the canned response from PATH ('-' = stdin)") { |v| response_file = v }
+          p.on("--body-file=PATH", "short_circuit: serve PATH as the response BODY (re-read when it changes)") { |v| body_file = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter add: unknown option: #{f}\n#{p}" }
@@ -141,20 +174,41 @@ module Gori
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target '#{target_s}'")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter add: invalid --part '#{part_s}'")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter add: invalid --match '#{match_s}' (literal|regex)")
-        if op.replace? && match.regex? && !valid_regex?(f)
+        if match.regex? && !op.header? && !valid_regex?(f)
           abort "gori run rewriter add: invalid regex --find (failed to compile)"
         end
-        part = Store::RulePart::Head if op.header?
+        value = check_short_circuit_args(op, value, response_file, body_file)
+        target, part = Gori::Rules.normalize_shape(op, target, part)
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          id = store.insert_rule(target, part, f, value, op, match, name, host, !disabled)
+          id = store.insert_rule(target, part, f, value, op, match, name, host, !disabled, body_file: body_file)
           abort "gori run rewriter add: failed to persist rule (store busy or unwritable)" if id == 0
           puts "Rule ##{id} added."
         ensure
           store.close
         end
+      end
+
+      # Validate the short-circuit-only flags and resolve --response-file into the stub text.
+      # A stub that cannot be parsed would answer every matching request with gori's own 502
+      # and never reach the origin, so it is refused here rather than discovered from live
+      # traffic; --body-file on any other op is refused too, since storing an ignored path
+      # would leave the operator believing a body source is configured.
+      private def self.check_short_circuit_args(op : Store::RuleOp, value : String,
+                                                response_file : String?, body_file : String) : String
+        unless op.short_circuit?
+          abort "gori run rewriter add: --response-file is only meaningful with --op=short_circuit" if response_file
+          abort "gori run rewriter add: --body-file is only meaningful with --op=short_circuit" unless body_file.empty?
+          return value
+        end
+        value = read_stub_response(response_file) if response_file
+        unless RuleStub.valid?(value)
+          abort "gori run rewriter add: the canned response is not parseable " \
+                "(expected a status line such as '200 OK', then headers, then a blank line and the body)"
+        end
+        value
       end
 
       private def self.valid_regex?(pattern : String) : Bool
@@ -251,7 +305,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
-          p.on("--op=OP", "replace|add_header|set_header|remove_header (default replace)") { |v| op_s = v }
+          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal)") { |v| match_s = v }
           p.on("--part=PART", "head|body (default head)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob") { |v| host = v }
@@ -271,10 +325,10 @@ module Gori
         # Validate the regex up front (like `add` does) — otherwise a bad pattern is
         # swallowed and reported as "0 flows", indistinguishable from a valid rule
         # that simply matched nothing.
-        if op.replace? && match.regex? && !valid_regex?(f)
+        if match.regex? && !op.header? && !valid_regex?(f)
           abort "gori run rewriter preview: invalid regex --find (failed to compile)"
         end
-        part = Store::RulePart::Head if op.header?
+        target, part = Gori::Rules.normalize_shape(op, target, part)
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

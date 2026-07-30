@@ -37,6 +37,7 @@ require "./notes_view"
 require "./project_view"
 require "./intercept_view"
 require "./rewriter_rule_overlay"
+require "./rewriter_stub_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
@@ -4352,7 +4353,23 @@ module Gori::Tui
       ov = rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding
       ov.on_preview = ->rewriter_preview_text(Store::MatchRule)
       ov.on_commit = -> { rewriter_controller.apply_rewriter_rule(ov) }
+      ov.on_edit_stub = -> { open_rewriter_stub_editor(ov) }
       open_overlay(ov)
+    end
+
+    # --- short-circuit stub editor (opened from the rule form's `response:` row) ---
+    # A sub-editor, exactly like the Discover headers one: esc / click-away writes the buffer
+    # back onto the rule form and RETURNS to it, and the closure restores the parent itself
+    # while reporting false so the shell's close-on-commit doesn't drop the form we just
+    # put back (#384's lesson).
+    private def open_rewriter_stub_editor(form : RewriterRuleOverlay) : Nil
+      sov = RewriterStubOverlay.new(form.stub)
+      sov.on_commit = -> {
+        form.stub = sov.text
+        open_overlay(form)
+        false
+      }
+      open_overlay(sov)
     end
 
     # The "N of M recent flows" line under the Rewriter form. Bounded so a keystroke stays

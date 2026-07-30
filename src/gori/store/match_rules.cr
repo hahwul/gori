@@ -6,14 +6,14 @@ module Gori
 
     def match_rules : Array(MatchRule)
       list = [] of MatchRule
-      @db.query("SELECT id, enabled, target, part, pattern, replacement, op, match_kind, name, host FROM match_rules ORDER BY position, id") do |rs|
+      @db.query("SELECT id, enabled, target, part, pattern, replacement, op, match_kind, name, host, body_file FROM match_rules ORDER BY position, id") do |rs|
         rs.each do
           list << MatchRule.new(
             rs.read(Int64), rs.read(Int32) != 0,
             RuleTarget.from_label(rs.read(String)), RulePart.from_label(rs.read(String)),
             rs.read(String), rs.read(String),
             RuleOp.from_label(rs.read(String)), MatchKind.from_label(rs.read(String)),
-            rs.read(String), rs.read(String))
+            rs.read(String), rs.read(String), rs.read(String))
         end
       end
       list
@@ -24,12 +24,13 @@ module Gori
     # move_rule renumbers the whole list on first use, so ties never persist.
     def insert_rule(target : RuleTarget, part : RulePart, pattern : String, replacement : String,
                     op : RuleOp = RuleOp::Replace, match_kind : MatchKind = MatchKind::Literal,
-                    name : String = "", host : String = "", enabled : Bool = true) : Int64
+                    name : String = "", host : String = "", enabled : Bool = true,
+                    body_file : String = "") : Int64
       exec_task ->(c : DB::Connection) {
         pos = c.query_one("SELECT COALESCE(MAX(position), -1) + 1 FROM match_rules", as: Int64)
-        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement, op, match_kind, name, host, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement, op, match_kind, name, host, body_file, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           enabled ? 1 : 0, target.label, part.label, pattern, replacement,
-          op.label, match_kind.label, name, host, pos)
+          op.label, match_kind.label, name, host, body_file, pos)
         nil
       }
     end
@@ -45,10 +46,10 @@ module Gori
     # Returns whether the write committed (false = store busy/locked/closing).
     def update_rule(id : Int64, target : RuleTarget, part : RulePart, pattern : String, replacement : String,
                     op : RuleOp = RuleOp::Replace, match_kind : MatchKind = MatchKind::Literal,
-                    name : String = "", host : String = "") : Bool
+                    name : String = "", host : String = "", body_file : String = "") : Bool
       exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ?, op = ?, match_kind = ?, name = ?, host = ? WHERE id = ?",
-          target.label, part.label, pattern, replacement, op.label, match_kind.label, name, host, id)
+        c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ?, op = ?, match_kind = ?, name = ?, host = ?, body_file = ? WHERE id = ?",
+          target.label, part.label, pattern, replacement, op.label, match_kind.label, name, host, body_file, id)
         nil
       }
     end

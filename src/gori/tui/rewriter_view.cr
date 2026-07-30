@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_area"
+require "../rules/stub"
 require "../store"
 
 module Gori::Tui
@@ -157,6 +158,7 @@ module Gori::Tui
       when .add_header?    then "+hdr"
       when .set_header?    then "~hdr"
       when .remove_header? then "-hdr"
+      when .short_circuit? then "stub"
       else                      "?"
       end
     end
@@ -165,7 +167,10 @@ module Gori::Tui
       case rule.op
       when .add_header?, .set_header? then "#{rule.pattern}: #{rule.replacement}"
       when .remove_header?            then rule.pattern
-      else                                 "#{rule.pattern} → #{rule.replacement}"
+        # `⇥` (not `→`) because a stub does not transform the request into the response — it
+        # answers instead of forwarding, and the row should not read like the other four ops.
+      when .short_circuit? then "#{rule.pattern} ⇥ #{RuleStub.summary(rule.replacement, rule.body_file)}"
+      else                      "#{rule.pattern} → #{rule.replacement}"
       end
     end
 

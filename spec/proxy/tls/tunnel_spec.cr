@@ -475,6 +475,64 @@ describe Gori::Proxy::Tls::Tunnel do
     end
   end
 
+  it "downgrades an h2 client when a SHORT-CIRCUIT rule is live, and answers it (#511)" do
+    # The stub seam lives on the ClientConn path and the h2 relay never asks for it. Left
+    # ungated, an operator who stubbed an endpoint would watch an h2 host forward the request
+    # to the origin anyway — the exact thing the rule exists to prevent — with nothing saying
+    # why. So a live stub rule earns the downgrade, and the h1 path then answers it.
+    dir = File.tempname("gori-ca-sc")
+    dbpath = File.tempname("gori-sc", ".db")
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    store : Gori::Store? = nil
+    begin
+      origin_port = start_tls_origin("FROM-ORIGIN", seen)
+      ca = CertAuthority.load_or_create(dir)
+      store = Gori::Store.open(dbpath)
+      rules = Gori::Rules.load(store.not_nil!)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/stubbed", "200 OK\n\nFROM-RULE", op: Gori::Store::RuleOp::ShortCircuit)
+      rules.short_circuits?.should be_true
+      # It is NOT a body rule — the pre-#511 gate would have let this reach the h2 relay.
+      rules.rewrites_request_body?.should be_false
+      rules.rewrites_response_body?.should be_false
+
+      sink = RecordingSink.new(done)
+      proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false, rewriter: rules))
+      proxy.start
+
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT localhost:#{origin_port} HTTP/1.1\r\nHost: localhost:#{origin_port}\r\n\r\n"
+      raw.flush
+      Codec::Http1.read_head(raw).not_nil!
+
+      client_ctx = OpenSSL::SSL::Context::Client.new
+      client_ctx.alpn_protocol = "h2" # client OFFERS h2
+      ca_cert = Cert.read_pem(File.join(dir, "root.crt.pem"))
+      st = LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe)
+      LibCrypto.x509_store_add_cert(st, ca_cert.handle)
+
+      tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
+      tls.alpn_protocol.should_not eq("h2") # a live stub rule refuses h2 → the h1 path
+      tls << "GET /stubbed HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+      tls.flush
+      answer = tls.gets_to_end
+      tls.close
+
+      done.receive
+      proxy.stop
+      answer.should contain("FROM-RULE") # the rule answered...
+      answer.should_not contain("FROM-ORIGIN")
+      sink.requests.first.short_circuited?.should be_true
+    ensure
+      store.try(&.close)
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+      File.delete?(dbpath)
+      File.delete?("#{dbpath}-wal")
+      File.delete?("#{dbpath}-shm")
+    end
+  end
+
   it "reflects an h1-only origin's ALPN: an h2 client falls back to h1 and the flow loads (#323)" do
     dir = File.tempname("gori-ca-h1only")
     seen = Channel(String).new(1)

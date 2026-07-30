@@ -38,6 +38,10 @@ module Gori
           j.field "response_size", row.response_size
           j.field "duration_us", row.duration_us
           j.field "content_type", row.content_type
+          # Kept in lockstep with MCP::Serialize.flow_row (spec/cli/run/history_spec.cr pins
+          # the two key sets against each other): a consumer of either feed has no other way
+          # to tell a gori-authored stub response from one the origin actually sent (#511).
+          j.field "short_circuited", row.short_circuited?
         end
       end
 
@@ -85,6 +89,9 @@ module Gori
           io << "  -> " << status
           io << "  " << human_size(row.size)
           io << dur
+          # Never silently: a text-mode reader scanning this list would otherwise take a
+          # stub for traffic the server produced.
+          io << "  [stub]" if row.short_circuited?
           io << "  [" << row.state << ']' unless row.state.complete?
         end
       end

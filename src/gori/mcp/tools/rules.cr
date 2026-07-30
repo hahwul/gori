@@ -23,6 +23,7 @@ module Gori
                     j.field "host", r.host
                     j.field "pattern", r.pattern
                     j.field "replacement", r.replacement
+                    j.field "body_file", r.body_file
                   end
                 end
               end
@@ -35,11 +36,27 @@ module Gori
       # literal or header-op rule is always fine. Mirrors the CLI's valid_regex? guard so the
       # MCP surface rejects a bad pattern instead of persisting a rule that silently never fires.
       private def valid_rule_regex?(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : Bool
-        return true unless op.replace? && match_kind.regex?
+        return true unless match_kind.regex?
+        return true if op.header? # a header op matches by NAME; `match` does not apply
         Regex.new(pattern)
         true
       rescue
         false
+      end
+
+      # Guard the short-circuit-only arguments. A stub that cannot be parsed would answer every
+      # matching request with gori's own 502 and never reach the origin, so it is refused at
+      # creation rather than discovered from live traffic — the same stance the CLI takes.
+      # `body_file` on any other op is rejected too: silently storing an ignored path would
+      # leave the caller believing a body source is configured.
+      private def short_circuit_error(op : Store::RuleOp, replacement : String, body_file : String) : Result?
+        unless op.short_circuit?
+          return err("'body_file' is only valid with op=short_circuit", "INVALID_ARGUMENT", field: "body_file") unless body_file.empty?
+          return nil
+        end
+        return nil if Gori::RuleStub.valid?(replacement)
+        err("'replacement' is not a parseable HTTP response (expected a status line such as " \
+            "'200 OK', then headers, then a blank line and the body)", "INVALID_ARGUMENT", field: "replacement")
       end
 
       private def create_rule(h) : Result
@@ -51,7 +68,7 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
-        part = Store::RulePart::Head if op.header? # header ops are head-only
+        target, part = Gori::Rules.normalize_shape(op, target, part) # header ops head-only; a stub is request/head
         # Reject an uncompilable regex up front (the CLI does; the proxy would otherwise
         # rescue the compile to passthrough and the rule would silently never fire).
         unless valid_rule_regex?(op, match_kind, pattern)
@@ -60,10 +77,14 @@ module Gori
         replacement = str(h, "replacement") || ""
         name = str(h, "name") || ""
         host = str(h, "host") || ""
+        body_file = str(h, "body_file") || ""
+        if bad = short_circuit_error(op, replacement, body_file)
+          return bad
+        end
         # Atomic disabled creation: insert already-disabled so there is no window
         # where a just-created rule is live before a follow-up disable call.
         enabled = bool_arg(h, "enabled", true)
-        id = store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled)
+        id = store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled, body_file: body_file)
         return busy("failed to persist rule (store busy or unwritable)") if id == 0
         Result.new(JSON.build do |j|
           j.object do
@@ -90,7 +111,7 @@ module Gori
         ok = rule_op_kind(h, existing.op, existing.match_kind)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
-        part = Store::RulePart::Head if op.header?
+        target, part = Gori::Rules.normalize_shape(op, target, part)
         pattern = present?(h, "pattern") ? str(h, "pattern") : existing.pattern
         return err("pattern must not be empty", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
         unless valid_rule_regex?(op, match_kind, pattern)
@@ -99,7 +120,11 @@ module Gori
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host
-        return busy("rule not updated (store busy or unwritable); the rule is unchanged") unless store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
+        body_file = present?(h, "body_file") ? (str(h, "body_file") || "") : existing.body_file
+        if bad = short_circuit_error(op, replacement, body_file)
+          return bad
+        end
+        return busy("rule not updated (store busy or unwritable); the rule is unchanged") unless store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host, body_file)
         if present?(h, "enabled")
           en = bool_arg(h, "enabled", existing.enabled?)
           return busy("rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_rule_enabled(id, en)
@@ -130,7 +155,7 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
-        part = Store::RulePart::Head if op.header?
+        target, part = Gori::Rules.normalize_shape(op, target, part)
         # Reject an uncompilable regex up front, same as create/update_rule — otherwise
         # Rules#apply_rule's own rescue (a deliberate passthrough so a bad LIVE rule
         # can't corrupt traffic) silently reports a fake "0 matches" instead of the
@@ -183,10 +208,11 @@ module Gori
                when "add_header"    then Store::RuleOp::AddHeader
                when "set_header"    then Store::RuleOp::SetHeader
                when "remove_header" then Store::RuleOp::RemoveHeader
+               when "short_circuit" then Store::RuleOp::ShortCircuit
                else                      nil
                end
              end
-        return err("invalid 'op' (expected replace|add_header|set_header|remove_header)", "INVALID_ARGUMENT", field: "op") unless op
+        return err("invalid 'op' (expected replace|add_header|set_header|remove_header|short_circuit)", "INVALID_ARGUMENT", field: "op") unless op
         # Validate `match` explicitly instead of leaning on MatchKind.from_label
         # (which coerces any unknown label to Literal). A silent literal fallback
         # would mislead a caller into thinking a `regex` rule was applied while the

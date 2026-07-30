@@ -131,7 +131,7 @@ describe "Gori::Tui::RewriterRuleOverlay — Overlay seam" do
     ov = RewriterRuleOverlay.adding
     ov.valid?.should be_false
     h = OverlayHarness.new(ov, commit: false)
-    ov.set_selected(8) # Save row
+    ov.set_selected(RewriterRuleOverlay::ROW_SAVE)
     h.press(Termisu::Input::Key::Enter).should eq(:open)
     h.commits.should eq(1) # apply_rewriter_rule DID run — it just returned false
   end
@@ -150,9 +150,9 @@ describe "Gori::Tui::RewriterRuleOverlay — Overlay seam" do
   it "click selects a row, and a click on Save commits" do
     ov = RewriterRuleOverlay.adding
     h = OverlayHarness.new(ov)
-    # Rows start at box.y + 2; Save is index 8.
-    h.click_in_box(3, 4).should eq(:open) # the op row
-    h.click_in_box(3, 10).should eq(:closed)
+    # Rows start at box.y + 2, so row i sits at y = i + 2.
+    h.click_in_box(3, RewriterRuleOverlay::ROW_OP + 2).should eq(:open)
+    h.click_in_box(3, RewriterRuleOverlay::ROW_SAVE + 2).should eq(:closed)
     h.commits.should eq(1)
   end
 

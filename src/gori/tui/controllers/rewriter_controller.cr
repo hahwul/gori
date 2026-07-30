@@ -320,10 +320,10 @@ module Gori::Tui
       return false unless ov.valid?
       if id = ov.edit_id
         rules_engine.update(id, ov.target, ov.part, ov.pattern, ov.replacement,
-          ov.op, ov.match_kind, ov.name, ov.host)
+          ov.op, ov.match_kind, ov.name, ov.host, ov.body_file)
       else
         rules_engine.add(ov.target, ov.part, ov.pattern, ov.replacement,
-          ov.op, ov.match_kind, ov.name, ov.host)
+          ov.op, ov.match_kind, ov.name, ov.host, ov.body_file)
         @sel = {rule_list.size - 1, 0}.max
       end
       true

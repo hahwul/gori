@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./text_field"
 require "./overlay"
+require "../rules/stub"
 require "../store"
 require "../store/safe_regexp"
 
@@ -28,12 +29,15 @@ module Gori::Tui
     ROW_HOST   = 5
     ROW_FIND   = 6
     ROW_VALUE  = 7
-    ROW_SAVE   = 8
-    ROW_COUNT  = 9
+    # short_circuit only: the response BODY file. Sits between the response and Save so the
+    # two body sources (inline, in the response buffer; on disk, here) read as one choice.
+    ROW_BODY_FILE =  8
+    ROW_SAVE      =  9
+    ROW_COUNT     = 10
 
     TARGETS   = %w[request response]
-    OPS       = %w[replace add_header set_header remove_header]
-    OP_LABELS = ["replace", "add header", "set header", "remove header"]
+    OPS       = %w[replace add_header set_header remove_header short_circuit]
+    OP_LABELS = ["replace", "add header", "set header", "remove header", "stub"]
     MATCHES   = %w[literal regex]
     PARTS     = %w[head body]
 
@@ -42,6 +46,11 @@ module Gori::Tui
     # Renders the "affects N of M recent flows" line under the form. Injected at the
     # open-site because it READS TRAFFIC — the form itself stays store-free.
     property on_preview : Proc(Store::MatchRule, String)?
+
+    # Opens the multi-line stub editor for the `response:` row. Injected at the open-site the
+    # same way DiscoverConfigOverlay injects its headers editor: the form owns WHEN to ask,
+    # the Runner owns the overlay swap and putting this form back afterwards.
+    property on_edit_stub : Proc(Nil)?
 
     @target_i : Int32
     @op_i : Int32
@@ -54,13 +63,19 @@ module Gori::Tui
 
     def initialize(*, name : String = "", target : String = "request", op : String = "replace",
                    match : String = "literal", part : String = "head", host : String = "",
-                   pattern : String = "", replacement : String = "", @edit_id : Int64? = nil)
+                   pattern : String = "", replacement : String = "", @edit_id : Int64? = nil,
+                   body_file : String = "")
       @fields = {
-        name:    TextField.new(name),
-        host:    TextField.new(host),
-        pattern: TextField.new(pattern),
-        value:   TextField.new(replacement),
+        name:      TextField.new(name),
+        host:      TextField.new(host),
+        pattern:   TextField.new(pattern),
+        value:     TextField.new(replacement),
+        body_file: TextField.new(body_file),
       }
+      # A short-circuit rule's response is multi-line, so it lives in its own buffer edited by
+      # RewriterStubOverlay rather than in the single-line `value` field the other ops use.
+      # Seeded from `replacement`, which is where it is persisted either way.
+      @stub = replacement
       @target_i = idx(TARGETS, target)
       @op_i = idx(OPS, op)
       @match_i = idx(MATCHES, match)
@@ -75,7 +90,8 @@ module Gori::Tui
     def self.editing(rule : Store::MatchRule) : RewriterRuleOverlay
       new(name: rule.name, target: rule.target.label, op: rule.op.label,
         match: rule.match_kind.label, part: rule.part.label, host: rule.host,
-        pattern: rule.pattern, replacement: rule.replacement, edit_id: rule.id)
+        pattern: rule.pattern, replacement: rule.replacement, edit_id: rule.id,
+        body_file: rule.body_file)
     end
 
     private def idx(list : Array(String), v : String) : Int32
@@ -99,9 +115,23 @@ module Gori::Tui
     end
 
     # The replacement / header value keeps interior + trailing spaces (a header value or
-    # a replacement may legitimately contain them).
+    # a replacement may legitimately contain them). A short-circuit rule persists its canned
+    # response through the same field, so the two paths join here.
     def replacement : String
-      @fields[:value].value
+      short_circuit_op? ? @stub : @fields[:value].value
+    end
+
+    # The stub buffer, as the sub-editor last left it.
+    def stub : String
+      @stub
+    end
+
+    def stub=(text : String) : Nil
+      @stub = text
+    end
+
+    def body_file : String
+      short_circuit_op? ? @fields[:body_file].value.strip : ""
     end
 
     def target : Store::RuleTarget
@@ -124,18 +154,44 @@ module Gori::Tui
       op.header?
     end
 
+    def short_circuit_op? : Bool
+      op.short_circuit?
+    end
+
+    # Rows the CURRENT op has no meaning for, skipped by ↑/↓ so the form never parks the
+    # caret on a field that does nothing. target/match/part are already drawn "n/a" for the
+    # ops that ignore them; this stops the two body-source rows from appearing at all for the
+    # four rewrite ops, and the plain `replace:` row from appearing for a stub.
+    private def skip_row?(row : Int32) : Bool
+      if short_circuit_op?
+        row == ROW_TARGET || row == ROW_PART
+      else
+        row == ROW_BODY_FILE
+      end
+    end
+
     def on_save_row? : Bool
       @sel == ROW_SAVE
     end
 
-    # A pattern is required; a regex replace must additionally compile.
+    # A pattern is required; a regex match must additionally compile; a short-circuit rule's
+    # canned response must parse, because an unparseable one would answer every matching
+    # request with gori's own 502 and still never reach the origin.
     def valid? : Bool
       return false if pattern.empty?
-      return true unless op.replace? && match_kind.regex?
+      return false if short_circuit_op? && !RuleStub.valid?(@stub)
+      return true unless match_kind.regex? && !op.header?
       SafeRegexp.compile(pattern)
       true
     rescue
       false
+    end
+
+    # What is missing, for the Save row's label.
+    def invalid_reason : String
+      return "enter a #{header_op? ? "header name" : "pattern"}" if pattern.empty?
+      return "write a stub response (↵ on response:)" if short_circuit_op? && !RuleStub.valid?(@stub)
+      "fix the regex"
     end
 
     # The preview line as last computed — "" until the first key that changes a
@@ -144,7 +200,7 @@ module Gori::Tui
 
     # The fields a match preview depends on — only rescan when this changes.
     private def preview_signature : String
-      "#{@target_i}|#{@op_i}|#{@match_i}|#{@part_i}|#{host}|#{pattern}|#{replacement}"
+      "#{@target_i}|#{@op_i}|#{@match_i}|#{@part_i}|#{host}|#{pattern}|#{replacement}|#{body_file}"
     end
 
     # Recompute the preview when the candidate rule's match-relevant fields changed.
@@ -166,17 +222,28 @@ module Gori::Tui
 
     # The rule as currently edited (id 0 when adding) — used for the live preview.
     def candidate_rule : Store::MatchRule
-      Store::MatchRule.new(@edit_id || 0_i64, true, target,
-        header_op? ? Store::RulePart::Head : part,
-        pattern, replacement, op, match_kind, name, host)
+      tgt, prt = Gori::Rules.normalize_shape(op, target, part)
+      Store::MatchRule.new(@edit_id || 0_i64, true, tgt, prt,
+        pattern, replacement, op, match_kind, name, host, body_file)
     end
 
     def move(d : Int32) : Nil
-      @sel = (@sel + d).clamp(0, ROW_COUNT - 1)
+      step = d < 0 ? -1 : 1
+      nxt = @sel
+      # Walk PAST rows this op ignores instead of landing on them; stop at the ends rather
+      # than wrapping, matching the previous clamp behaviour.
+      loop do
+        probe = nxt + step
+        break if probe < 0 || probe > ROW_COUNT - 1
+        nxt = probe
+        break unless skip_row?(nxt)
+      end
+      @sel = nxt unless skip_row?(nxt)
     end
 
     def set_selected(idx : Int32) : Nil
-      @sel = idx.clamp(0, ROW_COUNT - 1)
+      idx = idx.clamp(0, ROW_COUNT - 1)
+      @sel = idx unless skip_row?(idx)
     end
 
     private def cycler_row?(row : Int32) : Bool
@@ -185,10 +252,11 @@ module Gori::Tui
 
     private def text_field_for(row : Int32) : TextField?
       case row
-      when ROW_NAME  then @fields[:name]
-      when ROW_HOST  then @fields[:host]
-      when ROW_FIND  then @fields[:pattern]
-      when ROW_VALUE then @fields[:value]
+      when ROW_NAME      then @fields[:name]
+      when ROW_HOST      then @fields[:host]
+      when ROW_FIND      then @fields[:pattern]
+      when ROW_BODY_FILE then @fields[:body_file]
+      when ROW_VALUE     then short_circuit_op? ? nil : @fields[:value]
       end
     end
 
@@ -231,6 +299,7 @@ module Gori::Tui
       if idx = row_at(box, mx, my)
         set_selected(idx)
         return :commit if on_save_row?
+        @on_edit_stub.try(&.call) if idx == ROW_VALUE && short_circuit_op?
       end
       :stay
     end
@@ -255,10 +324,14 @@ module Gori::Tui
         :stay
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
+      elsif @sel == ROW_VALUE && short_circuit_op?
+        # Not a text row for this op — the response is multi-line and lives in its own editor.
+        @on_edit_stub.try(&.call) if key.enter? || key.space?
+        :stay
       else # text row
         field = text_field_for(@sel)
         if key.enter?
-          return :commit if @sel == ROW_VALUE
+          return :commit if @sel == ROW_VALUE || @sel == ROW_BODY_FILE
           move(1)
         elsif field
           field.handle_edit_key(ev)
@@ -272,9 +345,10 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 66}.min
+      # 72, not 66: a fifth op pushed the option row past the card edge at the old width.
+      w = {area.w - 4, 72}.min
       h = {area.h - 2, ROW_COUNT + 5}.min # title + rows + preview + hint + padding
-      return nil if w < 40 || h < 12
+      return nil if w < 40 || h < 13
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
@@ -310,20 +384,35 @@ module Gori::Tui
       x = box.x + 3
       fg = sel ? Theme.text_bright : Theme.text
       hop = header_op?
+      sc = short_circuit_op?
       case i
       when ROW_NAME   then draw_field(screen, box, py, bg, fg, sel, "name:", @fields[:name])
-      when ROW_TARGET then draw_cycle(screen, x, py, bg, fg, "target:", TARGETS, @target_i, sel)
+      when ROW_TARGET then sc ? draw_na(screen, x, py, bg, "target:", "request (a stub answers a request)") : draw_cycle(screen, x, py, bg, fg, "target:", TARGETS, @target_i, sel)
       when ROW_OP     then draw_cycle(screen, x, py, bg, fg, "op:", OP_LABELS, @op_i, sel)
       when ROW_MATCH  then hop ? draw_na(screen, x, py, bg, "match:") : draw_cycle(screen, x, py, bg, fg, "match:", MATCHES, @match_i, sel)
-      when ROW_PART   then hop ? draw_na(screen, x, py, bg, "part:") : draw_cycle(screen, x, py, bg, fg, "part:", PARTS, @part_i, sel)
+      when ROW_PART   then (hop || sc) ? draw_na(screen, x, py, bg, "part:", sc ? "head (matches the request head)" : nil) : draw_cycle(screen, x, py, bg, fg, "part:", PARTS, @part_i, sel)
       when ROW_HOST   then draw_field(screen, box, py, bg, fg, sel, "host:", @fields[:host])
       when ROW_FIND   then draw_field(screen, box, py, bg, fg, sel, hop ? "header:" : "find:", @fields[:pattern])
-      when ROW_VALUE  then draw_field(screen, box, py, bg, fg, sel, value_label, @fields[:value])
+      when ROW_VALUE
+        sc ? draw_stub_row(screen, x, py, bg, fg, sel) : draw_field(screen, box, py, bg, fg, sel, value_label, @fields[:value])
+      when ROW_BODY_FILE
+        draw_field(screen, box, py, bg, fg, sel, "body file:", @fields[:body_file]) if sc
       else
         ok = valid?
-        label = ok ? "[ Save rule ]" : "[ enter a #{header_op? ? "header name" : "pattern"} ]"
+        label = ok ? "[ Save rule ]" : "[ #{invalid_reason} ]"
         screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       end
+    end
+
+    # The `response:` row is a BUTTON, not a field: ↵ opens the multi-line stub editor. The
+    # row shows what the buffer currently amounts to, so the form still says at a glance what
+    # this rule would answer with.
+    private def draw_stub_row(screen : Screen, x : Int32, py : Int32, bg : Color, fg : Color, sel : Bool) : Nil
+      screen.text(x, py, "response:", Theme.muted, bg)
+      tx = x + 10
+      text = @stub.blank? ? "(none — ↵ to write one)" : RuleStub.summary(@stub, body_file)
+      screen.text(tx, py, text, @stub.blank? ? Theme.muted : fg, bg)
+      screen.text(tx + Screen.draw_width(text) + 1, py, "↵", Theme.accent, bg) if sel
     end
 
     private def value_label : String
@@ -334,9 +423,9 @@ module Gori::Tui
       end
     end
 
-    private def draw_na(screen : Screen, x : Int32, py : Int32, bg : Color, label : String) : Nil
+    private def draw_na(screen : Screen, x : Int32, py : Int32, bg : Color, label : String, note : String? = nil) : Nil
       screen.text(x, py, label, Theme.muted, bg)
-      screen.text(x + label.size + 1, py, "n/a (header op)", Theme.muted, bg)
+      screen.text(x + label.size + 1, py, note || "n/a (header op)", Theme.muted, bg)
     end
 
     private def draw_cycle(screen : Screen, x : Int32, py : Int32, bg : Color, fg : Color,

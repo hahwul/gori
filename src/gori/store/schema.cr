@@ -590,7 +590,29 @@ module Gori
         "CREATE INDEX idx_flows_fts_dirty ON flows (id) WHERE fts_dirty = 1",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4]
+      # The short-circuit rule op (#511): a Match&Replace rule that ANSWERS a request instead
+      # of rewriting one, so `Upstream.dial` is never reached.
+      #
+      # `match_rules.body_file` is the second body source. The stub's status line and headers
+      # live in the existing `replacement` (a raw response head), but an inline body cannot
+      # carry a large or binary stub — a PNG, a multi-MiB JSON — without pasting it into the
+      # rule row. A path keeps those on disk and editable outside gori; empty (the default,
+      # and every pre-#511 row) means the inline body is the source, so no existing rule
+      # changes meaning.
+      #
+      # `flows.short_circuited` marks a flow gori ANSWERED ITSELF. It has to be stored rather
+      # than derived: nothing in the recorded bytes distinguishes a stub from a real response
+      # — that is the point of a stub — so after a restart History would present a fabricated
+      # 200 as a finding about the origin. It is a separate column, not a `FlowState` member,
+      # because state is a lifecycle position (a short-circuited flow is still `Complete` on
+      # that axis) and not an attribute. Existing rows default to 0: gori could not
+      # short-circuit before this migration, so 0 is the truth for every one of them.
+      V5 = [
+        "ALTER TABLE match_rules ADD COLUMN body_file TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE flows ADD COLUMN short_circuited INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

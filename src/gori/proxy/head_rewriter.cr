@@ -10,8 +10,44 @@ module Gori::Proxy
   # when it changes nothing, so the caller can tell a rewrite happened and preserve
   # byte-fidelity (P7) for unmodified flows.
   abstract class HeadRewriter
+    # A response the rule engine authored for a request that will NOT be sent (#511).
+    #
+    # `head` is the status line plus header lines, each CRLF-terminated, WITHOUT the
+    # terminating blank line and WITHOUT `Content-Length`/`Transfer-Encoding`: framing is
+    # ClientConn's job, because only ClientConn knows the request method (a HEAD or a 204
+    # takes no body) and it is the one keeping the connection in sync. A rule that names
+    # either header has it dropped here rather than trusted — a stub whose declared length
+    # disagrees with the bytes gori sends desyncs the next request on a keep-alive
+    # connection, which is a far worse failure than a corrected header.
+    #
+    # `error` is non-nil only when gori generated this response ITSELF because the rule
+    # could not be honoured (an unparseable stub, an unreadable `body_file`). The engine
+    # answers anyway rather than falling through to the origin: the operator declared this
+    # request contained, and dialing out because a stub file went missing would send a
+    # payload they believed was never leaving the machine. The message is recorded on the
+    # flow so the failure is visible instead of silent.
+    # `status` is carried separately so the framing decision does not have to re-parse the
+    # head it is about to frame.
+    record Stub, head : Bytes, body : Bytes, status : Int32, rule_id : Int64, error : String? = nil
+
     abstract def rewrite_request(head : Bytes, host : String) : Bytes
     abstract def rewrite_response(head : Bytes, host : String) : Bytes
+
+    # Does a short-circuit rule answer this request? Non-nil means ClientConn must write the
+    # stub and NEVER dial. Called once per request head, after the head rewrite (so the
+    # match sees the same bytes that would have gone out) and after the sandbox gate (so a
+    # rule can never act on a host the operator's sandbox excludes). Default nil (a no-op
+    # stub never short-circuits).
+    def short_circuit(head : Bytes, host : String) : Stub?
+      nil
+    end
+
+    # Whether any short-circuit rule is live. Separate from `active?` so a caller can ask
+    # about THIS seam alone — the h2 relay cannot reach `short_circuit`, so a host with a
+    # live stub rule needs the HTTP/1.1 path the way a body rule does (`tls/tunnel.cr`).
+    def short_circuits? : Bool
+      false
+    end
 
     # Whether any rewrite is actually configured. The h2 relay checks this before paying
     # to synthesize a head to run rules against (`H2::HeadRewrite`), and the TUI reads it

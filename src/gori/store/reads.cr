@@ -6,7 +6,8 @@ module Gori
 
     SELECT_ROW = <<-SQL
       SELECT id, created_at, scheme, method, host, port, target, status,
-             request_size, response_size, state, duration_us, content_type
+             request_size, response_size, state, duration_us, content_type,
+             short_circuited
       FROM flows
       SQL
 
@@ -110,6 +111,7 @@ module Gori
         @db.query(<<-SQL, max, max, id) do |rs|
           SELECT id, created_at, scheme, method, host, port, target, status,
                  request_size, response_size, state, duration_us, content_type,
+                 short_circuited,
                  http_version, request_head,
                  CASE WHEN request_body IS NULL THEN NULL ELSE substr(request_body, 1, ?) END,
                  response_head,
@@ -124,6 +126,7 @@ module Gori
         @db.query(<<-SQL, id) do |rs|
           SELECT id, created_at, scheme, method, host, port, target, status,
                  request_size, response_size, state, duration_us, content_type,
+                 short_circuited,
                  http_version, request_head, request_body, response_head, response_body,
                  h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
                  sni

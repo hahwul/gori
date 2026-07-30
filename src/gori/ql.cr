@@ -70,7 +70,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body url
+        host path method scheme proto status size reqsize respsize dur header body url stub
 
       Comparisons (status size reqsize respsize dur):
         status:>=500  size:>10000  dur:>=500  dur:<2s  (dur defaults to ms; suffix ms|s)
@@ -78,6 +78,10 @@ module Gori
       Status class shorthand: status:5xx  status:4xx
 
       Protocol: proto:ws  proto:grpc  proto:sse  proto:http  (ws = 101 upgrade; grpc/sse by Content-Type)
+
+      Short-circuited: stub:true  stub:false  — flows gori answered ITSELF from a Match&Replace
+      short-circuit rule, with NO origin involved. Their response bytes came from the rule, not
+      from the server, so `stub:false` is what you want before treating History as evidence.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin
 
@@ -226,6 +230,7 @@ module Gori
       when "dur"                         then duration_cond(value)
       when "header"                      then header_cond(value)
       when "body"                        then body_cond(value)
+      when "stub"                        then stub_cond(value)
       else
         # Unknown field — a typo (`hosst:x`) or a literal colon in a value (`time:12:00`):
         # free-text the WHOLE token (prefix included), not just the part after the ':'. This
@@ -235,6 +240,20 @@ module Gori
         # (Store#flags_for is a stub), so there is nothing to match; it free-texts like any
         # other unknown field rather than advertising an unimplemented filter.
         free_text(term)
+      end
+    end
+
+    # stub: selects flows gori ANSWERED ITSELF from a short-circuit rule (#511) — the ones no
+    # origin ever saw. `stub:true` isolates them for review; `stub:false` is the one an
+    # operator actually reaches for, to read History as traffic that really happened before
+    # writing anything up. The column is NOT NULL DEFAULT 0, so both directions are NULL-free
+    # and `-stub:true` behaves exactly like `stub:false`. An unrecognised value drops the term
+    # rather than guessing, same as a bad proto:/status:.
+    private def self.stub_cond(value : String) : {String, Array(DB::Any)}?
+      no_args = [] of DB::Any
+      case value.downcase
+      when "true", "yes", "on", "1"  then {"short_circuited = 1", no_args}
+      when "false", "no", "off", "0" then {"short_circuited = 0", no_args}
       end
     end
 

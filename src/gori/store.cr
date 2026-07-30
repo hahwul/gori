@@ -744,15 +744,15 @@ module Gori
         INSERT INTO flows
           (created_at, scheme, host, port, method, target, http_version,
            sni, alpn, tls_version, request_head, request_body, request_size, state,
-           h2_conn_id, h2_stream_id, request_body_truncated, unsent, fts_dirty)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+           h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, fts_dirty)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
         SQL
         req.created_at, req.scheme, req.host, req.port, req.method, req.target,
         req.http_version, req.sni, req.alpn, req.tls_version,
         req.head, req.body,
         req.head.size.to_i64 + body_size,
         FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id,
-        req.body_truncated? ? 1 : 0, unsent ? 1 : 0)
+        req.body_truncated? ? 1 : 0, unsent ? 1 : 0, req.short_circuited? ? 1 : 0)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
       # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
@@ -930,8 +930,10 @@ module Gori
       state = FlowState.new(rs.read(Int32))
       duration_us = rs.read(Int64?)
       content_type = rs.read(String?)
+      short_circuited = rs.read(Int32) != 0
       FlowRow.new(id, created_at, scheme, method, host, port, target,
-        status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type)
+        status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type,
+        short_circuited)
     end
 
     # Column order MUST match EVENT_COLS.

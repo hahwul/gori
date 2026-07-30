@@ -29,12 +29,16 @@ module Gori
       # When this flow is a decoded HTTP/2 stream, links back to its raw frame log.
       getter h2_conn_id : Int64?
       getter h2_stream_id : Int64?
+      # gori ANSWERED this request itself — a short-circuit rule matched and no origin was
+      # dialed (#511). Carried on the request DTO because the proxy decides it before the
+      # response exists; `Store#insert_one` persists it to `flows.short_circuited`.
+      getter? short_circuited : Bool
 
       def initialize(@created_at, @scheme, @host, @port, @method, @target,
                      @http_version, @head, @body = nil,
                      @sni = nil, @alpn = nil, @tls_version = nil,
                      @body_truncated = false, @body_size = nil,
-                     @h2_conn_id = nil, @h2_stream_id = nil)
+                     @h2_conn_id = nil, @h2_stream_id = nil, @short_circuited = false)
       end
     end
 
@@ -80,10 +84,14 @@ module Gori
       getter response_size : Int64? # response bytes alone (nil until the response lands)
       getter duration_us : Int64?   # request→response latency in µs (nil until complete)
       getter content_type : String? # response Content-Type header (nil until the response lands)
+      # gori answered this flow itself — a short-circuit rule matched and no origin was
+      # dialed (#511). In the LIST projection, not just the detail, because the whole point
+      # is that a fabricated response must not look like an ordinary row while scrolling.
+      getter? short_circuited : Bool
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
-                     @content_type = nil)
+                     @content_type = nil, @short_circuited = false)
       end
 
       # True when `target` already carries its own scheme+authority — an ABSOLUTE-FORM
@@ -328,11 +336,20 @@ module Gori
     # matching header line. Header ops carry the header NAME in `pattern` and the value
     # in `replacement` (empty for `RemoveHeader`). Stored lowercase; default `replace`
     # so every pre-op rule keeps its exact meaning.
+    #
+    # `ShortCircuit` (#511) is the odd one out and deliberately so: the other four REWRITE a
+    # message that already exists, this one ANSWERS the request and `Upstream.dial` is never
+    # reached. It carries the request match in `pattern` (literal or regex, like `Replace`)
+    # and the canned response in `replacement` — a raw response head, optionally a blank line
+    # and an inline body — with `body_file` as the alternative body source. It is always
+    # request-side and head-matched; `Rules`/the surfaces force that, the way header ops are
+    # forced head-only.
     enum RuleOp
       Replace
       AddHeader
       SetHeader
       RemoveHeader
+      ShortCircuit
 
       def label : String
         case self
@@ -340,6 +357,7 @@ module Gori
         in RuleOp::AddHeader    then "add_header"
         in RuleOp::SetHeader    then "set_header"
         in RuleOp::RemoveHeader then "remove_header"
+        in RuleOp::ShortCircuit then "short_circuit"
         end
       end
 
@@ -348,6 +366,7 @@ module Gori
         when "add_header"    then AddHeader
         when "set_header"    then SetHeader
         when "remove_header" then RemoveHeader
+        when "short_circuit" then ShortCircuit
         else                      Replace
         end
       end
@@ -355,7 +374,15 @@ module Gori
       # A header-name-keyed op (mutates the HEAD by name, not a substring gsub). Header
       # ops are head-only regardless of a rule's `part`.
       def header? : Bool
-        !replace?
+        !replace? && !short_circuit?
+      end
+
+      # Does this op REWRITE bytes in flight? False only for `ShortCircuit`, which produces
+      # a response instead. The rewrite hot path counts and selects on this, so a stub rule
+      # never costs a head/body rewrite its mutex + select — and, more importantly, its
+      # `replacement` (a whole HTTP response) is never gsub'd into live traffic.
+      def rewrite? : Bool
+        !short_circuit?
       end
     end
 
@@ -383,6 +410,10 @@ module Gori
     # label; `host` is an optional glob that scopes the rule to matching hosts ("" = all).
     # A body rule buffers + re-frames the message in flight (Content-Length synced); a
     # head rule streams the body untouched (P6). See `Rules` / `ClientConn`.
+    #
+    # `body_file` belongs to `ShortCircuit` alone: a path whose bytes become the stub body,
+    # instead of the inline body in `replacement`. Empty = inline (and every other op ignores
+    # it entirely).
     struct MatchRule
       getter id : Int64
       getter? enabled : Bool
@@ -394,10 +425,11 @@ module Gori
       getter match_kind : MatchKind
       getter name : String
       getter host : String
+      getter body_file : String
 
       def initialize(@id, @enabled, @target, @part, @pattern, @replacement,
                      @op = RuleOp::Replace, @match_kind = MatchKind::Literal,
-                     @name = "", @host = "")
+                     @name = "", @host = "", @body_file = "")
       end
     end
 

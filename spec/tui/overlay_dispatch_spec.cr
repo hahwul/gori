@@ -31,7 +31,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences,
   :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :passthrough, :listeners, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
-  :probe_rule, :rewriter_rule, :ca_import, :import, :export, :scope_rule, :sequence_config,
+  :probe_rule, :rewriter_rule, :rewriter_stub, :ca_import, :import, :export, :scope_rule, :sequence_config,
   :mine_config, :copy_as, :send_to,
 }
 
@@ -47,6 +47,8 @@ private MIGRATED_KINDS = [
   OverlayKind::OastProvider,
   OverlayKind::ProbeRule,
   OverlayKind::RewriterRule,
+  # #511 — the short-circuit stub sub-editor, born on the seam
+  OverlayKind::RewriterStub,
   OverlayKind::CaImport,
   OverlayKind::Import,
   # C1 — scan/fuzz config forms

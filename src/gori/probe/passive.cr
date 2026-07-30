@@ -64,10 +64,17 @@ module Gori
 
       # `disabled` holds RuleInfo#id values the operator switched off in the Rules sub-tab (skipped
       # here); `custom` are the merged global+project user match rules, run after the built-ins.
+      # A SHORT-CIRCUITED flow is refused outright (#511): gori wrote that response itself from
+      # a Match&Replace stub, so every passive rule here would be reading the operator's own
+      # bytes and reporting them as a property of the target. That is the `probe-rule-fp-review`
+      # lesson — a probe that cannot see its own signal must refuse — and it is enforced at BOTH
+      # analyze entry points rather than at the callers, because `Analyzer#scan_detail` and
+      # `Probe::Scan` reach them by different routes.
       def self.analyze(detail : Store::FlowDetail,
                        ws_messages : Array(Store::WsMessage) = [] of Store::WsMessage,
                        *, disabled : Set(String) = NO_DISABLED,
                        custom : Array(CustomRule) = NO_CUSTOM) : Array(Detection)
+        return [] of Detection if detail.row.short_circuited?
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
         RULES.each { |r| r.check(ctx, acc) unless disabled.includes?(r.info.id) }
@@ -80,7 +87,7 @@ module Gori
       def self.analyze_ws(detail : Store::FlowDetail,
                           ws_messages : Array(Store::WsMessage),
                           *, disabled : Set(String) = NO_DISABLED) : Array(Detection)
-        return [] of Detection if ws_messages.empty?
+        return [] of Detection if ws_messages.empty? || detail.row.short_circuited?
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
         WS_RULES.each { |r| r.check(ctx, acc) unless disabled.includes?(r.info.id) }

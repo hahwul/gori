@@ -272,6 +272,21 @@ module Gori::Proxy
         return false
       end
 
+      # Short circuit (#511): a Match&Replace rule may ANSWER this request rather than
+      # rewrite it, in which case nothing is dialed. Placement is load-bearing on both sides:
+      #   - AFTER the sandbox gate, so a rule can never act on a host the operator's sandbox
+      #     excludes. A stub sends nothing outward, but the sandbox is the operator's outer
+      #     boundary and no rule may widen where gori participates at all.
+      #   - BEFORE the intercept hold, matching where the head rewrite already runs. Holding
+      #     a short-circuited request would offer a "forward" that cannot happen — the
+      #     request is never going anywhere — so the hold is skipped, not lied to.
+      # It also has to come after `request_framing`, because answering means draining the
+      # body first (see serve_short_circuit).
+      if (rw = @rewriter) && (stub = rw.short_circuit(sent_head, host))
+        return serve_short_circuit(stub, req, sent_req, record_req, host, port, scheme,
+          created_at, req_framing, req_len)
+      end
+
       # Intercept (request): hold only when enabled AND in scope. Holding buffers
       # the full body (vs streaming) so the human can see/edit it; the non-hold
       # path keeps zero-buffer streaming (P6). The gate builds the scope URL lazily
@@ -379,6 +394,76 @@ module Gori::Proxy
         body: stored, body_truncated: trunc, body_size: size))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
+    end
+
+    # Answer a request from a short-circuit rule and record the flow. No upstream is acquired
+    # and `Upstream.dial` is never reached — that is the whole feature (#511).
+    #
+    # The connection survives: unlike every other canned answer here (sandbox block, intercept
+    # drop, gateway error) a stub is a NORMAL response as far as the client is concerned, and
+    # closing after each one would make a stubbed endpoint behave nothing like the origin it
+    # stands in for. Paying for that means draining the request body first — it is still on
+    # the socket, and an undrained body is read as the next request line.
+    private def serve_short_circuit(stub : HeadRewriter::Stub, req : Codec::RawRequest,
+                                    sent_req : Codec::RawRequest, record_req : Codec::RawRequest,
+                                    host : String, port : Int32, scheme : String,
+                                    created_at : Int64,
+                                    req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+      unless body_complete
+        # Nothing was answered, so this is not a short-circuited flow — record it as the
+        # truncation it is (mirrors the hold / body-rewrite paths).
+        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        return false
+      end
+
+      omit_length, send_body = stub_framing(stub, req.method)
+      resp_head = build_stub_head(stub, omit_length)
+
+      written = begin
+        @io.write(resp_head)
+        @io.write(stub.body) if send_body && !stub.body.empty?
+        @io.flush
+        true
+      rescue
+        false
+      end
+
+      stored, trunc, size = capped(buffered)
+      flow_id = @sink.on_request(FlowMapper.request(record_req,
+        scheme: scheme, host: host, port: port, created_at: created_at,
+        body: stored, body_truncated: trunc, body_size: size, short_circuited: true))
+      resp = Codec::Http1.parse_response_head(resp_head)
+      # ttfb/duration stay nil on purpose. There was no round trip to measure, and a `0`
+      # would render in History as an impossibly fast origin — the exact misreading the
+      # short-circuit marker exists to prevent. `—` is the truth.
+      @sink.on_response(FlowMapper.response(resp,
+        flow_id: flow_id, body: send_body ? stub.body : nil,
+        state: written ? Store::FlowState::Complete : Store::FlowState::Aborted,
+        error: written ? stub.error : "client closed before the short-circuit response was written"))
+      return false unless written
+      keep_alive?(req, resp, omit_length ? Codec::BodyFraming::None : Codec::BodyFraming::Length)
+    end
+
+    # {omit_length, send_body} for a stub answering `method`. Content-Length is prohibited on
+    # a 1xx/204, so it is left off entirely there; a 304 and a HEAD response keep it — it
+    # describes the entity that WOULD be sent — but carry no body of their own.
+    private def stub_framing(stub : HeadRewriter::Stub, method : String) : {Bool, Bool}
+      head_only = method.compare("HEAD", case_insensitive: true) == 0
+      omit_length = stub.status == 204 || (100..199).includes?(stub.status)
+      {omit_length, !head_only && !omit_length && stub.status != 304}
+    end
+
+    # The stub's head plus the terminating blank line, with Content-Length taken from the body
+    # gori is about to write and NEVER from the rule (the rule's copy was dropped at parse
+    # time). A stub whose declared length disagreed with its body would leave the client
+    # mid-way through what it reads as the next response.
+    private def build_stub_head(stub : HeadRewriter::Stub, omit_length : Bool) : Bytes
+      io = IO::Memory.new(stub.head.size + 32)
+      io.write(stub.head)
+      io << "Content-Length: " << stub.body.size << "\r\n" unless omit_length
+      io << "\r\n"
+      io.to_slice
     end
 
     # The Match&Replace request-body path (no intercept): buffer the whole body,

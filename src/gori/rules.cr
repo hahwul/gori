@@ -1,4 +1,5 @@
 require "./proxy/head_rewriter"
+require "./rules/stub"
 require "./store"
 require "./store/safe_regexp"
 
@@ -15,6 +16,7 @@ module Gori
   class Rules < Proxy::HeadRewriter
     def initialize(@store : Store, @rules : Array(Store::MatchRule))
       @mutex = Mutex.new
+      @stub_bodies = RuleStubBodyCache.new
       # Lock-free fast-path flags: rewrite_* run on EVERY message, but the common case
       # is no rule for that side/part. These let the hot path skip the mutex + select-
       # array allocation entirely when nothing would match. The head counts gate the head
@@ -25,14 +27,30 @@ module Gori
       @resp_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Body))
+      # Short-circuit rules get their OWN gate and are excluded from all four counts above.
+      # A stub rule is stored request/head like a header op, so it would otherwise inflate
+      # @req_head_count and make every request head pay the mutex + select for a rule that
+      # rewrites nothing — and `apply` would then have to skip it anyway, because its
+      # `replacement` is a whole HTTP response and gsub'ing that into live traffic is exactly
+      # the silent corruption the count exists to avoid.
+      @short_circuit_count = Atomic(Int32).new(stub_count(@rules))
     end
 
-    # Count enabled, non-empty-pattern rules matching an optional target + a part.
+    # Count enabled, non-empty-pattern REWRITE rules matching an optional target + a part.
+    # Short-circuit rules are never counted here — see `stub_count`.
     private def active_count(rules : Array(Store::MatchRule), target : Store::RuleTarget? = nil,
                              *, part : Store::RulePart) : Int32
       rules.count do |r|
-        r.enabled? && !r.pattern.empty? && r.part == part && (target.nil? || r.target == target)
+        r.enabled? && r.op.rewrite? && !r.pattern.empty? && r.part == part &&
+          (target.nil? || r.target == target)
       end
+    end
+
+    # Count enabled short-circuit rules whose stub is usable. A rule with an unparseable head
+    # is counted anyway: it MUST still short-circuit (fail closed — see `stub_for`), because
+    # falling through would send a request the operator declared contained.
+    private def stub_count(rules : Array(Store::MatchRule)) : Int32
+      rules.count { |r| r.enabled? && r.op.short_circuit? && !r.pattern.empty? }
     end
 
     def self.load(store : Store) : Rules
@@ -57,20 +75,35 @@ module Gori
 
     def add(target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
             op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
-            name : String = "", host : String = "") : Nil
+            name : String = "", host : String = "", body_file : String = "") : Nil
       return if pattern.empty?
-      part = Store::RulePart::Head if op.header? # header ops are head-only
-      @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host)
+      target, part = normalize_shape(op, target, part)
+      @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, body_file: body_file)
       refresh
     end
 
     def update(id : Int64, target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
                op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
-               name : String = "", host : String = "") : Nil
+               name : String = "", host : String = "", body_file : String = "") : Nil
       return if pattern.empty?
-      part = Store::RulePart::Head if op.header?
-      @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
+      target, part = normalize_shape(op, target, part)
+      @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host, body_file)
       refresh
+    end
+
+    # The {target, part} an op can actually have. Header ops are head-only; a short-circuit
+    # rule is additionally request-only, because it matches a request and there is no response
+    # to match against — the request never gets sent. Forced here (and mirrored by the CLI /
+    # MCP / TUI surfaces) so a rule can never be persisted in a shape the proxy would ignore.
+    def self.normalize_shape(op : Store::RuleOp, target : Store::RuleTarget,
+                             part : Store::RulePart) : {Store::RuleTarget, Store::RulePart}
+      return {Store::RuleTarget::Request, Store::RulePart::Head} if op.short_circuit?
+      {target, op.header? ? Store::RulePart::Head : part}
+    end
+
+    private def normalize_shape(op : Store::RuleOp, target : Store::RuleTarget,
+                                part : Store::RulePart) : {Store::RuleTarget, Store::RulePart}
+      Rules.normalize_shape(op, target, part)
     end
 
     def remove(id : Int64) : Nil
@@ -125,6 +158,73 @@ module Gori
       apply(entity, Store::RuleTarget::Response, Store::RulePart::Body, @resp_body_count, host)
     end
 
+    # --- short circuit (#511) ------------------------------------------------
+
+    def short_circuits? : Bool
+      @short_circuit_count.get > 0
+    end
+
+    # The stub answering this request head, or nil when no rule claims it. The FIRST matching
+    # rule in the applied order wins and the rest are not consulted — a stub terminates the
+    # exchange, so "apply them all in order" (what the rewrite ops do) has no meaning here.
+    def short_circuit(head : Bytes, host : String) : Proxy::HeadRewriter::Stub?
+      return nil if @short_circuit_count.get == 0 # lock-free fast path
+      active = @mutex.synchronize do
+        @rules.select do |r|
+          r.enabled? && r.op.short_circuit? && !r.pattern.empty? && host_matches?(r.host, host)
+        end
+      end
+      return nil if active.empty?
+      text = String.new(head)
+      rule = active.find { |r| stub_matches?(r, text) }
+      rule ? stub_for(rule) : nil
+    end
+
+    # Whether a stub rule's pattern claims this request head. Same literal/regex split the
+    # `Replace` op uses, so `match:` means the same thing on both. A regex that fails to
+    # compile (or meets non-UTF-8 bytes) does NOT match — the rule stays inert rather than
+    # capturing every request, which is the safe direction for an op that stops traffic.
+    private def stub_matches?(rule : Store::MatchRule, text : String) : Bool
+      if rule.match_kind.regex?
+        begin
+          SafeRegexp.compile(rule.pattern).matches?(text)
+        rescue
+          false
+        end
+      else
+        text.includes?(rule.pattern)
+      end
+    end
+
+    # Build the response bytes for a matched stub rule. Never returns nil: once a rule has
+    # claimed the request, gori answers it. An unparseable stub or an unreadable `body_file`
+    # becomes a gori-authored 502 carrying the reason, which ClientConn records on the flow —
+    # falling through to the origin instead would send a request the operator declared
+    # contained, and a payload leaking because a stub file was deleted is the worse failure.
+    private def stub_for(rule : Store::MatchRule) : Proxy::HeadRewriter::Stub
+      head = RuleStub.parse_head(rule.replacement)
+      return stub_failure(rule, "stub response head could not be parsed") unless head
+      body = if rule.body_file.empty?
+               RuleStub.inline_body(rule.replacement)
+             else
+               begin
+                 @stub_bodies.read(rule.body_file)
+               rescue ex : Gori::Error
+                 return stub_failure(rule, ex.message || "stub body file unreadable")
+               end
+             end
+      Proxy::HeadRewriter::Stub.new(head.bytes, body, head.status, rule.id)
+    end
+
+    # gori's own answer when a rule cannot be honoured. Unlike a stub, this one IS marked on
+    # the wire (`X-Gori-Short-Circuit: error`): the operator's bytes go out untouched, but
+    # bytes gori invented say so.
+    private def stub_failure(rule : Store::MatchRule, message : String) : Proxy::HeadRewriter::Stub
+      body = "gori: short-circuit rule ##{rule.id} could not be applied: #{message}\n".to_slice
+      head = "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nX-Gori-Short-Circuit: error\r\n".to_slice
+      Proxy::HeadRewriter::Stub.new(head, body, 502, rule.id, error: message)
+    end
+
     # Live preview for the Rewriter tab: apply every enabled rule for `target` over a
     # full HTTP message (head + body split on the first blank line). Host-scoped rules
     # use `host` (typically parsed from the sample's Host header). Empty host → only
@@ -161,7 +261,7 @@ module Gori
       return bytes if count.get == 0 # lock-free fast path: no rules to apply
       active = @mutex.synchronize do
         @rules.select do |r|
-          r.enabled? && r.target == target && r.part == part && !r.pattern.empty? &&
+          r.enabled? && r.op.rewrite? && r.target == target && r.part == part && !r.pattern.empty? &&
             !(part.body? && r.op.header?) && host_matches?(r.host, host)
         end
       end
@@ -189,6 +289,7 @@ module Gori
       in Store::RuleOp::AddHeader    then head_add_header(text, rule.pattern, rule.replacement)
       in Store::RuleOp::SetHeader    then head_set_header(text, rule.pattern, rule.replacement)
       in Store::RuleOp::RemoveHeader then head_remove_header(text, rule.pattern)
+      in Store::RuleOp::ShortCircuit then text # answers, never rewrites — `apply` filters it out
       end
     end
 
@@ -327,9 +428,14 @@ module Gori
       Preview.new(scanned, matched, @store.count)
     end
 
-    # Whether applying `rule` to the relevant part of `detail` would change its bytes.
+    # Whether applying `rule` to the relevant part of `detail` would change its bytes — or,
+    # for a short-circuit rule, whether it would have ANSWERED that flow instead of letting
+    # it reach the origin. Same question the preview line asks of every other op ("how many
+    # of your recent flows does this touch"), and the more useful one for a stub: it tells
+    # the operator what they are about to stop sending.
     private def rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
       return false unless host_matches?(rule.host, detail.row.host)
+      return stub_matches?(rule, String.new(detail.request_head)) if rule.op.short_circuit?
       return false if rule.part.body? && rule.op.header?
       bytes = flow_part_bytes(detail, rule)
       return false unless bytes
@@ -351,6 +457,10 @@ module Gori
       @resp_head_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Body))
+      @short_circuit_count.set(stub_count(fresh))
+      # An edit may have repointed a rule at a different file; the cache is keyed by path and
+      # revalidated per read, so this only drops entries no rule refers to any more.
+      @stub_bodies.clear
     end
   end
 end

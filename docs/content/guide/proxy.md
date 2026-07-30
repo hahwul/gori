@@ -159,6 +159,7 @@ Each rule has an operation:
 | **Add header** | Append a `Name: value` header |
 | **Set header** | Replace a header's value by name, or add it if absent |
 | **Remove header** | Drop a header by name |
+| **Short circuit** | Answer the request from the rule, without dialing the origin at all |
 
 A **Replace** rule targets the request or response, and the **head** (request/status line + headers) or **body** (the entity). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
 
@@ -167,6 +168,34 @@ Scope any rule to a **host** glob so it only fires for matching traffic: a plain
 Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules are per-project and take effect as soon as you save, with no restart.
 
 A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. **A body rule still forces matching hosts to HTTP/1.1**: body rewriting on HTTP/2 isn't built yet, and an h2 client that can't take that downgrade (gRPC) won't connect while one is enabled. `gori.log` records that once per host, naming the host and the reason.
+
+### Short circuit — answer without an origin
+
+The other four operations rewrite a message that already exists. **Short circuit** answers instead: the request is matched, gori replies with a response you wrote, and the origin is never dialed. That covers what a Replace rule structurally cannot — the endpoint 404s or 500s, the origin is offline or behind an auth wall, or the body has to be constructed rather than derived.
+
+It is how you ask *"is this check enforced anywhere but the client?"*: force an authorization probe to return `{"isAdmin": true}`, flip an entitlement the client is trusted to honour, inject a payload into a JSON field to reach a DOM sink, or serve a malformed body to test the client's parsing.
+
+The rule matches the **request head** (literal or regex, host glob as usual) and carries the response you want. Write it as a raw HTTP response — press `Enter` on the `response:` row to open the editor:
+
+```
+200 OK
+Content-Type: application/json
+
+{"isAdmin": true}
+```
+
+The first line is the status; `200`, `200 OK` and `HTTP/1.1 200 OK` all work, and an omitted reason phrase is filled in for you. Lines up to the blank line are headers, and everything after it is the body, byte for byte as you typed it. For a large or binary stub, set **body file** to a path instead: gori serves that file's bytes as the body and re-reads it whenever it changes on disk, so you can edit the stub outside gori and see it on the next request.
+
+`Content-Length` is always re-derived from the bytes gori actually sends — a `Content-Length` or `Transfer-Encoding` in your rule is dropped, because one that disagreed with the body would desync the next request on a keep-alive connection. Everything else goes out exactly as written; gori adds no header of its own.
+
+If the rule cannot be honoured (the response doesn't parse, the body file is gone) gori answers `502` with `X-Gori-Short-Circuit: error` and records the reason on the flow. It does **not** fall through to the origin: you declared the request contained, and leaking a payload because a stub file was deleted is the worse failure.
+
+Two consequences worth knowing:
+
+- **Short-circuited flows are marked in History.** They show `STUB` in the `PROTO` column and no duration, because there was no round trip. Filter with `stub:true` to review them, or `stub:false` to read History as traffic that really happened — worth doing before you screenshot anything.
+- **Probe skips them.** A passive rule reading a stub is reading your bytes, not the target's, and an active probe would compare a canned baseline against a live origin. Both refuse, so a stub can never manufacture a finding.
+
+**A short-circuit rule forces matching hosts to HTTP/1.1**, the way a body rule does: the h2 relay has no way to answer a request locally, so a stub rule left on an h2 connection would silently let the request through to the origin — the one thing it exists to prevent. `gori.log` records that once per host, naming the host and the reason. An h2-only client (gRPC) will not connect while a stub rule is enabled.
 
 ### Head rules on HTTP/2
 

@@ -359,6 +359,9 @@ module Gori
       private def maybe_enqueue_active(detail : Store::FlowDetail) : Nil
         return if @stopped
         return unless @mode.probes_actively?
+        # Skipped here too, purely to keep stubbed flows out of the queue — `Active.analyze`
+        # is the refusal that matters and would reject this job anyway (#511).
+        return if detail.row.short_circuited?
         row = detail.row
         url = row.url
         # Active probes only on hosts/paths covered by Project scope INCLUDE rules

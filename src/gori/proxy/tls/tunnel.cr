@@ -240,6 +240,18 @@ module Gori::Proxy::Tls
                                "is not implemented yet (disable the body rule to keep h2)")
         return false
       end
+      # A SHORT-CIRCUIT rule (#511) earns the downgrade for the same reason a body rule does:
+      # `HeadRewriter#short_circuit` is consulted in `ClientConn#handle_request`, and the h2
+      # relay never asks. Unlike the sandbox this IS a seam, so an unreachable one lets traffic
+      # through rather than blocking it — but that is precisely the failure, because the rule's
+      # whole purpose is that the request must NOT reach the origin. Left ungated, an operator
+      # who stubbed an endpoint would watch an h2 host send the request anyway, with nothing
+      # anywhere saying why.
+      if @rewriter.try(&.short_circuits?)
+        notice_downgrade(host, "a Match&Replace short-circuit rule is live and the h2 relay " \
+                               "cannot answer a request locally (disable the stub rule to keep h2)")
+        return false
+      end
       true
     end
 

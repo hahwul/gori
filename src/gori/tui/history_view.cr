@@ -46,7 +46,7 @@ module Gori::Tui
     # nothing, and the empty list reads as "no flows match". `url` is the reverse case —
     # a real, working field that was never suggested. spec/tui/history_view_spec.cr pins
     # this list against ql.cr so the two cannot drift apart again.
-    QL_FIELDS  = %w(host url method status path scheme proto body header size reqsize respsize dur)
+    QL_FIELDS  = %w(host url method status path scheme proto body header size reqsize respsize dur stub)
     METHOD_VAL = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
     # Discoverability hints for the QL filter, kept loosely in sync with QL_FIELDS.
     # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits
@@ -1523,8 +1523,18 @@ module Gori::Tui
         # plain HTTP flows keep showing the scheme (HTTP/HTTPS) — the plaintext-vs-TLS
         # signal — since there is nothing else worth flagging on them.
         kind = Proto.classify(row.status, row.content_type)
-        proto_label = kind.http? ? row.scheme.upcase : kind.label
-        screen.text(proto_x, y, proto_label, kind.http? ? Theme.muted : Theme.accent, bg)
+        # A short-circuited flow says so IN the PROTO column, replacing HTTP/HTTPS (#511).
+        # That column already answers "what kind of exchange was this", and for a stub the
+        # honest answer is that it was not an exchange at all — gori wrote the response from
+        # a rule and no origin was dialed. It has to displace the scheme rather than sit
+        # beside it: the row is fixed-width, and a marker that drops off a narrow terminal is
+        # a marker that lets someone screenshot a finding the server never took part in. The
+        # scheme is still on the row's URL and in the detail pane. Yellow, like #507's
+        # `bypass:N` chip — "you are not seeing what you think", not a blocked/failed state.
+        stub = row.short_circuited?
+        proto_label = stub ? "STUB" : (kind.http? ? row.scheme.upcase : kind.label)
+        proto_color = stub ? Theme.yellow : (kind.http? ? Theme.muted : Theme.accent)
+        screen.text(proto_x, y, proto_label, proto_color, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of

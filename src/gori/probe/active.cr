@@ -77,6 +77,12 @@ module Gori
                        backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
                        disabled : Set(String) = NO_DISABLED,
                        on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
+        # A short-circuited flow is refused before a single probe is sent (#511). Its baseline
+        # response came from a Match&Replace stub, not from the origin, so every differential
+        # this builds would be measuring the rule — and the probes themselves WOULD reach the
+        # origin (Active dials directly, not through the proxy), so the comparison is between
+        # two different responders. Same refusal, same reason, as `Passive.analyze`.
+        return [] of Detection if detail.row.short_circuited?
         out = [] of Detection
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
