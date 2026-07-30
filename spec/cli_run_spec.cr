@@ -254,6 +254,31 @@ describe "gori run probe --active" do
   end
 end
 
+# The guard behind `unknown subcommand` on the verb-dispatching subcommands. `issues`/`links`
+# used to end their `case` with `else <the read command>`, so an unrecognized verb silently
+# LISTED and exited 0: `gori run issues remove 1` deleted nothing and reported success. The
+# dispatch itself calls `abort`, so the classification is spec'd here and the messages are
+# covered by the subcommand help.
+describe "Gori::CLI::Run.verb_token?" do
+  it "is true for a bare word — a verb the case must recognize or reject" do
+    Gori::CLI::Run.verb_token?("remove").should be_true
+    Gori::CLI::Run.verb_token?("delet").should be_true # a typo is still a verb token
+    Gori::CLI::Run.verb_token?("severity:high").should be_true
+  end
+
+  it "is false for a flag, which means the default read command" do
+    # `gori run issues --project x` and `gori run links --owner note --id 2` still list.
+    Gori::CLI::Run.verb_token?("--project").should be_false
+    Gori::CLI::Run.verb_token?("-h").should be_false
+    Gori::CLI::Run.verb_token?("--format=json").should be_false
+  end
+
+  it "is false when there is no first token at all" do
+    Gori::CLI::Run.verb_token?(nil).should be_false
+    Gori::CLI::Run.verb_token?("").should be_false
+  end
+end
+
 # #410: `gori run fuzz` dropped every errored send from all output formats (the CLI showed only
 # matches), so a headless run that 100%-failed looked identical to one that cleanly matched
 # nothing. `emit_fuzz_result` now emits an errored row too — proven here via a whitebox wrapper.

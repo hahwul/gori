@@ -5,11 +5,19 @@ module Gori
   module CLI
     module Run
       private def self.cmd_links(args : Array(String)) : Nil
-        case args.first?
+        case sub = args.first?
         when "add"          then cmd_links_mutate(args[1..], add: true)
         when "delete", "rm" then cmd_links_mutate(args[1..], add: false)
-        when "list", nil    then cmd_links_list(args.empty? ? args : args[1..])
-        else                     cmd_links_list(args)
+        when "list"         then cmd_links_list(args[1..])
+        else
+          # See the matching guard in cmd_issues: an unrecognized verb fell through to the list,
+          # so `links remove …` — the exact word `gori run -h` used to advertise — silently
+          # listed instead of unlinking. With a mutate-only flag present it did fail, but blamed
+          # the flag (`unknown option: --ref`) and never said `remove` is not a verb.
+          if verb_token?(sub)
+            abort "gori run links: unknown subcommand '#{sub}' (add, delete, list)"
+          end
+          cmd_links_list(args)
         end
       end
 
@@ -21,10 +29,17 @@ module Gori
         format = :text
 
         parser = OptionParser.new do |p|
+          # The mutate verbs belong in this banner: it IS `gori run links --help`, and listing
+          # only the read path left `add`/`delete` implemented but undiscoverable — the more
+          # so because the top-level table used to name a `remove` verb that does not exist.
           p.banner = "Usage: gori run links [list] --owner=issue|note --id=N\n\n" \
                      "List the evidence an issue or note points at. A pointer whose target was\n" \
                      "pruned is shown as (stale) rather than hidden, so \"no evidence\" and\n" \
-                     "\"evidence that is gone\" stay distinguishable."
+                     "\"evidence that is gone\" stay distinguishable.\n\n" \
+                     "Or run with a subcommand:\n" \
+                     "  gori run links add    --owner=issue|note --id=N --ref=KIND --ref-id=M\n" \
+                     "  gori run links delete --owner=issue|note --id=N --ref=KIND --ref-id=M\n" \
+                     "  (--ref is flow|repeater|fuzz|miner; `rm` is accepted for delete)"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }

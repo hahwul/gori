@@ -162,9 +162,9 @@ module Gori
         {"probe delete", "Hard-delete a finding (or --all)"},
         {"probe rules", "List/enable/disable scan rules; add or delete custom ones"},
         {"probe mode", "Get/set the scan mode (off, passive, active, aggressive)"},
-        {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
+        {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create, delete)"},
         {"issues", "List, export, create, update, or delete issues (text, json, markdown)"},
-        {"links", "List/add/remove an issue's or note's evidence links"},
+        {"links", "List/add/delete an issue's or note's evidence links"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
         {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},
@@ -194,6 +194,22 @@ module Gori
       end
 
       # --- shared helpers ----------------------------------------------------
+
+      # Is a subcommand's first token a VERB, as opposed to a flag or nothing at all?
+      #
+      # A `case args.first?` that ends in `else <the read command>` treats an unrecognized verb
+      # as the default read, which is how `gori run issues remove 1` printed the issue list and
+      # exited 0 having deleted nothing, and how `gori run links remove …` listed instead of
+      # unlinking. Both are mutations that silently no-op with a SUCCESS status — the worst
+      # failure mode for a surface scripts consume. So the `else` branch asks this first and
+      # rejects a verb it does not know, while a leading flag (`--project x`, meaning "list")
+      # and an empty argv still fall through to the read command.
+      #
+      # One home for the predicate: any subcommand growing verbs should call this rather than
+      # re-derive the `starts_with?("-")` test next to its own `case`.
+      def self.verb_token?(sub : String?) : Bool
+        !sub.nil? && !sub.empty? && !sub.starts_with?("-")
+      end
 
       # --db wins → else --project resolved via ProjectRegistry#find (exact short id
       # → exact dir slug → exact display name → unique id-prefix, all
