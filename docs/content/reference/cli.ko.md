@@ -108,7 +108,11 @@ gori run history -q 'status:5xx' --limit 100 --format json
 |--------|-------------|
 | `-q`, `--query=QL` | 쿼리 언어 필터 (위치 인자로도 허용) |
 | `-n`, `--limit=N` | 최대 행 수 (기본값 50) |
-| `--format=FMT` | `text` 또는 `json` |
+| `--format=FMT` | `text`, `json`, 또는 `har` |
+
+서브커맨드: `history show <id>` (`run show`와 동일), `history delete <id>`, `history clear --yes`.
+
+`--format har`은 결과 집합 전체를 하나의 HAR 1.2 log로 STDOUT에 씁니다. 오래된 항목이 먼저 오므로, 쿼리 결과를 동료에게 넘기거나 Burp, Charles, 브라우저 네트워크 패널에 그대로 불러올 수 있습니다. [HAR 내보내기](#har-export)를 참고하세요.
 
 ### run show {#run-show}
 
@@ -116,7 +120,15 @@ gori run history -q 'status:5xx' --limit 100 --format json
 gori run show <flow-id> --format raw
 ```
 
-`--format`은 `text`, `json`, 또는 `raw`(정확한 바이트)입니다. `--request-only` / `--response-only`로 출력을 제한합니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+`--format`은 `text`, `json`, `raw`(정확한 바이트), 또는 `har`(항목 하나짜리 HAR log)입니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+
+#### HAR 내보내기 {#har-export}
+
+gori가 쓴 HAR은 다시 gori로 가져와도(`gori run import --har`) 같은 플로우가 되므로 왕복이 보장됩니다. 세 가지를 알아두세요.
+
+- **본문은 와이어 바이트**입니다. chunked만 풀고 압축은 풀지 않으며, 유효한 UTF-8이 아니면 base64로 인코딩합니다. `Content-Encoding` 헤더가 `headers`에 그대로 남아 본문과 헤드가 같은 메시지를 가리킵니다.
+- **캡처 상한에 잘린 본문은 표시**되며, 온전한 것처럼 나가지 않습니다. `bodySize`와 `content.size`는 실제 와이어 크기를 유지하고 텍스트에는 캡처된 앞부분만 담기며, `content`/`postData`의 `comment`가 그 사실을 적습니다. 명령은 해당 개수도 STDERR로 보고합니다.
+- **WebSocket 플로우와 응답이 캡처되지 않은 플로우는 건너뜁니다.** HAR로 표현할 수 없기 때문입니다. 개수와 이유는 STDERR로 나가고 STDOUT은 순수한 HAR 문서로 유지됩니다.
 
 ### run compare {#run-compare}
 

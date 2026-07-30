@@ -108,7 +108,11 @@ gori run history -q 'status:5xx' --limit 100 --format json
 |--------|-------------|
 | `-q`, `--query=QL` | Query-language filter (also accepted positionally) |
 | `-n`, `--limit=N` | Max rows (default 50) |
-| `--format=FMT` | `text` or `json` |
+| `--format=FMT` | `text`, `json`, or `har` |
+
+Subcommands: `history show <id>` (same as `run show`), `history delete <id>`, `history clear --yes`.
+
+`--format har` writes the whole result set as one HAR 1.2 log on STDOUT, oldest entry first, so a query can be handed to a teammate or loaded into Burp, Charles, or a browser's network panel. See [HAR export](#har-export).
 
 ### run show
 
@@ -116,7 +120,15 @@ gori run history -q 'status:5xx' --limit 100 --format json
 gori run show <flow-id> --format raw
 ```
 
-`--format` is `text`, `json`, or `raw` (exact bytes). `--request-only` / `--response-only` limit the output. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
+`--format` is `text`, `json`, `raw` (exact bytes), or `har` (a one-entry HAR log). `--request-only` / `--response-only` limit the output and do not apply to `har`. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
+
+#### HAR export
+
+A HAR gori writes imports back into gori as the same flow (`gori run import --har`), so it round-trips. Three things to know:
+
+- **Bodies are the wire bytes**, de-chunked but not decompressed, base64-encoded when they are not valid UTF-8. The `Content-Encoding` header stays in `headers`, so body and head keep describing the same message.
+- **A body capped at the capture limit is marked**, never emitted as if complete: `bodySize` and `content.size` stay the true wire size while the text carries only the captured prefix, and a `comment` on `content`/`postData` says so. The command also reports the count on STDERR.
+- **WebSocket flows and flows with no captured response are skipped**, since HAR cannot represent either. The count and reason go to STDERR; STDOUT stays a pure HAR document.
 
 ### run compare
 

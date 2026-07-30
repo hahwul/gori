@@ -12,12 +12,21 @@ module Gori
       # Bound a stored import body to the same ceiling live capture uses, so a HAR
       # with a huge (e.g. media/base64) body can't insert an arbitrarily large,
       # never-truncated BLOB straight into the DB. Returns {stored, truncated, true_size}.
-      def self.capped(body : Bytes?) : {Bytes?, Bool, Int64?}
+      #
+      # `declared_size` is the size the SOURCE says the body had on the wire — HAR's
+      # `bodySize` / `content.size`, which `Export::Har` writes as the true size while the
+      # file carries only the bytes gori captured. When it exceeds the bytes we actually
+      # have, the body arrives already truncated and is stored that way: dropping the flag
+      # would present a capture-capped body as complete one hop later, which is the whole
+      # thing the export marking exists to prevent. Every other import source passes nil and
+      # keeps its exact previous behaviour.
+      def self.capped(body : Bytes?, declared_size : Int64? = nil) : {Bytes?, Bool, Int64?}
         return {nil, false, nil} unless body
         size = body.size.to_i64
         max = Settings.capture_max
-        return {body, false, size} if body.size <= max
-        {body[0, max].dup, true, size}
+        true_size = declared_size && declared_size > size ? declared_size : size
+        return {body[0, max].dup, true, true_size} if body.size > max
+        {body, true_size > size, true_size}
       end
 
       # A scheme is `scheme://` at the very START of the string (RFC 3986 §3.1); a
@@ -150,7 +159,7 @@ module Gori
 
       def self.request_head(method : String, target : String, http_version : String,
                             scheme : String, host : String, port : Int32, headers : Headers,
-                            body : Bytes?) : Bytes
+                            body : Bytes?, content_length : Int64? = nil) : Bytes
         reject_inject!(method, "method")
         reject_inject!(http_version, "HTTP version")
         # `host` reaches the Host line, so it forges a message boundary the same way a header
@@ -179,11 +188,17 @@ module Gori
           # length differs from the original request's Content-Length. Keeping that header
           # verbatim left the stored request advertising the wrong length; re-emit one correct
           # Content-Length below from the true (pre-cap) body size.
+          #
+          # `content_length` overrides that when the source told us the body was longer than
+          # the bytes it shipped (a capture-capped body in a gori-written HAR). A live capture
+          # stores the ORIGIN's Content-Length beside a capped BLOB, so honouring the declared
+          # size here is what makes a re-imported truncated flow match the captured one instead
+          # of advertising the prefix length as the whole entity.
           headers.each do |k, v|
             next if k.compare("content-length", case_insensitive: true) == 0
             b << k << ": " << v << "\r\n"
           end
-          b << "Content-Length: " << body.size << "\r\n" if body
+          b << "Content-Length: " << (content_length || body.size) << "\r\n" if body
           b << "\r\n"
         end.to_slice
       end
@@ -207,10 +222,12 @@ module Gori
 
       def self.pending_request(created_at : Int64, url : String, method : String = "GET",
                                headers : Headers = Headers.new,
-                               body : Bytes? = nil, http_version : String = "HTTP/1.1") : FlowPair
+                               body : Bytes? = nil, http_version : String = "HTTP/1.1",
+                               declared_body_size : Int64? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
-        head = request_head(method, target, http_version, scheme, host, port, headers, body)
-        stored, trunc, size = capped(body)
+        stored, trunc, size = capped(body, declared_body_size)
+        head = request_head(method, target, http_version, scheme, host, port, headers, body,
+          trunc ? size : nil)
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
           method: method.upcase, target: target, http_version: http_version,
@@ -224,16 +241,21 @@ module Gori
                              status : Int32, reason : String,
                              resp_headers : Headers,
                              resp_body : Bytes?, content_type : String?,
-                             duration_us : Int64?) : FlowPair
+                             duration_us : Int64?,
+                             declared_req_body_size : Int64? = nil,
+                             declared_resp_body_size : Int64? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
-        req_head = request_head(method, target, http_version, scheme, host, port, req_headers, req_body)
-        req_stored, req_trunc, req_size = capped(req_body)
+        req_stored, req_trunc, req_size = capped(req_body, declared_req_body_size)
+        req_head = request_head(method, target, http_version, scheme, host, port, req_headers, req_body,
+          req_trunc ? req_size : nil)
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
           method: method.upcase, target: target, http_version: http_version,
           head: req_head, body: req_stored, body_truncated: req_trunc, body_size: req_size)
+        # `response_head` keeps an incoming Content-Length verbatim, so a truncated response
+        # already re-serializes with the origin's true length — no override needed on this side.
         resp_head = response_head(http_version, status, reason, resp_headers, resp_body)
-        resp_stored, resp_trunc, resp_size = capped(resp_body)
+        resp_stored, resp_trunc, resp_size = capped(resp_body, declared_resp_body_size)
         content_encoding = resp_headers.find { |(k, _)| k.compare("content-encoding", case_insensitive: true) == 0 }.try(&.[1])
         resp = Store::CapturedResponse.new(
           flow_id: 0, status: status, reason: reason.presence, content_type: content_type,

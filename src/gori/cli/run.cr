@@ -438,6 +438,7 @@ module Gori
               when "json"           then :json
               when "jsonl"          then :jsonl
               when "raw"            then :raw
+              when "har"            then :har
               when "paths"          then :paths
               when "markdown", "md" then :markdown
               else                       abort "gori run: unknown --format '#{v}'"

@@ -1,14 +1,16 @@
 # `gori run history` (alias ls) and `gori run show <id>` — list / QL-query captured
-# flows, and print one flow's request/response (text, json, or raw bytes).
+# flows, and print one flow's request/response (text, json, raw bytes, or HAR).
 module Gori
   module CLI
     module Run
+      # `delete`/`clear`/`show` are reserved as the first positional (same convention as
+      # `gori run probe`); a QL query starting with one goes through --query. `history show
+      # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
       private def self.cmd_history(args : Array(String)) : Nil
-        # `delete`/`clear` are reserved as the first positional (same convention as
-        # `gori run probe`); a QL query starting with one goes through --query.
         case args.first?
         when "delete", "rm" then cmd_history_delete(args[1..])
         when "clear"        then cmd_history_clear(args[1..])
+        when "show"         then cmd_show(args[1..])
         else                     cmd_history_list(args)
         end
       end
@@ -89,13 +91,13 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
-                     "Subcommands: history delete <id> · history clear --yes"
+                     "Subcommands: history show <id> · history delete <id> · history clear --yes"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines)") do |v|
-            format = parse_format(v, [:text, :json, :jsonl])
+          p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines) | har (one HAR 1.2 log)") do |v|
+            format = parse_format(v, [:text, :json, :jsonl, :har])
             format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
           end
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -141,7 +143,9 @@ module Gori
             else
               store.recent_flows(limit)
             end
-          if format == :json
+          if format == :har
+            emit_har(store, rows, query, limit)
+          elsif format == :json
             rows.each { |r| puts CLI::Output.flow_row_json(r) }
           elsif rows.empty?
             STDERR.puts "no flows#{query ? " match #{query.inspect}" : ""}"
@@ -150,6 +154,33 @@ module Gori
           end
         ensure
           store.close
+        end
+      end
+
+      # The whole QL result set as ONE HAR 1.2 log (#495).
+      #
+      # Flows are materialized one at a time — a HAR needs the head/body BLOBs an `ls` row
+      # deliberately doesn't carry — so a large `-n` streams instead of holding every body in
+      # memory at once. OLDEST first: the listing is newest-first for reading, but a HAR log's
+      # entries are chronological, which is what every reader assumes when it renders a
+      # waterfall.
+      #
+      # STDOUT stays a pure HAR document (pipe it straight to a file); every caveat — flows
+      # skipped, bodies capped — goes to STDERR, because a silently short export is exactly
+      # the failure this file keeps having to fix.
+      private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
+                                limit : Int32) : Nil
+        details = rows.reverse.each.compact_map { |r| store.get_flow(r.id) }
+        report = Export::Har.log(STDOUT, details)
+        STDOUT.puts
+        report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
+        if report.written == 0
+          STDERR.puts "gori run history: no flows written to the HAR#{query ? " (query #{query.inspect})" : ""}"
+        elsif rows.size >= limit
+          # A file handed to someone else must not quietly be the newest 50 of 5000. The
+          # listing formats share this default, but there a short page is obvious on screen
+          # and in a HAR it is not, so say it out loud.
+          STDERR.puts "gori run history: stopped at the --limit of #{limit} flow#{limit == 1 ? "" : "s"}; raise -n to export more"
         end
       end
 
@@ -167,7 +198,7 @@ module Gori
           p.banner = "Usage: gori run show <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes)") { |v| format = parse_format(v, [:text, :json, :raw]) }
+          p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log)") { |v| format = parse_format(v, [:text, :json, :raw, :har]) }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -177,6 +208,11 @@ module Gori
         end
         parser.parse(args)
         abort "gori run show: --request-only and --response-only are mutually exclusive" if req_only && resp_only
+        # A HAR entry is a request AND its response; there is no half-entry shape to emit,
+        # so the one-sided flags are a usage error here rather than a silently ignored option.
+        if format == :har && (req_only || resp_only)
+          abort "gori run show: --format har writes a whole entry — --request-only/--response-only don't apply"
+        end
         id = take_flow_id(positional, "show")
 
         # Close the store before any abort (abort/exit skip ensure blocks); get_flow
@@ -196,9 +232,27 @@ module Gori
         show_response = !req_only
         case format
         when :raw  then show_raw(detail, show_request, show_response)
+        when :har  then show_har(detail)
         when :json then puts show_json(detail, show_request, show_response, ws_msgs)
         else            show_text(detail, show_request, show_response, ws_msgs)
         end
+      end
+
+      # One flow as a one-entry HAR 1.2 log. A flow HAR cannot represent is an ERROR here,
+      # not an empty log: the listing can skip and count, but `show <id> --format har` named
+      # this flow, so silently handing back `entries: []` would answer a different question.
+      private def self.show_har(detail : Store::FlowDetail) : Nil
+        case Export::Har.skip_reason(detail)
+        in Export::Har::Skip::WebSocket
+          abort "gori run show: flow ##{detail.row.id} is a WebSocket flow — HAR has no representation for its messages (use --format json or raw)"
+        in Export::Har::Skip::NoResponse
+          abort "gori run show: flow ##{detail.row.id} has no captured response — a HAR entry requires one"
+        in Nil
+          # exportable
+        end
+        report = Export::Har.log(STDOUT, [detail])
+        STDOUT.puts
+        report.notes.each { |n| STDERR.puts "gori run show: #{n}" }
       end
 
       private def self.show_raw(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil

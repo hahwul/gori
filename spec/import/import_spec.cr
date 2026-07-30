@@ -534,7 +534,9 @@ describe Gori::Import do
         result.count.should eq(1) # imported, not silently skipped
         row = store.search(Gori::QL::EMPTY, 1).first
         row.host.should eq("tz.test")
-        row.created_at.should eq(1_717_262_430_000_000_i64) # parsed absolute time, not "now"
+        # Parsed absolute time, not "now" — and the .123 fraction is KEPT (parse_started
+        # used to truncate to whole seconds, collapsing a burst of flows onto one stamp).
+        row.created_at.should eq(1_717_262_430_123_000_i64)
       end
     ensure
       File.delete?(har)

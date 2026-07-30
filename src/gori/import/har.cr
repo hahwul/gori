@@ -51,19 +51,27 @@ module Gori
         method = req["method"]?.to_s.presence || "GET"
         http_version = normalize_http_version(req["httpVersion"]?.to_s)
         created_at = parse_started(entry["startedDateTime"]?.to_s)
-        duration_us = entry["time"]?.try { |t| (t.as_f * 1_000).to_i64 } # HAR time is ms → µs
+        duration_us = parse_time(entry["time"]?)
 
         req_headers = headers_list(req["headers"]?)
         req_body = post_body(req["postData"]?)
+        # HAR's `bodySize` is the size the body had ON THE WIRE, which is not necessarily the
+        # size of the text the file carries: `Export::Har` writes the true size beside a body
+        # that was capped at capture time. Passing it through keeps that flow truncated
+        # instead of re-importing a prefix as if it were the whole entity.
+        req_declared = declared_size(req["bodySize"]?)
 
         resp = entry["response"]?
         resp = nil if resp.try(&.raw).nil? # an explicit JSON `null` response is truthy as JSON::Any — treat it as absent
-        return Builder.pending_request(created_at, url, method, req_headers, req_body, http_version) unless resp
+        unless resp
+          return Builder.pending_request(created_at, url, method, req_headers, req_body,
+            http_version, req_declared)
+        end
 
         status = resp["status"]?.try(&.as_i).try(&.to_i32) || 0
         reason = resp["statusText"]?.to_s.presence || status_reason(status)
         resp_headers = headers_list(resp["headers"]?)
-        resp_body, mime_type = response_body(resp)
+        resp_body, mime_type, resp_declared = response_body(resp)
         # Prefer the ACTUAL Content-Type response HEADER over HAR content.mimeType, matching how
         # a live-captured flow derives content_type from the real header. A HAR whose mimeType
         # disagrees with the header (e.g. mimeType `text/html` but a real `application/json`
@@ -75,7 +83,31 @@ module Gori
 
         Builder.complete_flow(
           created_at, url, method, req_headers, req_body, http_version,
-          status, reason, resp_headers, resp_body, content_type, duration_us)
+          status, reason, resp_headers, resp_body, content_type, duration_us,
+          req_declared, resp_declared)
+      end
+
+      # A HAR size field (`bodySize`, `content.size`) as a usable byte count, or nil. The
+      # spec's own "not available" is -1, and a generator that writes 0 for a body it did
+      # ship is saying nothing useful either — only a positive number is a claim.
+      private def self.declared_size(node : JSON::Any?) : Int64?
+        return nil unless node
+        n = node.as_i64? || node.as_f?.try(&.to_i64)
+        n && n > 0 ? n : nil
+      end
+
+      # HAR `time` is milliseconds; the store keeps micros.
+      #
+      # ROUND rather than truncate: a fractional-ms value gori itself wrote (12.345 for
+      # 12345µs) is not exactly representable as a double, so `(t * 1000).to_i64` could land
+      # on 12344 and shed a microsecond on every round trip. A NEGATIVE time is the spec's
+      # "not available", not a duration — nil keeps the History column showing "—" instead of
+      # a "-1ms" that reads like a real measurement. (`as_f?` accepts both JSON number
+      # shapes, so an integer `"time": 0` needs no separate branch.)
+      private def self.parse_time(node : JSON::Any?) : Int64?
+        ms = node.try(&.as_f?)
+        return nil unless ms && ms >= 0
+        (ms * 1_000).round.to_i64
       end
 
       # An ORDERED list of {name, value} — a HAR response commonly has several Set-Cookie
@@ -113,12 +145,12 @@ module Gori
         nil
       end
 
-      private def self.response_body(resp : JSON::Any) : {Bytes?, String?}
+      private def self.response_body(resp : JSON::Any) : {Bytes?, String?, Int64?}
         content = resp["content"]?
-        return {nil, nil} unless content
+        return {nil, nil, nil} unless content
         mime = content["mimeType"]?.to_s.presence
         body = encoded_body(content["text"]?.to_s, content["encoding"]?.to_s)
-        {body, mime}
+        {body, mime, declared_size(content["size"]?)}
       end
 
       private def self.encoded_body(text : String, encoding : String?) : Bytes?
@@ -141,8 +173,13 @@ module Gori
       # and numeric-offset forms with or without fractional seconds; fall back to a
       # bare offset-less datetime, then to "now", so a parse failure never drops the
       # whole request.
+      #
+      # Keep the MILLISECONDS, don't truncate to whole seconds: every mainstream generator (and
+      # `Export::Har`) writes milliseconds, and truncating to whole seconds threw them away —
+      # a HAR gori wrote came back with a different created_at than it left with, and a burst
+      # of flows captured inside one second all collapsed onto the same timestamp.
       private def self.parse_started(s : String) : Int64
-        return Time.utc.to_unix * 1_000_000 unless s.presence
+        return Time.utc.to_unix_ms * 1_000 unless s.presence
         time =
           begin
             Time.parse_rfc3339(s)
@@ -153,7 +190,7 @@ module Gori
               Time.utc
             end
           end
-        time.to_unix * 1_000_000
+        time.to_unix_ms * 1_000
       end
 
       private def self.status_reason(status : Int32) : String
