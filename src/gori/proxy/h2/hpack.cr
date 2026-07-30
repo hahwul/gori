@@ -1,10 +1,13 @@
 module Gori::Proxy::H2
-  # HPACK header decompression (RFC 7541) — decode only (we observe both peers'
-  # blocks; we never re-encode). One Decoder instance per direction per
-  # connection: the dynamic table is stateful across a connection's HEADERS
-  # frames, which is exactly why a single h2 stream's header bytes cannot be
-  # replayed out of connection context (hence raw-frame fidelity lives at the
-  # frame layer; this is the decoded projection, P7's "derived view").
+  # HPACK header compression (RFC 7541). One `Decoder` AND one `Encoder` instance
+  # per direction per connection: the dynamic table is stateful across a
+  # connection's HEADERS frames, which is exactly why a single h2 stream's header
+  # bytes cannot be replayed out of connection context (hence raw-frame fidelity
+  # lives at the frame layer; this is the decoded projection, P7's "derived view").
+  #
+  # The two halves are deliberately NOT coupled: an encoder's table is its own
+  # (RFC 7541 §2.2 — one table per direction, driven only by what that direction's
+  # encoder emits). Nothing here reads the peer's table to encode with.
   module HPACK
     # Static table (RFC 7541 Appendix A), 1-indexed by the protocol.
     STATIC = [
@@ -284,6 +287,24 @@ module Gori::Proxy::H2
       String.new(buf.to_slice)
     end
 
+    # One decoded header field. Carries the §6.2.3 "never indexed" marking next to
+    # the pair because that bit is an instruction TO intermediaries, not a
+    # compression detail we may drop and re-derive: a peer that sent a header as
+    # never-indexed asked everyone on the path to keep it out of every dynamic
+    # table, and `Encoder` can only honour that if the decode side preserved it.
+    struct Field
+      getter name : String
+      getter value : String
+      getter? never_indexed : Bool
+
+      def initialize(@name : String, @value : String, @never_indexed : Bool = false)
+      end
+
+      def to_tuple : {String, String}
+        {@name, @value}
+      end
+    end
+
     # Per-direction decoder holding the dynamic table (RFC 7541 §2.3.2).
     class Decoder
       ENTRY_OVERHEAD = 32 # per-entry accounting cost (§4.1)
@@ -304,7 +325,14 @@ module Gori::Proxy::H2
 
       # Decodes one header block into an ordered list of (name, value) pairs.
       def decode(block : Bytes) : Array({String, String})
-        headers = [] of {String, String}
+        decode_fields(block).map(&.to_tuple)
+      end
+
+      # Same decode, keeping each field's §6.2.3 never-indexed marking (see
+      # `Field`). `decode` is this minus that bit, so existing callers that only
+      # want the projection are unaffected.
+      def decode_fields(block : Bytes) : Array(Field)
+        headers = [] of Field
         list_size = 0
         pos = 0
         while pos < block.size
@@ -312,28 +340,31 @@ module Gori::Proxy::H2
           if b & 0x80 != 0
             # §6.1 Indexed Header Field
             index, pos = read_int(block, pos, 7)
-            headers << lookup(index)
+            headers << Field.new(*lookup(index))
           elsif b & 0x40 != 0
             # §6.2.1 Literal with Incremental Indexing
             index, pos = read_int(block, pos, 6)
             name, pos = field_name(block, pos, index)
             value, pos = read_string(block, pos)
             add(name, value)
-            headers << {name, value}
+            headers << Field.new(name, value)
           elsif b & 0x20 != 0
             # §6.3 Dynamic Table Size Update
             new_max, pos = read_int(block, pos, 5)
             resize(new_max)
             next
           else
-            # §6.2.2 (no indexing) / §6.2.3 (never indexed) — both 4-bit prefix
+            # §6.2.2 (no indexing) / §6.2.3 (never indexed) — both 4-bit prefix;
+            # bit 0x10 is what separates them, and it is the one an intermediary
+            # MUST carry through (§6.2.3), so it rides along on the Field.
+            never = b & 0x10 != 0
             index, pos = read_int(block, pos, 4)
             name, pos = field_name(block, pos, index)
             value, pos = read_string(block, pos)
-            headers << {name, value}
+            headers << Field.new(name, value, never)
           end
-          n, v = headers[-1]
-          list_size += n.bytesize + v.bytesize + ENTRY_OVERHEAD
+          f = headers[-1]
+          list_size += f.name.bytesize + f.value.bytesize + ENTRY_OVERHEAD
           raise Gori::Error.new("hpack: header list too large") if list_size > MAX_HEADER_LIST
         end
         headers
@@ -431,28 +462,193 @@ module Gori::Proxy::H2
       io.to_slice
     end
 
-    # Stateless HPACK encoder: static-table refs for exact/name matches, literal
-    # WITHOUT indexing for everything else (so it never touches a dynamic table —
-    # any decoder reads it). Foundation for replaying an h2 stream.
+    # HPACK encoder — the return path a rewritten h2 head needs (#492 step 1).
+    # Mirror of `Decoder`: its own dynamic table, its own `add`/`resize`/`evict`,
+    # with identical §4.1 entry accounting, because the two tables agree only if
+    # they are computed the same way. It never reads a Decoder's table.
+    #
+    # ## Dynamic-table insertion is opt-in, and off by default
+    #
+    # Emitting everything as a literal (static refs where they exist, otherwise
+    # WITHOUT indexing) is valid HPACK and leaves this encoder effectively
+    # stateless: the block decodes correctly against any decoder, with no shared
+    # history to keep in step. Insertion buys real compression — a repeated
+    # cookie or authorization header collapses to one byte — but only holds if
+    # THIS encoder is the sole writer of that direction for the whole connection.
+    #
+    # That is precisely what the intercept/rewrite path cannot promise yet. The
+    # h2 relay forwards frames byte-faithfully (`proxy/h2/relay.cr`); the moment
+    # one head is re-encoded and the next passes through untouched, the peer's
+    # decoder table is being driven by two encoders that never agreed on a
+    # history. Its dynamic indices then resolve to the WRONG header — silently,
+    # since an in-range index is not an error — or out of range, which takes the
+    # connection down. A literal-only encoder cannot cause either, at the cost of
+    # bytes on the wire. So the default is the choice that cannot corrupt a
+    # stream, and `indexing: true` is there for a caller that owns every head in
+    # its direction (the repeater's one-shot connection does; #492 step 2 must
+    # establish it before turning this on).
+    #
+    # ## Never-indexed is honoured, not inferred
+    #
+    # `Field#never_indexed?` re-emits §6.2.3 and keeps the field out of the table
+    # even with `indexing: true` — §6.2.3 requires an intermediary to use the same
+    # representation, and it is the sender's mechanism for saying "this is a
+    # secret, do not put it in a compression table". gori is that intermediary.
+    # There is no name-based guessing here: the marking travels with the field
+    # from `Decoder#decode_fields`.
     class Encoder
+      # Same §4.1 accounting as the decoder — an encoder that sized entries
+      # differently would evict at a different moment and shift every index.
+      ENTRY_OVERHEAD = Decoder::ENTRY_OVERHEAD
+
+      # Ceiling on a size update we will emit, mirroring `Decoder#resize`'s bound
+      # so we can never emit an update our own decoder would reject.
+      MAX_TABLE_SIZE = 1 << 20
+
+      getter max_size : Int32
+      getter? indexing : Bool
+
+      # `max_size` is the table size this encoder starts with; it MUST NOT exceed
+      # the peer's SETTINGS_HEADER_TABLE_SIZE (a smaller one is always safe — we
+      # simply evict earlier than the peer's decoder, which leaves the surviving
+      # entries at the same indices). Mid-connection changes go through
+      # `max_size=`, which signals them on the wire.
+      def initialize(max_size : Int32 = 4096, @indexing : Bool = false)
+        @max_size = max_size.clamp(0, MAX_TABLE_SIZE)
+        @table = Deque({String, String}).new # index 0 = most recently added
+        @size = 0
+      end
+
+      # Pending §6.3 size updates (RFC 7541 §4.2): a change is signalled at the
+      # start of the next block, never mid-block.
+      @pending_min : Int32? = nil
+      @pending_size : Int32? = nil
+
+      # Encodes a header list into one HPACK block. Nothing here raises on
+      # adversarial content (empty/duplicate names, huge values, non-UTF-8 bytes):
+      # names and values are treated as opaque octets, exactly as HPACK defines
+      # them (P7 — a rewritten head still has to carry whatever the peer sent).
       def encode(headers : Array({String, String})) : Bytes
         io = IO::Memory.new
-        headers.each { |(name, value)| encode_field(io, name, value) }
+        emit_size_updates(io)
+        headers.each { |(name, value)| encode_field(io, name, value, false) }
         io.to_slice
       end
 
-      private def encode_field(io : IO::Memory, name : String, value : String) : Nil
-        if idx = STATIC_PAIR[{name, value}]?
+      # :ditto:
+      def encode(fields : Array(Field)) : Bytes
+        io = IO::Memory.new
+        emit_size_updates(io)
+        fields.each { |f| encode_field(io, f.name, f.value, f.never_indexed?) }
+        io.to_slice
+      end
+
+      # Changes the table size, to be signalled on the next block (§4.2) — this is
+      # how a peer's SETTINGS_HEADER_TABLE_SIZE update reaches the wire.
+      def max_size=(new_max : Int32) : Nil
+        new_max = new_max.clamp(0, MAX_TABLE_SIZE)
+        return if new_max == @max_size
+        @max_size = new_max
+        low = @pending_min
+        @pending_min = low ? Math.min(low, new_max) : new_max
+        @pending_size = new_max
+        evict
+      end
+
+      # The current dynamic-table entries, newest first (for inspection/specs).
+      def dynamic_entries : Array({String, String})
+        @table.to_a
+      end
+
+      private def encode_field(io : IO::Memory, name : String, value : String,
+                               never_indexed : Bool) : Nil
+        # A never-indexed field skips the indexed representation even on an exact
+        # STATIC hit: §6.2.3's "MUST use the same representation to forward" is
+        # about the representation, not just the table, and collapsing e.g. a
+        # never-indexed ":method GET" to 0x82 would drop the marking for the next
+        # hop. Costs a few bytes on a field nobody wants compressed anyway.
+        if !never_indexed && (idx = index_of(name, value))
           encode_int(io, idx, 7, 0x80_u8) # §6.1 indexed header field
           return
         end
-        # §6.2.2 literal without indexing; 4-bit name index (0 = literal name).
-        name_idx = STATIC_NAME[name]? || 0
-        encode_int(io, name_idx, 4, 0x00_u8)
+        name_idx = name_index(name) || 0 # 0 = literal name follows
+        insert = @indexing && !never_indexed && fits?(name, value)
+        if insert
+          encode_int(io, name_idx, 6, 0x40_u8) # §6.2.1 literal, incremental indexing
+        elsif never_indexed
+          encode_int(io, name_idx, 4, 0x10_u8) # §6.2.3 literal, never indexed
+        else
+          encode_int(io, name_idx, 4, 0x00_u8) # §6.2.2 literal, without indexing
+        end
         encode_string(io, name) if name_idx == 0
         encode_string(io, value)
+        # Every index above refers to the table as the decoder sees it BEFORE this
+        # field, so the insert lands last (§6.2.1's "then added").
+        add(name, value) if insert
       end
 
+      # Exact (name, value) hit. Static first: its indices are one byte and it
+      # costs no table state.
+      private def index_of(name : String, value : String) : Int32?
+        if idx = STATIC_PAIR[{name, value}]?
+          return idx
+        end
+        @table.each_with_index do |entry, i|
+          return STATIC.size + 1 + i if entry[0] == name && entry[1] == value
+        end
+        nil
+      end
+
+      private def name_index(name : String) : Int32?
+        if idx = STATIC_NAME[name]?
+          return idx
+        end
+        @table.each_with_index do |entry, i|
+          return STATIC.size + 1 + i if entry[0] == name
+        end
+        nil
+      end
+
+      # §4.4: adding an entry larger than the whole table empties it. Both sides
+      # would do that consistently, so it is not a correctness problem — it is
+      # just a pure loss, so such a field goes out without indexing instead.
+      private def fits?(name : String, value : String) : Bool
+        name.bytesize + value.bytesize + ENTRY_OVERHEAD <= @max_size
+      end
+
+      private def add(name : String, value : String) : Nil
+        @table.unshift({name, value})
+        @size += name.bytesize + value.bytesize + ENTRY_OVERHEAD
+        evict
+      end
+
+      private def evict : Nil
+        while @size > @max_size && !@table.empty?
+          name, value = @table.pop # oldest
+          @size -= name.bytesize + value.bytesize + ENTRY_OVERHEAD
+        end
+      end
+
+      private def emit_size_updates(io : IO::Memory) : Nil
+        final = @pending_size
+        return if final.nil?
+        low = @pending_min
+        # §4.2: if the max moved more than once since the last block, the decoder
+        # has to see the low-water mark too, otherwise it never performs the
+        # eviction we already performed and every later index is off by that much.
+        encode_int(io, low, 5, 0x20_u8) if low && low != final
+        encode_int(io, final, 5, 0x20_u8)
+        @pending_min = nil
+        @pending_size = nil
+      end
+
+      # §5.2: Huffman only when it actually shrinks the string — the choice is the
+      # encoder's, and a Huffman-coded literal that came out longer is strictly
+      # worse (short or high-entropy values expand: one byte ≥ 0x80 costs 20+ bits).
+      # A tie goes to the raw literal, which costs neither side the coding pass and
+      # leaves the value readable in the raw frame log (P7's truth). That is the one
+      # place we differ from the reference encoder in RFC 7541 Appendix C, which
+      # Huffman-codes ties — see the C.6 spec.
       private def encode_string(io : IO::Memory, s : String) : Nil
         huff = HPACK.huffman_encode(s)
         if huff.size < s.bytesize
