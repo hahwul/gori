@@ -98,6 +98,40 @@ module Gori::Proxy::H2
       nil
     end
 
+    # What the intercept gate needs to hold a RESPONSE: h1 scopes a response hold on the
+    # REQUEST's method/target (`client_conn.cr:501`), and an h2 response head carries neither.
+    # nil when this connection is not tracking the stream (past MAX_LIVE_STREAMS) — the gate
+    # then declines to hold rather than inventing a URL to scope-test.
+    record RequestRef, method : String, target : String, scheme : String, authority : String
+
+    def request_ref(stream_id : UInt32) : RequestRef?
+      @mutex.synchronize do
+        headers = @streams[stream_id]?.try(&.req.headers)
+        next nil unless headers
+        RequestRef.new(pseudo(headers, ":method") || "GET", pseudo(headers, ":path") || "/",
+          pseudo(headers, ":scheme") || "https", pseudo(headers, ":authority") || @host)
+      end
+    end
+
+    # The flow row already projected for `stream_id`, if any. Nil is normal, not exceptional: a
+    # request flow is emitted when the request half-closes, so an origin answering a still
+    # streaming upload has no row yet — which is why `Interceptor#hold_response` takes an
+    # `Int64?`.
+    def flow_id_of(stream_id : UInt32) : Int64?
+      @mutex.synchronize { @streams[stream_id]?.try(&.flow_id) }
+    end
+
+    # A stream the operator DROPPED at the intercept gate, or one abandoned while held. Its
+    # head never went on the wire, so the gate fed it here for projection only; flush it with
+    # the operator's reason and forget the stream. No-op when nothing was tracked.
+    def drop_stream(stream_id : UInt32, reason : String) : Nil
+      @mutex.synchronize do
+        if stream = @streams.delete(stream_id)
+          finalize_stream(stream_id, stream, reason)
+        end
+      end
+    end
+
     # Feed one frame. `direction` is "out" (client→server) or "in". `pre` is set only by a
     # caller that already decoded this frame's header block (see `HeadBlock`).
     def feed(direction : String, frame : Frame::Header, pre : HeadBlock? = nil) : Nil

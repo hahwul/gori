@@ -127,6 +127,81 @@ describe Gori::Interceptor do
     end
   end
 
+  # #492 step 3 split `hold` into `enqueue` + `receive` so the h2 relay can wait on a decision
+  # off its pump fiber. `Interceptor` is SHARED with h1, so these pin the h1 side: the hold is
+  # still one blocking call, resolving to the exact decision bytes, gated in the same places.
+  it "h1 hold_request is unchanged by the enqueue split: one blocking call, byte-exact result" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      result = Channel(Gori::Interceptor::Decision).new
+      spawn { result.send(req(ic, "GET /a HTTP/1.1\r\nHost: acme.test\r\n\r\n")) }
+      Fiber.yield
+
+      # It BLOCKS — nothing has been decided, so nothing has come back.
+      select
+      when result.receive
+        fail "hold_request returned before a decision"
+      when timeout(5.milliseconds)
+      end
+      ic.pending_count.should eq(1)
+      item = ic.pending.first
+      item.kind.should eq(Gori::Interceptor::Kind::Request)
+      item.method.should eq("GET")
+
+      ic.forward(item.id) # no override → the ORIGINAL bytes, byte-exact
+      d = result.receive
+      d.action.should eq(Gori::Interceptor::Action::Forward)
+      String.new(d.bytes).should eq("GET /a HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      ic.pending_count.should eq(0)
+    end
+  end
+
+  it "h1 hold_* and h2 enqueue_* short-circuit on exactly the same gates" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+
+      # Disabled: hold returns Forward(original) synchronously, enqueue returns nil. Same gate.
+      req(ic, "GET / HTTP/1.1\r\n\r\n").action.should eq(Gori::Interceptor::Action::Forward)
+      ic.enqueue_request("GET / HTTP/1.1\r\n\r\n".to_slice,
+        method: "GET", target: "/", host: "acme.test", port: 80, scheme: "http").should be_nil
+
+      # Out of scope: same again, on both.
+      ic.toggle
+      scope.add("include", "host", "other.test")
+      scope.enable
+      req(ic, "GET / HTTP/1.1\r\n\r\n").action.should eq(Gori::Interceptor::Action::Forward)
+      ic.enqueue_request("GET / HTTP/1.1\r\n\r\n".to_slice,
+        method: "GET", target: "/", host: "acme.test", port: 80, scheme: "http").should be_nil
+      ic.pending_count.should eq(0)
+
+      # Shutting down: latched, so neither enqueues.
+      scope.add("include", "host", "acme.test")
+      ic.release_all
+      ic.enqueue_request("GET / HTTP/1.1\r\n\r\n".to_slice,
+        method: "GET", target: "/", host: "acme.test", port: 80, scheme: "http").should be_nil
+    end
+  end
+
+  it "hold_response still takes an Int64 flow_id from h1 (the h2 path is what needs nil)" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      spawn do
+        ic.hold_response("HTTP/1.1 200 OK\r\n\r\n".to_slice, flow_id: 7_i64, method: "GET",
+          target: "200 OK", host: "acme.test", port: 80, scheme: "http")
+      end
+      Fiber.yield
+      ic.pending.first.flow_id.should eq(7_i64)
+
+      item = ic.enqueue_response("HTTP/1.1 200 OK\r\n\r\n".to_slice, flow_id: nil, method: "GET",
+        target: "200", host: "acme.test", port: 80, scheme: "http")
+      item.not_nil!.flow_id.should be_nil
+      ic.release_all
+    end
+  end
+
   it "gates by the Scope lens (intercepts_host?)" do
     with_store do |store|
       scope = Gori::Scope.load(store)

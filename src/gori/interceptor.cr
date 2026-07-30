@@ -7,11 +7,10 @@ module Gori
   # The proxy fiber blocks at the hold point until the TUI sends a decision —
   # exactly the `Store#insert_flow` "block on a reply channel" pattern.
   #
-  # One shared instance (Mutex-guarded, like `Rules`): proxy fibers call
-  # `hold_*`, the TUI calls `pending`/`forward`/`drop`/`toggle`. Gating reuses the
-  # Scope lens via `intercepts_host?`, which ALSO drives the h2→h1 ALPN downgrade
-  # so the same hosts that get held are the ones forced onto the interceptable
-  # h1 path. Held items are ephemeral (never persisted).
+  # One shared instance (Mutex-guarded, like `Rules`): proxy fibers call `hold_*` (h1) or
+  # `enqueue_*` (the h2 relay, which cannot block its pump fiber — see `enqueue_request`), and
+  # the TUI calls `pending`/`forward`/`drop`/`toggle`. Gating reuses the Scope lens via
+  # `intercepts_host?`. Held items are ephemeral (never persisted).
   class Interceptor
     enum Kind
       Request
@@ -159,12 +158,14 @@ module Gori
       now_on
     end
 
-    # Conservative HOST-level gate, used by the Tunnel to decide whether to downgrade
-    # h2→h1 BEFORE any request exists (so only the host is known). Scope rules that
-    # match on path/URL can't be evaluated yet, so this is permissive: downgrade if the
-    # host COULD be in scope, then let ClientConn make the precise per-request call via
-    # intercepts_request?. Keeping the connection on h1 is what lets a request be held.
-    # Direction-agnostic on purpose: holding EITHER a request or a response needs h1.
+    # Conservative HOST-level gate: is holding even possible for this host? Scope rules that
+    # match on path/URL can't be evaluated without a request, so this is permissive — true if
+    # the host COULD be in scope — and the precise per-message call is `intercepts_request?` /
+    # `intercepts_response?`, which do NOT consult this. Direction-agnostic on purpose.
+    #
+    # It used to also drive the h2→h1 ALPN downgrade (`tls/tunnel.cr`), forcing held hosts onto
+    # the h1 path because that was the only interceptable one. #492 step 3 made the hold work
+    # per stream on h2 and removed that gate, so this now has one caller: the `enqueue` below.
     def intercepts_host?(host : String) : Bool
       active = @mutex.synchronize { @enabled && !@shutting_down }
       return false unless active
@@ -239,25 +240,49 @@ module Gori
 
     def hold_request(raw : Bytes, *, method : String, target : String,
                      host : String, port : Int32, scheme : String) : Decision
-      hold(Kind::Request, raw, method, target, host, port, scheme, nil)
+      item = enqueue_request(raw, method: method, target: target, host: host, port: port, scheme: scheme)
+      item ? item.reply.receive : Decision.new(Action::Forward, raw)
     end
 
-    def hold_response(raw : Bytes, *, flow_id : Int64, method : String, target : String,
+    # `flow_id` is nilable for the h2 path only: the h2 assembler emits the request flow when
+    # the request half-closes, so an origin that answers a still-streaming upload has no flow
+    # row yet. `Item#flow_id` was already `Int64?` and the TUI already falls back to the
+    # intercept tab when it is nil, so nothing else moves. h1 keeps passing an Int64.
+    def hold_response(raw : Bytes, *, flow_id : Int64?, method : String, target : String,
                       host : String, port : Int32, scheme : String) : Decision
-      hold(Kind::Response, raw, method, target, host, port, scheme, flow_id)
+      item = enqueue_response(raw, flow_id: flow_id, method: method, target: target,
+        host: host, port: port, scheme: scheme)
+      item ? item.reply.receive : Decision.new(Action::Forward, raw)
     end
 
-    private def hold(kind, raw, method, target, host, port, scheme, flow_id) : Decision
-      return Decision.new(Action::Forward, raw) unless intercepts_host?(host)
+    # Queue a message WITHOUT waiting for the decision, handing back the Item to wait on (nil
+    # = not held, forward as-is). h1 has no use for this: its hold IS the connection fiber, so
+    # blocking there costs exactly the one request it is holding. The h2 relay runs ONE pump
+    # fiber per direction for every stream on the connection, so the fiber that waits for a
+    # human cannot be the one reading frames (#492 step 3, D1) — it enqueues here and blocks
+    # on `Item#reply` elsewhere. `hold_request`/`hold_response` are this plus the receive, so
+    # the two paths cannot drift.
+    def enqueue_request(raw : Bytes, *, method : String, target : String,
+                        host : String, port : Int32, scheme : String) : Item?
+      enqueue(Kind::Request, raw, method, target, host, port, scheme, nil)
+    end
+
+    def enqueue_response(raw : Bytes, *, flow_id : Int64?, method : String, target : String,
+                         host : String, port : Int32, scheme : String) : Item?
+      enqueue(Kind::Response, raw, method, target, host, port, scheme, flow_id)
+    end
+
+    private def enqueue(kind, raw, method, target, host, port, scheme, flow_id) : Item?
+      return nil unless intercepts_host?(host)
       item = @mutex.synchronize do
-        return Decision.new(Action::Forward, raw) if @shutting_down || !@enabled
+        return nil if @shutting_down || !@enabled
         id = (@next_id += 1)
         it = Item.new(id, kind, method, host, target, port, scheme, raw, Time.instant, flow_id)
         @items[id] = it
         it
       end
       @revision.add(1) # a request/response was held (async, from a proxy fiber)
-      item.reply.receive
+      item
     end
 
     # --- TUI side ------------------------------------------------------------

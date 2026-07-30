@@ -164,7 +164,7 @@ module Gori::Proxy::Tls
     # entry (origin since dropped to h1/down) would re-strand the client on a dead h2 tunnel,
     # the exact #323 failure, so only the benign negative direction is cached.
     private def reflect_origin_h2(host : String, port : Int32) : OpenSSL::SSL::Socket::Client?
-      return nil unless h2_candidate?(host)
+      return nil unless h2_candidate?
       return nil if @h1_only_origins.includes?({host, port}) # known h1-only: skip the probe
       # Cap the connect wait so an unreachable origin doesn't burn the full timeout here before
       # the h1 fallback re-dials and waits again (never longer than the configured timeout).
@@ -181,11 +181,10 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when HTTP/2 is switched off, the sandbox is on, intercept is on for this
-    # host, OR a Match&Replace BODY rule is live: those seams are not reachable from the h2
-    # relay, so it would silently skip them. Out-of-scope, sandbox-off, intercept-off hosts
-    # with no body rule are candidates (subject to the origin actually speaking h2 — see
-    # reflect_origin_h2).
+    # ClientConn path — when HTTP/2 is switched off, the sandbox is on, OR a Match&Replace BODY
+    # rule is live: those seams are not reachable from the h2 relay, so it would silently skip
+    # them. Sandbox-off hosts with no body rule are candidates (subject to the origin actually
+    # speaking h2 — see reflect_origin_h2).
     #
     # The rewriter gate used to be `active?`, and #492 step 2 narrowed it rather than removing
     # it. HEAD rules now reach h2 (`H2::HeadRewrite`), which is the whole point of that step —
@@ -198,14 +197,24 @@ module Gori::Proxy::Tls
     # not working — the exact failure this epic exists to remove. Body rewriting on h2 is #492
     # step 5; until then a body rule still earns the downgrade, and only that.
     #
+    # The INTERCEPT gate came out in #492 step 3, which made the hold reachable per stream
+    # (`H2::StreamGate`). Checked the same way step 2 checked the rewriter, since the lesson
+    # there was that the obvious predicate protected more than it looked like: `intercepts_host?`
+    # is not consulted by `intercepts_request?`/`intercepts_response?` (`interceptor.cr:204-222`
+    # take their own snapshot), and `sandbox_enabled?` is a separate term on the same object, so
+    # removing it weakens no gate — it removes a downgrade. What it DOES change is that a held
+    # h2 message is the head only: the body is not shown and not editable, because DATA streams
+    # past untouched until step 5. Unlike step 2 there is no narrower predicate that saves it —
+    # nothing can know before the request exists whether the operator will want to edit a body —
+    # so it is stated in `docs/content/guide/proxy.md` instead of being fixed.
+    #
     # `http2_disabled?` is one MORE reason to downgrade, deliberately not a way to override the
-    # others: those three are correctness requirements, not preferences, so no setting may turn
+    # others: those two are correctness requirements, not preferences, so no setting may turn
     # them off. Placing the check here also means "off" skips the origin ALPN probe entirely —
     # reflect_origin_h2 consults this before dialing.
-    private def h2_candidate?(host : String) : Bool
+    private def h2_candidate? : Bool
       !(Gori::Settings.http2_disabled? ||
         @interceptor.try(&.sandbox_enabled?) ||
-        @interceptor.try(&.intercepts_host?(host)) ||
         @rewriter.try { |rw| rw.rewrites_request_body? || rw.rewrites_response_body? })
     end
 
@@ -219,7 +228,7 @@ module Gori::Proxy::Tls
       # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
       Proxy::SocketTuning.relax(client_tls)
       Proxy::SocketTuning.relax(upstream)
-      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter)
+      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter, @interceptor)
     ensure
       upstream.close rescue nil
     end

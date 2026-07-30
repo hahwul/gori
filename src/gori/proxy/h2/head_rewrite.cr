@@ -59,7 +59,40 @@ module Gori::Proxy::H2
     # (`Assembler#feed` returns at `stream_id == 0`).
     MAX_FRAME_PAYLOAD = 16384
 
-    def initialize(@direction : String, @rewriter : Proxy::HeadRewriter,
+    # One complete header block, rules already applied, on its way out. `frames`/`pre` are
+    # what the relay forwards when nothing holds it back.
+    #
+    # The rest exists for the intercept gate (#492 step 3), which needs more than the frames:
+    # `head` is the h1 text a human edits, `fields` is what an edit is re-parsed against, and
+    # `first`/`prefix` are what re-framing the result needs. `head` is nil for a block that is
+    # not a message head — trailers, PUSH_PROMISE, or a block that could not be decoded — and
+    # those are exactly the blocks that are never rule-applied and never held.
+    record Block,
+      frames : Array(Frame::Header),
+      pre : Assembler::HeadBlock,
+      fields : Array(HPACK::Field),
+      head : Bytes?,
+      first : Frame::Header,
+      prefix : Bytes,
+      request : Bool do
+      def stream_id : UInt32
+        first.stream_id
+      end
+    end
+
+    # Consulted with every complete header block before it is forwarded. `defer?` returning
+    # true means the callee has taken ownership of the block's frames — `HeadRewrite` then
+    # yields nothing for it and the callee is responsible for writing them later. Only the
+    # intercept gate implements this; with no deferrer wired in the pipeline is step 2's.
+    module Deferrer
+      abstract def defer?(block : Block) : Bool
+    end
+
+    # Set by `StreamGate` when intercept is wired in. Deliberately a property rather than a
+    # constructor argument: the gate needs a live `HeadRewrite` to construct itself around.
+    property deferrer : Deferrer?
+
+    def initialize(@direction : String, @rewriter : Proxy::HeadRewriter?,
                    @assembler : Assembler, @host : String)
       @encoder = HPACK::Encoder.new
       @engaged = false
@@ -72,6 +105,42 @@ module Gori::Proxy::H2
     # Whether this direction has begun re-encoding (see the class comment).
     def engaged? : Bool
       @engaged
+    end
+
+    # Re-encode a block whose delivery is being DEFERRED, and latch the direction (#492 step 3,
+    # D1 rule 5). Deferring means later blocks in this direction reach the peer AHEAD of this
+    # one, and HPACK's context is one sequential per-direction state (RFC 7541 §2.2): a
+    # passthrough block delivered out of order resolves its dynamic indices against a table
+    # missing this block's insertions — the wrong header, silently, or out of range and the
+    # connection dies. It is the same §6.2.1 asymmetry the class comment describes, reached by
+    # reordering instead of by rewriting, and it breaks with zero rules enabled.
+    #
+    # A re-encoded block reads no dynamic index and inserts nothing, so its position in the
+    # sequence stops mattering. That is what makes holding ONE stream without freezing the
+    # others legal at all — so this is a correctness precondition of the hold, not a tidy-up.
+    # A block produced while already engaged came out of `finish` re-encoded, so it is returned
+    # untouched.
+    def engage(block : Block) : Block
+      return block if @engaged
+      @engaged = true
+      block.copy_with(frames: reframe(block.first, block.prefix, @encoder.encode(block.fields)))
+    end
+
+    # Re-encode a held head the operator EDITED (#492 step 3, D3). Same decoder (the block was
+    # decoded on arrival), same encoder, same latch, same `HeadCodec` round trip a rule takes —
+    # intercept is a stage inside this pipeline, not a second pipeline beside it. nil when the
+    # edited bytes are no longer a head: the caller then forwards the block as it stood, which
+    # is what an unparseable RULE result already does.
+    def encode_edited(block : Block, head : Bytes) : Block?
+      parsed = block.request ? HeadCodec.parse_request(head, block.fields) : HeadCodec.parse_response(head, block.fields)
+      if parsed.nil?
+        warn_unparseable(block.stream_id, "an intercept edit")
+        return nil
+      end
+      fields = HeadCodec.restore_content_length(parsed, block.fields)
+      @engaged = true
+      Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
+        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
     end
 
     # Feed one frame; yields the frames to forward, in arrival order, each with the
@@ -138,6 +207,9 @@ module Gori::Proxy::H2
     # exactly once), rewrite it, and choose between forwarding the frames as they arrived
     # and emitting re-encoded ones. Returns the frames to write plus the projection the
     # assembler must use — never letting the assembler decode the block a second time.
+    #
+    # An empty frame array means a `Deferrer` took the block: the gate owns those frames now
+    # and will write them when the operator decides.
     private def finish : {Array(Frame::Header), Assembler::HeadBlock}
       first = @buf.first
       split = split_block(first)
@@ -151,47 +223,56 @@ module Gori::Proxy::H2
       # assembler from running a second (differently-positioned) decode over the same bytes.
       return {@buf.dup, Assembler::HeadBlock.new(nil)} if fields.nil?
 
-      rewritten = rewrite(fields, first)
-      if rewritten.nil? && !@engaged
-        # Unchanged, and this direction has never re-encoded: byte-exact passthrough, which
-        # is also what keeps the peer's HPACK table driven by the original encoder.
-        return {@buf.dup, Assembler::HeadBlock.new(pairs(fields))}
-      end
+      request = @direction == "out"
+      head = head_text(fields, first, request)
+      rewritten = head ? rewrite(fields, head, request) : nil
       emit_fields = rewritten || fields
-      @engaged = true
-      {reframe(first, prefix, @encoder.encode(emit_fields)), Assembler::HeadBlock.new(pairs(emit_fields))}
+      built = if rewritten.nil? && !@engaged
+                # Unchanged, and this direction has never re-encoded: byte-exact passthrough,
+                # which is also what keeps the peer's HPACK table driven by the original encoder.
+                Block.new(@buf.dup, Assembler::HeadBlock.new(pairs(fields)), fields, head, first, prefix, request)
+              else
+                @engaged = true
+                # A rule changed the head, so the TEXT the gate would show a human is the
+                # rewritten one — re-synthesized from the fields actually going out, so what the
+                # operator edits is what would have been sent.
+                shown = rewritten ? head_text(emit_fields, first, request) : head
+                Block.new(reframe(first, prefix, @encoder.encode(emit_fields)),
+                  Assembler::HeadBlock.new(pairs(emit_fields)), emit_fields, shown, first, prefix, request)
+              end
+      return {[] of Frame::Header, built.pre} if @deferrer.try(&.defer?(built))
+      {built.frames, built.pre}
+    end
+
+    # This block's h1-equivalent head text, or nil when the block is not a message head.
+    #
+    # PUSH_PROMISE carries a request the SERVER invented, not one the client sent; a TRAILER
+    # block has no start line, and the header ops treat line 0 as one and skip it
+    # (`rules.cr:246`, `rules.cr:264`), so running them over trailers would mangle the first
+    # trailer rather than help. Both are re-encoded once engaged, never rule-applied and never
+    # held — which also keeps h1 and h2 equivalent, since h1 sees neither.
+    private def head_text(fields : Array(HPACK::Field), first : Frame::Header, request : Bool) : Bytes?
+      return nil if first.frame_type == Frame::Type::PushPromise
+      return nil unless message_head?(fields, request)
+      tuples = pairs(fields)
+      # Scope on the stream's own `:authority` rather than the CONNECT host, so a host-scoped
+      # rule (and a host-scoped intercept) is right even on a coalesced connection. Responses
+      # have no authority to read, so those fall back to the connection's host.
+      request ? HeadCodec.synth_request(tuples, HeadCodec.pseudo(tuples, ":authority") || @host) : HeadCodec.synth_response(tuples)
     end
 
     # Run the Match&Replace rules over this block's h1-equivalent head. nil = unchanged
     # (which is also what a block the rules do not apply to returns).
-    private def rewrite(fields : Array(HPACK::Field), first : Frame::Header) : Array(HPACK::Field)?
-      return nil unless @rewriter.active?
-      # PUSH_PROMISE carries a request the SERVER invented, not one the client sent; a
-      # TRAILER block has no start line, and the header ops treat line 0 as one and skip it
-      # (`rules.cr:246`, `rules.cr:264`), so running them over trailers would mangle the
-      # first trailer rather than help. Both are re-encoded once engaged, never rule-applied
-      # — which also keeps h1 and h2 equivalent, since h1 rules never see trailers either.
-      return nil if first.frame_type == Frame::Type::PushPromise
-      request = @direction == "out"
-      return nil unless message_head?(fields, request)
-
-      tuples = pairs(fields)
-      if request
-        # Scope the rule on the stream's own `:authority` rather than the CONNECT host, so a
-        # host-scoped rule is right even on a coalesced connection. Responses have no
-        # authority to read, so those fall back to the connection's host.
-        authority = HeadCodec.pseudo(tuples, ":authority") || @host
-        head = HeadCodec.synth_request(tuples, authority)
-        rewritten_head = @rewriter.rewrite_request(head, authority)
-      else
-        head = HeadCodec.synth_response(tuples)
-        rewritten_head = @rewriter.rewrite_response(head, @host)
-      end
+    private def rewrite(fields : Array(HPACK::Field), head : Bytes, request : Bool) : Array(HPACK::Field)?
+      rw = @rewriter
+      return nil unless rw && rw.active?
+      authority = request ? (HeadCodec.pseudo_of(fields, ":authority") || @host) : @host
+      rewritten_head = request ? rw.rewrite_request(head, authority) : rw.rewrite_response(head, @host)
       return nil if rewritten_head == head # `Rules` returns the same content when nothing matched
 
       parsed = request ? HeadCodec.parse_request(rewritten_head, fields) : HeadCodec.parse_response(rewritten_head, fields)
       if parsed.nil?
-        warn_unparseable(first.stream_id)
+        warn_unparseable(@block_stream, "a Match&Replace rule")
         return nil
       end
       restored = HeadCodec.restore_content_length(parsed, fields)
@@ -210,15 +291,15 @@ module Gori::Proxy::H2
       fields.any? { |f| f.name == want }
     end
 
-    # A rewritten head that is no longer a head reaches this only from a destructive
-    # `Replace` rule — the header ops keep it well-formed by construction. The original
-    # block is forwarded unchanged, which must not be silent: say so once per direction per
-    # connection, naming the stream.
-    private def warn_unparseable(stream_id : UInt32) : Nil
+    # A rewritten head that is no longer a head reaches this from a destructive `Replace` rule
+    # (the header ops keep it well-formed by construction) or from a human editing a held head
+    # into something that no longer parses. Either way the block is forwarded as it stood,
+    # which must not be silent: say so once per direction per connection, naming the stream.
+    private def warn_unparseable(stream_id : UInt32, source : String) : Nil
       return if @warned
       @warned = true
       ::Log.warn do
-        "h2 #{@direction}: a Match&Replace rule produced a head that is no longer parseable " \
+        "h2 #{@direction}: #{source} produced a head that is no longer parseable " \
         "(stream #{stream_id}) — forwarded the original head unchanged"
       end
     end

@@ -1,8 +1,10 @@
 require "./frame"
 require "./assembler"
 require "./head_rewrite"
+require "./stream_gate"
 require "../head_rewriter"
 require "../sink"
+require "../../interceptor"
 
 module Gori::Proxy::H2
   # A transparent HTTP/2 relay. Once ALPN negotiated "h2" on BOTH the client and
@@ -15,15 +17,19 @@ module Gori::Proxy::H2
   # has arrived and the rules have run. See `HeadRewrite` for why that costs nothing here
   # and why DATA deliberately keeps the forward-first path (#492 step 2).
   #
-  # With no `rewriter` this is exactly the byte-faithful relay it has always been.
+  # With neither a `rewriter` nor an `interceptor` this is exactly the byte-faithful relay it
+  # has always been — no head pipeline, and no locking on the frame path.
+  #
+  # An `interceptor` adds a `StreamGate` per direction, which holds streams INDIVIDUALLY: the
+  # pump never blocks on a human, so a held stream does not freeze the connection (#492 step 3).
   class Relay
     def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink,
-                 rewriter : Proxy::HeadRewriter? = nil) : Nil
-      new(client, upstream, host, port, sink, rewriter).run
+                 rewriter : Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil) : Nil
+      new(client, upstream, host, port, sink, rewriter, interceptor).run
     end
 
     def initialize(@client : IO, @upstream : IO, @host : String, @port : Int32, @sink : FlowSink,
-                   @rewriter : Proxy::HeadRewriter? = nil)
+                   @rewriter : Proxy::HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil)
     end
 
     def run : Nil
@@ -34,20 +40,63 @@ module Gori::Proxy::H2
         @upstream.write(Frame.read_preface(@client))
         @upstream.flush
 
+        out_gate, in_gate = gates(conn_id, assembler)
         done = Channel(Nil).new(2)
-        spawn { pump(@client, @upstream, conn_id, "out", assembler); done.send(nil) }
-        spawn { pump(@upstream, @client, conn_id, "in", assembler); done.send(nil) }
+        spawn { pump(@client, @upstream, conn_id, "out", assembler, out_gate); done.send(nil) }
+        spawn { pump(@upstream, @client, conn_id, "in", assembler, in_gate); done.send(nil) }
         2.times { done.receive }
       rescue
         # handshake/preface failure: nothing decodable to relay
       ensure
         # Flush any stream still open at connection close (never got END_STREAM on
-        # both halves) so it doesn't sit Pending forever.
+        # both halves) so it doesn't sit Pending forever. Runs after BOTH pumps have closed
+        # their gates, so a stream held at teardown has already been projected.
         assembler.finalize_all("h2 connection closed")
       end
     end
 
-    private def pump(src : IO, dst : IO, conn_id : Int64, direction : String, assembler : Assembler) : Nil
+    # The two gates, PAIRED — a drop has to reset the opposite leg, and each gate reaches the
+    # other only through `peer`. {nil, nil} when intercept is off, so a relay without it keeps
+    # exactly the frame path (and the zero locking) it has today.
+    private def gates(conn_id : Int64, assembler : Assembler) : {StreamGate?, StreamGate?}
+      ic = @interceptor
+      return {nil, nil} unless ic
+      out_gate = StreamGate.new("out", @upstream, conn_id, @sink, assembler, @host, @port, ic,
+        HeadRewrite.new("out", @rewriter, assembler, @host))
+      in_gate = StreamGate.new("in", @client, conn_id, @sink, assembler, @host, @port, ic,
+        HeadRewrite.new("in", @rewriter, assembler, @host))
+      out_gate.peer = in_gate
+      in_gate.peer = out_gate
+      {out_gate, in_gate}
+    end
+
+    private def pump(src : IO, dst : IO, conn_id : Int64, direction : String,
+                     assembler : Assembler, gate : StreamGate?) : Nil
+      if gate
+        pump_gated(src, gate)
+      else
+        pump_plain(src, dst, conn_id, direction, assembler)
+      end
+    ensure
+      dst.close rescue nil # propagate close so the opposite pump unblocks
+    end
+
+    private def pump_gated(src : IO, gate : StreamGate) : Nil
+      loop do
+        frame = Frame.read(src)
+        break if frame.nil? # clean EOF at a frame boundary
+        gate.accept(frame)
+      end
+    rescue
+      # peer reset / parse error ends this direction
+    ensure
+      # Releases the rewriter's partial block, hands every still-held item back to the
+      # Interceptor, and projects what was held.
+      gate.close rescue nil
+    end
+
+    private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,
+                           assembler : Assembler) : Nil
       rw = @rewriter
       heads = rw ? HeadRewrite.new(direction, rw, assembler, @host) : nil
       begin
@@ -71,8 +120,6 @@ module Gori::Proxy::H2
           h.drain { |f, pre| emit(dst, conn_id, direction, assembler, f, pre) rescue nil }
         end
       end
-    ensure
-      dst.close rescue nil # propagate close so the opposite pump unblocks
     end
 
     # Forward one frame, then capture it, then project it. Order is deliberate for every
