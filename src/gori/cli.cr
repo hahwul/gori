@@ -23,18 +23,20 @@ module Gori
   # - `gori update`                 → channel-aware self-update (binary / brew / snap / AUR)
   module CLI
     def self.run(argv : Array(String) = ARGV) : Nil
-      # Global version (works before/after any subcommand or alone)
-      if argv.any? { |a| a == "-v" || a == "-V" || a == "--version" }
-        puts "gori #{VERSION}"
-        return
-      end
-
       # `--config PATH` is consumed HERE, before subcommand detection, rather than being added
       # to each subcommand's OptionParser. It must apply to every surface (tui, run, mcp,
       # settings) and take effect before anything reads Settings, so one central strip is both
       # simpler and impossible to forget on a new subcommand — and every parser below would
       # otherwise reject it through invalid_option.
       argv = extract_config_flag(argv)
+
+      # Global version (works alone, or against a top-level subcommand). Deliberately AFTER the
+      # --config strip: that is the one top-level flag taking a value, and its PATH must not
+      # count against the one-non-flag-token budget below (`gori --config x.json tui -v`).
+      if global_version_flag?(argv)
+        puts "gori #{VERSION}"
+        return
+      end
 
       # Top-level help when no explicit subcommand is given
       has_explicit_sub = !argv.empty? && !argv[0].starts_with?("-")
@@ -77,6 +79,38 @@ module Gori
       # file, both landed that way. Deliberately narrow — an IO error, a nil, anything gori
       # did not anticipate still backtraces, because those are bugs and want a trace.
       abort "gori: #{ex.message.presence || ex.class}"
+    end
+
+    VERSION_FLAGS = {"-v", "-V", "--version"}
+
+    # A version flag belongs to the TOP LEVEL — `gori -v`, `gori --version`, `gori run -v` —
+    # which is exactly what print_main_help promises ("Flags like --version and --help work at
+    # the top level too").
+    #
+    # It is NOT global once a NESTED subcommand has been named, because there the same token is
+    # that command's own option, or worse its option VALUE. A blanket `argv.any?` claimed all of
+    # them, so `gori run rewriter add --find X -v boom` (rewriter's own documented `-vVALUE`)
+    # and `gori run decoder base64-encode --input -v` printed the version and returned 0
+    # WITHOUT doing the work — a silent no-op carrying a SUCCESS status, the worst failure mode
+    # there is for a surface scripts consume (`… || die` never fires). So stop at the second
+    # non-flag token: at most the top-level subcommand (`run`, `mcp`, `tui`, …) may precede a
+    # global version flag. This mirrors the `-h`/`--help` rule just below, which is narrower
+    # still (`!has_explicit_sub`) because every subcommand's own parser owns `-h`.
+    #
+    # KNOWN RESIDUAL: a value that is literally `-v` given to a flag of the top-level
+    # subcommand itself (`gori run --project -v`) is still read as the flag, because deciding
+    # otherwise needs to know which flags take values, and that lives in each subcommand's
+    # OptionParser — not built yet at this layer. `--config`'s own PATH is exempt because the
+    # caller strips it before asking. Every nested case, the ones that actually bit, is covered.
+    private def self.global_version_flag?(argv : Array(String)) : Bool
+      non_flags = 0
+      argv.each do |arg|
+        return true if VERSION_FLAGS.includes?(arg)
+        next if arg.starts_with?("-")
+        non_flags += 1
+        break if non_flags > 1
+      end
+      false
     end
 
     # Pull `--config PATH` / `--config=PATH` out of argv, point Settings at it, and return the
