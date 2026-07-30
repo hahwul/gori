@@ -3,9 +3,9 @@ module Gori::Proxy::H2
   # content-type is `application/grpc*`; its DATA payload is a sequence of
   # length-prefixed messages, and the call status arrives in the response
   # trailers (`grpc-status` / `grpc-message`, captured by the Assembler's trailer
-  # merge). We frame the messages but do NOT decode protobuf — without the
-  # `.proto` schema the message body is opaque bytes (shown as hex). Schema-aware
-  # decoding is a deferred enhancement.
+  # merge). Framing lives here; schema-less protobuf decoding of each message
+  # body is `Gori::Protobuf` (see `gori run show --format json` → `grpc_messages`).
+  # Schema-aware decoding (needs the `.proto`) remains a deferred enhancement.
   module Grpc
     # One length-prefixed gRPC message. The 1-byte flag is a bitmask: bit 0
     # (0x01) marks a compressed payload; bit 7 (0x80) marks a grpc-web TRAILER

@@ -313,6 +313,67 @@ module Gori
           resp_head: resp ? detail.response_head : nil, resp_body: resp ? detail.response_body : nil)
       end
 
+      # Schema-less protobuf tree for an application/grpc body. Framed by
+      # `Proxy::H2::Grpc.messages`, then each non-trailer / non-compressed payload
+      # is decoded by `Gori::Protobuf`. Compressed payloads stay opaque (not
+      # protobuf until inflated); grpc-web trailer frames become header maps.
+      # Omitted entirely when the head is not gRPC or the body has no complete
+      # frames — so ordinary HTTP flows stay free of an empty shell.
+      private def self.emit_grpc_messages_json(j : JSON::Builder, head : Bytes?, body : Bytes?) : Nil
+        return if head.nil? || body.nil? || body.empty?
+        return unless Proxy::H2::Grpc.grpc?(content_type_of(head))
+        msgs = Proxy::H2::Grpc.messages(body)
+        return if msgs.empty?
+        j.field "grpc_messages" do
+          j.object do
+            j.field "count", msgs.size
+            j.field "messages" do
+              j.array do
+                msgs.each_with_index do |m, i|
+                  j.object do
+                    j.field "index", i
+                    j.field "compressed", m.compressed
+                    j.field "trailer", m.trailer
+                    j.field "size", m.data.size
+                    if m.trailer
+                      # grpc-web TRAILER frame: ASCII headers, not protobuf.
+                      j.field "headers" do
+                        j.object do
+                          Proxy::H2::Grpc.trailer_headers(m.data).each do |k, v|
+                            j.field k, v.scrub
+                          end
+                        end
+                      end
+                    elsif m.compressed
+                      # Honour the 0x01 flag: compressed bytes are not a protobuf
+                      # message until the caller inflates them (encoding is named
+                      # by grpc-encoding, not by us).
+                      j.field "note", "compressed payload — not decoded as protobuf"
+                      j.field "bytes", Base64.strict_encode(m.data)
+                    else
+                      j.field "protobuf" do
+                        Protobuf.decode(m.data).to_json(j)
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+
+      # Content-Type value from a message head (case-insensitive name, any spacing
+      # after the colon). Nil when the head has no Content-Type line.
+      private def self.content_type_of(head : Bytes) : String?
+        String.new(head).each_line do |line|
+          colon = line.index(':') || next
+          next unless line[0, colon].strip.downcase == "content-type"
+          return line[(colon + 1)..].strip
+        end
+        nil
+      end
+
       # "→ out" (client→server) / "← in" (server→client). Text frames print their
       # (scrubbed) payload; binary frames print a size + short hex preview.
       private def self.ws_message_text(m : Store::WsMessage) : String
@@ -340,6 +401,7 @@ module Gori
                 j.object do
                   j.field "head", scrub(detail.request_head)
                   emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?)
+                  emit_grpc_messages_json(j, detail.request_head, detail.request_body)
                 end
               end
             end
@@ -348,6 +410,7 @@ module Gori
                 j.object do
                   j.field "head", scrub(detail.response_head)
                   emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?)
+                  emit_grpc_messages_json(j, detail.response_head, detail.response_body)
                 end
               end
               unless ws_msgs.empty?

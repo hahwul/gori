@@ -23,6 +23,15 @@ private def flow_detail(scheme : String, host : String, port : Int32, request_he
     response_head.try(&.to_slice), response_body.try(&.to_slice))
 end
 
+# gRPC length-prefixed frame (1-byte flag + 4-byte big-endian length + payload).
+private def grpc_frame_for_spec(payload : Bytes, flag : UInt8 = 0_u8) : Bytes
+  io = IO::Memory.new
+  io.write_byte(flag)
+  io.write_bytes(payload.size.to_u32, IO::ByteFormat::BigEndian)
+  io.write(payload)
+  io.to_slice
+end
+
 # `show_json` is `private` (CLI-command glue, not a public API) — reopen the module to
 # expose a thin bare-call wrapper for testing, same trick Crystal allows for whitebox
 # specs of private `self.` methods (a bare call from within the same type is permitted;
@@ -229,5 +238,81 @@ describe "gori run show --format json" do
     entries[1]["binary"].as_bool.should be_true
     entries[1]["size"].as_i.should eq(2)
     Base64.decode(entries[1]["base64"].as_s).should eq(Bytes[0x00, 0xFF])
+  end
+
+  # gRPC + schema-less protobuf: `request/response.grpc_messages` carries the
+  # framed messages and each uncompressed non-trailer payload's protobuf tree.
+  describe "grpc_messages" do
+    it "decodes a unary gRPC request/response into protobuf field trees" do
+      # protobuf field 1 = "alice" / field 1 = "Hello, alice"
+      hello = Bytes[0x0a, 0x05, 0x61, 0x6c, 0x69, 0x63, 0x65]
+      # "Hello, alice" is 12 bytes
+      reply = Bytes[0x0a, 0x0c, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x61, 0x6c, 0x69, 0x63, 0x65]
+      req_body = grpc_frame_for_spec(hello)
+      resp_body = grpc_frame_for_spec(reply)
+
+      req_head = "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n"
+      resp_head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 7_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/demo.Greeter/SayHello", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete,
+        content_type: "application/grpc")
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/2", req_head.to_slice, req_body,
+        resp_head.to_slice, resp_body)
+
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
+      req_msgs = json["request"]["grpc_messages"]
+      req_msgs["count"].as_i.should eq(1)
+      m0 = req_msgs["messages"].as_a[0]
+      m0["compressed"].as_bool.should be_false
+      m0["trailer"].as_bool.should be_false
+      m0["protobuf"]["complete"].as_bool.should be_true
+      m0["protobuf"]["fields"].as_a[0]["string"].as_s.should eq("alice")
+
+      resp_msgs = json["response"]["grpc_messages"]
+      resp_msgs["messages"].as_a[0]["protobuf"]["fields"].as_a[0]["string"].as_s.should eq("Hello, alice")
+    end
+
+    it "does not feed a compressed gRPC payload to the protobuf decoder" do
+      body = grpc_frame_for_spec(Bytes[0xab, 0xcd], flag: 0x01_u8)
+      req_head = "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/S/M", status: nil, size: 0_i64, state: Gori::Store::FlowState::Pending)
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/2", req_head.to_slice, body, nil, nil)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, false))
+      m = json["request"]["grpc_messages"]["messages"].as_a[0]
+      m["compressed"].as_bool.should be_true
+      m["protobuf"]?.should be_nil
+      m["note"].as_s.should contain("compressed")
+      Base64.decode(m["bytes"].as_s).should eq(Bytes[0xab, 0xcd])
+    end
+
+    it "parses a grpc-web trailer frame as headers, not protobuf" do
+      trailer_payload = "grpc-status: 5\r\ngrpc-message: not found\r\n"
+      body = grpc_frame_for_spec(trailer_payload.to_slice, flag: 0x80_u8)
+      resp_head = "HTTP/2 200 OK\r\ncontent-type: application/grpc-web+proto\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/S/M", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/2",
+        "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc-web+proto\r\n\r\n".to_slice, nil,
+        resp_head.to_slice, body)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, false, true))
+      m = json["response"]["grpc_messages"]["messages"].as_a[0]
+      m["trailer"].as_bool.should be_true
+      m["protobuf"]?.should be_nil
+      m["headers"]["grpc-status"].as_s.should eq("5")
+      m["headers"]["grpc-message"].as_s.should eq("not found")
+    end
+
+    it "omits grpc_messages on a non-gRPC flow" do
+      detail = flow_detail("https", "x", 443, "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
+        response_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        response_body: %({"a":1}))
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true)).as_h
+      json["request"].as_h.has_key?("grpc_messages").should be_false
+      json["response"].as_h.has_key?("grpc_messages").should be_false
+    end
   end
 end
