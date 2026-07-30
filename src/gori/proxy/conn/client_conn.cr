@@ -157,16 +157,23 @@ module Gori::Proxy
       created_at = now_us
 
       # A garbage h2/gRPC client preface forced onto this HTTP/1.1 path by the (intentional)
-      # ALPN downgrade — see Tunnel#intercept — must NOT be treated as a real request: left
+      # ALPN downgrade — see Tunnel#h2_candidate? — must NOT be treated as a real request: left
       # alone it parses as an ordinary-looking "PRI * HTTP/2.0" request and either gets
       # forwarded to an origin that can't make sense of it, or (Intercept catch mode) sits in
       # the hold queue forever as a confusing fake entry with no indication it was an h2
       # client. Reject the connection cleanly instead. No 502 is written back: a real h2/gRPC
       # client isn't expecting (or able to parse) an HTTP/1.1 response here, and the existing
       # "framing rejected" precedent below also just records + closes.
+      #
+      # The recorded reason names the SETTINGS to change rather than a private method the
+      # operator cannot see (#492 step 4b, the same fix `Outbound#sweep_block` got in #491).
+      # It cannot name WHICH of the two applies — that decision was made per host in the
+      # Tunnel, before this connection existed — so it points at the gori.log line that can.
       if Codec::Http1.h2_preface?(req)
         record_error(req, @scheme, @fixed_host || req.host? || "", @fixed_port, created_at,
-          "rejected h2/gRPC client preface on the HTTP/1.1 path (ALPN downgrade, see Tunnel#intercept)")
+          "rejected h2/gRPC client preface on the HTTP/1.1 path: HTTP/2 was not offered for " \
+          "this host, because settings network.http2 is \"off\" or a Match&Replace body rule " \
+          "is live — gori.log names which (\"h2 downgrade: <host> ...\")")
         return false
       end
 
@@ -1017,9 +1024,9 @@ module Gori::Proxy
 
       # Sandbox: refuse to even open a tunnel to a host that CAN'T be in scope (safe-testing:
       # don't handshake with an out-of-scope origin at all). A host that MIGHT be in scope —
-      # e.g. only url/path rules narrow it — IS tunnelled and MITM'd; the Tunnel forces it to
-      # h1 so ClientConn can block the out-of-scope requests precisely, per request. Answered
-      # before the 200 so the client sees the CONNECT itself refused.
+      # e.g. only url/path rules narrow it — IS tunnelled and MITM'd, and the precise per-request
+      # block then happens inside: `handle_request` below on h1, `H2::StreamGate` on the h2 relay
+      # (#492 step 4). Answered before the 200 so the client sees the CONNECT itself refused.
       if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
         write_sandbox_block
         return true

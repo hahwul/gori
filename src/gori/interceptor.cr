@@ -178,8 +178,13 @@ module Gori
     # INDEPENDENT of the interceptor's own `@enabled`: the sandbox blocks whether or not
     # intercept is on.
 
-    # Is the sandbox on? Drives the Tunnel's force-to-h1 (so every MITM'd request reaches the
-    # per-request block below) and the CONNECT h2c refusal.
+    # Is the sandbox on? Two callers, and neither is the Tunnel any more: it used to force every
+    # sandboxed connection to h1 so that `sandbox_blocks?` below would run per request, and #492
+    # step 4 replaced that with a per-stream refusal in `H2::StreamGate` (which is the other
+    # caller — it refuses a header block it cannot decode, since an unreadable head has no URL
+    # to test). The first is the CONNECT h2c refusal (`client_conn.cr`), where the raw h2c relay
+    # is wired with no gates at all, so there is nothing to gate per request and the whole tunnel
+    # is refused instead.
     def sandbox_enabled? : Bool
       @scope.sandbox?
     end

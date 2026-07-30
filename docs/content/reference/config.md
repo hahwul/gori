@@ -61,7 +61,9 @@ Pinning the version matters because h1-vs-h2 differences are often the *subject*
 
 Before this setting, the only lever was an implementation detail: gori downgrades to HTTP/1.1 when Match & Replace rules are live, so the way to force h1 was to enable a no-op rule. That also turned on head rewriting, and was easy to leave behind.
 
-`off` takes effect on the next tunnelled connection, and skips the origin ALPN probe entirely (one fewer connection per origin). It does **not** override the downgrades gori performs for correctness — the Sandbox, per-host interception, and live Match & Replace rules still force HTTP/1.1 regardless, because the HTTP/2 relay genuinely bypasses those seams. A cleartext-HTTP/2 (`h2c`) tunnel inside `CONNECT` is refused rather than relayed when `off`: the client has already committed to h2 by sending the preface, so there is nothing to downgrade.
+`off` takes effect on the next tunnelled connection, and skips the origin ALPN probe entirely (one fewer connection per origin). It does **not** override the one downgrade gori still performs for correctness: a live Match & Replace **body** rule forces HTTP/1.1 regardless, because body rewriting on HTTP/2 isn't built yet. Intercept, head rules and the Sandbox no longer downgrade anything. A cleartext-HTTP/2 (`h2c`) tunnel inside `CONNECT` is refused rather than relayed when `off`: the client has already committed to h2 by sending the preface, so there is nothing to downgrade.
+
+Either downgrade is announced in `gori.log`, once per host, naming the host and which of the two caused it. An HTTP/2-only client — every gRPC client — cannot connect to a host while a downgrade applies, and that log line is the only place the reason is written down.
 
 There is no `force` mode. It would need a defined fallback for an origin that turns out not to speak HTTP/2, and no need for it has come up; the string form leaves room to add it without a compatibility shim.
 

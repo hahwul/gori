@@ -31,20 +31,25 @@ private class Rig
   getter ic : Gori::Interceptor
   getter sink : RecSink
   getter assembler : Gori::Proxy::H2::Assembler
-  getter enc_out = HPACK::Encoder.new # stands in for the client's encoder
-  getter enc_in = HPACK::Encoder.new  # stands in for the origin's encoder
+  getter enc_out : HPACK::Encoder    # stands in for the client's encoder
+  getter enc_in = HPACK::Encoder.new # stands in for the origin's encoder
   getter heads_out : Gori::Proxy::H2::HeadRewrite
   getter heads_in : Gori::Proxy::H2::HeadRewrite
 
-  def initialize(@ic : Gori::Interceptor)
+  # `host` is the CONNECT authority — the connection's own name, which a coalesced stream's
+  # `:authority` may differ from (RFC 9113 §9.1.1). `indexing` makes the stand-in client encoder
+  # insert into its dynamic table, i.e. behave like a browser rather than like gori's own
+  # literal-only encoder.
+  def initialize(@ic : Gori::Interceptor, host : String = "api.example.com", indexing : Bool = false)
     @sink = RecSink.new
     @upstream = IO::Memory.new
     @client = IO::Memory.new
-    @assembler = Gori::Proxy::H2::Assembler.new(@sink, "api.example.com", 443, 1_i64)
-    @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", nil, @assembler, "api.example.com")
-    @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, "api.example.com")
-    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, "api.example.com", 443, @ic, @heads_out)
-    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, "api.example.com", 443, @ic, @heads_in)
+    @enc_out = HPACK::Encoder.new(indexing: indexing)
+    @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, 443, 1_i64)
+    @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", nil, @assembler, host)
+    @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, host)
+    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, 443, @ic, @heads_out)
+    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, 443, @ic, @heads_in)
     @c2s.peer = @s2c
     @s2c.peer = @c2s
   end
@@ -80,21 +85,24 @@ private def data(stream : UInt32, body : String, flags = 0_u8) : Frame::Header
   Frame::Header.new(Frame::Type::Data.value, flags, stream, body.to_slice)
 end
 
-private def request(path : String) : Array({String, String})
-  [{":method", "GET"}, {":scheme", "https"}, {":authority", "api.example.com"}, {":path", path}]
+private def request(path : String, authority : String = "api.example.com") : Array({String, String})
+  [{":method", "GET"}, {":scheme", "https"}, {":authority", authority}, {":path", path}]
 end
 
 private def response(status : String) : Array({String, String})
   [{":status", status}, {"content-type", "text/plain"}]
 end
 
-private def with_ic(&)
+private def with_ic(intercept : Bool = true, &)
   path = File.tempname("gori-h2gate", ".db")
   store = Gori::Store.open(path)
   begin
-    ic = Gori::Interceptor.new(Gori::Scope.load(store))
-    ic.toggle # enable
-    yield ic
+    scope = Gori::Scope.load(store)
+    ic = Gori::Interceptor.new(scope)
+    ic.toggle if intercept
+    # The sandbox is independent of intercept, so the step-4 specs take the scope and leave
+    # intercept off — the two gates are proved separately, then together.
+    yield ic, scope
   ensure
     store.close
     File.delete?(path)
@@ -409,6 +417,178 @@ describe Gori::Proxy::H2::StreamGate do
 
       rig.to_origin.map(&.frame_type).should contain(Frame::Type::RstStream)
       rig.to_client.map(&.frame_type).should contain(Frame::Type::RstStream)
+    end
+  end
+
+  # ---- #492 step 4: the sandbox, per stream -----------------------------------
+  #
+  # Every scope here is a `string` rule, i.e. a URL-level one. That is not an arbitrary choice:
+  # `Scope#sandbox_blocks_host?` treats ANY url-level include as "the path might match on this
+  # host", so the pre-handshake CONNECT gate lets every host through and the per-request gate is
+  # the only one that ever fires. It is exactly the scope shape that the tunnel's old
+  # `sandbox_enabled?` downgrade was carrying.
+
+  it "refuses an out-of-scope h2 request: nothing upstream, RST_STREAM(CANCEL) to the client" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/admin"))))
+
+      rig.to_origin.should be_empty # the refused head never reached the origin
+      rst = rig.to_client
+      rst.map(&.frame_type).should eq([Frame::Type::RstStream])
+      rst.first.stream_id.should eq(1_u32)
+      IO::ByteFormat::BigEndian.decode(UInt32, rst.first.payload).should eq(Gate::CANCEL)
+
+      # Visible in History under h1's own string for a blocked request (`client_conn.cr:1249`).
+      rig.sink.requests.map(&.target).should eq(["/admin"])
+      rig.sink.responses.first.error.should eq(Gate::SANDBOX_REASON)
+    end
+  end
+
+  it "lets an in-scope request through on the same connection" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/api/v1"))))
+      rig.to_origin.map(&.stream_id).should eq([1_u32])
+      rig.to_client.should be_empty
+    end
+  end
+
+  it "swallows a refused stream's later DATA instead of forwarding the body it just refused" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+
+      # No END_STREAM: the client is still uploading when its head is refused.
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/admin")), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "the body the gate refused", Frame::END_STREAM))
+
+      # Forwarding it would hand over the refused body AND be a connection error at an origin
+      # that never saw stream 1 open (§5.1).
+      rig.to_origin.should be_empty
+    end
+  end
+
+  it "refuses a COALESCED stream whose :authority is out of scope, on an in-scope connection" do
+    with_ic(intercept: false) do |ic, scope|
+      # The connection is to api.example.com and that host is in scope. §9.1.1 lets the client
+      # reuse it for any name the certificate covers, so the stream's own authority is the one
+      # that has to be tested — h1 inside a tunnel never had to face this, because
+      # `resolve_forward` pins every request to the CONNECT host.
+      scope.add("include", "string", "https://api.example.com/")
+      scope.enable_sandbox
+      rig = Rig.new(ic, host: "api.example.com")
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x", authority: "evil.example.com"))))
+      rig.to_origin.should be_empty
+      rig.to_client.map(&.frame_type).should eq([Frame::Type::RstStream])
+    end
+  end
+
+  it "refuses an in-scope :authority riding an out-of-scope connection" do
+    with_ic(intercept: false) do |ic, scope|
+      # The mirror of the case above, and the reason BOTH URLs are tested rather than one: a
+      # client that simply claims an in-scope name would otherwise walk a request into an origin
+      # the scope never allowed.
+      scope.add("include", "string", "https://acme.test/")
+      scope.enable_sandbox
+      rig = Rig.new(ic, host: "evil.example.com")
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x", authority: "acme.test"))))
+      rig.to_origin.should be_empty
+      rig.to_client.map(&.frame_type).should eq([Frame::Type::RstStream])
+    end
+  end
+
+  it "re-encodes the rest of the direction after a refusal, so a suppressed head cannot desync HPACK" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic, indexing: true) # a client that indexes — i.e. every browser
+
+      # Stream 1 is refused. Its block inserted `x-token` into the CLIENT's dynamic table; the
+      # origin never received the block, so the origin's decoder table did not grow.
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/admin") + [{"x-token", "abc"}])))
+      rig.heads_out.engaged?.should be_true
+
+      # Stream 3 refers to `x-token` by DYNAMIC INDEX. Passed through verbatim it would resolve
+      # against a table missing the insert — the wrong header, silently. `head_of` decodes with a
+      # FRESH decoder, which is exactly the origin's position.
+      allowed = request("/api/ok") + [{"x-token", "abc"}]
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(allowed), Frame::END_HEADERS))
+      head_of(rig.to_origin, 3_u32).should eq(allowed)
+    end
+  end
+
+  it "forwards everything when the sandbox is OFF, however narrow the scope is" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      # Sandbox NOT enabled: the scope is a display lens here, never a block (`scope.cr`).
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/admin"))))
+      rig.to_origin.map(&.stream_id).should eq([1_u32])
+      rig.to_client.should be_empty
+      rig.heads_out.engaged?.should be_false # and the direction stays byte-exact
+    end
+  end
+
+  it "refuses before holding: an out-of-scope request is never offered to the operator" do
+    with_ic do |ic, scope| # intercept ON as well
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/admin"))))
+      settle
+      # There is no decision to offer about a request that is not going anywhere, and a queue
+      # row for one would let Forward override the sandbox.
+      ic.pending_count.should eq(0)
+      rig.to_origin.should be_empty
+    end
+  end
+
+  it "closes the connection on a header block it cannot decode while the sandbox is on" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+
+      # An indexed-field representation whose varint never terminates: gori's decoder gives up,
+      # and a head it cannot read is a head it cannot scope-test.
+      truncated = Bytes[0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8]
+      expect_raises(Gori::Error) { rig.c2s.accept(headers(1_u32, truncated)) }
+      rig.to_origin.should be_empty
+    end
+  end
+
+  it "still forwards a block it cannot decode when the sandbox is off (P7 — the relay is honest)" do
+    with_ic(intercept: false) do |ic, _scope|
+      rig = Rig.new(ic)
+      truncated = Bytes[0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8]
+      rig.c2s.accept(headers(1_u32, truncated))
+      rig.to_origin.map(&.stream_id).should eq([1_u32])
+    end
+  end
+
+  it "swallows a DROPPED request's later DATA too, for the same reason a refused one's" do
+    with_ic do |ic, _scope|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/nope")), Frame::END_HEADERS))
+      settle
+      ic.drop(ic.pending.first.id)
+      settle
+
+      rig.c2s.accept(data(1_u32, "still uploading", Frame::END_STREAM))
+      # The origin never saw stream 1 open; before step 4 this DATA was written to it.
+      rig.to_origin.should be_empty
     end
   end
 end

@@ -86,6 +86,16 @@ module Gori::Proxy::H2
     # intercept gate implements this; with no deferrer wired in the pipeline is step 2's.
     module Deferrer
       abstract def defer?(block : Block) : Bool
+
+      # Called instead of `defer?` for a block this direction could not read at all —
+      # malformed padding (RFC 9113 §6.1) or a HPACK decoding failure (§4.3). Both are
+      # CONNECTION errors by spec, so the peer's own error handling ends the connection
+      # anyway; the frames are forwarded verbatim either way (P7 — the raw log is the truth).
+      #
+      # The hook exists because #492 step 4 put a BLOCKING gate on this pipeline, and a head
+      # that cannot be decoded is a head whose URL cannot be scope-tested. Without it the
+      # sandbox would fail OPEN on exactly the input most likely to be hostile.
+      abstract def undecodable(stream_id : UInt32) : Nil
     end
 
     # Set by `StreamGate` when intercept is wired in. Deliberately a property rather than a
@@ -122,8 +132,18 @@ module Gori::Proxy::H2
     # untouched.
     def engage(block : Block) : Block
       return block if @engaged
-      @engaged = true
+      latch
       block.copy_with(frames: reframe(block.first, block.prefix, @encoder.encode(block.fields)))
+    end
+
+    # `engage` for a block that will never be written AT ALL — #492 step 4's sandbox refusal
+    # SUPPRESSES a header block rather than deferring it. Same §6.2.1 asymmetry as the class
+    # comment describes, reached a third way: dropping a block leaves the far decoder short of
+    # its insertions while the original encoder's table has already grown, so every later
+    # passthrough block in this direction resolves its dynamic indices against the wrong table.
+    # There is nothing to re-encode here, so this is `engage` minus the block.
+    def latch : Nil
+      @engaged = true
     end
 
     # Re-encode a held head the operator EDITED (#492 step 3, D3). Same decoder (the block was
@@ -215,13 +235,13 @@ module Gori::Proxy::H2
       split = split_block(first)
       # Malformed padding (RFC 7540 §6.1): we cannot locate the block, so forward exactly
       # what arrived and let the assembler drop the projection, as `validate_pad` does.
-      return {@buf.dup, Assembler::HeadBlock.new(nil)} if split.nil?
+      return unreadable(first) if split.nil?
       prefix, block = split
 
       fields = @assembler.decode_head_block(@direction, block)
       # Malformed/hostile HPACK. Same disposition, and the nil projection is what stops the
       # assembler from running a second (differently-positioned) decode over the same bytes.
-      return {@buf.dup, Assembler::HeadBlock.new(nil)} if fields.nil?
+      return unreadable(first) if fields.nil?
 
       request = @direction == "out"
       head = head_text(fields, first, request)
@@ -242,6 +262,15 @@ module Gori::Proxy::H2
               end
       return {[] of Frame::Header, built.pre} if @deferrer.try(&.defer?(built))
       {built.frames, built.pre}
+    end
+
+    # A block this direction could not read. The frames go out exactly as they arrived, with a
+    # nil projection so the assembler does not attempt its own decode — that part is unchanged.
+    # What is new is telling the `Deferrer` first: it may refuse a connection it has gone blind
+    # on, which is the only honest answer for a blocking gate. See `Deferrer#undecodable`.
+    private def unreadable(first : Frame::Header) : {Array(Frame::Header), Assembler::HeadBlock}
+      @deferrer.try(&.undecodable(first.stream_id))
+      {@buf.dup, Assembler::HeadBlock.new(nil)}
     end
 
     # This block's h1-equivalent head text, or nil when the block is not a message head.

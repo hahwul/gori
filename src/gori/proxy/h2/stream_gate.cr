@@ -5,9 +5,30 @@ require "./assembler"
 require "../sink"
 require "../upstream"
 require "../../interceptor"
+require "../../outbound"
 
 module Gori::Proxy::H2
-  # One direction's writer, and the intercept gate in front of it (#492 step 3).
+  # One direction's writer, and the intercept + sandbox gates in front of it (#492 steps 3-4).
+  #
+  # ## The sandbox, per stream
+  #
+  # Intercept and Match&Replace are seams: if they cannot reach h2, a feature silently does
+  # nothing. The sandbox is a BLOCKING gate — if it cannot reach h2, out-of-scope requests
+  # reach the origin, which is a security defect and not a missing feature. It kept working
+  # only because `Tls::Tunnel#h2_candidate?` forced every sandboxed connection down to
+  # HTTP/1.1, where `ClientConn#handle_request` blocks per request (`client_conn.cr:249`).
+  #
+  # #492 step 4 makes it reachable here instead, so the gate could come out of the tunnel.
+  # Three things about it are NOT the intercept hold's shape:
+  #
+  #   1. **The decision is gori's, not a human's**, so it is synchronous on the pump fiber:
+  #      no Slot, no wait fiber, no §5.1.1 ordering problem. Skipping a stream id is legal
+  #      (a client that cancels before sending does exactly that); only DEFERRING one is not.
+  #   2. **It suppresses the head instead of delaying it**, which is a THIRD route into the
+  #      §6.2.1 HPACK asymmetry — see `HeadRewrite#latch`, which every refusal engages.
+  #   3. **It fails CLOSED.** Everywhere the hold fails open (toggle-off, `release_all`, the
+  #      #123 reaper, `MAX_DEFERRED_BYTES`) a blocking gate must not: a refusal it cannot
+  #      remember, or a head it cannot read, ends the connection instead of guessing.
   #
   # ## Why a gate rather than a `hold` call in the pump
   #
@@ -68,6 +89,12 @@ module Gori::Proxy::H2
     # stream can be safely retried"), and a request the operator DROPPED is the one request
     # that must never come back. INTERNAL_ERROR would claim gori malfunctioned. CANCEL carries
     # no retry semantics and gRPC maps it to CANCELLED, which is not retried by default.
+    #
+    # A SANDBOX refusal reuses it, and the retry argument is the reason rather than tidiness:
+    # a refused request will be refused again for as long as the scope says so, so telling the
+    # client to retry is telling it to loop. One code for both also keeps the wire honest —
+    # which of gori's two refusals fired is an operator's business, and History says which
+    # (`DROP_REQUEST_REASON` vs `SANDBOX_REASON`), not the client's.
     CANCEL = 0x8_u32
 
     # Ceiling on the frames parked behind one deferred stream. A sender is already throttled by
@@ -76,10 +103,18 @@ module Gori::Proxy::H2
     # disposition as toggle-off (`interceptor.cr:147`), `release_all` and the #123 reaper.
     MAX_DEFERRED_BYTES = 1 << 20
 
-    # h1 records exactly these strings (`client_conn.cr:1234`, `:840`), so History reads the
-    # same on both protocols.
+    # h1 records exactly these strings (`client_conn.cr:1234`, `:840`, `:1249`), so History
+    # reads the same on both protocols.
     DROP_REQUEST_REASON  = "dropped by intercept (request)"
     DROP_RESPONSE_REASON = "dropped by intercept"
+    SANDBOX_REASON       = Gori::Outbound::SANDBOX_ERROR
+
+    # Ceiling on the refused-stream set (see `@refused`). The set is the only thing standing
+    # between a refused request's later DATA and the origin, so past the ceiling the CONNECTION
+    # goes — not the memory bound, and not the guarantee. Generous on purpose: it is per
+    # connection and only refusals count, so reaching it means thousands of refused streams on
+    # one connection, i.e. a client that has ignored thousands of RST_STREAMs.
+    MAX_REFUSED_STREAMS = 4096
 
     # One stream whose delivery is deferred. Created only when something is actually held or
     # queued; a connection that holds nothing never allocates one.
@@ -114,6 +149,18 @@ module Gori::Proxy::H2
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
       # only. Rule 1 above: releases follow this order, not decision order.
       @opens = [] of UInt32
+      # Streams gori refused — by the sandbox, or by an operator drop. Their head never reached
+      # the far leg, so every LATER frame on them has to be swallowed too: forwarding a refused
+      # request's DATA would both hand over the body the gate just refused and be a connection
+      # error there (RFC 9113 §5.1 — anything but HEADERS/PRIORITY on an idle stream). Bounded,
+      # and the bound ends the connection rather than the guarantee (`MAX_REFUSED_STREAMS`).
+      @refused = Set(UInt32).new
+      # Cross-direction work produced by `defer?`, which cannot return it: its Bool is the
+      # `Deferrer` contract. Drained by `accept_locked`, its only caller — `defer?` runs
+      # synchronously inside `@heads.accept`, under the same already-held `@mutex`. The lock
+      # invariant is intact: this is still "hand the peer's work back as data", not "touch
+      # `@peer` under the lock".
+      @deferred_cross = [] of UInt32
       @closed = false
       @warned_body = false
       @warned_scope = false
@@ -169,6 +216,10 @@ module Gori::Proxy::H2
         park_block(slot, block)
         return true
       end
+      # The blocking gate runs before the holding one, and before anything is written. A
+      # refused stream is never held: there is no decision to offer a human about a request
+      # that is not going anywhere.
+      return true if sandbox_refuses_locked(block)
       item = start_hold(block)
       queued = @ordered && !block.head.nil? && !@opens.empty?
       return false unless item || queued
@@ -201,10 +252,15 @@ module Gori::Proxy::H2
       cross = NO_CROSS
       # Every header block goes through `@heads` even for a deferred stream: the per-direction
       # HPACK decoder must advance in ARRIVAL order, so a block cannot wait in a Slot undecoded
-      # and be decoded later out of sequence.
+      # and be decoded later out of sequence. That holds for a REFUSED stream too — its later
+      # blocks (trailers) still carry the peer's HPACK insertions, so they must be decoded even
+      # though nothing is written.
       @heads.accept(frame) do |f, pre|
         slot = @slots[f.stream_id]?
-        if slot.nil?
+        if @refused.includes?(f.stream_id)
+          # Swallowed, not written: the far leg never saw this stream open. Deliberately not
+          # captured either — `write` is what logs a frame and P7 logs what gori actually wrote.
+        elsif slot.nil?
           write(f, pre)
         elsif f.frame_type == Frame::Type::RstStream
           cross = cross + abandon_locked(slot, f)
@@ -212,7 +268,16 @@ module Gori::Proxy::H2
           park(slot, f, pre)
         end
       end
-      cross
+      take_deferred_cross(cross)
+    end
+
+    # `defer?` cannot return cross-direction work, so it parks it here. Merged on the way out
+    # of the lock, where `accept` hands the whole list to `run_cross`.
+    private def take_deferred_cross(cross : Array(UInt32)) : Array(UInt32)
+      return cross if @deferred_cross.empty?
+      taken = cross + @deferred_cross
+      @deferred_cross.clear
+      taken
     end
 
     # The peer cancelled a stream we are holding, so the operator's decision is moot. Give the
@@ -259,6 +324,105 @@ module Gori::Proxy::H2
         end
       end
       @interceptor.forward(item.id)
+    end
+
+    # --- sandbox side --------------------------------------------------------
+
+    # The hard containment gate, per stream (#492 step 4). True when this head was REFUSED —
+    # its frames are then accounted for and nothing is ever written for the stream again.
+    #
+    # ## Why two URLs are tested, not one
+    #
+    # h1 inside a tunnel tests `scheme://<CONNECT host><target>`: `resolve_forward`
+    # short-circuits on the pinned host, so the name in the request and the socket's
+    # destination cannot disagree. On h2 they can. RFC 9113 §9.1.1 lets a client REUSE one
+    # connection for any origin the certificate covers, so a single relay carries streams whose
+    # `:authority` is not the CONNECT host — which is exactly why the head pipeline already
+    # scopes rules and holds on the stream's own authority (`head_rewrite.cr`).
+    #
+    # For a blocking gate, choosing one of the two names is choosing which half to leak. Take a
+    # scope of `https://acme.test/*` — a URL rule, so `sandbox_blocks_host?` lets EVERY host
+    # past the CONNECT gate and every per-request decision is this one:
+    #
+    #   * authority only would pass a stream claiming `:authority: acme.test` on a connection
+    #     to `evil.test`, i.e. the request goes to a host the scope never allowed.
+    #   * connection host only would pass a coalesced stream to `evil.test` riding an
+    #     `acme.test` connection, because the URL it tested was the connection's, not the
+    #     request's.
+    #
+    # So both are tested and either refusal is a refusal. On an ordinary connection the two
+    # names are equal and the second test is skipped, so the common path costs one evaluation.
+    private def sandbox_refuses_locked(block : HeadRewrite::Block) : Bool
+      return false unless @ordered   # a response exists only for a request already allowed
+      return false unless block.head # trailers/PUSH_PROMISE carry no request URL to test
+      fields = block.fields
+      authority = HeadCodec.pseudo_of(fields, ":authority") || @host
+      host, _ = Upstream.split_host_port(authority, @port)
+      scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+      target = HeadCodec.pseudo_of(fields, ":path") || "/"
+      blocked = @interceptor.sandbox_blocks?(scheme, host, target) ||
+                (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target))
+      return false unless blocked
+      refuse_locked(block)
+      true
+    end
+
+    # Refuse one stream. The head never goes on the wire, so it is fed to the assembler for the
+    # PROJECTION ONLY — `write` is what logs a frame, and P7 logs what gori actually wrote — and
+    # the flow is finalized with h1's own sandbox reason, so a blocked attempt stays visible in
+    # History exactly as `ClientConn#record_blocked_request` keeps it (P4/P7).
+    #
+    # Then RST_STREAM(CANCEL) to the CLIENT only. The origin never saw this stream open, and
+    # RST_STREAM on an idle stream is itself a connection error (§6.4), so telling it would take
+    # down every other stream on the connection — the same per-leg reasoning `drop_locked`
+    # spells out. The client leg belongs to the peer gate, hence the cross list.
+    #
+    # h1 answers a blocked request with `403 + X-Gori-Sandbox: blocked`, and h2 deliberately
+    # does not, for the reason step 3 rejected a synthesized 502: encoding a response head into
+    # the client-bound direction makes gori a SECOND producer of HPACK-bearing frames there,
+    # correct only while dynamic-table insertion stays off. A refusal is the last place to spend
+    # that, since it would be spent on every out-of-scope subresource of every page.
+    private def refuse_locked(block : HeadRewrite::Block) : Nil
+      @heads.latch # suppressing a block desyncs HPACK exactly as reordering one does
+      project(block)
+      @assembler.drop_stream(block.stream_id, SANDBOX_REASON)
+      remember_refused(block.stream_id)
+      @deferred_cross << block.stream_id
+    end
+
+    # Past the ceiling the connection goes. Everywhere else in this file an overflow fails OPEN
+    # (`fail_open`, `close`, the #123 reaper) because the thing being lost is a human's chance
+    # to look at a message. Here it is the record of which streams must never reach the origin,
+    # and a blocking gate that has forgotten what it blocked is not a gate.
+    private def remember_refused(stream_id : UInt32) : Nil
+      @refused << stream_id
+      return if @refused.size <= MAX_REFUSED_STREAMS
+      ::Log.warn do
+        "h2 #{@direction}: over #{MAX_REFUSED_STREAMS} streams refused on one connection " \
+        "(sandbox or intercept drop) — closing it, because gori can no longer keep track of " \
+        "which streams must not reach the far end"
+      end
+      raise Gori::Error.new("h2: refused-stream ceiling reached")
+    end
+
+    # `HeadRewrite::Deferrer`. A header block this direction could not read.
+    #
+    # With the sandbox OFF this is a no-op and the frames go out verbatim — step 2's behaviour
+    # and P7's, since the raw log is the truth and the peer is entitled to gori's honest relay
+    # of what it received. With the sandbox ON the same forward is a hole: an unreadable head
+    # has no URL to scope-test, so it would be the one request shape that walks past a blocking
+    # gate, and it is the shape most likely to be hostile. Both causes (§6.1 padding, §4.3
+    # HPACK) are CONNECTION errors by spec, so the far end would end the connection over this
+    # block anyway — gori doing it first costs nothing and is the only answer that does not
+    # guess. Response-direction blocks are left alone: they bypass no request gate.
+    def undecodable(stream_id : UInt32) : Nil
+      return unless @ordered && @interceptor.sandbox_enabled?
+      ::Log.warn do
+        "h2 out: stream #{stream_id} carries a header block gori cannot decode (RFC 9113 " \
+        "§6.1/§4.3) — the sandbox is on and an unreadable head has no URL to scope-test, " \
+        "so the connection is closed rather than forwarded unexamined"
+      end
+      raise Gori::Error.new("h2 sandbox: undecodable header block on stream #{stream_id}")
     end
 
     # --- hold side -----------------------------------------------------------
@@ -407,6 +571,13 @@ module Gori::Proxy::H2
       end
       @assembler.drop_stream(slot.stream_id, @ordered ? DROP_REQUEST_REASON : DROP_RESPONSE_REASON)
       write(rst_frame(slot.stream_id), nil) unless @ordered
+      # A drop is a refusal too, and it leaves the same opening: the slot is gone from `@slots`,
+      # so a client that keeps sending on a dropped REQUEST would have its DATA written to an
+      # origin that never saw the stream open. Sharing `@refused` with the sandbox closes it for
+      # both. (`abandon_locked` deliberately does not: there the PEER reset the stream, so it is
+      # the one that has stopped sending, and charging its cancellations to the ceiling below
+      # would let an ordinary client cancel its way into a connection teardown.)
+      remember_refused(slot.stream_id)
       [slot.stream_id]
     end
 

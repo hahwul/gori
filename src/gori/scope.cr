@@ -232,13 +232,14 @@ module Gori
       inc_ok && @rules.none? { |r| r.exclude? && r.matches?(url, host) }
     end
 
-    # Conservative HOST-level check for the Tunnel's h2→h1 downgrade decision, made
-    # BEFORE any request exists (so no path/URL is known yet). A host is *potentially*
-    # in scope when includes don't rule it out — no includes, OR a host-include
-    # matches, OR any url-level include exists (its path we can't know yet) — AND no
-    # HOST-level exclude fully covers it (url-level excludes only kill specific paths,
-    # never a whole host). ClientConn then makes the precise per-request call; this only
-    # decides whether to keep the connection on h1 so a request CAN be held.
+    # Conservative HOST-level check behind `Interceptor#intercepts_host?`, made BEFORE any
+    # request exists (so no path/URL is known yet). A host is *potentially* in scope when
+    # includes don't rule it out — no includes, OR a host-include matches, OR any url-level
+    # include exists (its path we can't know yet) — AND no HOST-level exclude fully covers it
+    # (url-level excludes only kill specific paths, never a whole host). The precise per-message
+    # call is `in_scope_url?` via `intercepts_request?`/`intercepts_response?`, which do not
+    # consult this. It used to drive the Tunnel's h2→h1 downgrade as well; #492 step 3 made the
+    # hold work per stream on h2 and removed that.
     def may_match_host?(host : String) : Bool
       @mutex.synchronize { active_unlocked? ? host_in_scope_unlocked?(host) : true }
     end
@@ -259,12 +260,15 @@ module Gori
       @mutex.synchronize { @sandbox && !allowlisted_unlocked?(url, host) }
     end
 
-    # Coarse HOST-level block for the CONNECT gate + the h2→h1 downgrade decision, made
-    # BEFORE any request exists (no path/URL yet). Blocks only when the host CAN'T be in
-    # scope, so a partially-in-scope host is still tunnelled and gated per request by
-    # ClientConn. Conservative like may_match_host?: a url-level include (whose path we
-    # can't know here) keeps the host allowed; only a host-level include set that excludes
-    # it — or an empty allowlist — blocks it outright. Returns false when the sandbox is off.
+    # Coarse HOST-level block for the pre-handshake gates (CONNECT, transparent SNI, reverse),
+    # made BEFORE any request exists (no path/URL yet). Blocks only when the host CAN'T be in
+    # scope, so a partially-in-scope host is still tunnelled and then gated PER REQUEST — by
+    # `ClientConn#handle_request` on h1 and by `H2::StreamGate` on h2 (#492 step 4). That per-
+    # request gate is not optional garnish on this one: a url-level include (whose path we can't
+    # know here) keeps EVERY host allowed past this point, so with a path-scoped scope this
+    # method blocks nothing and `sandbox_blocks?` does the entire job. Only a host-level include
+    # set that excludes the host — or an empty allowlist — blocks it outright here. Returns
+    # false when the sandbox is off.
     def sandbox_blocks_host?(host : String) : Bool
       @mutex.synchronize { @sandbox && !host_allowlisted_unlocked?(host) }
     end

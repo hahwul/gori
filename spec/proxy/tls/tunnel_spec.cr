@@ -139,6 +139,41 @@ private def start_h2_head_origin(path_seen : Channel(String), ack : Channel(Nil)
   port
 end
 
+# A minimal HTTP/2 origin that reports the `:path` of EVERY HEADERS block it receives, rather
+# than stopping at the first. That is what makes it usable as a negative: a request the sandbox
+# refused must never turn up here, on a connection that is carrying other streams fine.
+private def start_h2_path_log_origin(paths : Channel(String), ack : Channel(Nil)) : Int32
+  cert, key = CertBuilder.build_root("origin.test")
+  ctx = ContextFactory.server_context(cert, key, advertise_h2: true)
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    if raw = origin.accept?
+      begin
+        ssl = OpenSSL::SSL::Socket::Server.new(raw, ctx, sync_close: true)
+        ssl.sync = true
+        # The read loop is its own fiber so `ack` still gates teardown while it runs.
+        spawn do
+          begin
+            Gori::Proxy::H2::Frame.read_preface(ssl)
+            decoder = Gori::Proxy::H2::HPACK::Decoder.new
+            while frame = Gori::Proxy::H2::Frame.read(ssl)
+              next unless frame.frame_type == Gori::Proxy::H2::Frame::Type::Headers
+              fields = decoder.decode(frame.payload)
+              paths.send(fields.find { |(n, _)| n == ":path" }.try(&.[1]) || "")
+            end
+          rescue
+          end
+        end
+        ack.receive
+        ssl.close rescue nil
+      rescue
+      end
+    end
+  end
+  port
+end
+
 describe Gori::Proxy::Tls::Tunnel do
   it "intercepts an HTTPS CONNECT and captures the decrypted flow byte-exact (P7)" do
     dir = File.tempname("gori-ca")
@@ -287,6 +322,94 @@ describe Gori::Proxy::Tls::Tunnel do
       tls.flush
 
       path_seen.receive.should eq("/rewritten") # the rule reached the h2 head — no downgrade
+      ack.send(nil)
+      tls.close rescue nil
+      proxy.stop
+    ensure
+      store.try(&.close)
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+      File.delete?(dbpath)
+      File.delete?("#{dbpath}-wal")
+      File.delete?("#{dbpath}-shm")
+    end
+  end
+
+  it "keeps h2 under the SANDBOX and refuses an out-of-scope stream on it (#492 step 4)" do
+    # The gate this replaces was not a seam but a BLOCK: the sandbox reached h2 traffic only
+    # because every sandboxed connection was forced to HTTP/1.1, where ClientConn blocks per
+    # request. So "the spec passes" is not the bar — this drives a real client, over a real h2
+    # connection that STAYS h2, and asserts the refused request never reaches the origin.
+    dir = File.tempname("gori-ca-h2sandbox")
+    dbpath = File.tempname("gori-h2sandbox", ".db")
+    paths = Channel(String).new(4)
+    ack = Channel(Nil).new(1)
+    done = Channel(Nil).new(4)
+    store : Gori::Store? = nil
+    begin
+      origin_port = start_h2_path_log_origin(paths, ack)
+      ca = CertAuthority.load_or_create(dir)
+      store = Gori::Store.open(dbpath)
+      scope = Gori::Scope.load(store.not_nil!)
+      # A URL-level include, which is the shape that makes the pre-handshake gate a no-op:
+      # `sandbox_blocks_host?` reads one as "the path might match on any host", so it passes
+      # every CONNECT and the per-request decision is the only decision there is.
+      scope.add("include", "string", "https://localhost/api/")
+      scope.enable_sandbox
+      ic = Gori::Interceptor.new(scope)
+
+      sink = RecordingSink.new(done)
+      proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false, interceptor: ic),
+        interceptor: ic)
+      proxy.start
+
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT localhost:#{origin_port} HTTP/1.1\r\nHost: localhost:#{origin_port}\r\n\r\n"
+      raw.flush
+      String.new(Codec::Http1.read_head(raw).not_nil!).should contain("200") # not refused at CONNECT
+
+      client_ctx = OpenSSL::SSL::Context::Client.new
+      client_ctx.alpn_protocol = "h2"
+      ca_cert = Cert.read_pem(File.join(dir, "root.crt.pem"))
+      st = LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe)
+      LibCrypto.x509_store_add_cert(st, ca_cert.handle)
+
+      tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
+      tls.sync = true
+      tls.alpn_protocol.should eq("h2") # the sandbox no longer costs the connection its protocol
+
+      encoder = Gori::Proxy::H2::HPACK::Encoder.new
+      tls.write(Gori::Proxy::H2::Frame::PREFACE)
+      tls.write(Gori::Proxy::H2::Frame::Header.new(0x4_u8, 0_u8, 0_u32, Bytes.new(0)).wire_bytes) # SETTINGS
+      # Stream 1 is out of scope, stream 3 is in scope, and they share one h2 connection.
+      [{1_u32, "/admin"}, {3_u32, "/api/v1"}].each do |(id, path)|
+        block = encoder.encode([{":method", "GET"}, {":scheme", "https"},
+                                {":authority", "localhost"}, {":path", path}])
+        tls.write(Gori::Proxy::H2::Frame::Header.new(
+          Gori::Proxy::H2::Frame::Type::Headers.value,
+          Gori::Proxy::H2::Frame::END_HEADERS | Gori::Proxy::H2::Frame::END_STREAM,
+          id, block).wire_bytes)
+      end
+      tls.flush
+
+      # The FIRST path the origin ever sees is the in-scope one: /admin did not leave gori.
+      paths.receive.should eq("/api/v1")
+
+      # And the client is told, rather than left hanging on a stream that is never coming back.
+      rst = nil
+      while frame = Gori::Proxy::H2::Frame.read(tls)
+        next unless frame.frame_type == Gori::Proxy::H2::Frame::Type::RstStream
+        rst = frame
+        break
+      end
+      rst.not_nil!.stream_id.should eq(1_u32)
+      IO::ByteFormat::BigEndian.decode(UInt32, rst.not_nil!.payload)
+        .should eq(Gori::Proxy::H2::StreamGate::CANCEL)
+
+      done.receive # the blocked attempt is recorded, exactly as the h1 path records one
+      sink.requests.first.target.should eq("/admin")
+      # The only flow finished so far: /api/v1 reached the origin and is still waiting on it.
+      sink.responses.first.error.should eq(Gori::Outbound::SANDBOX_ERROR)
+
       ack.send(nil)
       tls.close rescue nil
       proxy.stop

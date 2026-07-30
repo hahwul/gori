@@ -29,6 +29,11 @@ module Gori::Proxy::Tls
     # to hundreds of hosts, so the common origins are all cached long before this.
     H1_ONLY_CACHE_MAX = 4096
 
+    # Cap on the once-per-host h2→h1 downgrade notice (see notice_downgrade). Same number and
+    # same reason as `Settings::PASSTHROUGH_NOTICE_MAX`: a bound on unbounded operator-controlled
+    # input, without a log line per reconnect from a chatty client.
+    DOWNGRADE_NOTICE_MAX = 1024
+
     # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
     # flip upstream TLS verification without a restart; read per-CONNECT in `intercept`, so
     # the next tunnelled connection picks up the change.
@@ -49,6 +54,9 @@ module Gori::Proxy::Tls
       # Bare Set, no mutex: single-threaded fibers, and the read/add don't yield (the yielding
       # dial happens before the add), so a concurrent double-probe just re-adds idempotently.
       @h1_only_origins = Set({String, Int32}).new
+      # {host, reason} pairs already announced by notice_downgrade. Same no-mutex argument as
+      # above: the read and the add happen together with no yield between them.
+      @downgrade_noticed = Set({String, String}).new
     end
 
     # TlsMitm seam: hand the connection loop the root CA (for the self-serve download
@@ -164,7 +172,7 @@ module Gori::Proxy::Tls
     # entry (origin since dropped to h1/down) would re-strand the client on a dead h2 tunnel,
     # the exact #323 failure, so only the benign negative direction is cached.
     private def reflect_origin_h2(host : String, port : Int32) : OpenSSL::SSL::Socket::Client?
-      return nil unless h2_candidate?
+      return nil unless h2_candidate?(host)
       return nil if @h1_only_origins.includes?({host, port}) # known h1-only: skip the probe
       # Cap the connect wait so an unreachable origin doesn't burn the full timeout here before
       # the h1 fallback re-dials and waits again (never longer than the configured timeout).
@@ -181,41 +189,69 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when HTTP/2 is switched off, the sandbox is on, OR a Match&Replace BODY
-    # rule is live: those seams are not reachable from the h2 relay, so it would silently skip
-    # them. Sandbox-off hosts with no body rule are candidates (subject to the origin actually
-    # speaking h2 — see reflect_origin_h2).
+    # ClientConn path — when HTTP/2 is switched off OR a Match&Replace BODY rule is live.
+    # Anything else is a candidate, subject to the origin actually speaking h2 (see
+    # reflect_origin_h2). Placing the check here also means a downgrade skips the origin ALPN
+    # probe entirely: reflect_origin_h2 consults this before dialing.
     #
-    # The rewriter gate used to be `active?`, and #492 step 2 narrowed it rather than removing
-    # it. HEAD rules now reach h2 (`H2::HeadRewrite`), which is the whole point of that step —
-    # a single Match&Replace rule no longer kills every gRPC client on the host by forcing a
-    # downgrade the client cannot take (`conn/client_conn.cr:158`). But `Rules#active?` is
-    # true for a BODY-only rule set too (`rules.cr:48-50` counts any enabled rule regardless of
-    # part), and a body rule works today PRECISELY because this gate downgrades: the h1 path is
-    # where `rewrites_request_body?`/`rewrites_response_body?` and the buffered-body rewrite
-    # live. Dropping the gate outright would have regressed body rules from working to silently
-    # not working — the exact failure this epic exists to remove. Body rewriting on h2 is #492
-    # step 5; until then a body rule still earns the downgrade, and only that.
+    # A downgrade is never free, which is why what remains is only what is still REQUIRED.
+    # An h2-only client — every gRPC client — cannot take it: a modern grpc-go dies at ALPN
+    # enforcement ("missing selected ALPN property") because we no longer offer h2, and an older
+    # or hand-rolled one gets one step further and has its preface refused
+    # (`conn/client_conn.cr`). So each remaining term is announced once per host (see
+    # notice_downgrade); before #492 step 4 this file logged nothing at all.
     #
-    # The INTERCEPT gate came out in #492 step 3, which made the hold reachable per stream
-    # (`H2::StreamGate`). Checked the same way step 2 checked the rewriter, since the lesson
-    # there was that the obvious predicate protected more than it looked like: `intercepts_host?`
-    # is not consulted by `intercepts_request?`/`intercepts_response?` (`interceptor.cr:204-222`
-    # take their own snapshot), and `sandbox_enabled?` is a separate term on the same object, so
-    # removing it weakens no gate — it removes a downgrade. What it DOES change is that a held
-    # h2 message is the head only: the body is not shown and not editable, because DATA streams
-    # past untouched until step 5. Unlike step 2 there is no narrower predicate that saves it —
-    # nothing can know before the request exists whether the operator will want to edit a body —
-    # so it is stated in `docs/content/guide/proxy.md` instead of being fixed.
+    # ## What came out, and what each removal had to prove
     #
-    # `http2_disabled?` is one MORE reason to downgrade, deliberately not a way to override the
-    # others: those two are correctness requirements, not preferences, so no setting may turn
-    # them off. Placing the check here also means "off" skips the origin ALPN probe entirely —
-    # reflect_origin_h2 consults this before dialing.
-    private def h2_candidate? : Bool
-      !(Gori::Settings.http2_disabled? ||
-        @interceptor.try(&.sandbox_enabled?) ||
-        @rewriter.try { |rw| rw.rewrites_request_body? || rw.rewrites_response_body? })
+    # The rewriter gate used to be `active?`, and #492 step 2 NARROWED it rather than removing
+    # it: HEAD rules reach h2 now (`H2::HeadRewrite`), but `Rules#active?` is true for a
+    # BODY-only rule set too (`rules.cr:48-50` counts any enabled rule regardless of part), and
+    # a body rule works today PRECISELY because this gate downgrades — the h1 path is where the
+    # buffered-body rewrite lives. Dropping it outright would have regressed body rules from
+    # working to silently not working. Body rewriting on h2 is #492 step 5; until then a body
+    # rule still earns the downgrade, and only that.
+    #
+    # The INTERCEPT gate came out in step 3, which made the hold reachable per stream
+    # (`H2::StreamGate`). `intercepts_host?` is not consulted by
+    # `intercepts_request?`/`intercepts_response?` (`interceptor.cr` — they take their own
+    # snapshot), so removing it weakened no gate. What it DID change is that a held h2 message
+    # is the head only, because DATA streams past untouched until step 5.
+    #
+    # The SANDBOX gate came out in step 4, and it is the one removal that had to answer a
+    # different question, because the sandbox is not a seam: an unreachable seam silently does
+    # nothing, an unreachable BLOCKING gate lets traffic through. It was reachable only through
+    # this downgrade — `ClientConn#handle_request`'s per-request `sandbox_blocks?` — and the
+    # relay had no per-request URL check at all. The pre-handshake host gate is no substitute
+    # and never was: `sandbox_blocks_host?` deliberately passes a host that MIGHT be in scope,
+    # and with any url-level include in the scope that is EVERY host (`host_allowlisted_unlocked?`
+    # treats one url rule as "the path might match here"), so path-scoped rules did their whole
+    # job per request. Removing the term without replacing it would have made a scope of
+    # `https://acme.test/api/*` forward `/admin` to the origin unexamined. It is replaced by a
+    # per-stream refusal in `H2::StreamGate` — which also covers something h1 never had to face,
+    # a coalesced stream whose `:authority` is not the CONNECT host (§9.1.1).
+    private def h2_candidate?(host : String) : Bool
+      if Gori::Settings.http2_disabled?
+        notice_downgrade(host, "HTTP/2 is switched off (settings network.http2; set it back to " \
+                               "\"auto\" to keep h2)")
+        return false
+      end
+      if @rewriter.try { |rw| rw.rewrites_request_body? || rw.rewrites_response_body? }
+        notice_downgrade(host, "a Match&Replace BODY rule is live and body rewriting on HTTP/2 " \
+                               "is not implemented yet (disable the body rule to keep h2)")
+        return false
+      end
+      true
+    end
+
+    # One gori.log line per host per reason, the discipline `Settings::PASSTHROUGH_NOTICE_MAX`
+    # set for the other invisible-by-default decision this proxy makes. Keyed on the reason as
+    # well as the host so a host that downgrades for a second reason is not silenced by the
+    # first. Per Tunnel instance, i.e. per proxy listener.
+    private def notice_downgrade(host : String, reason : String) : Nil
+      key = {host, reason}
+      return if @downgrade_noticed.includes?(key) || @downgrade_noticed.size >= DOWNGRADE_NOTICE_MAX
+      @downgrade_noticed << key
+      ::Log.info { "h2 downgrade: #{host} forced to HTTP/1.1 because #{reason}. An HTTP/2-only client (any gRPC client) cannot connect to this host while it applies." }
     end
 
     # End-to-end h2 relay over an upstream ALREADY dialed (and confirmed h2) by `intercept`.
