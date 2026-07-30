@@ -788,6 +788,39 @@ reason phrase). Those forge a message boundary the same way a CRLF target does, 
 import should also carry an operator's header-boundary payload is a separate question #400 did
 not settle — left rejected pending its own call rather than widened by implication.
 
+### 2026-07-30: an imported request's Host header is the operator's, and carries its port
+
+Refines: [P7](#p7). PR #488 (the port) and its follow-up (the passthrough).
+
+The entry above names "a duplicate `Host`" as one of the payloads import must preserve, but
+`Builder.request_head` was doing the opposite: it skipped every incoming `Host` line and
+synthesized one from `uri.host`. Two defects fell out of that, found by replaying imported
+flows at a raw-echo origin and reading the bytes it received.
+
+- `uri.host` never carries a port, so the synthesized line dropped it. RFC 7230 §5.4 requires
+  the port whenever it is not the scheme default, so a HAR recording `Host: 127.0.0.1:8099`
+  was stored — and replayed — as `Host: 127.0.0.1`. Name/port-based routing at the origin saw
+  a different request than the one imported, and two imports differing only in port became
+  indistinguishable by Host. Only the stored `host`/`port` columns were right, so the raw bytes
+  and the JSON projection disagreed.
+- Synthesizing at all discarded the operator's own bytes. A recorded `Host: evil.example`, or
+  the duplicate `Host` this log already called a payload, was silently replaced — so the
+  Host-header attack the operator imported could not reproduce.
+
+Resolved as two halves of one rule: **a recorded Host goes out verbatim — order kept,
+duplicates kept — and a Host is synthesized only when the source described none.** The
+synthesized form now carries `host:port` unless the port is the scheme default
+(`Builder.host_header`, reusing `Discover::Url.default_port?`). Sources that describe no
+headers (`--urls`, OpenAPI) are the synthesize case; HAR/Postman/Insomnia are the passthrough
+case. `Import::Raw` (Burp) never enters Builder and is unaffected.
+
+Safe because gori already permits a Host that disagrees with the dialled host, deliberately:
+the scope gate judges `Outbound.scope_url` — the host actually dialled — never the request
+line or this header, which is what makes Host-header testing possible at all
+([§3](#s3)). The two guards the entry above kept are untouched: `HEADER_INJECT` still rejects
+CR/LF/NUL in any header, and `request_head` now applies the same check to the `host` it is
+handed, since that field reaches the start of the head and could forge a boundary there.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

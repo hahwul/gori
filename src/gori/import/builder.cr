@@ -150,18 +150,33 @@ module Gori
                             body : Bytes?) : Bytes
         reject_inject!(method, "method")
         reject_inject!(http_version, "HTTP version")
+        # `host` reaches the Host line, so it forges a message boundary the same way a header
+        # value would. `endpoint`'s HOST_INVALID already covers both internal callers, but this
+        # is a public serializer taking a caller-supplied host, so guard it here too rather than
+        # leave the one field on the start of the head unchecked.
+        reject_inject!(host, "host")
         reject_header_injection!(headers)
+        # P7, and DESIGN.md §7 by name: when the source RECORDED a `Host`, those are the
+        # OPERATOR's bytes and go out verbatim — order kept, duplicates kept. §7 lists "a
+        # duplicate `Host`" among "the smuggling payloads an operator tests with, not corruption
+        # to be repaired", and a deliberately mismatched Host is a Host-header attack the
+        # operator is reproducing. Skipping the incoming line and synthesizing one silently
+        # replaced both: a HAR recording `Host: evil.example` for `http://127.0.0.1:8098/p` was
+        # stored — and replayed — as `Host: 127.0.0.1:8098`, so the recorded attack could not
+        # reproduce. Synthesize ONLY when the source described no Host at all, which is the
+        # `--urls` / OpenAPI case (they carry no headers). Safe because the scope gate judges the
+        # host actually DIALLED (`Outbound.scope_url`), never this line.
+        has_host = headers.any? { |(k, _)| k.compare("host", case_insensitive: true) == 0 }
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
-          b << "Host: " << host_header(scheme, host, port) << "\r\n"
-          # One pass, allocation-free case-insensitive compares. Skip BOTH the Host line and any
-          # incoming Content-Length: the stored head must agree with the body we actually build
-          # and store, but a HAR postData.params entry (no `text`) rebuilds a fresh urlencoded
-          # body whose length differs from the original request's Content-Length. Keeping that
-          # header verbatim left the stored request advertising the wrong length; re-emit one
-          # correct Content-Length below from the true (pre-cap) body size.
+          b << "Host: " << host_header(scheme, host, port) << "\r\n" unless has_host
+          # One pass, allocation-free case-insensitive compares. Skip any incoming
+          # Content-Length: the stored head must agree with the body we actually build and store,
+          # but a HAR postData.params entry (no `text`) rebuilds a fresh urlencoded body whose
+          # length differs from the original request's Content-Length. Keeping that header
+          # verbatim left the stored request advertising the wrong length; re-emit one correct
+          # Content-Length below from the true (pre-cap) body size.
           headers.each do |k, v|
-            next if k.compare("host", case_insensitive: true) == 0
             next if k.compare("content-length", case_insensitive: true) == 0
             b << k << ": " << v << "\r\n"
           end

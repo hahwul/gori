@@ -1,6 +1,14 @@
 require "base64"
 require "../spec_helper"
 
+# A HAR-shaped import (complete_flow) against a ported URL, so the recorded Host can be made to
+# disagree with the URL authority — see the "a recorded Host header" describe.
+private def har_pair(headers)
+  Gori::Import::Builder.complete_flow(
+    0_i64, "http://127.0.0.1:8098/p", "GET", headers,
+    nil, "HTTP/1.1", 200, "OK", Gori::Import::Builder::Headers.new, nil, nil, nil)
+end
+
 private def with_store(&)
   path = File.tempname("gori-import", ".db")
   store = Gori::Store.open(path)
@@ -879,14 +887,54 @@ describe Gori::Import::Builder do
       a.should_not eq(b)
     end
 
-    it "applies to a complete_flow import (HAR) as well as a pending one" do
-      # The HAR's own `Host: 127.0.0.1:8099` is skipped and the line re-synthesized; it must
-      # come back out identical rather than losing the port.
-      req_headers = [{"Host", "127.0.0.1:8099"}] of {String, String}
+    it "synthesizes the line for a complete_flow import that recorded no Host" do
       pair = Gori::Import::Builder.complete_flow(
-        0_i64, "http://127.0.0.1:8099/login", "POST", req_headers,
+        0_i64, "http://127.0.0.1:8099/login", "POST", Gori::Import::Builder::Headers.new,
         nil, "HTTP/1.1", 200, "OK", Gori::Import::Builder::Headers.new, nil, nil, nil)
       String.new(pair.request.head).should contain("Host: 127.0.0.1:8099\r\n")
+    end
+  end
+
+  # P7, and DESIGN.md §7 by name: a recorded `Host` is the OPERATOR's bytes. §7 lists "a
+  # duplicate `Host`" among the smuggling payloads import must preserve, and a mismatched Host
+  # is a Host-header attack being reproduced. These assert a Host that DIFFERS from the URL
+  # authority — asserting one that matches passes whether the header is preserved or discarded
+  # and re-synthesized, which is how the overwrite went unnoticed.
+  describe "a recorded Host header" do
+    it "goes out verbatim when it disagrees with the URL authority" do
+      head = String.new(har_pair([{"Host", "evil.example"}] of {String, String}).request.head)
+      head.should contain("Host: evil.example\r\n")
+      head.should_not contain("Host: 127.0.0.1:8098") # not silently replaced
+    end
+
+    it "keeps a DUPLICATE Host — the payload DESIGN.md §7 names" do
+      head = String.new(har_pair(
+        [{"Host", "127.0.0.1:8098"}, {"Host", "evil.example"}] of {String, String}).request.head)
+      head.scan(/^Host:/im).size.should eq(2)
+      head.should contain("Host: 127.0.0.1:8098\r\n")
+      head.should contain("Host: evil.example\r\n")
+    end
+
+    it "keeps the operator's spelling rather than canonicalizing the port away" do
+      # A bare Host recorded against a ported URL: previously stored bare (accidentally right),
+      # then :8098 was appended by the port fix. Either way it must be the operator's bytes.
+      head = String.new(har_pair([{"Host", "example.com"}] of {String, String}).request.head)
+      head.should contain("Host: example.com\r\n")
+      head.should_not contain("Host: example.com:8098")
+    end
+
+    it "is matched case-insensitively, so a lowercased HAR header still suppresses the synth" do
+      head = String.new(har_pair([{"host", "evil.example"}] of {String, String}).request.head)
+      head.scan(/^host:/im).size.should eq(1)
+      head.should contain("host: evil.example\r\n")
+    end
+
+    it "still rejects a CR/LF in the host it is handed (boundary guard, not canonicalization)" do
+      expect_raises(Gori::Error, /control character/) do
+        Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1",
+          scheme: "http", host: "h.test\r\nX-Injected: evil", port: 80,
+          headers: Gori::Import::Builder::Headers.new, body: nil)
+      end
     end
 
     it "builds the value directly, including the IPv6 + default-port corners" do
