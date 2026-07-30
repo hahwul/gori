@@ -98,6 +98,24 @@ JS_BODY = begin
   io.to_slice.dup
 end
 
+# The SAME bundle plus one non-ASCII regex literal — a diacritic/slug normaliser, which real
+# i18n'd bundles ship constantly (`/[—–]/`, `/[가-힣]+/`, …).
+#
+# This is not a cosmetic variant. `strip` blanks the contents of strings and comments, so a
+# non-ASCII byte in either is gone by the time the client rules see the script — but regex
+# literals are deliberately left intact (JsScan's `strip` docs), so a single accented char there
+# makes the STRIPPED text non-ASCII. `String#[]` range slicing is O(1) only on an all-ASCII
+# string; once it isn't, every window slice in `source_in_window` walks from the start, and that
+# runs per sink occurrence. This fixture cost 1765ms against JS_BODY's 9ms until the window
+# arithmetic moved to byte offsets. Same reasoning as the sinks above: a JS fixture whose
+# stripped output is pure ASCII silently skips this branch, so keep the literal here.
+JS_I18N_BODY = begin
+  io = IO::Memory.new
+  io << "var deburr=/[éèêàçñüö—–]/g;" # <- the whole point of this fixture
+  io.write(JS_BODY)
+  io.to_slice.dup
+end
+
 JS_RESP_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n" \
                 "Server: nginx/1.24.0\r\nCache-Control: max-age=31536000\r\n\r\n").to_slice
 
@@ -105,15 +123,24 @@ JS_FLOW = flow("GET", "/static/app.min.js", "application/javascript",
   ("GET /static/app.min.js HTTP/1.1\r\nHost: app.example.com\r\n\r\n").to_slice, nil,
   JS_RESP_HEAD, JS_BODY)
 
+JS_I18N_FLOW = flow("GET", "/static/app.i18n.min.js", "application/javascript",
+  ("GET /static/app.i18n.min.js HTTP/1.1\r\nHost: app.example.com\r\n\r\n").to_slice, nil,
+  JS_RESP_HEAD, JS_I18N_BODY)
+
 puts "Probe passive scan — full Passive.analyze per flow:"
 puts "  JSON POST body: #{JSON_BODY.size} bytes; HTML document: #{HTML_BODY.size} bytes"
 puts "  JS bundle: #{JS_BODY.size} bytes (at the CLIENT_BODY_CAP ceiling)"
+puts "  JS bundle + non-ASCII regex literal: #{JS_I18N_BODY.size} bytes"
 puts "  (detections: json=#{Gori::Probe::Passive.analyze(JSON_FLOW).size}" \
      " html=#{Gori::Probe::Passive.analyze(HTML_FLOW).size}" \
-     " js=#{Gori::Probe::Passive.analyze(JS_FLOW).size})"
+     " js=#{Gori::Probe::Passive.analyze(JS_FLOW).size}" \
+     " js_i18n=#{Gori::Probe::Passive.analyze(JS_I18N_FLOW).size})"
 
 Benchmark.ips do |x|
-  x.report("JSON API POST flow") { Gori::Probe::Passive.analyze(JSON_FLOW) }
-  x.report("HTML document flow") { Gori::Probe::Passive.analyze(HTML_FLOW) }
-  x.report("JS bundle flow    ") { Gori::Probe::Passive.analyze(JS_FLOW) }
+  x.report("JSON API POST flow ") { Gori::Probe::Passive.analyze(JSON_FLOW) }
+  x.report("HTML document flow ") { Gori::Probe::Passive.analyze(HTML_FLOW) }
+  x.report("JS bundle flow     ") { Gori::Probe::Passive.analyze(JS_FLOW) }
+  # Must stay in the SAME order of magnitude as the plain JS bundle. A large gap here means the
+  # non-ASCII slow path is back.
+  x.report("JS bundle, non-ASCII") { Gori::Probe::Passive.analyze(JS_I18N_FLOW) }
 end

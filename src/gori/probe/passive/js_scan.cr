@@ -124,7 +124,7 @@ module Gori
             String.build(js.bytesize) do |io|
               i = 0
               while i < n
-                if j = blank_token_at(chars, i, n, io)
+                if j = blank_token_at(chars, i, n, io, 0)
                   i = j
                 else
                   io << chars[i]
@@ -150,8 +150,38 @@ module Gori
           end
         end
 
+        # Template-literal nesting recurses one frame per level (blank_string →
+        # emit_interpolation → blank_token_at → …, and the copy_* mirror of it), and the depth is
+        # ATTACKER-CONTROLLED: it is just response-body text. The recursion happens on the way IN,
+        # so no closing delimiters are needed — an unterminated "`${" costs 3 bytes per level, and
+        # CLIENT_BODY_CAP / 3 = 87381 levels lands past the ~87k frames an 8 MiB fiber stack holds.
+        # A Crystal stack overflow is a FATAL SIGNAL, not a rescuable exception, so Analyzer's
+        # per-flow `rescue` cannot contain it: one 256 KiB response body took the whole process
+        # down (proxy capture, TUI, CLI and MCP alike). The body cap is not a defense here — it
+        # sits on the wrong side of the limit — so the lexers cap the nesting themselves.
+        #
+        # 64 is far past anything real: minifiers do not add template nesting and hand-written
+        # code does not go beyond a handful of levels. Past it we blank the rest of the FRAGMENT
+        # (see blank_rest) rather than stop descending in place — declining to recurse would let a
+        # nested backtick close the enclosing template early and re-lex the remainder, the exact
+        # desync copy_string exists to prevent. Blanking is offset-preserving and cannot desync;
+        # the cost is that content past 64 levels of nesting is not analyzed, which is the safe
+        # direction (a missed lead, never a false one).
+        MAX_INTERP_DEPTH = 64
+
+        # Blank every remaining char of the fragment (one space each, offsets preserved) and
+        # return the end index, so the caller's `while i < n` loop terminates immediately.
+        private def self.blank_rest(chars, i : Int32, n : Int32, io : IO) : Int32
+          while i < n
+            io << ' '
+            i += 1
+          end
+          n
+        end
+
         # If chars[i] starts a // or /* */ comment, blank it (→ spaces, offsets preserved) and
         # return the index just past it; else nil. Shared by the string- and comment-strip lexers.
+        # No `depth`: a comment never recurses.
         private def self.blank_comment_at(chars, i : Int32, n : Int32, io : IO) : Int32?
           c = chars[i]
           if c == '/' && i + 1 < n && chars[i + 1] == '/'
@@ -164,12 +194,13 @@ module Gori
         # If chars[i] starts a // comment, /* */ comment, or a '…'/"…"/`…` string, blank it
         # (contents → spaces, offsets preserved) and return the index just past it; else nil.
         # Shared by strip and emit_interpolation so the token lexing lives in one place.
-        private def self.blank_token_at(chars, i : Int32, n : Int32, io : IO) : Int32?
+        # `depth` is the template-interpolation nesting level (see MAX_INTERP_DEPTH).
+        private def self.blank_token_at(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32?
           if j = blank_comment_at(chars, i, n, io)
             j
           else
             c = chars[i]
-            (c == '\'' || c == '"' || c == '`') ? blank_string(chars, i, n, io) : nil
+            (c == '\'' || c == '"' || c == '`') ? blank_string(chars, i, n, io, depth) : nil
           end
         end
 
@@ -190,7 +221,7 @@ module Gori
                     elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
                       blank_block_comment(chars, i, n, io)
                     elsif c == '\'' || c == '"' || c == '`'
-                      copy_string(chars, i, n, io)
+                      copy_string(chars, i, n, io, 0)
                     else
                       io << c
                       i + 1
@@ -206,7 +237,7 @@ module Gori
         # via copy_interpolation so a NESTED template's backtick inside ${…} is not mistaken
         # for this template's closing delimiter (which would terminate early and re-lex the
         # real remainder, blanking a URL's // as a comment).
-        private def self.copy_string(chars, i : Int32, n : Int32, io : IO) : Int32
+        private def self.copy_string(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
           quote = chars[i]
           io << quote
           i += 1
@@ -218,7 +249,7 @@ module Gori
               next
             end
             if quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
-              i = copy_interpolation(chars, i, n, io)
+              i = copy_interpolation(chars, i, n, io, depth)
               next
             end
             io << ch
@@ -232,20 +263,21 @@ module Gori
         # comments inside it, but COPY string literals verbatim (so their contents stay for the
         # string-key rules), tracking brace depth to find the matching `}`. Recurses through
         # copy_string for nested strings/templates. `i` points at `$`. Offset-preserving.
-        private def self.copy_interpolation(chars, i : Int32, n : Int32, io : IO) : Int32
+        private def self.copy_interpolation(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
+          return blank_rest(chars, i, n, io) if depth >= MAX_INTERP_DEPTH
           io << '$' << '{'
           i += 2
-          depth = 1
-          while i < n && depth > 0
+          braces = 1
+          while i < n && braces > 0
             ch = chars[i]
             if ch == '{' || ch == '}'
-              depth += ch == '{' ? 1 : -1
+              braces += ch == '{' ? 1 : -1
               io << ch
               i += 1
             elsif j = blank_comment_at(chars, i, n, io) # real code comment inside ${…} → blank
               i = j
             elsif ch == '\'' || ch == '"' || ch == '`'
-              i = copy_string(chars, i, n, io) # string content kept
+              i = copy_string(chars, i, n, io, depth + 1) # string content kept
             else
               io << ch
               i += 1
@@ -285,7 +317,7 @@ module Gori
         # expression is emitted (via emit_interpolation) instead of blanked — otherwise the
         # common template-literal sink shape (innerHTML = `${location.hash}`) would lose its
         # source and DOM-XSS would miss it.
-        private def self.blank_string(chars, i : Int32, n : Int32, io : IO) : Int32
+        private def self.blank_string(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
           quote = chars[i]
           io << quote # opening delimiter kept
           i += 1
@@ -302,7 +334,7 @@ module Gori
               break
             end
             if quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
-              i = emit_interpolation(chars, i, n, io) # ${…} expression kept as code
+              i = emit_interpolation(chars, i, n, io, depth) # ${…} expression kept as code
               next
             end
             io << ' ' # content blanked (incl. newlines inside a template)
@@ -315,20 +347,21 @@ module Gori
         # source/sink keywords inside it survive, but blank nested strings/comments (so their
         # CONTENTS can't false-match) and track brace depth to find the matching `}`. Every
         # consumed char emits exactly one char, so offsets stay aligned. `i` points at `$`.
-        private def self.emit_interpolation(chars, i : Int32, n : Int32, io : IO) : Int32
+        private def self.emit_interpolation(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
+          return blank_rest(chars, i, n, io) if depth >= MAX_INTERP_DEPTH
           io << "  " # blank the '${' delimiter (2 spaces, offset-preserved): keeps the inner
           #            expression as code but removes the '{' so source_in_window's /[;{}\n]/
           #            statement-boundary scan doesn't truncate the window at the interpolation
           #            (else `innerHTML = `${location.hash}`` loses its source and DOM-XSS misses it)
           i += 2
-          depth = 1
-          while i < n && depth > 0
+          braces = 1
+          while i < n && braces > 0
             ch = chars[i]
             if ch == '{' || ch == '}'
-              depth += ch == '{' ? 1 : -1
-              io << (ch == '}' && depth == 0 ? ' ' : ch) # blank the OUTER closing '}'; keep inner braces
+              braces += ch == '{' ? 1 : -1
+              io << (ch == '}' && braces == 0 ? ' ' : ch) # blank the OUTER closing '}'; keep inner braces
               i += 1
-            elsif j = blank_token_at(chars, i, n, io) # nested string/comment (recurses for a nested template)
+            elsif j = blank_token_at(chars, i, n, io, depth + 1) # nested string/comment (recurses for a nested template)
               i = j
             else
               io << ch
@@ -357,7 +390,7 @@ module Gori
             # the match call; `match_at_byte_index` is just as slow, so it is not char↔byte
             # conversion). `scan` yields the same MatchData, so begin/end are unchanged.
             code.scan(sink_re) do |m|
-              if src = source_in_window(code, m.begin(0), m.end(0))
+              if src = source_in_window(code, m.byte_begin(0), m.byte_end(0))
                 pairs << {src, sink_label}
               end
             end
@@ -365,35 +398,52 @@ module Gori
           pairs
         end
 
-        # The characters that end a statement, hence bound a source↔sink window. Scanned as four
-        # Char searches rather than one `/[;{}\n]/`: `String#rindex(Regex)` walks the whole subject
-        # FORWARD keeping the last match and allocates a MatchData per boundary, and a minified
-        # statement is dense with them. Same idea as the `[a.index('/'), a.index('?'),
-        # a.index('#')].compact.min?` idiom in active/types.cr, written allocation-free here
-        # because this runs once per sink occurrence.
-        BOUNDS = {';', '{', '}', '\n'}
+        # The bytes that end a statement, hence bound a source↔sink window: ';' '{' '}' '\n'.
+        # Held as BYTES, and the window walk below is a direct byte scan outward from the sink —
+        # NOT `String#rindex`/`index` over a substring. Two reasons: `String#rindex(Regex)` walks
+        # the whole subject FORWARD keeping the last match and allocates a MatchData per boundary,
+        # and taking the `pre`/`post` substrings at all is what made this quadratic on a non-ASCII
+        # script. The scan stops at the first boundary in each direction, so it touches at most
+        # WINDOW bytes per side and allocates nothing — and this runs once per sink occurrence.
+        BOUNDS = {0x3Bu8, 0x7Bu8, 0x7Du8, 0x0Au8}
 
         # The first taint source inside the statement window around [from, to), or nil.
+        # Offsets are BYTE offsets. Char-index slicing (`code[floor...from]`) is O(1) only while
+        # the script is all-ASCII; one non-ASCII byte anywhere makes every `String#[]` walk from
+        # the start, and this runs per sink occurrence — thousands of times in a minified bundle.
+        # A single accented char in a regex literal (kept intact by `strip`, by design) is enough:
+        # measured 9ms → 1765ms per flow, on the fiber the passive scan shares with the proxy.
         private def self.source_in_window(code : String, from : Int32, to : Int32) : String?
+          bytes = code.to_slice
           floor = from - WINDOW
           floor = 0 if floor < 0
           ceil = to + WINDOW
-          ceil = code.size if ceil > code.size
-          # Statement start: the LAST boundary before the sink (else the window floor).
-          pre = code[floor...from]
+          ceil = bytes.size if ceil > bytes.size
+          # Statement start: the LAST boundary before the sink (else the window floor). Scanned as
+          # raw bytes: every BOUNDS byte is ASCII, and a UTF-8 continuation byte is always >= 0x80,
+          # so a byte scan can never match inside a multi-byte char.
           lo = floor
-          BOUNDS.each do |c|
-            r = pre.rindex(c)
-            lo = floor + r + 1 if r && floor + r + 1 > lo
+          i = from - 1
+          while i >= floor
+            if BOUNDS.includes?(bytes[i])
+              lo = i + 1
+              break
+            end
+            i -= 1
           end
           # Statement end: the FIRST boundary after the sink (else the window ceiling).
-          post = code[to...ceil]
           hi = ceil
-          BOUNDS.each do |c|
-            r = post.index(c)
-            hi = to + r if r && to + r < hi
+          j = to
+          while j < ceil
+            if BOUNDS.includes?(bytes[j])
+              hi = j
+              break
+            end
+            j += 1
           end
-          seg = code[lo...hi]
+          # A window edge can land mid-char, so scrub before handing the slice to PCRE (invalid
+          # UTF-8 makes the match raise). Bounded to ~2*WINDOW bytes, so this costs nothing.
+          seg = String.new(bytes[lo, hi - lo]).scrub
           SOURCES.each { |(re, label)| return label if re.matches?(seg) }
           nil
         end
