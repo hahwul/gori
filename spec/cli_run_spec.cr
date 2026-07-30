@@ -259,23 +259,29 @@ end
 # LISTED and exited 0: `gori run issues remove 1` deleted nothing and reported success. The
 # dispatch itself calls `abort`, so the classification is spec'd here and the messages are
 # covered by the subcommand help.
+module Gori::CLI::Run
+  def self.verb_token_for_spec(sub : String?) : Bool
+    verb_token?(sub)
+  end
+end
+
 describe "Gori::CLI::Run.verb_token?" do
   it "is true for a bare word — a verb the case must recognize or reject" do
-    Gori::CLI::Run.verb_token?("remove").should be_true
-    Gori::CLI::Run.verb_token?("delet").should be_true # a typo is still a verb token
-    Gori::CLI::Run.verb_token?("severity:high").should be_true
+    Gori::CLI::Run.verb_token_for_spec("remove").should be_true
+    Gori::CLI::Run.verb_token_for_spec("delet").should be_true # a typo is still a verb token
+    Gori::CLI::Run.verb_token_for_spec("severity:high").should be_true
   end
 
   it "is false for a flag, which means the default read command" do
     # `gori run issues --project x` and `gori run links --owner note --id 2` still list.
-    Gori::CLI::Run.verb_token?("--project").should be_false
-    Gori::CLI::Run.verb_token?("-h").should be_false
-    Gori::CLI::Run.verb_token?("--format=json").should be_false
+    Gori::CLI::Run.verb_token_for_spec("--project").should be_false
+    Gori::CLI::Run.verb_token_for_spec("-h").should be_false
+    Gori::CLI::Run.verb_token_for_spec("--format=json").should be_false
   end
 
   it "is false when there is no first token at all" do
-    Gori::CLI::Run.verb_token?(nil).should be_false
-    Gori::CLI::Run.verb_token?("").should be_false
+    Gori::CLI::Run.verb_token_for_spec(nil).should be_false
+    Gori::CLI::Run.verb_token_for_spec("").should be_false
   end
 end
 

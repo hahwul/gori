@@ -30,24 +30,22 @@ module Gori
       # otherwise reject it through invalid_option.
       argv = extract_config_flag(argv)
 
-      # Global version (works alone, or against a top-level subcommand). Deliberately AFTER the
-      # --config strip: that is the one top-level flag taking a value, and its PATH must not
-      # count against the one-non-flag-token budget below (`gori --config x.json tui -v`).
-      if global_version_flag?(argv)
+      # Split once: the version rule, the top-level help, and the dispatch all key off it.
+      sub, subargs = split_subcommand(argv)
+
+      # Global version (alone, or against a top-level subcommand) — see global_version_flag?.
+      if global_version_flag?(subargs)
         puts "gori #{VERSION}"
         return
       end
 
       # Top-level help when no explicit subcommand is given
-      has_explicit_sub = !argv.empty? && !argv[0].starts_with?("-")
-      if argv.any? { |a| a == "-h" || a == "--help" } && !has_explicit_sub
+      if argv.any? { |a| a == "-h" || a == "--help" } && sub.nil?
         print_main_help
         return
       end
 
-      # Subcommand detection (first non-flag arg, else default to tui for bare `gori`)
-      subcmd = has_explicit_sub ? argv[0] : "tui"
-      subargs = has_explicit_sub ? argv[1..] : argv
+      subcmd = sub || "tui" # bare `gori` (or leading flags only) starts the TUI
 
       case subcmd
       when "tui"
@@ -81,36 +79,35 @@ module Gori
       abort "gori: #{ex.message.presence || ex.class}"
     end
 
-    VERSION_FLAGS = {"-v", "-V", "--version"}
+    private VERSION_FLAGS = {"-v", "-V", "--version"}
+
+    # The top-level subcommand and the arguments belonging to it. A leading flag — or an empty
+    # argv — means none was named, so every token belongs to the default surface (the TUI).
+    # Split once, because three rules key off it: the version flag, the top-level `-h`, and the
+    # dispatch itself.
+    private def self.split_subcommand(argv : Array(String)) : {String?, Array(String)}
+      return {nil, argv} if argv.empty? || argv[0].starts_with?("-")
+      {argv[0], argv[1..]}
+    end
 
     # A version flag belongs to the TOP LEVEL — `gori -v`, `gori --version`, `gori run -v` —
     # which is exactly what print_main_help promises ("Flags like --version and --help work at
-    # the top level too").
+    # the top level too"), and exactly the FIRST token of the subcommand's own args.
     #
-    # It is NOT global once a NESTED subcommand has been named, because there the same token is
-    # that command's own option, or worse its option VALUE. A blanket `argv.any?` claimed all of
-    # them, so `gori run rewriter add --find X -v boom` (rewriter's own documented `-vVALUE`)
-    # and `gori run decoder base64-encode --input -v` printed the version and returned 0
-    # WITHOUT doing the work — a silent no-op carrying a SUCCESS status, the worst failure mode
-    # there is for a surface scripts consume (`… || die` never fires). So stop at the second
-    # non-flag token: at most the top-level subcommand (`run`, `mcp`, `tui`, …) may precede a
-    # global version flag. This mirrors the `-h`/`--help` rule just below, which is narrower
-    # still (`!has_explicit_sub`) because every subcommand's own parser owns `-h`.
+    # It must not be claimed once a NESTED subcommand has been named, because there the same
+    # token is that command's own option, or worse its option VALUE. A blanket `argv.any?`
+    # claimed all of them, so `gori run rewriter add --find X -v boom` (rewriter's own
+    # documented `-vVALUE`) and `gori run decoder base64-encode --input -v` printed the version
+    # and returned 0 WITHOUT doing the work — a silent no-op carrying a SUCCESS status, the
+    # worst failure mode there is for a surface scripts consume (`… || die` never fires).
     #
-    # KNOWN RESIDUAL: a value that is literally `-v` given to a flag of the top-level
-    # subcommand itself (`gori run --project -v`) is still read as the flag, because deciding
-    # otherwise needs to know which flags take values, and that lives in each subcommand's
-    # OptionParser — not built yet at this layer. `--config`'s own PATH is exempt because the
-    # caller strips it before asking. Every nested case, the ones that actually bit, is covered.
-    private def self.global_version_flag?(argv : Array(String)) : Bool
-      non_flags = 0
-      argv.each do |arg|
-        return true if VERSION_FLAGS.includes?(arg)
-        next if arg.starts_with?("-")
-        non_flags += 1
-        break if non_flags > 1
-      end
-      false
+    # Keying on the first token excludes those STRUCTURALLY rather than by counting them: a
+    # value-taking flag always sits ahead of its own value, so a VALUE can never be at position
+    # 0. That covers `gori run --project -v` too, which no positional scan could — deciding it
+    # by inspection would need to know which flags take values, and that lives in each
+    # subcommand's OptionParser, which does not exist yet at this layer.
+    private def self.global_version_flag?(subargs : Array(String)) : Bool
+      (first = subargs.first?) ? VERSION_FLAGS.includes?(first) : false
     end
 
     # Pull `--config PATH` / `--config=PATH` out of argv, point Settings at it, and return the

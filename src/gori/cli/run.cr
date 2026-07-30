@@ -205,9 +205,16 @@ module Gori
       # rejects a verb it does not know, while a leading flag (`--project x`, meaning "list")
       # and an empty argv still fall through to the read command.
       #
-      # One home for the predicate: any subcommand growing verbs should call this rather than
-      # re-derive the `starts_with?("-")` test next to its own `case`.
-      def self.verb_token?(sub : String?) : Bool
+      # Only applicable to the verb-ONLY subcommands. The ones taking a bare positional —
+      # `history`/`probe`/`sitemap` (a QL query), `notes` (`<n>`), `decoder` (a chain),
+      # `repeater`/`show`/`fuzz` (an id) — legitimately receive a non-flag first token as DATA,
+      # and reject a bad verb downstream when validating it.
+      #
+      # `rewriter`, `project` and `intercept` still hand-roll this same `starts_with?('-')` test
+      # beside their own `case` (7 sites). Routing them through here is worth doing, but it
+      # changes how they treat an empty-string token, so it wants its own change rather than
+      # riding along with a bug fix.
+      private def self.verb_token?(sub : String?) : Bool
         !sub.nil? && !sub.empty? && !sub.starts_with?("-")
       end
 

@@ -1,7 +1,7 @@
 require "uri"
 require "../store/models"
 require "../proxy/codec/body"
-require "../discover/url" # Url.default_port? — the one home for the scheme/port default rule
+require "../discover/url" # Url.default_port? — the scheme/port default predicate
 
 module Gori
   module Import
@@ -122,17 +122,26 @@ module Gori
       # The `Host` header value for a stored request, per RFC 7230 §5.4.
       #
       # Takes scheme/host/port rather than a pre-built string so a new caller CANNOT forget the
-      # port half — that is exactly how it went missing. `host` arrives bracket-free (matching
-      # the CONNECT path), so an IPv6 literal is re-bracketed here (`Host: [::1]`); a
-      # reg-name/IPv4 host never contains `:`, since userinfo and port live outside `uri.host`.
+      # port half — that is exactly how it went missing. §5.4 REQUIRES the port whenever it is
+      # not the scheme's default, and synthesizing the line from `uri.host` alone silently
+      # dropped it: `http://h:8099/p` was stored — and REPLAYED — as `Host: h`, so a
+      # name/port-routing origin saw a different request than the one imported, and two imports
+      # differing only in port became indistinguishable by Host.
       #
-      # §5.4 also REQUIRES the port whenever it is not the scheme's default, and synthesizing
-      # the line from `uri.host` alone silently dropped it: `http://h:8099/p` was stored — and
-      # REPLAYED — as `Host: h`, so a name/port-routing origin saw a different request than the
-      # one imported, and two imports differing only in port became indistinguishable by Host.
-      # `default_port?` is reused rather than re-derived; it already has one home.
+      # An IPv6 literal must be bracketed (`Host: [::1]`); a reg-name/IPv4 host never contains
+      # `:`, since userinfo and port live outside `uri.host`. `endpoint` hands us a bracket-free
+      # host (matching the CONNECT path), but the `starts_with?('[')` guard is kept anyway so an
+      # already-bracketed host cannot double-bracket to `[[::1]]` — the same guard every sibling
+      # carries (`store/models.cr:107`, `repeater/h2_engine.cr:300`, `proxy/upstream.cr:206`).
+      #
+      # NOTE: several other places build this same authority (those three, plus
+      # `mcp/request_builder.cr:90`, `discover/engine.cr:187`, `tui/repeater_view.cr:1582`,
+      # `cli/run/repeater.cr:581`) and they do NOT agree — some omit the bracketing, and the CLI
+      # and TUI repeater paths disagree about `wss`. Only the scheme/port half has one home so
+      # far (`Discover::Url.default_port?`, reused here); consolidating the rest spans the h2,
+      # repeater, MCP and discover paths and wants its own change.
       def self.host_header(scheme : String, host : String, port : Int32) : String
-        authority = host.includes?(':') ? "[#{host}]" : host
+        authority = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
         Discover::Url.default_port?(scheme, port) ? authority : "#{authority}:#{port}"
       end
 

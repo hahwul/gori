@@ -10,10 +10,10 @@ module Gori
         when "delete", "rm" then cmd_links_mutate(args[1..], add: false)
         when "list"         then cmd_links_list(args[1..])
         else
-          # See the matching guard in cmd_issues: an unrecognized verb fell through to the list,
-          # so `links remove …` — the exact word `gori run -h` used to advertise — silently
-          # listed instead of unlinking. With a mutate-only flag present it did fail, but blamed
-          # the flag (`unknown option: --ref`) and never said `remove` is not a verb.
+          # Why this guard exists at all: see `verb_token?`. Local to links — `remove` is the
+          # exact word `gori run -h` used to advertise, and it silently listed instead of
+          # unlinking; with a mutate-only flag present it did fail, but blamed the flag
+          # (`unknown option: --ref`) and never said `remove` is not a verb.
           if verb_token?(sub)
             abort "gori run links: unknown subcommand '#{sub}' (add, delete, list)"
           end
@@ -29,9 +29,6 @@ module Gori
         format = :text
 
         parser = OptionParser.new do |p|
-          # The mutate verbs belong in this banner: it IS `gori run links --help`, and listing
-          # only the read path left `add`/`delete` implemented but undiscoverable — the more
-          # so because the top-level table used to name a `remove` verb that does not exist.
           p.banner = "Usage: gori run links [list] --owner=issue|note --id=N\n\n" \
                      "List the evidence an issue or note points at. A pointer whose target was\n" \
                      "pruned is shown as (stale) rather than hidden, so \"no evidence\" and\n" \

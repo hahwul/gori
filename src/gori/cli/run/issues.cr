@@ -12,14 +12,9 @@ module Gori
         when "delete", "rm" then cmd_issues_delete(args[1..])
         when "list"         then cmd_issues_list(args[1..])
         else
-          # A non-flag first token is a VERB. An unrecognized one used to fall through to the
-          # list, so `issues remove 1` (the wrong-but-obvious synonym for `delete`) or a
-          # one-letter typo of it printed the issue list and exited 0 having deleted nothing —
-          # a mutation that silently no-ops with a SUCCESS status, which for a scripted surface
-          # is the worst outcome there is (`… || die` never fires). The same fallthrough also
-          # swallowed a positional query: `issues severity:high` listed EVERY issue, since only
-          # the TUI implements Issues::Filter. Reject it, the way rewriter/project/oast/intercept
-          # already reject theirs. A leading flag is not a verb and still means "list".
+          # Why this guard exists at all: see `verb_token?`. Local to issues — the same
+          # fallthrough swallowed a positional query, so `issues severity:high` listed EVERY
+          # issue rather than narrowing, because only the TUI implements Issues::Filter.
           if verb_token?(sub)
             abort "gori run issues: unknown subcommand '#{sub}' (create, update, delete, list)"
           end

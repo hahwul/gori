@@ -799,7 +799,7 @@ describe Gori::Import::Builder do
     headers = Gori::Import::Builder::Headers.new
     headers << {"X-Foo", "bar\r\nX-Injected: evil"}
     expect_raises(Gori::Error, /control character/) do
-      Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "http", "h.test", 80, headers, nil)
+      Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", scheme: "http", host: "h.test", port: 80, headers: headers, body: nil)
     end
   end
 
@@ -814,7 +814,7 @@ describe Gori::Import::Builder do
   it "rejects a method / reason phrase containing CR/LF (start-line smuggling guard)" do
     empty = Gori::Import::Builder::Headers.new
     expect_raises(Gori::Error, /control character/) do
-      Gori::Import::Builder.request_head("GET\r\nHost: evil", "/", "HTTP/1.1", "http", "h.test", 80, empty, nil)
+      Gori::Import::Builder.request_head("GET\r\nHost: evil", "/", "HTTP/1.1", scheme: "http", host: "h.test", port: 80, headers: empty, body: nil)
     end
     expect_raises(Gori::Error, /control character/) do
       Gori::Import::Builder.response_head("HTTP/1.1", 200, "OK\r\nX-Injected: evil", empty, nil)
@@ -824,7 +824,7 @@ describe Gori::Import::Builder do
   it "allows a horizontal tab in a header value (a legal field-value byte, not a boundary)" do
     headers = Gori::Import::Builder::Headers.new
     headers << {"X-Foo", "a\tb"}
-    head = String.new(Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "http", "h.test", 80, headers, nil))
+    head = String.new(Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", scheme: "http", host: "h.test", port: 80, headers: headers, body: nil))
     head.should contain("X-Foo: a\tb")
   end
 

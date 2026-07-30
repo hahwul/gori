@@ -22,10 +22,6 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          # The write verbs are listed here because this banner IS `gori run notes --help` —
-          # documenting only the read path left `notes create` / `notes delete` implemented but
-          # undiscoverable from the CLI, while the top-level table advertised them. Mirrors the
-          # shape `gori run issues --help` already uses.
           p.banner = "Usage: gori run notes [<n>] [options]\n\n" \
                      "List the project's notes; with <n> (1-based) print that note in full, " \
                      "or --all to print them all.\n\n" \

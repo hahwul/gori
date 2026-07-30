@@ -6,8 +6,11 @@ require "./spec_helper"
 # `global_version_flag?` is private; expose it the way the other CLI specs expose theirs
 # (spec/cli/run/links_spec.cr does the same for resolve_link_ends / parse_link_id).
 module Gori::CLI
+  # Mirrors what CLI.run does: split off the top-level subcommand, then ask about the tail. Kept
+  # at full-argv granularity so these cases read as real command lines.
   def self.global_version_flag_for_spec(argv : Array(String)) : Bool
-    global_version_flag?(argv)
+    _, subargs = split_subcommand(argv)
+    global_version_flag?(subargs)
   end
 end
 
@@ -52,9 +55,17 @@ describe "gori — global version flag" do
       ["run", "history", "--query", "-V"]).should be_false
   end
 
-  it "does not claim a version flag once any second non-flag token has appeared" do
+  it "does not claim a version flag once a nested subcommand has been named" do
     Gori::CLI.global_version_flag_for_spec(["run", "capture", "-v"]).should be_false
     Gori::CLI.global_version_flag_for_spec(["run", "show", "1", "--version"]).should be_false
+  end
+
+  # Keying on the FIRST token of the tail rules a flag's own value out structurally: a
+  # value-taking flag always precedes its value, so a value can never sit at position 0.
+  it "leaves a top-level subcommand flag's own value alone" do
+    Gori::CLI.global_version_flag_for_spec(["run", "--project", "-v"]).should be_false
+    Gori::CLI.global_version_flag_for_spec(["tui", "--db", "-v"]).should be_false
+    Gori::CLI.global_version_flag_for_spec(["mcp", "--project", "--version"]).should be_false
   end
 
   it "is false when there is no version flag at all" do
