@@ -782,8 +782,11 @@ describe Gori::Import do
         row = store.search(Gori::QL::EMPTY, 1).first
         row.host.should eq("::1") # not "[::1]"
         row.port.should eq(9443)
-        # the Host header line stays RFC 7230 bracketed even though the stored host is bare
-        String.new(store.get_flow(row.id).not_nil!.request_head).should contain("Host: [::1]")
+        # The Host line stays RFC 7230 §5.4 bracketed even though the stored host is bare — AND
+        # carries the non-default port. Asserted as a whole line: `contain("Host: [::1]")` also
+        # passed while the port was being dropped, which is how that went unnoticed.
+        String.new(store.get_flow(row.id).not_nil!.request_head)
+          .should contain("Host: [::1]:9443\r\n")
       end
     ensure
       File.delete?(urls)
@@ -796,7 +799,7 @@ describe Gori::Import::Builder do
     headers = Gori::Import::Builder::Headers.new
     headers << {"X-Foo", "bar\r\nX-Injected: evil"}
     expect_raises(Gori::Error, /control character/) do
-      Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "h.test", headers, nil)
+      Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "http", "h.test", 80, headers, nil)
     end
   end
 
@@ -811,7 +814,7 @@ describe Gori::Import::Builder do
   it "rejects a method / reason phrase containing CR/LF (start-line smuggling guard)" do
     empty = Gori::Import::Builder::Headers.new
     expect_raises(Gori::Error, /control character/) do
-      Gori::Import::Builder.request_head("GET\r\nHost: evil", "/", "HTTP/1.1", "h.test", empty, nil)
+      Gori::Import::Builder.request_head("GET\r\nHost: evil", "/", "HTTP/1.1", "http", "h.test", 80, empty, nil)
     end
     expect_raises(Gori::Error, /control character/) do
       Gori::Import::Builder.response_head("HTTP/1.1", 200, "OK\r\nX-Injected: evil", empty, nil)
@@ -821,7 +824,7 @@ describe Gori::Import::Builder do
   it "allows a horizontal tab in a header value (a legal field-value byte, not a boundary)" do
     headers = Gori::Import::Builder::Headers.new
     headers << {"X-Foo", "a\tb"}
-    head = String.new(Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "h.test", headers, nil))
+    head = String.new(Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", "http", "h.test", 80, headers, nil))
     head.should contain("X-Foo: a\tb")
   end
 
@@ -835,6 +838,63 @@ describe Gori::Import::Builder do
     pair = Gori::Import::Builder.pending_request(0_i64, "https://[::1]:9443/probe")
     pair.request.host.should eq("::1") # bare, matching the CONNECT path
     pair.request.port.should eq(9443)
-    String.new(pair.request.head).should contain("Host: [::1]") # RFC 7230 §5.4 valid
+    # RFC 7230 §5.4 valid means BOTH halves: brackets around the literal, and the non-default
+    # port present. The old assertion stopped at `contain("Host: [::1]")`, which held while the
+    # port was silently dropped.
+    String.new(pair.request.head).should contain("Host: [::1]:9443\r\n")
+  end
+
+  # RFC 7230 §5.4 requires the port in Host whenever it is not the scheme's default. It was
+  # being dropped for every reg-name/IPv4 import, because the line was synthesized from
+  # `uri.host` — which never carries a port — while the operator's own Host header was skipped.
+  # The stored head is replayed verbatim, so the wrong Host reached the origin too.
+  describe "the Host header line" do
+    it "carries a non-default port" do
+      pair = Gori::Import::Builder.pending_request(0_i64, "http://127.0.0.1:8099/login")
+      pair.request.port.should eq(8099)
+      String.new(pair.request.head).should contain("Host: 127.0.0.1:8099\r\n")
+    end
+
+    it "omits the port when it is the scheme default" do
+      String.new(Gori::Import::Builder.pending_request(0_i64, "http://example.com/p").request.head)
+        .should contain("Host: example.com\r\n")
+      String.new(Gori::Import::Builder.pending_request(0_i64, "https://example.com/p").request.head)
+        .should contain("Host: example.com\r\n")
+    end
+
+    it "keeps a port that merely looks default for the OTHER scheme" do
+      # http://h:443 and https://h:80 are both non-default for their own scheme.
+      String.new(Gori::Import::Builder.pending_request(0_i64, "http://example.com:443/p").request.head)
+        .should contain("Host: example.com:443\r\n")
+      String.new(Gori::Import::Builder.pending_request(0_i64, "https://example.com:80/p").request.head)
+        .should contain("Host: example.com:80\r\n")
+    end
+
+    it "distinguishes two imports that differ only by port" do
+      # These used to produce an identical Host line, making them indistinguishable by Host.
+      a = String.new(Gori::Import::Builder.pending_request(0_i64, "http://127.0.0.1:8099/x").request.head)
+      b = String.new(Gori::Import::Builder.pending_request(0_i64, "http://127.0.0.1/x").request.head)
+      a.should contain("Host: 127.0.0.1:8099\r\n")
+      b.should contain("Host: 127.0.0.1\r\n")
+      a.should_not eq(b)
+    end
+
+    it "applies to a complete_flow import (HAR) as well as a pending one" do
+      # The HAR's own `Host: 127.0.0.1:8099` is skipped and the line re-synthesized; it must
+      # come back out identical rather than losing the port.
+      req_headers = [{"Host", "127.0.0.1:8099"}] of {String, String}
+      pair = Gori::Import::Builder.complete_flow(
+        0_i64, "http://127.0.0.1:8099/login", "POST", req_headers,
+        nil, "HTTP/1.1", 200, "OK", Gori::Import::Builder::Headers.new, nil, nil, nil)
+      String.new(pair.request.head).should contain("Host: 127.0.0.1:8099\r\n")
+    end
+
+    it "builds the value directly, including the IPv6 + default-port corners" do
+      Gori::Import::Builder.host_header("http", "example.com", 80).should eq("example.com")
+      Gori::Import::Builder.host_header("https", "example.com", 443).should eq("example.com")
+      Gori::Import::Builder.host_header("http", "example.com", 8080).should eq("example.com:8080")
+      Gori::Import::Builder.host_header("https", "::1", 443).should eq("[::1]")
+      Gori::Import::Builder.host_header("https", "::1", 9443).should eq("[::1]:9443")
+    end
   end
 end

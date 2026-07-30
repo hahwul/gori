@@ -1,6 +1,7 @@
 require "uri"
 require "../store/models"
 require "../proxy/codec/body"
+require "../discover/url" # Url.default_port? — the one home for the scheme/port default rule
 
 module Gori
   module Import
@@ -118,18 +119,32 @@ module Gori
         raise Gori::Error.new("invalid #{label} (control character): #{field.inspect}") if field.matches?(HEADER_INJECT)
       end
 
+      # The `Host` header value for a stored request, per RFC 7230 §5.4.
+      #
+      # Takes scheme/host/port rather than a pre-built string so a new caller CANNOT forget the
+      # port half — that is exactly how it went missing. `host` arrives bracket-free (matching
+      # the CONNECT path), so an IPv6 literal is re-bracketed here (`Host: [::1]`); a
+      # reg-name/IPv4 host never contains `:`, since userinfo and port live outside `uri.host`.
+      #
+      # §5.4 also REQUIRES the port whenever it is not the scheme's default, and synthesizing
+      # the line from `uri.host` alone silently dropped it: `http://h:8099/p` was stored — and
+      # REPLAYED — as `Host: h`, so a name/port-routing origin saw a different request than the
+      # one imported, and two imports differing only in port became indistinguishable by Host.
+      # `default_port?` is reused rather than re-derived; it already has one home.
+      def self.host_header(scheme : String, host : String, port : Int32) : String
+        authority = host.includes?(':') ? "[#{host}]" : host
+        Discover::Url.default_port?(scheme, port) ? authority : "#{authority}:#{port}"
+      end
+
       def self.request_head(method : String, target : String, http_version : String,
-                            host : String, headers : Headers,
+                            scheme : String, host : String, port : Int32, headers : Headers,
                             body : Bytes?) : Bytes
         reject_inject!(method, "method")
         reject_inject!(http_version, "HTTP version")
         reject_header_injection!(headers)
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
-          # `host` is stored bracket-free (matching the CONNECT path); an IPv6 literal must be
-          # re-bracketed in the Host header line to stay RFC 7230 §5.4 valid (`Host: [::1]`).
-          # A reg-name/IPv4 host never contains `:` (userinfo/port live outside `uri.host`).
-          b << "Host: " << (host.includes?(':') ? "[#{host}]" : host) << "\r\n"
+          b << "Host: " << host_header(scheme, host, port) << "\r\n"
           # One pass, allocation-free case-insensitive compares. Skip BOTH the Host line and any
           # incoming Content-Length: the stored head must agree with the body we actually build
           # and store, but a HAR postData.params entry (no `text`) rebuilds a fresh urlencoded
@@ -167,7 +182,7 @@ module Gori
                                headers : Headers = Headers.new,
                                body : Bytes? = nil, http_version : String = "HTTP/1.1") : FlowPair
         scheme, host, port, target = endpoint(url)
-        head = request_head(method, target, http_version, host, headers, body)
+        head = request_head(method, target, http_version, scheme, host, port, headers, body)
         stored, trunc, size = capped(body)
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
@@ -184,7 +199,7 @@ module Gori
                              resp_body : Bytes?, content_type : String?,
                              duration_us : Int64?) : FlowPair
         scheme, host, port, target = endpoint(url)
-        req_head = request_head(method, target, http_version, host, req_headers, req_body)
+        req_head = request_head(method, target, http_version, scheme, host, port, req_headers, req_body)
         req_stored, req_trunc, req_size = capped(req_body)
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,

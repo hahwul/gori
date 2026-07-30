@@ -40,7 +40,7 @@ describe "import → repeater wire fidelity (#400, P7)" do
     # in the PATH, so the host stayed a real host and the entry was NOT skipped.
     target = "/path\r\nX-Injected: pwn\r\n\r\nGET /second HTTP/1.1"
     head = Gori::Import::Builder.request_head(
-      "GET", target, "HTTP/1.1", "evil.test", Gori::Import::Builder::Headers.new, nil)
+      "GET", target, "HTTP/1.1", "http", "evil.test", 80, Gori::Import::Builder::Headers.new, nil)
 
     # The send-layer guard's OWN verdict on these bytes is "unsafe" — it would refuse to
     # SYNTHESIZE a request line out of them. That it fires here and the replay below still sends
@@ -85,7 +85,7 @@ describe "import → repeater wire fidelity (#400, P7)" do
     # request line, replayed as-is. Confirming it on the wire, not just in a reconstruct string.
     target = "/a b?x=1 2"
     head = Gori::Import::Builder.request_head(
-      "GET", target, "HTTP/1.1", "evil.test", Gori::Import::Builder::Headers.new, nil)
+      "GET", target, "HTTP/1.1", "http", "evil.test", 80, Gori::Import::Builder::Headers.new, nil)
 
     server = TCPServer.new("127.0.0.1", 0)
     port = server.local_address.port

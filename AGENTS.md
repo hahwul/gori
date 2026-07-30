@@ -24,7 +24,7 @@ canonical; parsed columns and pretty views are derived projections.
   keeps the octets rather than rejecting. `serialize_head` is the identity function.
 - **The axis is provenance, not byte values.** The same octet gets three different answers:
   - **operator bytes** (imported HAR, an MCP `raw` request, a replay) go out verbatim, never
-    sanitized. See the comment at `src/gori/import/builder.cr:30-37` and
+    sanitized. See the comment at `src/gori/import/builder.cr:31-38` and
     `src/gori/mcp/request_builder.cr` (`normalize_raw`).
   - **page-authored bytes** (a crawled `<a href>`) get percent-encoded where they merely
     break, and refused where they *frame*. See `src/gori/discover/url.cr` (`encode_unsafe`).
