@@ -29,7 +29,7 @@ end
 private EXPECTED_OVERLAY_SYMS = {
   :none, :detail, :palette, :issue_new, :confirm, :browser, :choice, :tabs_more,
   :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences,
-  :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :probe_active,
+  :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :passthrough, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :probe_rule, :rewriter_rule, :ca_import, :import, :export, :scope_rule, :sequence_config,
   :mine_config, :copy_as, :send_to,
@@ -77,6 +77,9 @@ private MIGRATED_KINDS = [
   # Export — born on the seam (Notes → Export note, Issues → Export issues), so it was
   # never in MODAL_OVERLAYS to be deleted from.
   OverlayKind::Export,
+  # Passthrough (#497) — born on the seam too (the `bypass:N` chip / app.passthrough), so
+  # likewise never in MODAL_OVERLAYS.
+  OverlayKind::Passthrough,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

@@ -62,6 +62,7 @@ require "./jobs"
 require "./notifications"
 require "./pet"
 require "./notifications_overlay"
+require "./passthrough_overlay"
 require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
@@ -190,6 +191,12 @@ module Gori::Tui
       # frame advances while a job is active so the bottom-bar chip animates.
       @jobs = Jobs.new
       @notifications = Notifications.new
+      # High-water mark of the session-global passthrough inventory already ANNOUNCED (see
+      # drain_passthrough_notices). Seeded to what is already there rather than 0: the
+      # inventory outlives a project switch by design, and re-announcing every prior host on
+      # entering a project would bury the notification center under standing state the
+      # `bypass:N` chip is already reporting.
+      @passthrough_announced = Settings.passthrough_count
       # #123: high-water-mark of intercept_commands drained + applied to the live interceptor
       # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
       # session never replays a prior command; advances monotonically as commands are consumed.
@@ -502,6 +509,9 @@ module Gori::Tui
           # only reports true when the RENDERED string changes, so a parked gori doesn't
           # repaint on a timer just to redraw the same "CPU 0%".
           dirty = true if @resource.tick(now)
+          # TLS passthrough: announce hosts bypassed since the last tick. Before the Pet, so
+          # a bypass notice reaches her on the same frame it is pushed.
+          dirty = true if drain_passthrough_notices
           # Miss Ring: advance the animation beat and pick up new notifications. Like the
           # resource meter above she reports dirty ONLY when the drawn sprite/bubble
           # changes, and stops reporting at all once she dozes off (Pet::SLEEP_AFTER).
@@ -1347,9 +1357,9 @@ module Gori::Tui
     # Click a top-bar chip: the notification badge (`notify:N`, left of scope) opens
     # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
     # action as the global `s` chord; the probe chip opens the SET PROBE MODE picker
-    # (the `m` chord inside the Probe tab); the listen chip toggles capture; the
-    # far-right `⌘`/`⚙` glyphs open the command palette (Ctrl/Cmd-P) / the Preferences
-    # modal (Ctrl+,). Returns true when consumed.
+    # (the `m` chord inside the Probe tab); `bypass:N` opens the TLS-passthrough list; the
+    # listen chip toggles capture; the far-right `⌘`/`⚙` glyphs open the command palette
+    # (Ctrl/Cmd-P) / the Preferences modal (Ctrl+,). Returns true when consumed.
     #
     # One `top_bar_chip_at` pass resolves the tag from the SAME tagged source render
     # uses (so a click can't drift), replacing the four full chip-list rebuilds this
@@ -1359,13 +1369,14 @@ module Gori::Tui
         rules: rules_label, intercept: intercept_label, sandbox: sandbox_label,
         listen: listen_chip_label,
         unread: @notifications.unread, capturing: @session.capturing?,
-        write_failures: @session.store.write_failures)
+        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count)
       return false unless tag
 
       case tag
       when :notify   then open_notifications
       when :scope    then scope_toggle_lens
       when :probe    then probe_set_mode
+      when :bypass   then open_passthrough
       when :listen   then toggle_capture
       when :palette  then open_palette
       when :settings then open_preferences
@@ -2781,7 +2792,7 @@ module Gori::Tui
         scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
         sandbox: sandbox_label,
         unread: @notifications.unread, capturing: @session.capturing?,
-        write_failures: @session.store.write_failures)
+        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count)
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
       # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
@@ -3214,6 +3225,36 @@ module Gori::Tui
       ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
       @notifications.mark_all_read
+    end
+
+    # Open the TLS-passthrough list (the `bypass:N` top-bar chip + the app.passthrough verb).
+    # Read-only, so there is no on_commit — the rules are edited in settings:network.
+    def open_passthrough : Nil
+      ov = PassthroughOverlay.new
+      # Same ordering rule as open_notifications: drop this modal BEFORE raising the palette,
+      # and via leave_overlay so no pop-back lands on top of it.
+      ov.on_palette = -> { leave_overlay; open_palette }
+      open_overlay(ov)
+    end
+
+    # Announce hosts newly added to the session-global passthrough inventory
+    # (Settings.passthrough_hosts) as notifications. The inventory is written by PROXY fibers
+    # and Notifications#push is main-fiber-only by contract, so this is a per-tick diff of a
+    # cheap monotonic marker — the same shape the Pet uses against `latest_id` — not a direct
+    # call from the proxy.
+    #
+    # The high-water mark starts at whatever the inventory already holds (see the initializer),
+    # so opening a second project does NOT re-announce hosts bypassed under the first. The chip
+    # already carries the standing state; a notification means "this just happened".
+    private def drain_passthrough_notices : Bool
+      seen = Settings.passthrough_count
+      return false if seen <= @passthrough_announced
+      Settings.passthrough_hosts[@passthrough_announced..].each do |entry|
+        @notifications.push(:warn,
+          "TLS passthrough: #{entry.host} relayed without MITM (rule #{entry.pattern}) — nothing captured for it")
+      end
+      @passthrough_announced = seen
+      true
     end
 
     private def run_goto(g : Jobs::Goto?) : Nil

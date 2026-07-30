@@ -407,6 +407,28 @@ describe "Chrome top-bar chip hit-testing" do
     grect.x.should be > prect.x # ⚙ sits to the right of ⌘
   end
 
+  it "shows bypass:N only once a host has actually been relayed without MITM (#497)" do
+    # The chip's APPEARANCE is the discoverability signal — a bypassed host is otherwise
+    # invisible in the TUI — so it must be absent, not zeroed, until one happens.
+    rect = Rect.new(0, 0, 80, 1)
+    Chrome.top_bar_chip_rect(rect, :bypass, scope: "scope:2", listen: "127.0.0.1:8080",
+      bypass: 0).should be_nil
+
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect,
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", bypass: 2)
+    brect = Chrome.top_bar_chip_rect(rect, :bypass, scope: "scope:2",
+      listen: "127.0.0.1:8080", bypass: 2).not_nil!
+    backend.row(0)[brect.x, brect.w].should eq("bypass:2")
+    # Left of the listen chip, whose capture dot it qualifies.
+    lrect = Chrome.top_bar_chip_rect(rect, :listen, scope: "scope:2",
+      listen: "127.0.0.1:8080", bypass: 2).not_nil!
+    brect.x.should be < lrect.x
+    # Clickable: it opens the passthrough list.
+    Chrome.top_bar_chip_at(rect, brect.x, 0, scope: "scope:2", listen: "127.0.0.1:8080",
+      bypass: 2).should eq(:bypass)
+  end
+
   it "resolves a click to the chip's tag, and ignores passive readouts" do
     # 110 cols: every optional chip is present at once here (notify + sandbox on top of the
     # always-on ones), which overflows an 80-col bar — see the overflow spec below.

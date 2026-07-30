@@ -208,6 +208,8 @@ List those hosts under **TLS passthrough** (Preferences → **Network & Tabs** �
 
 Scope will not do this for you. Scope decides what is recorded and acted on; an out-of-scope host is still decrypted. Passthrough is the only setting that keeps gori's hands off the TLS itself. See the [`tls_passthrough` reference](/reference/config/#tls_passthrough) for pattern syntax.
 
+A bypassed host leaves no flow anywhere, so the top bar grows a yellow `bypass:N` chip the first time one is relayed. Click it (or run **TLS passthrough hosts** from the command palette) for the list: each host with the rule that matched, when it was first seen, and how many connections it covered. The list is session-wide, not per project, because the setting is global.
+
 ## Project Tab
 
 The **Project** home tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.

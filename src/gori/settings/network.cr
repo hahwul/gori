@@ -61,6 +61,12 @@ module Gori::Settings
   # has no answer anywhere; one gori.log line per distinct host gives it one, without a log
   # line per reconnect from a chatty push connection.
   PASSTHROUGH_NOTICE_MAX = 1024
+  # Cap on the passthrough INVENTORY (see @@tls_passthrough_seen). Same number as the notice
+  # cap and for the same reason — a bound on unbounded operator-controlled input — but a
+  # SEPARATE constant because the two are free to diverge: hitting the notice cap only stops
+  # writing log lines, while hitting this one stops the TUI's list from being complete, which
+  # is why passthrough_over_cap exists to say so out loud.
+  PASSTHROUGH_INVENTORY_MAX = 1024
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -103,8 +109,77 @@ module Gori::Settings
   # @h1_only_origins: single-threaded fibers, and the read/add pair does not yield.
   @@tls_passthrough_noticed : Set(String) = Set(String).new
 
+  # One bypassed host, as the TUI's `bypass:N` chip and its drill-down list read it.
+  # `pattern` is the rule that matched MOST RECENTLY — the list's whole job is to let the
+  # operator find the rule to delete, so a host still being bypassed must name the rule
+  # doing it now, not the one that did it the first time.
+  record PassthroughHost,
+    host : String,
+    pattern : String,
+    first_seen : Time,
+    connections : Int32 do
+    def hit(pattern : String) : PassthroughHost
+      PassthroughHost.new(@host, pattern, @first_seen, @connections + 1)
+    end
+  end
+
+  # The passthrough INVENTORY: every host this PROCESS relayed without MITM, in first-seen
+  # order, each with the pattern that matched and how many CONNECTs it covered.
+  #
+  # Deliberately NOT @@tls_passthrough_noticed above. That Set is a log-dedup marker, and
+  # both of the things that make it right for a log line make it wrong for a readout:
+  #   - `tls_passthrough=` CLEARS it, so editing the list would zero the chip at exactly the
+  #     moment an operator is looking at it to decide what to edit;
+  #   - it stops growing at PASSTHROUGH_NOTICE_MAX, so the count would silently stop counting.
+  # This map is therefore never cleared — a host gori declined to decrypt at 10:02 stays a
+  # fact at 10:03, whatever the list says by then — and it reports its own overflow rather
+  # than truncating in silence.
+  #
+  # SESSION-GLOBAL, and NOT reset when the operator switches project, even though the top bar
+  # that renders the chip is otherwise per-project chrome. `tls_passthrough` is a Global-only
+  # setting (see DEFAULT_TLS_PASSTHROUGH) read by a proxy that keeps running across the
+  # switch, so a per-project reset would show `bypass:0` — "nothing is being skipped" — while
+  # the very next CONNECT for that host is still skipped. On a feature whose entire purpose is
+  # to answer "why is this host missing?", a false negative is the one failure that cannot be
+  # allowed; a count that outlives the project it appeared in is merely surprising, and the
+  # overlay says so in as many words.
+  #
+  # Same no-mutex invariant as the Set above: proxy fibers write, the render loop reads, and
+  # neither the read/write pair here nor `passthrough_hosts` yields mid-way.
+  @@tls_passthrough_seen : Hash(String, PassthroughHost) = {} of String => PassthroughHost
+  # Bypassed CONNECTs (not distinct hosts — counting those would need the very map the cap
+  # exists to bound) that arrived after the inventory filled. Surfaced verbatim so a full
+  # list reads as truncated rather than complete.
+  @@tls_passthrough_over_cap : Int64 = 0_i64
+
   def self.tls_passthrough : Array(String)
     @@tls_passthrough
+  end
+
+  # Snapshot of the inventory in first-seen order (Hash preserves insertion order). Copies —
+  # PassthroughHost is a struct — so a proxy fiber recording a hit mid-render cannot mutate
+  # what is being drawn.
+  def self.passthrough_hosts : Array(PassthroughHost)
+    @@tls_passthrough_seen.values
+  end
+
+  # How many distinct hosts have been bypassed. O(1) and allocation-free, so the chip and the
+  # Runner's per-tick announce diff can read it 20×/second without materialising the list
+  # (the same reason Notifications#latest_id exists).
+  def self.passthrough_count : Int32
+    @@tls_passthrough_seen.size
+  end
+
+  def self.passthrough_over_cap : Int64
+    @@tls_passthrough_over_cap
+  end
+
+  # Test-only reset. The inventory is deliberately never cleared in production (see above),
+  # so specs that assert on it need an explicit way back to empty; without this they would
+  # leak into each other through class state.
+  def self.reset_passthrough_inventory : Nil
+    @@tls_passthrough_seen = {} of String => PassthroughHost
+    @@tls_passthrough_over_cap = 0_i64
   end
 
   # Assigning the list recompiles it and re-arms the once-per-host notice, so editing the
@@ -120,16 +195,33 @@ module Gori::Settings
   # per CONNECT from ClientConn#handle_connect; the patterns are precompiled and the host is
   # normalized once for the whole list.
   #
-  # Also emits the once-per-host gori.log notice, because this is the only place that knows a
-  # bypass happened AND which host it was — a bypassed connection produces no flow, no event,
-  # and no other trace.
+  # Also records the bypass — the gori.log notice (once per host) AND the inventory the TUI
+  # reads (every CONNECT) — because this is the only place that knows a bypass happened AND
+  # which host and pattern it was: a bypassed connection produces no flow, no event, and no
+  # other trace. `match` rather than `matches_any?` so the winning pattern can be named.
   def self.tls_passthrough?(host : String) : Bool
-    return false unless HostPattern.matches_any?(@@tls_passthrough_compiled, host)
+    hit = HostPattern.match(@@tls_passthrough_compiled, host)
+    return false unless hit
+    record_passthrough(host, hit.raw)
     if !@@tls_passthrough_noticed.includes?(host) && @@tls_passthrough_noticed.size < PASSTHROUGH_NOTICE_MAX
       @@tls_passthrough_noticed << host
       ::Log.info { "tls passthrough: #{host} relayed without MITM (settings network.tls_passthrough) — nothing captured for it" }
     end
     true
+  end
+
+  # Fold one bypassed CONNECT into the inventory: bump an existing host (refreshing the
+  # pattern, which may have changed under it) or admit a new one while there is room. Past
+  # the cap the host is not admitted at all — a partial row would be worse than a counted
+  # omission — and the overflow is counted so the list can say it is truncated.
+  private def self.record_passthrough(host : String, pattern : String) : Nil
+    if seen = @@tls_passthrough_seen[host]?
+      @@tls_passthrough_seen[host] = seen.hit(pattern)
+    elsif @@tls_passthrough_seen.size < PASSTHROUGH_INVENTORY_MAX
+      @@tls_passthrough_seen[host] = PassthroughHost.new(host, pattern, Time.local, 1)
+    else
+      @@tls_passthrough_over_cap += 1
+    end
   end
 
   def self.effective_connect_timeout_secs : Int32

@@ -38,6 +38,7 @@ module Gori::Tui
     Env
     Hotkeys
     Notifications
+    Passthrough
     ProbeActive
     DiscoverConfig
     DiscoverHeaders

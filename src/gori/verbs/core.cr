@@ -36,6 +36,13 @@ module Gori
         "app.notifications", "Notifications", "Open the notification center (background-job results)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_notifications; nil }
 
+      # The TLS-passthrough list (#497). Palette + the `bypass:N` top-bar chip, no chord —
+      # a bypassed host is rare and the chip is how you find out it happened; this entry is
+      # what makes the list keyboard-reachable rather than mouse-only.
+      r.register Verb::Definition.new(
+        "app.passthrough", "TLS passthrough hosts", "List hosts relayed without decryption (nothing captured for them)",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_passthrough; nil }
+
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
         [Verb::Chord.new("c")]) { |ctx| ctx.toggle_capture; nil }

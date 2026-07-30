@@ -69,5 +69,18 @@ module Gori
       h = bare(host.downcase)
       compiled.any?(&.matches_bare?(h))
     end
+
+    # The FIRST pattern `host` matches, or nil. Same walk as `matches_any?`, but it keeps
+    # the winner — for a caller that has to NAME the rule that fired, not just know one
+    # did (Settings.tls_passthrough? records it so the TUI can point at the rule to remove).
+    #
+    # Deliberately NOT the implementation of `matches_any?`: Scope evaluates that per
+    # captured row and only ever asks the Bool question, so it keeps the predicate that
+    # says exactly what it needs.
+    def self.match(compiled : Array(Compiled), host : String) : Compiled?
+      return nil if compiled.empty?
+      h = bare(host.downcase)
+      compiled.find(&.matches_bare?(h))
+    end
   end
 end

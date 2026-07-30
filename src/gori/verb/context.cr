@@ -46,6 +46,10 @@ module Gori
       # overlays
       abstract def open_palette : Nil
       abstract def open_notifications : Nil # open the notification center (background-job results)
+      # Open the TLS-passthrough list: hosts relayed WITHOUT decryption, so nothing was
+      # captured for them. Its own intent rather than a settings jump — the answer is runtime
+      # state (which hosts actually got bypassed), not the rule list settings:network edits.
+      abstract def open_passthrough : Nil
       abstract def close_overlay : Nil
 
       # Emergency full repaint: redraw every cell (a full sync, not a diff). Recovers from
