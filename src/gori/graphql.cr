@@ -20,13 +20,35 @@ module Gori
 
     # Parse the operation, or nil if the flow isn't GraphQL. Tries the POST JSON body
     # first, then the GET query string.
+    #
+    # The query-string fallback is NOT reached for a body-bearing method that actually sent a
+    # body: there, the body IS the payload the server reads, so falling through made any
+    # `POST /upload?query=%7Bx%7D` with an unrelated (even binary) body report as GraphQL. That
+    # is not merely a wrong pane — `location` then answers `:query`, so sending it from the
+    # Repeater re-encodes the whole query string, rewriting the operator's request on the
+    # strength of a misdetection. A GET carrying a stray body still falls through, which is
+    # what the fallback was written for.
     def from_flow(target : String, req_head : Bytes?, req_body : Bytes?) : Op?
       if (b = req_body) && !b.empty? && b.size <= MAX_BODY
         if op = from_json(String.new(b))
           return op
         end
       end
+      return nil if (b = req_body) && !b.empty? && body_bearing?(req_head)
       from_query(target)
+    end
+
+    # Whether the request line names a method whose BODY carries the payload. Read off the
+    # head, which `from_flow` has always been handed and never looked at. nil (no head, as in
+    # a unit call) keeps the permissive fallback.
+    private def body_bearing?(req_head : Bytes?) : Bool
+      head = req_head || return false
+      line = String.new(head[0, {head.size, 64}.min])
+      sp = line.index(' ') || return false
+      case line[0, sp].upcase
+      when "POST", "PUT", "PATCH" then true
+      else                             false
+      end
     end
 
     # A POST JSON body. A GraphQL document always has a selection set, so requiring a

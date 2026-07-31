@@ -237,6 +237,27 @@ describe Gori::FilterAst do
       Gori::FilterAst.parse("#{"NOT " * 8000}host:x").should_not be_nil
     end
 
+    # The cap's contract is that an over-deep parse degrades FORGIVINGLY. It did for parens,
+    # but a NOT chain was cut in its MIDDLE: `parse_unary` recursed once per keyword, returned
+    # nil at the cap having consumed one `NOT` per level, `parse_and` re-descended on the rest,
+    # and the count that happened to SURVIVE decided polarity. So one keyword past the cap
+    # returned the exact COMPLEMENT of the query — silently, exit 0, "no flows match". On a
+    # filter that is worse than an error: it hides the rows the operator was looking for.
+    it "keeps NOT-chain polarity on both sides of the depth cap" do
+      cap = Gori::FilterAst::MAX_PARSE_DEPTH
+      {2, 4, cap, cap + 1, cap + 2, 400, 401, 8000, 8001}.each do |n|
+        got = parse("#{"NOT " * n}host:x")
+        want = n.even? ? "host:x" : "-host:x"
+        got.should eq(want), "NOT x#{n} parsed as #{got}, expected #{want}"
+      end
+    end
+
+    it "keeps NOT-chain polarity over a GROUP past the cap too" do
+      cap = Gori::FilterAst::MAX_PARSE_DEPTH
+      parse("#{"NOT " * (cap + 1)}(host:a OR host:b)").should eq("(not (or host:a host:b))")
+      parse("#{"NOT " * (cap + 2)}(host:a OR host:b)").should eq("(or host:a host:b)")
+    end
+
     it "parses normal shallow nesting exactly as before the guard" do
       # A handful of levels is far under the cap, so these stay byte-for-byte unchanged.
       parse("((a OR b) c) OR d").should eq("(or (and (or a b) c) d)")

@@ -128,11 +128,39 @@ describe Gori::QL do
     Gori::QL.analyze("body:\u0001").clean?.should be_false
   end
 
-  it "falls back to a NULL-safe blob scan for a body: value below the 3-char trigram floor" do
+  it "falls back to a byte-wise blob scan for a body: value below the 3-char trigram floor" do
     f = Gori::QL.parse("body:ab")
-    f.sql.should eq("(((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') " \
-                    "OR (response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\')))")
-    f.args.should eq(["%ab%", "%ab%"])
+    f.sql.should contain("instr(request_body, CAST(? AS BLOB)) > 0")
+    f.sql.should contain("instr(response_body, CAST(? AS BLOB)) > 0")
+    f.args.should eq(["ab", "ab", "aB", "aB", "Ab", "Ab", "AB", "AB"]) # every case spelling
+  end
+
+  # The fallback used `CAST(request_body AS TEXT)`, which SQLite truncates at the first NUL —
+  # so a SHORTER needle matched FEWER rows than a longer one, a monotonicity violation that
+  # cannot be explained to an operator. This is a tool whose targets deliberately put NULs in
+  # bodies, so the short path has to be byte-wise. Both halves are asserted against a real
+  # store because the bug lived in SQLite's cast, not in the SQL text.
+  it "finds a short body: needle that sits AFTER a NUL byte, like the >=3-char path does" do
+    tmp_store do |store|
+      buried = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
+        method: "POST", target: "/bin", http_version: "HTTP/1.1",
+        head: "POST /bin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        body: Bytes[0x68, 0x65, 0x61, 0x64, 0x00, 0x4E, 0x55, 0x4C, 0x4E, 0x45, 0x45, 0x44]))
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "http", host: "acme.test", port: 80,
+        method: "GET", target: "/other", http_version: "HTTP/1.1",
+        head: "GET /other HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        body: "plain".to_slice))
+      store.flush
+
+      # `NULNEED` sits past the NUL. The long needle takes the FTS path, the short one the
+      # blob path; they must agree about this row.
+      store.search(Gori::QL.parse("body:NULNEED"), 50).map(&.id).should eq([buried])
+      store.search(Gori::QL.parse("body:NU"), 50).map(&.id).should eq([buried])
+      store.search(Gori::QL.parse("body:nu"), 50).map(&.id).should eq([buried]) # still case-insensitive
+      store.search(Gori::QL.parse("body:zz"), 50).map(&.id).should be_empty
+    end
   end
 
   it "compiles size: as a comparison on the TOTAL (req+resp), matching the displayed size" do

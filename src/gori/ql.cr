@@ -85,6 +85,14 @@ module Gori
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin
 
+      body: SEARCHES AN INDEX, AND THE INDEX IS BOUNDED. `body:` reads a trigram index that
+      covers only the FIRST 8 KiB of each side (request and response), and a body is not
+      indexed at all when its Content-Type is binary or its Content-Encoding is compressed.
+      So `body:` can return NOTHING for content that is genuinely there — deep in a large
+      body, or in a gzipped/binary one. `body~regex` scans the stored bytes instead, with no
+      cap and no content-type rule, so it is the one to reach for when `body:` comes back
+      empty and you expected a hit. (`body:` is the fast path; `body~` is the complete one.)
+
       Free text (no field:): matches method, host, or target (case-insensitive substring).
 
       Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
@@ -293,9 +301,11 @@ module Gori
     end
 
     # Body search uses the trigram FTS index over request/response body text —
-    # case-insensitive SUBSTRING matching (same semantics as the old `body:` LIKE,
-    # so `body:token` still finds "mytokenvalue"), just indexed instead of
-    # scanning every BLOB. The value is passed as a quoted FTS phrase (embedded
+    # case-insensitive SUBSTRING matching (so `body:token` still finds "mytokenvalue"),
+    # indexed instead of scanning every BLOB. NOT the same result set as the old LIKE
+    # scan, and `REFERENCE` now says so: the index covers only the first
+    # `Store::FTS_INDEX_MAX` bytes per side and skips binary/compressed bodies, so
+    # `body:` can miss content `body~` finds. The value is passed as a quoted FTS phrase (embedded
     # quotes doubled) so arbitrary characters can't form FTS operator syntax. A
     # bodyless flow has an empty FTS row, so it never matches and `-body:x`
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
@@ -311,13 +321,38 @@ module Gori
       # spellings agree.
       return nil if value.empty?
       if value.size < 3
-        p = like(value)
-        return {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \
-                "(response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\'))",
-                [p, p] of DB::Any}
+        # BYTE-wise, not `CAST(... AS TEXT)`: SQLite truncates a BLOB→TEXT cast at the first
+        # NUL, so the LIKE fallback stopped scanning there and a body of
+        # `head\0NULNEEDLE tail` was invisible to `body:nu` while `body:NULNEEDLE` (the FTS
+        # path, >=3 chars) found it. A SHORTER needle matching FEWER rows is a monotonicity
+        # violation that cannot be explained to an operator, and this is a tool whose targets
+        # deliberately put NULs in bodies. `instr` over the raw BLOB is NUL-transparent, and a
+        # NULL body yields NULL (falsy), so `-body:x` still KEEPS a bodyless flow.
+        #
+        # `instr` is case-SENSITIVE while `body:` promises case-insensitive substring matching,
+        # so match every case permutation of the needle instead — at most four, since this
+        # branch only runs for one or two characters.
+        conds = [] of String
+        params = [] of DB::Any
+        case_permutations(value).each do |v|
+          conds << "instr(request_body, CAST(? AS BLOB)) > 0"
+          conds << "instr(response_body, CAST(? AS BLOB)) > 0"
+          params << v << v
+        end
+        return {"(#{conds.join(" OR ")})", params}
       end
       phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
       {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
+    end
+
+    # Every upper/lower spelling of a one- or two-character needle, so a byte-wise `instr`
+    # can stand in for a case-insensitive LIKE. Bounded at 4 by `body_cond`'s `size < 3`
+    # guard; a character with no case (a digit, a symbol, most CJK) contributes one variant.
+    private def self.case_permutations(value : String) : Array(String)
+      value.each_char.reduce([""]) do |acc, ch|
+        forms = [ch.downcase, ch.upcase].uniq!
+        acc.flat_map { |prefix| forms.map { |f| prefix + f } }
+      end.uniq!
     end
 
     # Split a leading comparison operator (<= >= < > =, default =) off a value. Shared

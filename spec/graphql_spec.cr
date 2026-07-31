@@ -297,6 +297,34 @@ describe Gori::Graphql do
       GQL.from_flow("p?query=%7Bme%7D", nil, big).should eq(GQL::Op.new(nil, "{me}", nil))
     end
 
+    # The false positive that mattered: `location` answers `:query` for anything `from_flow`
+    # resolved off the query string, so the Repeater re-encodes the WHOLE query string on send.
+    # A POST/PUT/PATCH that sent a body has already said where its payload is; falling through
+    # to a stray `?query=` param rewrote a request on the strength of a misdetection.
+    it "does not fall through to a ?query= param for a POST that sent an unrelated body" do
+      head = "POST /upload?query=%7Bx%7D HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      GQL.from_flow("/upload?query=%7Bx%7D", head, Bytes[0x00, 0x01, 0xff]).should be_nil
+    end
+
+    it "does not fall through for PUT or PATCH either" do
+      {"PUT", "PATCH"}.each do |m|
+        head = "#{m} /u?query=%7Bx%7D HTTP/1.1\r\n\r\n".to_slice
+        GQL.from_flow("/u?query=%7Bx%7D", head, %({"not":"graphql"}).to_slice).should be_nil
+      end
+    end
+
+    it "still prefers a real GraphQL body on a POST" do
+      head = "POST /graphql HTTP/1.1\r\n\r\n".to_slice
+      GQL.from_flow("/graphql", head, %({"query":"{ me }"}).to_slice)
+        .should eq(GQL::Op.new(nil, "{ me }", nil))
+    end
+
+    it "still falls through for a GET carrying a stray body (what the fallback was for)" do
+      head = "GET /g?query=%7Bme%7D HTTP/1.1\r\n\r\n".to_slice
+      GQL.from_flow("/g?query=%7Bme%7D", head, %({"foo":1}).to_slice)
+        .should eq(GQL::Op.new(nil, "{me}", nil))
+    end
+
     it "returns nil when neither the body nor the target is GraphQL" do
       GQL.from_flow("/rest/path", nil, %({"foo":1}).to_slice).should be_nil
     end

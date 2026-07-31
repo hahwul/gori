@@ -270,9 +270,25 @@ module Gori
 
     private def self.parse_unary(lx : Array(Lexeme), pos : Int32, depth : Int32) : {Node?, Int32}
       return {nil, pos} if depth > MAX_PARSE_DEPTH
-      if pos < lx.size && lx[pos].tok.not?
-        node, pos = parse_unary(lx, pos + 1, depth + 1)
+      # Consume the whole `NOT` run in a LOOP rather than one recursion per keyword. Recursing
+      # meant the depth cap cut the run in its MIDDLE: the innermost call returned nil having
+      # consumed one `NOT` per level, `parse_and` re-descended on what was left, and the count
+      # that happened to SURVIVE decided polarity. So a 257-deep run matched exactly what a
+      # 256-deep run excluded — the complement of the query, silently, with exit 0 and no
+      # warning. The cap's contract is that an over-deep parse degrades FORGIVINGLY (an
+      # over-deep group parses as if empty); returning the complement is the opposite of that,
+      # and on a security tool a filter that quietly inverts is worse than one that errors —
+      # it hides the rows the operator was looking for. A run is one frame and one tree level
+      # now, so the paren cap alone bounds the native stack.
+      negations = 0
+      while pos < lx.size && lx[pos].tok.not?
+        negations += 1
+        pos += 1
+      end
+      if negations > 0
+        node, pos = parse_primary(lx, pos, depth + 1)
         return {nil, pos} unless node
+        return {node, pos} if negations.even? # NOT NOT x == x, at any depth
         # A lone term flips its own flag; only a group needs a wrapper.
         return {node.is_a?(TermNode) ? TermNode.new(node.term.negated) : NotNode.new(node), pos}
       end
