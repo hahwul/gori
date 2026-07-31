@@ -66,9 +66,9 @@ module Gori::Proxy::H2
       ic = @interceptor
       return {nil, nil} unless ic
       out_gate = StreamGate.new("out", @upstream, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("out", @rewriter, assembler, @host))
+        HeadRewrite.new("out", @rewriter, assembler, @host, @extractor))
       in_gate = StreamGate.new("in", @client, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("in", @rewriter, assembler, @host), extract_for(assembler))
+        HeadRewrite.new("in", @rewriter, assembler, @host, @extractor), extract_for(assembler))
       out_gate.peer = in_gate
       in_gate.peer = out_gate
       {out_gate, in_gate}
@@ -109,7 +109,7 @@ module Gori::Proxy::H2
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,
                            assembler : Assembler) : Nil
       rw = @rewriter
-      heads = rw ? HeadRewrite.new(direction, rw, assembler, @host) : nil
+      heads = rw ? HeadRewrite.new(direction, rw, assembler, @host, @extractor) : nil
       extract = direction == "in" ? extract_for(assembler) : nil
       begin
         loop do

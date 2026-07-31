@@ -3,6 +3,7 @@ require "./hpack"
 require "./head_codec"
 require "./assembler"
 require "../head_rewriter"
+require "../extractor"
 require "../upstream"
 
 module Gori::Proxy::H2
@@ -103,8 +104,13 @@ module Gori::Proxy::H2
     # constructor argument: the gate needs a live `HeadRewrite` to construct itself around.
     property deferrer : Deferrer?
 
+    # `extractor` is read for ONE thing: `notice_coalesced`, which runs on request heads only.
+    # The "in" direction therefore never touches it, and extraction itself happens in
+    # `H2::Extract` on the response side — this seam only has to be able to ASK whether a
+    # body-scoped extract rule would have wanted a stream the connection gate could not see.
     def initialize(@direction : String, @rewriter : Proxy::HeadRewriter?,
-                   @assembler : Assembler, @host : String)
+                   @assembler : Assembler, @host : String,
+                   @extractor : Proxy::ResponseExtract? = nil)
       @encoder = HPACK::Encoder.new
       @engaged = false
       @warned = false
@@ -255,6 +261,11 @@ module Gori::Proxy::H2
 
       request = @direction == "out"
       head = head_text(fields, first, request)
+      # Before the rewrite, and NOT from inside it: what this announces is a seam the relay
+      # cannot reach at all, which is true whether or not a head rule is live. Running it from
+      # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a session-binding
+      # extract descriptor — the case #536 is about — got nothing.
+      notice_coalesced(fields) if request && head
       rewritten = head ? rewrite(fields, head, request) : nil
       emit_fields = rewritten || fields
       built = if rewritten.nil? && !@engaged
@@ -305,7 +316,6 @@ module Gori::Proxy::H2
     private def rewrite(fields : Array(HPACK::Field), head : Bytes, request : Bool) : Array(HPACK::Field)?
       rw = @rewriter
       return nil unless rw && rw.active?
-      notice_coalesced(rw, fields) if request
       # The peer's own head has no faithful h1-text form, so the round trip that runs the
       # rules would hand the far side a DIFFERENT message — see `HeadCodec.h1_faithful?`.
       # `parse_*` refuses it anyway; checking here keeps the rules from running for nothing
@@ -365,36 +375,63 @@ module Gori::Proxy::H2
 
     # The stated cost of #526, kept spoken instead of silent.
     #
-    # The h2 downgrade gate (`tls/tunnel.cr#h2_candidate?`) is per CONNECT, so it can only ask
-    # about the CONNECT host. Since #526 it asks whether a BODY or SHORT-CIRCUIT rule matches
-    # THAT host — which is right for every stream whose `:authority` is that host, and every
-    # stream on a conformant connection is (gori's leaf carries a SAN of exactly the requested
-    # host, `tls/cert_builder.cr`, so a conformant client cannot coalesce onto one). A
-    # hand-rolled client can still coalesce, and then a rule scoped to the coalesced authority
-    # goes unapplied where the pre-#526 blanket downgrade would have caught it. Body rewriting
-    # and short-circuiting are both seams the relay cannot reach, so that failure is silent —
-    # the operator sees a request they stubbed reach the origin with nothing saying why.
+    # Every gate that can cost a connection its protocol (`tls/tunnel.cr#h2_candidate?`) is per
+    # CONNECT, so it can only ask about the CONNECT host. Since #526 it asks whether a rule the
+    # h2 relay cannot run matches THAT host — which is right for every stream whose `:authority`
+    # is that host, and every stream on a conformant connection is (gori's leaf carries a SAN of
+    # exactly the requested host, `tls/cert_builder.cr`, so a conformant client cannot coalesce
+    # onto one). A hand-rolled client can still coalesce, and then a rule scoped to the coalesced
+    # authority goes unapplied where the pre-#526 blanket downgrade would have caught it.
     #
-    # So: one line per connection, naming the authority and the connection host. Costs a string
-    # compare per request head on every normal connection (the authority IS the host, and that
-    # returns before any lock); only a genuinely coalesced stream reaches the rule lookup, and
-    # only until the line is written.
-    private def notice_coalesced(rw : Proxy::HeadRewriter, fields : Array(HPACK::Field)) : Nil
+    # Enforcement is right either way — a rule that cannot scope a stream must not fire on it —
+    # so what is wrong is only that it is SILENT: the operator sees a request they stubbed reach
+    # the origin, or `$SESSION` never bind, with nothing saying why.
+    #
+    # So: one line per connection, naming the authority, the connection host, and WHICH KIND of
+    # rule was skipped — three kinds now share this notice and they fail differently, so a line
+    # that did not name them would send the operator to the wrong rule table (#536). Costs a
+    # string compare per request head on every normal connection (the authority IS the host, and
+    # that returns before any lock); only a genuinely coalesced stream reaches the rule lookups,
+    # and only until the line is written.
+    private def notice_coalesced(fields : Array(HPACK::Field)) : Nil
       return if @warned_coalesced
       authority = HeadCodec.pseudo_of(fields, ":authority")
       return if authority.nil? || authority.empty?
       # `:authority` may carry a port; the gate asked about a bare host.
       host, _ = Upstream.split_host_port(authority, 0)
       return if host.compare(@host, case_insensitive: true) == 0
-      return unless rw.rewrites_body_for_host?(host) || rw.short_circuits_for_host?(host)
+      kinds = unreachable_kinds(host)
+      return if kinds.empty?
       @warned_coalesced = true
       ::Log.warn do
         "h2 #{@direction}: stream authority #{host.inspect} is not the CONNECT host " \
-        "#{@host.inspect} (RFC 9113 §9.1.1 coalescing) and a Match&Replace body or " \
-        "short-circuit rule matches it — those rules are NOT applied on the HTTP/2 relay, and " \
-        "the connection was not downgraded because no such rule matches #{@host.inspect}. " \
-        "Reach this host on its own connection to have them apply."
+        "#{@host.inspect} (RFC 9113 §9.1.1 coalescing), and it is matched by rules this relay " \
+        "cannot apply: #{kinds.join(", ")}. The connection was not downgraded because no such " \
+        "rule matches #{@host.inspect}, so they do not fire on this stream. Reach this host on " \
+        "its own connection to have them apply."
       end
+    end
+
+    # Which of the per-CONNECT gates would have wanted this stream — i.e. which host-scoped
+    # seams the h2 relay cannot reach have a live rule for the coalesced authority. Exactly the
+    # set `h2_candidate?` tests, asked about the authority instead of the CONNECT host, so the
+    # two cannot drift apart in what they consider unreachable.
+    #
+    # Only ever reached on a genuinely coalesced stream and only once per connection, so each
+    # predicate is free to take its lock (all three document themselves as once-per-CONNECT).
+    private def unreachable_kinds(host : String) : Array(String)
+      kinds = [] of String
+      if rw = @rewriter
+        kinds << "a Match&Replace BODY rule" if rw.rewrites_body_for_host?(host)
+        kinds << "a Match&Replace SHORT-CIRCUIT rule" if rw.short_circuits_for_host?(host)
+      end
+      # Head-scoped extraction is deliberately absent: `H2::Extract` reads the response head on
+      # this relay and scopes it on the stream's own request, so a cookie/header descriptor is
+      # applied correctly on a coalesced stream and has nothing to announce.
+      if @extractor.try(&.extracts_body_for_host?(host))
+        kinds << "a session-binding EXTRACT rule that reads the response body"
+      end
+      kinds
     end
 
     private def pairs(fields : Array(HPACK::Field)) : Array({String, String})

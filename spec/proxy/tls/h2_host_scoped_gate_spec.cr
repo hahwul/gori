@@ -118,9 +118,25 @@ private def alpn_through_proxy(rewriter : Gori::Proxy::HeadRewriter, tag : Strin
   end
 end
 
-private def gate_pipe(rewriter : Gori::Proxy::HeadRewriter) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
+private def with_gate_bindings(&)
+  path = File.tempname("gori-h2-gate-bind", ".db")
+  store = Gori::Store.open(path)
+  begin
+    # Both tables off ONE store, because that is how `Session` wires them: the same proxy
+    # carries `rewriter: rules` and `extractor: bindings`, and the notice has to weigh both.
+    yield Gori::Rules.load(store), Gori::Bindings.load(store)
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+private def gate_pipe(rewriter : Gori::Proxy::HeadRewriter?,
+                      extractor : Gori::Proxy::ResponseExtract? = nil) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
   assembler = Gori::Proxy::H2::Assembler.new(GateSink.new, "api.example.com", 443, 1_i64)
-  {Gori::Proxy::H2::HeadRewrite.new("out", rewriter, assembler, "api.example.com"), assembler}
+  {Gori::Proxy::H2::HeadRewrite.new("out", rewriter, assembler, "api.example.com", extractor), assembler}
 end
 
 private def feed_authority(pipe : Gori::Proxy::H2::HeadRewrite,
@@ -266,9 +282,23 @@ describe "h2 downgrade gate, host-scoped (#526)" do
         Log.capture do |logs|
           feed_authority(pipe, assembler, "alpha.test")
           logs.check(:warn, /stream authority "alpha\.test" is not the CONNECT host "api\.example\.com"/)
+          # ...and it names WHICH kind, so the operator knows which table to look in (#536).
+          logs.entry.message.should contain("a Match&Replace BODY rule")
           # Once per connection, not once per stream.
           feed_authority(pipe, assembler, "alpha.test")
           logs.empty
+        end
+      end
+    end
+
+    it "names the short-circuit rule when that is the kind that was skipped" do
+      with_gate_rules do |rules|
+        rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: "alpha.test")
+        pipe, assembler = gate_pipe(rules)
+        Log.capture do |logs|
+          feed_authority(pipe, assembler, "alpha.test")
+          logs.check(:warn, /stream authority "alpha\.test"/)
+          logs.entry.message.should contain("a Match&Replace SHORT-CIRCUIT rule")
         end
       end
     end
@@ -291,6 +321,62 @@ describe "h2 downgrade gate, host-scoped (#526)" do
         Log.capture do |logs|
           feed_authority(pipe, assembler, "alpha.test")
           logs.empty
+        end
+      end
+    end
+
+    # #536: a body-scoped session-binding extract rule (#501 slice 2) is host-scoped through the
+    # same gate and unreachable on this relay for the same reason, so it belongs in this notice.
+    it "names a body-scoped EXTRACT rule that the connection gate never saw" do
+      with_gate_bindings do |rules, bindings|
+        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
+        # No Match&Replace rule at all — the rewriter is INACTIVE. Before #536 the notice ran
+        # from inside `rewrite`, behind `rw.active?`, so this case produced nothing.
+        rules.active?.should be_false
+        pipe, assembler = gate_pipe(rules, bindings)
+        Log.capture do |logs|
+          feed_authority(pipe, assembler, "alpha.test")
+          logs.check(:warn, /stream authority "alpha\.test" is not the CONNECT host "api\.example\.com"/)
+          logs.entry.message.should contain("a session-binding EXTRACT rule that reads the response body")
+          feed_authority(pipe, assembler, "alpha.test")
+          logs.empty # once per connection, same latch
+        end
+      end
+    end
+
+    it "says nothing for a HEAD-scoped extract rule — `H2::Extract` applies it on the relay" do
+      with_gate_bindings do |rules, bindings|
+        bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid", host: "alpha.test").should be_nil
+        bindings.extracts?.should be_true # live, just not unreachable
+        pipe, assembler = gate_pipe(rules, bindings)
+        Log.capture do |logs|
+          feed_authority(pipe, assembler, "alpha.test")
+          logs.empty
+        end
+      end
+    end
+
+    it "says nothing when the extract rule's glob cannot match the coalesced authority" do
+      with_gate_bindings do |rules, bindings|
+        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "beta.test").should be_nil
+        pipe, assembler = gate_pipe(rules, bindings)
+        Log.capture do |logs|
+          feed_authority(pipe, assembler, "alpha.test")
+          logs.empty
+        end
+      end
+    end
+
+    it "names every kind that matches, in one line" do
+      with_gate_bindings do |rules, bindings|
+        rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: "alpha.test")
+        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
+        pipe, assembler = gate_pipe(rules, bindings)
+        Log.capture do |logs|
+          feed_authority(pipe, assembler, "alpha.test")
+          logs.check(:warn, /stream authority "alpha\.test"/)
+          logs.entry.message.should contain("a Match&Replace BODY rule")
+          logs.entry.message.should contain("a session-binding EXTRACT rule that reads the response body")
         end
       end
     end
