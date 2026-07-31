@@ -165,8 +165,13 @@ module Gori
     # the connection). Issues/Probe/Repeater that referenced the id keep the dangling
     # cross-ref — their resolvers already surface "gone". Writer-fiber only so it races
     # cleanly with live capture.
-    def delete_flow(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) {
+    # `exec_task_ok`, for `delete_flows`' reason below: a DELETE reports nothing through
+    # last_insert_rowid, so a batch rolled back by an unrelated co-submitted write is
+    # indistinguishable from success — and the CLI printed "Flow #N deleted." / MCP returned
+    # `{"deleted": true}` with the row still there. The batch form got this and the singular
+    # did not. Returns whether the delete actually committed.
+    def delete_flow(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         delete_flow_one(c, id)
         nil
       }
@@ -193,8 +198,11 @@ module Gori
     # Wipe every captured History flow in this project (and their WS/FTS/h2 logs and
     # flow entity_links). Repeater-owned WS rows (repeater_id set) and workbench sessions
     # are left intact. Issues/Probe keep dangling sample flow ids.
-    def clear_flows : Nil
-      exec_task ->(c : DB::Connection) {
+    # Returns whether the wipe committed; see `delete_flow`. A rolled-back clear reported as
+    # done is the worst of the three, because the operator moves on believing the project is
+    # empty.
+    def clear_flows : Bool
+      exec_task_ok ->(c : DB::Connection) {
         # Captured WS only — WebSocket-Repeater output is keyed by repeater_id.
         c.exec("DELETE FROM ws_messages WHERE repeater_id IS NULL")
         # contentless FTS: per-row DELETE is a tombstone; wipe the whole index in one go

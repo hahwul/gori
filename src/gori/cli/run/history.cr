@@ -41,7 +41,7 @@ module Gori
           # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
           # "does this exist?" — a 40 MB response would be read and discarded.
           abort "gori run history delete: no flow with id #{id}" unless store.flow_row(id)
-          store.delete_flow(id)
+          abort "gori run history delete: flow ##{id} NOT deleted (project busy) — try again" unless store.delete_flow(id)
           puts "Flow ##{id} deleted."
         ensure
           store.close
@@ -74,7 +74,7 @@ module Gori
           unless yes
             abort "gori run history clear: refusing to delete #{n} flow#{n == 1 ? "" : "s"} without --yes"
           end
-          store.clear_flows
+          abort "gori run history clear: NOT cleared (project busy) — every flow is still there" unless store.clear_flows
           puts "Deleted #{n} flow#{n == 1 ? "" : "s"}."
         ensure
           store.close

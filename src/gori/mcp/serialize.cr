@@ -242,6 +242,13 @@ module Gori
           j.field "state", row.state.to_s.downcase
           j.field "duration_us", row.duration_us
           j.field "content_type", text(row.content_type)
+          # `flow_row`'s field, on the DETAIL projection too, and for a sharper reason: this
+          # is the call an agent makes to read a flow's BYTES before writing an issue, and
+          # without it there is no way to tell a response gori fabricated from a
+          # short-circuit rule apart from origin traffic. QL's own `stub:` docs say
+          # "`stub:false` is what you want before treating History as evidence"; the list
+          # projection said so and the detail one dropped it.
+          j.field "short_circuited", row.short_circuited?
           j.field "error", text(detail.error)
           j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
           emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?, body_cap, body_omit)

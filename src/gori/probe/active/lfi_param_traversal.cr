@@ -180,10 +180,18 @@ module Gori
           dup.join('&')
         end
 
+        # Percent-decoded AND scrubbed. The scrub is not cosmetic: `path_like?` runs PCRE
+        # (`FILE_EXT`, `NUMERIC_VALUE`) over this, and Crystal's Regex RAISES
+        # `ArgumentError: UTF-8 error: illegal byte` on a subject that is not valid UTF-8 —
+        # which `%FF` decodes to. Every other rule that PCREs a URL scrubs first and says why
+        # (`passive/secret_in_url.cr`, `security_headers.cr`, `cors.cr`); this one did not, and
+        # its callers make that a crash rather than a skipped rule: the TUI's `A` estimate
+        # reaches it through `Analyzer#active_estimate` with no `rescue` in the event loop, and
+        # `scan_detail`'s blanket rescue silently drops every ACTIVE rule registered after it.
         private def decode(s : String) : String
-          URI.decode_www_form(s)
+          URI.decode_www_form(s).scrub
         rescue
-          s
+          s.scrub
         end
 
         # {path, query-without-'?'} — query is "" when the target has none.

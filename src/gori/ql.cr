@@ -300,8 +300,16 @@ module Gori
     # bodyless flow has an empty FTS row, so it never matches and `-body:x`
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
     # values fall back to the NULL-safe BLOB LIKE scan.
-    private def self.body_cond(value : String) : {String, Array(DB::Any)}
+    private def self.body_cond(value : String) : {String, Array(DB::Any)}?
       value = value.chars.reject(&.control?).join # strip NUL/control chars (FTS/LIKE safety)
+      # `field_cond`'s `return nil if value.empty?` runs BEFORE this strip, so a value made
+      # only of control bytes survived that guard and arrived here as "". `like("")` is
+      # `'%%'`, which matches EVERY flow with a body — and `-body:` then excluded every flow
+      # with one. That is the silent-BROADEN direction, the one `filter_ast.cr` calls the
+      # dangerous one, and `QL.analyze` reported the query clean so `strict:` never saw it.
+      # Dropping the term is what `body:` (genuinely empty) already does; this makes the two
+      # spellings agree.
+      return nil if value.empty?
       if value.size < 3
         p = like(value)
         return {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \

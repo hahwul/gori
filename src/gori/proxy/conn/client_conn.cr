@@ -504,8 +504,17 @@ module Gori::Proxy
       # ttfb/duration stay nil on purpose. There was no round trip to measure, and a `0`
       # would render in History as an impossibly fast origin — the exact misreading the
       # short-circuit marker exists to prevent. `—` is the truth.
+      # Capped like every other capture path (`capped` eight lines above for the request,
+      # `CaptureBuffer` on the streaming path, the h2 assembler). The stub's body is bounded
+      # only by `RuleStub::MAX_BODY_FILE_BYTES` = 8 MiB, four times the default
+      # `Settings.capture_max`, and it is written PER REQUEST — so a `body_file` stub on an
+      # endpoint a page hits repeatedly grew `flows.response_body` by the whole file each
+      # time, which the retention cap (counted in rows) cannot reclaim and lowering
+      # `capture_max` did not shrink.
+      resp_stored, resp_trunc, resp_size = capped(send_body ? stub.body : nil)
       @sink.on_response(FlowMapper.response(resp,
-        flow_id: flow_id, body: send_body ? stub.body : nil,
+        flow_id: flow_id, body: resp_stored,
+        body_truncated: resp_trunc, body_size: resp_size,
         state: written ? Store::FlowState::Complete : Store::FlowState::Aborted,
         error: written ? stub.error : "client closed before the short-circuit response was written"))
       return false unless written

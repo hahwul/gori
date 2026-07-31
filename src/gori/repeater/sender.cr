@@ -101,10 +101,38 @@ module Gori
         if reason = refusal(upgrade)
           return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
         end
-        # The handshake alone: a WS frame is not an HTTP response and `TokenExtract`'s five
-        # descriptors are all defined over one. Slice 1 does not extract from WS traffic.
-        WsEngine.send(Gori::Env.expand_bindings(upgrade), messages, scheme: @scheme, host: @host,
-          port: @port, verify_upstream: @verify, sni: @sni, idle: idle, overrides: @overrides)
+        # EXTRACTION is handshake-only — a WS frame is not an HTTP response and `TokenExtract`'s
+        # five descriptors are all defined over one. INJECTION is not: the messages carry
+        # `$NAME` as readily as the handshake does, the proxy's own WS path already resolves it
+        # (`Rules` `RulePart::Ws`), and every surface that builds these frames runs `Env.expand`
+        # over them — which by design covers env vars and NOT bindings. So a `$SESSION` in a
+        # frame went out as those seven characters with the name bound, and with it unbound
+        # there was no refusal either: exactly the failure #519/#525 exist to stop, on the one
+        # send path that had neither half.
+        if reason = ws_message_refusal(messages)
+          return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
+        end
+        WsEngine.send(Gori::Env.expand_bindings(upgrade), expand_messages(messages),
+          scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
+          idle: idle, overrides: @overrides)
+      end
+
+      # The first declared-but-unbound name across the outgoing frames, as a refusal.
+      private def ws_message_refusal(messages : Array(WsEngine::OutMsg)) : String?
+        messages.each do |m|
+          unbound = Gori::Env.unbound(m.payload)
+          return Gori::Env.unbound_error(unbound) if unbound.present?
+        end
+        nil
+      end
+
+      # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,
+      # so nothing here is a message boundary and the value goes in as it was observed.
+      private def expand_messages(messages : Array(WsEngine::OutMsg)) : Array(WsEngine::OutMsg)
+        messages.map do |m|
+          expanded = Gori::Env.expand_bindings(String.new(m.payload)).to_slice
+          expanded == m.payload ? m : WsEngine::OutMsg.new(m.opcode, expanded)
+        end
       end
 
       # Offer this response to the binding table's extract rules.

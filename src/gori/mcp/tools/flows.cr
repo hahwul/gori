@@ -137,7 +137,7 @@ module Gori
         # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
         # "does this exist?" — a 40 MB response would be read and discarded.
         return not_found("no flow with id #{id}") unless store.flow_row(id)
-        store.delete_flow(id)
+        return busy("flow NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_flow(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
 
@@ -151,7 +151,7 @@ module Gori
             "CONFIRM_REQUIRED", field: "confirm",
             details: JSON.parse({"flows" => n}.to_json))
         end
-        store.clear_flows
+        return busy("history NOT cleared (store busy or unwritable); every flow is still there") unless store.clear_flows
         Result.new({"deleted" => n, "cleared" => true}.to_json)
       end
 

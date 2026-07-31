@@ -187,6 +187,59 @@ describe Gori::Bindings do
       end
     end
 
+    # Binding values resolve at SEND time, after every plan builder has already framed the
+    # request. Without this the declared length described the UNEXPANDED body: on a pipelined
+    # send-group the origin read the declared prefix and the remainder became the front of the
+    # NEXT request line — gori desyncing its own connection and putting the session token on
+    # the wire as a method.
+    it "moves the Content-Length by what a body substitution added" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("CSRF", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"t":"TOKEN-0123456789abcdef"})),
+          subject).should eq(["CSRF"])
+        with_layer(b) do
+          wire = "POST /a HTTP/1.1\r\nHost: acme.test\r\nContent-Length: 10\r\n\r\ncsrf=$CSRF"
+          out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+          body = out.split("\r\n\r\n", 2)[1]
+          body.should eq("csrf=TOKEN-0123456789abcdef")
+          # 10 + (27 - 10) = 27, which is the body actually sent.
+          out.should contain("Content-Length: 27")
+        end
+      end
+    end
+
+    # A DELTA, not a resync: an operator with auto-Content-Length off authored the mismatch as
+    # their payload (a smuggling probe), and re-syncing would silently destroy it.
+    it "preserves a deliberate Content-Length mismatch's offset" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("T", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"t":"abcdef"})), subject)
+        with_layer(b) do
+          # Declared 4 for a 3-byte body: an offset of -(-1)… i.e. 1 MORE than the body.
+          wire = "POST /a HTTP/1.1\r\nContent-Length: 4\r\n\r\n$T"
+          out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+          out.split("\r\n\r\n", 2)[1].should eq("abcdef") # 6 bytes, was 2
+          out.should contain("Content-Length: 8")         # 4 + 4, offset preserved
+        end
+      end
+    end
+
+    it "leaves a head-only substitution's Content-Length alone" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("S", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"t":"longvalue"})), subject)
+        with_layer(b) do
+          wire = "POST /a HTTP/1.1\r\nCookie: sid=$S\r\nContent-Length: 4\r\n\r\nbody"
+          out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+          out.should contain("Cookie: sid=longvalue")
+          out.should contain("Content-Length: 4") # the body did not move
+        end
+      end
+    end
+
     it "a value with no boundary byte is untouched by any of this" do
       with_store do |store|
         b = Gori::Bindings.load(store)

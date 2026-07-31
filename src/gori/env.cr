@@ -148,15 +148,49 @@ module Gori
       prefix = Settings.env_prefix
       return bytes if prefix.empty? || !contains_prefix?(bytes, prefix)
       safe = boundary_safe(vals)
-      return expand(String.new(bytes), vals, prefix).to_slice if safe.size == vals.size
       boundary = head_body_boundary(bytes)
       head = expand(String.new(bytes[0...boundary]), safe, prefix).to_slice
       return head if boundary >= bytes.size
-      body = expand(String.new(bytes[boundary..]), vals, prefix).to_slice
+      raw_body = bytes[boundary..]
+      body = expand(String.new(raw_body), vals, prefix).to_slice
+      head = shift_content_length(head, body.size - raw_body.size) unless body.size == raw_body.size
       buf = IO::Memory.new(head.size + body.size)
       buf.write(head)
       buf.write(body)
       buf.to_slice
+    end
+
+    # `head` with its `Content-Length` moved by `delta`, every other byte untouched. No-op
+    # when the head declares none.
+    #
+    # ## Why this lives here and why it is a DELTA
+    #
+    # Binding values resolve at SEND time, which is after every plan builder has framed the
+    # request — `Repeater::Plan` runs `resync_content_length`, `Fuzz::Generator#emit` runs
+    # `ContentLength.sync`, both over bytes that still hold the literal `$NAME`. Nothing
+    # re-framed afterwards, so a `$NAME` in a BODY shipped a Content-Length describing the
+    # UNEXPANDED body: on a pipelined send-group the origin read the declared prefix and the
+    # remainder became the front of the next request line — gori desyncing its own connection
+    # and putting the session token on the wire as a method. A value shorter than the token
+    # hangs the connection instead. On h2 a `content-length` disagreeing with the DATA frames
+    # is malformed outright (RFC 9113 §8.1.2.6).
+    #
+    # A DELTA and not a resync, because both framing modes have to survive: an operator with
+    # auto-Content-Length OFF (`Repeater`) or `update_content_length` off (`Fuzz`) authored a
+    # deliberate mismatch as their payload, and a resync would silently destroy it. Shifting
+    # by what the substitution actually added keeps that offset exactly, while a request that
+    # WAS in sync stays in sync. It is also why this sits inside `expand_bindings` rather than
+    # at the five send seams: the seam that forgets is the one that desyncs.
+    private def self.shift_content_length(head : Bytes, delta : Int32) : Bytes
+      text = String.new(head)
+      eol = text.includes?("\r\n") ? "\r\n" : "\n"
+      lines = text.split(eol)
+      idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return head unless idx
+      current = lines[idx].split(':', 2)[1]?.try(&.strip.to_i64?)
+      return head unless current
+      lines[idx] = "Content-Length: #{{current + delta, 0_i64}.max}"
+      lines.join(eol).to_slice
     end
 
     # The String form has no head/body split to take — every caller is a short operator field

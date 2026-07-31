@@ -155,6 +155,23 @@ class Gori::Store
       conn.exec("UPDATE flows SET request_body = X'', request_body_truncated = 1 " \
                 "WHERE request_body IS NOT NULL AND LENGTH(request_body) > 0")
     end
+    # Dropping a body drops what `body:` searches, so the FTS index has to go with it. Both
+    # siblings already maintain it — `delete_flow_one` deletes the row's entry, `clear_flows`
+    # issues `'delete-all'` — and only this path skipped it, so `body:secret` kept hitting a
+    # flow whose body is gone AND that body's own trigram tokens (up to `FTS_INDEX_MAX` of
+    # them) stayed in the file, which is the opposite of what compact is asked for.
+    #
+    # Wiped whole and re-flagged rather than deleted per row: the index holds head text too
+    # (`flows_fts(req, resp)` is head+body), and compact is not dropping heads — so the rows
+    # are marked `fts_dirty` and the off-commit indexer rebuilds them from what is left. That
+    # is the same self-healing path a failed index pass already relies on, and it runs at the
+    # next project open because compact works on a closed store. `'delete-all'` rather than a
+    # tombstone per flow so the run that is meant to SHRINK the file does not leave a
+    # full-size index behind.
+    if plan.response_bodies || plan.request_bodies
+      conn.exec("INSERT INTO flows_fts(flows_fts) VALUES('delete-all')")
+      conn.exec("UPDATE flows SET fts_dirty = 1")
+    end
     if plan.h2_frames
       # The raw h2 frame log is a detail-view-only diagnostic; each flow rebuilds
       # from its own request_head/response_head, so dropping it loses no traffic.

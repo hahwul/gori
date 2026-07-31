@@ -109,6 +109,25 @@ describe Gori::QL do
     f.args.should eq([%("token")]) # control bytes removed before the phrase is built
   end
 
+  # …and a value made ENTIRELY of control bytes strips to "", which `like("")` turns into
+  # `'%%'` — matching every flow with a body, and `-body:` excluding every one. That is the
+  # silent-BROADEN direction, and `QL.analyze` called the query clean so `strict:` never saw
+  # it. `field_cond`'s empty guard runs before the strip, so `body:` and `body:\x01` had to be
+  # made to agree: both drop the term.
+  it "drops a body: term whose value is only control characters" do
+    only_control = Gori::QL.parse("body:\u0001\u001f")
+    only_control.args.should be_empty
+    only_control.sql.should_not contain("request_body")
+    only_control.sql.should_not contain("flows_fts")
+    # The genuinely-empty spelling already behaved this way; now the two agree.
+    only_control.sql.should eq(Gori::QL.parse("body:").sql)
+    # Negated, the broadening was an EXCLUDE-everything - same fix, same term dropped.
+    Gori::QL.parse("-body:\u0001").sql.should_not contain("request_body")
+    # And `analyze` now REPORTS it: while the term compiled to '%%' the query read CLEAN,
+    # so `strict:` / `ql_explain` said nothing about a filter that had quietly inverted.
+    Gori::QL.analyze("body:\u0001").clean?.should be_false
+  end
+
   it "falls back to a NULL-safe blob scan for a body: value below the 3-char trigram floor" do
     f = Gori::QL.parse("body:ab")
     f.sql.should eq("(((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') " \
