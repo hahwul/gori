@@ -275,7 +275,7 @@ Useful for staging hosts, IP-based virtual hosts, or pointing a production hostn
 
 Some clients ignore proxy settings entirely — embedded devices, statically-linked binaries, anything that never reads `HTTP_PROXY`. For those, run a **transparent listener** and redirect traffic into it with your firewall; no client-side configuration is needed at all.
 
-gori recovers the destination from the kernel where it can (`SO_ORIGINAL_DST` on Linux, a `pf` lookup on macOS, which needs root), and from the client's `Host` header or TLS SNI otherwise. The log says which one it used, so a destination that looks wrong is traceable.
+gori recovers the destination from the kernel where it can (`SO_ORIGINAL_DST` on Linux, a `pf` lookup on macOS, which needs root). That answer decides which machine the connection reaches, while the client's `Host` header or TLS SNI still supplies the name — the one the certificate is minted for, that scope matches, and that History shows. Where the kernel cannot answer, the name is resolved as the destination too. The log says which source decided, so a destination that looks wrong is traceable.
 
 Add it under `listeners` in `settings.json` and point `iptables` / `pf` at it — see the [`listeners` reference](/reference/config/#listeners) for the config keys and the redirect rules. Captured flows, scope, the Sandbox and the passthrough list all behave exactly as on the normal proxy path.
 

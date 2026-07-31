@@ -53,7 +53,7 @@ module Gori::Proxy::Tls
       # CONNECT skips the throwaway ALPN-reflection probe for these. See reflect_origin_h2.
       # Bare Set, no mutex: single-threaded fibers, and the read/add don't yield (the yielding
       # dial happens before the add), so a concurrent double-probe just re-adds idempotently.
-      @h1_only_origins = Set({String, Int32}).new
+      @h1_only_origins = Set({String, Int32, String?}).new
       # {host, reason} pairs already announced by notice_downgrade. Same no-mutex argument as
       # above: the read and the add happen together with no yield between them.
       @downgrade_noticed = Set({String, String}).new
@@ -99,8 +99,16 @@ module Gori::Proxy::Tls
       client_tls.try(&.close) rescue nil
     end
 
+    # `dial_addr` is the seam #529 needed: `host` names the connection, `dial_addr` reaches it.
+    # Everything in here that identifies the connection — the leaf `@ca.context_for` mints, the
+    # `h2_candidate?`/`notice_downgrade` host, the `@h1_only_origins` key, the relay's scope
+    # authority, the `ClientConn` `fixed_host` and so the whole capture record — keeps using
+    # `host`. Only the two dials (the ALPN probe here, and `ClientConn#open_upstream` below)
+    # take the pin, and each does so through `Upstream.connect_target`, which is the one place
+    # that decides "given this name, which address". nil means resolve the name, i.e. every
+    # pre-#529 caller is unchanged.
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink,
-                  tls_upstream : Bool = true) : Nil
+                  tls_upstream : Bool = true, dial_addr : String? = nil) : Nil
       # ALPN reflection (#323): advertise h2 to the client only when the ORIGIN speaks it. A
       # non-nil result is a live upstream already confirmed h2 (reflect_origin_h2 dials it and
       # keeps it for reuse); nil means fall the client back to the h1 path. See that helper.
@@ -108,7 +116,7 @@ module Gori::Proxy::Tls
       # Skipped entirely for a CLEARTEXT origin: reflection is an ALPN probe, and ALPN only
       # exists inside a TLS handshake. gori has no h2c support to reflect instead, so the
       # client is kept on h1 — which is what the nil path already means.
-      upstream = tls_upstream ? reflect_origin_h2(host, port) : nil
+      upstream = tls_upstream ? reflect_origin_h2(host, port, dial_addr) : nil
 
       server_ctx = @ca.context_for(host, advertise_h2: !upstream.nil?)
       # sync_close: true is REQUIRED, not cosmetic. The h2/ws relays tear down by
@@ -145,6 +153,10 @@ module Gori::Proxy::Tls
           tls_upstream: tls_upstream, verify_upstream: @verify_upstream,
           rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides,
+          # The name/port halves of `origin_dst` are inert here — `resolve_forward`
+          # short-circuits on `fixed_host` before either is consulted — so what this actually
+          # hands over is the DIAL PIN, which `ClientConn#dial_pin` reads back off it.
+          origin_dst: dial_addr.try { |a| {a, port} },
         ).run
       end
     rescue
@@ -171,19 +183,27 @@ module Gori::Proxy::Tls
     # probe can't serve it) — a positive "this host is h2" cache WOULD, but a stale positive
     # entry (origin since dropped to h1/down) would re-strand the client on a dead h2 tunnel,
     # the exact #323 failure, so only the benign negative direction is cached.
-    private def reflect_origin_h2(host : String, port : Int32) : OpenSSL::SSL::Socket::Client?
+    #
+    # `dial_addr` pins where the probe connects (#529) without touching what it asks for: the
+    # SNI and the verified name stay `host`, so a reflected "this origin speaks h2" is still a
+    # statement about the name. It IS part of the cache key, though, because the observation is
+    # about the machine that answered: the same name reached at two different pinned addresses
+    # is two origins, and sharing one entry between them would deny h2 to the second on
+    # evidence gathered from the first.
+    private def reflect_origin_h2(host : String, port : Int32,
+                                  dial_addr : String? = nil) : OpenSSL::SSL::Socket::Client?
       return nil unless h2_candidate?(host)
-      return nil if @h1_only_origins.includes?({host, port}) # known h1-only: skip the probe
+      return nil if @h1_only_origins.includes?({host, port, dial_addr}) # known h1-only: skip the probe
       # Cap the connect wait so an unreachable origin doesn't burn the full timeout here before
       # the h1 fallback re-dials and waits again (never longer than the configured timeout).
       timeout = {Gori::Settings.connect_timeout, H2_PROBE_CONNECT_TIMEOUT}.min
       upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2",
-        connect_timeout: timeout, overrides: @host_overrides)
+        connect_timeout: timeout, overrides: @host_overrides, pin: dial_addr)
       return upstream if upstream && upstream.alpn_protocol == "h2"
       # Remember a DEFINITIVE h1 negotiation (handshake completed, ALPN != h2) so repeat visits
       # skip the probe. Never cache a nil dial — that's a transient reach/verify failure, not a
       # statement about the origin's ALPN; caching it would wrongly pin a briefly-down origin.
-      @h1_only_origins << {host, port} if upstream && @h1_only_origins.size < H1_ONLY_CACHE_MAX
+      @h1_only_origins << {host, port, dial_addr} if upstream && @h1_only_origins.size < H1_ONLY_CACHE_MAX
       upstream.try(&.close) rescue nil
       nil
     end

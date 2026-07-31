@@ -31,8 +31,9 @@ module Gori::Proxy
     def self.dial(host : String, port : Int32,
                   connect_timeout : Time::Span = Settings.connect_timeout,
                   io_timeout : Time::Span = Settings.io_timeout,
-                  *, overrides : Gori::HostOverrides? = nil) : TCPSocket?
-      target = connect_target(host, overrides)
+                  *, overrides : Gori::HostOverrides? = nil,
+                  pin : String? = nil) : TCPSocket?
+      target = connect_target(host, overrides, pin)
       # ONE decision point for "how do we reach this host": Settings.upstream_route folds the
       # project pin, the rule table and the legacy scalar together. Resolved on the ORIGINAL
       # host, not `target` — a rule is written against the name the operator sees, and a
@@ -48,11 +49,26 @@ module Gori::Proxy
     end
 
     # The IP to actually dial for `host`: a project override (wins) → a global override
-    # (Settings, read live) → `host` unchanged. ONLY the TCP connect target changes —
+    # (Settings, read live) → `pin` → `host` unchanged. ONLY the TCP connect target changes —
     # SNI, the certificate hostname, the Host header, and the upstream-reuse pool key
     # all keep the ORIGINAL host (a /etc/hosts-style resolution override, nothing more).
-    private def self.connect_target(host : String, overrides : Gori::HostOverrides?) : String
-      overrides.try(&.connect_ip(host)) || Settings.host_override_ip(host) || host
+    #
+    # `pin` is the address a TRANSPARENT listener read out of the kernel for this connection
+    # (`Proxy::OrigDst`, #528/#529) — where the client was ACTUALLY going, as opposed to the
+    # name it wrote in `Host`/SNI. It joins this chain rather than replacing it because the
+    # question is the same one: given a name, which address do we connect to? Everything above
+    # it in the chain still keeps the name, so a pinned dial is invisible to the certificate,
+    # scope, the passthrough list and History — that is the whole point of #529.
+    #
+    # It sits BELOW both overrides deliberately. An override is a declaration the OPERATOR
+    # wrote; the pin closes a hole where the CLIENT decided. Letting the pin win would make a
+    # host override a silent no-op on every transparent connection, which is a worse failure
+    # than the narrow residual it would remove: a lying `Host` that names an overridden host
+    # can still reach that override's address, but only an address the operator already put in
+    # their own table by name.
+    private def self.connect_target(host : String, overrides : Gori::HostOverrides?,
+                                    pin : String? = nil) : String
+      overrides.try(&.connect_ip(host)) || Settings.host_override_ip(host) || pin || host
     end
 
     # True when dialing `host:port` (after override resolution) would connect back
@@ -612,8 +628,10 @@ module Gori::Proxy
     def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
                       connect_timeout : Time::Span = Settings.connect_timeout,
                       io_timeout : Time::Span = Settings.io_timeout,
-                      *, overrides : Gori::HostOverrides? = nil) : OpenSSL::SSL::Socket::Client?
-      dial_tls_result(host, port, verify, alpn, sni, connect_timeout, io_timeout, overrides: overrides)[0]
+                      *, overrides : Gori::HostOverrides? = nil,
+                      pin : String? = nil) : OpenSSL::SSL::Socket::Client?
+      dial_tls_result(host, port, verify, alpn, sni, connect_timeout, io_timeout,
+        overrides: overrides, pin: pin)[0]
     end
 
     # Like `dial_tls` but also reports WHY the dial failed (see TlsDialError) as the second
@@ -622,9 +640,15 @@ module Gori::Proxy
     def self.dial_tls_result(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
                              connect_timeout : Time::Span = Settings.connect_timeout,
                              io_timeout : Time::Span = Settings.io_timeout,
-                             *, overrides : Gori::HostOverrides? = nil) : {OpenSSL::SSL::Socket::Client?, TlsDialError?}
-      tcp = dial(host, port, connect_timeout, io_timeout, overrides: overrides)
+                             *, overrides : Gori::HostOverrides? = nil,
+                             pin : String? = nil) : {OpenSSL::SSL::Socket::Client?, TlsDialError?}
+      tcp = dial(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin)
       return {nil, TlsDialError::Connect} unless tcp
+      # `hostname:` below is unaffected by `pin` on purpose: SNI and the verified name stay the
+      # NAME. A pinned dial reaches the address the client actually connected to and then asks
+      # that origin for the name the client asked for — which is what makes the leaf, the
+      # passthrough list, scope and History go on working (#529).
+      #
       # The outbound-TLS policy is looked up on the DIALED host, not `sni`: a client
       # certificate and a protocol floor belong to the machine we are actually talking to,
       # whereas `sni` deliberately lies about the name for domain-fronting / vhost tests.

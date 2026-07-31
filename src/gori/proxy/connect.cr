@@ -21,8 +21,16 @@ module Gori::Proxy
     # asked for `https://host`, so downgrading the origin leg would be gori silently weakening
     # a connection the client believes is end-to-end TLS. Defaulted to true so those two paths
     # keep their exact behaviour.
+    #
+    # `dial_addr` splits the two jobs `host` used to do alone (#529). `host` stays the NAME —
+    # the leaf is minted for it, the passthrough list and the sandbox are written against it,
+    # scope matches it and History shows it — while `dial_addr`, when given, is the address
+    # every origin dial underneath actually connects to, so the name is no longer RESOLVED. A
+    # TRANSPARENT listener sets it from the kernel's original destination (`Proxy::OrigDst`),
+    # which is where the client was going before the redirect; nil (every other caller, and a
+    # transparent connection the kernel could not answer for) resolves the name as before.
     abstract def intercept(host : String, port : Int32, client : IO, sink : FlowSink,
-                           tls_upstream : Bool = true) : Nil
+                           tls_upstream : Bool = true, dial_addr : String? = nil) : Nil
 
     # Serve the self-page over TLS after a CONNECT to a RESERVED host (SelfPage.magic_host?)
     # — a proxy-configured client that browsed to `https://gori.proxy/`. No origin is dialed

@@ -40,14 +40,24 @@ module Gori::Proxy
     # the scheme default. It is the DECLARED answer, used when the kernel has none.
     #
     # `origin_dst` is the kernel's own answer for the same connection — the address and port the
-    # client dialled before the redirect rewrote them (`Proxy::OrigDst`). It outranks
-    # `default_port` and, for the PORT, the `Host` header too: the header's port is a claim
-    # about the very connection the kernel is describing, so the two can only disagree by the
-    # header being wrong or hostile. The header still supplies the NAME — that is what the
-    # request is addressed to, what scope matches and what History shows — and `origin_dst`'s
-    # address is used only when there is no name at all (an HTTP/1.0 or malformed request with
-    # no usable Host). An ABSOLUTE-form target still wins outright, unchanged: that branch is
-    # the forward-proxy contract and a transparent client does not emit one.
+    # client dialled before the redirect rewrote them (`Proxy::OrigDst`). It settles three
+    # different things, and keeping them apart is what #529 is:
+    #
+    #   - PORT — it outranks `default_port` AND a port in the `Host` header: the header's port
+    #     is a claim about the very connection the kernel is describing, so the two can only
+    #     disagree by the header being wrong or hostile. An ABSOLUTE-form target still wins
+    #     outright, unchanged: that branch is the forward-proxy contract and a transparent
+    #     client does not emit one.
+    #   - NAME — it does NOT. The `Host` header still supplies it, because a name is what the
+    #     request is addressed to, what scope matches and what History shows. `origin_dst`'s
+    #     address fills in only when there is no name at all (an HTTP/1.0 or malformed request
+    #     with no usable Host).
+    #   - DIAL ADDRESS — it does, always (`dial_pin`). The name above is carried all the way
+    #     through capture and matching, but it is no longer RESOLVED: the TCP connect goes to
+    #     the address the kernel says this connection was headed for. Before #529 the name did
+    #     both jobs, so a client that lied in `Host` steered gori's upstream dial to a host of
+    #     its choosing. See `Upstream.connect_target` for where the pin sits relative to a
+    #     hostname override.
     #
     # `rewrite_fixed_host` replaces the forwarded `Host` header with `fixed_host`'s authority.
     # It exists ONLY for a reverse listener whose operator declared `rewrite_host: true`, and it
@@ -78,6 +88,17 @@ module Gori::Proxy
       # dial returned nil — lets a failed HTTPS flow distinguish unreachable from a TLS/verify
       # rejection (the #323 case, whose fix is --insecure-upstream). See `upstream_error_message`.
       @last_tls_dial_error = nil.as(Upstream::TlsDialError?)
+    end
+
+    # The address every upstream dial on THIS connection is pinned to, or nil when nothing
+    # pinned it (every mode but transparent, and transparent where the kernel had no answer —
+    # which degrades to resolving the name, exactly as gori did before #529).
+    #
+    # Read at the dial, never at resolution: `resolve_forward` keeps handing back the NAME, so
+    # the certificate, the sandbox, the passthrough list, scope and History are all untouched
+    # by this. Only `Upstream.connect_target` sees it.
+    private def dial_pin : String?
+      @origin_dst.try(&.[0])
     end
 
     # The connection-lifetime scratch buffer for body forwarding, allocated on first use.
@@ -1042,7 +1063,7 @@ module Gori::Proxy
     # CONNECT authority, so we dial it plaintext and run the same h2 relay (no
     # :authority routing / HPACK coupling needed). The origin must speak h2c.
     private def intercept_h2c(host : String, port : Int32, client : IO) : Nil
-      upstream = Upstream.dial(host, port, overrides: @host_overrides)
+      upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
       return unless upstream
       # Long-lived h2c relay: relax both legs so an idle h2 connection isn't reaped by the
       # baseline/io timeouts; keepalive (both legs) handles a dead peer.
@@ -1127,10 +1148,10 @@ module Gori::Proxy
           return false if Settings.http2_disabled?
           intercept_h2c(host, port, stream)
         else
-          tls.intercept(host, port, stream, @sink)
+          tls.intercept(host, port, stream, @sink, dial_addr: dial_pin)
         end
       else
-        upstream = Upstream.dial(host, port, overrides: @host_overrides)
+        upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
         unless upstream
           write_gateway_error
           return false
@@ -1246,12 +1267,13 @@ module Gori::Proxy
     # origin-form for the upstream; the captured truth keeps the original bytes.
     private def open_upstream(host : String, port : Int32) : IO?
       if @tls_upstream
-        sock, err = Upstream.dial_tls_result(host, port, verify: @verify_upstream, overrides: @host_overrides)
+        sock, err = Upstream.dial_tls_result(host, port, verify: @verify_upstream,
+          overrides: @host_overrides, pin: dial_pin)
         @last_tls_dial_error = err
         sock
       else
         @last_tls_dial_error = nil # plaintext forward-proxy dial: no TLS leg to classify
-        Upstream.dial(host, port, overrides: @host_overrides)
+        Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
       end
     end
 
@@ -1297,9 +1319,10 @@ module Gori::Proxy
       end
     end
 
-    # Where an ORIGIN-FORM request goes: the `Host` header, with the kernel's original
+    # What an ORIGIN-FORM request is ADDRESSED to: the `Host` header, with the kernel's original
     # destination layered over it where there is one (see `origin_dst`). The kernel's port is
-    # definitive; its address only fills in for a request that named no host at all.
+    # definitive; its address only fills in for a request that named no host at all — where the
+    # dial GOES is a separate question, answered by `dial_pin`.
     private def origin_form_destination(req : Codec::RawRequest) : {String, Int32}
       host, port = Upstream.split_host_port(req.host? || "", @default_port || (@scheme == "https" ? 443 : 80))
       if od = @origin_dst

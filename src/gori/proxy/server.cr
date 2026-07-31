@@ -345,6 +345,12 @@ module Gori::Proxy
       # list are written against, and what History shows. The kernel's address answers the case
       # the SNI cannot — a ClientHello that carries no server_name at all, which until now had
       # no destination and was dropped.
+      #
+      # The name is no longer what gets DIALLED, though (#529): `dial_addr` below carries the
+      # kernel's address down to the two origin dials, so an SNI that names one host while the
+      # connection went to another reaches the host it went to. When the SNI IS absent both
+      # values are the kernel's address and the pin is a no-op, which is why #528's no-name
+      # behaviour is untouched.
       host = sni || dst.try(&.[0])
       unless host
         # No name and no kernel answer: nothing to mint a certificate for and nothing to gate on.
@@ -360,20 +366,26 @@ module Gori::Proxy
       # with a 403 here — the client expects TLS, not HTTP — so the connection is dropped.
       return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
       if Settings.tls_passthrough?(host)
-        return if relay_transparent_passthrough(host, port, stream, client)
+        return if relay_transparent_passthrough(host, port, stream, client, dst.try(&.[0]))
         # The origin was unreachable, so nothing was relayed. Fall through and MITM instead of
         # dropping: the operator asked not to decrypt this host, not to lose the connection, and
         # the handshake failure they then see names the real problem.
       end
-      tls.intercept(host, port, stream, @sink)
+      tls.intercept(host, port, stream, @sink, dial_addr: dst.try(&.[0]))
     end
 
     # A passthrough host reached through a transparent listener: dial the origin and pipe bytes,
     # never minting a leaf. False when the origin could not be reached AND nothing was consumed,
     # so the caller can still fall through.
+    #
+    # `pin` applies here for the same reason it applies to the MITM branch, and matters MORE:
+    # this connection is relayed undecrypted, so the address gori dials is the only thing that
+    # decides where the client's session actually terminates. The passthrough LIST is still
+    # matched on the name (`Settings.tls_passthrough?` above) — the operator wrote it against
+    # names — which is exactly the split #529 is.
     private def relay_transparent_passthrough(host : String, port : Int32, stream : IO,
-                                              client : TCPSocket) : Bool
-      upstream = Upstream.dial(host, port, overrides: @host_overrides)
+                                              client : TCPSocket, pin : String? = nil) : Bool
+      upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: pin)
       return false unless upstream
       begin
         SocketTuning.relax(stream)
