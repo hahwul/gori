@@ -16,6 +16,8 @@
 # Env:    SHOTS="theme:subdir …"   which palettes to shoot and where under tui/.
 #           default: "goridark: goriday:light"  (dark → tui/, light → tui/light/)
 #           e.g. SHOTS="goriday:light" to refresh only the light set.
+#         ONLY="scenes themes readme"  which groups to shoot (default: all three).
+#           e.g. ONLY=readme to refresh just the README hero shot.
 #
 # The captures are deliberately reproducible but not pixel-identical run to run
 # (timestamps, durations, and live response bodies vary). Eyeball the output.
@@ -30,6 +32,8 @@ OUT="$TUI_ROOT"
 # 132 columns reads as a real full-width terminal in the docs; at the old 104
 # the SVGs scaled up chunky ("zoomed-in screenshot" feel) in the content column.
 COLS=132 ROWS=26 PORT=8091
+ONLY="${ONLY:-scenes themes readme}"
+want() { case " $ONLY " in *" $1 "*) return 0;; *) return 1;; esac; }
 
 [ -x "$GORI" ] || { echo "gori binary not found/executable at $GORI (run 'shards build' first)"; exit 1; }
 command -v tmux >/dev/null || { echo "tmux is required"; exit 1; }
@@ -87,10 +91,12 @@ done
 # Launches `gori <subcmd>` in a fresh tmux pane, optionally walks the project
 # picker preamble, sends the keys, and renders the capture to SVG. Interleave
 # the literal token SLEEP<seconds> to pause between keys.
+# Set SHOT_COLS for a single call to widen that pane beyond the default $COLS.
 _shoot() {
   local name="$1" rows="$2" title="$3" subcmd="$4" preamble="$5"; shift 5
+  local cols="${SHOT_COLS:-$COLS}"
   tmux kill-session -t goricap 2>/dev/null || true
-  TERM=xterm-256color tmux new-session -d -s goricap -x "$COLS" -y "$rows"
+  TERM=xterm-256color tmux new-session -d -s goricap -x "$cols" -y "$rows"
   tmux send-keys -t goricap \
     "cd $REPO && clear && GORI_HOME=$GORI_HOME TERM=xterm-256color '$GORI' $subcmd 2>/dev/null" C-m
   sleep 3
@@ -162,19 +168,66 @@ shoot_themes() {
   done
 }
 
+# Extra traffic on top of seed_all, so the README's taller History pane reads as
+# a working engagement instead of a dozen rows over a lot of empty space. Only
+# the README shot wants these, and it runs last, so the doc scenes above keep
+# the smaller, stable flow set.
+seed_readme_extra() {
+  seed "https://httpbingo.org/anything/api/v2/orders?status=paid&limit=50"
+  seed "https://httpbingo.org/anything/api/v2/orders/9182"
+  seed -X PUT -H 'Content-Type: application/json' -d '{"role":"editor"}' https://httpbingo.org/anything/api/users/42
+  seed -X DELETE https://httpbingo.org/anything/api/sessions/8f3a1c
+  seed "https://httpbingo.org/anything/admin/config?debug=true"
+  seed https://httpbingo.org/status/401
+  seed https://httpbingo.org/status/403
+  seed https://httpbingo.org/status/404
+  seed https://httpbingo.org/redirect/1
+  seed https://httpbingo.org/gzip
+  seed https://httpbingo.org/html
+  seed https://httpbingo.org/uuid
+  seed https://api.github.com/repos/hahwul/gori
+  seed https://api.github.com/rate_limit
+  seed https://example.com/robots.txt
+}
+
+# The README hero (readme.svg): History with the Space menu open, shot on a much
+# wider pane than the doc scenes. The README renders one image edge to edge with
+# no sidebar, so the 132x26 doc geometry reads as a cramped little window there;
+# 180x38 fills the width and still lands near a 2:1 card.
+shoot_readme() {
+  OUT="$TUI_ROOT"
+  write_settings goridark
+  echo "▸ topping up the throwaway project for the README shot…"
+  "$GORI" run capture --listen 127.0.0.1 --port "$PORT" >/dev/null 2>&1 &
+  local cap=$!; sleep 2
+  seed_readme_extra
+  sleep 1; kill "$cap" 2>/dev/null || true; sleep 1
+  SHOT_COLS=180 run_scene readme 38 "gori · History · Space menu" \
+    3 SLEEP1 Down SLEEP0.3 Space SLEEP1.2
+}
+
 # One pass per "theme:subdir" spec in $SHOTS. The seeded DB is shared across
 # passes; only the theme in settings.json changes between them, so the light and
 # dark galleries show the same flows.
-for spec in $SHOTS; do
-  theme="${spec%%:*}" subdir="${spec#*:}"
-  OUT="$TUI_ROOT${subdir:+/$subdir}"
-  write_settings "$theme"
-  mkdir -p "$OUT"
-  echo "▸ capturing $theme → $OUT"
-  shoot_all
-done
+if want scenes; then
+  for spec in $SHOTS; do
+    theme="${spec%%:*}" subdir="${spec#*:}"
+    OUT="$TUI_ROOT${subdir:+/$subdir}"
+    write_settings "$theme"
+    mkdir -p "$OUT"
+    echo "▸ capturing $theme → $OUT"
+    shoot_all
+  done
+fi
 
-echo "▸ capturing the theme gallery → $TUI_ROOT/theme-*.svg"
-shoot_themes
+if want themes; then
+  echo "▸ capturing the theme gallery → $TUI_ROOT/theme-*.svg"
+  shoot_themes
+fi
+
+if want readme; then
+  echo "▸ capturing the README hero → $TUI_ROOT/readme.svg"
+  shoot_readme
+fi
 
 echo "▸ done. Review the SVGs under $TUI_ROOT"

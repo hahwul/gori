@@ -32,10 +32,21 @@ docs/tools/tui-capture/capture.sh  # writes docs/static/images/tui/*.svg
 
 Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`.
 
+Set `ONLY` to shoot a subset of the three groups (`scenes themes readme`):
+
+```bash
+ONLY=readme docs/tools/tui-capture/capture.sh   # just the README hero
+```
+
 Captures are reproducible but not pixel-identical run to run (timestamps,
 durations, and live response bodies vary), so eyeball the output before
 committing. The theme gallery on the Themes page (`theme-<name>.svg`) is shot in
 the same run by `shoot_themes` — the History scene under each gallery palette.
+
+`readme.svg` is its own shot (`shoot_readme`), not part of the doc set: the
+repo README renders one image edge to edge with no sidebar, so it uses a much
+wider 180x38 pane and tops the throwaway project up with extra traffic first.
+It runs last, so the doc scenes above keep the smaller, stable flow set.
 
 ## Render a single frame by hand
 

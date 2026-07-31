@@ -27,7 +27,7 @@ HTTP/2, WebSocket, gRPC, and SSE, and intercept in flight on HTTP/1.1 and HTTP/2
 also a `gori run` subcommand and an MCP tool, so scripts and AI agents can drive the same
 engagement.
 
-![](docs/static/images/tui/history.svg)
+![gori TUI — History with the Space menu open](docs/static/images/tui/readme.svg)
 
 <details>
 <summary><strong>Features</strong></summary>
