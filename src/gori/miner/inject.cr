@@ -48,12 +48,25 @@ module Gori::Miner
     def self.split(request : Bytes) : {Bytes, Bytes, String}
       sep, sep_w, eol = boundary(request)
       if sep.nil?
-        return {request, Bytes.empty, "\r\n"}
+        # "no trailing blank line" is this method's stated contract, and the no-boundary
+        # branch was breaking it: the whole request came back INCLUDING its last line
+        # terminator, so `inject_headers`/`inject_cookies` (which append `head + eol + line`)
+        # completed a blank line and wrote their header into the BODY. `inject_query` rewrites
+        # the request line in place, which is why the three disagreed on the same input.
+        return {chomp_eol(request), Bytes.empty, "\r\n"}
       end
       head = request[0, sep]
       body_start = sep + sep_w
       body = request[body_start, request.size - body_start]
       {head, body, eol}
+    end
+
+    # `bytes` without ONE trailing CRLF or LF. Byte-level and single: the head's own last line
+    # terminator is what `split` must not hand back, and eating more would delete a header.
+    private def self.chomp_eol(bytes : Bytes) : Bytes
+      return bytes if bytes.empty? || bytes[bytes.size - 1] != 0x0a_u8
+      drop = bytes.size >= 2 && bytes[bytes.size - 2] == 0x0d_u8 ? 2 : 1
+      bytes[0, bytes.size - drop]
     end
 
     # The named header's value (case-insensitive), scanning only the head lines.

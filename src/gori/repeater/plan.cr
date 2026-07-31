@@ -208,7 +208,17 @@ module Gori::Repeater
           "unsupported target scheme #{scheme.inspect}", scheme)
       end
 
-      options.sni.try { |s| refuse_unresolved(Env.unresolved(s)) }
+      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
+      # DECLARED binding because a send seam re-scans the same value with `Env.unbound` +
+      # `expand_bindings` later; this value is read ONCE, frozen into the plan, and never
+      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
+      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
+      # would move the dial target out from under a scope decision. Deferring bought nothing
+      # anyway: a binding value is a token observed from a response, never a hostname, a port
+      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
+      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
+      # the run was refused as out-of-scope, naming the wrong gate.
+      options.sni.try { |s| refuse_unresolved(Env.unresolved(s, deferred: nil)) }
       sni = options.sni.try { |s| Env.expand(s).presence }
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: options.http2?, sni: sni,
@@ -231,12 +241,12 @@ module Gori::Repeater
         # A pre-resolved origin skips `Env.expand` because its builder already ran it —
         # but an unresolved `$HOST` survives that expansion as the literal host, and this
         # early return is the one path where nothing else would ever look at it again.
-        refuse_unresolved(Env.unresolved(o.host))
+        refuse_unresolved(Env.unresolved(o.host, deferred: nil)) # see the SNI note above
         return {normalize_scheme(o.scheme), o.host, o.port}
       end
       raw = options.target || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      refuse_unresolved(Env.unresolved(raw))
+      refuse_unresolved(Env.unresolved(raw, deferred: nil)) # see the SNI note above
       url = Env.expand(raw)
       scheme, host, port = FlowRequest.parse_target(url)
       if host.empty? || port <= 0

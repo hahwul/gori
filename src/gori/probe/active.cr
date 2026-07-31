@@ -95,6 +95,8 @@ module Gori
                    Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout)
                  end
 
+        # Send-refusal reasons already reported for THIS flow (see the `result.ok?` branch).
+        refusals = Set(String).new
         RULES.each do |rule|
           next if disabled.includes?(rule.info.id)
           # ISOLATE each rule. Without this, one rule raising in plan/detections_all took down
@@ -108,7 +110,24 @@ module Gori
             plan = rule.plan(detail, opts)
             next unless plan
             result = sender.send(plan.request)
-            next unless result.ok?
+            unless result.ok?
+              # A refused or failed send is NOT an exception — `Fuzz::Sender` returns an
+              # errored Result for a sandbox block, an unbound binding, a connect failure —
+              # so the rescue below cannot see it and `next` alone made it invisible. With
+              # Sandbox on and nothing in scope, EVERY probe was refused and the operator
+              # read `0 issues` / MCP emitted no `scan_errors` key at all: indistinguishable
+              # from a clean target. `Miner::Engine#first_error` and the TUI analyzer's
+              # `emit_active_error` both name this; probe active is the one automated sweep
+              # that never got the #491 treatment.
+              #
+              # Deduped per flow per reason: 14 rules refused for the same cause would
+              # otherwise push 14 identical rows at the caller for one flow.
+              err = result.error
+              if err && refusals.add?(err)
+                on_error.try &.call("flow #{row.id}", Gori::Error.new(err))
+              end
+              next
+            end
             results = [result]
             plan.followups.each { |req| results << sender.send(req) }
             dets = rule.detections_all(plan, results, detail)

@@ -197,11 +197,20 @@ class Gori::Store
   # Keep only the newest `keep` flows (by id, which is monotonic), cascading to
   # their ws messages, FTS rows and orphaned h2 frames/connections — the same
   # cascade the retention sweep (`prune`) uses, but with an explicit keep count.
+  # The cutoff is the id of the OLDEST flow that survives, taken from the rows that actually
+  # exist rather than from `MAX(id) - keep`. That arithmetic is "keep the newest N" only on a
+  # gap-free id space, and gaps are ordinary: a `history delete`, an earlier compact, a
+  # sweep. With 10 flows of which the operator hand-deleted 6 mid-history ones (ids 1, 2, 9,
+  # 10 survive), `keep: 4` gave `cutoff = 6` and destroyed flows 1 and 2 — kept TWO of the
+  # four it was asked for, out of a database that held exactly four. Irreversible loss in the
+  # option whose whole promise is "keep only the newest `keep` flows".
   private def self.prune_old_flows(conn : DB::Connection, keep : Int32) : Nil
     return if keep <= 0
-    max_id = conn.query_one?("SELECT MAX(id) FROM flows", as: Int64?)
-    return unless max_id
-    cutoff = max_id - keep
+    cutoff = conn.query_one?(
+      "SELECT MIN(id) FROM (SELECT id FROM flows ORDER BY id DESC LIMIT ?)", keep, as: Int64?)
+    return unless cutoff
+    # Everything strictly below the oldest survivor goes; `<=` below is against `cutoff - 1`.
+    cutoff -= 1
     return if cutoff <= 0
     conn.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
     conn.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)

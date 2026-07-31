@@ -130,7 +130,7 @@ module Gori
       # so nothing here is a message boundary and the value goes in as it was observed.
       private def expand_messages(messages : Array(WsEngine::OutMsg)) : Array(WsEngine::OutMsg)
         messages.map do |m|
-          expanded = Gori::Env.expand_bindings(String.new(m.payload)).to_slice
+          expanded = Gori::Env.expand_bindings(String.new(m.payload), guard_boundary: false).to_slice
           expanded == m.payload ? m : WsEngine::OutMsg.new(m.opcode, expanded)
         end
       end

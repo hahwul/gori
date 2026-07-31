@@ -2687,20 +2687,29 @@ describe "MCP entity links" do
     end
   end
 
-  it "marks a link whose target vanished as stale instead of hiding it" do
+  # This example used to pin the OPPOSITE — that deleting a repeater leaves the link dangling,
+  # "because gone is not the same as never there". That reading only holds where the id cannot
+  # come back, which is true of flows and false of repeaters: `repeaters.id` has no
+  # AUTOINCREMENT and closing the NEWEST tab deletes at the top of the id space, so the
+  # counter resets and the very next tab takes the dead id. The link then resolved
+  # `stale: false` to an unrelated request — an issue's evidence pointer naming a different
+  # URL. A pointer that starts lying is worse than either honest answer, so this one cascades.
+  it "drops a repeater link when the repeater is deleted, because its id can be reused" do
     with_store do |store|
-      rid = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+      rid = store.insert_repeater("https://victim.test/a", "GET /a HTTP/1.1\r\nHost: victim.test\r\n\r\n".to_slice,
         false, true, nil, 0)
       iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
       tools = tools_for(store)
       ok_json(tools, "add_link", %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))
 
-      # Deleting a repeater does NOT cascade entity_links (unlike deleting a flow), so this
-      # is the path that actually leaves a dangling pointer.
       store.delete_repeater(rid)
-      listed = ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))
-      listed["total"].as_i.should eq(1) # still reported — "gone" is not the same as "never there"
-      listed["links"].as_a.first["stale"].as_bool.should be_true
+      ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
+
+      # The id comes straight back — which is exactly why the link could not be left behind.
+      again = store.insert_repeater("https://unrelated.test/z", "GET /z HTTP/1.1\r\nHost: unrelated.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      again.should eq(rid)
+      ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
     end
   end
 

@@ -240,6 +240,41 @@ describe Gori::Bindings do
       end
     end
 
+    # A DIAL TUPLE cannot defer: it is frozen into the plan, the ConnPool is built on it and
+    # the Layer-1 scope verdict was taken against it. Left deferred, `$SESSION` shipped as the
+    # literal host — every send failing DNS, and `Outbound.scope_url` asked about
+    # `https://$SESSION/a`, which no rule can match, so the run was refused as out-of-scope:
+    # a refusal naming the wrong gate.
+    it "refuses a declared binding in a dial target at plan-build" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        with_layer(b) do
+          # Bound or not makes no difference — the tuple is read once, before any send.
+          b.observe(response_result("HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n\r\n"), subject)
+          scope = Gori::Scope.load(store)
+          err = expect_raises(Gori::Repeater::PlanError) do
+            Gori::Repeater::Plan.build(
+              Gori::Repeater::PlanOptions.new(["GET /a HTTP/1.1\r\nHost: x\r\n\r\n".to_slice],
+                target: "https://$SESSION/a"), Gori::Outbound.cli(scope, false))
+          end
+          err.message.to_s.should contain("SESSION")
+          # The SNI is the same kind of field and takes the same refusal — with the SAME
+          # declared name, so this is the deferral being closed and not the pre-existing
+          # unknown-key refusal.
+          expect_raises(Gori::Repeater::PlanError, /SESSION/) do
+            Gori::Repeater::Plan.build(
+              Gori::Repeater::PlanOptions.new(["GET /a HTTP/1.1\r\nHost: x\r\n\r\n".to_slice],
+                target: "https://acme.test/a", sni: "$SESSION"), Gori::Outbound.cli(scope, false))
+          end
+          # …while a request BODY keeps its deferral: that one IS re-scanned at send.
+          Gori::Repeater::Plan.build(
+            Gori::Repeater::PlanOptions.new(["POST /a HTTP/1.1\r\nHost: x\r\n\r\nt=$SESSION".to_slice],
+              target: "https://acme.test/a"), Gori::Outbound.cli(scope, false)).should_not be_nil
+        end
+      end
+    end
+
     it "a value with no boundary byte is untouched by any of this" do
       with_store do |store|
         b = Gori::Bindings.load(store)

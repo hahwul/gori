@@ -164,9 +164,23 @@ module Gori
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).
+    #
+    # Cascades `entity_links`, unlike the deliberately-dangling FLOW case, and the difference
+    # is id REUSE. `repeaters.id` is `INTEGER PRIMARY KEY` without AUTOINCREMENT, and repeaters
+    # are routinely deleted at the TOP of the id space — closing the newest tab — which resets
+    # the counter immediately. So a link left pointing at repeater #1 read `#1 (gone)` for as
+    # long as it took to open one more tab, and then resolved, `stale: false`, to an
+    # UNRELATED request: an issue's evidence pointer confidently naming a different URL, in
+    # the TUI overlay, both exports and MCP `list_links`.
+    #
+    # Flows can afford to dangle because their ids never come back: both prune paths delete
+    # from the bottom (`WHERE id <= cutoff`), so `MAX(id)` always survives and the next insert
+    # is `max + 1`. "Gone" is genuinely more informative than absent THERE. Here it is a
+    # pointer that silently starts lying, which is worse than either.
     def delete_repeater(id : Int64) : Bool
       exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
+        c.exec("DELETE FROM entity_links WHERE ref_kind = 'repeater' AND ref_id = ?", id)
         c.exec("DELETE FROM repeaters WHERE id = ?", id)
         nil
       }

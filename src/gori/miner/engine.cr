@@ -391,10 +391,23 @@ module Gori::Miner
           @successful_sends += 1
           return raw
         end
-        return raw if attempts >= @config.retries
+        # A PERMANENT refusal is not worth a retry. All three siblings exempt the cap
+        # explicitly (`Fuzz::Engine#run_one`, `Discover`'s `send_with_retries`,
+        # `Sequencer`'s), and miner had no exemption at all — so once `--max-requests` tripped,
+        # every remaining bucket slept `retry_pause` and called a backend whose answer cannot
+        # change. A Layer-2 refusal is permanent for the same reason: the scope did not move
+        # between the two calls, and each attempt is charged to the cap a second time
+        # (`CappedBackend#send` increments AFTER the cap check but BEFORE the gate's).
+        return raw if permanent_refusal?(raw.error) || attempts >= @config.retries
         attempts += 1
         sleep @config.retry_pause
       end
+    end
+
+    # Refusals no retry can change: the request budget is spent, or the sandbox says no. Both
+    # are decided from state that does not move between two calls a `retry_pause` apart.
+    private def permanent_refusal?(err : String?) : Bool
+      err == Fuzz::CappedBackend::CAP_ERROR || err == Gori::Outbound::SANDBOX_SWEEP_ERROR
     end
 
     private def pace_interval : Time::Span?

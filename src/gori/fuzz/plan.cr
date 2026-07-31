@@ -204,7 +204,17 @@ module Gori::Fuzz
     private def self.resolve_origin(options : PlanOptions) : Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      refuse_unresolved(Env.unresolved(raw))
+      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
+      # DECLARED binding because a send seam re-scans the same value with `Env.unbound` +
+      # `expand_bindings` later; this value is read ONCE, frozen into the plan, and never
+      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
+      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
+      # would move the dial target out from under a scope decision. Deferring bought nothing
+      # anyway: a binding value is a token observed from a response, never a hostname, a port
+      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
+      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
+      # the run was refused as out-of-scope, naming the wrong gate.
+      refuse_unresolved(Env.unresolved(raw, deferred: nil))
       url = Env.expand(raw)
       scheme, host, port = Repeater::FlowRequest.parse_target(url)
       raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url) if host.empty?

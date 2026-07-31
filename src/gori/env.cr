@@ -181,25 +181,50 @@ module Gori
     # by what the substitution actually added keeps that offset exactly, while a request that
     # WAS in sync stays in sync. It is also why this sits inside `expand_bindings` rather than
     # at the five send seams: the seam that forgets is the one that desyncs.
+    # Only the DIGITS move. The field name's spelling, the colon and the optional whitespace
+    # on either side are copied through byte-exact, because on this codebase's requests they
+    # are the payload: `content-length:   2` with lower-case and extra OWS IS a
+    # header-parsing-discrepancy probe, and canonicalising it to `Content-Length: 2` silently
+    # sends a different test than the operator wrote.
+    #
+    # And with MORE THAN ONE Content-Length the shift is refused outright. A CL.CL request is
+    # a desync probe whose whole content is the RELATIONSHIP between the two numbers; moving
+    # one of them turns the operator's `2/99` into `10/99`, and there is no reading of "which
+    # one did they mean" that is not a guess. Refusing leaves their bytes alone — the request
+    # still goes out exactly as authored.
     private def self.shift_content_length(head : Bytes, delta : Int32) : Bytes
       text = String.new(head)
       eol = text.includes?("\r\n") ? "\r\n" : "\n"
       lines = text.split(eol)
-      idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
-      return head unless idx
-      current = lines[idx].split(':', 2)[1]?.try(&.strip.to_i64?)
+      hits = [] of Int32
+      lines.each_with_index { |l, i| hits << i if l.lstrip.downcase.starts_with?("content-length:") }
+      return head unless hits.size == 1
+      line = lines[hits[0]]
+      colon = line.index(':')
+      return head unless colon
+      value = line[(colon + 1)..]
+      lead = value.size - value.lstrip.size
+      trail = value.size - value.rstrip.size
+      current = value[lead, value.size - lead - trail].to_i64?
       return head unless current
-      lines[idx] = "Content-Length: #{{current + delta, 0_i64}.max}"
+      lines[hits[0]] = String.build do |b|
+        b << line[0, colon + 1] << value[0, lead] << {current + delta, 0_i64}.max
+        b << value[(value.size - trail)..] if trail > 0
+      end
       lines.join(eol).to_slice
     end
 
-    # The String form has no head/body split to take — every caller is a short operator field
-    # that lands on the request line or in a header (a `--target`, an SNI, a WS frame's text),
-    # so all of it is boundary-sensitive.
-    def self.expand_bindings(text : String) : String
+    # The String form has no head/body split to take, so the caller says whether what it holds
+    # is boundary-sensitive. A `--target` or an SNI lands on the request line or in a header
+    # and is (`guard_boundary: true`, the default); a WebSocket frame is ALL payload — there is
+    # no head in it for a CR/LF to forge a line into, and the proxy's own WS path agrees
+    # (`Rules#head_scoped?` maps `part: Ws` to false). Withholding there would kill exactly the
+    # multi-line values this feature allows: a PEM block, a SAML assertion, a formatted JSON
+    # sub-document.
+    def self.expand_bindings(text : String, guard_boundary : Bool = true) : String
       vals = binding_values
       return text if vals.empty?
-      expand(text, boundary_safe(vals), Settings.env_prefix)
+      expand(text, guard_boundary ? boundary_safe(vals) : vals, Settings.env_prefix)
     end
 
     # `vals` minus every value that would forge a message boundary where it is injected.
