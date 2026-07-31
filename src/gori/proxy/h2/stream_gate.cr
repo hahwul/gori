@@ -77,8 +77,12 @@ module Gori::Proxy::H2
   #   * every method that mutates gate state is named `*_locked`, runs under `@mutex`, and
   #     RETURNS the opposite direction's work as data (a list of stream ids) instead of doing
   #     it. No `*_locked` method may touch `@peer`.
-  #   * `run_cross` is the only place that touches `@peer`, and it runs after `@mutex` has been
-  #     released. `write_cross_rst` takes its own gate's lock and nothing else.
+  #   * `run_cross` and `refund_swallowed` are the only places that touch `@peer`, and both run
+  #     after `@mutex` has been released. `write_cross_rst` and `write_cross_window_update` take
+  #     their own gate's lock and nothing else.
+  #   * they are PAIRED: every path that can settle a slot must run both, or the cross-leg work
+  #     it produced sits until something else happens to trigger them. `accept` and `wait_for`
+  #     are the two such paths.
   #
   # `Interceptor#hold` is likewise never called under `@mutex` — that is the whole reason the
   # wait lives on its own fiber.
@@ -557,7 +561,14 @@ module Gori::Proxy::H2
     private def wait_for(item : Gori::Interceptor::Item, block : HeadRewrite::Block) : Nil
       spawn do
         decision = item.reply.receive
+        # The same PAIRING `accept` has, and it is not optional here: a DROP settles on THIS
+        # fiber (`resolve_locked` -> `drain_locked` -> `release_locked` -> `drop_locked`), which
+        # charges `@swallowed` for the parked DATA it discards. With only `accept` flushing, the
+        # credit sat until the client happened to send another frame — and a client whose
+        # remaining work is DATA has no window left to send one with, which is the wedge this
+        # refund exists to prevent, reached through the intercept path instead of the sandbox.
         run_cross(@mutex.synchronize { resolve_locked(item, block, decision) })
+        refund_swallowed
       end
     end
 

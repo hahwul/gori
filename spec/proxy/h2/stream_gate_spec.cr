@@ -490,6 +490,31 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # The sandbox path settles inside `accept`, so the two examples around this one cannot see
+  # the other way a slot gets charged: an operator DROP settles on the WAIT FIBER
+  # (`resolve_locked` -> `drain_locked` -> `release_locked` -> `drop_locked`). With only
+  # `accept` flushing, the credit sat there — and a client whose remaining work is DATA has no
+  # window left to send the frame that would flush it, which is exactly the wedge.
+  it "refunds the window for a dropped request's parked DATA, on the wait fiber" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/held")), Frame::END_HEADERS))
+      settle
+      rig.c2s.accept(data(1_u32, "A" * 700))
+      settle
+      # Nothing owed yet: the frames are parked behind a live hold, not discarded.
+      rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }.should be_empty
+
+      ic.pending.each { |it| ic.drop(it.id) }
+      settle
+
+      rig.to_origin.should be_empty # the body never reached the origin, so the credit is owed
+      wu = rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }
+      wu.map(&.stream_id).uniq.should eq([0_u32])
+      wu.sum { |f| IO::ByteFormat::BigEndian.decode(UInt32, f.payload) }.should eq(700_u32)
+    end
+  end
+
   it "refunds nothing when the DATA was actually forwarded" do
     with_ic(intercept: false) do |ic, scope|
       scope.add("include", "string", "https://api.example.com/api/")
@@ -723,7 +748,11 @@ describe Gori::Proxy::H2::StreamGate do
       # Fail-open must not overrule a decision already in flight — forwarding a request the
       # operator dropped is the one outcome worse than holding it.
       rig.to_origin.should be_empty
-      rig.to_client.map(&.frame_type).should eq([Frame::Type::RstStream])
+      # RST_STREAM is what this example is about. A WINDOW_UPDATE rides alongside it now
+      # (the dropped stream's ~1 MiB of parked DATA is credit the client is owed back), so
+      # assert the RST rather than the exact frame list.
+      rig.to_client.map(&.frame_type).should contain(Frame::Type::RstStream)
+      rig.to_client.count { |f| f.frame_type == Frame::Type::RstStream }.should eq(1)
     end
   end
 
