@@ -456,6 +456,10 @@ private class FakeContext < ExecContext
     @calls << :sitemap_repeater
   end
 
+  def sitemap_open_flow : Nil
+    @calls << :sitemap_open_flow
+  end
+
   def sitemap_mark_toggle : Nil
     @calls << :sitemap_mark_toggle
   end

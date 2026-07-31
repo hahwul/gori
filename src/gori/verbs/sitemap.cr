@@ -93,6 +93,17 @@ module Gori
         "sitemap.discover", "Discover here", "Spider + brute-force the selected host or path subtree",
         Verb::Scope::Sitemap, [Verb::Chord.new("d")], mnemonic: 'd') { |ctx| ctx.sitemap_discover; nil }
 
+      # `o` — read the bytes behind the selected endpoint: resolve its representative captured
+      # flow and open History's detail on it. Same chord and same shape as the Issues tab's
+      # `issue.open-flow` (verbs/issues.cr) and Probe's `probe.open-flow` — "o opens the
+      # evidence" is now one gesture everywhere a list row stands in for a flow.
+      #
+      # Cursor-only even with marks set (SITEMAP_CURSOR_ONLY in runner.cr): a detail overlay
+      # shows one flow, so there is nothing for a batch to mean here.
+      r.register Verb::Definition.new(
+        "sitemap.open-flow", "Open flow", "Open the selected endpoint's captured request/response in History",
+        Verb::Scope::Sitemap, [Verb::Chord.new("o")], mnemonic: 'o') { |ctx| ctx.sitemap_open_flow; nil }
+
       # `r` — send the selected endpoint (or every marked one) to Repeater, resolving a
       # representative captured flow per path.
       r.register Verb::Definition.new(

@@ -497,6 +497,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:sitemap_repeater)
   end
 
+  def sitemap_open_flow : Nil
+    rec(:sitemap_open_flow)
+  end
+
   def sitemap_mark_toggle : Nil
     rec(:sitemap_mark_toggle)
   end

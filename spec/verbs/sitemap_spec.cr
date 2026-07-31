@@ -29,7 +29,28 @@ describe "Gori::Verbs.register_sitemap" do
      "sitemap.scope-toggle"    => :scope_toggle_lens,
      "sitemap.discover"        => :sitemap_discover,
      "sitemap.repeater"        => :sitemap_repeater,
+     "sitemap.open-flow"       => :sitemap_open_flow,
     }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
+  end
+
+  # #539: the action existed nowhere — no chord, no registry entry — so the space menu could
+  # not reach the bytes behind a tree node. Registering it is what wires BOTH surfaces.
+  it "opens the selected endpoint's flow on `o`, and shows it in the action menu" do
+    verb = r["sitemap.open-flow"]
+    verb.chords.should eq([Gori::Verb::Chord.new("o")])
+    verb.hidden?.should be_false # else it reaches neither the space menu nor Help
+    verb.menu_key.should eq('o') # what for_scope+SpaceMenu need to render a row
+    # Same chord as the two siblings that make the same jump, so `o` means one thing.
+    r["issue.open-flow"].chords.should eq([Gori::Verb::Chord.new("o")])
+    r["probe.open-flow"].chords.should eq([Gori::Verb::Chord.new("o")])
+  end
+
+  # The space menu filters on available? while validate_menu_keys! does not, so an entry can
+  # pass boot validation and still never render. Assert the gate the MENU actually applies.
+  it "stays available in the Sitemap scope with no marks set (the space menu's own gate)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :target
+    r["sitemap.open-flow"].available?(ctx).should be_true
   end
 
   it "gives the scope toggle an explicit 's' menu key (its only chord is ⇧S)" do

@@ -63,6 +63,36 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
+  # Open the bytes behind the cursor row. CROSS-TAB mediator: resolves the tree node through
+  # the store, then drives the History controller + detail overlay — exactly the hop
+  # issue_open_flow (runner/issues.cr) makes from an issue to its evidence.
+  #
+  # Deliberately NOT marked-set aware, unlike sitemap_repeater: a detail overlay shows one
+  # flow, so the cursor row is the only thing it could mean. It uses the same
+  # `selected_endpoint` resolve, so `o` and `r` never disagree about which path is under
+  # the cursor — including a `{uuid}` fold, which both resolve to a real descendant.
+  def sitemap_open_flow : Nil
+    ep = sitemap_controller.view.selected_endpoint
+    unless ep
+      @toast = "select an endpoint to open"
+      return
+    end
+    unless id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+      @toast = "no captured request for this path — capture it, or use Discover"
+      return
+    end
+    if history_controller.view.open_detail_id(id, @session.store)
+      @active_tab = :history
+      @focus = :body
+      @overlay = OverlayKind::Detail
+    else
+      # The resolve above just saw this id, so only a prune racing between the two reads
+      # lands here — say so rather than repeating "no captured request", which would read
+      # as "this path was never captured".
+      @toast = "that request was pruned since the tree was built"
+    end
+  end
+
   # Batch over the marks: one Repeater sub-tab per marked endpoint, capped (BATCH_SUBTAB_CAP)
   # like History's ^R. Nothing is SENT here — a Repeater session only fires on ^R — so this
   # just confirms the sub-tab count.
