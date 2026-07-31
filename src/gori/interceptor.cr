@@ -383,11 +383,23 @@ module Gori
       @mutex.synchronize { @items.size }
     end
 
-    def forward(id : Int64, bytes : Bytes? = nil) : Nil
+    # True when THIS call is the one that settled the item. False means somebody else got
+    # there first — the operator's own forward or drop, `forward_all`, the #123 reaper — and
+    # their Decision is the one on the channel.
+    #
+    # The answer matters to the involuntary releases (`H2::StreamGate#fail_one_open`,
+    # `WS::MessageGate#fail_open_locked`). Those probe `get(id)` first to avoid overruling a
+    # decision already in flight, but a probe is not a claim: an operator DROP landing in the
+    # window between the probe and this call left the gate believing it had forwarded, so it
+    # marked the slot ready with no item, and the wait fiber's `slot.item == item` guard then
+    # rejected the real Drop — a request the operator explicitly dropped reached the origin.
+    # Returning the outcome makes the claim atomic without a second Interceptor entry point.
+    def forward(id : Int64, bytes : Bytes? = nil) : Bool
       item = @mutex.synchronize { @items.delete(id) }
-      return unless item
+      return false unless item
       @revision.add(1)
       item.reply.send(Decision.new(Action::Forward, bytes || item.raw))
+      true
     end
 
     def drop(id : Int64) : Nil

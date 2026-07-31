@@ -357,10 +357,18 @@ module Gori::Proxy::H2
       # the slot open here would DISCARD the decision, and forwarding a request the operator
       # dropped is the one outcome worse than holding it.
       return if item && @interceptor.get(item.id).nil?
-      target.ready = true
-      return unless item
+      unless item
+        target.ready = true
+        return
+      end
+      # The probe above is not a claim: an operator DROP landing between it and here would make
+      # `forward` a no-op while this slot went ready with no item, and the wait fiber's
+      # `slot.item == item` guard would then reject the real Drop — releasing a request the
+      # operator dropped. `forward` reports whether it was the one that settled the item, so a
+      # lost race leaves the slot exactly as it was and its wait fiber owns the outcome.
+      return unless @interceptor.forward(item.id)
       target.item = nil
-      @interceptor.forward(item.id)
+      target.ready = true
     end
 
     # Every slot that has to move for `slot` to be released, in release order. In the request
@@ -681,7 +689,31 @@ module Gori::Proxy::H2
     # a frame: these bytes never went on the wire.
     private def project(block : HeadRewrite::Block) : Nil
       last = block.frames.size - 1
-      block.frames.each_with_index { |f, i| @assembler.feed(@direction, f, i == last ? block.pre : nil) }
+      block.frames.each_with_index { |f, i| @assembler.feed(@direction, projected(f), i == last ? block.pre : nil) }
+    end
+
+    # The frame as the PROJECTION should see it. In the RESPONSE direction END_STREAM is
+    # cleared, and that is the whole of this method.
+    #
+    # Every caller of `project` is a message the client did NOT receive — a sandbox refusal,
+    # an operator drop, a peer RST while held, a teardown with the hold still out. A response
+    # head carrying END_STREAM (a 204, a 304, a reply to HEAD, a bodiless 3xx — everyday
+    # traffic) COMPLETES the exchange inside `feed_locked`, which then deletes the stream, so
+    # the `drop_stream` abort marker on the very next line found nothing and History recorded
+    # the exchange as Complete and delivered. The operator's drop was invisible in the record.
+    #
+    # `drop_locked` already makes exactly this call for the parked DATA and says why ("feeding
+    # its DATA would let the assembler emit the exchange COMPLETE and delete the stream"); the
+    # HEAD needed it for the same reason and did not have it. The raw frame log is untouched —
+    # `write` is what logs a frame and nothing was written here — so P7 is not in question:
+    # this is gori's model of an exchange that did not finish, and it did not finish.
+    #
+    # REQUEST direction is left alone. There END_STREAM ends the request, not the exchange,
+    # so the stream stays open for `drop_stream` to mark, and clearing it would lose the fact
+    # that the request had no body.
+    private def projected(f : Frame::Header) : Frame::Header
+      return f if @ordered || !f.end_stream?
+      Frame::Header.new(f.type, f.flags & ~Frame::END_STREAM, f.stream_id, f.payload, nil)
     end
 
     private def rst_frame(stream_id : UInt32) : Frame::Header

@@ -135,6 +135,14 @@ module Gori::Proxy::WS
         end
         @queue << slot
         check_ceiling
+        # A slot born READY at the head of the queue has nobody to release it otherwise:
+        # `drain_locked` is reachable only from `resolve_locked` (which needs an Item) and
+        # from `fail_open_locked`. That is the `item.nil?` branch above — `holds?` said yes
+        # and `enqueue_ws` then returned nil, which the comment there already names — and it
+        # stalled the direction outright: nothing written, no capture row, every later
+        # message queued behind it, and `close` discards an item-less slot without writing
+        # it, so the bytes were lost for good.
+        drain_locked
       end
     end
 
@@ -300,10 +308,16 @@ module Gori::Proxy::WS
         # the decision, and forwarding a message the operator dropped is worse than waiting a
         # scheduler turn for it (`H2::StreamGate#fail_one_open`, same reasoning).
         next if item && @interceptor.get(item.id).nil?
-        slot.ready = true
-        next unless item
+        unless item
+          slot.ready = true
+          next
+        end
+        # `H2::StreamGate#fail_one_open`'s claim, and for the same reason: the probe above is
+        # not atomic, so a decision landing in the window would otherwise be discarded by the
+        # wait fiber's `slot.item == item` guard while this loop released the message anyway.
+        next unless @interceptor.forward(item.id)
         slot.item = nil
-        @interceptor.forward(item.id)
+        slot.ready = true
       end
       drain_locked
     end
