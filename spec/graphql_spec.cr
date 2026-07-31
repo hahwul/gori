@@ -202,17 +202,59 @@ describe Gori::Graphql do
     end
   end
 
-  describe ".recompose_query" do
-    it "preserves unmanaged params and appends the edited query (no operationName pair when absent)" do
-      out = GQL.recompose_query("query=%7Bold%7D&apiKey=secret&operationName=Old", "{ new }")
-      out.should eq("apiKey=secret&query=%7B+new+%7D")
-      out.includes?("operationName").should be_false
+  describe ".parse_display / operationName sentinel" do
+    # `# operationName:` is also a valid GraphQL comment. The `# variables` sentinel already
+    # gets disambiguated; this one did not, so a document whose FIRST line was such a comment
+    # had that line deleted and its text promoted into a real operationName — changing which
+    # operation the server runs.
+    it "does not promote a leading GraphQL comment into a real operationName" do
+      text = "# operationName: NotReallyTheName\nquery Real { a }"
+      op, query, _ = GQL.parse_display(text)
+      op.should be_nil
+      query.should eq(text)
     end
 
-    it "minifies the variables and appends operationName when present" do
+    it "still lifts the genuine header, which display always follows with a blank line" do
+      op, query, _ = GQL.parse_display(GQL.display(GQL::Op.new("Hero", "query Hero { a }", nil)))
+      op.should eq("Hero")
+      query.should eq("query Hero { a }")
+    end
+
+    it "treats a deleted header as an explicit unset rather than falling back to the base" do
+      out = GQL.recompose(%({"query":"query Hero { a }","operationName":"Hero"}), "query Hero { a }")
+      out.should eq(%({"query":"query Hero { a }"}))
+    end
+
+    it "keeps other base fields (a persisted-query extensions block) across a recompose" do
+      base = %({"query":"{ a }","operationName":"Op","extensions":{"persistedQuery":{"version":1}}})
+      out = GQL.recompose(base, GQL.display(GQL::Op.new("Op", "{ b }", nil)))
+      out.should contain(%("extensions":{"persistedQuery":{"version":1}}))
+      out.should contain(%("query":"{ b }"))
+    end
+  end
+
+  describe ".recompose_query" do
+    # A managed param is replaced WHERE IT STOOD. Dropping and re-appending it reordered the
+    # query string — `page=2&query=…&sig=abc` came back as `page=2&sig=abc&query=…` — which is
+    # a request the operator did not write and which breaks any signature or cache key computed
+    # over the canonical query string. That is a real target shape for this tool, so position
+    # is part of what "edit the query" must preserve.
+    it "replaces the edited query in place and keeps unmanaged params where they were" do
+      out = GQL.recompose_query("query=%7Bold%7D&apiKey=secret&operationName=Old", "{ new }")
+      out.should eq("query=%7B+new+%7D&apiKey=secret")
+      out.includes?("operationName").should be_false # the edit removed it, so it is gone
+    end
+
+    it "keeps a managed param's slot even when other params surround it" do
+      decoded = GQL.display(GQL::Op.new("Op", "{ new }", nil))
+      out = GQL.recompose_query("page=2&query=old&sig=abc", decoded)
+      out.should eq("page=2&query=%7B+new+%7D&sig=abc&operationName=Op")
+    end
+
+    it "minifies the variables and appends params the original did not carry" do
       decoded = GQL.display(GQL::Op.new("Op", "{ new }", %({"x": 1})))
       out = GQL.recompose_query("query=old&apiKey=x", decoded)
-      out.should eq("apiKey=x&query=%7B+new+%7D&operationName=Op&variables=%7B%22x%22%3A1%7D")
+      out.should eq("query=%7B+new+%7D&apiKey=x&operationName=Op&variables=%7B%22x%22%3A1%7D")
     end
   end
 

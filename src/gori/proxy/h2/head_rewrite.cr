@@ -216,9 +216,16 @@ module Gori::Proxy::H2
       # by 64 MiB of CONTINUATION. With the sandbox off `undecodable` is a no-op and this
       # stays the verbatim forward it has always been.
       if @block_bytes > Assembler::MAX_HEADER_BLOCK
-        @deferrer.try(&.undecodable(@block_stream))
-        @buf.each { |f| yield f, nil }
+        # Drain the buffer into a local and `reset` BEFORE the deferrer is told, because
+        # `undecodable` RAISES to end the connection when the sandbox is on. The raise unwinds
+        # through `pump_gated`'s `ensure gate.close`, and `close` drains this same buffer
+        # straight to `@dst` (`stream_gate.cr`) — so leaving the frames here forwarded the very
+        # block the gate had just refused to let past, unexamined, while the WARN said the
+        # opposite. Empty buffer, nothing for `close` to write.
+        frames, stream = @buf.dup, @block_stream
         reset
+        @deferrer.try(&.undecodable(stream))
+        frames.each { |f| yield f, nil }
         return
       end
       return unless frame.end_headers?
@@ -297,8 +304,14 @@ module Gori::Proxy::H2
     # What is new is telling the `Deferrer` first: it may refuse a connection it has gone blind
     # on, which is the only honest answer for a blocking gate. See `Deferrer#undecodable`.
     private def unreadable(first : Frame::Header) : {Array(Frame::Header), Assembler::HeadBlock}
+      # Same ordering rule as the ceiling branch: take the frames and `reset` before telling the
+      # deferrer, since `undecodable` raises with the sandbox on and `StreamGate#close` would
+      # otherwise write this still-buffered block to the peer. `accept`'s trailing `reset` on
+      # the normal return is then a no-op.
+      frames = @buf.dup
+      reset
       @deferrer.try(&.undecodable(first.stream_id))
-      {@buf.dup, Assembler::HeadBlock.new(nil)}
+      {frames, Assembler::HeadBlock.new(nil)}
     end
 
     # This block's h1-equivalent head text, or nil when the block is not a message head.

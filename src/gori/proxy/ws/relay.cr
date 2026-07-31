@@ -160,16 +160,23 @@ module Gori::Proxy::WS
       clean_close = false
       loop do
         h = WS.read_header(src) || break
-        message_opcode = h.opcode if h.data? && h.opcode != OP_CONT
+        # A new data message arriving while the previous one never sent its FIN is an RFC 6455
+        # §5.4 violation. `capture_frame` only emits on FIN, so without this the two messages
+        # were concatenated into ONE History row — `TEXT fin=0 "AAA"` then `TEXT fin=1 "BBB"`
+        # surfaced as `AAABBB` while the origin correctly received two frames. `AssemblingPump`
+        # was given this reset explicitly (`start_message`) and the oversized branch below has
+        # it too; the default pump, which every socket with no rule and no hold runs, did not —
+        # so the two pumps disagreed about identical bytes. Capture only: the wire is untouched.
+        if h.data? && h.opcode != OP_CONT
+          assembling = emit_pending(assembling, direction, flow_id, sink, message_opcode)
+          message_opcode = h.opcode
+        end
 
         if h.len > WS::MAX_FRAME
           # Flush any buffered leading fragments of this message before the oversized-frame
           # marker, so captured prefix bytes aren't dropped and a later small FIN fragment
           # can't be surfaced as if it were the whole message.
-          if h.data? && assembling.size > 0
-            sink.on_ws_message(flow_id, direction, message_opcode.to_i, assembling.to_slice.dup)
-            assembling = assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear)
-          end
+          assembling = emit_pending(assembling, direction, flow_id, sink, message_opcode) if h.data?
           break unless forward_oversized_frame(src, dst, h, direction, flow_id, sink, message_opcode, scratch)
           if h.close? # an oversized CLOSE still terminates the tunnel, like a normal one
             clean_close = true
@@ -190,6 +197,30 @@ module Gori::Proxy::WS
       clean_close
     rescue
       false # peer closed / reset: this direction ends
+    ensure
+      # An unterminated fragment when the direction ends. gori already put those bytes on the
+      # wire frame by frame, so dropping them here made History disagree with what gori itself
+      # relayed — `TEXT fin=0 "UNTERMINATED"` then a CLOSE left no row at all. Emitted on both
+      # the clean and the reset path, which is why this is an `ensure` and not a tail statement.
+      # `AssemblingPump#run`'s own `ensure` flushes its withheld half for the same reason.
+      # `ensure` types every body-assigned local as nilable (the raise could precede the
+      # assignment), so bind it before asking.
+      if buf = assembling
+        emit_pending(buf, direction, flow_id, sink, message_opcode || OP_TEXT) rescue nil
+      end
+    end
+
+    # Surface whatever fragments are buffered as ONE message and hand back a cleared buffer.
+    # A no-op when nothing is buffered. Three callers need exactly this: a new data message
+    # arriving before the previous one FIN'd (RFC 6455 §5.4), an oversized frame that ends the
+    # buffered prefix, and teardown with an unterminated fragment still held. They had two
+    # copies and one omission between them, which is how the merged-row and dropped-bytes bugs
+    # got in; `AssemblingPump` has the same three moments and its own equivalents.
+    private def self.emit_pending(assembling : IO::Memory, direction : String, flow_id : Int64,
+                                  sink : FlowSink, message_opcode : UInt8) : IO::Memory
+      return assembling if assembling.size == 0
+      sink.on_ws_message(flow_id, direction, message_opcode.to_i, assembling.to_slice.dup)
+      assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear)
     end
 
     # The assembling pump for ONE direction (#500). Only reached when a `part: ws` rule can

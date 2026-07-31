@@ -225,6 +225,60 @@ describe Gori::Proxy::WS do
   end
 
   describe Gori::Proxy::WS::Relay do
+    # `capture_frame` only emits a message on FIN, so the default (byte-exact) pump had no
+    # per-message boundary of its own: a second data message arriving before the first FIN'd
+    # was concatenated into the first, and an unterminated fragment at teardown was dropped
+    # entirely. `AssemblingPump` was given both (`start_message` / its `run` ensure) and the
+    # oversized branch has the first, so the two pumps disagreed about identical bytes —
+    # which this file already treats as a bug for the oversized case. Capture only; the wire
+    # is byte-exact either way, and both examples assert that too.
+    it "does not merge a second data message into one that never sent its FIN" do
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+      cs_w.close # the client sends nothing; EOF so that direction's pump ends
+
+      frames = Bytes[0x01, 0x03, 0x41, 0x41, 0x41] + # TEXT fin=0 "AAA" — §5.4 violation follows
+               Bytes[0x81, 0x03, 0x42, 0x42, 0x42]   # TEXT fin=1 "BBB"
+      ss_w.write(frames); ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink)
+
+      relayed = Bytes.new(frames.size)
+      tc_r.read_fully(relayed)
+      relayed.should eq(frames) # the wire keeps the peer's own framing (P7)
+      sink.messages.should eq([{"in", 1, "AAA"}, {"in", 1, "BBB"}])
+      _ = ts_r
+    end
+
+    it "captures an unterminated fragment left when the direction ends" do
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+      cs_w.close # the client sends nothing; EOF so that direction's pump ends
+
+      frames = Bytes[0x81, 0x06, 0x4D, 0x41, 0x52, 0x4B, 0x45, 0x52] + # TEXT fin=1 "MARKER"
+               Bytes[0x01, 0x06, 0x55, 0x4E, 0x54, 0x45, 0x52, 0x4D]   # TEXT fin=0 "UNTERM", no FIN
+      ss_w.write(frames); ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink)
+
+      relayed = Bytes.new(frames.size)
+      tc_r.read_fully(relayed)
+      relayed.should eq(frames) # gori put all 16 bytes on the wire...
+      # ...so History must not be missing the 6 it relayed itself.
+      sink.messages.should eq([{"in", 1, "MARKER"}, {"in", 1, "UNTERM"}])
+      _ = ts_r
+    end
+
     it "relays frames both directions byte-exact and captures messages" do
       cs_r, cs_w = IO.pipe # client → server
       ts_r, ts_w = IO.pipe # relay → server

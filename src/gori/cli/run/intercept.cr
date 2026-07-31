@@ -178,7 +178,13 @@ module Gori
               scheme = CLI::Output.term_safe(r.scheme)
               host = CLI::Output.term_safe(r.host)
               target = CLI::Output.term_safe(r.target)
-              puts "##{r.item_id}  [#{r.kind}]  #{method} #{scheme}://#{host}#{target}  (#{body.size}b body)"
+              # A forward-proxy request is held in ABSOLUTE form (`http://host:port/path` —
+              # the wire truth, P7), so prefixing scheme+host doubled it into
+              # `http://127.0.0.1http://127.0.0.1:19160/ws`. `FlowRow.absolute_form?` is the
+              # canonical test for exactly this and its own doc comment names this failure;
+              # this call site simply was not wired to it.
+              url = Store::FlowRow.absolute_form?(target) ? target : "#{scheme}://#{host}#{target}"
+              puts "##{r.item_id}  [#{r.kind}]  #{method} #{url}  (#{body.size}b body)"
             end
           end
         end

@@ -43,9 +43,9 @@ module Gori::Proxy::H2
       method = pseudo(fields, ":method") || "GET"
       path = pseudo(fields, ":path") || "/"
       String.build do |io|
-        io << method << ' ' << path << " HTTP/2\r\n"
-        io << "Host: " << authority << "\r\n" if !authority.empty? && !explicit_host?(fields)
-        regular(fields) { |n, v| io << n << ": " << v << "\r\n" }
+        io << line_safe(method) << ' ' << line_safe(path) << " HTTP/2\r\n"
+        io << "Host: " << line_safe(authority) << "\r\n" if !authority.empty? && !explicit_host?(fields)
+        regular(fields) { |n, v| io << line_safe(n) << ": " << line_safe(v) << "\r\n" }
         io << "\r\n"
       end.to_slice
     end
@@ -58,9 +58,29 @@ module Gori::Proxy::H2
       status = (pseudo(fields, ":status") || "0").to_i? || 0
       String.build do |io|
         io << "HTTP/2 " << status << "\r\n"
-        regular(fields) { |n, v| io << n << ": " << v << "\r\n" }
+        regular(fields) { |n, v| io << line_safe(n) << ": " << line_safe(v) << "\r\n" }
         io << "\r\n"
       end.to_slice
+    end
+
+    # Keep the synthesis INJECTIVE at the line level: one h2 field must never become two text
+    # lines (#517). `h1_faithful?` is that precondition for `parse_*`/`rewrite`/`encode_edited`,
+    # which refuse outright — but `Assembler` calls `synth_*` DIRECTLY to build the stored head,
+    # and had no such guard, so a peer field whose value carried a CRLF was projected as two
+    # well-formed headers into everything derived from the head: `gori run show`, MCP get_flow,
+    # QL `header:`, the Rewriter preview, and the bytes the Repeater/fuzz/mine editors replay
+    # from. Response-direction is the dangerous one — the value is the ORIGIN'S, so it is a
+    # header-injection primitive handed to whatever replays the projection.
+    #
+    # Refusing is not available here (a captured flow still has to render), so the CR/LF is
+    # escaped instead: the field stays one line, the operator SEES the injected bytes, and the
+    # text cannot be re-read as two fields. This is a projection, not the wire — the raw frames
+    # remain the truth (P7), and `synth_response` already normalizes `:status` the same way.
+    # Every path that could put these bytes back on an h2 wire refuses them before reaching
+    # here, so nothing that was byte-exact stops being byte-exact.
+    private def line_safe(s : String) : String
+      return s unless line_broken?(s)
+      s.gsub('\r', "\\r").gsub('\n', "\\n")
     end
 
     # Invert `synth_request`. `original` supplies everything the h1 text cannot carry.

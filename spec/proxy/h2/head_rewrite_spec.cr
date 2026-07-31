@@ -41,6 +41,36 @@ private class SubRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# The sandbox's BLOCKING gate: `StreamGate#undecodable` raises to end the connection when the
+# sandbox is on and a head arrives with no URL to scope-test.
+private class BlockingDeferrer
+  include Gori::Proxy::H2::HeadRewrite::Deferrer
+  getter told = [] of UInt32
+
+  def defer?(block : Gori::Proxy::H2::HeadRewrite::Block) : Bool
+    false
+  end
+
+  def undecodable(stream_id : UInt32) : Nil
+    @told << stream_id
+    raise Gori::Error.new("h2 sandbox: undecodable header block on stream #{stream_id}")
+  end
+end
+
+# The sandbox-OFF disposition: told, but nothing is refused, so the frames go out verbatim (P7).
+private class QuietDeferrer
+  include Gori::Proxy::H2::HeadRewrite::Deferrer
+  getter told = [] of UInt32
+
+  def defer?(block : Gori::Proxy::H2::HeadRewrite::Block) : Bool
+    false
+  end
+
+  def undecodable(stream_id : UInt32) : Nil
+    @told << stream_id
+  end
+end
+
 private def pipeline(rewriter : Gori::Proxy::HeadRewriter, direction = "out",
                      sink = RecSink.new) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler, RecSink}
   assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
@@ -260,6 +290,62 @@ describe Gori::Proxy::H2::HeadRewrite do
     sink.requests.size.should eq(2)
     sink.requests[1].target.should eq("/second")
     String.new(sink.requests[1].head).should contain("x-a: 0123456789abcdef")
+  end
+
+  # The sandbox gate is BLOCKING, so `undecodable` raises — and the raise unwinds through
+  # `Relay#pump_gated`'s `ensure gate.close`, which drains this very buffer to the peer. If the
+  # frames are still buffered when the deferrer is told, the refusal forwards the exact block it
+  # refused: an unexamined, out-of-scope request reaching the origin while the WARN says the
+  # connection was closed instead. Measured at the wire before the fix — a PADDED head with a
+  # bad pad length arrived at the origin complete (END_STREAM|END_HEADERS), and a CONTINUATION
+  # flood past the 1 MiB ceiling delivered ~1.06 MB. Both assert on `drain` because `close` is
+  # what writes them.
+  describe "an undecodable block the sandbox refuses" do
+    # PADDED with a pad length past the end of the payload: RFC 9113 §6.1, the block cannot be
+    # located, so `finish` takes the `unreadable` path.
+    bad_pad = Bytes.new(20) { |i| i == 0 ? 250_u8 : 0_u8 }
+
+    it "leaves nothing buffered, so connection teardown cannot forward what was refused" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      pipe.deferrer = deferrer = BlockingDeferrer.new
+
+      expect_raises(Gori::Error, /undecodable/) do
+        push(pipe, assembler, headers(1_u32, bad_pad, Frame::END_HEADERS | Frame::END_STREAM | Frame::PADDED))
+      end
+
+      deferrer.told.should eq([1_u32])
+      drained = [] of Frame::Header
+      pipe.drain { |f, _| drained << f }
+      drained.should be_empty
+    end
+
+    it "leaves nothing buffered when the block passes the 1 MiB ceiling either" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      pipe.deferrer = deferrer = BlockingDeferrer.new
+      over = Bytes.new(Gori::Proxy::H2::Assembler::MAX_HEADER_BLOCK + 1)
+
+      expect_raises(Gori::Error, /undecodable/) do
+        push(pipe, assembler, headers(3_u32, over, 0_u8)) # no END_HEADERS: a CONTINUATION flood
+      end
+
+      deferrer.told.should eq([3_u32])
+      drained = [] of Frame::Header
+      pipe.drain { |f, _| drained << f }
+      drained.should be_empty
+    end
+
+    it "still forwards it verbatim when the sandbox is OFF (P7 — the raw log is the truth)" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      pipe.deferrer = deferrer = QuietDeferrer.new
+
+      sent = push(pipe, assembler, headers(1_u32, bad_pad, Frame::END_HEADERS | Frame::END_STREAM | Frame::PADDED))
+
+      sent.map(&.payload).should eq([bad_pad]) # byte-exact, as it arrived
+      deferrer.told.should eq([1_u32])         # told either way; only the disposition differs
+      drained = [] of Frame::Header
+      pipe.drain { |f, _| drained << f }
+      drained.should be_empty # and not left behind to be written a second time
+    end
   end
 
   # #517. A field value carrying the head's own delimiter has no h1-text form, and the bridge

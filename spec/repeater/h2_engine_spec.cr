@@ -6,6 +6,20 @@ private alias HPACK = Gori::Proxy::H2::HPACK
 
 # A minimal cleartext-h2 origin: reads the preface + request, records the decoded
 # request line and body, then replies SETTINGS + HEADERS(:status) + DATA.
+# An origin that accepts the TCP connection and nothing more. The refusal examples below never
+# write a request, so the h2-speaking origin's `read_preface` would hit EOF and print an
+# unhandled-spawn backtrace into the spec output — noise that reads like a failure. All these
+# examples need is a port `H2Engine.open` can connect to.
+private def start_quiet_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    conn = origin.accept?
+    conn.try(&.close) rescue nil
+  end
+  port
+end
+
 private def start_h2_origin(status : Int32, body : String, seen : Channel(String)) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
@@ -201,6 +215,62 @@ describe Gori::Repeater::H2Engine do
     String.new(result.head).should contain("server: gori-test")
     String.new(result.body.not_nil!).should eq("replayed!")
     result.incomplete?.should be_false # END_STREAM was seen — a complete response
+  end
+
+  # The Fuzzer marks a position inside a header VALUE. `parse_request` rebuilds the h2 fields
+  # from the h1 text by splitting on '\n', so a payload carrying a bare LF split the field and
+  # the orphan tail hit a `next unless colon` — `x-fuzz: be\naf` went out as `x-fuzz: be` while
+  # the result row was still labelled with the whole payload. The operator then reads a status
+  # measured against a request gori never sent. Measured at the wire against an HPACK-decoding
+  # origin before the fix. h1 carries these bytes verbatim (P7); h2 has no encoding for them,
+  # so refusing is the only answer that does not lie.
+  it "refuses a header value carrying a bare LF rather than silently dropping the tail" do
+    port = start_quiet_origin
+
+    request = "GET /f HTTP/2\r\nx-fuzz: be\naf\r\n\r\n".to_slice
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1",
+      port: port, verify_upstream: false)
+
+    result.ok?.should be_false
+    result.error.not_nil!.should contain("not a header field")
+    result.error.not_nil!.should contain("HTTP/2")
+  end
+
+  it "refuses a lone CR inside a header value (rstrip only ever removed a trailing one)" do
+    port = start_quiet_origin
+
+    request = "GET /f HTTP/2\r\nx-fuzz: x\ry\r\n\r\n".to_slice
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1",
+      port: port, verify_upstream: false)
+
+    result.ok?.should be_false
+    result.error.not_nil!.should contain("CR, LF or NUL")
+  end
+
+  it "refuses a NUL inside a header value" do
+    port = start_quiet_origin
+
+    request = "GET /f HTTP/2\r\nx-fuzz: nul\u0000byte\r\n\r\n".to_slice
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1",
+      port: port, verify_upstream: false)
+
+    result.ok?.should be_false
+    result.error.not_nil!.should contain("CR, LF or NUL")
+  end
+
+  # The deliberate non-case: a CRLF that yields two WELL-FORMED fields is indistinguishable
+  # from the operator typing two headers, and the h1 engine puts two headers on the wire for
+  # it too. Refusing that would break the smuggling primitive P7 exists to preserve.
+  it "still sends a CRLF that parses as two well-formed header fields" do
+    seen = Channel(String).new(1)
+    port = start_h2_origin(200, "ok", seen)
+
+    request = "GET /f HTTP/2\r\nx-a: one\r\nx-b: two\r\n\r\n".to_slice
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1",
+      port: port, verify_upstream: false)
+
+    seen.receive.should eq("GET /f body=")
+    result.ok?.should be_true
   end
 
   it "flags an h2 response cut short before END_STREAM as incomplete" do

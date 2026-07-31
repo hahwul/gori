@@ -110,7 +110,8 @@ module Gori
       vars = vi ? lines[(vi + 1)..].join('\n').strip : nil
       body = vi ? lines[0...vi] : lines
       op = nil.as(String?)
-      if (first = body.index { |l| !l.strip.empty? }) && body[first].strip.starts_with?("# operationName:")
+      first = body.index { |l| !l.strip.empty? }
+      if first && body[first].strip.starts_with?("# operationName:") && blank_after?(body, first)
         op = body[first].strip.lchop("# operationName:").strip
         body = body[0...first] + body[(first + 1)..]
       end
@@ -133,7 +134,10 @@ module Gori
       elsif base_vars
         obj["variables"] = base_vars
       end
-      base.try &.each { |k, v| obj[k] = v unless obj.has_key?(k) } # keep extensions etc.
+      # Keep extensions etc. — but NOT `operationName`: the pane always renders it when it is
+      # set, so an operator who deleted the header meant to unset it, and overlaying the base
+      # back silently ignored the deletion. Absence here is a decision, not "unchanged".
+      base.try &.each { |k, v| obj[k] = v unless obj.has_key?(k) || k == "operationName" }
       obj.to_json
     end
 
@@ -142,14 +146,30 @@ module Gori
     # Variables are minified. The GET-binding sibling of recompose (which targets the body).
     def recompose_query(orig_query : String, decoded_text : String) : String
       op, query, vars_text = parse_display(decoded_text)
-      managed = {"query", "operationName", "variables"}
-      parts = orig_query.split('&').reject { |pair| pair.empty? || managed.includes?(pair.partition('=')[0]) }
-      parts << "query=#{URI.encode_www_form(query)}"
-      parts << "operationName=#{URI.encode_www_form(op)}" if op
-      if vars_text
-        mini = (JSON.parse(vars_text).to_json rescue vars_text)
-        parts << "variables=#{URI.encode_www_form(mini)}"
+      mini = vars_text.try { |v| (JSON.parse(v).to_json rescue v) }
+      replacement = {
+        "query"         => "query=#{URI.encode_www_form(query)}",
+        "operationName" => op.try { |o| "operationName=#{URI.encode_www_form(o)}" },
+        "variables"     => mini.try { |m| "variables=#{URI.encode_www_form(m)}" },
+      }
+      # Replace the managed params IN PLACE rather than dropping them and appending. Rejecting
+      # and re-adding moved them to the end, so `page=2&query=…&sig=abc` came back as
+      # `page=2&sig=abc&query=…` — a request the operator did not write, and one that breaks any
+      # signature or cache key computed over the canonical query string. Unmanaged params keep
+      # their positions and their exact spelling either way.
+      seen = Set(String).new
+      parts = [] of String
+      orig_query.split('&').each do |pair|
+        next if pair.empty?
+        key = pair.partition('=')[0]
+        unless replacement.has_key?(key)
+          parts << pair
+          next
+        end
+        next unless seen.add?(key)              # a repeated managed param collapses into the first
+        replacement[key].try { |r| parts << r } # nil = the edit removed it
       end
+      replacement.each { |k, r| parts << r if r && seen.add?(k) } # not in the original: append
       parts.join('&')
     end
 
@@ -162,6 +182,18 @@ module Gori
       else
         :query
       end
+    end
+
+    # `# operationName:` is ALSO a valid GraphQL source comment, so the same disambiguation the
+    # `# variables` sentinel already gets is owed to this one — without it a document whose
+    # FIRST line is a comment starting with those characters had that line deleted from the
+    # query and its text promoted into a real `operationName` field, changing which operation
+    # the server runs. `display` always writes the header as `"# operationName: NAME\n\n"`
+    # (`display` above), so the genuine sentinel is followed by a BLANK line; a comment that
+    # opens a document is followed by more GraphQL.
+    private def blank_after?(lines : Array(String), i : Int32) : Bool
+      nxt = lines[i + 1]?
+      nxt.nil? || nxt.strip.empty?
     end
 
     private def json?(s : String) : Bool

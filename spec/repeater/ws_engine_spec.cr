@@ -47,6 +47,17 @@ private UPGRADE = ("GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
                    "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
 
 describe Gori::Repeater::WsEngine do
+  # `start_ws_origin` computes the fake origin's Accept with `WsEngine::GUID` itself, so every
+  # "no handshake note" assertion below is self-referential: a corrupted GUID would keep the
+  # whole file green while `verify_accept` mismatched against every real origin on earth. Anchor
+  # it OUTSIDE gori on RFC 6455 §1.3's worked example instead — this is the one assertion here
+  # that a wrong constant cannot satisfy.
+  it "uses the RFC 6455 §1.3 accept magic, checked against the RFC's own worked example" do
+    WsEngine::GUID.should eq("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+    Base64.strict_encode(Digest::SHA1.digest("dGhlIHNhbXBsZSBub25jZQ==" + WsEngine::GUID))
+      .should eq("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+  end
+
   it "upgrades, repeaters an outbound message, and captures the echo" do
     port = start_ws_origin
     result = WsEngine.send(UPGRADE, [WsEngine::OutMsg.new(1, "ping".to_slice)],

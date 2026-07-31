@@ -49,15 +49,26 @@ module Gori::Tui
       v.abs < 100 ? "#{v.round(1)}b" : "#{v.round.to_i}b"
     end
 
-    # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
+    # Compact request→response latency (µs/ms/s/m/h), bounded to ≤6 cols. "—" until the
     # response lands; a minute/hour tier keeps very slow flows from overflowing.
+    #
+    # The store's unit is MICROseconds, so the sub-millisecond tier is not a nicety: a
+    # loopback or LAN target answers in 100–900 µs, and integer-truncating to ms rendered
+    # every one of those as a flat "0ms". That is worst in the Fuzzer, where `dur` labels
+    # both the result rows and the DIST time histogram's min/max — a timing side-channel
+    # reads as "0ms → 0ms" with the whole spread collapsed. Same rounding convention as
+    # `size`/`count`: pick the unit from the ROUNDED magnitude so 999.6 ms rolls up to
+    # "1.0s" rather than the misleading "1000ms".
     def self.dur(us : Int64?) : String
       return "—" unless us
-      ms = us // 1000
-      return "#{ms}ms" if ms < 1000
-      return "#{(ms / 1000.0).round(1)}s" if ms < 60_000
-      return "#{(ms / 60_000.0).round(1)}m" if ms < 3_600_000
-      "#{(ms / 3_600_000.0).round(1)}h"
+      return "#{us}µs" if us < 1000
+      ms = us / 1000.0
+      return unit(ms, "ms") if ms.round < 1000
+      s = us / 1_000_000.0
+      return unit(s, "s") if s.round < 60
+      m = us / 60_000_000.0
+      return unit(m, "m") if m.round < 60
+      unit(us / 3_600_000_000.0, "h")
     end
   end
 end

@@ -275,7 +275,21 @@ module Gori
         lines[1..]?.try &.each do |line|
           next if line.empty?
           colon = line.index(':')
-          next unless colon && colon > 0
+          # A non-empty line that is not a header field means this text has no faithful h2
+          # form, and skipping it SILENTLY sent a different request than the operator wrote.
+          # It is what a payload carrying a bare LF produces: `x-fuzz: be\naf` splits here, the
+          # `af` tail lands on a line with no colon, and the field went out as `x-fuzz: be`
+          # while the Fuzzer labelled the result row with the whole `be\naf` payload — a status
+          # measured against a request gori never sent. h1 carries those bytes verbatim (P7,
+          # malformed input IS the payload); h2 has no encoding for them, so the honest answer
+          # is to refuse the send and say so, exactly as the proxy's `HeadCodec.h1_faithful?`
+          # refuses the same shape on the rewrite path. A CRLF that yields two WELL-FORMED
+          # fields is left alone deliberately: that is indistinguishable from the operator
+          # typing two headers, and h1 puts two headers on the wire for it too.
+          raise Gori::Error.new(
+            "cannot send over h2: #{line.inspect} is not a header field. A CR, LF or NUL " \
+            "inside a header value has no HTTP/2 representation (RFC 9113 §8.2.1) — h1 " \
+            "carries those bytes verbatim, h2 cannot.") unless colon && colon > 0
           name = line[0...colon].strip.downcase
           value = line[(colon + 1)..].strip
           if name == "host"
@@ -289,7 +303,23 @@ module Gori
         headers = [{":method", method}, {":path", path}, {":scheme", scheme},
                    {":authority", authority_override || authority(host, port, scheme)}]
         headers.concat(regular)
+        headers.each { |(n, v)| reject_uncarriable(n, v) }
         {headers, body}
+      end
+
+      # RFC 9113 §8.2.1: a field name or value may carry no CR, LF or NUL. `rstrip('\r')`
+      # above only removes a TRAILING CR, so a lone CR mid-value survived the split and went
+      # out raw, and a NUL was never looked at — both producing a field a conformant peer must
+      # treat as malformed, with no notice to the operator and the Fuzzer still labelling the
+      # row with the payload it believed it sent. Refusing here keeps the h1/h2 divergence
+      # visible instead of silent; the h1 engine is unchanged and still sends them byte-exact.
+      private def self.reject_uncarriable(name : String, value : String) : Nil
+        {name, value}.each do |s|
+          next unless s.each_char.any? { |c| c == '\r' || c == '\n' || c == '\0' }
+          raise Gori::Error.new(
+            "cannot send over h2: #{name.inspect} carries a CR, LF or NUL, which has no " \
+            "HTTP/2 representation (RFC 9113 §8.2.1) — h1 sends those bytes verbatim, h2 cannot.")
+        end
       end
 
       private def self.authority(host : String, port : Int32, scheme : String) : String
