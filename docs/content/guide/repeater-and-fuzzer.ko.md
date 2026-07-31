@@ -42,7 +42,9 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | **Global** | Preferences(`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, 또는 `settings.json`의 `env` 섹션 |
 | **Project** | **Project** 탭 → **ENV** 패널 (`a` 추가, `e` 편집, `d` 삭제) |
 
-기본 접두사는 `$`입니다(ENV space 메뉴의 **Change prefix**나 설정의 `env.prefix`로 변경 가능). 키는 `A-Z a-z _`로 시작해 `A-Z a-z 0-9 _`가 이어집니다. 알 수 없는 토큰은 그대로 둡니다.
+기본 접두사는 `$`입니다(ENV space 메뉴의 **Change prefix**나 설정의 `env.prefix`로 변경 가능). 키는 `A-Z a-z _`로 시작해 `A-Z a-z 0-9 _`가 이어집니다.
+
+알 수 없는 토큰은 요청이 *표시*되는 곳에서는 리터럴 텍스트로 그대로 남습니다. 에디터는 입력한 그대로를 유지하고, 하이라이터가 미등록 토큰을 등록된 토큰과 다르게 칠합니다. 다만 전송되지는 않습니다. Repeater, Fuzzer, Miner, Sequencer, Discover는 요청 라인, 헤더, 타깃에 아무것으로도 해석되지 않는 변수가 남아 있으면 그 이름을 대며 실행을 거부합니다. 변수를 설정하거나 토큰을 지우세요. 검사 범위는 요청 head뿐입니다. 바디 안의 `$`는 바이트로 취급하므로 바이너리 업로드는 그대로 재전송됩니다.
 
 ```http
 GET /api/me HTTP/1.1
