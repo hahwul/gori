@@ -356,6 +356,19 @@ module Gori
         abort "#{cmd}: #{host} is out of the project scope — add a scope include rule or pass --allow-unscoped"
       end
 
+      # One sentence for every `gori run` tool whose builder refused an env token that
+      # resolves to nothing (#519). Shared rather than written per command because, unlike
+      # the other plan reasons, this one names no flag of the command's own — the token is
+      # the whole fact and the remedy is the same everywhere. `detail` is the builder's
+      # prefixed, comma-joined token list (`$SESSION, $TOKEN`).
+      # `where` names the thing that carried the token (e.g. " for session #3") and belongs
+      # on the FACT, not after the remedy — "...or remove the token for session #3" reads as
+      # if the token were the session's.
+      private def self.env_unresolved_error(detail : String?, where : String = "") : String
+        "unresolved env #{detail}#{where} — set it with `gori run project env set KEY value`, " \
+        "or remove the token"
+      end
+
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
       # aborts them as unknown options before the positional-query join ever runs. Pull
       # them out first so they join the query like any other positional term. A single-

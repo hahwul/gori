@@ -353,6 +353,8 @@ module Gori::Tui
         "invalid target — use scheme://host[:port]/path"
       in Sequencer::PlanError::Reason::NoTokenLoc
         "set a token location first"
+      in Sequencer::PlanError::Reason::UnresolvedEnv
+        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end
     end
 

@@ -134,6 +134,8 @@ module Gori
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: --tokens is handled above and never builds a plan.
           "no tokens to analyze"
+        in Sequencer::PlanError::Reason::UnresolvedEnv
+          env_unresolved_error(ex.detail)
         end
       end
 

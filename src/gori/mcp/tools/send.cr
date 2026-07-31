@@ -445,6 +445,7 @@ module Gori
           in Repeater::PlanError::Reason::NoTarget          then "'url' is required"
           in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
           in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
+          in Repeater::PlanError::Reason::UnresolvedEnv     then env_unresolved_error(detail)
           end
         err(message, "INVALID_ARGUMENT", field: field)
       end

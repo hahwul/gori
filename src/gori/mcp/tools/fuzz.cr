@@ -255,6 +255,8 @@ module Gori
           "could not parse a host from '#{ex.detail}'"
         in Fuzz::PlanError::Reason::NoPayloads
           %(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])
+        in Fuzz::PlanError::Reason::UnresolvedEnv
+          env_unresolved_error(ex.detail)
         end
       end
 

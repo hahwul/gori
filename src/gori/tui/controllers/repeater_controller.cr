@@ -1416,6 +1416,8 @@ module Gori::Tui
         "repeater: invalid target — use scheme://host[:port]/path"
       in Repeater::PlanError::Reason::UnsupportedScheme
         "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
+      in Repeater::PlanError::Reason::UnresolvedEnv
+        "repeater: unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end)
       nil
     end

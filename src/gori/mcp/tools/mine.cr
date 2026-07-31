@@ -189,6 +189,8 @@ module Gori
           "wordlist error: #{ex.detail}"
         in Miner::PlanError::Reason::NoNames
           "no candidate parameter names to mine"
+        in Miner::PlanError::Reason::UnresolvedEnv
+          env_unresolved_error(ex.detail)
         end
       end
 

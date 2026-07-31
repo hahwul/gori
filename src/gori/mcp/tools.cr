@@ -1896,6 +1896,17 @@ module Gori
         present?(h, key) ? "invalid '#{key}' (expected an integer)" : "missing required '#{key}'"
       end
 
+      # One sentence for every MCP tool whose builder refused an env token that resolves to
+      # nothing (#519). Shared rather than written per tool because, unlike the other plan
+      # reasons, this one names no argument of the tool's own — the token is the whole fact
+      # and the remedy is the same everywhere. Naming `set_env_var` matters more here than
+      # on the other surfaces: an agent cannot see the token highlighted the way the TUI
+      # operator can, so the message has to carry both the name and the way to fix it.
+      # `detail` is the builder's prefixed, comma-joined token list (`$SESSION, $TOKEN`).
+      private def env_unresolved_error(detail : String?) : String
+        "unresolved env #{detail} — set it with the set_env_var tool, or remove the token"
+      end
+
       # Coerce a JSON arg to Int64. Accepts a JSON integer, an INTEGRAL float
       # (100.0 → 100; many encoders emit ints as floats), and a numeric STRING
       # ("5" → 5) — clients/LLMs often serialize tool args as strings and the

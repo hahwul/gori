@@ -26,6 +26,10 @@ module Gori::Discover
       NoTechnique
       # The user wordlist could not be read (`detail` = the underlying error message).
       Wordlist
+      # The seed or a custom header still names an env var that resolves to nothing, so
+      # the crawl would put the token's own characters on the wire (`detail` = the
+      # unresolved tokens, prefixed and comma-joined, for surfaces that quote them back).
+      UnresolvedEnv
     end
 
     getter reason : Reason
@@ -137,6 +141,10 @@ module Gori::Discover
       unless Headers.safe_value?(seed)
         raise PlanError.new(PlanError::Reason::BadTarget, "seed contains a control character", raw)
       end
+      # The SECOND expansion this builder owns, and the one easiest to miss: custom header
+      # values go through `Headers.expand` below, so an unresolved `$SESSION` there rides
+      # every probe the crawl sends. Checked on the raw pairs, before that call.
+      refuse_unresolved(config.headers.flat_map { |(_, value)| Env.unresolved(value) }.uniq!)
       words = load_words(config.user_wordlist)
       policy = resolve_policy(outbound, seed, parts.host)
       # `idle_conns` is the run's concurrency for the reason Fuzz uses it: one worker fiber
@@ -151,6 +159,7 @@ module Gori::Discover
     # ONE `Env.expand` over the seed, then the scheme default: `acme.test/admin` means
     # `https://acme.test/admin` on every surface (the TUI used to reject it as invalid).
     private def self.resolve_seed(raw : String) : String
+      refuse_unresolved(Env.unresolved(raw.strip))
       target = Env.expand(raw.strip)
       raise PlanError.new(PlanError::Reason::NoTarget, "no seed target") if target.empty?
       target.matches?(/\Ahttps?:\/\//i) ? target : "https://#{target}"
@@ -197,6 +206,20 @@ module Gori::Discover
         return UnscopedStoreScope.new(scope)
       end
       StoreScope.new(scope)
+    end
+
+    # Refuse a crawl whose seed or custom headers still carry a token that resolves to
+    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
+    # a display path, wrong here, because the seven characters `$SESSION` then go out as
+    # a header value on every probe, the origin answers 401 to all of them, and the run
+    # reports a uniformly locked-down target rather than a variable the operator never
+    # set (#519). This builder is the surface-independent chokepoint every discover
+    # surface expands through, so the check lives here once instead of in each of three.
+    private def self.refuse_unresolved(names : Array(String)) : Nil
+      return if names.empty?
+      detail = Env.token_list(names)
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
+        "unresolved env #{detail}", detail)
     end
 
     # A missing/unreadable/binary wordlist is a user mistake, not a crash: every surface

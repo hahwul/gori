@@ -969,6 +969,8 @@ module Gori::Tui
         "invalid target — use scheme://host[:port]/path"
       in Fuzz::PlanError::Reason::NoPayloads
         "add a payload set — ^O config · + Add set (^L for a List)"
+      in Fuzz::PlanError::Reason::UnresolvedEnv
+        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end
     end
 

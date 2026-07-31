@@ -104,6 +104,8 @@ module Gori
           "invalid --target #{ex.detail.inspect} (use http:// or https://)"
         in Discover::PlanError::Reason::Wordlist
           "wordlist error: #{ex.detail}"
+        in Discover::PlanError::Reason::UnresolvedEnv
+          env_unresolved_error(ex.detail)
         in Discover::PlanError::Reason::NoTarget, Discover::PlanError::Reason::NoTechnique
           discover_reason_error(ex.reason)
         end

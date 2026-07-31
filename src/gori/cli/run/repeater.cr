@@ -263,6 +263,8 @@ module Gori
           "#{prefix}: could not determine a target host#{where}#{detail ? " from #{detail.inspect}" : ""}"
         in Repeater::PlanError::Reason::UnsupportedScheme
           "#{prefix}: unsupported target scheme #{(detail || "").inspect} (use http:// or https://)"
+        in Repeater::PlanError::Reason::UnresolvedEnv
+          "#{prefix}: #{env_unresolved_error(detail, where)}"
         end)
       end
 

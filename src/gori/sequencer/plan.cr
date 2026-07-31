@@ -26,6 +26,10 @@ module Gori::Sequencer
       NoTokenLoc
       # Manual mode with nothing to analyze: no pasted token, or all of them blank.
       NoTokens
+      # The request or the target still names an env var that resolves to nothing, so
+      # the run would put the token's own characters on the wire (`detail` = the
+      # unresolved tokens, prefixed and comma-joined, for surfaces that quote them back).
+      UnresolvedEnv
     end
 
     getter reason : Reason
@@ -149,7 +153,9 @@ module Gori::Sequencer
       # it at all, so a `$TOKEN` in a sequenced request went out literally there while
       # resolving on the other two surfaces; `gori run sequence` and MCP each ran it in
       # their source reader, and doing it there AND here would resolve a var whose value
-      # itself contains a `$TOKEN` twice.
+      # itself contains a `$TOKEN` twice. A token in the HEAD that resolves to nothing
+      # refuses the run first (see `refuse_unresolved`).
+      refuse_unresolved(Env.unresolved_wire(String.new(options.request)))
       request = Env.expand_wire(String.new(options.request))
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides)
@@ -173,12 +179,28 @@ module Gori::Sequencer
     private def self.resolve_origin(options : PlanOptions) : Fuzz::Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
+      refuse_unresolved(Env.unresolved(raw))
       url = Env.expand(raw)
       scheme, host, port = Repeater::FlowRequest.parse_target(url)
       if host.empty?
         raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url)
       end
       Fuzz::Origin.new(scheme, host, port)
+    end
+
+    # Refuse a collection whose request or target still carries a token that resolves to
+    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
+    # a display path, wrong here, because the seven characters `$SESSION` then go out as
+    # a header value, the origin answers 401, and the sampled tokens describe a rejected
+    # session rather than the one the operator meant to measure (#519). This builder is
+    # the surface-independent chokepoint every sequence surface expands through, so the
+    # check lives here once instead of in each of the three. The manual (analyse-only)
+    # path returns before this and needs none — it opens no socket.
+    private def self.refuse_unresolved(names : Array(String)) : Nil
+      return if names.empty?
+      detail = Env.token_list(names)
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
+        "unresolved env #{detail}", detail)
     end
   end
 end

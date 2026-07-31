@@ -217,6 +217,8 @@ module Gori::Tui
         "enable spider or brute-force in the run config first"
       in Discover::PlanError::Reason::Wordlist
         "wordlist error: #{ex.detail}"
+      in Discover::PlanError::Reason::UnresolvedEnv
+        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end
     end
 

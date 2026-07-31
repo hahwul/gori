@@ -29,6 +29,10 @@ module Gori::Fuzz
       BadTarget
       # No payload sets at all.
       NoPayloads
+      # The template or the target still names an env var that resolves to nothing, so
+      # the run would put the token's own characters on the wire (`detail` = the
+      # unresolved tokens, prefixed and comma-joined, for surfaces that quote them back).
+      UnresolvedEnv
     end
 
     getter reason : Reason
@@ -145,7 +149,9 @@ module Gori::Fuzz
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
-      # ONE `Env.expand` over the template, before anything reads it.
+      # ONE `Env.expand` over the template, before anything reads it — and first, a
+      # refusal when a token in the HEAD resolves to nothing (see `refuse_unresolved`).
+      refuse_unresolved(Env.unresolved_wire(options.template))
       text = Env.expand(options.template)
       text = Template.auto_mark(text) if options.auto_mark?
       marker = Template::MARKER
@@ -198,10 +204,25 @@ module Gori::Fuzz
     private def self.resolve_origin(options : PlanOptions) : Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
+      refuse_unresolved(Env.unresolved(raw))
       url = Env.expand(raw)
       scheme, host, port = Repeater::FlowRequest.parse_target(url)
       raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url) if host.empty?
       Origin.new(scheme, host, port)
+    end
+
+    # Refuse a run whose template or target still carries a token that resolves to
+    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
+    # a display path, wrong here, because the seven characters `$SESSION` then go out as
+    # a header value, the origin answers 401, and the results read as findings about the
+    # target rather than as a variable the operator never set (#519). This builder is the
+    # surface-independent chokepoint every fuzz surface expands through, so the check
+    # lives here once instead of in each of the three.
+    private def self.refuse_unresolved(names : Array(String)) : Nil
+      return if names.empty?
+      detail = Env.token_list(names)
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
+        "unresolved env #{detail}", detail)
     end
 
     # Non-overlapping occurrences of a literal token (mirrors what `String#gsub` will

@@ -30,6 +30,10 @@ module Gori::Miner
       Wordlist
       # The candidate-name list came back empty, so the run would send nothing.
       NoNames
+      # The request or the target still names an env var that resolves to nothing, so
+      # the run would put the token's own characters on the wire (`detail` = the
+      # unresolved tokens, prefixed and comma-joined, for surfaces that quote them back).
+      UnresolvedEnv
     end
 
     getter reason : Reason
@@ -162,7 +166,9 @@ module Gori::Miner
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
-      # ONE `Env.expand_wire` over the request, before anything reads it.
+      # ONE `Env.expand_wire` over the request, before anything reads it — and first, a
+      # refusal when a token in the HEAD resolves to nothing (see `refuse_unresolved`).
+      refuse_unresolved(Env.unresolved_wire(options.request))
       request = Env.expand_wire(options.request)
       request_target = Gori::Outbound.request_target(request)
       origin = resolve_origin(options)
@@ -191,10 +197,25 @@ module Gori::Miner
     private def self.resolve_origin(options : PlanOptions) : Fuzz::Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
+      refuse_unresolved(Env.unresolved(raw))
       url = Env.expand(raw)
       scheme, host, port = Repeater::FlowRequest.parse_target(url)
       raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url) if host.empty?
       Fuzz::Origin.new(scheme, host, port)
+    end
+
+    # Refuse a run whose request or target still carries a token that resolves to
+    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
+    # a display path, wrong here, because the seven characters `$SESSION` then go out as
+    # a header value, the origin answers 401, and the results read as findings about the
+    # target rather than as a variable the operator never set (#519). This builder is the
+    # surface-independent chokepoint every mine surface expands through, so the check
+    # lives here once instead of in each of the three.
+    private def self.refuse_unresolved(names : Array(String)) : Nil
+      return if names.empty?
+      detail = Env.token_list(names)
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
+        "unresolved env #{detail}", detail)
     end
 
     # Built-in names plus the optional user file, read HERE so a bad path surfaces as a

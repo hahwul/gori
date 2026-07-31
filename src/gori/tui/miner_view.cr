@@ -317,6 +317,8 @@ module Gori::Tui
         "wordlist error: #{ex.detail}"
       in Miner::PlanError::Reason::NoNames
         "wordlist is empty"
+      in Miner::PlanError::Reason::UnresolvedEnv
+        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end
     end
 

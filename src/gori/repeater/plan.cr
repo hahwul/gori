@@ -25,6 +25,10 @@ module Gori::Repeater
       BadTarget
       # The target's scheme is one the repeater engines cannot dial (`detail` = the scheme).
       UnsupportedScheme
+      # The request, the target or the SNI still names an env var that resolves to
+      # nothing, so the send would put the token's own characters on the wire (`detail` =
+      # the unresolved tokens, prefixed and comma-joined, for surfaces that quote back).
+      UnresolvedEnv
     end
 
     getter reason : Reason
@@ -183,6 +187,11 @@ module Gori::Repeater
       scheme, host, port = resolve_origin(options)
 
       raise PlanError.new(PlanError::Reason::NoRequest, "no request to send") if options.requests.empty?
+      # Checked on `options.requests` REGARDLESS of `expand_request?`, and that is the
+      # point: when it is false the surface expanded already (MCP's `RequestBuilder`, the
+      # TUI editor's byte modes), so an unresolved token is sitting in the bytes it handed
+      # over and this is still the last place anyone looks before they reach a socket.
+      refuse_unresolved(options.requests.flat_map { |b| Env.unresolved_wire(String.new(b)) }.uniq!)
       wires = options.expand_request? ? options.requests.map { |b| Env.expand_wire(String.new(b)) } : options.requests
 
       # Detect the upgrade on the FINAL wire, not the stored text: the bytes that decide
@@ -199,6 +208,7 @@ module Gori::Repeater
           "unsupported target scheme #{scheme.inspect}", scheme)
       end
 
+      options.sni.try { |s| refuse_unresolved(Env.unresolved(s)) }
       sni = options.sni.try { |s| Env.expand(s).presence }
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: options.http2?, sni: sni,
@@ -218,10 +228,15 @@ module Gori::Repeater
     # request somewhere the operator did not name.
     private def self.resolve_origin(options : PlanOptions) : {String, String, Int32}
       if o = options.origin
+        # A pre-resolved origin skips `Env.expand` because its builder already ran it —
+        # but an unresolved `$HOST` survives that expansion as the literal host, and this
+        # early return is the one path where nothing else would ever look at it again.
+        refuse_unresolved(Env.unresolved(o.host))
         return {normalize_scheme(o.scheme), o.host, o.port}
       end
       raw = options.target || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
+      refuse_unresolved(Env.unresolved(raw))
       url = Env.expand(raw)
       scheme, host, port = FlowRequest.parse_target(url)
       if host.empty? || port <= 0
@@ -229,6 +244,20 @@ module Gori::Repeater
           "could not determine a target host from #{url.inspect}", url)
       end
       {normalize_scheme(scheme), host, port}
+    end
+
+    # Refuse a send whose request, target or SNI still carries a token that resolves to
+    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for a
+    # display path, wrong here, because the seven characters `$SESSION` then go out as a
+    # header value, the origin answers 401, and the operator reads that as the target
+    # rejecting a token rather than as a variable they never set (#519). This builder is
+    # the surface-independent chokepoint every repeater surface goes through, so the check
+    # lives here once instead of in each of the five paths that used to drift.
+    private def self.refuse_unresolved(names : Array(String)) : Nil
+      return if names.empty?
+      detail = Env.token_list(names)
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
+        "unresolved env #{detail}", detail)
     end
 
     # ws/wss are hand-typed spellings of http/https — the capture proxy only ever records

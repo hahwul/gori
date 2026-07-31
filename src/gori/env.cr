@@ -111,6 +111,96 @@ module Gori
       String.new(buf.to_slice)
     end
 
+    # The KEYs in `text` that `expand` would NOT substitute — every `prefix+KEY`
+    # whose KEY is unregistered — in first-appearance order, deduplicated. Empty
+    # means every token resolved.
+    #
+    # This is a QUERY, never a mutation of `expand`'s contract: leaving an unknown
+    # token literal is correct on a display path (it is honest about what could not
+    # be resolved, and `token_regions` already paints it), and wrong on a path that
+    # then puts those bytes on a socket. So the send paths ask this first and refuse,
+    # and `expand` keeps its meaning for everyone else (issue #519).
+    #
+    # Shares `read_key_bytes` and mirrors `expand`'s scan positions exactly —
+    # INCLUDING the `i += plen` advance on a miss — rather than re-deriving the token
+    # grammar. That is what makes the answer trustworthy: a name reported here is a
+    # name `expand` tried to resolve at that same offset and could not, so it is a
+    # name that lands on the wire literally.
+    #
+    # NOT `token_regions`, which computes the same `known` fact: that one is
+    # char-based (`text.chars`), and the text this runs over is routinely not valid
+    # UTF-8 (a captured flow's body loaded verbatim). `String#chars` decodes lossily
+    # to U+FFFD, which can both invent and destroy a token boundary — the exact
+    # hazard `expand` was made byte-level to avoid.
+    def self.unresolved(text : String, vars : Hash(String, String) = effective_vars,
+                        prefix : String = Settings.env_prefix) : Array(String)
+      return [] of String if prefix.empty?
+      return [] of String unless text.byte_index(prefix) # same fast no-op as `expand`
+      scan_unresolved(text.to_slice, vars, prefix)
+    end
+
+    # `unresolved` over the HEAD of wire-form text ALONE — the request line and
+    # headers, through the blank-line separator — never the body.
+    #
+    # Same split, and the same reason, as `expand_wire`'s CRLF normalization: in the
+    # head a `$` starts a reference, in the body it is just a byte. The body is where
+    # that distinction bites, because a body is often not text at all. A `$` followed
+    # by `[A-Za-z_]` occurs by chance roughly once per 1.2KB of high-entropy bytes, so
+    # a whole-request check would refuse essentially EVERY replay carrying a
+    # compressed, encrypted, or otherwise binary body — measured on random bodies:
+    # ~3 token-shaped hits per 4KB, hit in 20 of 20 samples; ~51 per 64KB. Refusing a
+    # captured multipart upload because its JPEG happened to contain `$A` would be a
+    # far worse failure than the one this check exists to stop.
+    #
+    # The boundary is taken on the text as AUTHORED (pre-expansion), because the
+    # question is which tokens the author wrote in the head — not where the head ends
+    # after some var's value has been spliced in.
+    def self.unresolved_wire(text : String, vars : Hash(String, String) = effective_vars,
+                             prefix : String = Settings.env_prefix) : Array(String)
+      return [] of String if prefix.empty?
+      return [] of String unless text.byte_index(prefix)
+      bytes = text.to_slice
+      scan_unresolved(bytes[0...head_body_boundary(bytes)], vars, prefix)
+    end
+
+    # Render token names back into the spelling the operator typed (`["A"]` → `"$A"`),
+    # comma-joined. Every surface quotes the same list, so the prefix is applied here
+    # rather than in five builders that could each drift on whether to include it.
+    def self.token_list(names : Array(String), prefix : String = Settings.env_prefix) : String
+      names.join(", ") { |n| "#{prefix}#{n}" }
+    end
+
+    private def self.scan_unresolved(bytes : Bytes, vars : Hash(String, String),
+                                     prefix : String) : Array(String)
+      names = [] of String
+      seen = Set(String).new
+      prefix_bytes = prefix.to_slice
+      n = bytes.size
+      plen = prefix_bytes.size
+      i = 0
+      while i < n
+        if i + plen <= n && prefix_bytes.each_with_index.all? { |b, j| bytes[i + j] == b }
+          if parsed = read_key_bytes(bytes, i + plen, n)
+            key, consumed = parsed
+            if vars.has_key?(key)
+              i += plen + consumed
+            else
+              names << key if seen.add?(key)
+              # `i += plen`, NOT `plen + consumed`: `expand` re-scans from just past
+              # the prefix on a miss, and this has to walk the same offsets or the two
+              # could disagree about what a later token even is.
+              i += plen
+            end
+          else
+            i += plen
+          end
+        else
+          i += 1
+        end
+      end
+      names
+    end
+
     # Finds the head/body boundary in wire-form text: the byte offset where the
     # body starts, right after the first blank line. Checks for both a bare
     # `\n\n` (how the Repeater/Miner editors store the blob internally) and,

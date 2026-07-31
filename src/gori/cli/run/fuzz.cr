@@ -146,6 +146,8 @@ module Gori
           "could not determine a target host"
         in Fuzz::PlanError::Reason::NoPayloads
           "no payloads — add -w/--payloads/--numbers/--null/--brute"
+        in Fuzz::PlanError::Reason::UnresolvedEnv
+          env_unresolved_error(ex.detail)
         end
       end
 

@@ -108,6 +108,8 @@ module Gori
           "at least one of spider/bruteforce must stay enabled"
         in Discover::PlanError::Reason::Wordlist
           "wordlist error: #{ex.detail}"
+        in Discover::PlanError::Reason::UnresolvedEnv
+          env_unresolved_error(ex.detail)
         end
       end
 
