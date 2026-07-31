@@ -15,6 +15,121 @@ private def req_fields : Array(Field)
   [f(":method", "GET"), f(":scheme", "https"), f(":authority", "api.example.com"), f(":path", "/x")]
 end
 
+# The round trip exactly as `HeadRewrite` drives it, with no rule in between: whatever comes
+# back differing from what went in is a field the h1 text could not carry.
+private def round_trip(fields : Array(Field), request : Bool) : Array(Field)?
+  return HeadCodec.parse_response(HeadCodec.synth_response(tuples(fields)), fields) unless request
+  authority = HeadCodec.pseudo(tuples(fields), ":authority") || "conn.example.com"
+  HeadCodec.parse_request(HeadCodec.synth_request(tuples(fields), authority), fields)
+end
+
+private record Entry, label : String, fields : Array(Field), request : Bool, faithful : Bool
+
+# A request/response carrying one field under test, plus a tail field so a truncating or
+# field-dropping round trip is visible and not just a shorter list of one.
+private def rq(field : Field, faithful : Bool, label : String) : Entry
+  Entry.new(label, req_fields + [field, f("x-tail", "z")], true, faithful)
+end
+
+private def rs(field : Field, faithful : Bool, label : String) : Entry
+  Entry.new(label, [f(":status", "200"), field, f("x-tail", "z")], false, faithful)
+end
+
+private def both(field : Field, faithful : Bool, label : String) : Array(Entry)
+  [rq(field, faithful, "#{label} (request)"), rs(field, faithful, "#{label} (response)")]
+end
+
+private INVALID_UTF8_VALUE = String.new(Bytes[0x61_u8, 0xff_u8, 0xfe_u8, 0x62_u8])
+private INVALID_UTF8_NAME  = String.new(Bytes[0x78_u8, 0xff_u8, 0x2d_u8, 0x61_u8])
+
+private CORPUS = [
+  # --- regular fields: what the line-split and the `name: value` cut cannot carry ----------
+  both(f("x-echo", "safe\r\nset-cookie: injected=1"), false, "a CRLF in a value (it becomes TWO fields)"),
+  both(f("x-echo", "a\r\n\r\nGET /x HTTP/1.1"), false, "a double CRLF in a value (it TRUNCATES the head)"),
+  both(f("x-echo", "safe\rset-cookie: injected=1"), false, "a lone CR in a value"),
+  both(f("x-echo", "safe\nset-cookie: injected=1"), false, "a lone LF in a value"),
+  both(f("x-a\rb", "v"), false, "a CR in a field name"),
+  both(f("x-a\nb", "v"), false, "an LF in a field name"),
+  both(f("x-a:b", "v"), false, "a colon in a field name (it renames the field)"),
+  both(f(" x-echo ", "v"), false, "whitespace around a field name"),
+  both(f("X-Echo", "v"), false, "an uppercase field name the PEER sent"),
+  both(f("", "v"), false, "an empty field name"),
+  both(f("x-echo", "   lead"), false, "a leading space in a value (h1 OWS strips it)"),
+  both(f("x-echo", "   "), false, "an all-spaces value"),
+  # --- regular fields the text carries exactly ---------------------------------------------
+  both(f("x-echo", "trail   "), true, "a trailing space in a value"),
+  both(f("x-echo", "\tlead\t"), true, "tabs around a value"),
+  both(f("x-echo", "a: b"), true, "a colon-space inside a value"),
+  both(f("x-echo", "HTTP/1.1 200 OK"), true, "a value shaped like a status line"),
+  both(f("x-echo", "a\u0000b"), true, "a NUL in a value"),
+  both(f("x-echo", "a\vb\fc\td"), true, "other control bytes in a value"),
+  both(f("x-echo", ""), true, "an empty value"),
+  both(f("x-echo", INVALID_UTF8_VALUE), true, "invalid UTF-8 in a value"),
+  both(f(INVALID_UTF8_NAME, "v"), true, "invalid UTF-8 in a field name"),
+  both(f("x a", "v"), true, "a space inside a field name"),
+].flatten + [
+  # --- pseudo-headers: the start line and the synthetic Host line -------------------------
+  Entry.new("a CRLF in :path (it splits the START line)",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/a\r\nx-admin: true")], true, false),
+  Entry.new("a lone LF in :path",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/a\nx-admin: true")], true, false),
+  Entry.new("an empty :path",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "")], true, false),
+  Entry.new("a space in :method (it moves the tail into :path)",
+    [f(":method", "GE T"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, false),
+  Entry.new("a CRLF in :method",
+    [f(":method", "GET\r\nx: y"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, false),
+  Entry.new("an empty :method",
+    [f(":method", ""), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, false),
+  Entry.new("a CRLF in :authority (it splits the synthetic Host line)",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test\r\nx-admin: true"), f(":path", "/")], true, false),
+  Entry.new("a leading space in :authority",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", " a.test"), f(":path", "/")], true, false),
+  Entry.new("an empty :authority with no host field (it DROPS :authority)",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", ""), f(":path", "/")], true, false),
+  Entry.new("no :authority and no host field (it INVENTS one from the connection)",
+    [f(":method", "GET"), f(":scheme", "https"), f(":path", "/")], true, false),
+  Entry.new("no :path at all (it INVENTS `/`)",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test")], true, false),
+  Entry.new("a CRLF in :scheme, which is preserved off the original",
+    [f(":method", "GET"), f(":scheme", "https\r\nx: y"), f(":authority", "a.test"), f(":path", "/")], true, true),
+  Entry.new("a CRLF in an unknown pseudo, likewise preserved",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/"), f(":proto", "w\r\nx: y")], true, true),
+  Entry.new("a trailing space in :authority",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test "), f(":path", "/")], true, true),
+  Entry.new("a :path that is only a space",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", " ")], true, true),
+  Entry.new("a :path ending in a version token",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/a HTTP/9")], true, true),
+  Entry.new("a tab in :method",
+    [f(":method", "GE\tT"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, true),
+  Entry.new("no :authority but an explicit host field",
+    [f(":method", "GET"), f(":scheme", "https"), f(":path", "/"), f("host", "h.test")], true, true),
+  # --- :status, which `synth_response` normalizes through to_i ----------------------------
+  Entry.new("a zero-padded :status (it becomes an ACCEPTED three-digit one)",
+    [f(":status", "0200"), f("x-a", "1")], false, false),
+  Entry.new("a :status with a CRLF", [f(":status", "200\r\nset-cookie: e=1"), f("x-a", "1")], false, false),
+  Entry.new("a non-numeric :status", [f(":status", "abc"), f("x-a", "1")], false, false),
+  Entry.new("a plain :status", [f(":status", "204"), f("x-a", "1")], false, true),
+  # --- pseudo-header count and order (RFC 9113 §8.3) --------------------------------------
+  Entry.new("a duplicate :method (the second is DROPPED)",
+    [f(":method", "GET"), f(":method", "POST"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, false),
+  Entry.new("a duplicate :path", [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"),
+                                  f(":path", "/a"), f(":path", "/b")], true, false),
+  Entry.new("a duplicate :scheme", [f(":method", "GET"), f(":scheme", "https"), f(":scheme", "http"),
+                                    f(":authority", "a.test"), f(":path", "/")], true, false),
+  Entry.new("a duplicate :status", [f(":status", "200"), f(":status", "404"), f("x-a", "1")], false, false),
+  Entry.new("a pseudo-header AFTER a regular one (the order is CORRECTED)",
+    [f(":method", "GET"), f("x-first", "1"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, false),
+  Entry.new("a pseudo-header after a regular one, response",
+    [f("x-first", "1"), f(":status", "200")], false, false),
+  # --- duplicates that DO survive ---------------------------------------------------------
+  Entry.new("duplicate regular fields (h2 cookie crumbs)",
+    [f(":status", "200"), f("cookie", "a=1"), f("cookie", "b=2")], false, true),
+  Entry.new("duplicate host fields", [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"),
+                                      f(":path", "/"), f("host", "one.test"), f("host", "two.test")], true, true),
+]
+
 describe Gori::Proxy::H2::HeadCodec do
   describe "synth" do
     it "renders :authority as a Host line and omits the pseudo-headers" do
@@ -123,6 +238,44 @@ describe Gori::Proxy::H2::HeadCodec do
       HeadCodec.parse_request("no-spaces-at-all\r\n\r\n".to_slice, req_fields).should be_nil
       HeadCodec.parse_request("GET /x HTTP/2\r\nnot a header line\r\n\r\n".to_slice, req_fields).should be_nil
       HeadCodec.parse_response("nonsense\r\n\r\n".to_slice, [f(":status", "200")]).should be_nil
+    end
+  end
+
+  # #517. The round trip is only sound while it is INJECTIVE, and #492's hazard table never
+  # said so. `CORPUS` is the audit that found the ones it missed, kept as an oracle: for every
+  # entry it asserts that `h1_faithful?` and what the round trip ACTUALLY does agree. A future
+  # change to either side that makes them disagree fails here rather than on the wire.
+  describe "h1_faithful? (injectivity)" do
+    CORPUS.each do |entry|
+      it "#{entry.faithful ? "round-trips" : "refuses"} #{entry.label}" do
+        HeadCodec.h1_faithful?(entry.fields, entry.request).should eq(entry.faithful)
+        back = round_trip(entry.fields, entry.request)
+        if entry.faithful
+          # Faithful means EXACTLY these fields back, in this order — not "close enough".
+          tuples(back.not_nil!).should eq(tuples(entry.fields))
+        else
+          back.should be_nil
+        end
+      end
+    end
+
+    it "judges what the PEER sent, never what a rule produced" do
+      # A rule whose replacement carries a CRLF adds two headers here for the same reason the
+      # identical rule does on h1: those are the operator's bytes (P7). Only the peer's head
+      # gates the round trip.
+      fields = [f(":status", "200"), f("x-tag", "a")]
+      HeadCodec.h1_faithful?(fields, false).should be_true
+      back = HeadCodec.parse_response("HTTP/2 200\r\nx-tag: a\r\nset-cookie: op=1\r\n\r\n".to_slice, fields)
+      tuples(back.not_nil!).should eq([{":status", "200"}, {"x-tag", "a"}, {"set-cookie", "op=1"}])
+    end
+
+    it "does not refuse ordinary traffic" do
+      req = req_fields + [f("user-agent", "curl/8"), f("cookie", "a=1"), f("cookie", "b=2"),
+                          f("accept-encoding", "gzip, deflate, br"), f("authorization", "Bearer x", true)]
+      HeadCodec.h1_faithful?(req, true).should be_true
+      resp = [f(":status", "204"), f("date", "Mon, 01 Jan 2024 00:00:00 GMT"),
+              f("content-length", "0"), f("set-cookie", "s=1; Path=/; HttpOnly")]
+      HeadCodec.h1_faithful?(resp, false).should be_true
     end
   end
 

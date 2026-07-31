@@ -261,4 +261,91 @@ describe Gori::Proxy::H2::HeadRewrite do
     sink.requests[1].target.should eq("/second")
     String.new(sink.requests[1].head).should contain("x-a: 0123456789abcdef")
   end
+
+  # #517. A field value carrying the head's own delimiter has no h1-text form, and the bridge
+  # used to turn it into two well-formed wire fields — a message the far endpoint would have
+  # REJECTED (RFC 9113 §8.2.1) arriving as one it accepts. Everything below decodes what the
+  # far side actually receives, with a fresh decoder, exactly as a real peer would.
+  describe "a peer head the h1 text cannot carry (#517)" do
+    it "does not split a CRLF-bearing request value into a second header" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      fields = req("/x") + [{"x-tag", "a"}, {"x-echo", "safe\r\nx-admin: true"}]
+      block = HPACK::Encoder.new.encode(fields)
+      sent = push(pipe, assembler, headers(1_u32, block))
+
+      origin = HPACK::Decoder.new.decode(sent.first.payload)
+      origin.should eq(fields)                                         # the peer's head, field for field
+      origin.map(&.[0]).should_not contain("x-admin")                  # nothing was invented
+      origin.count { |(n, _)| n == "x-echo" }.should eq(1)             # one field in, one field out
+      origin.find { |(n, _)| n == "x-tag" }.not_nil![1].should eq("a") # the rule did NOT run
+    end
+
+    it "does not split a CRLF-bearing response value into a second header" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"), direction: "in")
+      fields = [{":status", "200"}, {"x-tag", "a"}, {"x-echo", "safe\r\nset-cookie: injected=1"}]
+      block = HPACK::Encoder.new.encode(fields)
+      emitted = [] of Frame::Header
+      pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+
+      client = HPACK::Decoder.new.decode(emitted.first.payload)
+      client.should eq(fields)
+      client.map(&.[0]).should_not contain("set-cookie")
+    end
+
+    it "still RE-ENCODES it once the direction has latched, rather than falling back to passthrough" do
+      # The disposition is "emit the ORIGINAL FIELDS", not "forward the original frames". On an
+      # engaged direction those are not the same thing: the sender's encoder has kept indexing
+      # (§6.2.1) against a table the peer no longer shares, so a passthrough block here would
+      # resolve its dynamic indices against the wrong table. Malformed in, malformed out — but
+      # re-encoded, because the latch is one-way.
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: alpha", "x-tag: beta"), direction: "in")
+      sender = HPACK::Encoder.new(indexing: true)
+      b1 = sender.encode([{":status", "200"}, {"x-tag", "alpha"}, {"x-token", "abcdefghijklmnop"}])
+      evil = [{":status", "200"}, {"x-echo", "safe\r\nset-cookie: injected=1"}, {"x-token", "abcdefghijklmnop"}]
+      b2 = sender.encode(evil)
+
+      peer = HPACK::Decoder.new # ONE decoder for the connection, like a real client
+      out1 = [] of Frame::Header
+      pipe.accept(headers(1_u32, b1)) { |f, pre| out1 << f; assembler.feed("in", f, pre) }
+      peer.decode(out1.first.payload)
+      pipe.engaged?.should be_true
+
+      out2 = [] of Frame::Header
+      pipe.accept(headers(3_u32, b2)) { |f, pre| out2 << f; assembler.feed("in", f, pre) }
+      out2.first.payload.should_not eq(b2) # re-encoded, not forwarded as it arrived
+      peer.decode(out2.first.payload).should eq(evil)
+    end
+
+    it "refuses an intercept edit of one, because the text the operator edited is not the message" do
+      pipe, _, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"), direction: "in")
+      evil = [HPACK::Field.new(":status", "200"),
+              HPACK::Field.new("x-echo", "safe\r\nset-cookie: injected=1")]
+      block = Gori::Proxy::H2::HeadRewrite::Block.new(
+        [] of Frame::Header, HeadBlock.new(evil.map(&.to_tuple)), evil,
+        "HTTP/2 200\r\nx-echo: safe\r\nset-cookie: injected=1\r\n\r\n".to_slice,
+        headers(1_u32, Bytes.empty), Bytes.empty, false)
+      pipe.encode_edited(block, "HTTP/2 200\r\nx-echo: edited\r\n\r\n".to_slice).should be_nil
+
+      # Control: the same edit on a head the text CAN carry is applied as it always was.
+      ok = [HPACK::Field.new(":status", "200"), HPACK::Field.new("x-echo", "safe")]
+      fine = Gori::Proxy::H2::HeadRewrite::Block.new(
+        [] of Frame::Header, HeadBlock.new(ok.map(&.to_tuple)), ok,
+        "HTTP/2 200\r\nx-echo: safe\r\n\r\n".to_slice,
+        headers(1_u32, Bytes.empty), Bytes.empty, false)
+      edited = pipe.encode_edited(fine, "HTTP/2 200\r\nx-echo: edited\r\n\r\n".to_slice).not_nil!
+      edited.fields.map(&.to_tuple).should eq([{":status", "200"}, {"x-echo", "edited"}])
+    end
+
+    it "still adds two headers for a CRLF the OPERATOR wrote — those are their bytes (P7)" do
+      # The guard reads what the PEER sent, never what a rule produced. The identical rule adds
+      # two headers on h1; making h2 disagree would be the silent-divergence class this epic
+      # exists to remove.
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b\r\nx-added: 1"), direction: "in")
+      block = HPACK::Encoder.new.encode([{":status", "200"}, {"x-tag", "a"}])
+      emitted = [] of Frame::Header
+      pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+      HPACK::Decoder.new.decode(emitted.first.payload)
+        .should eq([{":status", "200"}, {"x-tag", "b"}, {"x-added", "1"}])
+    end
+  end
 end

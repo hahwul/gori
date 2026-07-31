@@ -107,6 +107,7 @@ module Gori::Proxy::H2
       @encoder = HPACK::Encoder.new
       @engaged = false
       @warned = false
+      @warned_unfaithful = false
       @buf = [] of Frame::Header
       @block_bytes = 0
       @block_stream = 0_u32
@@ -152,6 +153,13 @@ module Gori::Proxy::H2
     # edited bytes are no longer a head: the caller then forwards the block as it stood, which
     # is what an unparseable RULE result already does.
     def encode_edited(block : Block, head : Bytes) : Block?
+      # The head shown to the operator is a lossy rendering of what the peer sent, so re-parsing
+      # their edit would apply it to a DIFFERENT message (#517). Refuse the edit rather than
+      # send that; the caller keeps the block as it stood.
+      unless HeadCodec.h1_faithful?(block.fields, block.request)
+        warn_unfaithful(block.stream_id, block.request)
+        return nil
+      end
       parsed = block.request ? HeadCodec.parse_request(head, block.fields) : HeadCodec.parse_response(head, block.fields)
       if parsed.nil?
         warn_unparseable(block.stream_id, "an intercept edit")
@@ -295,6 +303,11 @@ module Gori::Proxy::H2
     private def rewrite(fields : Array(HPACK::Field), head : Bytes, request : Bool) : Array(HPACK::Field)?
       rw = @rewriter
       return nil unless rw && rw.active?
+      # The peer's own head has no faithful h1-text form, so the round trip that runs the
+      # rules would hand the far side a DIFFERENT message — see `HeadCodec.h1_faithful?`.
+      # `parse_*` refuses it anyway; checking here keeps the rules from running for nothing
+      # and, more to the point, keeps the log from blaming a rule for the peer's bytes.
+      return warn_unfaithful(@block_stream, request) unless HeadCodec.h1_faithful?(fields, request)
       authority = request ? (HeadCodec.pseudo_of(fields, ":authority") || @host) : @host
       rewritten_head = request ? rw.rewrite_request(head, authority) : rw.rewrite_response(head, @host)
       return nil if rewritten_head == head # `Rules` returns the same content when nothing matched
@@ -330,6 +343,20 @@ module Gori::Proxy::H2
       ::Log.warn do
         "h2 #{@direction}: #{source} produced a head that is no longer parseable " \
         "(stream #{stream_id}) — forwarded the original head unchanged"
+      end
+    end
+
+    # The mirror of `warn_unparseable` for a head the PEER sent that the h1 text cannot carry
+    # (#517). Not a rule's doing and not the operator's, so it gets its own line — and its own
+    # flag, or whichever of the two happened first would silence the other. Always nil, so
+    # `rewrite` can return it directly: nothing is rewritten and the original fields go out.
+    private def warn_unfaithful(stream_id : UInt32, request : Bool) : Nil
+      return if @warned_unfaithful
+      @warned_unfaithful = true
+      ::Log.warn do
+        "h2 #{@direction}: the peer sent a #{request ? "request" : "response"} head that has no " \
+        "HTTP/1.1 text form (stream #{stream_id}) — Match&Replace and intercept edits are " \
+        "not applied to it, the fields go out exactly as they arrived"
       end
     end
 

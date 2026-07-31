@@ -20,6 +20,16 @@ module Gori::Proxy::H2
   # `parse_request` / `parse_response` invert them, restoring from the ORIGINAL fields what
   # the h1 text has nowhere to carry: `:scheme`, the §6.2.3 never-indexed markings, and
   # whether the `Host:` line was ours or the peer's.
+  #
+  # ## The round trip is only sound while it is INJECTIVE (#517)
+  #
+  # "Invert" holds for a head the text can represent, and NOT for one it cannot: a field value
+  # carrying a CRLF comes back as two fields, a duplicate pseudo-header comes back as one, an
+  # uppercase name comes back lowercased. Every such input is malformed h2 a conformant peer
+  # would REJECT, so the round trip would launder it into a message the far side ACCEPTS —
+  # gori promoting the peer's malformed head, a header-injection primitive that exists only
+  # because of this bridge. `h1_faithful?` is the precondition that says no; `parse_*` refuse
+  # outright rather than trust a caller to ask.
   module HeadCodec
     extend self
 
@@ -57,6 +67,7 @@ module Gori::Proxy::H2
     # Returns nil when the rewritten bytes are no longer a head — the caller then forwards
     # the original block unchanged and says so, rather than guessing (#492 decision A).
     def parse_request(head : Bytes, original : Array(HPACK::Field)) : Array(HPACK::Field)?
+      return nil unless h1_faithful?(original, request: true)
       start, lines = split_head(head)
       return nil unless start
       method, path = request_line(start)
@@ -108,6 +119,7 @@ module Gori::Proxy::H2
 
     # Invert `synth_response`. See `parse_request`.
     def parse_response(head : Bytes, original : Array(HPACK::Field)) : Array(HPACK::Field)?
+      return nil unless h1_faithful?(original, request: false)
       start, lines = split_head(head)
       return nil unless start
       status = status_code(start)
@@ -144,6 +156,119 @@ module Gori::Proxy::H2
       fields_out = fields.reject { |f| f.name == "content-length" }
       fields_out.concat(orig)
       fields_out
+    end
+
+    # Whether `synth_* -> parse_*` returns these fields UNCHANGED — the precondition the
+    # whole rewrite path rests on, and the one #492's hazard table did not state (#517).
+    #
+    # The h1 head text is a lossy carrier. `synth_*` writes `name: value\r\n` per field and
+    # `parse_*` reads it back by splitting on the line ending and cutting at the first `:`,
+    # so a field the peer sent can come back as two fields, as none, or as a DIFFERENT
+    # well-formed field. Every one of those inputs is malformed h2 (RFC 9113 §8.2.1/§8.3)
+    # that a conformant endpoint would REJECT — which is exactly what makes it matter: the
+    # round trip would hand the far side a message it accepts, so gori would be laundering
+    # the peer's malformed head into a valid one. A header-injection primitive
+    # (`set-cookie`, `location`, `x-admin`, ...) that exists only because of the bridge.
+    #
+    # So the round trip is refused for these fields instead. The caller's disposition is the
+    # one an unparseable rewrite already takes: emit the ORIGINAL fields. On an engaged
+    # direction that is a re-encode of those fields, not a raw frame passthrough, so the
+    # §6.2.1 latch invariant is untouched (`HeadRewrite#finish`) — malformed in, malformed
+    # out, and the far side rejects it exactly as it would have without gori.
+    #
+    # Judged on what the PEER sent, never on what a rule produced. A rule whose replacement
+    # contains a CRLF adds two headers here for the same reason it does on h1: those are the
+    # operator's bytes, and carrying operator-supplied malformed input is the point (P7).
+    #
+    # Deliberately conservative in one place: a duplicate pseudo-header is refused in both
+    # directions, though only `request_pseudo` drops every duplicate while `parse_response`
+    # drops only a second `:status`. Duplicate pseudo-headers are malformed either way.
+    def h1_faithful?(fields : Array(HPACK::Field), request : Bool) : Bool
+      seen = Set(String).new
+      regular = false
+      fields.each do |f|
+        if pseudo?(f.name)
+          # §8.3 puts the pseudo-headers first and `parse_*` re-emits them there, so a peer
+          # that sent one AFTER a regular field would get its order corrected. A duplicate is
+          # dropped outright by the `seen` guard in `request_pseudo`.
+          return false if regular || !seen.add?(f.name)
+          return false unless pseudo_faithful?(f, fields, request)
+        else
+          regular = true
+          return false unless regular_faithful?(f)
+        end
+      end
+      request ? request_shape?(fields, seen) : seen.includes?(":status")
+    end
+
+    # A regular field survives iff the text can hold it: `header_lines` cuts the line at its
+    # FIRST `:` (so a name carrying one renames the field and moves the rest into the value),
+    # `strip`s the name and `lstrip(' ')`s the value (so leading whitespace is eaten — a
+    # trailing space survives, and is left alone), and `append_regular` lowercases the name.
+    # A CR or LF anywhere is a line break in the text: CRLF splits the field in two, a second
+    # CRLF truncates the head and drops every field after it, and a lone CR/LF survives here
+    # today only because the synthesized EOL happens to be CRLF — the same byte still ends
+    # the head early for `StreamGate#split_edit`'s `\n\n` scan on an intercept edit.
+    private def regular_faithful?(f : HPACK::Field) : Bool
+      name = f.name
+      !name.empty? && !name.includes?(':') && !line_broken?(name) &&
+        name == name.strip.downcase &&
+        !line_broken?(f.value) && !f.value.starts_with?(' ')
+    end
+
+    # A pseudo-header survives iff the start line (or the synthetic `Host:` line) can hold it.
+    # A pseudo belonging to the OTHER direction — a `:status` on a request, a `:method` on a
+    # response — is copied straight off `original`, exactly like `:scheme` and an unknown one,
+    # and so cannot be damaged.
+    private def pseudo_faithful?(f : HPACK::Field, fields : Array(HPACK::Field), request : Bool) : Bool
+      request ? request_pseudo_faithful?(f, fields) : response_pseudo_faithful?(f)
+    end
+
+    private def request_pseudo_faithful?(f : HPACK::Field, fields : Array(HPACK::Field)) : Bool
+      value = f.value
+      case f.name
+      when ":method"
+        # `request_line` splits the start line on its FIRST space: a method carrying one comes
+        # back with its tail moved into `:path`.
+        !value.empty? && !value.includes?(' ') && !line_broken?(value)
+      when ":path"
+        # A CRLF here splits the START line — the injected field lands ahead of every real one.
+        !value.empty? && !line_broken?(value)
+      when ":authority"
+        # Only the SYNTHETIC `Host:` line can damage it; with an explicit `host` field
+        # `resolve_authority` preserves `:authority` off the original instead.
+        return true if host_carrier?(fields)
+        !value.empty? && !value.starts_with?(' ') && !line_broken?(value)
+      else
+        true
+      end
+    end
+
+    # `synth_response` normalizes the code through `to_i` so a stored head does not vary with a
+    # peer's padding — which also turns a `:status` of `0200` (§8.3.2 requires exactly three
+    # digits, so a conformant client rejects it) into an accepted `200`.
+    private def response_pseudo_faithful?(f : HPACK::Field) : Bool
+      return true unless f.name == ":status"
+      (f.value.to_i? || 0).to_s == f.value
+    end
+
+    # `synth_request` defaults a missing `:method`/`:path` and `resolve_authority` maps the
+    # `Host:` line back to `:authority`, so a request missing any of the three comes back
+    # with it INVENTED — §8.3.1 requires all three, so that is another malformed head made
+    # acceptable. (`:authority` may legitimately be absent when a `host` field carries it.)
+    private def request_shape?(fields : Array(HPACK::Field), seen : Set(String)) : Bool
+      seen.includes?(":method") && seen.includes?(":path") &&
+        (seen.includes?(":authority") || host_carrier?(fields))
+    end
+
+    private def line_broken?(s : String) : Bool
+      s.includes?('\r') || s.includes?('\n')
+    end
+
+    # `explicit_host?` over decoded fields — the same test `synth_request` makes before it
+    # invents a `Host:` line, without building the tuple array to ask it.
+    private def host_carrier?(fields : Array(HPACK::Field)) : Bool
+      fields.any? { |f| host_field?(f.name) }
     end
 
     def pseudo(fields : Array({String, String}), name : String) : String?
