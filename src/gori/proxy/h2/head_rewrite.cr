@@ -3,6 +3,7 @@ require "./hpack"
 require "./head_codec"
 require "./assembler"
 require "../head_rewriter"
+require "../upstream"
 
 module Gori::Proxy::H2
   # One direction's head-rewrite pipeline: buffer a header block, decode it, run the
@@ -108,6 +109,7 @@ module Gori::Proxy::H2
       @engaged = false
       @warned = false
       @warned_unfaithful = false
+      @warned_coalesced = false
       @buf = [] of Frame::Header
       @block_bytes = 0
       @block_stream = 0_u32
@@ -303,6 +305,7 @@ module Gori::Proxy::H2
     private def rewrite(fields : Array(HPACK::Field), head : Bytes, request : Bool) : Array(HPACK::Field)?
       rw = @rewriter
       return nil unless rw && rw.active?
+      notice_coalesced(rw, fields) if request
       # The peer's own head has no faithful h1-text form, so the round trip that runs the
       # rules would hand the far side a DIFFERENT message — see `HeadCodec.h1_faithful?`.
       # `parse_*` refuses it anyway; checking here keeps the rules from running for nothing
@@ -357,6 +360,40 @@ module Gori::Proxy::H2
         "h2 #{@direction}: the peer sent a #{request ? "request" : "response"} head that has no " \
         "HTTP/1.1 text form (stream #{stream_id}) — Match&Replace and intercept edits are " \
         "not applied to it, the fields go out exactly as they arrived"
+      end
+    end
+
+    # The stated cost of #526, kept spoken instead of silent.
+    #
+    # The h2 downgrade gate (`tls/tunnel.cr#h2_candidate?`) is per CONNECT, so it can only ask
+    # about the CONNECT host. Since #526 it asks whether a BODY or SHORT-CIRCUIT rule matches
+    # THAT host — which is right for every stream whose `:authority` is that host, and every
+    # stream on a conformant connection is (gori's leaf carries a SAN of exactly the requested
+    # host, `tls/cert_builder.cr`, so a conformant client cannot coalesce onto one). A
+    # hand-rolled client can still coalesce, and then a rule scoped to the coalesced authority
+    # goes unapplied where the pre-#526 blanket downgrade would have caught it. Body rewriting
+    # and short-circuiting are both seams the relay cannot reach, so that failure is silent —
+    # the operator sees a request they stubbed reach the origin with nothing saying why.
+    #
+    # So: one line per connection, naming the authority and the connection host. Costs a string
+    # compare per request head on every normal connection (the authority IS the host, and that
+    # returns before any lock); only a genuinely coalesced stream reaches the rule lookup, and
+    # only until the line is written.
+    private def notice_coalesced(rw : Proxy::HeadRewriter, fields : Array(HPACK::Field)) : Nil
+      return if @warned_coalesced
+      authority = HeadCodec.pseudo_of(fields, ":authority")
+      return if authority.nil? || authority.empty?
+      # `:authority` may carry a port; the gate asked about a bare host.
+      host, _ = Upstream.split_host_port(authority, 0)
+      return if host.compare(@host, case_insensitive: true) == 0
+      return unless rw.rewrites_body_for_host?(host) || rw.short_circuits_for_host?(host)
+      @warned_coalesced = true
+      ::Log.warn do
+        "h2 #{@direction}: stream authority #{host.inspect} is not the CONNECT host " \
+        "#{@host.inspect} (RFC 9113 §9.1.1 coalescing) and a Match&Replace body or " \
+        "short-circuit rule matches it — those rules are NOT applied on the HTTP/2 relay, and " \
+        "the connection was not downgraded because no such rule matches #{@host.inspect}. " \
+        "Reach this host on its own connection to have them apply."
       end
     end
 

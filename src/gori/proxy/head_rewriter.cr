@@ -49,6 +49,26 @@ module Gori::Proxy
       false
     end
 
+    # The same two questions, asked ABOUT ONE HOST (#526). A rule carries a host glob, so
+    # "is a body/stub rule live" and "can a body/stub rule touch this host" are different
+    # questions, and the h2 downgrade gate needs the second one: it costs a host its
+    # protocol, and a rule scoped to `alpha.test` must not cost `127.0.0.1` anything. The
+    # host-blind pair above stays for the per-message callers (`ClientConn` asks whether to
+    # buffer a body at all, on a connection already pinned to one host).
+    #
+    # An UNSCOPED rule (empty glob) matches every host, so it still answers true everywhere
+    # — the pre-#526 behaviour for the rule set most operators have, unchanged.
+    #
+    # Called once per CONNECT, never per message: an implementation may take a lock.
+    # Default false, matching the host-blind pair — a no-op stub rewrites nothing anywhere.
+    def rewrites_body_for_host?(host : String) : Bool
+      false
+    end
+
+    def short_circuits_for_host?(host : String) : Bool
+      false
+    end
+
     # Whether any rewrite is actually configured. The h2 relay checks this before paying
     # to synthesize a head to run rules against (`H2::HeadRewrite`), and the TUI reads it
     # for the Rewriter tab. It used to also be the TLS MITM's reason to force HTTP/1.1;

@@ -160,6 +160,26 @@ module Gori
       @resp_body_count.get > 0
     end
 
+    # Whether a body rule that can actually MATCH `host` is live (#526). The two predicates
+    # above answer "is any body rule live", which is the right question for `ClientConn` (it
+    # is deciding whether to pay for a body buffer on a connection already pinned to one
+    # host) and the wrong one for the h2 downgrade gate: that gate costs the host its
+    # protocol, and a rule scoped to `alpha.test` was costing `127.0.0.1` its protocol too.
+    #
+    # The atomic counts are still the fast path — no body rule anywhere means no lock and no
+    # select — and `host_matches?` (memoised, see below) then decides the rest. Both sides
+    # are folded into one question because the gate downgrades for either.
+    #
+    # Once per CONNECT, so the mutex here is not on any hot path.
+    def rewrites_body_for_host?(host : String) : Bool
+      return false if @req_body_count.get == 0 && @resp_body_count.get == 0 # lock-free fast path
+      @mutex.synchronize do
+        @rules.any? do |r|
+          r.enabled? && r.op.rewrite? && !r.pattern.empty? && r.part.body? && host_matches?(r.host, host)
+        end
+      end
+    end
+
     def rewrite_request_body(entity : Bytes, host : String) : Bytes
       apply(entity, Store::RuleTarget::Request, Store::RulePart::Body, @req_body_count, host)
     end
@@ -172,6 +192,19 @@ module Gori
 
     def short_circuits? : Bool
       @short_circuit_count.get > 0
+    end
+
+    # `short_circuits?` narrowed to one host (#526) — the same split, and for the same
+    # reason, as `rewrites_body_for_host?` above. The host filter is exactly the one
+    # `short_circuit` itself applies, so this answers "could `short_circuit` ever return a
+    # stub for this host", which is precisely what the downgrade gate is protecting.
+    def short_circuits_for_host?(host : String) : Bool
+      return false if @short_circuit_count.get == 0 # lock-free fast path
+      @mutex.synchronize do
+        @rules.any? do |r|
+          r.enabled? && r.op.short_circuit? && !r.pattern.empty? && host_matches?(r.host, host)
+        end
+      end
     end
 
     # The stub answering this request head, or nil when no rule claims it. The FIRST matching

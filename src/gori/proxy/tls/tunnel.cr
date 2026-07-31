@@ -189,8 +189,8 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when HTTP/2 is switched off OR a Match&Replace BODY rule is live.
-    # Anything else is a candidate, subject to the origin actually speaking h2 (see
+    # ClientConn path — when HTTP/2 is switched off OR a Match&Replace BODY rule is live FOR
+    # THIS HOST. Anything else is a candidate, subject to the origin actually speaking h2 (see
     # reflect_origin_h2). Placing the check here also means a downgrade skips the origin ALPN
     # probe entirely: reflect_origin_h2 consults this before dialing.
     #
@@ -229,13 +229,31 @@ module Gori::Proxy::Tls
     # `https://acme.test/api/*` forward `/admin` to the origin unexamined. It is replaced by a
     # per-stream refusal in `H2::StreamGate` — which also covers something h1 never had to face,
     # a coalesced stream whose `:authority` is not the CONNECT host (§9.1.1).
+    #
+    # ## What #526 narrowed, and what that costs
+    #
+    # Both remaining rewriter terms were HOST-BLIND: they read a global atomic count, so ONE
+    # rule scoped to `alpha.test` downgraded every h2 host on the proxy, including hosts its
+    # own glob can never match. That is the same shape step 2 fixed for head rules — a gate
+    # true for something it is not protecting — and it took the same remedy: narrow, don't
+    # remove. `rewrites_body_for_host?` / `short_circuits_for_host?` (`rules.cr`) keep the
+    # atomic counts as a lock-free fast path and then ask the host glob. An UNSCOPED rule
+    # matches every host and still downgrades everything, exactly as before.
+    #
+    # The cost is a stream whose `:authority` is NOT the CONNECT host (§9.1.1 coalescing):
+    # such a stream can now carry a rule this per-connection gate never saw, where the blanket
+    # downgrade caught it. gori's leaf certs carry a SAN of exactly the requested host
+    # (`cert_builder.cr`), so a conformant client cannot coalesce onto one and the case needs a
+    # hand-rolled peer — but it is not impossible, so it is not left silent: `H2::HeadRewrite`
+    # already computes the per-stream authority for rule scoping and logs once per connection
+    # when a stream's authority differs from this host AND a body/stub rule matches it.
     private def h2_candidate?(host : String) : Bool
       if Gori::Settings.http2_disabled?
         notice_downgrade(host, "HTTP/2 is switched off (settings network.http2; set it back to " \
                                "\"auto\" to keep h2)")
         return false
       end
-      if @rewriter.try { |rw| rw.rewrites_request_body? || rw.rewrites_response_body? }
+      if @rewriter.try(&.rewrites_body_for_host?(host))
         notice_downgrade(host, "a Match&Replace BODY rule is live and body rewriting on HTTP/2 " \
                                "is not implemented yet (disable the body rule to keep h2)")
         return false
@@ -247,7 +265,7 @@ module Gori::Proxy::Tls
       # whole purpose is that the request must NOT reach the origin. Left ungated, an operator
       # who stubbed an endpoint would watch an h2 host send the request anyway, with nothing
       # anywhere saying why.
-      if @rewriter.try(&.short_circuits?)
+      if @rewriter.try(&.short_circuits_for_host?(host))
         notice_downgrade(host, "a Match&Replace short-circuit rule is live and the h2 relay " \
                                "cannot answer a request locally (disable the stub rule to keep h2)")
         return false
