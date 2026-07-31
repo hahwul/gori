@@ -1098,6 +1098,29 @@ module Gori::Proxy
     # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the
     # CONNECT authority, so we dial it plaintext and run the same h2 relay (no
     # :authority routing / HPACK coupling needed). The origin must speak h2c.
+    # A rule kind this tunnel cannot serve, or nil. Mirrors `tls/tunnel.cr#h2_candidate?`'s
+    # three rule gates — a body Match&Replace rule, a short-circuit stub, a body-scoped
+    # extract rule — all of which live on `ClientConn`'s h1 path and are unreachable from the
+    # h2 relay. On the TLS path they earn a downgrade to h1; here the client has already sent
+    # the preface, so the only honest answers are refuse or lie.
+    private def h2c_unservable?(host : String) : Bool
+      reason =
+        if @rewriter.try(&.rewrites_body_for_host?(host))
+          "a Match&Replace BODY rule is live and body rewriting on HTTP/2 is not implemented yet"
+        elsif @rewriter.try(&.short_circuits_for_host?(host))
+          "a Match&Replace short-circuit rule is live and the h2 relay cannot answer a request locally"
+        elsif @extractor.try(&.extracts_body_for_host?(host))
+          "a body-scoped session-binding extract rule is live and the h2 relay never holds a body"
+        end
+      return false unless reason
+      ::Log.warn do
+        "h2c CONNECT to #{host}: refused because #{reason}. The client committed to HTTP/2 by " \
+        "sending the preface, so there is nothing to downgrade — disable the rule for this host " \
+        "to allow the tunnel, or reach it over TLS where gori can downgrade the connection"
+      end
+      true
+    end
+
     private def intercept_h2c(host : String, port : Int32, client : IO) : Nil
       upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
       return unless upstream
@@ -1191,6 +1214,12 @@ module Gori::Proxy
           # silently relaying it would make "force HTTP/1.1" quietly untrue for this path,
           # which is worse than a visible refusal.
           return false if Settings.http2_disabled?
+          # The other three gates `tls/tunnel.cr#h2_candidate?` applies, which had no h2c
+          # equivalent. Same reasoning as the line above, and the same disposition: there is
+          # nothing to downgrade here, so a rule the relay structurally cannot apply gets a
+          # VISIBLE refusal rather than a tunnel that looks like it honours the rule table
+          # while a stub rule quietly lets the request reach the origin.
+          return false if h2c_unservable?(host)
           intercept_h2c(host, port, stream)
         else
           tls.intercept(host, port, stream, @sink, dial_addr: dial_pin)

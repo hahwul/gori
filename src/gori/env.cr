@@ -52,8 +52,17 @@ module Gori
     abstract class Layer
       # Names an extract rule declares, whether or not one is bound yet.
       abstract def declared : Array(String)
-      # Currently bound values, by name.
+      # Values available for RESOLUTION — what `$NAME` may expand to at send time.
       abstract def values : Hash(String, String)
+
+      # Every value the layer is HOLDING, resolvable or not. Defaults to `values`; a layer
+      # whose two answers differ must override it. `Bindings` does: it keeps a disabled
+      # rule's token so re-enabling costs no round trip, while refusing to resolve it. See
+      # `Env.masking_vars` — a secret that stopped resolving has not stopped being a secret.
+      def held_values : Hash(String, String)
+        values
+      end
+
       # Bumped on every rule edit and every rebind, so a consumer can cache a merged
       # snapshot instead of rebuilding one per message (see `Rules`).
       abstract def rev : UInt64
@@ -103,6 +112,21 @@ module Gori
       h
     end
 
+    # What a MASKING surface must treat as secret: build-time vars plus every value the
+    # binding layer is holding, INCLUDING one whose rule is currently disabled.
+    #
+    # Deliberately wider than `display_vars`, and the two must not be merged. `display_vars`
+    # answers "what will resolve", which is what `token_regions` paints and what completion
+    # offers — a disabled name is not resolvable and must not paint as bound. Masking asks a
+    # different question: those bytes were observed from a real response and are sitting in
+    # memory, so a redaction that stopped the moment the operator toggled a rule off would
+    # print the token into an export, a note or the detail view.
+    def self.masking_vars : Hash(String, String)
+      h = effective_vars
+      (@@layer.try(&.held_values) || {} of String => String).each { |(k, v)| h[k] = v }
+      h
+    end
+
     # Substitute BOUND binding values in final wire bytes, at send time. Returns the same
     # slice when there is nothing to do — the common case, and byte-fidelity (P7) besides.
     #
@@ -111,18 +135,44 @@ module Gori
     # safe here in a way `unresolved_wire`'s head-only rule was not, because this matches a
     # SPECIFIC declared name rather than the `$`+`[A-Za-z_]` shape — a random collision with
     # `$SESSION` in a binary body is a 2^-56 event, not the ~3-per-4KB one #525 measured.
+    # A value carrying CR/LF/NUL is withheld from the HEAD half and substituted freely in the
+    # BODY. A binding value is the ORIGIN'S — see `Bindings.boundary_forging?` — and in a head
+    # `abc\r\nX-Admin: true` becomes two header lines while `abc\r\n\r\nGET /...` forges a whole
+    # second request onto a pooled keep-alive upstream. In a body it forges nothing, and the
+    # sentence above is the designed case, so the split is by POSITION rather than by value.
+    # A name whose value is withheld stays LITERAL, `Env.expand`'s documented contract for an
+    # unknown key — visible in the request rather than silently dropped.
     def self.expand_bindings(bytes : Bytes) : Bytes
       vals = binding_values
       return bytes if vals.empty?
       prefix = Settings.env_prefix
       return bytes if prefix.empty? || !contains_prefix?(bytes, prefix)
-      expand(String.new(bytes), vals, prefix).to_slice
+      safe = boundary_safe(vals)
+      return expand(String.new(bytes), vals, prefix).to_slice if safe.size == vals.size
+      boundary = head_body_boundary(bytes)
+      head = expand(String.new(bytes[0...boundary]), safe, prefix).to_slice
+      return head if boundary >= bytes.size
+      body = expand(String.new(bytes[boundary..]), vals, prefix).to_slice
+      buf = IO::Memory.new(head.size + body.size)
+      buf.write(head)
+      buf.write(body)
+      buf.to_slice
     end
 
+    # The String form has no head/body split to take — every caller is a short operator field
+    # that lands on the request line or in a header (a `--target`, an SNI, a WS frame's text),
+    # so all of it is boundary-sensitive.
     def self.expand_bindings(text : String) : String
       vals = binding_values
       return text if vals.empty?
-      expand(text, vals, Settings.env_prefix)
+      expand(text, boundary_safe(vals), Settings.env_prefix)
+    end
+
+    # `vals` minus every value that would forge a message boundary where it is injected.
+    # Returns the SAME Hash when nothing is withheld, which is the common case.
+    private def self.boundary_safe(vals : Hash(String, String)) : Hash(String, String)
+      return vals unless vals.any? { |(_, v)| Bindings.boundary_forging?(v) }
+      vals.reject { |_, v| Bindings.boundary_forging?(v) }
     end
 
     # Declared binding names in `bytes` that have no value yet, first-appearance order.
@@ -405,10 +455,12 @@ module Gori
     # just the masked spans. Byte-level value matching is also strictly more
     # precise than char matching: it finds a value's literal bytes regardless of
     # whether the surrounding haystack happens to be well-formed UTF-8.
-    # `display_vars`, not `effective_vars`: a bound session token is exactly the value a
+    # `masking_vars`, not `effective_vars`: a bound session token is exactly the value a
     # masking surface must not print, and widening the default here is what makes every
-    # existing caller mask it without a per-caller change (the design's "for free").
-    def self.mask_secrets(text : String, vars : Hash(String, String) = display_vars,
+    # existing caller mask it without a per-caller change (the design's "for free"). Wider
+    # than `display_vars` on purpose — see `masking_vars`: a value whose rule was disabled
+    # stops RESOLVING but is still a secret sitting in memory.
+    def self.mask_secrets(text : String, vars : Hash(String, String) = masking_vars,
                           prefix : String = Settings.env_prefix) : String
       return text if prefix.empty? || vars.empty?
 

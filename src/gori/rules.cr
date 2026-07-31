@@ -439,7 +439,18 @@ module Gori
       # replacement means the identical String comes back, exactly as before this feature.
       return repl if prefix.empty? || !repl.byte_index(prefix)
       vars, declared = subst_snapshot
-      substitute(repl, prefix, vars, declared, rule.op.replace? && rule.match_kind.regex?)
+      substitute(repl, prefix, vars, declared, rule.op.replace? && rule.match_kind.regex?,
+        head: head_scoped?(rule))
+    end
+
+    # Whether this rule writes into the HEAD of a message, which is where a value carrying
+    # CR/LF can forge a header line or a whole second request. The three header ops write
+    # header lines by construction; a `Replace` is judged by its `part`. See
+    # `Bindings.boundary_forging?` for why the check lives at the injection site rather than
+    # at extraction: a CR/LF in a BODY forges nothing and body injection is a designed case.
+    private def head_scoped?(rule : Store::MatchRule) : Bool
+      return true if rule.op.set_header? || rule.op.add_header? || rule.op.remove_header?
+      rule.part.head?
     end
 
     # ONE left-to-right pass that resolves `$NAME`, translates the Caido-style `$1` capture
@@ -465,7 +476,7 @@ module Gori
     # Byte-level for the same reason `Env.expand` is: a BODY replacement can carry bytes
     # that are not valid UTF-8, and `String#chars` would turn each of them into U+FFFD.
     private def substitute(repl : String, prefix : String, vars : Hash(String, String),
-                           declared : Array(String), regex : Bool) : String?
+                           declared : Array(String), regex : Bool, head : Bool = false) : String?
       bytes = repl.to_slice
       prefix_bytes = prefix.to_slice
       n = bytes.size
@@ -488,6 +499,7 @@ module Gori
           key, consumed = parsed
           # Declared by an extract rule but not bound yet → the rule must not apply.
           return nil if !vars.has_key?(key) && declared.includes?(key)
+          return nil if head && forges_boundary?(vars, declared, key)
           i += emit_key(buf, bytes, vars, key, consumed, prefix, plen, regex)
           next
         end
@@ -502,6 +514,19 @@ module Gori
         i += plen
       end
       String.new(buf.to_slice)
+    end
+
+    # Whether resolving `key` here would write a boundary-forging value into a HEAD, in which
+    # case the rule must not apply at all — the same disposition an unbound name gets, and for
+    # a stronger reason. A server-controlled `abc\r\nX-Admin: true` in a `SetHeader`
+    # replacement becomes two header lines the origin reads as its own. Only for a BINDING
+    # (`declared`): an env var is the operator's own bytes and stays byte-exact (P7), and only
+    # in the head — the same value in a BODY replacement forges nothing, which is the designed
+    # case `Env.expand_bindings` documents.
+    private def forges_boundary?(vars : Hash(String, String), declared : Array(String),
+                                 key : String) : Bool
+      return false unless declared.includes?(key)
+      (v = vars[key]?) ? Bindings.boundary_forging?(v) : false
     end
 
     private def prefix_at?(bytes : Bytes, prefix_bytes : Bytes, at : Int32) : Bool

@@ -191,7 +191,7 @@ describe Gori::Export::Har do
     with_store do |store|
       detail = capture_flow(store,
         req_head: "POST /u HTTP/1.1\r\nHost: shop.test\r\nTransfer-Encoding: chunked\r\n\r\n",
-        req_body: "9\r\nfirst-part\r\n0\r\n\r\n".to_slice,
+        req_body: "a\r\nfirst-part\r\n0\r\n\r\n".to_slice,
         resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n",
         resp_body: "4\r\ndone\r\n0\r\n\r\n".to_slice,
         method: "POST", target: "/u", content_type: "text/plain")
@@ -208,6 +208,46 @@ describe Gori::Export::Har do
       export([back])[0].should eq(har)
     end
   end
+
+  # The other source these builders serve. A browser / Charles / Postman HAR passes
+  # `transfer-encoding: chunked` through verbatim while `content.text` is the DECODED body —
+  # so trusting the header alone stored a head declaring Chunked over a body that is not,
+  # which every consumer then misframes SILENTLY. (The pre-fix CL+TE at least got refused
+  # loudly by `Codec::Body.response_framing`.) The body decides, and the head is made to
+  # describe what is actually stored.
+  it "drops a Transfer-Encoding a third-party HAR's decoded body does not back" do
+    har = {
+      "log" => {
+        "version" => "1.2", "creator" => {"name" => "some-browser", "version" => "1"},
+        "entries" => [{
+          "startedDateTime" => "2026-07-31T00:00:00.000Z", "time" => 1.0,
+          "request"  => {"method" => "POST", "url" => "https://a.test/x", "httpVersion" => "HTTP/1.1",
+                         "headers"  => [{"name" => "Transfer-Encoding", "value" => "chunked"}],
+                         "postData" => {"mimeType" => "application/json", "text" => %({"a":1})},
+                         "queryString" => [] of String, "cookies" => [] of String,
+                         "headersSize" => -1, "bodySize" => -1},
+          "response" => {"status" => 200, "statusText" => "OK", "httpVersion" => "HTTP/1.1",
+                         "headers" => [{"name" => "Transfer-Encoding", "value" => "chunked"}],
+                         "content" => {"size" => 11, "mimeType" => "text/plain", "text" => "hello world"},
+                         "cookies" => [] of String, "redirectURL" => "",
+                         "headersSize" => -1, "bodySize" => -1},
+          "cache" => {} of String => String,
+          "timings" => {"send" => 0.0, "wait" => 1.0, "receive" => 0.0},
+        }],
+      },
+    }.to_json
+
+    detail = reimport(har)
+    req = String.new(detail.request_head)
+    resp = String.new(detail.response_head.not_nil!)
+    req.should_not contain("Transfer-Encoding")
+    resp.should_not contain("Transfer-Encoding")
+    # …and the head now states the length of the body it really has, so the framing the codec
+    # derives matches the bytes instead of contradicting them.
+    req.should contain("Content-Length: 7")
+    resp.should contain("Content-Length: 11")
+  end
+
 
   it "writes the WIRE body, not the decompressed view, so it stays in sync with Content-Encoding" do
     # Chrome writes the decoded text here. That is fine for a debugging view and wrong for a

@@ -354,6 +354,17 @@ module Gori
         present?(h, "enabled") ? bool_arg(h, "enabled", current) : nil
       end
 
+      # `enabled_change` / `bool_arg`'s refusal turned into a Result, WITHOUT a method-wide
+      # `rescue Gori::Error`. That rescue would be far broader than the argument error it was
+      # added for — `Gori::Error` is this codebase's general error type, so a store failure
+      # inside `bindings.add` would come back as INVALID_ARGUMENT carrying the store's message.
+      # Scoped to the one call that can raise on the CALLER's input.
+      private def enabled_arg(h, current : Bool) : Bool? | Result
+        enabled_change(h, current)
+      rescue ex : Gori::Error
+        err(ex.message || "invalid 'enabled' (expected true or false)", "INVALID_ARGUMENT", field: "enabled")
+      end
+
       # kind=position needs a real range; every other kind ignores the two ints.
       private def extract_range_error(kind : Gori::ExtractKind, pos_start : Int32, pos_end : Int32) : Result?
         return nil unless kind.position? && pos_end <= pos_start
@@ -376,7 +387,9 @@ module Gori
         # reading it after `bindings.add` had persisted meant the caller got a failure while a
         # live, ENABLED extract rule stayed behind — already observing responses and binding
         # its name for Match&Replace injection. A rejected create must leave nothing.
-        enabled = bool_arg(h, "enabled", true)
+        enabled = enabled_arg(h, true)
+        return enabled if enabled.is_a?(Result)
+        enabled = enabled.nil? ? true : enabled
         bindings = extract_bindings
         if bad = bindings.add(name, str(h, "when") || "", kind, selector, pos_start, pos_end, str(h, "host") || "")
           return err(bad, "INVALID_ARGUMENT", field: "name")
@@ -394,10 +407,6 @@ module Gori
             j.field "enabled", enabled
           end
         end)
-      rescue ex : Gori::Error
-        # `create_rule`'s rescue, for the same reason: a bad argument is the CALLER's, so it
-        # gets INVALID_ARGUMENT here rather than the catch-all's INTERNAL.
-        err(ex.message || "invalid extract rule arguments", "INVALID_ARGUMENT")
       end
 
       # Atomic disabled creation, matching create_rule: flip before returning so there is no
@@ -425,7 +434,8 @@ module Gori
         end
         filter = keep(h, "when", existing.match_filter)
         host = keep(h, "host", existing.host)
-        en = enabled_change(h, existing.enabled?)
+        en = enabled_arg(h, existing.enabled?)
+        return en if en.is_a?(Result)
         if bad = extract_bindings.update(id, name, filter, kind, selector, pos_start, pos_end, host)
           return err(bad, "INVALID_ARGUMENT", field: "name")
         end
@@ -440,8 +450,6 @@ module Gori
             j.field "kind", kind.label
           end
         end)
-      rescue ex : Gori::Error
-        err(ex.message || "invalid extract rule arguments", "INVALID_ARGUMENT")
       end
 
       private def set_extract_rule_enabled(h) : Result

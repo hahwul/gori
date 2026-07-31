@@ -339,9 +339,16 @@ module Gori::Tui
       ic = @host.session.interceptor
       edit = @intercept.pending_edit
       label = batch_label(ids) # built BEFORE the decisions go out — the items are gone after
-      ids.each { |id| ic.forward(id, (edit && edit[0] == id) ? edit[1] : nil) }
+      # Count what actually went out: an item another surface (MCP, the reaper) settled first
+      # is not this operator's forward, and reporting the whole batch would be a silent no-op
+      # for the difference.
+      sent = ids.count { |id| ic.forward(id, (edit && edit[0] == id) ? edit[1] : nil) }
       @intercept.reload(ic)
-      @host.status("forwarded #{label}")
+      if sent == ids.size
+        @host.status("forwarded #{label}")
+      else
+        @host.status("forwarded #{sent} of #{ids.size} — the rest were already decided elsewhere")
+      end
     end
 
     # Drop the effective target set. No confirm even in batch: a dropped hold answers the

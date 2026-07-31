@@ -141,36 +141,63 @@ describe Gori::Bindings do
     # whole second request onto a pooled keep-alive upstream. `escape_backrefs` already
     # covers this value being re-read by `gsub`'s replacement grammar; the message boundary
     # is the other half, and `Import::Builder` guards exactly it on the sibling path.
-    it "never binds a value that would forge a message boundary" do
+    # It BINDS — a CR/LF in a body forges nothing, and `Env.expand_bindings` documents body
+    # injection as a designed case (a PEM block, a SAML assertion, a formatted JSON
+    # sub-document). What is refused is the HEAD half, at the injection site.
+    it "binds a multi-line value but withholds it from the head" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("SESSION", "", Gori::ExtractKind::JsonPath, "$.token").should be_nil
         head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
         # A JSON-escaped CRLF: the origin's own bytes, decoded into a real CR LF by the
-        # extractor — which is exactly how it would reach the header line.
-        forged = response_result(head, %({"token":"abc\\r\\nX-Admin: true"}))
-        b.observe(forged, subject).should be_empty
-        b.bound?("SESSION").should be_false
-        store.events_after(0, 20).any? { |e| e.message.includes?("CR, LF or NUL") }.should be_true
+        # extractor — which is exactly how it would reach a header line.
+        b.observe(response_result(head, %({"token":"abc\\r\\nX-Admin: true"})), subject)
+          .should eq(["SESSION"])
+        b.bound?("SESSION").should be_true
 
-        # A previous GOOD value is not cleared by the refusal — a miss never unbinds.
-        b.observe(response_result(head, %({"token":"clean"})), subject).should eq(["SESSION"])
-        b.observe(forged, subject).should be_empty
-        b.values["SESSION"].should eq("clean")
+        with_layer(b) do
+          wire = "GET /a HTTP/1.1\r\nCookie: sid=$SESSION\r\n\r\nbody=$SESSION"
+          out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+          # Head: left LITERAL, so the forged header line never exists and the operator can
+          # see why the request failed.
+          out.should contain("Cookie: sid=$SESSION")
+          out.should_not contain("X-Admin: true\r\nCookie")
+          # Body: substituted, newline and all.
+          out.should contain("body=abc\r\nX-Admin: true")
+        end
       end
     end
 
-    it "refuses a NUL as readily as a CR or an LF" do
+    it "withholds a boundary-forging value from a header rule, not from a body rule" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::JsonPath, "$.token").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"token":"a\\r\\nX-Evil: 1"})),
+          subject).should eq(["SESSION"])
+        with_layer(b) do
+          rules = Gori::Rules.new(store, store.match_rules)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "GET",
+            "$SESSION", Gori::Store::RuleOp::SetHeader, Gori::Store::MatchKind::Literal,
+            "auth", "", "")
+          req = "GET /a HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice
+          # The rule does not apply at all, exactly as it does not for an unbound name —
+          # rather than writing a second header line the origin would read as its own.
+          String.new(rules.rewrite_request(req, "acme.test")).should_not contain("X-Evil")
+        end
+      end
+    end
+
+    it "a value with no boundary byte is untouched by any of this" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("A", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
         head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
-        b.observe(response_result(head, %({"t":"ab\\u0000cd"})), subject).should be_empty
-        b.bound?("A").should be_false
-        # A value with no boundary byte still binds — the guard is the three bytes
-        # `Import::Builder::HEADER_INJECT` names, not "anything unusual". A horizontal tab is
-        # legal in a field-value (RFC 7230 §3.2) and stays legal here.
+        # A horizontal tab is legal in a field-value (RFC 7230 §3.2) and stays legal: the
+        # guard is the three bytes `Import::Builder::HEADER_INJECT` names, not "anything odd".
         b.observe(response_result(head, %({"t":"ab\\tcd"})), subject).should eq(["A"])
+        with_layer(b) do
+          String.new(Gori::Env.expand_bindings("X: $A\r\n\r\n".to_slice)).should eq("X: ab\tcd\r\n\r\n")
+        end
       end
     end
 

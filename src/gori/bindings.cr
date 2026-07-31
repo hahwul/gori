@@ -92,11 +92,16 @@ module Gori
     # binding value being re-interpreted downstream — that is what `escape_backrefs` is for —
     # and covers `gsub`'s replacement grammar only; the message boundary is the other half.
     #
-    # Refused at EXTRACTION rather than at each injection site because there are five of them
-    # (`Rules#substitute` plus `Env.expand_bindings` on the four send seams) and a value that
-    # never enters the table cannot reach any of them. The cost is stated plainly: a
-    # `position`/`regex` descriptor that deliberately spans a line break no longer binds, and
-    # the miss event says which byte it was.
+    # ## Why it is asked at the INJECTION SITE and not at extraction
+    #
+    # Refusing at extraction was the first answer and it was too wide. `Env.expand_bindings`
+    # states that "injecting a token into a body is a designed case (a `Replace` rule with
+    # `part: Body`, an operator's Repeater template)", and CR/LF in a BODY forges nothing — a
+    # PEM block, a SAML assertion, a formatted JSON sub-document are all legitimate values for
+    # exactly that case. So the value is bound either way and the refusal lives where the
+    # boundary exists: the head half of a message, and any short field that lands on the
+    # request line. `Env.expand_bindings` splits the message and applies it to the head only;
+    # `Rules#substitute` applies it for the head ops and the head part.
     #
     # A BYTE scan and not a Regex: a header value or a `position` slice can carry bytes that
     # are not valid UTF-8, and Crystal's Regex raises `ArgumentError` on such a subject — which
@@ -166,6 +171,18 @@ module Gori
         @rules.each { |r| live << r.name if r.enabled? }
         h = {} of String => String
         @values.each { |(k, b)| h[k] = b.value if live.includes?(k) }
+        h
+      end
+    end
+
+    # Every value held, enabled or not — the MASKING half of the split above. A token whose
+    # rule the operator switched off stops resolving, but it was still observed from a real
+    # response and is still in memory, so `Env.mask_secrets` must keep redacting it out of
+    # exports, notes and the detail view. See `Env.masking_vars`.
+    def held_values : Hash(String, String)
+      @mutex.synchronize do
+        h = {} of String => String
+        @values.each { |(k, b)| h[k] = b.value }
         h
       end
     end
@@ -485,10 +502,6 @@ module Gori
     # was, rather than being left to wonder why `$NAME` did not move.
     private def unusable(value : String) : String?
       return "matched an empty value" if value.empty?
-      if Bindings.boundary_forging?(value)
-        return "matched a value carrying CR, LF or NUL, which would forge a message boundary " \
-               "where it is injected"
-      end
       nil
     end
 

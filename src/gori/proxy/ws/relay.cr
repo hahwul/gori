@@ -258,12 +258,18 @@ module Gori::Proxy::WS
       rescue
         false # peer closed / reset: this direction ends
       ensure
-        # The abnormal exits (EOF, a truncated frame, a reset) reach here too, and they are
-        # withholding the same bytes a CLOSE would have been. Best-effort: this path is
-        # usually taken BECAUSE a peer went away, so the write can itself fail — but the
-        # byte-exact pump would already have forwarded these bytes, and dropping them
-        # silently is the difference between the two pumps that must not exist.
-        (bypass("this direction ended mid-message") { flush_withheld }) rescue nil
+        # The abnormal exits (EOF, a truncated frame, a reset) are withholding the same bytes
+        # a CLOSE would have been, and the byte-exact pump would already have forwarded them —
+        # so dropping them silently is a difference between the two pumps that should not
+        # exist. Best-effort: this path is usually taken BECAUSE a peer went away.
+        #
+        # GATED sockets are deliberately excluded, and NOT because of ordering. `bypass` runs
+        # `fail_open_locked` before it yields, so routing this through it would force every
+        # still-undecided held message out to the origin on any abnormal end — flipping
+        # `MessageGate#close`'s deliberate discard into a fail-open as a side effect, for
+        # messages the operator never looked at. With a gate armed, what happens to withheld
+        # bytes at teardown is `close`'s decision and it has already made it.
+        (flush_withheld rescue nil) if @gate.nil?
       end
 
       # A control frame (ping/pong/close) never takes part in a rewrite or a hold and is
