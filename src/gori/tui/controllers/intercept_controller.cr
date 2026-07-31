@@ -324,6 +324,7 @@ module Gori::Tui
     def intercept_forward : Nil
       ids = @intercept.target_ids
       return if ids.empty?
+      return if refuse_unresolved_env?
       ic = @host.session.interceptor
       edit = @intercept.pending_edit
       label = batch_label(ids) # built BEFORE the decisions go out — the items are gone after
@@ -356,8 +357,26 @@ module Gori::Tui
       "#{ids.size} held message#{ids.size == 1 ? "" : "s"}"
     end
 
+    # Refuse a forward whose pending edit still names a var that resolves to nothing, and
+    # say so. `Env.expand_wire` leaves an unregistered `$KEY` literal on purpose — right in
+    # the editor, wrong on the socket, where the token's own characters go out as a header
+    # value and the origin's 401 reads as the target rejecting a token rather than as a
+    # variable that was never set (#519). Intercept forwards outside `Repeater::Plan`, so
+    # the builder's refusal never covered it (#524).
+    #
+    # The WHOLE batch is refused, not just the edited item: forwarding the others and
+    # silently holding back the one being edited would report "forwarded 4 held messages"
+    # for a set the operator asked to send as one.
+    private def refuse_unresolved_env? : Bool
+      names = @intercept.unresolved_env
+      return false if names.empty?
+      @host.status("intercept: unresolved env #{Env.token_list(names)} — add it in the Project tab's ENV pane, or remove the token")
+      true
+    end
+
     def intercept_forward_all : Nil
       n = @host.session.interceptor.pending_count
+      return if refuse_unresolved_env?
       # Carry the currently-loaded item's in-progress edit into the bulk forward, so
       # "forward all" doesn't send its stale original bytes (single-forward already does).
       overrides = @intercept.pending_edit.try { |e| {e[0] => e[1]} }

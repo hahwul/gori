@@ -92,6 +92,21 @@ module Gori
           return err("repeater #{id} contains §fuzz§ markers — remove them first, or use fuzz_start to sweep them",
             "INVALID_ARGUMENT", field: "repeater_id")
         end
+        # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
+        # design, so the builder's unresolved-token refusal (#519) never runs for it and this
+        # is the only place that check can happen (#524). Checked BEFORE the target parse: an
+        # unresolved `$HOST` survives `Env.expand` as the literal host, which would otherwise
+        # surface as an unparseable-target error naming no variable at all.
+        #
+        # Head-only on the REQUEST (`unresolved_wire`) for #519's reason — a `$` in a captured
+        # body is a byte, and a whole-request check refuses nearly every binary-body session —
+        # but whole-string on the target and SNI, which are short operator-typed fields with no
+        # body to exclude. The CLI and TUI minimize paths carry the same three checks.
+        names = Env.unresolved_wire(text) | Env.unresolved(rec.target) |
+                (rec.sni.try { |s| Env.unresolved(s) } || [] of String)
+        unless names.empty?
+          return err(env_unresolved_error(Env.token_list(names)), "INVALID_ARGUMENT", field: "repeater_id")
+        end
         scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
         return err("could not determine a target host for repeater #{id}", "INVALID_ARGUMENT", field: "repeater_id") if host.empty?
         unless scheme.in?("http", "https")

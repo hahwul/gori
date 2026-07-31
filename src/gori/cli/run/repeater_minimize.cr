@@ -104,6 +104,22 @@ module Gori
         unless Fuzz::Template.marker_regions(text).empty?
           abort "gori run repeater minimize: session ##{id} contains §fuzz§ markers — remove them first, or use `gori run fuzz` to sweep them"
         end
+        # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
+        # design, so the builder's unresolved-token refusal (#519) never runs for it and this
+        # is the only place that check can happen (#524). Checked BEFORE the target parse: an
+        # unresolved `$HOST` survives `Env.expand` as the literal host, which would otherwise
+        # surface as an unparseable-target abort naming no variable at all.
+        #
+        # Head-only on the REQUEST (`unresolved_wire`) for #519's reason — a `$` in a captured
+        # body is a byte, and a whole-request check refuses nearly every binary-body session —
+        # but whole-string on the target and SNI, which are short operator-typed fields with no
+        # body to exclude. The MCP and TUI minimize paths carry the same three checks.
+        names = Env.unresolved_wire(text) | Env.unresolved(rec.target) |
+                (rec.sni.try { |s| Env.unresolved(s) } || [] of String)
+        unless names.empty?
+          abort "gori run repeater minimize: " +
+                env_unresolved_error(Env.token_list(names), " for session ##{id}")
+        end
         scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(rec.target))
         abort "gori run repeater minimize: could not determine a target host for session ##{id}" if host.empty?
         abort "gori run repeater minimize: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")

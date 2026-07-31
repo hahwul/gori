@@ -1246,6 +1246,22 @@ module Gori::Tui
         return
       end
       view.commit_chain_pane
+      # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
+      # design, so the builder's unresolved-token refusal (#519) never runs for it and this
+      # is the only place that check can happen (#524). Before `parse_target`, which expands:
+      # an unresolved `$HOST` survives as the literal host and would otherwise be reported as
+      # an invalid target naming no variable.
+      #
+      # Head-only on the REQUEST (`unresolved_wire`) for #519's reason — a `$` in a captured
+      # body is a byte, and a whole-request check refuses nearly every binary-body session —
+      # but whole-string on the target and SNI, which are short operator-typed fields with no
+      # body to exclude. The CLI and MCP minimize paths carry the same three checks.
+      env_names = Env.unresolved_wire(view.request_text) | Env.unresolved(view.target) |
+                  (view.sni_override.try { |s| Env.unresolved(s) } || [] of String)
+      unless env_names.empty?
+        @host.status("minimize: unresolved env #{Env.token_list(env_names)} — add it in the Project tab's ENV pane")
+        return
+      end
       scheme, host, port = view.parse_target
       if host.empty?
         @host.status("repeater: invalid target — use scheme://host[:port]/path")
@@ -1299,6 +1315,14 @@ module Gori::Tui
       if reason = plan.refusal
         results.send({view, Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)})
         @host.status("ws repeater: #{reason}")
+        return
+      end
+      # The handshake went through the builder above, which refuses an unresolved token
+      # (#519); the MESSAGES did not — they are expanded one frame at a time, after the
+      # handshake is built, so this is the only place that check can run for them (#524).
+      # Before `inflight` and before the dial: a refused send must leave the tab resendable.
+      unless (names = view.ws_unresolved_env).empty?
+        @host.status("ws repeater: unresolved env #{Env.token_list(names)} in a message — add it in the Project tab's ENV pane")
         return
       end
       messages = view.ws_out_messages

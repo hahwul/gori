@@ -488,6 +488,30 @@ module Gori::Tui
       end
     end
 
+    # The env tokens in the outbound message lines that resolve to nothing — what
+    # `ws_out_messages` would leave on the wire as their own characters. Empty means every
+    # token resolved. A QUERY, deliberately separate from `ws_out_messages`: that one also
+    # feeds the COPY menu (repeater_controller#repeater_request_options), a display path
+    # where a literal `$KEY` is the honest answer. Only the SEND path consults this (#524).
+    #
+    # Whole line, not `Env.unresolved_wire`'s head: a frame has no head/body split to take,
+    # and every line here becomes a TEXT frame — UTF-8 the operator typed into the editor,
+    # the same provenance as a header value, which #519 already checks in full.
+    #
+    # `valid_encoding?` is where the CLI/MCP paths check `m.text?` instead, and it is the
+    # SAME question. The pane is seeded from the session's stored OUT frames with no opcode
+    # filter (repeater_controller: `String.new(m.payload)`), so a captured BINARY frame
+    # arrives here as a line of arbitrary bytes. RFC 6455 §5.6 makes UTF-8 the definition of
+    # a text frame, so a line that is not valid UTF-8 is a binary payload the pane happens to
+    # be displaying, not text an operator typed — and `$` followed by `[A-Za-z_]` turns up in
+    # such bytes roughly once per 1.2KB by chance (#519). Without this the pane refused a
+    # real captured binary frame, naming the `$A` inside a JPEG.
+    def ws_unresolved_env : Array(String)
+      @decoded.text.split('\n')
+        .select { |line| !line.empty? && line.valid_encoding? }
+        .flat_map { |line| Env.unresolved(line) }.uniq!
+    end
+
     # Raw outbound message lines (LF-split, env tokens UNexpanded) for persistence.
     # The store masks secrets and stores these verbatim, so `$KEY` survives to re-expand
     # on the next send — never bake an expanded secret into the DB (see ws_out_messages).

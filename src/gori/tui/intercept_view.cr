@@ -380,6 +380,23 @@ module Gori::Tui
       {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
 
+    # The env tokens in a pending edit that resolve to nothing — what `pending_edit`'s
+    # `Env.expand_wire` would forward as their own characters. Empty when the editor is
+    # clean (an unedited forward is byte-exact and never expands, so there is nothing to
+    # check) or when every token resolved.
+    #
+    # A QUERY beside `pending_edit`, not a change to it: the editor keeps painting an
+    # unregistered token and the queue rows keep showing it, which is the honest display
+    # answer — only the FORWARD consults this (#524).
+    #
+    # Head-only, mirroring `expand_wire`'s own split and #519's rule: in the head a `$`
+    # starts a reference, in an edited body it is a byte, and a whole-request check would
+    # refuse a forward whose held body is binary.
+    def unresolved_env : Array(String)
+      return [] of String unless @loaded_id && @editor_dirty
+      Env.unresolved_wire(@editor.text)
+    end
+
     # The method + target to DISPLAY for a held item — the EDITED values when this is
     # the item loaded in the editor and modified (so a GET→PUT method change or a
     # 200→201 status edit shows in the queue row + forward/drop toast, not the stale

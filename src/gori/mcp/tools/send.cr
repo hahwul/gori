@@ -333,16 +333,23 @@ module Gori
         out_messages = if present?(h, "messages")
                          arr = h["messages"]?.try(&.as_a?)
                          return Result.new("invalid 'messages' (expected an array of strings)", is_error: true) unless arr
-                         parsed = [] of Repeater::WsEngine::OutMsg
+                         texts = [] of String
                          arr.each do |item|
                            text = item.as_s?
                            return Result.new("invalid 'messages' (expected an array of strings)", is_error: true) unless text
-                           parsed << Repeater::WsEngine::OutMsg.new(1, Env.expand(text).to_slice)
+                           texts << text
                          end
-                         parsed
+                         if e = ws_unresolved_env_error(texts, "messages")
+                           return e
+                         end
+                         texts.map { |t| Repeater::WsEngine::OutMsg.new(1, Env.expand(t).to_slice) }
                        else
-                         store.ws_messages_for_repeater(repeater_id).compact_map do |m|
-                           next unless m.direction == "out"
+                         stored = store.ws_messages_for_repeater(repeater_id).select { |m| m.direction == "out" }
+                         if e = ws_unresolved_env_error(stored.select(&.text?).map { |m| String.new(m.payload).scrub },
+                              "repeater_id")
+                           return e
+                         end
+                         stored.map do |m|
                            payload = m.text? ? Env.expand(String.new(m.payload).scrub).to_slice : m.payload
                            Repeater::WsEngine::OutMsg.new(m.opcode, payload)
                          end
@@ -423,6 +430,24 @@ module Gori
         Result.new(payload, is_error: !result.ok?)
       rescue ex : Gori::Error
         Result.new(ex.message || "invalid WebSocket request arguments", is_error: true)
+      end
+
+      # The refusal for a `send_websocket` whose TEXT payloads still name a var that resolves
+      # to nothing, or nil when they all resolve. Each frame is expanded on its own AFTER
+      # `Repeater::Plan` built the handshake, so the builder's check (#519) never sees a
+      # message payload — this is that gate for the payloads (#524), run before the dial.
+      #
+      # Whole payload, not `unresolved_wire`'s head: a frame has no head/body split to take
+      # (`head_body_boundary` returns the whole slice unless the payload happens to hold a
+      # blank line, which would then check a prefix of a JSON body and silently skip the
+      # rest). The axis #519 drew as an offset is carried here by the OPCODE: a text frame is
+      # UTF-8 the operator typed, the same provenance as a header value, while a BINARY frame
+      # is not checked at all — it is never expanded either, so it has no literal token to
+      # put on the wire and nothing to refuse.
+      private def ws_unresolved_env_error(texts : Array(String), field : String) : Result?
+        names = texts.flat_map { |t| Env.unresolved(t) }.uniq!
+        return nil if names.empty?
+        err(env_unresolved_error(Env.token_list(names)), "INVALID_ARGUMENT", field: field)
       end
 
       # The ready-to-send plan for one `send_request`, or the error Result to return as-is.

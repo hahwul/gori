@@ -400,13 +400,39 @@ module Gori
       # The session's outbound messages: `--message` overrides when given (each
       # sent as a text frame), else the WS messages stored on the repeater (the
       # ones with direction "out"), env-expanded like MCP send_websocket.
+      #
+      # Each frame is expanded on its own, AFTER `Repeater::Plan` built the handshake, so
+      # the builder's unresolved-token check (#519) never sees a message payload — this is
+      # the second half of that gate and it lives here (#524).
       private def self.ws_out_messages(store : Store, id : Int64, override : Array(String)) : Array(Repeater::WsEngine::OutMsg)
-        return override.map { |t| Repeater::WsEngine::OutMsg.new(1, Env.expand(t).to_slice) } unless override.empty?
-        store.ws_messages_for_repeater(id).compact_map do |m|
-          next nil unless m.direction == "out"
+        unless override.empty?
+          refuse_unresolved_ws(override, id)
+          return override.map { |t| Repeater::WsEngine::OutMsg.new(1, Env.expand(t).to_slice) }
+        end
+        stored = store.ws_messages_for_repeater(id).select { |m| m.direction == "out" }
+        refuse_unresolved_ws(stored.select(&.text?).map { |m| String.new(m.payload).scrub }, id)
+        stored.map do |m|
           payload = m.text? ? Env.expand(String.new(m.payload).scrub).to_slice : m.payload
           Repeater::WsEngine::OutMsg.new(m.opcode, payload)
         end
+      end
+
+      # Refuse a WS send whose TEXT payloads still name a var that resolves to nothing,
+      # before the handshake is dialed. Same fact as the builder's refusal, checked where
+      # the expansion actually happens (#524).
+      #
+      # Whole payload, not `unresolved_wire`'s head — a frame has no head/body split to take
+      # (`head_body_boundary` returns the whole slice unless the payload happens to contain a
+      # blank line, which would then silently check a prefix of a JSON body and nothing else).
+      # The axis #519 drew as an offset is carried here by the OPCODE instead: a text frame is
+      # UTF-8 the operator typed, the same provenance as a header value, and a BINARY frame is
+      # not checked at all — it is not even expanded, so nothing there can reach the wire as a
+      # literal token and there is nothing to refuse.
+      private def self.refuse_unresolved_ws(texts : Array(String), id : Int64) : Nil
+        names = texts.flat_map { |t| Env.unresolved(t) }.uniq!
+        return if names.empty?
+        abort "gori run repeater send: " +
+              env_unresolved_error(Env.token_list(names), " in a WebSocket message for session ##{id}")
       end
 
       private def self.emit_ws_result(id : Int64, result : Repeater::WsEngine::Result, format : Symbol) : Nil
