@@ -12,6 +12,7 @@ require "./tls/client_hello"
 require "./pump"
 require "./upstream"
 require "./prefix_io"
+require "./orig_dst"
 
 module Gori::Proxy
   # The listening proxy. Accepts client connections and spawns one ClientConn
@@ -57,6 +58,11 @@ module Gori::Proxy
       @server = nil.as(TCPServer?)
       @running = false
       @slots = Channel(Nil).new(max_connections) # counting semaphore: send=acquire, receive=release
+      # Per-LISTENER, not per-process: two transparent listeners on one host can legitimately get
+      # different answers (one behind a redirect rule, one dialled directly), and folding them
+      # into one class-level latch would silence the second one's line.
+      @socket_dst_logged = false
+      @derived_dst_logged = false
     end
 
     # How many ports past the requested one to probe before giving up to ephemeral.
@@ -268,12 +274,55 @@ module Gori::Proxy
     # forwarding; nothing further is needed for cleartext.
     private def serve_transparent(client : TCPSocket) : Nil
       first = client.peek
-      if first && !first.empty? && first[0] == 0x16_u8
-        serve_transparent_tls(client)
+      tls = !!(first && !first.empty? && first[0] == 0x16_u8)
+      # Read the original destination ONCE, before the branch, and hand the same answer to both
+      # halves. That is the property `Settings::Listener#effective_target_port(tls)` existed to
+      # hold — the cleartext and TLS branches cannot disagree about the destination — now
+      # covering the address as well as the port.
+      dst = transparent_dst(client, tls)
+      if tls
+        serve_transparent_tls(client, dst)
       else
         ClientConn.new(client, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides,
-          default_port: Settings.listener_target_port(@target_port, tls: false)).run
+          default_port: Settings.listener_target_port(@target_port, tls: false),
+          origin_dst: dst).run
+      end
+    end
+
+    # The kernel's original destination for this connection as {host, port}, or nil when there
+    # is none and the `Host`/SNI derivation has to answer instead.
+    private def transparent_dst(client : TCPSocket, tls : Bool) : {String, Int32}?
+      found = OrigDst.lookup(client)
+      if found
+        log_dst_source(true, "#{OrigDst.dial_host(found)}:#{found.port}")
+        {OrigDst.dial_host(found), found.port}
+      else
+        log_dst_source(false, "port #{Settings.listener_target_port(@target_port, tls: tls)}")
+        nil
+      end
+    end
+
+    # #493's discipline, applied to the destination: an operator looking at a flow that went
+    # somewhere unexpected must be able to READ which of the two sources decided it, not infer
+    # it from the shape of the mistake. The two are not interchangeable — the kernel's answer is
+    # the address the client actually dialled, the derived one is a name the client typed into a
+    # header it controls.
+    #
+    # Logged once per source per listener, following `@@missing_sni_logged` and
+    # `PASSTHROUGH_NOTICE_MAX`: the answer changes when the deployment changes, not per
+    # connection, so a line per connection would be noise an operator learns to ignore. Both
+    # states are announced, and a listener that later starts answering the other way says so
+    # too — the transition is exactly the moment worth hearing about.
+    private def log_dst_source(from_socket : Bool, detail : String) : Nil
+      return if from_socket ? @socket_dst_logged : @derived_dst_logged
+      if from_socket
+        @socket_dst_logged = true
+        ::Log.info { "transparent listener #{BindAddress.authority(@host, @port)}: original destination read from the socket via #{OrigDst.mechanism} (#{detail}) — this is logged once" }
+      else
+        @derived_dst_logged = true
+        why = OrigDst.unavailable_reason || "the kernel has no original destination for this connection (nothing redirected it here?)"
+        ::Log.info { "transparent listener #{BindAddress.authority(@host, @port)}: destination DERIVED from the client's Host header / TLS SNI — #{why}; #{detail} — this is logged once" }
       end
     end
 
@@ -286,30 +335,37 @@ module Gori::Proxy
     # ClientConn or to the TLS socket (whose sync_close tears down the transport). A path that
     # merely returned would leave the client blocked until its own timeout and leak the fd —
     # one per connection, so a client that always fails the gate would exhaust them.
-    private def serve_transparent_tls(client : TCPSocket) : Nil
+    private def serve_transparent_tls(client : TCPSocket, dst : {String, Int32}?) : Nil
       tls = @tls
       return close_client(client) unless tls
       sni, consumed = Tls::ClientHello.peek_sni(client)
       stream = PrefixIO.new(consumed, client)
-      unless sni
-        # No name: nothing to mint a certificate for and nothing to gate on. Relaying blind would
-        # send an unidentified connection to an unknown origin, so drop it — and say so once,
-        # because a client that mysteriously fails otherwise leaves no trace anywhere.
+      # The SNI is the NAME the client asked for, so it stays the destination whenever it is
+      # there: it is what the leaf has to be minted for, what the sandbox and the passthrough
+      # list are written against, and what History shows. The kernel's address answers the case
+      # the SNI cannot — a ClientHello that carries no server_name at all, which until now had
+      # no destination and was dropped.
+      host = sni || dst.try(&.[0])
+      unless host
+        # No name and no kernel answer: nothing to mint a certificate for and nothing to gate on.
+        # Relaying blind would send an unidentified connection to an unknown origin, so drop it —
+        # and say so once, because a client that mysteriously fails otherwise leaves no trace
+        # anywhere.
         log_missing_sni
         return close_client(client)
       end
-      port = Settings.listener_target_port(@target_port, tls: true)
+      port = dst.try(&.[1]) || Settings.listener_target_port(@target_port, tls: true)
       # The sandbox refuses a host that CANNOT be in scope before any handshake, matching the
       # CONNECT path's gate (ClientConn#connect_answered_locally?). There is no way to answer
       # with a 403 here — the client expects TLS, not HTTP — so the connection is dropped.
-      return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(sni)
-      if Settings.tls_passthrough?(sni)
-        return if relay_transparent_passthrough(sni, port, stream, client)
+      return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
+      if Settings.tls_passthrough?(host)
+        return if relay_transparent_passthrough(host, port, stream, client)
         # The origin was unreachable, so nothing was relayed. Fall through and MITM instead of
         # dropping: the operator asked not to decrypt this host, not to lose the connection, and
         # the handshake failure they then see names the real problem.
       end
-      tls.intercept(sni, port, stream, @sink)
+      tls.intercept(host, port, stream, @sink)
     end
 
     # A passthrough host reached through a transparent listener: dial the origin and pipe bytes,
@@ -339,7 +395,7 @@ module Gori::Proxy
     private def log_missing_sni : Nil
       return if @@missing_sni_logged
       @@missing_sni_logged = true
-      ::Log.info { "transparent listener: dropped a TLS connection with no SNI (no destination to derive) — this is logged once" }
+      ::Log.info { "transparent listener: dropped a TLS connection with no SNI and no original destination from the socket (nothing to derive a destination from) — this is logged once" }
     end
   end
 end

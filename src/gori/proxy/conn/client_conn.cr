@@ -36,8 +36,18 @@ module Gori::Proxy
     #
     # `default_port` overrides the port used when an origin-form request's Host header names
     # none. It exists for the TRANSPARENT listener: there the client dialled a port the kernel
-    # redirected, so 80 is not necessarily right, and the socket alone cannot reveal the original
-    # destination (see Settings::Listener#target_port). nil keeps the scheme default.
+    # redirected, so 80 is not necessarily right (see Settings::Listener#target_port). nil keeps
+    # the scheme default. It is the DECLARED answer, used when the kernel has none.
+    #
+    # `origin_dst` is the kernel's own answer for the same connection — the address and port the
+    # client dialled before the redirect rewrote them (`Proxy::OrigDst`). It outranks
+    # `default_port` and, for the PORT, the `Host` header too: the header's port is a claim
+    # about the very connection the kernel is describing, so the two can only disagree by the
+    # header being wrong or hostile. The header still supplies the NAME — that is what the
+    # request is addressed to, what scope matches and what History shows — and `origin_dst`'s
+    # address is used only when there is no name at all (an HTTP/1.0 or malformed request with
+    # no usable Host). An ABSOLUTE-form target still wins outright, unchanged: that branch is
+    # the forward-proxy contract and a transparent client does not emit one.
     #
     # `rewrite_fixed_host` replaces the forwarded `Host` header with `fixed_host`'s authority.
     # It exists ONLY for a reverse listener whose operator declared `rewrite_host: true`, and it
@@ -53,6 +63,7 @@ module Gori::Proxy
                    @self_addr : {String, Int32}? = nil,
                    @local_host : String? = nil,
                    @default_port : Int32? = nil,
+                   @origin_dst : {String, Int32}? = nil,
                    @rewrite_fixed_host : Bool = false)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
@@ -1276,9 +1287,21 @@ module Gori::Proxy
         port = uri.port || (scheme == "https" ? 443 : 80)
         {host, port, scheme, rewrite_request_line(req, origin_form(uri))}
       else
-        host, port = Upstream.split_host_port(req.host? || "", @default_port || (@scheme == "https" ? 443 : 80))
+        host, port = origin_form_destination(req)
         {host, port, @scheme, req.raw_head}
       end
+    end
+
+    # Where an ORIGIN-FORM request goes: the `Host` header, with the kernel's original
+    # destination layered over it where there is one (see `origin_dst`). The kernel's port is
+    # definitive; its address only fills in for a request that named no host at all.
+    private def origin_form_destination(req : Codec::RawRequest) : {String, Int32}
+      host, port = Upstream.split_host_port(req.host? || "", @default_port || (@scheme == "https" ? 443 : 80))
+      if od = @origin_dst
+        host = od[0] if host.empty?
+        port = od[1]
+      end
+      {host, port}
     end
 
     private def origin_form(uri : URI) : String

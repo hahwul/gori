@@ -107,7 +107,7 @@ Additional sockets the proxy accepts on, alongside the primary `network.bind_hos
 | `host` | string | — | Listen address. Required |
 | `port` | integer | — | Listen port. Required |
 | `mode` | string | `"proxy"` | `proxy`, `transparent` or `reverse`. An unknown mode drops the entry rather than defaulting to `proxy`, which could expose an unintended forward proxy on a LAN address |
-| `target_port` | integer | `80` / `443` | Transparent only: the upstream port to use when the derived destination names none |
+| `target_port` | integer | `80` / `443` | Transparent only: the upstream port to use when the kernel cannot say which one the client dialled. Advisory — see [Transparent mode](#transparent-mode) |
 | `origin` | string | — | Reverse only, required: the absolute `http(s)` URL to forward to |
 | `rewrite_host` | boolean | `false` | Reverse only: replace the forwarded `Host` with the origin's authority |
 
@@ -123,10 +123,18 @@ The section is read at startup and is **not** applied live: editing it and savin
 
 #### Transparent mode
 
-A transparent listener serves clients that believe they are talking to the origin. There is no `CONNECT` and no absolute-form request target, so gori derives the destination per connection:
+A transparent listener serves clients that believe they are talking to the origin. There is no `CONNECT` and no absolute-form request target, so gori has to recover the destination per connection, and it has two sources that answer different halves of the question.
 
-- **cleartext** — from the `Host` header (this is what `resolve_forward` already does for origin-form requests);
-- **HTTPS** — from the TLS **SNI**, read out of the ClientHello *before* the handshake. It has to be read first, because everything downstream keys on knowing the host: which leaf certificate to mint, the sandbox gate, the [passthrough list](#tls_passthrough), and the origin ALPN probe.
+**The kernel** still remembers what the client dialled before the redirect rule rewrote it, and gori asks it once per connection:
+
+- **Linux** — `getsockopt(SOL_IP, SO_ORIGINAL_DST)`, or the `SOL_IPV6` form for a v6 connection. Always available; it just returns nothing when no redirect put the connection there.
+- **macOS** — a `DIOCNATLOOK` on `/dev/pf`. That device is root-only, so this works only when gori itself runs as root.
+
+That answer is an **address and a port**, and the port is authoritative: it is the port the client actually connected to, so it outranks both `target_port` and any port in the client's `Host` header.
+
+**The client's own bytes** supply the name: the `Host` header for cleartext, the TLS **SNI** for HTTPS, read out of the ClientHello *before* the handshake. gori keeps using the name whenever there is one, because a name is what everything downstream needs — which leaf certificate to mint, the sandbox gate, the [passthrough list](#tls_passthrough), the origin ALPN probe, scope matching, and what History shows. The kernel's address fills in only when there is no name at all.
+
+Which source decided a destination is written to the log, once per listener and once again if it ever changes, so a destination that looks wrong can be traced instead of guessed at.
 
 Route traffic to it with your firewall. On Linux:
 
@@ -137,9 +145,11 @@ iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
 
 On macOS, an equivalent `pf` `rdr` rule.
 
-**Why `target_port` exists.** A redirected socket does not reveal the port the client originally dialled — recovering it needs `SO_ORIGINAL_DST` on Linux or a `pf` lookup on macOS, neither of which gori does. So the redirect rule's intent is declared in the config instead: the listener taking redirected `:443` traffic sets `target_port: 443`. A `Host` header that names a port still wins over it.
+**Why `target_port` is still here.** The kernel lookup does not always answer: there is no mechanism outside Linux and macOS, macOS needs root, and a connection made straight to the listener with no redirect in front of it has nothing earlier to recover. `target_port` is the declared fallback for those — the redirect rule's intent, written down, so the listener taking redirected `:443` traffic sets `target_port: 443`. When the kernel does answer, `target_port` is not consulted.
 
-Everything else behaves exactly as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. Two cases are dropped rather than guessed — a TLS connection with **no SNI** (no destination to derive; logged once), and a host the Sandbox rules out (there is no way to answer a TLS client with a 403).
+**What the lookup does not fix.** The kernel gives an address; the client gives a name; gori prefers the name, so a named destination is still resolved through DNS and can land somewhere other than the address the client reached. In transparent mode the destination host is therefore still, in part, **client-controlled**: a client that lies in `Host` (or offers a misleading SNI) can steer gori's upstream dial to a different host, though no longer to a different port. If that matters for your deployment, use [reverse mode](#reverse-mode) instead — it declares the destination and consults nothing the client sent.
+
+Everything else behaves exactly as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. A TLS connection with **no SNI** is now served when the kernel supplies an address (gori mints a leaf for that IP), and dropped, logged once, only when there is no address either. A host the Sandbox rules out is still dropped outright — there is no way to answer a TLS client with a 403.
 
 #### Reverse mode
 

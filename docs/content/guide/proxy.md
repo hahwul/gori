@@ -248,11 +248,15 @@ Useful for staging hosts, IP-based virtual hosts, or pointing a production hostn
 
 ## Clients That Cannot Use a Proxy
 
-Some clients ignore proxy settings entirely — embedded devices, statically-linked binaries, anything that never reads `HTTP_PROXY`. For those, run a **transparent listener** and redirect traffic into it with your firewall; gori derives the destination from the `Host` header for cleartext and from the TLS SNI for HTTPS, so no client-side configuration is needed at all.
+Some clients ignore proxy settings entirely — embedded devices, statically-linked binaries, anything that never reads `HTTP_PROXY`. For those, run a **transparent listener** and redirect traffic into it with your firewall; no client-side configuration is needed at all.
+
+gori recovers the destination from the kernel where it can (`SO_ORIGINAL_DST` on Linux, a `pf` lookup on macOS, which needs root), and from the client's `Host` header or TLS SNI otherwise. The log says which one it used, so a destination that looks wrong is traceable.
 
 Add it under `listeners` in `settings.json` and point `iptables` / `pf` at it — see the [`listeners` reference](/reference/config/#listeners) for the config keys and the redirect rules. Captured flows, scope, the Sandbox and the passthrough list all behave exactly as on the normal proxy path.
 
 The certificate still has to be trusted on the client: transparent mode removes the proxy *setting*, not the need for gori's CA.
+
+If a **reverse listener** would also work for your target, prefer it. It declares the destination outright, so it needs no firewall rule and none of the destination is taken from what the client sent.
 
 ## When a Pinned App Is in the Way
 

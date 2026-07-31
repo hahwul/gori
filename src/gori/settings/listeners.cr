@@ -33,9 +33,12 @@ module Gori::Settings
   #               Use it to expose a second address (e.g. a LAN interface for a phone) without
   #               widening the primary bind to 0.0.0.0.
   # transparent — the client believes it is talking to the origin. There is no CONNECT and no
-  #               absolute-form target, so the destination comes from the `Host` header for
-  #               cleartext and from the TLS SNI for HTTPS. Requires the kernel to redirect
-  #               traffic here (pf / iptables REDIRECT).
+  #               absolute-form target, so the destination is recovered per connection: the
+  #               kernel's own record of what the client dialled before the redirect
+  #               (`Proxy::OrigDst`) where it can be read, and the `Host` header / TLS SNI
+  #               otherwise. Requires the kernel to redirect traffic here (pf / iptables
+  #               REDIRECT). Where either mode would work, `reverse` is simpler: it DECLARES the
+  #               destination and needs no kernel rule and no recovery at all.
   # reverse     — the client believes it is talking to the origin, and the origin is DECLARED
   #               (`origin`) rather than derived. Same pinned-destination path as transparent
   #               with none of the derivation's failure modes, and no kernel rule: the client
@@ -44,10 +47,19 @@ module Gori::Settings
   LISTENER_MODES = ["proxy", "transparent", "reverse"]
 
   # One additional listener. `target_port` is the port gori dials upstream for a TRANSPARENT
-  # connection whose derived host names no port: a transparent listener cannot know the original
-  # destination port from the socket alone (that needs SO_ORIGINAL_DST on Linux or a pf lookup on
-  # macOS, neither of which gori does), so the redirect rule's intent is declared here instead —
-  # the listener taking redirected :443 traffic sets 443. Ignored in proxy mode.
+  # connection when the kernel will not say — the redirect rule's intent, declared, so the
+  # listener taking redirected :443 traffic sets 443. Ignored in proxy mode.
+  #
+  # It is now ADVISORY rather than the only answer: `Proxy::OrigDst` reads the original
+  # destination off the socket (SO_ORIGINAL_DST on Linux, a pf DIOCNATLOOK on macOS) and that
+  # answer OUTRANKS this field, because it is the port the client actually dialled rather than a
+  # description of the rule that redirected it. It still has to exist, and is still the only
+  # answer, everywhere the lookup cannot reach: a platform with neither mechanism, a macOS gori
+  # not running as root (`/dev/pf` is 0600 root:wheel), and a connection made straight to the
+  # listener with no redirect in front of it.
+  #
+  # Kept REFUSED in every non-transparent mode below for the same reason as before: accepting it
+  # silently would ignore the field. Advisory is not the same as meaningless.
   #
   # `origin` is the REVERSE listener's declared destination, as an absolute URL
   # ("https://api.example.com", "http://127.0.0.1:3000"). Deliberately NOT `target_port`
@@ -70,9 +82,9 @@ module Gori::Settings
       mode == "reverse"
     end
 
-    # The upstream port for a transparent connection, when the derived host carries none.
-    # `tls` picks the sensible default so a plain `{host, port, mode}` entry works for both
-    # halves of a redirect pair without the operator spelling out 80/443.
+    # The upstream port for a transparent connection the kernel could not answer for, when the
+    # derived host carries none. `tls` picks the sensible default so a plain `{host, port, mode}`
+    # entry works for both halves of a redirect pair without the operator spelling out 80/443.
     def effective_target_port(tls : Bool) : Int32
       return target_port if target_port > 0
       tls ? 443 : 80
@@ -256,9 +268,11 @@ module Gori::Settings
     among.any? { |l| l.port == port && same_bind_host?(host, l.host) }
   end
 
-  # The upstream port a transparent connection should use: the listener's configured
-  # target_port when set, else the conventional port for the protocol. One helper so the
-  # cleartext and TLS branches of the transparent path cannot disagree.
+  # The upstream port a transparent connection should use WHEN THE SOCKET CANNOT SAY: the
+  # listener's configured target_port when set, else the conventional port for the protocol.
+  # One helper so the cleartext and TLS branches of the transparent path cannot disagree —
+  # `Proxy::Server#transparent_dst` now holds the same property one level up, reading the
+  # kernel's answer once per connection and handing the SAME one to both branches.
   def self.listener_target_port(configured : Int32, tls : Bool) : Int32
     return configured if configured > 0
     tls ? 443 : 80
