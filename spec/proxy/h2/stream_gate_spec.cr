@@ -748,11 +748,13 @@ describe Gori::Proxy::H2::StreamGate do
       # Fail-open must not overrule a decision already in flight — forwarding a request the
       # operator dropped is the one outcome worse than holding it.
       rig.to_origin.should be_empty
-      # RST_STREAM is what this example is about. A WINDOW_UPDATE rides alongside it now
-      # (the dropped stream's ~1 MiB of parked DATA is credit the client is owed back), so
-      # assert the RST rather than the exact frame list.
-      rig.to_client.map(&.frame_type).should contain(Frame::Type::RstStream)
-      rig.to_client.count { |f| f.frame_type == Frame::Type::RstStream }.should eq(1)
+      # A WINDOW_UPDATE rides alongside the RST now (the dropped stream's ~1 MiB of parked
+      # DATA is credit the client is owed back), so the exact frame list no longer works.
+      # Kept as strict as it was, though: ONE RST and nothing that is not a refund — the
+      # original assertion's real content was "nothing else reaches the client".
+      kinds = rig.to_client.map(&.frame_type)
+      kinds.count(Frame::Type::RstStream).should eq(1)
+      kinds.reject(Frame::Type::RstStream).all?(Frame::Type::WindowUpdate).should be_true
     end
   end
 
