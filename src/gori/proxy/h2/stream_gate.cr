@@ -168,6 +168,9 @@ module Gori::Proxy::H2
       @warned_body = false
       @warned_scope = false
       @warned_overflow = false
+      # Connection-level flow-control credit owed back to the SENDER for DATA this gate
+      # accepted and discarded. Flushed by `refund_swallowed` once `accept` is out of the lock.
+      @swallowed = 0
       # The request direction is the one that opens streams, and the one whose deferred streams
       # the FAR leg has therefore never seen.
       @ordered = @direction == "out"
@@ -177,6 +180,7 @@ module Gori::Proxy::H2
     # Feed one frame off the wire. Never blocks on a human.
     def accept(frame : Frame::Header) : Nil
       run_cross(@mutex.synchronize { accept_locked(frame) })
+      refund_swallowed
     end
 
     # The direction ended. Release the partial block the rewriter may be holding, hand every
@@ -263,6 +267,10 @@ module Gori::Proxy::H2
         if @refused.includes?(f.stream_id)
           # Swallowed, not written: the far leg never saw this stream open. Deliberately not
           # captured either — `write` is what logs a frame and P7 logs what gori actually wrote.
+          # But the sender's CONNECTION window was still charged for these bytes and nothing
+          # downstream will ever credit them back, so they are counted here and refunded once
+          # `accept` is out of the lock. See `refund_swallowed`.
+          @swallowed += f.payload.size if f.frame_type == Frame::Type::Data
         elsif slot.nil?
           write(f, pre)
         elsif f.frame_type == Frame::Type::RstStream
@@ -295,6 +303,9 @@ module Gori::Proxy::H2
         project(b)
         @assembler.drop_stream(slot.stream_id, "stream reset by the peer while held at intercept")
       end
+      # The parked frames are dropped on the floor here, and their DATA was charged to the
+      # sender's connection window just as the refused-branch DATA was. See `refund_swallowed`.
+      charge_swallowed(slot)
       remove(slot)
       write(frame, nil) unless @ordered
       drain_locked
@@ -662,6 +673,8 @@ module Gori::Proxy::H2
       # both. (`abandon_locked` deliberately does not: there the PEER reset the stream, so it is
       # the one that has stopped sending, and charging its cancellations to the ceiling below
       # would let an ordinary client cancel its way into a connection teardown.)
+      # Its parked DATA is never written on either leg — see `charge_swallowed`.
+      charge_swallowed(slot)
       remember_refused(slot.stream_id)
       [slot.stream_id]
     end
@@ -739,6 +752,57 @@ module Gori::Proxy::H2
       peer = @peer
       return unless peer
       ids.each { |id| peer.write_cross_rst(id) }
+    end
+
+    # Count a slot's parked DATA as owed credit. Called where those frames are DISCARDED
+    # rather than written — `abandon_locked` and `drop_locked`. A released slot's frames go
+    # through `write`, so the far end sees them and generates its own WINDOW_UPDATE; only the
+    # discarded ones have nobody to credit them.
+    private def charge_swallowed(slot : Slot) : Nil
+      slot.frames.each do |(f, _)|
+        @swallowed += f.payload.size if f.frame_type == Frame::Type::Data
+      end
+    end
+
+    # Give the SENDER back the connection-level flow-control credit for DATA this gate
+    # accepted and then threw away.
+    #
+    # RFC 9113 §6.9.1: the connection window is only ever reduced by DATA and only ever
+    # restored by a WINDOW_UPDATE — RST_STREAM refunds nothing, and a receiver that discards
+    # accepted DATA must still return the credit or the sender's window shrinks for good.
+    # gori is normally transparent here (it forwards DATA and the far end's WINDOW_UPDATEs
+    # flow back through it), but a SWALLOWED frame never reaches a far end, so no
+    # WINDOW_UPDATE is ever generated for it by anyone. Measured against a real client:
+    # 120 KiB pushed at a sandbox-refused stream, credit returned 0. Past the default 65535
+    # the client can send DATA on NO stream — in-scope ones included.
+    #
+    # Connection level only (stream 0). The stream itself is refused or dropped and its own
+    # window dies with it; it is the shared one that wedges the connection.
+    #
+    # Written on the PEER's leg, because that is the one facing the sender — the same
+    # `@peer` seam `write_cross_rst` uses, and with `@mutex` released for the same reason.
+    private def refund_swallowed : Nil
+      n = @mutex.synchronize do
+        v = @swallowed
+        @swallowed = 0
+        v
+      end
+      return if n <= 0
+      @peer.try(&.write_cross_window_update(n))
+    end
+
+    # Called by the OPPOSITE direction's gate. Takes this gate's lock and nothing else — the
+    # caller has already released its own, exactly as `write_cross_rst` requires.
+    def write_cross_window_update(increment : Int32) : Nil
+      @mutex.synchronize do
+        return if @closed
+        payload = Bytes.new(4)
+        IO::ByteFormat::BigEndian.encode(increment.to_u32 & 0x7fff_ffff_u32, payload)
+        @dst.write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, payload).wire_bytes)
+        @dst.flush
+      end
+    rescue
+      # The leg is gone; there is nobody left to credit.
     end
 
     # --- small helpers -------------------------------------------------------

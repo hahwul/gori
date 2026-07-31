@@ -465,6 +465,45 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # RFC 9113 §6.9.1: the connection window is only reduced by DATA and only restored by a
+  # WINDOW_UPDATE — RST_STREAM refunds nothing. gori is normally transparent (it forwards DATA
+  # and the far end's WINDOW_UPDATEs come back through it), but a SWALLOWED frame never reaches
+  # a far end, so nobody generates one for it. Verified against a real client before this spec
+  # existed: 120 KiB pushed at a sandbox-refused stream, credit returned 0 — past the default
+  # 65535 the client can send DATA on NO stream, in-scope ones included.
+  it "refunds the connection window for DATA it swallowed on a refused stream" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/admin")), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "A" * 900))
+      rig.c2s.accept(data(1_u32, "B" * 124))
+
+      rig.to_origin.should be_empty # still nothing upstream
+      wu = rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }
+      # Stream 0 — the shared window is the one that wedges the connection; the refused
+      # stream's own window dies with it.
+      wu.map(&.stream_id).uniq.should eq([0_u32])
+      wu.sum { |f| IO::ByteFormat::BigEndian.decode(UInt32, f.payload) }.should eq(1024_u32)
+    end
+  end
+
+  it "refunds nothing when the DATA was actually forwarded" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      # In scope: the frames go upstream, so the ORIGIN credits them and a refund here would
+      # hand the client twice the window it is owed.
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/api/x")), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "A" * 500))
+      rig.to_origin.map(&.frame_type).should contain(Frame::Type::Data)
+      rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }.should be_empty
+    end
+  end
+
   it "lets an in-scope request through on the same connection" do
     with_ic(intercept: false) do |ic, scope|
       scope.add("include", "string", "https://api.example.com/api/")
