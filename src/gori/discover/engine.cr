@@ -358,6 +358,12 @@ module Gori::Discover
     @pending : Int32
     @found : Int32
     @errors : Int64
+    # The first non-benign send error, so a run in which EVERY send was refused can name the
+    # reason. `Miner::Engine#first_error` and `Sequencer::Engine#first_error` (both #491) for
+    # the identical shape, and for the identical reason: the engine stays surface-free, the
+    # consumer reads this and decides. ONE string, not a list — every send in a wholly-blocked
+    # run fails for the same reason and the point is to name it, not to tally it.
+    getter first_error : String? = nil
     @pages : Int32
     @crawl_enqueued : Int32
     @calibrated_out : Int32
@@ -522,8 +528,18 @@ module Gori::Discover
       #
       # A run the operator STOPPED is exempt: stopping before the first send is a decision, not
       # a failure to have anything to do.
-      if @capped.sent == 0 && @state != State::Stopped
-        @events.send(ErrorEvent.new(NOTHING_TO_SEND))
+      #
+      # `@capped.sent` is a BUDGET counter — `CappedBackend#fetch` charges the attempt before
+      # the inner fetch, deliberately, so a refusal costs the run a request the same way a
+      # retry or a redirect hop does. It is therefore the wrong question for "did anything
+      # reach the wire": a run whose every send was refused before a socket (an unbound
+      # `$NAME`, an unsafe URL) has `sent > 0`, took this branch, and ended in a clean
+      # `DoneEvent` with the reason nowhere — `handle_crawl`/`handle_probe` had built the
+      # sentence and dropped it. `first_error` is what Miner and Sequencer already carry for
+      # exactly this (#491), so a wholly-refused run is terminal here too and NAMES the cause.
+      refusal = @state == State::Stopped ? nil : (@capped.sent == 0 ? NOTHING_TO_SEND : wholly_refused_reason)
+      if refusal
+        @events.send(ErrorEvent.new(refusal))
       else
         @events.send(DoneEvent.new(progress_snapshot, run_stats, @state == State::Stopped))
       end
@@ -634,13 +650,28 @@ module Gori::Discover
       end
     end
 
+    # The reason this run produced nothing, or nil when it produced something. "Nothing" is
+    # deliberately `@found == 0 && @pages == 0`: a run that recorded a page or a finding got
+    # an answer from an origin, however many later sends were refused, and turning that into
+    # a terminal error would hide the results it did get.
+    private def wholly_refused_reason : String?
+      return nil unless @found == 0 && @pages == 0
+      @first_error.presence
+    end
+
     private def handle_crawl(oc : Outcome) : Nil
       task = oc.task
       @pages += 1 if task.kind == TaskKind::Crawl
       fetched = oc.fetched
       return unless fetched
       if err = fetched.error
-        @errors += 1 unless benign_error?(err)
+        unless benign_error?(err)
+          @errors += 1
+          # `.presence`: an error String can be EMPTY (a spec double, a backend that reports
+          # failure without a message), and "" is truthy in Crystal — recording it would make
+          # `first_error` present but say nothing, which is worse than absent.
+          @first_error ||= err.presence
+        end
         return
       end
       if @seed_calibration_dir && (task.source.robots? || task.source.sitemap?)
@@ -688,7 +719,13 @@ module Gori::Discover
       fetched = oc.fetched
       return unless fetched
       if err = fetched.error
-        @errors += 1 unless benign_error?(err)
+        unless benign_error?(err)
+          @errors += 1
+          # `.presence`: an error String can be EMPTY (a spec double, a backend that reports
+          # failure without a message), and "" is truthy in Crystal — recording it would make
+          # `first_error` present but say nothing, which is worse than absent.
+          @first_error ||= err.presence
+        end
         return
       end
       if oc.hit && oc.confidence >= @config.confidence_floor

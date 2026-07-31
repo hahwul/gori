@@ -485,6 +485,33 @@ describe Gori::Discover::Engine do
       sent.should be_empty
     end
 
+    # The send counter is a BUDGET counter — `CappedBackend#fetch` charges the attempt BEFORE
+    # the inner fetch, so a send refused before a socket (an unbound `$NAME`, an unsafe URL)
+    # still increments it. That made this run take the Done branch with the reason nowhere:
+    # `handle_crawl`/`handle_probe` had the sentence and dropped it. Miner and Sequencer
+    # already carry `first_error` for exactly this (#491).
+    it "names the reason when every send was refused at the backend" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 0, concurrency: 1, retries: 0)
+      refused = R.new(Bytes.new(0), nil, nil, 0_i64, "$SESSION is declared by an extract rule but not bound yet")
+      engine = D::Engine.new("http://t/api", ["admin", "login"], RouteBackend.new(->(_t : String) { refused }), cfg)
+      kinds, messages = terminal_of(engine)
+      kinds.should eq([:error]) # terminal, so a consumer cannot settle a "0 found" success over it
+      messages.first.should contain("not bound yet")
+      engine.first_error.should_not be_nil
+    end
+
+    # …but a run that DID get an answer keeps its results, however many later sends were
+    # refused. Turning that into a terminal error would hide what it found.
+    it "still ends Done when a page was read, even with later refusals" do
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      backend = RouteBackend.new(->(t : String) do
+        # The seed answers with a link; everything it leads to is refused.
+        t == "/api" ? make(200, %(<a href="/api/next">n</a>)) : R.new(Bytes.new(0), nil, nil, 0_i64, "refused")
+      end)
+      kinds, _ = terminal_of(D::Engine.new("http://t/api", [] of String, backend, cfg))
+      kinds.last.should eq(:done)
+    end
+
     it "still emits a normal Done as soon as ONE request goes out (the control)" do
       cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1, concurrency: 1, retries: 0)
       sent = [] of String
