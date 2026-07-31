@@ -22,16 +22,17 @@
 ---
 
 **gori** (고리 — Korean for *ring, link, loop*) sits in the loop between your client and its target,
-capturing every request and response as a *flow* you can intercept, replay, fuzz, and scan across
-HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE. Every action is also a `gori run` subcommand and an MCP
-tool, so scripts and AI agents can drive the same engagement.
+capturing every request and response as a *flow* you can replay, fuzz, and scan across HTTP/1.1,
+HTTP/2, WebSocket, gRPC, and SSE, and intercept in flight on HTTP/1.1 and HTTP/2. Every action is
+also a `gori run` subcommand and an MCP tool, so scripts and AI agents can drive the same
+engagement.
 
 <details>
 <summary><strong>Features</strong></summary>
 
 ### Capture & Intercept
-- Intercepting proxy for HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE
-- Hold, edit, forward, or drop traffic in flight
+- Capturing proxy for HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE
+- Intercept on HTTP/1.1 and HTTP/2, gRPC included: hold, edit, forward, or drop in flight
 - Searchable History of every flow, with a query language for filtering
 - Scope rules, hostname overrides, and match & replace
 
