@@ -214,6 +214,7 @@ module Gori
         # binding write-only.
         @bindings = nil.as(Gori::Bindings?)
         if s = @store
+          bind_project_network(s)
           Env.load_project(s)
           bind_binding_layer(s)
         end
@@ -257,6 +258,20 @@ module Gori
         # added by the TUI or `gori run` since the last call, but the VALUES this process
         # observed are its own and must survive the refresh.
         @bindings.try(&.reload)
+      end
+
+      # Install this project's network overrides (#538) — the third caller of the loader the
+      # TUI's `Session.open` and the CLI's `open_store` also use, so `send_request`, `fuzz_start`
+      # and friends dial through a project's pinned upstream on its timeouts instead of the
+      # global ones. `bind: false`: the MCP server never opens a listening socket (OAST polls a
+      # remote collector, it does not listen), so the two bind keys do not apply here.
+      #
+      # Bind time only, like `bind_binding_layer` and unlike `refresh_project_env`. Env vars
+      # need the per-call reload because MCP itself read-modify-WRITES them; nothing on this
+      # surface writes a network override, so the only staleness window is a TUI edit made
+      # after the server bound — one `switch_project` away from being picked up.
+      private def bind_project_network(s : Store) : Nil
+        Settings.load_project_network(s, bind: false)
       end
 
       # Publish this project's extract rules as `Env`'s send-time layer. Same per-project

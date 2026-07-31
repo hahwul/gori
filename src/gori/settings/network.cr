@@ -1,6 +1,7 @@
 require "json"
 require "socket"
 require "../host_pattern"
+require "../store"
 
 # NETWORK section (settings:network): proxy bind, upstream proxy, dial timeouts,
 # body capture cap, and per-project overrides of the same. See settings.cr for the
@@ -259,12 +260,13 @@ module Gori::Settings
     effective_capture_max_mib.clamp(1, MAX_CAPTURE_MAX_MIB) * 1024 * 1024
   end
 
-  # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
-  # project's DB and NEVER persisted to settings.json (the project's own DB is the source
-  # of truth). nil = inherit the matching global value above. The proxy bind + Upstream.dial
-  # read the effective_* helpers, so a project can pin its own bind/upstream while the global
-  # settings:network editor keeps writing the shared defaults. Stored in the project's generic
-  # KV `settings` table under these keys (Store#setting/#set_setting/#delete_setting).
+  # Per-project network overrides — a RUNTIME layer installed by `load_project_network` from
+  # the OPEN project's DB and NEVER persisted to settings.json (the project's own DB is the
+  # source of truth). nil = inherit the matching global value above. The proxy bind +
+  # Upstream.dial read the effective_* helpers, so a project can pin its own bind/upstream
+  # while the global settings:network editor keeps writing the shared defaults. Stored in the
+  # project's generic KV `settings` table under these keys
+  # (Store#setting/#set_setting/#delete_setting).
   PROJECT_BIND_HOST_KEY = "net.bind_host"
   PROJECT_BIND_PORT_KEY = "net.bind_port"
   PROJECT_UPSTREAM_KEY  = "net.upstream_proxy"
@@ -280,6 +282,34 @@ module Gori::Settings
   class_property project_connect_timeout_secs : Int32? = nil
   class_property project_io_timeout_secs : Int32? = nil
   class_property project_capture_max_mib : Int32? = nil
+
+  # Install *store*'s per-project network overrides into the runtime layer above. THE one
+  # implementation, called by every surface that opens a project store — `Session.open` (TUI
+  # and `gori run capture`), `CLI::Run.open_store`, and the MCP bind path — so a fourth
+  # surface added later inherits the overrides instead of forgetting them (#538: only the
+  # first of the three read them, so a project pinned to a jump host was silently dialled
+  # DIRECT by `gori run fuzz` and by MCP `send_request`).
+  #
+  # Every property is assigned unconditionally, nil included: these are process globals, and
+  # a surface that switches projects (MCP `switch_project`, the TUI project picker) must not
+  # carry the previous project's upstream into the next one.
+  #
+  # `bind:` is REQUIRED, and gates the two LISTEN keys only. The four outbound/capture keys
+  # apply on every surface — anything that dials reads `upstream_route` + `connect_timeout` /
+  # `io_timeout`, and anything that stores a body reads `capture_max` — but a bind address is
+  # meaningless where nothing binds, and worse than meaningless if left set: `effective_bind_*`
+  # is also read for display and for the listeners duplicate check, so a headless command that
+  # never opened a socket would report a port it is not on. Passing `bind: false` therefore
+  # CLEARS the pair rather than skipping it. Named and mandatory so the question is put to
+  # each new caller rather than defaulted past.
+  def self.load_project_network(store : Store, *, bind : Bool) : Nil
+    self.project_bind_host = bind ? store.setting(PROJECT_BIND_HOST_KEY) : nil
+    self.project_bind_port = bind ? store.setting(PROJECT_BIND_PORT_KEY).try(&.to_i?) : nil
+    self.project_upstream_proxy = store.setting(PROJECT_UPSTREAM_KEY)
+    self.project_connect_timeout_secs = store.setting(PROJECT_CONNECT_TIMEOUT_KEY).try(&.to_i?)
+    self.project_io_timeout_secs = store.setting(PROJECT_IO_TIMEOUT_KEY).try(&.to_i?)
+    self.project_capture_max_mib = store.setting(PROJECT_CAPTURE_MAX_KEY).try(&.to_i?)
+  end
 
   def self.effective_bind_host : String
     project_bind_host || bind_host

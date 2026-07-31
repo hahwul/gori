@@ -123,6 +123,10 @@ module Gori
         @db_path = proj.db_path
         @workspace_root = reg.workspace_of(proj)
         @selection_source = source
+        # Same REPLACEMENT discipline as the binding layer below: the loader assigns every
+        # network property including nil, so a project with no pinned upstream does not
+        # inherit the previous project's jump host (#538).
+        bind_project_network(new_store)
         Env.load_project(new_store)
         # A REPLACEMENT, not a reload: bindings are per project, and carrying one project's
         # `$SESSION` into another would be the worst kind of cross-project leak.

@@ -5,9 +5,28 @@ private def reset_net
   Gori::Settings.project_bind_host = nil
   Gori::Settings.project_bind_port = nil
   Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.project_connect_timeout_secs = nil
+  Gori::Settings.project_io_timeout_secs = nil
+  Gori::Settings.project_capture_max_mib = nil
   Gori::Settings.bind_host = "127.0.0.1"
   Gori::Settings.bind_port = 8070
   Gori::Settings.upstream_proxy = ""
+  Gori::Settings.connect_timeout_secs = Gori::Settings::DEFAULT_CONNECT_TIMEOUT_SECS
+  Gori::Settings.io_timeout_secs = Gori::Settings::DEFAULT_IO_TIMEOUT_SECS
+  Gori::Settings.capture_max_mib = Gori::Settings::DEFAULT_CAPTURE_MAX_MIB
+end
+
+private def with_net_store(&)
+  path = File.tempname("gori-projnet", ".db")
+  store = Gori::Store.open(path)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
 end
 
 describe Gori::Settings do
@@ -1143,6 +1162,122 @@ describe Gori::Settings do
     it "rejects a non-numeric / out-of-range explicit port" do
       Gori::Settings.upstream_proxy_port_error("proxy:8O80").should_not be_nil
       Gori::Settings.upstream_proxy_port_error("proxy:99999").should_not be_nil
+    end
+  end
+
+  # #538 — the ONE loader every surface that opens a project store calls. Session.open passes
+  # bind: true (it listens), CLI::Run.open_store and the MCP bind path pass bind: false.
+  describe ".load_project_network" do
+    it "installs all six keys with bind: true" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
+        store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+        store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
+        store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
+
+        Gori::Settings.load_project_network(store, bind: true)
+
+        Gori::Settings.effective_bind_host.should eq("0.0.0.0")
+        Gori::Settings.effective_bind_port.should eq(9100)
+        Gori::Settings.effective_upstream_proxy.should eq("jump:8888")
+        Gori::Settings.effective_connect_timeout_secs.should eq(7)
+        Gori::Settings.effective_io_timeout_secs.should eq(9)
+        Gori::Settings.effective_capture_max_mib.should eq(16)
+        # The routing decision Upstream.dial actually consults, not just the scalar.
+        route = Gori::Settings.upstream_route("example.com")
+        {route.kind, route.host, route.port}.should eq({"http", "jump", 8888})
+      ensure
+        reset_net
+      end
+    end
+
+    # The whole point of the named flag: a headless command that never opens a socket must
+    # not end up holding a bind address, because effective_bind_* is also read for display
+    # and for the listeners duplicate check.
+    it "with bind: false applies the four outbound/capture keys and CLEARS the two bind keys" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
+        store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+        store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
+        store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
+        # Pre-set, so "cleared" is distinguishable from "never assigned".
+        Gori::Settings.project_bind_host = "10.9.9.9"
+        Gori::Settings.project_bind_port = 9999
+
+        Gori::Settings.load_project_network(store, bind: false)
+
+        Gori::Settings.project_bind_host.should be_nil
+        Gori::Settings.project_bind_port.should be_nil
+        Gori::Settings.effective_bind_host.should eq("127.0.0.1") # the global
+        Gori::Settings.effective_bind_port.should eq(8070)
+        Gori::Settings.effective_upstream_proxy.should eq("jump:8888")
+        Gori::Settings.effective_connect_timeout_secs.should eq(7)
+        Gori::Settings.effective_io_timeout_secs.should eq(9)
+        Gori::Settings.effective_capture_max_mib.should eq(16)
+      ensure
+        reset_net
+      end
+    end
+
+    # A process global: switching projects (MCP switch_project, the TUI picker) must not
+    # carry the previous project's jump host into the next one.
+    it "assigns nil for absent rows, so a project with no pins falls back to the globals" do
+      with_net_store do |store|
+        reset_net
+        Gori::Settings.upstream_proxy = "glob:3128"
+        # Whatever the previously-bound project left behind.
+        Gori::Settings.project_upstream_proxy = "stale:8888"
+        Gori::Settings.project_connect_timeout_secs = 7
+        Gori::Settings.project_capture_max_mib = 16
+
+        Gori::Settings.load_project_network(store, bind: true)
+
+        Gori::Settings.project_upstream_proxy.should be_nil
+        Gori::Settings.project_connect_timeout_secs.should be_nil
+        Gori::Settings.project_capture_max_mib.should be_nil
+        Gori::Settings.effective_upstream_proxy.should eq("glob:3128")
+        Gori::Settings.effective_connect_timeout_secs.should eq(Gori::Settings::DEFAULT_CONNECT_TIMEOUT_SECS)
+        Gori::Settings.effective_capture_max_mib.should eq(Gori::Settings::DEFAULT_CAPTURE_MAX_MIB)
+      ensure
+        reset_net
+      end
+    end
+
+    # An unparseable hand-edited row reads as "unset" (to_i? → nil) rather than raising and
+    # taking the whole project open down with it. Matches how the TUI editor's values arrive.
+    it "treats a non-numeric row as unset" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "nine-thousand")
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "")
+        Gori::Settings.load_project_network(store, bind: true)
+        Gori::Settings.project_bind_port.should be_nil
+        Gori::Settings.project_io_timeout_secs.should be_nil
+        Gori::Settings.effective_bind_port.should eq(8070)
+      ensure
+        reset_net
+      end
+    end
+
+    # "" is an explicit "go direct", which must beat a non-blank global — the nil-vs-empty
+    # distinction the loader has to preserve when it reads the row back off disk.
+    it "preserves an explicit empty upstream row as direct" do
+      with_net_store do |store|
+        reset_net
+        Gori::Settings.upstream_proxy = "glob:3128"
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "")
+        Gori::Settings.load_project_network(store, bind: true)
+        Gori::Settings.effective_upstream_proxy.should eq("")
+        Gori::Settings.upstream_route("example.com").direct?.should be_true
+      ensure
+        reset_net
+      end
     end
   end
 

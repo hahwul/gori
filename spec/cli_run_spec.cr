@@ -540,3 +540,66 @@ describe "gori run intercept (bridge state)" do
     end
   end
 end
+
+# #538 — `CLI::Run.open_store` is the second caller of Settings.load_project_network. Every
+# `gori run` subcommand except `capture` reads its project through here, and none of them
+# LISTENS (capture opens its project through Session.open instead), so the loader is called
+# with bind: false: the pinned upstream / timeouts / capture cap apply, the bind pair does not.
+module Gori::CLI::Run
+  def self.open_store_for_spec(project : Project) : Store
+    open_store(project)
+  end
+end
+
+describe "Gori::CLI::Run.open_store per-project network overrides" do
+  it "installs the outbound + capture pins and leaves the bind pair alone" do
+    path = File.tempname("gori-clirun-net", ".db")
+    seed = Gori::Store.open(path)
+    seed.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
+    seed.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
+    seed.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+    seed.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
+    seed.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
+    seed.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
+    seed.close
+
+    store = Gori::CLI::Run.open_store_for_spec(Gori::Project.new("net", path))
+    begin
+      # The dial decision the fuzzer/miner/repeater actually consult.
+      route = Gori::Settings.upstream_route("example.com")
+      {route.kind, route.host, route.port}.should eq({"http", "jump", 8888})
+      Gori::Settings.effective_connect_timeout_secs.should eq(7)
+      Gori::Settings.effective_io_timeout_secs.should eq(9)
+      Gori::Settings.effective_capture_max_mib.should eq(16)
+      # Not one command routed through open_store binds a socket, so the pinned listen
+      # address must NOT be installed — widening it here would be a behaviour change.
+      Gori::Settings.project_bind_host.should be_nil
+      Gori::Settings.project_bind_port.should be_nil
+    ensure
+      store.close
+      Gori::Settings.project_upstream_proxy = nil
+      Gori::Settings.project_connect_timeout_secs = nil
+      Gori::Settings.project_io_timeout_secs = nil
+      Gori::Settings.project_capture_max_mib = nil
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "falls back to the globals for a project with no pins" do
+    path = File.tempname("gori-clirun-nonet", ".db")
+    Gori::Store.open(path).close
+    store = Gori::CLI::Run.open_store_for_spec(Gori::Project.new("plain", path))
+    begin
+      Gori::Settings.project_upstream_proxy.should be_nil
+      Gori::Settings.effective_capture_max_mib.should eq(Gori::Settings.capture_max_mib)
+      Gori::Settings.effective_connect_timeout_secs.should eq(Gori::Settings.connect_timeout_secs)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end

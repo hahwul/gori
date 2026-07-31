@@ -637,6 +637,15 @@ A project can pin its own network settings without editing the global file. Thes
 
 The timeout and capture-limit keys are engagement properties rather than machine ones: a slow internal appliance needs its own idle timeout, and one target returning very large responses needs its own capture cap — raising either globally would tax every other project.
 
+**Which surfaces apply which keys.** The two bind keys only mean something where gori opens a listening socket; the other four apply wherever gori dials out or stores a body.
+
+| Surface | `bind_host` / `bind_port` | `upstream_proxy` / `connect_timeout_secs` / `io_timeout_secs` / `capture_max_mib` |
+|---------|---------------------------|-----------------------------------------------------------------------------------|
+| TUI (`gori`) | applied — the proxy listens on the pinned address | applied |
+| `gori run capture` | applied — the one headless subcommand that listens (the pin wins over `--listen`/`--port`) | applied |
+| every other `gori run` subcommand | not applied — nothing binds | applied |
+| `gori mcp` | not applied — the server never listens | applied |
+
 **Effective bind / upstream** for an open project:
 
 | Priority | Source |

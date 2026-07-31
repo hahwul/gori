@@ -272,6 +272,13 @@ module Gori
       # turn that into a clean CLI error instead of an unhandled backtrace.
       private def self.open_store(project : Project) : Store
         store = Store.open(project.db_path, retention_flows: Settings.retention_flows)
+        # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
+        # not one command routed through here LISTENS — `gori run capture` is the only
+        # subcommand that binds and it opens its project through `Session.open` instead — so
+        # the two bind keys are deliberately left out and the other four apply. Without this,
+        # a project pinned to a jump host was dialled DIRECT by every `gori run` active
+        # command, and an imported/replayed body was capped at the global limit.
+        Settings.load_project_network(store, bind: false)
         Env.load_project(store)
         # The project's extract rules become `Env`'s send-time layer here too (#501) — with
         # NO values, because a binding lives in the memory of the gori that observed it and
