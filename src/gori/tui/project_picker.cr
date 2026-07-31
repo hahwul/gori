@@ -10,6 +10,8 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./confirm_dialog"
+require "./notifications"
+require "./pet"
 require "./settings_view"
 require "./preferences_view"
 require "./compact_overlay"
@@ -109,6 +111,14 @@ module Gori::Tui
       @update_notice = nil.as(String?) # the one-line notice text, once a fresh update is available
       @update_notice_version = ""      # the version the notice is for (persisted as the read-once marker)
       @notice_persisted = false        # guard: write the read-once marker after the notice's first real paint
+      # Miss Ring (settings:pet), same widget the session runs — off by default, and the
+      # same zero-cost no-op while off. She has no notification ring to watch here (the
+      # picker exists before any project), so the one thing she has to say beyond her
+      # hello is handed to her directly — see announce_update / Pet#say.
+      @pet = Pet.new(Notifications.new)
+      @pet_started_at = nil.as(Time::Instant?) # when she first ticked — the hello's t0
+      @update_line = nil.as(String?)           # her form of the update notice, until she says it
+      @update_spoken = false                   # she has said it → her line counts as the notice's paint
     end
 
     # Once-a-day cache window: skip the network probe when the last successful check
@@ -119,6 +129,7 @@ module Gori::Tui
       start_update_check
       loop do
         reconcile_update_check
+        tick_pet
         render
         # Drive the entrance animation off the idle poll cadence (~50 ms/frame):
         # the loop re-renders whenever poll_event times out, so bumping the clock
@@ -134,6 +145,7 @@ module Gori::Tui
           @backend.resize(ev.width, ev.height)
           @resized = true
         when Termisu::Event::Key
+          @pet.wake_on_input # any key re-arms Miss Ring's idle clock (self-gated while off)
           result = case @mode
                    when :new      then handle_new(ev)
                    when :confirm  then handle_confirm(ev)
@@ -149,6 +161,7 @@ module Gori::Tui
           when :quit   then return nil
           end
         when Termisu::Event::Mouse
+          @pet.wake_on_input
           result = handle_picker_mouse(ev)
           case result
           when Project then return result
@@ -213,7 +226,94 @@ module Gori::Tui
       if nv = Update.notice_version(Gori::VERSION, latest, Settings.update_notified_version)
         @update_notice_version = nv
         @update_notice = "update available: v#{Update.normalize_version(Gori::VERSION)} → v#{nv} · run: gori update"
+        announce_update(nv)
       end
+    end
+
+    # Hand the update to Miss Ring, to be said a beat after her hello (see #speak_update).
+    # Deliberately NOT merged into the hello itself: a greeting that opens with a version
+    # bump is a banner wearing a face, whereas hello-then-news is her telling you
+    # something, which is the whole point of routing it through her.
+    #
+    # @update_notice stays set either way. She is off by default and needs room the card
+    # doesn't always leave (see #pet_rect), so the row is still the notice's home — she
+    # takes the row while she is talking and hands it back when she stops.
+    private def announce_update(version : String) : Nil
+      return unless Settings.pet? && Settings.pet_notices?
+      @update_line = "heads up: v#{version} is out · run: gori update"
+    end
+
+    # --- Miss Ring -----------------------------------------------------------
+
+    # Beat between her hello and the update line. Long enough that "hi!" reads as a
+    # greeting rather than as a header on the notice, short enough to land while the
+    # operator is still on this screen (her hello holds for Pet::GREET_TTL = 8s).
+    UPDATE_SPEAK_AFTER = 3.seconds
+
+    # Held back until the entrance animation has resolved, so the hero lands first and she
+    # walks on afterwards rather than popping in mid-reveal. @art_frame advances on every
+    # frame whether or not the art is shown, so short terminals get the same beat.
+    #
+    # No dirty-tracking around the tick (unlike the Runner's): this loop already repaints
+    # every poll, so her `changed` verdict has nothing here to gate.
+    private def tick_pet : Nil
+      return if @art_frame < ART_ANIM_DONE
+      now = Time.instant
+      @pet_started_at ||= now
+      @pet.tick(now)
+      speak_update(now)
+    end
+
+    private def speak_update(now : Time::Instant) : Nil
+      return unless line = @update_line
+      return unless started = @pet_started_at
+      return if now - started < UPDATE_SPEAK_AFTER
+      @update_line = nil
+      @update_spoken = true
+      @pet.say(line, now, :warn)
+    end
+
+    # Where Miss Ring stands, or nil when she has no room. Her stage is the canvas down to
+    # the row above the notice row, which puts her plate on h-6..h-4 — clear of both footer
+    # rows, with her bubble on the three rows above that.
+    #
+    # THE SPRITE is dropped OUTRIGHT rather than moved when that lands her on the picker
+    # card: she paints last, and a mascot parked on the project list for the whole session
+    # is a rendering bug rather than a mascot. With the 50-column card centred that needs
+    # roughly 75 columns — under it she simply doesn't appear, the same bargain
+    # `art_shown?` makes for the brand block.
+    #
+    # THE BUBBLE is held to no such rule, and floats over the card when what she is saying
+    # is wider than the margin she stands in. That is the same trade `placement: body`
+    # makes in the session, where she speaks over the tab body: a bubble is a few seconds
+    # of her talking, it carries its own border rather than eating the card's, and a bubble
+    # narrowed to a 20-column margin would truncate every line she has to say — which is
+    # the one thing a speech bubble may not do.
+    private def pet_rect(w : Int32, h : Int32) : Rect?
+      return nil unless Settings.pet?
+      ProjectPicker.pet_place(w, h)
+    end
+
+    # The placement rule itself, free of Settings and of any picker instance so a spec can
+    # sweep it over terminal sizes — the one thing about her here that geometry can get
+    # wrong. `pet_stage` is the rect Pet.place measures from; the caller hands the SAME
+    # rect to Pet.draw, so what is tested is what is painted.
+    def self.pet_stage(w : Int32, h : Int32) : Rect
+      Rect.new(0, 0, w, h - 1)
+    end
+
+    def self.pet_place(w : Int32, h : Int32) : Rect?
+      return nil unless rect = Pet.place(pet_stage(w, h))
+      box, _ = card_metrics(w, h)
+      # rect.x - 1: Pet.draw claims a column of plate either side of the sprite.
+      return nil if rect.x - 1 < box.right && rect.y < box.bottom
+      rect
+    end
+
+    # Whether she is mid-sentence. Not the text — nothing here paints her line, she says it
+    # in her own bubble — only whether the notice row must stand down while she does.
+    private def pet_speaking? : Bool
+      !@pet.frame.try(&.bubble).nil?
     end
 
     # --- input ---------------------------------------------------------------
@@ -747,7 +847,7 @@ module Gori::Tui
     # a divider, then the windowed project list (from @results_scroll) at box.y+5.
     private def entry_at(mx : Int32, my : Int32) : Int32?
       w, h = @backend.size
-      box, res_rows = card_metrics(w, h)
+      box, res_rows = ProjectPicker.card_metrics(w, h)
       return nil unless box.contains?(mx, my)
       arow = my - (box.y + 1)
       return arow if 0 <= arow < 3 # New / Temp / Search action rows
@@ -927,13 +1027,13 @@ module Gori::Tui
     # The art is a nicety, not load-bearing — only show it when the terminal is
     # tall enough to keep a usable project list beneath this taller logo and wide
     # enough to fit the block without clipping; otherwise fall back to the wordmark.
-    private def art_shown?(w : Int32, h : Int32) : Bool
+    def self.art_shown?(w : Int32, h : Int32) : Bool
       h >= 26 && w >= 32
     end
 
     # Rows reserved above the picker card for the brand block. With the art the
     # stack is [art][ART_GAP][gori][subtitle][gap]; without it just [gori][subtitle][gap].
-    private def brand_h(w : Int32, h : Int32) : Int32
+    def self.brand_h(w : Int32, h : Int32) : Int32
       art_shown?(w, h) ? ART_H + ART_GAP + 3 : 3
     end
 
@@ -1038,7 +1138,7 @@ module Gori::Tui
     # The picker card rect + the number of project rows it shows, for `w`×`h`. The
     # ONE source of this geometry — render_list and the mouse hit-test (entry_at)
     # both call it so a click maps to exactly the row that was drawn.
-    private def card_metrics(w : Int32, h : Int32) : {Rect, Int32}
+    def self.card_metrics(w : Int32, h : Int32) : {Rect, Int32}
       cw = {w - 4, MENU_WIDTH}.min
       cx = {(w - cw) // 2, 0}.max
       actions = 3
@@ -1064,7 +1164,7 @@ module Gori::Tui
       # then the scrollable project list — the same header + divider + list shape
       # the overlays use, so the picker matches the rest of the app.
       actions = 3
-      box, res_rows = card_metrics(w, h)
+      box, res_rows = ProjectPicker.card_metrics(w, h)
       top = box.y - 3 # the "𝓰𝓸𝓻𝓲" wordmark sits 3 rows above the card
 
       # The decorative art (when it fits) sits ART_GAP rows above the wordmark;
@@ -1072,7 +1172,7 @@ module Gori::Tui
       # The logo stack (art + wordmark + tagline) draws straight on the starred
       # canvas — no lifted panel band, and no band re-fill, which would punch a
       # starless hole across the backdrop render already painted.
-      draw_brand_art(screen, top - ART_H - ART_GAP, w, @art_frame) if art_shown?(w, h)
+      draw_brand_art(screen, top - ART_H - ART_GAP, w, @art_frame) if ProjectPicker.art_shown?(w, h)
       render_hero_text(screen, top, w, h)
 
       Frame.card(screen, box)
@@ -1113,29 +1213,8 @@ module Gori::Tui
         end
       end
 
-      # Row above the hint (h-3): a transient compaction result when present, else why the
-      # last open failed, else the once-per-release "update available" notice. The
-      # compaction flash is a direct response to a keypress, so it takes the row; the
-      # others return when the flash clears on the next keystroke. The open error outranks
-      # the update notice — one explains the screen the operator is looking at, the other
-      # is an aside — and it persists rather than fading, since it is the ONLY on-screen
-      # trace that a project failed to open.
-      if flash = @flash
-        centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w)
-      elsif open_error = @open_error
-        # Capped rather than left to run off the edge: a db path makes this the one notice
-        # of unbounded length. The leading words carry the meaning, and gori.log has it all.
-        centered(screen, h - 3, open_error, Theme.red, w, width: w - 2)
-      elsif notice = @update_notice
-        centered(screen, h - 3, notice, Theme.yellow, w)
-        # Mark this release "read" only once it has actually reached the screen, so a
-        # fetch that lands as the user opens a project doesn't burn the one showing.
-        unless @notice_persisted
-          @notice_persisted = true
-          Settings.update_notified_version = @update_notice_version
-          Settings.save
-        end
-      end
+      pet = draw_pet(screen, w, h)
+      render_notice_row(screen, pet, w, h)
 
       if tokens = list_hint_tokens
         render_hint(screen, tokens, h - 2, w)
@@ -1150,6 +1229,65 @@ module Gori::Tui
                end
         centered(screen, h - 2, hint, Theme.muted, w)
       end
+    end
+
+    # Miss Ring stands in the bottom-right corner, over the starfield and beside the card
+    # — but only on the plain list: every other mode floats something of its own (the space
+    # menu shares her corner outright), and the picker draws those AFTER the list, which
+    # would clip her box and leave an orphaned corner behind.
+    #
+    # Returns her SPOT on this screen, which the notice row turns on — non-nil from the
+    # frame she has room to stand on, not from the frame she first paints on. The gap is
+    # the second the entrance animation holds her back for (see #tick_pet): the row must
+    # already know she is coming, or it flashes the update notice she is about to deliver.
+    private def draw_pet(screen : Screen, w : Int32, h : Int32) : Rect?
+      return nil unless @mode == :list
+      return nil unless rect = pet_rect(w, h)
+      if frame = @pet.frame
+        Pet.draw(screen, ProjectPicker.pet_stage(w, h), frame)
+      end
+      rect
+    end
+
+    # The row above the hint (h-3): a transient compaction result when present, else why
+    # the last open failed, else the once-per-release "update available" notice. The
+    # compaction flash is a direct response to a keypress, so it takes the row; the others
+    # return when the flash clears on the next keystroke. The open error outranks the
+    # update notice — one explains the screen the operator is looking at, the other is an
+    # aside — and it persists rather than fading, since it is the ONLY on-screen trace that
+    # a project failed to open.
+    #
+    # Miss Ring paints nothing here. She takes the row off the update notice while she is
+    # saying it (and while she still owes it), because for those seconds her bubble IS the
+    # notice — the row would otherwise carry the same news a second time, in a second
+    # wording, three rows below the bubble carrying it.
+    private def render_notice_row(screen : Screen, pet : Rect?, w : Int32, h : Int32) : Nil
+      if flash = @flash
+        centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w)
+      elsif open_error = @open_error
+        # Capped rather than left to run off the edge: a db path makes this the one notice
+        # of unbounded length. The leading words carry the meaning, and gori.log has it all.
+        centered(screen, h - 3, open_error, Theme.red, w, width: w - 2)
+      elsif pet && (@update_line || pet_speaking?)
+        # Her saying it IS the notice reaching the screen — the marker must burn here too,
+        # or the row's own paint (seconds later, and only if the operator is still on this
+        # screen) would be the sole path that ever records it.
+        persist_update_notice if @update_spoken
+      elsif notice = @update_notice
+        centered(screen, h - 3, notice, Theme.yellow, w)
+        persist_update_notice
+      end
+    end
+
+    # Mark this release "read", once it has actually reached the screen — so a fetch that
+    # lands as the user opens a project doesn't burn the one showing. Called from whichever
+    # path painted it (the notice row, or Miss Ring saying it), hence the guard here rather
+    # than at the call sites.
+    private def persist_update_notice : Nil
+      return if @notice_persisted
+      @notice_persisted = true
+      Settings.update_notified_version = @update_notice_version
+      Settings.save
     end
 
     # Gap between footer-hint tokens — the same three cells the flat hint string used, so
@@ -1428,7 +1566,7 @@ module Gori::Tui
     # 1.0, i.e. the same static render as the no-art path, which skips the
     # entrance entirely (short/narrow terminals shouldn't wait on a flourish).
     private def render_hero_text(screen : Screen, top : Int32, w : Int32, h : Int32) : Nil
-      unless art_shown?(w, h)
+      unless ProjectPicker.art_shown?(w, h)
         Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg)
         centered(screen, top + 1, TAGLINE, Theme.muted, w)
         return

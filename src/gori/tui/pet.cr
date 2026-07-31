@@ -49,6 +49,13 @@ module Gori::Tui
     # Her one unprompted line — see #greet. Everything else she says is a notification
     # someone else raised.
     GREETING = "hi! ready when you are"
+    # Has she said hello in THIS PROCESS yet? The hello is a SESSION event, not a widget
+    # one: the project picker builds one Pet and the session it opens builds another, so
+    # a per-instance flag greets twice inside the ten seconds it takes to choose a
+    # project — which reads as a glitch rather than as a character. The flag it replaced
+    # was per-instance for exactly this reason at a smaller scale ("not once per enable
+    # edge"); the operator being greeted is the same operator either way.
+    @@greeted = false
     # Held longer than a notification bubble (3.5s). A note is a reaction to something
     # the operator just did, so they are already looking at her corner; the hello lands
     # while the tab body is still painting and their eyes are on the tab bar.
@@ -112,7 +119,6 @@ module Gori::Tui
       @wake_until_beat = 0
       @settle_beat = -1
       @seen_id = @notes.latest_id # don't announce a backlog on enable
-      @greeted = false
       @bubble = nil.as(String?)
       @bubble_at = nil.as(Time::Instant?)
       @bubble_until = nil.as(Time::Instant?)
@@ -320,21 +326,47 @@ module Gori::Tui
 
     # --- notifications -------------------------------------------------------
 
-    # Say hello the first time she appears. ONCE per Pet, not once per enable edge: the
-    # Runner holds one for the whole session, and someone flipping her on and off in the
-    # settings view to see what she looks like is not asking to be greeted each time.
+    # Say hello the first time she appears. ONCE PER PROCESS (see @@greeted), not once per
+    # enable edge and not once per Pet: someone flipping her on and off in the settings
+    # view to see what she looks like is not asking to be greeted each time, and neither
+    # is someone crossing from the project picker into the session it opens.
     #
     # Gated on `notices` like everything else she says — a reader who turned her speech
     # off asked for a silent mascot — and it burns the flag either way, so turning
     # notices on an hour later does not produce a stale hello. The mood stays :info: a
     # mood is a reaction to a note's LEVEL, and a greeting has none.
     private def greet(now : Time::Instant) : Nil
-      return if @greeted
-      @greeted = true
+      return if @@greeted
+      @@greeted = true
       return unless Settings.pet_notices?
       @bubble = GREETING
       @bubble_at = now
       @bubble_until = now + GREET_TTL
+    end
+
+    # Forget that this process has been greeted. A SPEC SEAM only — nothing in the app
+    # un-greets, because nothing in a run of gori is a second first meeting.
+    def self.forget_greeting! : Nil
+      @@greeted = false
+    end
+
+    # Speak a line that did not come from the notification ring — same contract as a note
+    # (condensed, mood-ranked, wakes her), for a surface that has something to tell the
+    # operator but no Notifications behind it. The project picker is the one caller: it
+    # exists before any project, so there is no session ring for the update check to push
+    # into, and routing one line through a whole Notifications instance would only make
+    # the picker look like it has a notification centre it does not have.
+    #
+    # Not a way to bypass her Notices setting: the same gate that silences the ring
+    # silences this.
+    def say(message : String, now : Time::Instant, level : Symbol = :info) : Nil
+      return unless Settings.pet_notices?
+      mood = mood_of(level)
+      @bubble = condense(message)
+      @bubble_at = now
+      @bubble_until = now + bubble_ttl(mood)
+      apply_mood(mood, now)
+      poke(now)
     end
 
     private def consume_note(now : Time::Instant) : Bool

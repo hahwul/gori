@@ -26,6 +26,11 @@ private def beats(pet : Pet, t0 : Time::Instant, n : Int32) : Int32
 end
 
 describe Gori::Tui::Pet do
+  # The hello is once per PROCESS, not once per Pet (Pet.@@greeted) — so without this
+  # every example after the first would inherit "already greeted" from whichever ran
+  # before it, and the greeting assertions would pass or fail on spec ordering.
+  before_each { Pet.forget_greeting! }
+
   # --- the tick contract (idle-zero-CPU) ------------------------------------
 
   it "does nothing while disabled" do
@@ -219,6 +224,64 @@ describe Gori::Tui::Pet do
     with_pet(true, notices: true) do
       beats(pet, t0, 3)
       pet.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  # The picker builds one Pet and the session it opens builds another, seconds apart —
+  # one hello covers both, or the operator is greeted twice for one launch of gori.
+  it "greets once per process, not once per Pet" do
+    with_pet(true) do
+      t0 = Time.instant
+      first = Pet.new(Notifications.new)
+      first.tick(t0)
+      first.frame.not_nil!.bubble.should eq(Pet::GREETING)
+
+      second = Pet.new(Notifications.new) # the session's, after a project is chosen
+      second.tick(t0 + 5.seconds)
+      second.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  # --- say (a line with no notification behind it) --------------------------
+
+  it "says a line handed to it directly, with the level's mood" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      pet.say("heads up: v9.9.9 is out", t0 + 1.second, :warn)
+      pet.tick(t0 + 1.second + Pet::BEAT)
+      f = pet.frame.not_nil!
+      f.bubble.should eq("heads up: v9.9.9 is out") # replaces the hello it interrupts
+      f.mood.should eq(:warn)
+      pet.bubble_at.should eq(t0 + 1.second)
+    end
+  end
+
+  # Same gate as the ring: Notices off means she does not speak, whoever is asking.
+  it "stays silent on say while notices are off" do
+    with_pet(true, notices: false) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      pet.say("heads up: v9.9.9 is out", t0, :warn)
+      pet.tick(t0 + Pet::BEAT)
+      pet.frame.not_nil!.bubble.should be_nil
+      pet.frame.not_nil!.mood.should eq(:info)
+    end
+  end
+
+  it "wakes her from a doze to say it" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      pet.tick(t0 + Pet::SLEEP_AFTER)
+      pet.frame.not_nil!.pose.should eq(:doze)
+      woke = t0 + Pet::SLEEP_AFTER + 1.second
+      pet.say("heads up: v9.9.9 is out", woke, :warn)
+      pet.tick(woke + Pet::BEAT)
+      pet.frame.not_nil!.pose.should_not eq(:doze)
     end
   end
 

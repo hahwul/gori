@@ -231,6 +231,12 @@ shoot_readme() {
   # Keys land fast on purpose: Miss Ring greets on the frame she first appears on and
   # holds it for Pet::GREET_TTL (8s) from TUI start, and _shoot has already slept 3s
   # waiting for the pane. Pad these and the hero loses the speech bubble.
+  #
+  # AND THE SHOT MUST NOT GO THROUGH THE PROJECT PICKER. The hello is once per PROCESS
+  # (Pet.@@greeted) and she now stands on the picker too, so a preamble=1 run would have
+  # her say it THERE and reach History already greeted — a silent hero, with nothing in
+  # the capture to say why. run_scene opens the db directly (`--db`, preamble 0), which
+  # is the only reason this still works; keep it that way.
   SHOT_COLS=180 SHOT_ARIA="gori TUI — the History tab listing captured HTTP flows" \
     run_scene readme 38 "𝓰𝓸𝓻𝓲" 3 SLEEP0.4 Enter SLEEP1
 }
