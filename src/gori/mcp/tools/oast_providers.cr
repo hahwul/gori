@@ -62,7 +62,16 @@ module Gori
 
         name = str(h, "name").try(&.strip).presence || existing.name
         host = str(h, "host").try(&.strip).presence || existing.host
-        token = str(h, "token").try(&.strip).presence || existing.token
+        # `presence ||` cannot express "clear it": an explicit `"token": ""` folded into the
+        # same nil as an OMITTED field, so the old auth credential stayed on the provider and
+        # kept going out. Presence of the KEY decides whether to change it; its value decides
+        # what to. `name`/`host` above keep the fallback deliberately — a provider with no name
+        # or no host is not a thing you can save.
+        token = if present?(h, "token")
+                  str(h, "token").try(&.strip).presence
+                else
+                  existing.token
+                end
         enabled = bool(h, "enabled")
         enabled = existing.enabled? if enabled.nil?
 

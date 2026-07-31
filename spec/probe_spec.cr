@@ -2056,6 +2056,46 @@ describe "Gori::Probe::Active (safety + coverage)" do
     end
   end
 
+  # `scan_repeaters` had no budget at all, so an MCP `probe_scan active:true` could send far
+  # past its own PROBE_ACTIVE_MAX_FLOWS: repeater tabs are unbounded and the rule set costs 33
+  # requests per tab (47 aggressive). The cap now covers the whole scan.
+  it "spends ONE active budget across flows and repeater tabs" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?token=aaaaaaaa", content_type: nil)
+      store.insert_repeater("http://acme.test/r", "GET /r?token=cccccccc HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+
+      budget = Gori::Probe::Scan::Budget.new(0)
+      Gori::Probe::Scan.scan_all(store, ids, active: true, scope: scope, active_budget: budget)
+      # Nothing was sent, so the cap was reached — which is the question `active_flows_capped`
+      # should answer, rather than `ids.size > limit` on a pre-filter count.
+      budget.exhausted?.should be_true
+    end
+  end
+
+  # The disabled-rule set is the only thing between an ACTIVE rule the operator switched off
+  # and a real request. Its read used to degrade to an EMPTY set — "nothing is disabled" — on
+  # a store error, which is a fail-OPEN on the half of this config that authorises traffic.
+  it "skips ACTIVE probing when the disabled-rule list could not be read" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/a?token=aaaaaaaa", content_type: nil)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      ids = Gori::Probe::Scan.flow_ids(store, nil)
+      degraded = Gori::Probe::Scan::RuleConfig.new(Set(String).new, [] of Gori::Probe::CustomRule, degraded: true)
+      said = [] of String
+      dets = Gori::Probe::Scan.scan_all(store, ids, active: true, scope: scope, rules: degraded,
+        on_error: ->(where : String, ex : Exception) { said << "#{where}: #{ex.message}"; nil })[0]
+      # It is NAMED, not silent — a scan that quietly stopped probing would read as clean.
+      said.first.should contain("active probing was skipped")
+      # …and the request-free passive half still ran.
+      dets.count { |d| d.code == "secret_in_url" }.should eq(1)
+    end
+  end
+
   it "sends active probes when the scope ALLOWLISTS the target" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)

@@ -24,14 +24,54 @@ module Gori
     module Scan
       extend self
 
+      # One ACTIVE-send budget for a whole scan. `scan_repeaters` had none at all, so an MCP
+      # `probe_scan active:true` could send far past its own `PROBE_ACTIVE_MAX_FLOWS`: repeater
+      # tabs are unbounded (`store.repeaters` is an uncapped SELECT and `create_repeater` can
+      # mint them) and the 14 rules cost 33 requests per tab, 47 under `aggressive`. Shared
+      # rather than per-half so the cap means what its name says.
+      class Budget
+        def initialize(@remaining : Int32?)
+        end
+
+        # True when this scan may still send. Consumes one unit when it can.
+        def take? : Bool
+          n = @remaining
+          return true unless n
+          if n <= 0
+            @exhausted = true
+            return false
+          end
+          @remaining = n - 1
+          true
+        end
+
+        # Whether the cap actually STOPPED a send. `ids.size > limit` is not the same question:
+        # the ids are counted before the scope allowlist and the has-a-response filter, so a
+        # project with 600 captured flows of which 5 are in scope reported truncated coverage
+        # for a scan that covered everything.
+        def exhausted? : Bool
+          @exhausted
+        end
+
+        @exhausted = false
+      end
+
       # The operator's Rules sub-tab config: built-ins turned off (by RuleInfo#id) + the merged
       # global+project custom match rules. A headless scan MUST honour both or it diverges from
       # what the same project shows in the TUI — a disabled built-in would come back, and a
       # custom rule would never fire at all. Mirrors Analyzer#load_disabled / #load_custom,
       # including their "a broken/locked DB degrades to the built-in defaults" rescue.
-      record RuleConfig, disabled : Set(String), custom : Array(CustomRule) do
+      # `degraded` is true when the disabled-rule set could NOT be read. It matters because
+      # that set is the only thing standing between an ACTIVE rule the operator switched off
+      # and a real request going out: the rescue below returns an EMPTY set, which reads as
+      # "nothing is disabled" — a fail-OPEN on the one half of this config that authorises
+      # traffic. Passive analysis is request-free and degrades harmlessly (it just applies the
+      # built-in defaults, which is what the comment above always described); ACTIVE does not,
+      # so `Scan` skips it and says so rather than sending probes the operator turned off.
+      record RuleConfig, disabled : Set(String), custom : Array(CustomRule), degraded : Bool = false do
         def self.load(store : Store) : RuleConfig
-          new(load_disabled(store), load_custom(store))
+          disabled, ok = load_disabled(store)
+          new(disabled, load_custom(store), degraded: !ok)
         end
 
         # The "no config" default, for callers (specs) that scan without a Rules config.
@@ -39,10 +79,13 @@ module Gori
           new(Passive::NO_DISABLED, Passive::NO_CUSTOM)
         end
 
-        private def self.load_disabled(store : Store) : Set(String)
-          store.probe_disabled_rules
+        # {the set, whether it was actually read}. The pair is the whole point — an empty set
+        # from a broken store and an empty set from a project with nothing disabled are the
+        # same value and must not mean the same thing.
+        private def self.load_disabled(store : Store) : {Set(String), Bool}
+          {store.probe_disabled_rules, true}
         rescue DB::Error | SQLite3::Exception
-          Set(String).new
+          {Set(String).new, false}
         end
 
         private def self.load_custom(store : Store) : Array(CustomRule)
@@ -75,15 +118,26 @@ module Gori
                    active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
                    rules : RuleConfig? = nil,
                    progress : Proc(Int32, Int32, Nil)? = nil,
+                   active_budget : Budget? = nil,
                    on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
         # Read the Rules config ONCE per scan (not per flow) — same as the Analyzer, which
         # loads it at construction and only re-reads on an explicit rules reload.
         cfg = rules || RuleConfig.load(store)
+        # ONE budget across both halves — see `Budget`. Built here rather than passed down as a
+        # number so the repeater half cannot spend the flow half's allowance again.
+        budget = active_budget || Budget.new(active_limit)
+        if active && cfg.degraded
+          on_error.try &.call("probe rules", Gori::Error.new(
+            "the disabled-rule list could not be read (store busy or unwritable), so gori does " \
+            "not know which ACTIVE checks you switched off — active probing was skipped and " \
+            "only passive analysis ran"))
+        end
         detections = scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, active_limit: active_limit, opts: opts,
-          rules: cfg, progress: progress, on_error: on_error)
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts,
+          rules: cfg, progress: progress, active_budget: budget, on_error: on_error)
         repeater_dets, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg, on_error: on_error)
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg,
+          active_budget: budget, on_error: on_error)
         detections.concat(repeater_dets)
         {detections, repeater_n}
       end
@@ -93,11 +147,12 @@ module Gori
                      active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
                      rules : RuleConfig? = nil,
                      progress : Proc(Int32, Int32, Nil)? = nil,
+                     active_budget : Budget? = nil,
                      on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
-        active_sent = 0
+        budget = active_budget || Budget.new(active_limit)
         ids.each_with_index do |id, i|
           begin
             detail = store.get_flow(id)
@@ -105,10 +160,11 @@ module Gori
               ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
               # passive is request-free — NEVER capped
               detections.concat(Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom))
-              if active && outbound.allows?(detail.row.url, detail.row.host) && !(active_limit && active_sent >= active_limit)
+              # `!cfg.degraded`: the disabled-rule set could not be read, so gori does not
+              # know which ACTIVE rules the operator switched off — see `RuleConfig`.
+              if active && !cfg.degraded && outbound.allows?(detail.row.url, detail.row.host) && budget.take?
                 detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
                   disabled: cfg.disabled, on_error: on_error))
-                active_sent += 1
               end
             end
           rescue ex : DB::Error | SQLite3::Exception
@@ -130,11 +186,12 @@ module Gori
       def scan_repeaters(store : Store, *, active : Bool, verify_upstream : Bool = true,
                          scope : Scope? = nil, allow_unscoped : Bool = false,
                          opts : Active::Options = Active::Options::DEFAULT,
-                         rules : RuleConfig? = nil,
+                         rules : RuleConfig? = nil, active_budget : Budget? = nil,
                          on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
+        budget = active_budget || Budget.new(nil)
         n = 0
         store.repeaters.each do |rec|
           next unless detail = Probe.detail_from_repeater(rec)
@@ -145,7 +202,7 @@ module Gori
             Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
-            if active && outbound.allows?(detail.row.url, detail.row.host)
+            if active && !cfg.degraded && outbound.allows?(detail.row.url, detail.row.host) && budget.take?
               Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
                 disabled: cfg.disabled, on_error: on_error).each do |d|
                 detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)

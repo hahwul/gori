@@ -201,7 +201,8 @@ module Gori
           name.try(&.strip).presence || existing.name,
           kind.try(&.label) || existing.kind,
           host.try(&.strip).presence || existing.host,
-          token.try(&.strip).presence || existing.token,
+          # See the MCP twin: `--token=` with an empty value is a CLEAR, not an omission.
+          token.nil? ? existing.token : token.strip.presence,
           enabled.nil? ? existing.enabled? : enabled)
         puts "OAST provider p_#{row} updated."
       end

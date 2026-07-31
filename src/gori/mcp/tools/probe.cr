@@ -40,13 +40,16 @@ module Gori
         # Cap only the ACTIVE sends (network volume); the request-free PASSIVE scan always
         # covers every flow. (An earlier version truncated `ids`, which silently dropped
         # passive coverage of the newest flows under active:true.)
-        capped = active && ids.size > PROBE_ACTIVE_MAX_FLOWS
         # A scan SKIPS an item that blows up rather than losing the batch; count the skips so the
         # agent can tell an incomplete result from a clean one (surfaced as `scan_errors`).
         scan_errors = 0
+        # The budget is built here so `capped` can report whether it actually STOPPED a send,
+        # rather than guessing from the pre-filter id count — see `Scan::Budget#exhausted?`.
+        budget = Probe::Scan::Budget.new(active ? PROBE_ACTIVE_MAX_FLOWS : nil)
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: @verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_limit: active ? PROBE_ACTIVE_MAX_FLOWS : nil,
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_budget: budget,
           on_error: ->(_where : String, _ex : Exception) { scan_errors += 1; nil })
+        capped = budget.exhausted?
 
         groups = probe_filter_groups(Probe.group(dets), severity_from(str(h, "severity")), category.as(String?))
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,

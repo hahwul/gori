@@ -39,6 +39,7 @@ module Gori
         allow_unscoped = false
         unsafe = false
         aggressive = false
+        insecure = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -64,6 +65,11 @@ module Gori
           p.on("--allow-unscoped", "With --active, probe flows even when outside the project scope (default: only scope-included hosts)") { allow_unscoped = true }
           p.on("--unsafe", "With --active, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data") { unsafe = true }
           p.on("--aggressive", "With --active, raise per-rule caps + wider bypass sets (implies --unsafe)") { aggressive = true }
+          # Every other outbound `gori run` subcommand carries this; probe did not, so
+          # `scan_all`'s `verify_upstream: true` default was unreachable from the CLI and an
+          # internal target with a self-signed certificate failed every active probe with no
+          # way to say otherwise.
+          p.on("-k", "--insecure-upstream", "With --active, do not verify upstream TLS certificates") { insecure = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -114,6 +120,7 @@ module Gori
           # complete one and reads as "clean".
           scan_errors = [] of String
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
+            verify_upstream: !insecure,
             allow_unscoped: allow_unscoped, opts: opts, progress: probe_progress_meter(meter),
             on_error: ->(where : String, ex : Exception) { scan_errors << "#{where}: #{ex.message}"; nil })
           STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
