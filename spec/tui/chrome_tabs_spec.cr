@@ -14,7 +14,13 @@ describe "Chrome.reconcile" do
     out.find { |(s, _, _)| s == :miner }.not_nil![2].should be_false
     out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_true # now a default-visible tab
     out.find { |(s, _, _)| s == :decoder }.not_nil![2].should be_true  # now a default-visible tab
+    out.find { |(s, _, _)| s == :rewriter }.not_nil![2].should be_true # now a default-visible tab
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
+  end
+
+  it "places Rewriter immediately right of Comparer" do
+    order = Chrome.reconcile([] of {String, Bool}).map(&.first)
+    order.index(:rewriter).not_nil!.should eq(order.index(:comparer).not_nil! + 1)
   end
 
   it "honors a stored order and visibility, inserting absent catalog tabs at their position" do
@@ -86,7 +92,7 @@ end
 describe "Chrome.hidden_tabs" do
   it "returns the tabs hidden from the bar (Miner + Sequencer + JWT by default) on empty prefs" do
     hid = Chrome.hidden_tabs([] of {String, Bool}).map(&.first)
-    hid.should eq([:rewriter, :miner, :sequencer, :jwt]) # the default-hidden tabs, in catalog order
+    hid.should eq([:miner, :sequencer, :jwt]) # the default-hidden tabs, in catalog order
   end
 
   it "excludes the active tab even when its stored visibility is false (it's force-shown)" do

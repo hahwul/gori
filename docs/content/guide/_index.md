@@ -41,7 +41,6 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Target** | Sitemap (host → path endpoint tree) + Discover (spider & directory brute-force) |
 | **History** | Captured (and imported) flows with full request/response detail |
 | **Intercept** | Hold requests/responses for a manual decision |
-| **Rewriter** | Match & Replace rules that rewrite traffic in flight (hidden by default) |
 | **Repeater** | Request workbench (incl. WebSocket & gRPC modes) |
 | **Fuzzer** | Intruder-style fuzzer with four attack modes |
 | **Miner** | Hidden-parameter discovery (hidden by default) |
@@ -50,9 +49,10 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Decoder** | Encode / decode / hash pipeline |
 | **JWT** | Decode, re-sign, and attack JSON Web Tokens (hidden by default) |
 | **Comparer** | Side-by-side diff of two flows |
+| **Rewriter** | Match & Replace rules that rewrite traffic in flight |
 | **Probe** | Passive & light-touch active security scanner |
 | **Issues** | Triage results by severity and status |
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Some tabs are hidden on a fresh install (Rewriter, Miner, Sequencer, JWT) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Some tabs are hidden on a fresh install (Miner, Sequencer, JWT) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

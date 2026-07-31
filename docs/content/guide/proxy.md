@@ -182,7 +182,7 @@ Marks survive a filter change, a re-sort, and leaving the tab and coming back; t
 
 ## Match & Replace (Rewriter tab)
 
-The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It is hidden by default, so reach it from the tab-bar `⋯` menu or the command palette (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**).
+The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It sits on the tab bar right of Comparer, and the command palette reaches it too (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**).
 
 Each rule has an operation:
 

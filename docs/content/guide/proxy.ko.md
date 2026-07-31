@@ -182,7 +182,7 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Match & Replace (Rewriter 탭) {#match-replace}
 
-**Rewriter** 탭이 Match & Replace 편집기입니다. 이동 중인 요청/응답을 재작성하는 규칙을 관리합니다. 기본적으로 숨김 상태이므로 탭 바의 `⋯` 메뉴나 커맨드 팔레트(`Ctrl-P` → **Match & Replace** 또는 **Go to Rewriter**)로 엽니다.
+**Rewriter** 탭이 Match & Replace 편집기입니다. 이동 중인 요청/응답을 재작성하는 규칙을 관리합니다. 탭 바에서 Comparer 오른쪽에 있고, 커맨드 팔레트(`Ctrl-P` → **Match & Replace** 또는 **Go to Rewriter**)로도 열 수 있습니다.
 
 각 규칙에는 동작이 있습니다.
 
