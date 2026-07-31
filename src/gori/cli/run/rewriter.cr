@@ -149,7 +149,14 @@ module Gori
           end
           id = store.extract_rules.find { |r| r.name == name }.try(&.id) || 0_i64
           abort "gori run rewriter extract add: failed to persist rule (store busy or unwritable)" if id == 0
-          store.set_extract_rule_enabled(id, false) if disabled
+          # The disable's own answer, not a fire-and-forget: dropping it reported success
+          # while leaving an ENABLED rule that immediately starts binding from live proxy
+          # traffic — the opposite of what was asked, at exit 0. MCP's
+          # `apply_created_extract_state` already refuses this way.
+          if disabled && !store.set_extract_rule_enabled(id, false)
+            abort "gori run rewriter extract add: rule ##{id} was created but the disable did not persist " \
+                  "(store busy or unwritable) — it is ENABLED and already binding; retry the disable"
+          end
           puts "Extract rule ##{id} added — $#{name} binds from #{kind.label}."
         ensure
           store.close

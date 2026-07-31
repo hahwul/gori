@@ -113,6 +113,46 @@ describe Gori::Bindings do
       end
     end
 
+    # The check belongs to this chokepoint and not to one surface's argument parsing: the CLI
+    # calls `Bindings` rather than the store precisely so it "gets the SAME refusals the TUI
+    # and MCP do", and while the range test lived in the MCP tool layer alone that was false —
+    # a `kind=position` rule with no range saved from the TUI and the CLI and could never bind
+    # (`TokenExtract.position` returns nil for `hi <= lo`), missing forever with no reason given.
+    it "refuses a position descriptor whose range cannot select anything" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("A", "", Gori::ExtractKind::Position).to_s.should contain("byte range")
+        b.add("B", "", Gori::ExtractKind::Position, "", 32, 32).to_s.should contain("byte range")
+        b.add("C", "", Gori::ExtractKind::Position, "", 40, 8).to_s.should contain("byte range")
+        store.extract_rules.should be_empty
+        # A real range still saves, and the other kinds never consult the ints.
+        b.add("D", "", Gori::ExtractKind::Position, "", 0, 32).should be_nil
+        b.add("E", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        # An UPDATE takes the same refusal, so a good rule cannot be edited into a dead one.
+        id = b.rules.first.id
+        b.update(id, "D", "", Gori::ExtractKind::Position, "", 0, 0).to_s.should contain("byte range")
+        b.rules.first.pos_end.should eq(32)
+      end
+    end
+
+    it "reports whether a toggle or a delete actually committed" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        id = b.rules.first.id
+        # The store has always answered this; dropping the answer is how the TUI came to
+        # toast "extract rule deleted" for a write that rolled back.
+        b.toggle(id).should be_true
+        b.rules.first.enabled?.should be_false
+        b.remove(id).should be_true
+        # The Bool means the write COMMITTED (the store's own contract — false is busy /
+        # locked / closing), so a DELETE of a row that is already gone is still a commit.
+        # `toggle` is false here for a different reason: it reads the rule first, and there is
+        # no state to flip, so claiming one changed would be its own false report.
+        b.toggle(id).should be_false
+      end
+    end
+
     it "stops declaring a disabled rule's name" do
       with_store do |store|
         b = Gori::Bindings.load(store)

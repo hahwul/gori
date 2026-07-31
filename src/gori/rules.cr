@@ -127,16 +127,25 @@ module Gori
       Rules.normalize_shape(op, target, part)
     end
 
-    def remove(id : Int64) : Nil
-      @store.delete_rule(id)
+    # False when the write did NOT commit (store busy, locked or closing) — the rule is still
+    # there and still rewriting live traffic. The store has always answered this; it was
+    # discarded here, so the TUI reported "rule deleted" for a rollback while the headless
+    # surfaces (`mcp/tools/rules.cr`, `cli/run/rewriter.cr`) refused to. It means COMMITTED,
+    # not "a row existed", which is the store's own contract.
+    def remove(id : Int64) : Bool
+      ok = @store.delete_rule(id)
       refresh
+      ok
     end
 
-    def toggle(id : Int64) : Nil
+    # False when the write did NOT commit; see `remove`. A missing rule is `false` too — there
+    # was nothing to toggle, so claiming a state change would be just as wrong.
+    def toggle(id : Int64) : Bool
       rule = rules.find(&.id.==(id))
-      return unless rule
-      @store.set_rule_enabled(id, !rule.enabled?)
+      return false unless rule
+      ok = @store.set_rule_enabled(id, !rule.enabled?)
       refresh
+      ok
     end
 
     # Move a rule one slot up (dir < 0) / down (dir > 0) in the applied order.

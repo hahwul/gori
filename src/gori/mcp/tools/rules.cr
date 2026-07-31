@@ -346,6 +346,14 @@ module Gori
         (present?(h, field) ? int(h, field) : current.to_i64).try(&.to_i32) || 0
       end
 
+      # The enabled state the caller asked for, or nil when they omitted the field. Called
+      # BEFORE the write commits, and that ordering is the point: `bool_arg` RAISES on a
+      # non-boolean (`"enabled": "yes"`, which clients that stringify booleans send), so
+      # reading it afterwards meant a rejected call had already persisted its changes.
+      private def enabled_change(h, current : Bool) : Bool?
+        present?(h, "enabled") ? bool_arg(h, "enabled", current) : nil
+      end
+
       # kind=position needs a real range; every other kind ignores the two ints.
       private def extract_range_error(kind : Gori::ExtractKind, pos_start : Int32, pos_end : Int32) : Result?
         return nil unless kind.position? && pos_end <= pos_start
@@ -363,13 +371,18 @@ module Gori
         if bad = extract_range_error(kind, pos_start, pos_end)
           return bad
         end
+        # Read BEFORE the insert, exactly as `create_rule` does: `bool_arg` RAISES on a
+        # non-boolean (`"enabled": "yes"`, which clients that stringify booleans send), and
+        # reading it after `bindings.add` had persisted meant the caller got a failure while a
+        # live, ENABLED extract rule stayed behind — already observing responses and binding
+        # its name for Match&Replace injection. A rejected create must leave nothing.
+        enabled = bool_arg(h, "enabled", true)
         bindings = extract_bindings
         if bad = bindings.add(name, str(h, "when") || "", kind, selector, pos_start, pos_end, str(h, "host") || "")
           return err(bad, "INVALID_ARGUMENT", field: "name")
         end
         row = store.extract_rules.find { |r| r.name == name }
         return busy("failed to persist extract rule (store busy or unwritable)") unless row
-        enabled = bool_arg(h, "enabled", true)
         if bad = apply_created_extract_state(row.id, enabled)
           return bad
         end
@@ -381,6 +394,10 @@ module Gori
             j.field "enabled", enabled
           end
         end)
+      rescue ex : Gori::Error
+        # `create_rule`'s rescue, for the same reason: a bad argument is the CALLER's, so it
+        # gets INVALID_ARGUMENT here rather than the catch-all's INTERNAL.
+        err(ex.message || "invalid extract rule arguments", "INVALID_ARGUMENT")
       end
 
       # Atomic disabled creation, matching create_rule: flip before returning so there is no
@@ -408,11 +425,11 @@ module Gori
         end
         filter = keep(h, "when", existing.match_filter)
         host = keep(h, "host", existing.host)
+        en = enabled_change(h, existing.enabled?)
         if bad = extract_bindings.update(id, name, filter, kind, selector, pos_start, pos_end, host)
           return err(bad, "INVALID_ARGUMENT", field: "name")
         end
-        if present?(h, "enabled")
-          en = bool_arg(h, "enabled", existing.enabled?)
+        unless en.nil?
           return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
         end
         Result.new(JSON.build do |j|
@@ -423,6 +440,8 @@ module Gori
             j.field "kind", kind.label
           end
         end)
+      rescue ex : Gori::Error
+        err(ex.message || "invalid extract rule arguments", "INVALID_ARGUMENT")
       end
 
       private def set_extract_rule_enabled(h) : Result

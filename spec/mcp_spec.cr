@@ -868,6 +868,37 @@ describe Gori::MCP::Server do
       end
     end
 
+    # The same "persists nothing" contract, on the EXTRACT tools. It did not hold: the rule
+    # was written first and `enabled` was read after, so a rejected call left a live, ENABLED
+    # extract rule behind — already observing every matching response and binding its name for
+    # Match&Replace injection. `bool_arg` raises on a non-boolean, and clients that stringify
+    # booleans (`"enabled": "yes"`) are exactly what its own comment warns about.
+    it "rejects a non-boolean 'enabled' on extract create WITHOUT leaving the rule behind" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_extract_rule",) +
+               %("arguments":{"name":"SESSION","kind":"cookie","selector":"sid","enabled":"yes"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        # The caller's argument, so INVALID_ARGUMENT — not the catch-all's INTERNAL.
+        resp["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        store.extract_rules.should be_empty
+      end
+    end
+
+    it "rejects a non-boolean 'enabled' on extract update WITHOUT committing the other fields" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_extract_rule",) +
+                 %("arguments":{"name":"SESSION","kind":"cookie","selector":"sid"}}})
+        id = tool_payload(drive(store, create)[0])["id"].as_i64
+        call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_extract_rule",) +
+               %("arguments":{"id":#{id},"selector":"other","enabled":"nope"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        store.extract_rules.first.selector.should eq("sid") # unchanged
+      end
+    end
+
     it "rejects an unrecognized match kind instead of silently coercing to literal" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x","match":"regex-ignorecase"}}})

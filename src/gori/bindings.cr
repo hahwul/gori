@@ -160,8 +160,16 @@ module Gori
     # with `path:/login OR path:/refresh`, not two rules racing for a name.
     #
     # `except_id` excludes the row being edited from the duplicate-name test.
+    #
+    # The `position` range lives HERE and not in one surface's argument parsing, because this
+    # is the chokepoint all three go through — the CLI's own comment says it calls `Bindings`
+    # rather than `store.insert_extract_rule` precisely so it "gets the SAME refusals the TUI
+    # and MCP do". While the check sat in MCP's tool layer alone that sentence was false: a
+    # `kind=position` rule with no range saved happily from the TUI and the CLI and could
+    # never bind (`TokenExtract.position` returns nil for `hi <= lo`), so it logged a miss
+    # forever and nothing said why.
     def validate(name : String, kind : Gori::ExtractKind, selector : String,
-                 except_id : Int64? = nil) : String?
+                 except_id : Int64? = nil, pos_start : Int32 = 0, pos_end : Int32 = 0) : String?
       return "a binding needs a name" if name.empty?
       unless Env.valid_key?(name)
         return "#{name.inspect} is not a valid binding name (letters, digits and _ only, not starting with a digit)"
@@ -170,6 +178,9 @@ module Gori
         return "$#{name} is already written by another extract rule — one name, one writer"
       end
       return "a #{kind.label} descriptor needs a selector" if kind_needs_selector?(kind) && selector.empty?
+      if kind.position? && pos_end <= pos_start
+        return "a position descriptor needs a byte range with an end past its start (got #{pos_start}...#{pos_end})"
+      end
       if kind.regex?
         begin
           Regex.new(selector)
@@ -188,7 +199,7 @@ module Gori
     def add(name : String, match_filter : String, kind : Gori::ExtractKind,
             selector : String = "", pos_start : Int32 = 0, pos_end : Int32 = 0,
             host : String = "") : String?
-      if err = validate(name, kind, selector)
+      if err = validate(name, kind, selector, pos_start: pos_start, pos_end: pos_end)
         return err
       end
       @store.insert_extract_rule(name, match_filter, kind, selector, pos_start, pos_end, host)
@@ -199,7 +210,7 @@ module Gori
     def update(id : Int64, name : String, match_filter : String, kind : Gori::ExtractKind,
                selector : String = "", pos_start : Int32 = 0, pos_end : Int32 = 0,
                host : String = "") : String?
-      if err = validate(name, kind, selector, except_id: id)
+      if err = validate(name, kind, selector, except_id: id, pos_start: pos_start, pos_end: pos_end)
         return err
       end
       previous = @mutex.synchronize { @rules.find(&.id.==(id)) }
@@ -214,18 +225,29 @@ module Gori
       nil
     end
 
-    def remove(id : Int64) : Nil
+    # False when the write did NOT commit (store busy, locked or closing) — the rule is still
+    # there and still observing responses. `Rules#remove`'s contract, for the same reason:
+    # the store already answers this and dropping the answer is how a surface comes to
+    # report work it did not do. It means COMMITTED, not "a row existed" — the store's own
+    # contract — so deleting an id that is already gone is still true.
+    #
+    # The in-memory value is dropped only on a committed delete; `refresh` would restore it
+    # anyway on a rollback, but saying so here keeps the two halves from disagreeing.
+    def remove(id : Int64) : Bool
       gone = @mutex.synchronize { @rules.find(&.id.==(id)) }
-      @store.delete_extract_rule(id)
-      @mutex.synchronize { @values.delete(gone.name) } if gone
+      ok = @store.delete_extract_rule(id)
+      @mutex.synchronize { @values.delete(gone.name) } if ok && gone
       refresh
+      ok
     end
 
-    def toggle(id : Int64) : Nil
+    # False when the write did NOT commit, or when there is no such rule; see `remove`.
+    def toggle(id : Int64) : Bool
       rule = @mutex.synchronize { @rules.find(&.id.==(id)) }
-      return unless rule
-      @store.set_extract_rule_enabled(id, !rule.enabled?)
+      return false unless rule
+      ok = @store.set_extract_rule_enabled(id, !rule.enabled?)
       refresh
+      ok
     end
 
     # Re-read the store snapshot (an MCP / other-instance edit). Same work `refresh` does,

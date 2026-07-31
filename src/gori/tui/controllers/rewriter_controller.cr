@@ -81,6 +81,13 @@ module Gori::Tui
       rule_list[@sel]?
     end
 
+    # Whether the RULES sub-tab is the one on screen. One workflow, three sub-tabs, and only
+    # this one renders `rule_list` — so `selected_rule` alone is not "a rule the operator can
+    # see", which is what the Rewriter verbs' `available:` predicates have to mean.
+    def rules_sub? : Bool
+      @sub == :rules
+    end
+
     # --- render ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
@@ -420,15 +427,20 @@ module Gori::Tui
       label = rule.name.empty? ? rule.pattern : rule.name
       @host.confirm("Delete rule", "Delete “#{label}”? This can't be undone.",
         confirm_label: "Delete", danger: true) do
-        rules_engine.remove(rule.id)
+        # The store's answer, not an assumption: a rolled-back write left the rule rewriting
+        # live traffic while this toasted "rule deleted". Both headless surfaces already
+        # refuse to say that (`mcp/tools/rules.cr`, `cli/run/rewriter.cr`).
+        ok = rules_engine.remove(rule.id)
         @sel = @sel.clamp(0, {rule_list.size - 1, 0}.max)
-        @host.status("rule deleted")
+        @host.status(ok ? "rule deleted" : "rule NOT deleted (project busy) — it is still rewriting traffic")
       end
     end
 
     def rewriter_toggle : Nil
       rule = selected_rule || return @host.status("no rule selected")
-      rules_engine.toggle(rule.id)
+      unless rules_engine.toggle(rule.id)
+        return @host.status("enable/disable NOT applied (project busy) — the rule is unchanged")
+      end
       @host.status(rule.enabled? ? "rule disabled" : "rule enabled")
     end
 
@@ -485,7 +497,9 @@ module Gori::Tui
 
     def extract_toggle : Nil
       rule = selected_extract_rule || return @host.status("no extract rule selected")
-      bindings.toggle(rule.id)
+      unless bindings.toggle(rule.id)
+        return @host.status("enable/disable NOT applied (project busy) — the extract rule is unchanged")
+      end
       # Disabling the WRITER also un-declares the name, so a rewrite rule naming it goes
       # back to refusing rather than injecting a value nothing is refreshing any more.
       @host.status(rule.enabled? ? "$#{rule.name} extract rule disabled" : "$#{rule.name} extract rule enabled")
@@ -495,9 +509,9 @@ module Gori::Tui
       rule = selected_extract_rule || return @host.status("no extract rule selected")
       @host.confirm("Delete extract rule", "Delete “$#{rule.name}”? Its binding is forgotten too.",
         confirm_label: "Delete", danger: true) do
-        bindings.remove(rule.id)
+        ok = bindings.remove(rule.id)
         @sub_sel = @sub_sel.clamp(0, {extract_list.size - 1, 0}.max)
-        @host.status("extract rule deleted")
+        @host.status(ok ? "extract rule deleted" : "extract rule NOT deleted (project busy) — it is still observing responses")
       end
     end
 
@@ -513,6 +527,11 @@ module Gori::Tui
     # Commit the extract-rule editor overlay. Returns false — and says why — when the table
     # refuses the rule (a duplicate name, an uncompilable regex), so the form stays open.
     def apply_extract_rule(ov : ExtractRuleOverlay) : Bool
+      # `apply_rewriter_rule`'s guard, which this one was missing: the overlay's own
+      # `invalid_reason` catches the local shape (an empty name, a missing selector, a
+      # `position` range whose end is not past its start) and the Save row already renders it,
+      # but Enter committed anyway — so a rule the form said was incomplete was persisted.
+      return false unless ov.valid?
       err =
         if id = ov.edit_id
           bindings.update(id, ov.name, ov.match_filter, ov.kind, ov.selector,
