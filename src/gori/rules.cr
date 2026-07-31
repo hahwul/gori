@@ -658,8 +658,9 @@ module Gori
     end
 
     # Does `host` satisfy a rule's host glob? Empty = all hosts. A glob with `*` is an
-    # anchored wildcard (`*.example.com`); without `*` it is a case-insensitive substring
-    # (`example.com` matches `api.example.com`).
+    # anchored wildcard (`*.example.com`); without `*` it matches the host ITSELF or any
+    # SUBDOMAIN of it, case-insensitively (`example.com` matches `example.com` and
+    # `api.example.com`, but not `xexample.com` or `example.com.evil.net`).
     #
     # Exposed on the class because an extract rule (#501) carries the same host glob and
     # must mean the same thing by it — an operator who learned the dialect in the Rewriter's
@@ -681,7 +682,17 @@ module Gori
           false
         end
       else
-        h.includes?(g)
+        # DNS LABEL boundaries, not a raw substring. The dialect's intent is "this host and
+        # its subdomains" — the doc's own example is `example.com` matching `api.example.com`
+        # — but `includes?` also matched anything that merely CONTAINED the string, so a rule
+        # scoped to `alpha.test` fired on `xalpha.test`, `alpha.testing.com` and
+        # `alpha.test.evil.com`. This gate backs EVERY rule op (body, ws, short_circuit, head
+        # and header) and the extract rules that mint session bindings, so on a tool whose
+        # rules inject credentials (`SetHeader $SESSION`) or answer requests itself
+        # (`short_circuit`) that over-match sends the operator's secret to, or fakes a
+        # response for, a host they never scoped — one an attacker can simply register.
+        # `*` stays the explicit wildcard for anything wider.
+        h == g || h.ends_with?(g.starts_with?('.') ? g : ".#{g}")
       end
     end
 

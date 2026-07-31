@@ -180,10 +180,22 @@ module Gori::Proxy
       h.empty? || unspecified?(h)
     end
 
+    # An IPv6 literal reaches the dial path BRACKETED — that is how it appears in an
+    # absolute-form request target and what `URI#host` hands back — but a bracketed string is
+    # not an address, so `TCPSocket.new` treats it as a hostname and the resolve fails. gori
+    # therefore could not reach an IPv6-literal origin at all (`curl -x … 'http://[::1]:p/'`
+    # failed while the same origin answered 200 direct). This file already strips the brackets
+    # at the two OTHER places a host becomes an address — `socks5_write_address` and
+    # `normalize_host` — and `dial_via_proxy` adds them back for the CONNECT authority; the
+    # direct dial was the one site not wired to the same rule.
+    private def self.bare_host(h : String) : String
+      h.starts_with?('[') && h.ends_with?(']') ? h[1...-1] : h
+    end
+
     private def self.direct_dial(host : String, port : Int32,
                                  connect_timeout : Time::Span = Settings.connect_timeout,
                                  io_timeout : Time::Span = Settings.io_timeout) : TCPSocket?
-      sock = TCPSocket.new(host, port, connect_timeout: connect_timeout)
+      sock = TCPSocket.new(bare_host(host), port, connect_timeout: connect_timeout)
       begin
         sock.sync = true # flush writes immediately (P6)
         sock.tcp_nodelay = true
@@ -349,7 +361,7 @@ module Gori::Proxy
     # A host arriving bracketed ("[::1]") is an IPv6 literal — the brackets are URL syntax and
     # must not reach the wire, where the address is 16 raw bytes.
     private def self.socks5_write_address(sock : TCPSocket, host : String) : Bool
-      bare = host.starts_with?('[') && host.ends_with?(']') ? host[1...-1] : host
+      bare = bare_host(host)
       if ip = parse_ip(bare)
         v4 = ip.family == Socket::Family::INET
         sock.write(Bytes[v4 ? SOCKS_ATYP_IPV4 : SOCKS_ATYP_IPV6])

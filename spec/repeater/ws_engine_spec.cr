@@ -46,6 +46,28 @@ private UPGRADE = ("GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
                    "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
                    "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
 
+# An origin that completes the upgrade and then closes at once, without reading or sending a
+# single frame — the shape that made a repeater run report success for messages nobody got.
+private def start_dead_ws_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+    key = String.new(head).each_line
+      .find(&.downcase.starts_with?("sec-websocket-key:"))
+      .try(&.split(':', 2)[1].strip) || ""
+    accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
+    conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
+            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+    conn.flush
+    conn.close
+  rescue
+  end
+  port
+end
+
 describe Gori::Repeater::WsEngine do
   # `start_ws_origin` computes the fake origin's Accept with `WsEngine::GUID` itself, so every
   # "no handshake note" assertion below is self-referential: a corrupted GUID would keep the
@@ -142,5 +164,26 @@ describe Gori::Repeater::WsEngine do
     it "is false for an ordinary request" do
       WsEngine.upgrade_request?("GET / HTTP/1.1\r\nHost: t\r\n\r\n").should be_false
     end
+  end
+  # The "out" transcript rows are appended before the flush and with no delivery evidence, so
+  # an origin that closes right after the 101 produced `upgraded: true`, `error: null` and a
+  # list of messages it never received (confirmed at the origin: handshake only, no frame).
+  it "says delivery is unconfirmed when the peer sends no frame and no close" do
+    port = start_dead_ws_origin
+    result = WsEngine.send(UPGRADE, [WsEngine::OutMsg.new(1, "x".to_slice)],
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.upgraded?.should be_true
+    result.note.not_nil!.should contain("delivery unconfirmed")
+    result.note.not_nil!.should contain("sent 1 message")
+  end
+
+  it "stays quiet when the peer actually answers" do
+    port = start_ws_origin
+    result = WsEngine.send(UPGRADE, [WsEngine::OutMsg.new(1, "ping".to_slice)],
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.messages.count { |m| m.direction == "in" }.should eq(1)
+    (result.note || "").should_not contain("delivery unconfirmed")
   end
 end

@@ -97,8 +97,17 @@ module Gori::Repeater
                  resolve : Proc(String, Bytes),
                  backend : Fuzz::Backend,
                  & : Progress ->) : Report
+      # Every text helper below documents itself as operating on the LF editor form, and the
+      # TUI does feed LF (`TextArea#set_text` strips CR). The CLI and MCP feed the STORED
+      # bytes, which are CRLF — and `split_text`'s `index("\n\n")` finds nothing in a CRLF
+      # request, so `has_body` came back false and body-param candidates were never
+      # enumerated. The same session minimized further from the TUI than from `gori run
+      # repeater minimize` on identical bytes. Normalise once here so the file's stated
+      # assumption is actually true, and put the operator's line endings back on the way out.
+      crlf = base_text.includes?("\r\n")
+      base_text = base_text.gsub("\r\n", "\n") if crlf
       candidates = candidates_for(base_text, auto_cl: auto_cl)
-      return Report.new(base_text, [] of Removed, 0, false, "already minimal — nothing removable") if candidates.empty?
+      return Report.new(restore_eol(base_text, crlf), [] of Removed, 0, false, "already minimal — nothing removable") if candidates.empty?
 
       sends = 0
       # --- calibrate a FROZEN baseline from the original request ---
@@ -112,10 +121,10 @@ module Gori::Repeater
           sigs << behavior_signature(r.head)
         end
       end
-      return Report.new(base_text, [] of Removed, sends, true, "baseline unreachable — request left unchanged") if metrics.empty?
+      return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true, "baseline unreachable — request left unchanged") if metrics.empty?
       statuses = metrics.compact_map(&.status).uniq!
       unless statuses.size <= 1
-        return Report.new(base_text, [] of Removed, sends, true,
+        return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true,
           "baseline response unstable (status #{statuses.join("/")}) — request left unchanged")
       end
       baseline = calibrate(metrics, sigs)
@@ -131,14 +140,20 @@ module Gori::Repeater
         next if variant.nil? || variant == working # already gone under an earlier removal
         r = backend.send(resolve.call(variant))
         sends += 1
-        return Report.new(working, removed, sends, false, cap_note(removed)) if r.error == Fuzz::CappedBackend::CAP_ERROR
+        return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed)) if r.error == Fuzz::CappedBackend::CAP_ERROR
         if unchanged?(r, baseline)
           working = variant
           removed << Removed.new(cand.kind, cand.label)
         end
       end
       yield Progress.new(total, total)
-      Report.new(working, removed, sends, false, summary_note(removed, sends))
+      Report.new(restore_eol(working, crlf), removed, sends, false, summary_note(removed, sends))
+    end
+
+    # Put CRLF back on a report built from LF-normalised text. After the normalisation above
+    # there is no lone CR left, so this is exact.
+    private def self.restore_eol(text : String, crlf : Bool) : String
+      crlf ? text.gsub("\n", "\r\n") : text
     end
 
     # ── candidate enumeration ──────────────────────────────────────────────────────────

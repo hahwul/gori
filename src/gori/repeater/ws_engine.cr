@@ -115,8 +115,18 @@ module Gori
 
           # The FIRST inbound read keeps the generous handshake bound (a slow first
           # reply isn't a dead server); drain narrows to `idle` once frames flow.
+          sent_count = messages.size
           close_code = drain(upstream, messages, idle)
           send_close(upstream)
+          # The "out" rows above are appended before the flush and with no delivery evidence —
+          # WebSocket has no ack, so a transcript row means "gori wrote this", never "the peer
+          # got it". When the origin closes right after the 101 the drain breaks at EOF and
+          # `send_close` is rescued, so the run reported `upgraded: true`, `error: null` and
+          # listed messages the origin never received (verified at the origin: handshake only,
+          # no frame). Say so instead. A NOTE and not an error: a one-way protocol that never
+          # answers is legitimate, and in both cases the honest statement is the same —
+          # delivery is unconfirmed.
+          note = with_delivery_note(note, sent_count, messages.size, close_code)
           Result.new(head, messages, elapsed(started), note: note,
             close_code: close_code, upgraded: true)
         rescue ex
@@ -126,6 +136,15 @@ module Gori
         ensure
           upstream.close rescue nil
         end
+      end
+
+      # Append the unconfirmed-delivery advisory to whatever `note` already says. Kept out of
+      # `send` so that method's branch count stays where it was.
+      private def self.with_delivery_note(note : String?, sent : Int32, total : Int32,
+                                          close_code : Int32?) : String?
+        return note unless sent > 0 && total == sent && close_code.nil?
+        unreplied = "sent #{sent} message(s) but the peer sent no frame and no close — delivery unconfirmed"
+        note ? "#{note}; #{unreplied}" : unreplied
       end
 
       # Read inbound frames until the server sends Close, goes idle (read timeout),

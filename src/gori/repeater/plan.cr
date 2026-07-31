@@ -202,6 +202,16 @@ module Gori::Repeater
       # `resync_content_length` never ADDS a header, but a captured upgrade that happened to
       # carry a Content-Length would be rewritten, so skip the pass rather than rely on that.
       wires = wires.map { |b| FlowRequest.resync_content_length(b) } if options.auto_content_length? && !websocket
+      # `HTTP/2` on the version line of a request going down an h1 socket is never anything
+      # but a mistake (a Burp-pasted h2 view, or a captured h2 flow replayed as h1), and
+      # `FlowRequest.downgrade_version_line` exists to correct it. Its comment says it "runs
+      # unasked on every send", but the TUI was its only caller — so the SAME session sent
+      # different bytes from the TUI than from `gori run repeater send` / MCP
+      # `send_request{repeater_id}`. Doing it here puts it on the one path all three surfaces
+      # share. It is deliberately narrow (only the h2/h3 spellings; `HTTP/1.0` and a probe's
+      # `HTTP/9.9` are left alone), and it cannot touch an h2 send, which never builds a
+      # version line from this text.
+      wires = wires.map { |b| FlowRequest.downgrade_request_line(b) } unless options.http2?
 
       unless scheme.in?("http", "https")
         raise PlanError.new(PlanError::Reason::UnsupportedScheme,

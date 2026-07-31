@@ -362,4 +362,29 @@ describe Gori::Repeater::Plan do
       rewritten.sender.should be(plan.sender) # the SAME gated dialer, not a second one
     end
   end
+  # `downgrade_version_line` documents itself as running "unasked on every send", but the TUI
+  # was its only caller — so the SAME session sent `HTTP/2` down an h1 socket from
+  # `gori run repeater send` and MCP while the TUI corrected it. Recorded at a raw-socket
+  # origin before the fix. Doing it in `Plan.build` puts it on the path all three surfaces share.
+  describe "an HTTP/2 version line on an h1 send" do
+    it "is downgraded whichever surface built the plan" do
+      plan = R::Plan.build(R::PlanOptions.new(["GET /v HTTP/2\r\nHost: h.test\r\n\r\n".to_slice],
+        default_target: "http://h.test"), ungated)
+      String.new(plan.bytes).lines.first.should eq("GET /v HTTP/1.1")
+    end
+
+    it "leaves a version the operator meant alone" do
+      {"HTTP/1.0", "HTTP/9.9"}.each do |v|
+        plan = R::Plan.build(R::PlanOptions.new(["GET /v #{v}\r\nHost: h.test\r\n\r\n".to_slice],
+          default_target: "http://h.test"), ungated)
+        String.new(plan.bytes).lines.first.should eq("GET /v #{v}")
+      end
+    end
+
+    it "does not touch an h2 send, which builds its fields from this text" do
+      plan = R::Plan.build(R::PlanOptions.new(["GET /v HTTP/2\r\nHost: h.test\r\n\r\n".to_slice],
+        default_target: "http://h.test", http2: true), ungated)
+      String.new(plan.bytes).lines.first.should eq("GET /v HTTP/2")
+    end
+  end
 end

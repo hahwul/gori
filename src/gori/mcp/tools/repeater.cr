@@ -34,25 +34,27 @@ module Gori
           flow = store.get_flow(flow_id)
           return not_found("no flow with id #{flow_id}") unless flow
 
-          if target.nil? || target.empty?
-            scheme = flow.row.scheme
-            host = flow.row.host
-            port = flow.row.port
-            default_port = (scheme == "https" ? 443 : 80)
-            target = port == default_port ? "#{scheme}://#{host}" : "#{scheme}://#{host}:#{port}"
-          end
+          # Seed through `FlowRequest.build`, exactly as `gori run repeater create --flow` and
+          # `send_request{flow_id}` do. Hand-assembling head+body here skipped all three things
+          # that function exists for:
+          #   * `resync_truncated_head` — a capture cut at CAPTURE_MAX keeps its original
+          #     `Transfer-Encoding: chunked` over a body with no terminating 0-chunk (or a
+          #     Content-Length promising bytes that no longer exist), so the send blocked for
+          #     the full 30 s io_timeout and put a partial chunked stream on the wire. That
+          #     function's stated reason for existing is "so the repeater terminates instead
+          #     of hanging"; this was the one caller that did not get it.
+          #   * `origin_form_bytes` — every plain-HTTP flow gori captures has an ABSOLUTE-form
+          #     request line (that is how a proxy client writes it), which was then sent
+          #     verbatim to an origin that expects origin-form.
+          #   * `build_target` — this was a third hand-rolled copy of the authority formula,
+          #     without the ws/wss default-port fold or IPv6 re-bracketing the shared one has.
+          built = Repeater::FlowRequest.build(flow)
 
-          if request.nil? || request.empty?
-            req_str = String.new(flow.request_head)
-            if body = flow.request_body
-              req_str += String.new(body)
-            end
-            request = req_str
-          end
-
-          if http2_val.nil?
-            http2 = (flow.http_version == "HTTP/2")
-          end
+          target = built.target if target.nil? || target.empty?
+          request = String.new(built.bytes) if request.nil? || request.empty?
+          http2 = built.http2 if http2_val.nil?
+          # `built.sni` is deliberately NOT seeded here: `gori run repeater create --flow`
+          # takes SNI from the operator's flag alone, and this tool is its MCP twin.
 
           if flow.row.status == 101 && !present?(h, "ws_out_messages")
             ws_messages_override = store.ws_messages(flow_id).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }

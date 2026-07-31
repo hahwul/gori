@@ -95,6 +95,37 @@ private def minimize(backend : F::Backend, text : String, auto_cl : Bool = false
 end
 
 describe Gori::Repeater::Minimize do
+  # The TUI feeds LF editor text (`TextArea#set_text` strips CR); the CLI and MCP feed the
+  # STORED bytes, which are CRLF. `split_text` only looked for `"\n\n"`, which a CRLF request
+  # does not contain, so `has_body` came back false and body-param candidates were never
+  # enumerated at all — the SAME session minimized further from the TUI than from
+  # `gori run repeater minimize`. Every session created from a flow is CRLF.
+  it "minimizes a CRLF-stored request exactly as it does the LF editor form" do
+    lines = [
+      "POST /api?a=1&b=2 HTTP/1.1",
+      "Host: h",
+      "User-Agent: Mozilla/5.0",
+      "Content-Type: application/x-www-form-urlencoded",
+      "Content-Length: 11",
+      "",
+      "x=1&y=2&z=3",
+    ]
+    lf = minimize(StaticOrigin.new, lines.join("\n"), auto_cl: true)
+    crlf = minimize(StaticOrigin.new, lines.join("\r\n"), auto_cl: true)
+
+    # Body params are reached at all, and both forms remove exactly the same set.
+    crlf.removed.map(&.kind).should contain(Gori::Repeater::Minimize::Kind::Param)
+    crlf.removed.map { |r| {r.kind, r.label} }.sort_by!(&.[1])
+      .should eq(lf.removed.map { |r| {r.kind, r.label} }.sort_by!(&.[1]))
+    crlf.sends.should eq(lf.sends)
+  end
+
+  it "returns the report in the line endings the caller handed in" do
+    lines = ["GET /api?a=1 HTTP/1.1", "Host: h", "User-Agent: Mozilla/5.0"]
+    minimize(StaticOrigin.new, lines.join("\r\n")).minimized_text.should contain("\r\n")
+    minimize(StaticOrigin.new, lines.join("\n")).minimized_text.should_not contain('\r')
+  end
+
   it "drops cosmetic headers, cookie crumbs and query params but keeps load-bearing ones" do
     text = [
       "GET /api?id=5&utm_source=nl HTTP/1.1",

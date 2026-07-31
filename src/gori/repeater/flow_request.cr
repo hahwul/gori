@@ -196,6 +196,17 @@ module Gori
         "#{line[0, sp]} HTTP/1.1"
       end
 
+      # `downgrade_version_line` over a whole WIRE request, so `Plan.build` can apply it on the
+      # one path every surface shares instead of only the TUI doing it. Operates on the first
+      # CRLF-terminated line and returns the input UNCHANGED (same object) when there is
+      # nothing to correct, so a request whose version the operator meant is byte-untouched.
+      def self.downgrade_request_line(wire : Bytes) : Bytes
+        text = String.new(wire)
+        eol = text.index("\r\n") || return wire
+        fixed = downgrade_version_line(text[0, eol]) || return wire
+        "#{fixed}#{text[eol..]}".to_slice
+      end
+
       # Normalize bare LFs in a MULTIPART body to CRLF. Multipart parts are delimited by
       # CRLF + boundary (RFC 2046 §5.1.1), so a body carrying bare LFs is unparseable and
       # the origin answers 400 — usually with no hint as to why, because auto-Content-Length

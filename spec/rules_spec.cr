@@ -14,6 +14,46 @@ private def with_store(&)
 end
 
 describe Gori::Rules do
+  # This gate backs EVERY rule op — body, ws, short_circuit, head, header — and the extract
+  # rules that mint session bindings, so an over-match is how a `SetHeader $SESSION` rule
+  # sends the operator's credential to a host they never scoped, or a `short_circuit` rule
+  # answers for one. It had no spec at all, which is how a raw `includes?` survived here.
+  describe ".host_matches?" do
+    it "matches the host itself and any subdomain of it" do
+      Gori::Rules.host_matches?("example.com", "example.com").should be_true
+      Gori::Rules.host_matches?("example.com", "api.example.com").should be_true
+      Gori::Rules.host_matches?("example.com", "a.b.example.com").should be_true
+      Gori::Rules.host_matches?("EXAMPLE.com", "API.Example.COM").should be_true # case-insensitive
+    end
+
+    it "does not match a host that merely CONTAINS the glob" do
+      # `"xalpha.test".includes?("alpha.test")` is true — an attacker can register the
+      # look-alike and collect whatever the rule injects.
+      Gori::Rules.host_matches?("alpha.test", "xalpha.test").should be_false
+      Gori::Rules.host_matches?("alpha.test", "alpha.testing.com").should be_false
+      Gori::Rules.host_matches?("example.com", "notexample.com").should be_false
+    end
+
+    it "does not match a host that merely has the glob as a PREFIX label" do
+      Gori::Rules.host_matches?("alpha.test", "alpha.test.evil.com").should be_false
+      Gori::Rules.host_matches?("example.com", "example.com.attacker.net").should be_false
+    end
+
+    it "keeps an empty glob meaning all hosts, and * as the explicit wildcard" do
+      Gori::Rules.host_matches?("", "anything.test").should be_true
+      Gori::Rules.host_matches?("*.example.com", "api.example.com").should be_true
+      Gori::Rules.host_matches?("*.example.com", "example.com").should be_false # anchored, as before
+      Gori::Rules.host_matches?("*example.com", "notexample.com").should be_true
+    end
+
+    it "handles a leading-dot glob and a bracketed IPv6 literal (the store's host spelling)" do
+      Gori::Rules.host_matches?(".example.com", "api.example.com").should be_true
+      Gori::Rules.host_matches?(".example.com", "example.com").should be_false
+      Gori::Rules.host_matches?("[::1]", "[::1]").should be_true
+      Gori::Rules.host_matches?("[::1]", "[::12]").should be_false
+    end
+  end
+
   it "is inactive (and byte-identical) until an enabled rule exists" do
     with_store do |store|
       rules = Gori::Rules.load(store)

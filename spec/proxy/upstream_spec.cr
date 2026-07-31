@@ -4,6 +4,37 @@ require "openssl"
 require "file_utils"
 
 describe Gori::Proxy::Upstream do
+  # An IPv6 literal reaches this path BRACKETED — that is how it appears in an absolute-form
+  # request target and what `URI#host` returns — and a bracketed string is not an address, so
+  # `TCPSocket.new` treated it as a hostname and the resolve failed. gori could not reach an
+  # IPv6-literal origin at all through the forward proxy, while the same origin answered
+  # direct. The brackets were already stripped at the two other places a host becomes an
+  # address in this file; the direct dial was the site that was not.
+  describe "IPv6 literal targets" do
+    it "dials a bracketed IPv6 literal, as an absolute-form request target carries it" do
+      server = TCPServer.new("::1", 0)
+      port = server.local_address.port
+      spawn { server.accept?.try(&.close) }
+
+      sock = Gori::Proxy::Upstream.dial("[::1]", port)
+      sock.should_not be_nil
+      sock.try(&.close)
+      server.close
+    end
+
+    it "still dials the same host unbracketed, and an IPv4 literal and a hostname" do
+      v6 = TCPServer.new("::1", 0)
+      v4 = TCPServer.new("127.0.0.1", 0)
+      spawn { v6.accept?.try(&.close) }
+      spawn { v4.accept?.try(&.close) }
+
+      Gori::Proxy::Upstream.dial("::1", v6.local_address.port).should_not be_nil
+      Gori::Proxy::Upstream.dial("127.0.0.1", v4.local_address.port).should_not be_nil
+      v6.close
+      v4.close
+    end
+  end
+
   describe "upstream proxy (CONNECT tunnel)" do
     it "tunnels a dial through the configured proxy when it answers 2xx" do
       proxy = TCPServer.new("127.0.0.1", 0)
