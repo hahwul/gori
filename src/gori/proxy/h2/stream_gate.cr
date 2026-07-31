@@ -809,8 +809,15 @@ module Gori::Proxy::H2
         return if @closed
         payload = Bytes.new(4)
         IO::ByteFormat::BigEndian.encode(increment.to_u32 & 0x7fff_ffff_u32, payload)
-        @dst.write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, payload).wire_bytes)
-        @dst.flush
+        # Through `write`, exactly as `write_cross_rst` does — so this frame lands in the raw
+        # frame log like every other byte gori puts on the wire. Writing straight to `@dst`
+        # left the operator reading that log during a stalled upload (which is when you read
+        # it) seeing WINDOW_UPDATEs arrive from nowhere, with gori's own record disagreeing
+        # with the wire. The `@refused` branch's "P7 logs what gori actually wrote" cuts both
+        # ways: it justifies not logging a frame gori swallowed, and requires logging one gori
+        # synthesized. Safe on this frame: `feed` returns immediately for stream 0 and
+        # `@extract.observe` needs a `pre`, which a WINDOW_UPDATE never has.
+        write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, payload), nil)
       end
     rescue
       # The leg is gone; there is nobody left to credit.

@@ -20,6 +20,15 @@ private class RecSink < Gori::Proxy::FlowSink
 
   def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes) : Nil
   end
+
+  # The raw h2 frame log — what an operator reads to diagnose a stalled connection. Every byte
+  # gori puts on the wire must appear here, synthesized frames included.
+  getter frames = [] of {String, UInt8, UInt32}
+
+  def on_h2_frame(conn_id : Int64, direction : String, type : UInt8, flags : UInt8,
+                  stream_id : UInt32, payload : Bytes) : Nil
+    @frames << {direction, type, stream_id}
+  end
 end
 
 # A live client+origin pair of gates over in-memory legs, plus a real Interceptor.
@@ -512,6 +521,49 @@ describe Gori::Proxy::H2::StreamGate do
       wu = rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }
       wu.map(&.stream_id).uniq.should eq([0_u32])
       wu.sum { |f| IO::ByteFormat::BigEndian.decode(UInt32, f.payload) }.should eq(700_u32)
+    end
+  end
+
+  # The RESPONSE direction's refund goes to the ORIGIN, not the client — the origin is the
+  # sender of origin->client DATA. Without this example a revert shaped as
+  # `refund_swallowed if @ordered` would strand the origin's credit and the whole suite would
+  # still pass, because every other WindowUpdate assertion in this file reads `to_client`.
+  it "refunds a dropped RESPONSE's parked DATA to the origin, not the client" do
+    with_ic do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x")), Frame::END_HEADERS))
+      settle
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      settle
+      rig.s2c.accept(data(1_u32, "B" * 400))
+      settle
+
+      ic.pending.each { |it| ic.drop(it.id) }
+      settle
+
+      to_origin = rig.to_origin.select { |f| f.frame_type == Frame::Type::WindowUpdate }
+      to_origin.sum { |f| IO::ByteFormat::BigEndian.decode(UInt32, f.payload) }.should eq(400_u32)
+      rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }.should be_empty
+    end
+  end
+
+  # A synthesized frame is still a frame gori WROTE, so it belongs in the raw log — the same
+  # rule the `@refused` branch cites when it declines to log a frame gori swallowed. Its
+  # sibling `write_cross_rst` goes through `write` and is logged; this one used to bypass it,
+  # so the log disagreed with the wire exactly when an operator would be reading it.
+  it "records the refund in the raw frame log, like every other frame it writes" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/admin")), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "A" * 256))
+
+      on_wire = rig.to_client.count { |f| f.frame_type == Frame::Type::WindowUpdate }
+      logged = rig.sink.frames.count { |(_, t, sid)| t == Frame::Type::WindowUpdate.value && sid == 0_u32 }
+      on_wire.should eq(1)
+      logged.should eq(on_wire)
     end
   end
 
