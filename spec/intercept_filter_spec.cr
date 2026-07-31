@@ -8,6 +8,12 @@ private def res(status : Int32, method = "GET", host = "acme.test", target = "/l
   Gori::InterceptFilter::Subject.new(method: method, host: host, target: target, scheme: scheme, status: status)
 end
 
+# A held WebSocket message: the handshake's identity plus the payload in hand at the gate.
+private def ws(payload = %({"op":"subscribe","ch":"trades"}), host = "acme.test", target = "/ws")
+  Gori::InterceptFilter::Subject.new(method: "GET", host: host, target: target, scheme: "http",
+    proto: Gori::Proto::Kind::Ws, payload: payload.to_slice)
+end
+
 describe Gori::InterceptFilter do
   it "an empty filter matches everything" do
     f = Gori::InterceptFilter::EMPTY
@@ -93,13 +99,17 @@ describe Gori::InterceptFilter do
       Gori::InterceptFilter.suggestions("status:4", 8).should contain("status:4xx")
     end
 
-    it "only offers fields this parser understands (no History-only body:/dur:)" do
-      Gori::InterceptFilter::FIELDS.should eq(%w(host path method scheme status))
-      Gori::InterceptFilter.suggestions("b", 1).should be_empty
+    it "only offers fields this parser understands (no History-only header:/dur:)" do
+      # `body:` joined the list with #500 step 2 — a held WebSocket message carries its
+      # payload to the gate, so the "no row to query" reason no longer applies to it.
+      # `header:`/`size:`/`dur:` still have nothing to match against.
+      Gori::InterceptFilter::FIELDS.should eq(%w(host path method scheme status proto body))
+      Gori::InterceptFilter.suggestions("he", 2).should be_empty
       Gori::InterceptFilter.suggestions("d", 1).should be_empty
-      # `path:` completes the field but has no value pool — paths are unbounded.
+      # `path:`/`body:` complete the field but have no value pool — both are unbounded.
       Gori::InterceptFilter.suggestions("pa", 2).should eq(["path:"])
       Gori::InterceptFilter.suggestions("path:/ap", 8).should be_empty
+      Gori::InterceptFilter.suggestions("body:tra", 8).should be_empty
     end
 
     it "takes host values from the injected pool and preserves a leading -" do
@@ -135,6 +145,72 @@ describe Gori::InterceptFilter do
       Gori::InterceptFilter.suggestions("", 0).should be_empty
       Gori::InterceptFilter.suggestions("host:acme ", 10).should be_empty
       Gori::InterceptFilter.suggestions("login", 5).should be_empty
+    end
+  end
+
+  describe "the WebSocket terms (#500 step 2)" do
+    it "matches proto: against the subject's protocol, canonicalising the alias" do
+      Gori::InterceptFilter.new("proto:ws").matches?(ws).should be_true
+      Gori::InterceptFilter.new("proto:WebSocket").matches?(ws).should be_true
+      Gori::InterceptFilter.new("proto:ws").matches?(req).should be_false
+      # An HTTP hold gate has no status to classify with, so `proto:` resolves to Http
+      # there — which is why `proto:ws` never matches the 101 handshake REQUEST itself.
+      Gori::InterceptFilter.new("proto:http").matches?(req).should be_true
+    end
+
+    it "matches body: over the raw payload, ASCII-case-insensitively" do
+      Gori::InterceptFilter.new("body:SUBSCRIBE").matches?(ws(payload: %({"op":"subscribe"}))).should be_true
+      Gori::InterceptFilter.new("body:unsubscribe").matches?(ws(payload: %({"op":"subscribe"}))).should be_false
+    end
+
+    it "searches body: WITHOUT decoding, so a non-UTF-8 payload still matches" do
+      # The point of the byte scan: `String.new(payload)` would turn 0xFF into U+FFFD and
+      # both allocate a copy per message and mangle what it is searching.
+      payload = Bytes[0xFF, 0x00, 'h'.ord.to_u8, 'i'.ord.to_u8, 0xFE]
+      s = Gori::InterceptFilter::Subject.new(method: "GET", host: "acme.test", target: "/ws",
+        scheme: "http", proto: Gori::Proto::Kind::Ws, payload: payload)
+      Gori::InterceptFilter.new("body:hi").matches?(s).should be_true
+      Gori::InterceptFilter.new("body:no").matches?(s).should be_false
+    end
+
+    it "never matches body: at an HTTP gate, where the raw bytes do not exist yet" do
+      Gori::InterceptFilter.new("body:anything").matches?(req).should be_false
+      Gori::InterceptFilter.new("body:anything").matches?(res(200)).should be_false
+    end
+  end
+
+  describe "#mentions_ws? — the hold's opt-in, not a narrowing term" do
+    it "is false for a blank filter, which is the exact inverse of the HTTP default" do
+      # A blank filter matches EVERYTHING (`blank?` is true), and still arms nothing on WS.
+      Gori::InterceptFilter::EMPTY.blank?.should be_true
+      Gori::InterceptFilter::EMPTY.mentions_ws?.should be_false
+    end
+
+    it "is false for an ordinary HTTP condition, however permissive" do
+      Gori::InterceptFilter.new("host:acme").mentions_ws?.should be_false
+      Gori::InterceptFilter.new("host:acme OR method:POST").mentions_ws?.should be_false
+      Gori::InterceptFilter.new("proto:grpc").mentions_ws?.should be_false
+    end
+
+    it "is true for an explicit proto:ws, through AND, OR and the alias" do
+      Gori::InterceptFilter.new("proto:ws").mentions_ws?.should be_true
+      Gori::InterceptFilter.new("host:acme proto:ws").mentions_ws?.should be_true
+      Gori::InterceptFilter.new("proto:ws OR host:acme").mentions_ws?.should be_true
+      Gori::InterceptFilter.new("proto:websocket").mentions_ws?.should be_true
+    end
+
+    it "is false when the term is negated — `-proto:ws` asks to leave WS alone" do
+      Gori::InterceptFilter.new("-proto:ws").mentions_ws?.should be_false
+      Gori::InterceptFilter.new("NOT proto:ws").mentions_ws?.should be_false
+      Gori::InterceptFilter.new("host:acme AND NOT (proto:ws)").mentions_ws?.should be_false
+    end
+  end
+
+  describe "completion" do
+    it "offers the two new fields and the proto: value pool" do
+      Gori::InterceptFilter.suggestions("pro", 3).should eq(["proto:"])
+      Gori::InterceptFilter.suggestions("bo", 2).should eq(["body:"])
+      Gori::InterceptFilter.suggestions("proto:w", 7).should eq(["proto:ws"])
     end
   end
 end

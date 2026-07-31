@@ -39,7 +39,34 @@ Reading a held message needs no marks and no editor: `Shift-←` / `Shift-→` s
 
 ### What gets held
 
-Requests are held on HTTP/1.1 and HTTP/2, gRPC included. So are responses, except the ones that have no last byte to wait for: a WebSocket upgrade (`101`), a Server-Sent Events stream, and a close-delimited response are forwarded as they arrive rather than held. WebSocket messages after the upgrade are relayed and captured, never held, so a socket cannot be paused or dropped once it is open and no message reaches the editor. The request that opened it can be, like any other request. A [Match & Replace rule](#match-replace-websocket) can still rewrite messages on an open socket — that is a rule applied in flight, not a hold.
+Requests are held on HTTP/1.1 and HTTP/2, gRPC included. So are responses, except the ones that have no last byte to wait for: a WebSocket upgrade (`101`), a Server-Sent Events stream, and a close-delimited response are forwarded as they arrive rather than held. **WebSocket messages are held too, but only if you ask for them** — see [Intercept on WebSocket](#intercept-websocket) below. The request that opened the socket is held like any other request.
+
+### Intercept on WebSocket {#intercept-websocket}
+
+**A WebSocket message is held only when the catch condition contains `proto:ws`.** Nothing else arms it — not a blank condition, not `host:acme.test`, not any direction setting. That is the exact opposite of the rule for HTTP, where a blank condition holds everything, and it is deliberate: a browser tolerates one stalled request, but a trading or chat socket carrying tens of messages a second, frozen whole because you typed a host filter, is not a state you can drain your way out of.
+
+So the condition to type is `proto:ws`, optionally narrowed:
+
+```
+proto:ws body:subscribe          hold only messages containing "subscribe"
+proto:ws host:acme.test          hold only this socket's messages
+```
+
+`body:` is a substring of the message payload and matches WebSocket messages only — at an HTTP hold gate the bytes do not exist yet. The `c:REQ` / `c:RES` chip works as usual: `REQ` is client → server, `RES` is server → client.
+
+A held message goes in the same queue as a held request, with a `WS↑` or `WS↓` badge, the socket that carries it, and the start of the payload. Forward, drop, edit and the marks all work the same way. What is different:
+
+- **Catch has to be on before the socket opens.** gori decides once, at the `101`, whether a socket needs the holding path. Turning catch on — or adding `proto:ws` — reaches the *next* handshake, not the connection already running. Reconnect the client. Narrowing the condition afterwards does take effect immediately.
+- **A held message blocks its whole direction** until you decide it. Later messages from that peer queue behind it, and they are released in arrival order however you decide them — decide message 5 before 3 and it still goes out third. The **opposite direction keeps running**, and so do `PING`/`PONG` in both, so the socket does not die while you read. There is no way to let one message past another; a WebSocket has no message identifiers to reorder.
+- **A dropped message is invisible to both endpoints.** Nothing is written, and a WebSocket stream has no message identity for the peer to notice a hole in — no error, no gap, no retry. That is weaker than dropping an HTTP/1.1 request (which answers a `502`) or an HTTP/2 one (which cancels the stream), and gori keeps no message-log row for it either. If you need the attempt on record, note it yourself.
+- **A binary message (opcode 2) is read-only.** You can hold, forward and drop it; you cannot edit it. The editor round-trips through text, which is lossy on protobuf, msgpack or CBOR — and on a WebSocket that is the common case, not the exception. The pane says `READ-ONLY` and the queue row shows the size instead of a preview.
+- **Editing a text message changes its line endings.** The editor normalises `CRLF` to `LF`, shared with the Repeater and the HTTP intercept editor. `$NAME` bindings are *not* expanded in a WebSocket payload — a `$` there is a byte, not a reference — so what you type is what is sent.
+- **An edited message is re-framed as one frame** and a client → server message is re-masked with a fresh key, exactly as a [Match & Replace rule](#match-replace-websocket) does. A message you forward unchanged keeps the sender's own frame and mask key.
+- **A hold has about 5 seconds left once the peer closes the other direction.** gori waits that long for the closing handshake to finish and then tears the socket down; anything still held is forwarded unedited. The same happens if a `CLOSE` arrives in the direction you are holding — everything undecided goes out in order, then the `CLOSE`, because the protocol forbids data frames after one.
+- **Only data messages are held.** `PING`, `PONG` and `CLOSE` always pass: holding a ping breaks keepalive by construction, and holding a close strands the tunnel.
+- **A very deep queue is released for you.** Past about 1 MiB queued behind a held message, or on a frame too large to buffer, the hold fails open — everything queued forwards unedited, with one line in `gori.log`. A WebSocket has no application-level flow control, so nothing slows the sender down while you read. A queue that deep usually means the condition is too wide.
+
+Match & Replace runs **before** the hold, so what you see in the editor is what your rules produced, and what you forward is what goes out.
 
 ### Intercept on HTTP/2
 
@@ -95,7 +122,7 @@ gori understands the protocols it carries:
 |----------|---------|
 | **HTTP/1.1** | Full capture and repeater |
 | **HTTP/2** | Relay after ALPN with per-stream intercept and head rules, raw frame log, HPACK decode, stream → flow assembly |
-| **WebSocket** | Live message capture, repeater, and Match & Replace on messages. Compression is removed from the handshake (see below) |
+| **WebSocket** | Live message capture, repeater, per-message intercept (opt in with `proto:ws`), and Match & Replace on messages. Compression is removed from the handshake (see below) |
 | **gRPC** | Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no `.proto` schema) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
 
@@ -194,7 +221,7 @@ Six things are worth knowing before you rely on it:
 - **The message log records what gori sent**, not what arrived — the same rule the rest of the proxy follows, so History shows the bytes the peer actually saw.
 - **A message larger than 16 MiB is forwarded untouched**, as is any single frame past the same cap. The rewrite needs the whole message in memory and a long-lived socket should not be able to grow the proxy heap without bound.
 
-WebSocket messages still cannot be **held** — see [What gets held](#what-gets-held). A rule rewrites in flight and nothing pauses.
+A rule rewrites in flight and nothing pauses. To stop a message and decide about it by hand, hold it instead — see [Intercept on WebSocket](#intercept-websocket). The two compose: rules run first, and the editor shows you their output.
 
 ### Short circuit — answer without an origin
 

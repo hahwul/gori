@@ -12,9 +12,24 @@ module Gori
   # the TUI calls `pending`/`forward`/`drop`/`toggle`. Gating reuses the Scope lens via
   # `intercepts_host?`. Held items are ephemeral (never persisted).
   class Interceptor
+    # What a queue row IS. The two WebSocket members (#500 step 2) carry their direction in
+    # the member rather than reusing `Request`/`Response`, because a WS message is neither:
+    # it has no start line, no headers and no status, and every render site that treats
+    # "not a request" as "a response" would otherwise paint it as one.
+    #
+    # Adding a member here is NOT free — the seven `kind.request?` ternaries this enum used
+    # to be branched on all compiled clean and rendered a new member as `RES`. They are
+    # exhaustive `case ... in` now (the shape #533 gave `RulePart#badge`), so a member added
+    # later fails the build at each site that has to decide what it looks like.
     enum Kind
       Request
       Response
+      WsOut # a WebSocket message travelling client → server
+      WsIn  # a WebSocket message travelling server → client
+
+      def ws? : Bool
+        ws_out? || ws_in?
+      end
     end
 
     enum Action
@@ -58,8 +73,14 @@ module Gori
       # the MCP process can render a correct age that does NOT reset on every republish.
       getter held_at_ms : Int64
       getter reply : Channel(Decision)
+      # A WebSocket BINARY message (opcode 2). Holdable, forwardable and droppable, but
+      # read-only in the editor: the TextArea round trip is `String.new(raw)` → char ops →
+      # `.to_slice`, which is lossy on non-UTF-8 — a pre-existing sharp edge on an HTTP body
+      # that WS makes the DEFAULT case, since opcode 2 is protobuf/msgpack/CBOR.
+      getter? binary : Bool
 
-      def initialize(@id, @kind, @method, @host, @target, @port, @scheme, @raw, @held_at, @flow_id = nil)
+      def initialize(@id, @kind, @method, @host, @target, @port, @scheme, @raw, @held_at,
+                     @flow_id = nil, @binary = false)
         @reply = Channel(Decision).new(1)
         @held_at_ms = Time.utc.to_unix_ms
       end
@@ -227,6 +248,46 @@ module Gori
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme, status: status))
     end
 
+    # Precise per-MESSAGE gate for a reassembled WebSocket message (#500 step 2). `out` is
+    # client→server, matching `Direction::RequestOnly`, exactly as `in` matches responses —
+    # `Direction` already means "which leg", so no enum member was added there.
+    #
+    # Three things differ from the two HTTP gates above:
+    #
+    #   1. **`mentions_ws?` is a hard precondition.** Without an explicit `proto:ws` term
+    #      nothing is held, whatever else the condition says and however permissive the
+    #      direction is — the inverse of the HTTP default, and the reason is in
+    #      `InterceptFilter`'s header: a socket frozen whole is not a recoverable state.
+    #   2. **Scope is the HANDSHAKE's.** A WS message has no authority, scheme or path of its
+    #      own; scoping it on the 101's is the same answer #492 step 3 gave a held h2 response
+    #      ("inventing one is how a hold escapes scope").
+    #   3. **The payload is in hand**, so `body:` can match — the one place it can.
+    def intercepts_ws?(*, to_server : Bool, method : String, host : String, target : String,
+                       scheme : String, payload : Bytes) : Bool
+      enabled, dir, filter = gate_snapshot
+      return false unless enabled
+      return false if to_server ? dir.response_only? : dir.request_only?
+      return false unless filter.mentions_ws?
+      return false unless scope_allows?(scheme, host, target)
+      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
+        proto: Proto::Kind::Ws, payload: payload))
+    end
+
+    # Coarse per-SOCKET arming, asked once right after the 101 (`WS::Relay.run`), the way
+    # step 1 asks the rewriter once: a "no" runs the pre-existing byte-exact pump and pays
+    # nothing per message. A "yes" only means messages will be OFFERED to `intercepts_ws?`.
+    #
+    # Consequence, and it is in the docs: enabling catch on an ALREADY-OPEN socket does
+    # nothing — it applies to the next handshake. The condition itself stays live, because
+    # the per-message gate re-reads it; only the arming is one-shot.
+    def arms_ws_hold?(host : String, *, to_server : Bool) : Bool
+      enabled, dir, filter = gate_snapshot
+      return false unless enabled
+      return false if to_server ? dir.response_only? : dir.request_only?
+      return false unless filter.mentions_ws?
+      @scope.active? ? @scope.may_match_host?(host) : true
+    end
+
     # One locked read of the enabled/direction/filter trio, so a single hot-path
     # call takes @mutex once. Scope has its OWN mutex, so scope_allows? runs after.
     private def gate_snapshot : {Bool, Direction, InterceptFilter}
@@ -277,16 +338,32 @@ module Gori
       enqueue(Kind::Response, raw, method, target, host, port, scheme, flow_id)
     end
 
-    private def enqueue(kind, raw, method, target, host, port, scheme, flow_id) : Item?
+    # Queue one reassembled WebSocket message (#500 step 2). `raw` is the payload as it would
+    # go on the wire — post-Match&Replace, since the hold is a stage INSIDE step 1's rewrite
+    # path rather than a second pipeline beside it — and `method`/`target`/`host`/`scheme`
+    # are the HANDSHAKE's, so the queue row identifies the socket the message rides on.
+    #
+    # Like the h2 gate this never waits: `WS::MessageGate` owns the release order and blocks
+    # a fiber of its own, because a blocked pump stops relaying PING/PONG and a server's
+    # 20-30 s ping timer would close the socket out from under the operator.
+    def enqueue_ws(raw : Bytes, *, to_server : Bool, method : String, target : String,
+                   host : String, port : Int32, scheme : String, flow_id : Int64?,
+                   binary : Bool) : Item?
+      enqueue(to_server ? Kind::WsOut : Kind::WsIn, raw, method, target, host, port, scheme,
+        flow_id, binary)
+    end
+
+    private def enqueue(kind, raw, method, target, host, port, scheme, flow_id,
+                        binary = false) : Item?
       return nil unless intercepts_host?(host)
       item = @mutex.synchronize do
         return nil if @shutting_down || !@enabled
         id = (@next_id += 1)
-        it = Item.new(id, kind, method, host, target, port, scheme, raw, Time.instant, flow_id)
+        it = Item.new(id, kind, method, host, target, port, scheme, raw, Time.instant, flow_id, binary)
         @items[id] = it
         it
       end
-      @revision.add(1) # a request/response was held (async, from a proxy fiber)
+      @revision.add(1) # a request/response/message was held (async, from a proxy fiber)
       item
     end
 

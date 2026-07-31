@@ -1,20 +1,42 @@
 require "./frame"
+require "./message_gate"
 require "../sink"
 require "../head_rewriter"
+require "../../interceptor"
 
 module Gori::Proxy::WS
+  # The 101 handshake's identity, threaded into the relay because a WebSocket message has
+  # none of its own: no authority, no scheme, no path. A rule's host glob, an intercept
+  # hold's scope test and the queue row's label are all the HANDSHAKE's — the same answer
+  # #492 step 3 gave a held h2 response ("inventing one is how a hold escapes scope").
+  record Context,
+    host : String = "",
+    port : Int32 = 0,
+    scheme : String = "http",
+    method : String = "GET",
+    target : String = "/" do
+    NONE = new
+  end
+
   # After a 101 handshake, relays WebSocket frames in both directions byte-exact
   # (P7) while capturing reassembled text/binary messages to the sink. Control
   # frames (ping/pong/close) are forwarded; close ends the tunnel.
   #
-  # Match & Replace over WebSocket (#500 step 1) is the ONE exception to byte-exact, and
-  # it is opted into per DIRECTION, per SOCKET: `run` asks the rewriter once, right after
-  # the handshake, whether a `part: ws` rule can match this host. A "no" — which is every
-  # socket for an operator who has configured no WS rule — runs `pump`, the pre-existing
-  # loop, completely untouched. A "yes" runs `pump_rewriting`, which buffers a TEXT message
-  # to FIN, applies the rules, and emits the result as ONE frame (fragmentation cannot be
-  # preserved once the length changes). Even there, a message the rules do not change goes
-  # out as the peer's own frame bytes.
+  # Two features break byte-exact, and both are opted into per DIRECTION, per SOCKET — `run`
+  # asks each lens once, right after the handshake:
+  #
+  #   * **Match & Replace** (#500 step 1) — is a `part: ws` rule live for this host on this
+  #     side?
+  #   * **Intercept hold** (#500 step 2) — is catch on, with a condition that carries an
+  #     explicit `proto:ws`, for this host on this side?
+  #
+  # Two "no"s — which is every socket for an operator who has configured neither — run `pump`,
+  # the pre-existing loop, completely untouched. Either "yes" runs `pump_assembling`, which
+  # buffers a message to FIN and then runs it through ONE pipeline: rewrite, then hold. The
+  # hold's edit is a STAGE inside that pipeline, not a second one beside it — two pipelines
+  # would mean the operator editing bytes the rules had not seen, or rules re-running over an
+  # operator's edit. Even on that path, a message neither stage changed goes out as the peer's
+  # own frame bytes, mask key and all.
   module Relay
     # Cap on a reassembled (possibly fragmented) message we buffer for capture.
     # The raw forward is always byte-exact (P7); only the captured projection is
@@ -35,42 +57,30 @@ module Gori::Proxy::WS
     # peer replies near-instantly, and a dead one shouldn't pin the tunnel for 30 s.
     CLOSE_TIMEOUT = 5.seconds
 
-    # `rewriter` + `host` are the Match & Replace seam (#500). `host` is the handshake's
-    # host, which is what a rule's host glob is matched against — a WS message has no
-    # authority of its own, exactly as an intercept hold would scope on the handshake.
-    # Both default to "no rewriting", so every caller that only relays keeps today's path.
+    # `rewriter` is the Match & Replace seam (#500 step 1) and `interceptor` the hold seam
+    # (step 2); `ctx` is the 101 handshake's identity, which both scope on. All three default
+    # to "off", so every caller that only relays keeps today's byte-exact path.
     def self.run(client : IO, upstream : IO, flow_id : Int64, sink : FlowSink,
-                 rewriter : HeadRewriter? = nil, host : String = "") : Nil
-      # Asked ONCE per socket, not per message: a rule can be enabled mid-connection, but
-      # re-deciding per message would put a lock on the hot path for an answer that is "no"
-      # for every socket in the common case. The next handshake picks up the change — the
-      # same lifetime the deflate strip (#518) already has.
-      out_rw = nil.as(HeadRewriter?)
-      in_rw = nil.as(HeadRewriter?)
-      if rw = rewriter
-        out_rw = rw if rw.rewrites_ws_out_for_host?(host)
-        in_rw = rw if rw.rewrites_ws_in_for_host?(host)
-      end
+                 rewriter : HeadRewriter? = nil, ctx : Context = Context::NONE,
+                 interceptor : Gori::Interceptor? = nil) : Nil
+      # Asked ONCE per socket, not per message: a rule or the catch condition can change
+      # mid-connection, but re-deciding per message would put a lock on the hot path for an
+      # answer that is "no" for every socket in the common case. The next handshake picks up
+      # the change — the same lifetime the deflate strip (#518) already has, and the reason
+      # "enabling catch does not reach an already-open socket" is in the docs.
+      out_rw = ws_rewriter(rewriter, ctx.host, to_server: true)
+      in_rw = ws_rewriter(rewriter, ctx.host, to_server: false)
+      # One gate per DIRECTION: a direction is one ordering domain, and the gate writes to
+      # that direction's destination socket. client→server is "out", so its destination is
+      # the upstream leg.
+      out_gate = ws_gate(interceptor, upstream, flow_id, sink, ctx, "out", mask: true)
+      in_gate = ws_gate(interceptor, client, flow_id, sink, ctx, "in", mask: false)
 
       done = Channel(Bool).new(2) # each pump's payload: did it end by relaying a CLOSE frame?
-      spawn do
-        clean = if orw = out_rw
-                  # client→server: RFC 6455 §5.3 requires every such frame to be masked, so
-                  # a re-emitted one carries a fresh key of gori's.
-                  pump_rewriting(client, upstream, "out", flow_id, sink, orw, host, mask: true)
-                else
-                  pump(client, upstream, "out", flow_id, sink)
-                end
-        done.send(clean)
-      end
-      spawn do
-        clean = if irw = in_rw
-                  pump_rewriting(upstream, client, "in", flow_id, sink, irw, host, mask: false)
-                else
-                  pump(upstream, client, "in", flow_id, sink)
-                end
-        done.send(clean)
-      end
+      # client→server: RFC 6455 §5.3 requires every such frame to be masked, so a re-emitted
+      # one carries a fresh key of gori's.
+      spawn { done.send(direction_pump(client, upstream, "out", flow_id, sink, out_rw, ctx, out_gate, mask: true)) }
+      spawn { done.send(direction_pump(upstream, client, "in", flow_id, sink, in_rw, ctx, in_gate, mask: false)) }
 
       # The first direction to end tells us how to tear down:
       #   - abnormal end (EOF / reset / truncated frame): the peer is gone — close both
@@ -100,6 +110,34 @@ module Gori::Proxy::WS
       # sockets just unblocked its pending read) — `run` must never return with a pump
       # fiber still alive.
       done.receive if second_pending
+    end
+
+    # This direction's Match & Replace lens, or nil when no `part: ws` rule can reach this
+    # host on this side.
+    private def self.ws_rewriter(rewriter : HeadRewriter?, host : String, *,
+                                 to_server : Bool) : HeadRewriter?
+      return nil unless rw = rewriter
+      live = to_server ? rw.rewrites_ws_out_for_host?(host) : rw.rewrites_ws_in_for_host?(host)
+      live ? rw : nil
+    end
+
+    # This direction's hold gate, or nil when the catch condition does not arm one.
+    private def self.ws_gate(interceptor : Gori::Interceptor?, dst : IO, flow_id : Int64,
+                             sink : FlowSink, ctx : Context, direction : String,
+                             mask : Bool) : MessageGate?
+      return nil unless ic = interceptor
+      return nil unless ic.arms_ws_hold?(ctx.host, to_server: direction == "out")
+      MessageGate.new(direction, dst, flow_id, sink, ic, ctx, mask: mask)
+    end
+
+    # One direction's loop. `pump` — the pre-existing byte-exact one — unless this direction
+    # has a rewriter or a hold gate to run, which is what keeps an unconfigured socket on the
+    # path it has always taken.
+    private def self.direction_pump(src : IO, dst : IO, direction : String, flow_id : Int64,
+                                    sink : FlowSink, rewriter : HeadRewriter?, ctx : Context,
+                                    gate : MessageGate?, mask : Bool) : Bool
+      return pump(src, dst, direction, flow_id, sink) unless rewriter || gate
+      pump_assembling(src, dst, direction, flow_id, sink, rewriter, ctx, gate, mask: mask)
     end
 
     # Chunk size for streaming an oversized frame's payload (see stream_payload).
@@ -154,33 +192,44 @@ module Gori::Proxy::WS
       false # peer closed / reset: this direction ends
     end
 
-    # The rewriting pump for ONE direction (#500 step 1). Only reached when a `part: ws`
-    # rule can match this socket's host on this side; `pump` above is what every other
-    # socket runs, unchanged.
-    private def self.pump_rewriting(src : IO, dst : IO, direction : String, flow_id : Int64,
-                                    sink : FlowSink, rewriter : HeadRewriter, host : String,
-                                    mask : Bool) : Bool
-      RewritingPump.new(src, dst, direction, flow_id, sink, rewriter, host, mask).run
+    # The assembling pump for ONE direction (#500). Only reached when a `part: ws` rule can
+    # match this socket's host on this side, or when the catch condition arms a hold there;
+    # `pump` above is what every other socket runs, unchanged.
+    private def self.pump_assembling(src : IO, dst : IO, direction : String, flow_id : Int64,
+                                     sink : FlowSink, rewriter : HeadRewriter?, ctx : Context,
+                                     gate : MessageGate?, mask : Bool) : Bool
+      AssemblingPump.new(src, dst, direction, flow_id, sink, rewriter, ctx, gate, mask).run
+    ensure
+      # The direction ended (cleanly or not). Hand every still-held message back to the
+      # Interceptor so no ghost queue row survives the socket and no wait fiber leaks —
+      # `H2::StreamGate#close`'s contract. This is also where the CLOSE_TIMEOUT ceiling lands:
+      # when the PEER closes the other direction, `run` gives this one 5 s and then closes the
+      # sockets, which unblocks the read here and reaps whatever was still held.
+      gate.try(&.close)
     end
 
-    # One direction's rewriting pump. An object rather than a method because it carries
+    # One direction's assembling pump. An object rather than a method because it carries
     # per-message state across frames (the assembly buffer, the message opcode, whether the
     # message has fallen back to byte-exact forwarding). One instance per pump fiber, so
-    # nothing here is shared and nothing is locked.
+    # nothing here is shared and nothing is locked — the GATE owns the only shared state,
+    # because a wait fiber writes through it.
     #
-    # The invariant it keeps: gori's own framing is used ONLY for a message the rules
-    # actually changed. Everything else — binary messages, oversized frames, messages past
-    # the buffer cap, and text messages no rule matched — leaves as the bytes that arrived.
-    private class RewritingPump
+    # The invariant it keeps: gori's own framing is used ONLY for a message a rule or the
+    # operator actually changed. Everything else — binary messages nobody edited, oversized
+    # frames, messages past the buffer cap, and text messages no rule matched — leaves as the
+    # bytes that arrived.
+    private class AssemblingPump
       @buffer = IO::Memory.new
       @opcode = OP_TEXT
-      @passthrough = false       # this message fell back to byte-exact forwarding
+      @passthrough = false       # this message fell back to frame-by-frame byte-exact forwarding
+      @rewritable = false        # ... and this one is eligible for Match & Replace (TEXT + a live rule)
       @fresh = true              # no data frame of this message has been buffered yet
       @single_raw : Bytes? = nil # the message's own wire bytes, when it arrived as ONE frame
       @scratch : Bytes
 
       def initialize(@src : IO, @dst : IO, @direction : String, @flow_id : Int64,
-                     @sink : FlowSink, @rewriter : HeadRewriter, @host : String, @mask : Bool)
+                     @sink : FlowSink, @rewriter : HeadRewriter?, @ctx : Context,
+                     @gate : MessageGate?, @mask : Bool)
         @scratch = Bytes.new(STREAM_CHUNK)
       end
 
@@ -210,25 +259,45 @@ module Gori::Proxy::WS
         false # peer closed / reset: this direction ends
       end
 
-      # A control frame (ping/pong/close) never takes part in a rewrite and is forwarded the
-      # instant it arrives, byte-exact, even in the middle of a fragmented data message
-      # (RFC 6455 §5.4). Parking a PONG behind an assembling message is how a server's
-      # 20-30 s ping timer would close the socket out from under the operator.
+      # A control frame (ping/pong/close) never takes part in a rewrite or a hold and is
+      # forwarded the instant it arrives, byte-exact, even in the middle of a fragmented data
+      # message (RFC 6455 §5.4). Parking a PONG behind an assembling or held message is how a
+      # server's 20-30 s ping timer would close the socket out from under the operator — and
+      # on the hold path that is not a refinement, it is the whole reason this pump may not
+      # block. See `MessageGate`'s header.
+      #
+      # A CLOSE is the one control frame that cannot simply overtake: §5.5.1 forbids data
+      # frames after it, so anything still queued would never reach the peer. Design D5
+      # resolves the queue instead — everything undecided forwards, in order, then the CLOSE.
+      # Parking the CLOSE was the alternative and does not work against today's teardown: a
+      # pump that does not write it never returns "clean", so `run` reads the direction as an
+      # abnormal end and tears both sockets down, destroying the hold with no decision at all.
       private def forward_control(h : WS::Header) : Bool
         # §5.5 caps a control payload at 125 bytes; a peer that advertises more gets its
         # frame streamed rather than its tunnel killed here.
         if h.len > WS::MAX_FRAME
-          return Relay.forward_oversized_frame(@src, @dst, h, @direction, @flow_id, @sink, @opcode, @scratch)
+          return bypassing("a control frame too large to buffer arrived") do
+            Relay.forward_oversized_frame(@src, @dst, h, @direction, @flow_id, @sink, @opcode, @scratch)
+          end
         end
         ctl = WS.read_body(@src, h) || return false
-        @dst.write(ctl.raw)
-        @dst.flush
+        if ctl.close?
+          bypass("the peer closed this direction") { write_direct(ctl.raw) }
+        elsif gate = @gate
+          gate.write_control(ctl.raw)
+        else
+          write_direct(ctl.raw)
+        end
         true
       end
 
-      # A new message begins. A BINARY message is never rewritten — a text find/replace over
-      # protobuf/msgpack/CBOR corrupts rather than edits — so it is put on the byte-exact
-      # path here, at its first frame, which preserves its framing and mask key as well.
+      # A new message begins.
+      #
+      # A BINARY message is never REWRITTEN — a text find/replace over protobuf/msgpack/CBOR
+      # corrupts rather than edits — but it IS holdable, so it only falls onto the
+      # frame-by-frame byte-exact path when no gate is armed. With a gate it is assembled like
+      # any other message, offered to the operator, and (unless they edited it) re-emitted as
+      # the frame that arrived.
       private def start_message(opcode : UInt8) : Nil
         # A new data message arriving while the previous one never sent its FIN is an
         # RFC 6455 §5.4 violation. The byte-exact pump forwards it and lets the receiving
@@ -236,35 +305,39 @@ module Gori::Proxy::WS
         # they are lost on the wire. Emitted non-final, so gori does not invent the FIN the
         # sender never sent — the violation is passed on, not repaired.
         if !@passthrough && @buffer.size > 0
-          flush_buffered
+          bypass("a message arrived before the previous one sent its FIN") { flush_buffered }
           @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, @buffer.to_slice.dup)
           reset_buffer
         end
         @opcode = opcode
-        @passthrough = opcode != OP_TEXT
+        @rewritable = opcode == OP_TEXT && !@rewriter.nil?
+        @passthrough = !@rewritable && @gate.nil?
         @fresh = true
         @single_raw = nil
       end
 
-      # A frame too large to buffer: this message can no longer be rewritten. Put whatever
-      # is buffered on the wire, surface it to capture (the byte-exact pump's reason —
-      # captured prefix bytes must not be dropped, and a later small FIN fragment must not
-      # surface as if it were the whole message), then stream the frame through.
+      # A frame too large to buffer: this message can no longer be rewritten OR held. Put
+      # whatever is buffered on the wire, surface it to capture (the byte-exact pump's
+      # reason — captured prefix bytes must not be dropped, and a later small FIN fragment
+      # must not surface as if it were the whole message), then stream the frame through.
       private def forward_oversized(h : WS::Header) : Bool
-        flush_buffered unless @passthrough
+        forwarded = bypassing("a frame too large to buffer arrived") do
+          flush_buffered unless @passthrough
+          Relay.forward_oversized_frame(@src, @dst, h, @direction, @flow_id, @sink, @opcode, @scratch)
+        end
         if @buffer.size > 0
           @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, @buffer.to_slice.dup)
           reset_buffer
         end
         @passthrough = true
+        @rewritable = false
         @single_raw = nil
-        Relay.forward_oversized_frame(@src, @dst, h, @direction, @flow_id, @sink, @opcode, @scratch)
+        forwarded
       end
 
       private def handle_data(frame : WS::Frame) : Nil
         if @passthrough
-          @dst.write(frame.raw)
-          @dst.flush
+          write_direct(frame.raw)
           @buffer = Relay.capture_frame(frame, @buffer, @direction, @flow_id, @sink, @opcode)
           return
         end
@@ -273,10 +346,12 @@ module Gori::Proxy::WS
         # path takes, and the same one the HTTP body rewrite takes past MAX_REWRITE_BODY:
         # leave it alone rather than grow the proxy heap while a rule is on.
         if @buffer.size + frame.payload.size > MAX_MESSAGE
-          flush_buffered
-          @dst.write(frame.raw)
-          @dst.flush
+          bypass("a message outgrew the #{MAX_MESSAGE}-byte assembly buffer") do
+            flush_buffered
+            write_direct(frame.raw)
+          end
           @passthrough = true
+          @rewritable = false
           @buffer = Relay.capture_frame(frame, @buffer, @direction, @flow_id, @sink, @opcode)
           return
         end
@@ -286,28 +361,41 @@ module Gori::Proxy::WS
         emit_message if frame.fin?
       end
 
-      # The message is complete: apply the rules and put it on the wire. A rewritten message
-      # MUST go out as ONE frame — once its length changes the sender's fragmentation cannot
-      # be reproduced — but a message no rule changed is forwarded as the peer's own frame,
-      # mask key and all, whenever it arrived as a single frame.
+      # The message is complete. ONE pipeline: rewrite, then hold, then the wire.
+      #
+      # The hold is a STAGE here rather than a second pipeline beside this one, which is what
+      # #513's D3 established on h2 and what makes the two features composable: what the
+      # operator sees in the editor is what the rules produced, and what they forward is what
+      # goes out — no rule re-runs over a human's edit, and no edit is made against bytes the
+      # rules had not touched yet.
+      #
+      # Past the gate, a rewritten OR edited message MUST go out as ONE frame — once its
+      # length changes the sender's fragmentation cannot be reproduced — but a message nothing
+      # changed is forwarded as the peer's own frame, mask key and all, whenever it arrived as
+      # a single frame.
       private def emit_message : Nil
         payload = @buffer.to_slice
-        # `out` is a Crystal keyword, hence the name.
-        rewritten = if @direction == "out"
-                      @rewriter.rewrite_ws_out(payload, @host)
-                    else
-                      @rewriter.rewrite_ws_in(payload, @host)
-                    end
-        if (raw = @single_raw) && rewritten == payload
-          @dst.write(raw)
+        rewritten = rewrite(payload)
+        raw = (r = @single_raw) && rewritten == payload ? r : nil
+        if gate = @gate
+          # Never blocks: the gate either writes through or parks the message and waits on a
+          # fiber of its own, so the next frame — including a PING — is read immediately.
+          gate.submit(@opcode, rewritten, raw)
         else
-          @dst.write(WS.encode(@opcode, rewritten, mask: @mask, fin: true))
+          write_direct(raw || WS.encode(@opcode, rewritten, mask: @mask, fin: true))
+          # Record what gori WROTE rather than what arrived, the way #513 keeps P7 on h2: the
+          # capture has to be the bytes the peer actually sees.
+          @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, rewritten.dup)
         end
-        @dst.flush
-        # Record what gori WROTE rather than what arrived, the way #513 keeps P7 on h2: the
-        # capture has to be the bytes the peer actually sees.
-        @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, rewritten.dup)
         reset_buffer
+      end
+
+      # Match & Replace, or the payload untouched when this message is not eligible (binary,
+      # or no `part: ws` rule live on this side). `out` is a Crystal keyword, hence the name.
+      private def rewrite(payload : Bytes) : Bytes
+        rw = @rewriter
+        return payload unless @rewritable && rw
+        @direction == "out" ? rw.rewrite_ws_out(payload, @ctx.host) : rw.rewrite_ws_in(payload, @ctx.host)
       end
 
       # Emit everything buffered so far as a NON-final frame, so the rest of the message can
@@ -316,8 +404,33 @@ module Gori::Proxy::WS
       # the message's leading frame and carries the message opcode rather than OP_CONT.
       private def flush_buffered : Nil
         return if @buffer.size == 0
-        @dst.write(WS.encode(@opcode, @buffer.to_slice, mask: @mask, fin: false))
+        write_direct(WS.encode(@opcode, @buffer.to_slice, mask: @mask, fin: false))
+      end
+
+      # A write that goes STRAIGHT to the socket, bypassing the queue. Every caller either
+      # runs with no gate at all, or is already inside `bypass` (which has emptied the queue
+      # and holds the gate's lock), so this can never interleave with a release.
+      private def write_direct(bytes : Bytes) : Nil
+        @dst.write(bytes)
         @dst.flush
+      end
+
+      # Run `block` after the gate's queue has been forced out in arrival order. A no-op
+      # passthrough when no hold is armed, which is what keeps the rewrite-only path exactly
+      # as step 1 shipped it.
+      private def bypass(reason : String, &block : -> Nil) : Nil
+        if gate = @gate
+          gate.bypass(reason, &block)
+        else
+          block.call
+        end
+      end
+
+      # `bypass` for a block that answers whether the peer survived the write.
+      private def bypassing(reason : String, &block : -> Bool) : Bool
+        ok = false
+        bypass(reason) { ok = block.call }
+        ok
       end
 
       private def reset_buffer : Nil

@@ -26,7 +26,13 @@ module Gori::Tui
     # Standing hint on the suggestion row at a cold start (editing, but nothing typed
     # yet to complete), so the condition language is discoverable the moment `/` opens.
     # Example values double as syntax cues; keep in sync with InterceptFilter::FIELDS.
-    QUERY_HINT = "fields:  host:  path:  method:  scheme:  status:    ·    AND OR NOT ( ) combine  ·  -term negates"
+    # `proto:ws` earns its own note: it is not a narrowing term but the WebSocket hold's
+    # OPT-IN, and without it no WS message is held however permissive the rest is (#500).
+    QUERY_HINT = "fields:  host:  path:  method:  scheme:  status:  proto:  body:    ·    proto:ws opts WS messages IN    ·    AND OR NOT ( ) combine  ·  -term negates"
+
+    # How much of a held WebSocket payload the queue row previews. A row is one line, and
+    # the detail pane is where the message is actually read.
+    WS_LABEL_MAX = 120
 
     getter? editing : Bool
     getter? querying : Bool
@@ -57,6 +63,12 @@ module Gori::Tui
       @host_suggest_values = [] of String
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
       @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
+      # Whether the LOADED item is a WebSocket message. Captured when the editor takes the
+      # bytes rather than looked up per call: `pending_edit` must know before it touches the
+      # buffer, and by then the item can already have left the queue (forwarded cross-process
+      # by an MCP peer, reaped, released) — at which point a lookup would fall back to the
+      # HTTP path and splice a `Content-Length:` line into a payload with no head.
+      @loaded_ws = false
       # Cached highlight of the selected held item's bytes (read-only detail pane).
       # Held bytes are immutable, so the item id + theme is the base cache key —
       # recomputed only when the selection/theme changes, not every render. The loaded
@@ -336,7 +348,7 @@ module Gori::Tui
     def toggle_edit : Nil
       if @editing
         @editing = false
-      elsif it = selected_item
+      elsif (it = selected_item) && !it.binary?
         # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
         # edit on the same item (Esc/Shift-Tab then back) must preserve the in-progress edit,
         # mirroring detail_window_for's @detail_win_id guard.
@@ -345,8 +357,18 @@ module Gori::Tui
           @editor_dirty = false # freshly loaded — not yet modified
         end
         @loaded_id = it.id
+        @loaded_ws = it.kind.ws?
         @editing = true
       end
+    end
+
+    # A held WebSocket BINARY message (opcode 2) is holdable, forwardable and droppable but
+    # NOT editable: the TextArea round trip is `String.new(raw)` → char ops → `.to_slice`,
+    # which is lossy on non-UTF-8. That hazard exists for a held HTTP body too (a JPEG
+    # response), but on WebSocket it is the COMMON case — opcode 2 is protobuf/msgpack/CBOR,
+    # not an exception — so it is refused rather than left to corrupt the message silently.
+    def read_only_selection? : Bool
+      !!selected_item.try(&.binary?)
     end
 
     def stop_edit : Nil
@@ -371,9 +393,26 @@ module Gori::Tui
     # else nil. Keyed by @loaded_id (the item the editor holds) rather than the queue
     # selection, so "forward all" can pick up an in-progress edit for whichever item is
     # loaded even when the cursor has since moved to a different row.
+    # A WebSocket message payload is taken VERBATIM, and the kind gate comes before anything
+    # else touches the buffer, because both of the steps below corrupt it:
+    #
+    #   * `ContentLength.sync(add_when_missing: true)` is the editor's "update
+    #     Content-Length" affordance. On a WS payload there is no head to update, so
+    #     `add_when_missing` splices a `Content-Length: N` header LINE into the message body
+    #     — #513's `restore_content_length` trap with nothing to restore it from.
+    #   * `Env.expand_wire` rewrites bare LF to CRLF across the head. A WS payload has no
+    #     head/body boundary, so a pretty-printed JSON message would silently change length
+    #     and content on every edit.
+    #
+    # Env substitution is dropped along with it rather than downgraded to `Env.expand`: in a
+    # head a `$` starts a reference and in a body it is a byte (#519's rule, and the reason
+    # `unresolved_wire` is head-only), and a WS payload is all body.
     def pending_edit : {Int64, Bytes}?
       id = @loaded_id
       return nil unless id && @editor_dirty
+      # `text` (LF-joined), NOT `to_bytes` — that one joins with CRLF because it exists for
+      # WIRE text, and a WS payload is not wire text.
+      return {id, @editor.text.to_slice} if @loaded_ws
       # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
       # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
       raw = Env.expand_wire(@editor.text)
@@ -394,6 +433,7 @@ module Gori::Tui
     # refuse a forward whose held body is binary.
     def unresolved_env : Array(String)
       return [] of String unless @loaded_id && @editor_dirty
+      return [] of String if @loaded_ws # a WS payload expands nothing, so nothing can be unresolved
       Env.unresolved_wire(@editor.text)
     end
 
@@ -402,16 +442,29 @@ module Gori::Tui
     # 200→201 status edit shows in the queue row + forward/drop toast, not the stale
     # hold-time metadata), else the immutable Item's own fields. For a response,
     # `target` is the "status reason" the response Item carries.
+    #
+    # A WebSocket message re-reads NOTHING from the editor: its first line is JSON or
+    # protobuf, not an HTTP start line, so parsing it would rewrite the row's own label from
+    # the first three space-separated tokens of a payload. Its method/target are the
+    # handshake's and are immutable, which is exactly why the row stays identifiable while
+    # its payload is being edited.
     def effective_method_target(it : Interceptor::Item) : {String, String}
       return {it.method, it.target} unless @loaded_id == it.id && @editor_dirty
-      first = (String.new(@editor.to_bytes).split('\n', 2).first? || "").rstrip('\r')
-      if it.kind.request?
+      case it.kind
+      in .ws_out?, .ws_in? then {it.method, it.target}
+      in .request?
+        first = editor_first_line
         parts = first.split(' ', 3)
         {parts[0]?.presence || it.method, parts[1]?.presence || it.target}
-      else
+      in .response?
+        first = editor_first_line
         parts = first.split(' ', 2) # "HTTP/1.1 201 CREATED" → the "201 CREATED" target
         {it.method, parts[1]?.presence || it.target}
       end
+    end
+
+    private def editor_first_line : String
+      (String.new(@editor.to_bytes).split('\n', 2).first? || "").rstrip('\r')
     end
 
     # backspace/delete/undo are no-ops at buffer start / end-of-buffer / empty undo
@@ -726,6 +779,67 @@ module Gori::Tui
       Frame.pane_border(focused)
     end
 
+    # --- what a queue row IS ---------------------------------------------------
+    # Every branch on `Interceptor::Kind` in this file (and `InterceptController`'s toast
+    # label) is an exhaustive `case ... in`, deliberately. They were all `kind.request?`
+    # ternaries, which meant a new enum member compiled clean and silently rendered as `RES`
+    # — the shape #533 removed from `RulePart#badge`, closed here for the same reason.
+
+    # 3 cells wide, like REQ/RES, so the label column never shifts. The colour follows the
+    # LEG rather than the protocol: a WS message travelling client→server is caught by the
+    # same `c:REQ` chip an HTTP request is, so it reads in the same colour.
+    private def kind_badge(kind : Interceptor::Kind) : {String, Color}
+      case kind
+      in .request?  then {"REQ", Theme.yellow}
+      in .response? then {"RES", Theme.accent}
+      in .ws_out?   then {"WS↑", Theme.yellow}
+      in .ws_in?    then {"WS↓", Theme.accent}
+      end
+    end
+
+    # The row's one line. HTTP shows its method/host/target (edited values for the loaded
+    # item); a WebSocket message shows the socket it rides on plus a preview of the payload,
+    # because the handshake identity is shared by every message on that socket and the
+    # payload is the only thing that tells two rows apart.
+    private def row_label(it : Interceptor::Item) : String
+      method, raw_target = effective_method_target(it) # edited values for the loaded item
+      target = Url.origin_path(raw_target)             # strip scheme+authority for plaintext forward-proxy targets
+      case it.kind
+      in .request?         then "#{method} #{it.host}#{target}"
+      in .response?        then "#{it.host} #{target}"
+      in .ws_out?, .ws_in? then "#{it.host}#{target}  #{ws_preview(it)}"
+      end
+    end
+
+    # A binary message has no line to show, and rendering one would be a wall of U+FFFD:
+    # opcode 2 is protobuf/msgpack/CBOR. Its size is the useful fact.
+    private def ws_preview(it : Interceptor::Item) : String
+      return "<binary, #{it.raw.size} bytes>" if it.binary?
+      text = @loaded_id == it.id && @editor_dirty ? @editor.text : String.new(it.raw)
+      line = (text.split('\n', 2).first? || "").rstrip('\r')
+      line.size > WS_LABEL_MAX ? "#{line[0, WS_LABEL_MAX]}…" : line
+    end
+
+    private def detail_title(it : Interceptor::Item) : String
+      case it.kind
+      in .request?  then "REQUEST (held)"
+      in .response? then "RESPONSE (held)"
+      in .ws_out?   then "WS MESSAGE client→server (held)"
+      in .ws_in?    then "WS MESSAGE server→client (held)"
+      end
+    end
+
+    # The editor's syntax overlay. `nil` for a WebSocket payload: `Highlight.from_lines`
+    # splits at the first blank line and styles everything above it as a start line plus
+    # header lines, which is HTTP's shape and not a message's.
+    private def editor_highlight(it : Interceptor::Item) : Symbol?
+      case it.kind
+      in .request?         then :request
+      in .response?        then :response
+      in .ws_out?, .ws_in? then nil
+      end
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "QUEUE (#{@items.size})", bg: Theme.bg, border: pane_border(focused))
@@ -739,12 +853,9 @@ module Gori::Tui
         selected = idx == @selected
         marked = @marks.includes?(it.id)
         bg = row_band(screen, inner, y, selected: selected, marked: marked, focused: focused)
-        badge, bcolor = it.kind.request? ? {"REQ", Theme.yellow} : {"RES", Theme.accent}
+        badge, bcolor = kind_badge(it.kind)
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
-        method, raw_target = effective_method_target(it) # edited values for the loaded item
-        target = Url.origin_path(raw_target)             # strip scheme+authority for plaintext forward-proxy targets
-        label = it.kind.request? ? "#{method} #{it.host}#{target}" : "#{it.host} #{target}"
-        screen.text(inner.x + 5, y, label, selected || marked ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
+        screen.text(inner.x + 5, y, row_label(it), selected || marked ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
       end
       Frame.scroll_gauge(screen, inner, @items.size, @scroll, focused)
     end
@@ -770,17 +881,25 @@ module Gori::Tui
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       it = selected_item
-      title = it.nil? ? "DETAIL" : (it.kind.request? ? "REQUEST (held)" : "RESPONSE (held)")
+      title = it.nil? ? "DETAIL" : detail_title(it)
       Frame.card(screen, rect, title, bg: Theme.bg, border: pane_border(focused))
       # `e` (or ↵) toggles editing the held bytes vs previewing them — lit while editing,
-      # a muted hint while previewing, so the edit affordance rides the border.
-      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + title.size + 4, "e", "EDIT", @editing) if it
+      # a muted hint while previewing, so the edit affordance rides the border. A binary WS
+      # message says READ-ONLY there instead: the affordance must not advertise an edit the
+      # TextArea round trip would corrupt.
+      if it
+        if it.binary?
+          read_only_badge(screen, rect, rect.x + title.size + 4)
+        else
+          Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + title.size + 4, "e", "EDIT", @editing)
+        end
+      end
       inner = rect.inset(1, 1)
       unless it
         screen.text(inner.x, inner.y, "—", Theme.muted)
         return
       end
-      mode = it.kind.request? ? :request : :response
+      mode = editor_highlight(it)
       if @editing && @loaded_id == it.id
         @editor.render(screen, inner, cursor: focused, highlight: mode, gauge: true, gauge_focused: focused)
       else
@@ -801,6 +920,16 @@ module Gori::Tui
         end
         Frame.scroll_gauge(screen, inner, total, @detail_scroll, focused)
       end
+    end
+
+    # Where `e`:EDIT would ride, for a message the editor must not open. Right-aligned with
+    # the same min_x guard `Frame.toggle_badge` uses, so it drops out on a narrow pane rather
+    # than overwriting the title.
+    private def read_only_badge(screen : Screen, rect : Rect, min_x : Int32) : Nil
+      label = " READ-ONLY "
+      x = rect.right - 1 - label.size
+      return if x < min_x
+      screen.text(x, rect.y, label, Theme.muted)
     end
 
     # Nudge the read-only held-item preview sideways (shift+←/→). No-op while
@@ -838,8 +967,33 @@ module Gori::Tui
       @detail_win_id = it.id
       @detail_win_rev = Theme.revision
       @detail_win_edit_rev = edit_rev
+      @detail_win = it.kind.ws? ? ws_window_for(it, edited) : http_window_for(it, edited)
+    end
+
+    private def http_window_for(it : Interceptor::Item, edited : Bool) : Highlight::Windowed
       lines = edited ? @editor.lines_snapshot : String.new(it.raw).split('\n').map(&.rstrip('\r'))
-      @detail_win = Highlight.from_lines_windowed(lines, it.kind.request?)
+      Highlight.from_lines_windowed(lines, it.kind.request?)
+    end
+
+    # A WebSocket message is ALL body: no start line, no headers, no head/body separator to
+    # split on — and for opcode 2, no lines at all. So it gets an empty head and the payload
+    # as lazy `BodyLines` (built straight from the BYTES when unedited, which keeps a multi-MiB
+    # message off the UI fiber and scrubs per visible line rather than up front).
+    private def ws_window_for(it : Interceptor::Item, edited : Bool) : Highlight::Windowed
+      body = edited ? Highlight::BodyLines.from_array(@editor.lines_snapshot) : Highlight::BodyLines.from_bytes(it.raw)
+      Highlight::Windowed.new([] of Highlight::Line, body, it.binary? ? :text : ws_body_kind(it.raw))
+    end
+
+    # A WS message carries no Content-Type, so the payload's own first byte is the only
+    # signal there is. Sniffed, not guessed at render time: `Windowed#kind` is fixed for the
+    # life of the cached window.
+    private def ws_body_kind(raw : Bytes) : Symbol
+      first = raw.find { |b| b != 0x20_u8 && b != 0x09_u8 && b != 0x0A_u8 && b != 0x0D_u8 }
+      case first
+      when 0x7B_u8, 0x5B_u8 then :json # '{' '['
+      when 0x3C_u8          then :xml  # '<'
+      else                       :text
+      end
     end
 
     private def ensure_visible(h : Int32) : Nil

@@ -146,10 +146,21 @@ module Gori::Tui
       when key.escape?              then queue_escape
       when key.lower_j?, key.down?  then queue_move(1)
       when key.lower_k?, key.up?    then @intercept.at_top? ? @host.request_focus(:menu) : queue_move(-1)
-      when key.enter?, key.lower_e? then @intercept.toggle_edit
+      when key.enter?, key.lower_e? then open_editor
       else                               return false # f/d/⇧F/i/c/t/⇧T… → keymap
       end
       true
+    end
+
+    # ↵/e on the queue. `toggle_edit` already refuses a binary WebSocket message; a refusal
+    # with no explanation reads as a dead key, so say why — the detail pane's READ-ONLY badge
+    # is only visible once the row is selected.
+    private def open_editor : Nil
+      if @intercept.read_only_selection?
+        @host.status("binary WebSocket message — read-only (forward or drop it unchanged)")
+        return
+      end
+      @intercept.toggle_edit
     end
 
     # esc over a mark set hands the marks back first — the reflex clear, mirroring History,
@@ -452,13 +463,22 @@ module Gori::Tui
       "#{n} held message#{n == 1 ? "" : "s"} marked"
     end
 
-    # A short human label for a held item — "GET /path" (request) or the status line
-    # (response) — for forward/drop toasts; the queue's internal id means nothing to the
-    # user. Reads the EDITED method/status (via the view) so a forwarded edit shows what
-    # was actually sent, not the stale hold-time metadata.
+    # A short human label for a held item — "GET /path" (request), the status line
+    # (response), or the socket plus direction (a WebSocket message) — for forward/drop
+    # toasts; the queue's internal id means nothing to the user. Reads the EDITED
+    # method/status (via the view) so a forwarded edit shows what was actually sent, not the
+    # stale hold-time metadata.
+    #
+    # Exhaustive `case ... in` for the reason `InterceptView#kind_badge` is: as a
+    # `kind.request?` ternary a WebSocket message rendered here as its own status line.
     private def intercept_label(it : Interceptor::Item) : String
       method, target = @intercept.effective_method_target(it)
-      it.kind.request? ? "#{method} #{Url.origin_path(target)}" : target
+      case it.kind
+      in .request?  then "#{method} #{Url.origin_path(target)}"
+      in .response? then target
+      in .ws_out?   then "WS message → #{it.host}"
+      in .ws_in?    then "WS message ← #{it.host}"
+      end
     end
   end
 end

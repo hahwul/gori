@@ -62,6 +62,10 @@ end
 private MASKED_HI   = Bytes[0x81, 0x82, 0x01, 0x02, 0x03, 0x04, 0x69, 0x6b] # masked text "hi"
 private UNMASKED_YO = Bytes[0x81, 0x02, 0x79, 0x6f]                         # unmasked text "yo"
 
+# The 101 handshake identity every rewrite/hold in this file scopes on.
+private WS_CTX = Gori::Proxy::WS::Context.new(host: "echo.test", port: 80, scheme: "http",
+  method: "GET", target: "/ws")
+
 # A masked client frame of any opcode, for payloads under 126 bytes.
 private def masked_op_frame(opcode : UInt8, payload : Bytes, fin : Bool = true) : Bytes
   mask = Bytes[0xAA, 0xBB, 0xCC, 0xDD]
@@ -358,7 +362,7 @@ describe Gori::Proxy::WS do
 
       sink = WsSink.new
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_server: {"hi", "HELLO"}), "echo.test")
+        WsRewriter.new(to_server: {"hi", "HELLO"}), WS_CTX)
 
       h = Gori::Proxy::WS.read_header(ts_r).not_nil!
       h.fin?.should be_true
@@ -389,7 +393,7 @@ describe Gori::Proxy::WS do
 
       sink = WsSink.new
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_client: {"yo", "YOYO"}), "echo.test")
+        WsRewriter.new(to_client: {"yo", "YOYO"}), WS_CTX)
 
       h = Gori::Proxy::WS.read_header(tc_r).not_nil!
       h.masked?.should be_false # a server→client frame must never be masked
@@ -410,7 +414,7 @@ describe Gori::Proxy::WS do
 
       sink = WsSink.new
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_server: {"absent", "x"}), "echo.test")
+        WsRewriter.new(to_server: {"absent", "x"}), WS_CTX)
 
       fwd = Bytes.new(MASKED_HI.size)
       ts_r.read_fully(fwd)
@@ -432,7 +436,7 @@ describe Gori::Proxy::WS do
 
       sink = WsSink.new
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_server: {"hi", "HELLO"}), "echo.test")
+        WsRewriter.new(to_server: {"hi", "HELLO"}), WS_CTX)
 
       fwd = Bytes.new(bin.size)
       ts_r.read_fully(fwd)
@@ -457,7 +461,7 @@ describe Gori::Proxy::WS do
       # The pattern spans the fragment boundary, so it can only match on the assembled
       # message — which is what makes this an assembly test rather than a rewrite test.
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_server: {"hi there", "bye"}), "echo.test")
+        WsRewriter.new(to_server: {"hi there", "bye"}), WS_CTX)
 
       h = Gori::Proxy::WS.read_header(ts_r).not_nil!
       h.fin?.should be_true
@@ -485,7 +489,7 @@ describe Gori::Proxy::WS do
 
       sink = WsSink.new
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_server: {"hi there", "bye"}), "echo.test")
+        WsRewriter.new(to_server: {"hi there", "bye"}), WS_CTX)
 
       first = Gori::Proxy::WS.read_header(ts_r).not_nil!
       first.opcode.should eq(Gori::Proxy::WS::OP_PING) # ahead of the message it arrived inside
@@ -513,7 +517,7 @@ describe Gori::Proxy::WS do
 
       sink = WsSink.new
       Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
-        WsRewriter.new(to_server: {"second", "SECOND"}), "echo.test")
+        WsRewriter.new(to_server: {"second", "SECOND"}), WS_CTX)
 
       first = Gori::Proxy::WS.read_header(ts_r).not_nil!
       first.fin?.should be_false # gori does not invent the FIN the sender never sent

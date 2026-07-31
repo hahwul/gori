@@ -31,6 +31,14 @@ private def three_holds(ic)
   InterceptView.new.tap(&.reload(ic))
 end
 
+# A held WebSocket message (#500 step 2). `enqueue_ws` rather than a blocking hold: the WS
+# gate never blocks its pump, so nothing here waits on a decision either.
+private def hold_ws(ic, payload : String | Bytes, to_server = true, binary = false)
+  bytes = payload.is_a?(String) ? payload.to_slice : payload
+  ic.enqueue_ws(bytes, to_server: to_server, method: "GET", target: "/ws", host: "echo.test",
+    port: 80, scheme: "http", flow_id: 5_i64, binary: binary).not_nil!
+end
+
 describe Gori::Tui::InterceptView do
   it "renders the held queue with a REQ badge and host+target" do
     tmp_interceptor do |ic|
@@ -508,5 +516,109 @@ describe "Intercept verbs (P1)" do
     # Number keys are positional now (digit N → Nth visible tab), handled by nav.pos*; the
     # Runner resolves N to the actual tab. With the default layout the 3rd visible is Intercept.
     keymap.lookup(Gori::Verb::Chord.new("3"), Gori::Verb::Scope::Body).should eq("nav.pos3")
+  end
+
+  describe "a held WebSocket message (#500 step 2)" do
+    it "renders a WS badge, the socket, and the payload's first line" do
+      tmp_interceptor do |ic|
+        hold_ws(ic, %({"op":"subscribe"}))
+        view = InterceptView.new
+        view.reload(ic)
+        backend = MemoryBackend.new(120, 12)
+        view.render(Screen.new(backend), Rect.new(0, 0, 120, 12))
+        backend.contains?("WS↑").should be_true
+        backend.contains?("echo.test/ws").should be_true
+        backend.contains?(%({"op":"subscribe"})).should be_true
+        # NOT "RES": every Kind branch is an exhaustive `case ... in` now, which is the whole
+        # reason the two members could be added — as `kind.request?` ternaries a WS message
+        # compiled clean and painted itself as a response.
+        backend.contains?("RES").should be_false
+        backend.contains?("RESPONSE (held)").should be_false
+      end
+    end
+
+    it "labels the server → client direction and its own badge" do
+      tmp_interceptor do |ic|
+        hold_ws(ic, "pushed", to_server: false)
+        view = InterceptView.new
+        view.reload(ic)
+        backend = MemoryBackend.new(120, 12)
+        view.render(Screen.new(backend), Rect.new(0, 0, 120, 12))
+        backend.contains?("WS↓").should be_true
+        backend.contains?("server→client").should be_true
+      end
+    end
+
+    it "shows a binary message as its size and refuses the editor" do
+      tmp_interceptor do |ic|
+        hold_ws(ic, Bytes[0x00, 0xFF, 0x10, 0x82], binary: true)
+        view = InterceptView.new
+        view.reload(ic)
+        view.read_only_selection?.should be_true
+        view.toggle_edit
+        view.editing?.should be_false # refused: the TextArea round trip is lossy on non-UTF-8
+        backend = MemoryBackend.new(120, 12)
+        view.render(Screen.new(backend), Rect.new(0, 0, 120, 12))
+        backend.contains?("<binary, 4 bytes>").should be_true
+        backend.contains?("READ-ONLY").should be_true
+      end
+    end
+
+    it "does NOT splice a Content-Length line into an edited payload" do
+      # The trap the design named first: `pending_edit` runs
+      # `Fuzz::ContentLength.sync(add_when_missing: true)` on any dirty edit. A WS payload has
+      # no head, so `add_when_missing` would append a header LINE into the message body.
+      tmp_interceptor do |ic|
+        hold_ws(ic, %({"amount":1}))
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        view.replace_editor(%({"amount":9999}))
+        edit = view.pending_edit.not_nil!
+        String.new(edit[1]).should eq(%({"amount":9999}))
+        String.new(edit[1]).should_not contain("Content-Length")
+      end
+    end
+
+    it "does NOT rewrite bare LF to CRLF in an edited payload" do
+      # `Env.expand_wire` normalizes the HEAD's line endings, and a WS payload is all body —
+      # so a pretty-printed JSON message would silently change length and content.
+      tmp_interceptor do |ic|
+        hold_ws(ic, "{\n  \"a\": 1\n}")
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        view.replace_editor("{\n  \"a\": 2\n}")
+        edit = view.pending_edit.not_nil!
+        String.new(edit[1]).should eq("{\n  \"a\": 2\n}")
+        edit[1].should_not contain('\r'.ord.to_u8)
+      end
+    end
+
+    it "leaves a $ in an edited payload alone — in a body it is a byte, not a reference" do
+      tmp_interceptor do |ic|
+        hold_ws(ic, %({"sig":"x"}))
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        view.replace_editor(%({"sig":"$NOT_A_VAR"}))
+        String.new(view.pending_edit.not_nil![1]).should eq(%({"sig":"$NOT_A_VAR"}))
+        view.unresolved_env.should be_empty # ... so a forward is never refused over one
+      end
+    end
+
+    it "does not re-read its queue label from the edited payload's first line" do
+      # `effective_method_target` parses the editor's first line as an HTTP start line. On a
+      # WS message that would rewrite the row's own label from the first three
+      # space-separated tokens of a JSON blob.
+      tmp_interceptor do |ic|
+        it_ws = hold_ws(ic, "hello world again")
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        view.replace_editor("DELETE /wiped HTTP/1.1")
+        view.effective_method_target(it_ws).should eq({"GET", "/ws"})
+      end
+    end
   end
 end

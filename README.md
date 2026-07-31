@@ -32,7 +32,7 @@ engagement.
 
 ### Capture & Intercept
 - Capturing proxy for HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE
-- Intercept on HTTP/1.1 and HTTP/2, gRPC included: hold, edit, forward, or drop in flight
+- Intercept on HTTP/1.1 and HTTP/2, gRPC included: hold, edit, forward, or drop in flight — and per-message on WebSocket, opt in with `proto:ws`
 - Searchable History of every flow, with a query language for filtering
 - Scope rules, hostname overrides, and match & replace
 

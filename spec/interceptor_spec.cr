@@ -376,4 +376,82 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
     Gori::Scope.request_url("http", "acme.test", "HTTP://acme.test/x").should eq("HTTP://acme.test/x")
     Gori::Scope.request_url("http", "acme.test", "HTTPS://acme.test/x").should eq("HTTPS://acme.test/x")
   end
+
+  describe "the WebSocket gates (#500 step 2)" do
+    it "holds nothing on WS without an explicit proto:ws term, whatever the filter says" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        # A blank filter matches every HTTP message and still arms nothing on WebSocket —
+        # design D1, and the exact inverse of the HTTP default. An ordinary host condition
+        # that WOULD match this socket does not arm it either: a filter typed for HTTP must
+        # never freeze every socket on the host.
+        {"", "host:acme.test", "-proto:ws", "proto:grpc"}.each do |query|
+          ic.set_filter(query)
+          ic.arms_ws_hold?("acme.test", to_server: true).should be_false
+          ic.intercepts_ws?(to_server: true, method: "GET", host: "acme.test", target: "/ws",
+            scheme: "http", payload: "anything".to_slice).should be_false
+        end
+      end
+    end
+
+    it "holds on WS once the condition carries proto:ws, and narrows with body:" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        ic.set_filter("proto:ws body:subscribe")
+        ic.arms_ws_hold?("acme.test", to_server: true).should be_true
+        ic.intercepts_ws?(to_server: true, method: "GET", host: "acme.test", target: "/ws",
+          scheme: "http", payload: %({"op":"subscribe"}).to_slice).should be_true
+        ic.intercepts_ws?(to_server: true, method: "GET", host: "acme.test", target: "/ws",
+          scheme: "http", payload: %({"op":"ping"}).to_slice).should be_false
+      end
+    end
+
+    it "respects the catch direction on both legs" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        ic.set_filter("proto:ws")
+        ic.set_direction(Gori::Interceptor::Direction::RequestOnly)
+        ic.arms_ws_hold?("acme.test", to_server: true).should be_true
+        ic.arms_ws_hold?("acme.test", to_server: false).should be_false
+        ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+        ic.arms_ws_hold?("acme.test", to_server: true).should be_false
+        ic.arms_ws_hold?("acme.test", to_server: false).should be_true
+      end
+    end
+
+    it "arms nothing while catch is OFF, so an unarmed socket pays nothing per message" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.set_filter("proto:ws") # catch never toggled on
+        ic.arms_ws_hold?("acme.test", to_server: true).should be_false
+      end
+    end
+
+    it "queues a WS message under its own Kind, carrying the handshake's identity" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        ic.set_filter("proto:ws")
+        item = ic.enqueue_ws("hi".to_slice, to_server: true, method: "GET", target: "/ws",
+          host: "acme.test", port: 443, scheme: "https", flow_id: 9_i64, binary: false).not_nil!
+        item.kind.should eq(Gori::Interceptor::Kind::WsOut)
+        item.kind.ws?.should be_true
+        item.binary?.should be_false
+        # The message has no authority, scheme or path of its own — these are the 101's, and
+        # they are what a scope test and the queue row's label read.
+        item.host.should eq("acme.test")
+        item.target.should eq("/ws")
+        item.scheme.should eq("https")
+        item.flow_id.should eq(9_i64)
+
+        inbound = ic.enqueue_ws(Bytes[0xFF], to_server: false, method: "GET", target: "/ws",
+          host: "acme.test", port: 443, scheme: "https", flow_id: 9_i64, binary: true).not_nil!
+        inbound.kind.should eq(Gori::Interceptor::Kind::WsIn)
+        inbound.binary?.should be_true
+      end
+    end
+  end
 end
