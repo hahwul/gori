@@ -89,6 +89,23 @@ private def request(path : String, authority : String = "api.example.com") : Arr
   [{":method", "GET"}, {":scheme", "https"}, {":authority", authority}, {":path", path}]
 end
 
+private def post(path : String, authority : String = "api.example.com") : Array({String, String})
+  [{":method", "POST"}, {":scheme", "https"}, {":authority", authority}, {":path", path}]
+end
+
+# A peer that ignores its flow-control window — the case `MAX_DEFERRED_BYTES` names as its
+# trigger. Sends `bytes` of DATA in 16 KiB frames without waiting for a WINDOW_UPDATE.
+private def blast(gate : Gate, stream : UInt32, bytes : Int32) : Nil
+  chunk = Bytes.new(16384, 0x41_u8)
+  ((bytes + 16383) // 16384).times do
+    gate.accept(Frame::Header.new(Frame::Type::Data.value, 0_u8, stream, chunk))
+  end
+end
+
+private def data_bytes(frames : Array(Frame::Header), stream : UInt32) : Int32
+  frames.select { |f| f.stream_id == stream && f.frame_type == Frame::Type::Data }.sum(&.payload.size)
+end
+
 private def response(status : String) : Array({String, String})
   [{":status", status}, {"content-type", "text/plain"}]
 end
@@ -575,6 +592,191 @@ describe Gori::Proxy::H2::StreamGate do
       truncated = Bytes[0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8]
       rig.c2s.accept(headers(1_u32, truncated))
       rig.to_origin.map(&.stream_id).should eq([1_u32])
+    end
+  end
+
+  # ---- #516: the buffer ceiling actually fails OPEN ---------------------------
+  #
+  # `MAX_DEFERRED_BYTES` documents itself as the same disposition as toggle-off, `release_all`
+  # and the #123 reaper. It was not: it nulled the slot's item before forwarding, so the wait
+  # fiber's own `slot.item == item` guard rejected the release and the slot stayed in `@slots`
+  # unready forever — freezing every later stream open on the connection, while the log claimed
+  # the stream had been "forwarded unedited".
+
+  it "fails a held stream OPEN past the buffer ceiling instead of freezing the connection" do
+    with_ic do |ic|
+      ic.set_filter("path:/upload")
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/upload")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+      rig.to_origin.should be_empty
+
+      over = Gate::MAX_DEFERRED_BYTES + 16384
+      blast(rig.c2s, 1_u32, over)
+      settle
+
+      # The queue row is resolved AND the stream actually moved — the row dropping to 0 on its
+      # own is exactly the misleading signal the wedge produced.
+      ic.pending_count.should eq(0)
+      head_of(rig.to_origin, 1_u32).should eq(post("/upload")) # unedited, as the warning says
+      data_bytes(rig.to_origin, 1_u32).should eq(over)         # and every buffered byte followed it
+
+      # The connection is still usable: a LATER stream open still reaches the origin.
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free"))))
+      settle
+      head_of(rig.to_origin, 3_u32).should eq(request("/free"))
+    end
+  end
+
+  it "does not strand an innocent stream queued behind the one that overflowed" do
+    with_ic do |ic|
+      ic.set_filter("path:/upload")
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/upload")), Frame::END_HEADERS))
+      settle
+      # Stream 3 is innocent — the filter misses it — but §5.1.1 queues its open behind the hold.
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free"))))
+      settle
+      rig.to_origin.should be_empty
+
+      blast(rig.c2s, 1_u32, Gate::MAX_DEFERRED_BYTES + 16384)
+      settle
+      rig.to_origin.map(&.stream_id).uniq!.should eq([1_u32, 3_u32])
+    end
+  end
+
+  it "fails open the stream deferred AHEAD of the one that overflowed, which alone can move it" do
+    with_ic do |ic|
+      ic.set_filter("path:/held")
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held"))))
+      settle
+      # Stream 3 is queued for ORDER only (no item of its own), so releasing it is not something
+      # its own hold can do — rule 1 pins it behind stream 1 however it is settled.
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(post("/upload")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+
+      blast(rig.c2s, 3_u32, Gate::MAX_DEFERRED_BYTES + 16384)
+      settle
+      ic.pending_count.should eq(0)
+      rig.to_origin.map(&.stream_id).uniq!.should eq([1_u32, 3_u32])
+    end
+  end
+
+  it "keeps an operator DROP that was already decided when the ceiling was crossed" do
+    with_ic do |ic|
+      ic.set_filter("path:/upload")
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/upload")), Frame::END_HEADERS))
+      settle
+      # Decided, but its wait fiber has NOT run yet: the decision sits on the buffered channel
+      # while the flood crosses the ceiling on the pump fiber.
+      ic.drop(ic.pending.first.id)
+      blast(rig.c2s, 1_u32, Gate::MAX_DEFERRED_BYTES + 16384)
+      settle
+
+      # Fail-open must not overrule a decision already in flight — forwarding a request the
+      # operator dropped is the one outcome worse than holding it.
+      rig.to_origin.should be_empty
+      rig.to_client.map(&.frame_type).should eq([Frame::Type::RstStream])
+    end
+  end
+
+  it "fails a held RESPONSE open past the ceiling too" do
+    with_ic do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      rig = Rig.new(ic)
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x")), Frame::END_HEADERS))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+      rig.to_client.should be_empty
+
+      over = Gate::MAX_DEFERRED_BYTES + 16384
+      blast(rig.s2c, 1_u32, over)
+      settle
+      ic.pending_count.should eq(0)
+      head_of(rig.to_client, 1_u32).should eq(response("200"))
+      data_bytes(rig.to_client, 1_u32).should eq(over)
+    end
+  end
+
+  it "parks a multi-frame header block whole, so the ceiling cannot drop its CONTINUATIONs" do
+    with_ic do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x")), Frame::END_HEADERS))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+
+      blast(rig.s2c, 1_u32, Gate::MAX_DEFERRED_BYTES) # right up to the ceiling, not over it
+      ic.pending_count.should eq(1)
+
+      # Trailers too big for one frame: the latch re-encodes them and `reframe` splits the
+      # result at SETTINGS_MAX_FRAME_SIZE, so `park_block` hands over HEADERS + CONTINUATION and
+      # the FIRST of the two is what crosses the ceiling. Releasing on it would write that frame
+      # and append the rest to a slot already gone from `@slots`.
+      fields = [{"x-trailer", "T" * 20_000}]
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(fields), Frame::END_HEADERS | Frame::END_STREAM))
+      settle
+
+      ic.pending_count.should eq(0)
+      sent = rig.to_client.select { |f| f.stream_id == 1_u32 }
+      data_bytes(sent, 1_u32).should eq(Gate::MAX_DEFERRED_BYTES)
+
+      conts = sent.select { |f| f.frame_type == Frame::Type::Continuation }
+      conts.should_not be_empty # the block really did need more than one frame
+      block = IO::Memory.new
+      block.write(sent.reverse_each.find { |f| f.frame_type == Frame::Type::Headers }.not_nil!.payload)
+      conts.each { |f| block.write(f.payload) }
+      HPACK::Decoder.new.decode(block.to_slice).should eq(fields)
+    end
+  end
+
+  # ---- the sibling fail-open paths --------------------------------------------
+  #
+  # Every one of these releases a held item by putting a Decision on `Item#reply` and letting
+  # the gate's own wait fiber settle the slot, which is why none of them shared #516's defect —
+  # `fail_open` was the one that tried to settle by hand. The #123 reaper is literally
+  # `ic.forward(it.id)` (`runner.cr:689`), covered by the release above.
+
+  it "releases every held h2 stream when intercept is toggled OFF" do
+    with_ic do |ic|
+      ic.set_filter("path:/held")
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held"))))
+      settle
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free"))))
+      settle
+      rig.to_origin.should be_empty
+
+      ic.toggle # OFF auto-forwards everything held, so traffic never wedges
+      settle
+      rig.to_origin.map(&.stream_id).should eq([1_u32, 3_u32])
+    end
+  end
+
+  it "releases every held h2 stream on release_all (session shutdown)" do
+    with_ic do |ic|
+      ic.set_filter("path:/held")
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held"))))
+      settle
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free"))))
+      settle
+
+      ic.release_all
+      settle
+      rig.to_origin.map(&.stream_id).should eq([1_u32, 3_u32])
+      ic.pending_count.should eq(0)
     end
   end
 

@@ -155,8 +155,9 @@ module Gori::Proxy::H2
       # error there (RFC 9113 §5.1 — anything but HEADERS/PRIORITY on an idle stream). Bounded,
       # and the bound ends the connection rather than the guarantee (`MAX_REFUSED_STREAMS`).
       @refused = Set(UInt32).new
-      # Cross-direction work produced by `defer?`, which cannot return it: its Bool is the
-      # `Deferrer` contract. Drained by `accept_locked`, its only caller — `defer?` runs
+      # Cross-direction work produced by the two locked paths that cannot return it: `defer?`,
+      # whose Bool is the `Deferrer` contract, and `fail_open`, which is reached from `park` on
+      # the frame path. Drained by `accept_locked`, which both run under — `defer?` runs
       # synchronously inside `@heads.accept`, under the same already-held `@mutex`. The lock
       # invariant is intact: this is still "hand the peer's work back as data", not "touch
       # `@peer` under the lock".
@@ -266,6 +267,7 @@ module Gori::Proxy::H2
           cross = cross + abandon_locked(slot, f)
         else
           park(slot, f, pre)
+          check_ceiling(slot)
         end
       end
       take_deferred_cross(cross)
@@ -296,34 +298,94 @@ module Gori::Proxy::H2
       drain_locked
     end
 
+    # Buffer one frame behind a deferred head. The ceiling is `check_ceiling`'s, deliberately
+    # separate: `fail_open` writes the slot out and takes it out of `@slots`, so anything parked
+    # into it afterwards would never be written at all. One arrival is therefore parked WHOLE
+    # and measured once — `park_block` hands over a multi-frame header block, and releasing
+    # halfway through one would silently drop its remaining CONTINUATIONs.
     private def park(slot : Slot, frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
       slot.frames << {frame, pre}
       slot.bytes += frame.payload.size
-      fail_open(slot) if slot.bytes > MAX_DEFERRED_BYTES
     end
 
     private def park_block(slot : Slot, block : HeadRewrite::Block) : Nil
       last = block.frames.size - 1
       block.frames.each_with_index { |f, i| park(slot, f, i == last ? block.pre : nil) }
+      check_ceiling(slot)
     end
 
-    # Past the buffer ceiling. Release the hold everything is waiting on with the ORIGINAL head
-    # (fail open), not this slot's — in the request direction a slot may be queued behind an
-    # earlier one and releasing it alone would move nothing.
+    private def check_ceiling(slot : Slot) : Nil
+      fail_open(slot) if slot.bytes > MAX_DEFERRED_BYTES
+    end
+
+    # Past the buffer ceiling. The hold FAILS OPEN: the head goes out as it arrived, the parked
+    # frames follow it, and the queue row is resolved — the disposition `MAX_DEFERRED_BYTES`
+    # documents, and the same one toggle-off, `release_all` and the #123 reaper have.
+    #
+    # Two things this must not do, both of which it did before #516:
+    #
+    #   1. **Null `item` and stop.** `Interceptor#forward` only puts a Decision on the item's
+    #      channel; the RELEASE is `resolve_locked`'s, on the wait fiber, and its first act is
+    #      `slot.item == item`. Clearing the item first made that guard reject the decision, so
+    #      the slot stayed in `@slots` with `ready? == false` and — in the request direction —
+    #      its id stayed at the head of `@opens`, freezing every LATER stream open for the life
+    #      of the connection. That is the "a held stream freezes the connection" failure this
+    #      whole file exists to avoid, reached through the one exit that claimed to avoid it.
+    #      So the settle happens HERE, under the lock, and `forward` is only how the queue row
+    #      and the wait fiber are disposed of.
+    #   2. **Release the overflowing slot alone.** Rule 1 pins releases to `@opens` order, so a
+    #      slot with a deferred open still ahead of it moves nothing however it is settled.
+    #      Every slot from the head of the queue up to this one fails open together, which is
+    #      also the only thing that makes the warning below true.
     private def fail_open(slot : Slot) : Nil
-      target = slot.item ? slot : @slots.values.find(&.item)
-      return unless target
+      targets = blocking_slots(slot)
+      return if targets.empty?
+      warn_overflow(slot, targets.size - 1)
+      targets.each { |target| fail_one_open(target) }
+      @deferred_cross.concat(drain_locked)
+    end
+
+    # Make one slot releasable, with the head as it arrived: `decided` is deliberately left
+    # alone, so `release_locked` writes `pending`. A slot the operator already decided keeps
+    # that decision — this only makes it movable.
+    private def fail_one_open(target : Slot) : Nil
       item = target.item
+      # A decision is already on this item's channel (the operator acted, and its wait fiber has
+      # not been scheduled yet). That fiber owns the settle and will run it in a moment; failing
+      # the slot open here would DISCARD the decision, and forwarding a request the operator
+      # dropped is the one outcome worse than holding it.
+      return if item && @interceptor.get(item.id).nil?
+      target.ready = true
       return unless item
       target.item = nil
-      unless @warned_overflow
-        @warned_overflow = true
-        ::Log.warn do
-          "h2 #{@direction}: held stream #{target.stream_id} buffered over " \
-          "#{MAX_DEFERRED_BYTES} bytes — forwarded it unedited"
-        end
-      end
       @interceptor.forward(item.id)
+    end
+
+    # Every slot that has to move for `slot` to be released, in release order. In the request
+    # direction rule 1 makes that the run of deferred opens from the head of `@opens` up to and
+    # including this one. In the response direction nothing opens streams, so a slot releases on
+    # its own.
+    private def blocking_slots(slot : Slot) : Array(Slot)
+      return [slot] unless @ordered && @opens.includes?(slot.stream_id)
+      ahead = [] of Slot
+      @opens.each do |id|
+        @slots[id]?.try { |s| ahead << s }
+        break if id == slot.stream_id
+      end
+      ahead
+    end
+
+    # Once per direction per connection. It says what actually happens next, which is the other
+    # half of #516: the old text claimed "forwarded it unedited" on a path that forwarded
+    # nothing at all and left the connection dead.
+    private def warn_overflow(slot : Slot, ahead : Int32) : Nil
+      return if @warned_overflow
+      @warned_overflow = true
+      ::Log.warn do
+        also = ahead > 0 ? " (releasing #{ahead} stream(s) deferred ahead of it too)" : ""
+        "h2 #{@direction}: held stream #{slot.stream_id} buffered over #{MAX_DEFERRED_BYTES} " \
+        "bytes — forwarding it unedited#{also}"
+      end
     end
 
     # --- sandbox side --------------------------------------------------------
