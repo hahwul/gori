@@ -4,6 +4,7 @@ require "../codec/body"
 require "../codec/content_decode"
 require "../sink"
 require "../head_rewriter"
+require "../extractor"
 require "../../interceptor"
 require "../../host_overrides"
 require "../../outbound"
@@ -74,7 +75,8 @@ module Gori::Proxy
                    @local_host : String? = nil,
                    @default_port : Int32? = nil,
                    @origin_dst : {String, Int32}? = nil,
-                   @rewrite_fixed_host : Bool = false)
+                   @rewrite_fixed_host : Bool = false,
+                   @extractor : ResponseExtract? = nil)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -662,15 +664,20 @@ module Gori::Proxy
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
-      # Match&Replace (response body): buffer + rewrite a bounded (Length/chunked),
-      # non-streaming response when a response-body rule is live. SSE / close-delimited
-      # / 101-upgrade bodies would buffer forever, so they fall through to streaming and
-      # the body rule no-ops on them (matching the intercept-hold exclusions above). A body
-      # whose declared length exceeds MAX_REWRITE_BODY is likewise left byte-exact (see the
-      # constant) so one huge download can't grow the proxy heap while a rule is on.
-      if (rw = @rewriter) && rewrite_response_body?(rw, resp, resp_framing, resp_len)
-        return forward_response_rewriting_body(rw, upstream, req, sent_req, flow_id, host, port,
-          scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
+      # What an extract rule's condition needs to know about this exchange (#501 slice 2), or
+      # nil when no extract rule is live — one lock-free atomic read on the common path.
+      extract_ref = extract_ref_for(sent_req, host, scheme, sent_resp.status, flow_id)
+
+      # Buffer the response body when a Match&Replace body rule OR a body-scoped extract rule
+      # needs the whole entity: a bounded (Length/chunked), non-streaming response. SSE /
+      # close-delimited / 101-upgrade bodies would buffer forever, so they fall through to
+      # streaming — the body rule no-ops on them (matching the intercept-hold exclusions above)
+      # and a body-scoped extract rule records that it had no body to read. A body whose
+      # declared length exceeds MAX_REWRITE_BODY is likewise left byte-exact (see the constant)
+      # so one huge download can't grow the proxy heap while a rule is on.
+      if buffer_response_body?(resp, resp_framing, resp_len)
+        return forward_response_rewriting_body(upstream, req, sent_req, flow_id, host, port,
+          scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started, extract_ref)
       end
 
       relaxed = relax_for_streaming_response(resp, resp_framing, upstream)
@@ -681,7 +688,8 @@ module Gori::Proxy
       # `relaxed` streams also run a concurrent client-abort watcher (see the helper).
       resp_capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(resp_framing, resp_len))
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
-        resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed)
+        resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed,
+        extract_ref: extract_ref)
 
       if completed && resp.status == 101
         # A 101 Switching Protocols turns the connection into a bidirectional tunnel of the
@@ -812,10 +820,15 @@ module Gori::Proxy
                                         sent_resp_head : Bytes, resp_framing : Codec::BodyFraming,
                                         resp_len : Int64, resp_capture : Codec::CaptureBuffer,
                                         flow_id : Int64, ttfb : Int64, started : Time::Instant,
-                                        relaxed : Bool = false) : Bool
+                                        relaxed : Bool = false,
+                                        extract_ref : ExtractRef? = nil) : Bool
       begin
         @io.write(sent_resp_head)
         @io.flush
+        # The head is on the wire, so a head-scoped extract rule (cookie / header) may bind off
+        # it — this is the streaming path, and P6 keeps it that way: no body is buffered here,
+        # so a body-scoped rule is told it had nothing to read rather than silently missing.
+        observe_delivered(extract_ref, sent_resp_head, nil)
         resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed)
       rescue
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
@@ -888,21 +901,32 @@ module Gori::Proxy
         state: state, error: error))
     end
 
-    # The Match&Replace response-body path (no intercept): buffer the whole body,
-    # rewrite the entity, re-frame the head (Content-Length), forward, and capture.
-    # Returns the CLIENT keep-alive decision; the upstream is reused iff we read the
-    # whole body cleanly AND the origin kept its side. Mirrors stream_nonhold_response
-    # + the reuse tail of handle_response, minus the 101/close-delimited cases (excluded
-    # at the call site so the buffer is always bounded).
-    private def forward_response_rewriting_body(rw : HeadRewriter, upstream : IO, req : Codec::RawRequest,
+    # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
+    # re-frame the head (Content-Length), forward, capture, and offer the delivered bytes to the
+    # extract rules. Returns the CLIENT keep-alive decision; the upstream is reused iff we read
+    # the whole body cleanly AND the origin kept its side. Mirrors stream_nonhold_response + the
+    # reuse tail of handle_response, minus the 101/close-delimited cases (excluded at the call
+    # site so the buffer is always bounded).
+    #
+    # `@rewriter` may have no response-body rule at all here: since #501 slice 2 a body-scoped
+    # EXTRACT rule brings a response down this path on its own, because it reads the entity.
+    # The observer is handed the FORWARDED head + body — the pair `apply_body_rewrite` keeps
+    # consistently framed — and lets `ContentDecode` de-chunk and inflate them, which is the
+    # same code path `Repeater::Sender` extraction takes (slice 1). One decode implementation,
+    # so the two surfaces cannot disagree about what a descriptor means.
+    private def forward_response_rewriting_body(upstream : IO, req : Codec::RawRequest,
                                                 sent_req : Codec::RawRequest, flow_id : Int64,
                                                 host : String, port : Int32, scheme : String,
                                                 resp : Codec::RawResponse, sent_resp_head : Bytes,
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
-                                                ttfb : Int64, started : Time::Instant) : Bool
+                                                ttfb : Int64, started : Time::Instant,
+                                                extract_ref : ExtractRef? = nil) : Bool
       buf = IO::Memory.new
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
-      sent_resp_head, fwd_body = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing) { |e| rw.rewrite_response_body(e, host) }
+      rw = @rewriter
+      sent_resp_head, fwd_body = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing) do |e|
+        rw && rw.rewrites_response_body? ? rw.rewrite_response_body(e, host) : e
+      end
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
       stored, trunc, size = capped(fwd_body)
       state = resp_complete ? Store::FlowState::Complete : Store::FlowState::Aborted
@@ -911,6 +935,9 @@ module Gori::Proxy
         @io.write(sent_resp_head)
         @io.write(fwd_body) if fwd_body
         @io.flush
+        # Delivered — head and body both, post-rewrite (P4: what the client received is what a
+        # binding must agree with).
+        observe_delivered(extract_ref, sent_resp_head, fwd_body || Bytes.empty, status: sent_resp.status)
       rescue
         # Client aborted its read mid-response — record what we have, then close.
         state = Store::FlowState::Aborted
@@ -1015,6 +1042,13 @@ module Gori::Proxy
       @io.write(out_head)
       @io.write(out_body) if out_body
       @io.flush
+      # The operator's bytes are what the client got, so they are what a binding must agree
+      # with (P4) — and a DROPPED response never reaches here at all, because the client never
+      # received it. `decision.bytes` is a complete message, so its body half is already the
+      # entity (the editor synced Content-Length); an empty one is a body we have, not a body
+      # gori withheld, hence `Bytes.empty` rather than nil.
+      observe_delivered(extract_ref_for(sent_req, host, scheme, sent_resp.status, flow_id),
+        out_head, out_body || Bytes.empty)
       stored, trunc, size = capped(out_body)
       @sink.on_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
@@ -1070,7 +1104,7 @@ module Gori::Proxy
       SocketTuning.relax(client)
       SocketTuning.relax(upstream)
       begin
-        H2::Relay.run(client, upstream, host, port, @sink)
+        H2::Relay.run(client, upstream, host, port, @sink, extractor: @extractor)
       ensure
         upstream.close rescue nil
       end
@@ -1499,14 +1533,58 @@ module Gori::Proxy
       !framing.length? || len <= MAX_REWRITE_BODY
     end
 
-    # Whether the response-body Match&Replace path applies: a body rule is live, the body is
-    # bounded (Length/chunked, not SSE / close-delimited / 101), and small enough to buffer.
-    # Extracted from handle_response so the dispatch stays flat (it just tests + branches).
-    private def rewrite_response_body?(rw : HeadRewriter, resp : Codec::RawResponse,
-                                       framing : Codec::BodyFraming, len : Int64) : Bool
-      rw.rewrites_response_body? &&
-        (framing.length? || framing.chunked?) && !sse?(resp) && resp.status != 101 &&
+    # Whether the buffered response-body path applies: SOMETHING needs the whole entity, the
+    # body is bounded (Length/chunked, not SSE / close-delimited / 101), and it is small enough
+    # to buffer. Extracted from handle_response so the dispatch stays flat (it just tests +
+    # branches).
+    #
+    # Two things can need it, and neither pays anything when it is not configured: a
+    # Match&Replace body rule (which rewrites the entity) and a body-scoped extract rule
+    # (which reads it). Both predicates are lock-free atomic counts, so the overwhelmingly
+    # common no-rule response is one integer compare away from the streaming path (P6).
+    private def buffer_response_body?(resp : Codec::RawResponse,
+                                      framing : Codec::BodyFraming, len : Int64) : Bool
+      return false unless @rewriter.try(&.rewrites_response_body?) ||
+                          @extractor.try(&.extracts_body?)
+      (framing.length? || framing.chunked?) && !sse?(resp) && resp.status != 101 &&
         rewritable_body_size?(framing, len)
+    end
+
+    # --- session-binding extraction (#501 slice 2) ----------------------------
+
+    # What an extract rule's condition needs to know about an exchange. A response carries
+    # neither a method nor a target, so both come from the request that was actually SENT
+    # (post-rewrite, post-edit) — the same source the intercept response gate reads.
+    private record ExtractRef,
+      method : String,
+      host : String,
+      target : String,
+      scheme : String,
+      status : Int32,
+      flow_id : Int64?
+
+    # Built once per response, and only when an extract rule is live: `extracts?` is a lock-free
+    # atomic read, so a proxy with no extract rule allocates nothing here.
+    private def extract_ref_for(sent_req : Codec::RawRequest, host : String, scheme : String,
+                                status : Int32, flow_id : Int64) : ExtractRef?
+      ex = @extractor
+      return nil unless ex && ex.extracts?
+      ExtractRef.new(sent_req.method, host, sent_req.target, scheme, status, flow_id)
+    end
+
+    # Offer the bytes the client actually received to the extract rules. Called AFTER the head
+    # (and body, where there is one) has been written and flushed — see `Proxy::ResponseExtract`
+    # for why the delivered bytes and not the arrived ones.
+    #
+    # `status` overrides the ref's when the delivered head is not the one the ref was built
+    # from: a body rewrite re-frames the head, and an intercept edit can change the status
+    # outright. Everything else about the exchange is the request's and cannot move.
+    private def observe_delivered(ref : ExtractRef?, head : Bytes, entity : Bytes?,
+                                  status : Int32? = nil) : Nil
+      return unless ref
+      @extractor.try(&.observe_response(head, entity,
+        method: ref.method, host: ref.host, target: ref.target, scheme: ref.scheme,
+        status: status || ref.status, flow_id: ref.flow_id))
     end
 
     # Whether the request-body Match&Replace path applies: a body rule is live, there IS a
@@ -1523,6 +1601,11 @@ module Gori::Proxy
     # (P7) — so an unmatched flow, including a compressed body a literal pattern can't
     # touch, is never re-framed. On a change we re-frame the head to Content-Length (the
     # new entity length, Transfer-Encoding dropped) and forward the rewritten entity.
+    #
+    # The two returned halves are always FRAMED CONSISTENTLY with each other, and #501's
+    # extract observer depends on that: it is handed the same pair and lets
+    # `ContentDecode.decode` do the de-chunk + inflate, so it must never be given a de-chunked
+    # body alongside a head that still declares `Transfer-Encoding: chunked`.
     private def apply_body_rewrite(head : Bytes, wire_body : Bytes?, framing : Codec::BodyFraming,
                                    & : Bytes -> Bytes) : {Bytes, Bytes?}
       return {head, wire_body} if wire_body.nil? || wire_body.empty?

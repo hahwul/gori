@@ -1,6 +1,7 @@
 require "openssl"
 require "../connect"
 require "../head_rewriter"
+require "../extractor"
 require "../../interceptor"
 require "../conn/client_conn"
 require "../upstream"
@@ -48,7 +49,8 @@ module Gori::Proxy::Tls
                    @rewriter : Proxy::HeadRewriter? = nil,
                    @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
-                   @serve_landing : Bool = true)
+                   @serve_landing : Bool = true,
+                   @extractor : Proxy::ResponseExtract? = nil)
       # Origins that definitively negotiated HTTP/1.1 (not h2) on a prior probe — a repeat
       # CONNECT skips the throwaway ALPN-reflection probe for these. See reflect_origin_h2.
       # Bare Set, no mutex: single-threaded fibers, and the read/add don't yield (the yielding
@@ -152,7 +154,7 @@ module Gori::Proxy::Tls
           fixed_host: host, fixed_port: port,
           tls_upstream: tls_upstream, verify_upstream: @verify_upstream,
           rewriter: @rewriter, interceptor: @interceptor,
-          host_overrides: @host_overrides,
+          host_overrides: @host_overrides, extractor: @extractor,
           # The name/port halves of `origin_dst` are inert here — `resolve_forward`
           # short-circuits on `fixed_host` before either is consulted — so what this actually
           # hands over is the DIAL PIN, which `ClientConn#dial_pin` reads back off it.
@@ -209,8 +211,9 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when HTTP/2 is switched off OR a Match&Replace BODY rule is live FOR
-    # THIS HOST. Anything else is a candidate, subject to the origin actually speaking h2 (see
+    # ClientConn path — when HTTP/2 is switched off, or a Match&Replace BODY or SHORT-CIRCUIT
+    # rule is live FOR THIS HOST, or a session-binding extract rule reads the response BODY for
+    # it. Anything else is a candidate, subject to the origin actually speaking h2 (see
     # reflect_origin_h2). Placing the check here also means a downgrade skips the origin ALPN
     # probe entirely: reflect_origin_h2 consults this before dialing.
     #
@@ -290,6 +293,22 @@ module Gori::Proxy::Tls
                                "cannot answer a request locally (disable the stub rule to keep h2)")
         return false
       end
+      # A BODY-scoped session-binding extract rule (#501 slice 2) earns the downgrade for
+      # exactly the reason a body rewrite rule does: it needs the response ENTITY, and DATA
+      # frames stream past this relay untouched. Head-scoped extraction (cookie / header) does
+      # NOT appear here — it reads the response head, which `H2::Extract` reaches on the relay,
+      # so a `$SESSION` bound off a `Set-Cookie` costs an h2 host nothing.
+      #
+      # Host-scoped, per #526 and #531: the gate costs a host its protocol, so it must be asked
+      # about THIS host. A rule scoped to `alpha.test` downgrading `127.0.0.1` is the regression
+      # #531 fixed, and re-introducing it through a second gate would be the same bug wearing a
+      # different rule table.
+      if @extractor.try(&.extracts_body_for_host?(host))
+        notice_downgrade(host, "a session-binding extract rule reads the response BODY and body " \
+                               "extraction on HTTP/2 is not implemented yet (a cookie / header " \
+                               "descriptor works on h2 and costs nothing)")
+        return false
+      end
       true
     end
 
@@ -314,7 +333,7 @@ module Gori::Proxy::Tls
       # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
       Proxy::SocketTuning.relax(client_tls)
       Proxy::SocketTuning.relax(upstream)
-      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter, @interceptor)
+      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter, @interceptor, @extractor)
     ensure
       upstream.close rescue nil
     end

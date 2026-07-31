@@ -239,6 +239,28 @@ Head rules take effect on connections opened after you save. A rule enabled whil
 
 The same rules are scriptable headless: `gori run rewriter` (list / add / rm / enable / disable / preview) and the MCP `create_rule` / `update_rule` / `list_rules` / `preview_rule` tools.
 
+## Session bindings
+
+A rotating token — a session cookie, a CSRF field, a bearer — is worth nothing to a rule that has to spell it out in advance. A **binding** is a name gori fills in at send time from something it saw in a response, and it has two halves that are two separate rows:
+
+- an **extract rule** (Rewriter tab, `extract` sub-tab) reads a value out of a response and binds a name to it. It carries a condition in the intercept-filter grammar (`path:/login AND status:200`), an optional host glob, and a descriptor: a cookie, a response header, a regex over the body, a JSON path, or a byte range.
+- an ordinary **Match & Replace rule** writes it back out. A replacement of `$SESSION` in a `set header` rule, or in a body `replace`, is resolved when the request goes out rather than when the rule was saved.
+
+One name is written by exactly one extract rule; a second rule claiming the same name is refused when you save it, with the reason. A name that is declared but not yet bound does **not** go out empty and does not go out as the literal `$SESSION` — the rule is skipped and the reason lands in the events feed.
+
+Extraction runs on **traffic through the proxy** and on **sends you made by hand** (a Repeater tab). It deliberately does **not** run on a sweep — Fuzzer, Miner, Discover, or an active Probe. A sweep sends attacker-shaped payloads, and a response echoing one back could rebind your session to a payload-derived value that then went out on every later request.
+
+It also runs on the bytes that were **delivered**: after Match & Replace, and after whatever you decided at the intercept gate. A response you edited binds what you edited; a response you dropped binds nothing, because the browser never got it.
+
+**Where the value lives.** In memory, for as long as the project is open. The rule is saved; the value never is — not in `settings.json`, not in the project database. A token restored on reopen is stale by construction, and re-extracting it costs one request. A bound value never appears in the events feed, in an issue, in a note or in a log line. It **does** appear in captured traffic, because that is where it came from — masking a capture would be a lie about the wire.
+
+**What a body descriptor costs.** A cookie or header descriptor reads the response head, which every response is parsed for anyway, so it costs nothing and works on HTTP/2. A regex, JSON path or byte-range descriptor needs the response body, so gori buffers the response instead of streaming it — the same trade a Match & Replace body rule makes — and **forces matching hosts to HTTP/1.1**, for the same reason a body rule does: HTTP/2 DATA frames are relayed untouched. Only hosts the rule's own glob matches are downgraded, and `gori.log` records that once per host with the reason. Streaming responses (SSE, close-delimited, WebSocket upgrades) and bodies over the buffering ceiling are never buffered, so a body descriptor cannot read them; when its condition selects one anyway, the events feed says so rather than reporting that the selector found nothing.
+
+Compressed bodies **are** decoded before a body descriptor runs, so a CSRF token in a gzipped HTML page is reachable — unlike a Match & Replace body pattern, which matches the entity as it arrived. The same descriptor means the same thing whether the proxy or a Repeater send saw the response.
+
+The `bindings` sub-tab lists every name, whether it is bound, which rule wrote it, and a masked preview. Headless: `gori run rewriter extract` / `gori run rewriter bindings`, and the MCP `create_extract_rule` / `update_extract_rule` / `list_extract_rules` tools.
+
+
 ## Import
 
 You don't have to capture everything live. From the command palette (`Ctrl-P`):

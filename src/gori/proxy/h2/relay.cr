@@ -2,7 +2,9 @@ require "./frame"
 require "./assembler"
 require "./head_rewrite"
 require "./stream_gate"
+require "./extract"
 require "../head_rewriter"
+require "../extractor"
 require "../sink"
 require "../../interceptor"
 
@@ -24,12 +26,14 @@ module Gori::Proxy::H2
   # pump never blocks on a human, so a held stream does not freeze the connection (#492 step 3).
   class Relay
     def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink,
-                 rewriter : Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil) : Nil
-      new(client, upstream, host, port, sink, rewriter, interceptor).run
+                 rewriter : Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil,
+                 extractor : Proxy::ResponseExtract? = nil) : Nil
+      new(client, upstream, host, port, sink, rewriter, interceptor, extractor).run
     end
 
     def initialize(@client : IO, @upstream : IO, @host : String, @port : Int32, @sink : FlowSink,
-                   @rewriter : Proxy::HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil)
+                   @rewriter : Proxy::HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
+                   @extractor : Proxy::ResponseExtract? = nil)
     end
 
     def run : Nil
@@ -64,7 +68,7 @@ module Gori::Proxy::H2
       out_gate = StreamGate.new("out", @upstream, conn_id, @sink, assembler, @host, @port, ic,
         HeadRewrite.new("out", @rewriter, assembler, @host))
       in_gate = StreamGate.new("in", @client, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("in", @rewriter, assembler, @host))
+        HeadRewrite.new("in", @rewriter, assembler, @host), extract_for(assembler))
       out_gate.peer = in_gate
       in_gate.peer = out_gate
       {out_gate, in_gate}
@@ -95,18 +99,26 @@ module Gori::Proxy::H2
       gate.close rescue nil
     end
 
+    # The response-side extract observer, or nil when no extract rule could ever fire. Built per
+    # connection because it carries a once-per-connection warning latch.
+    private def extract_for(assembler : Assembler) : Extract?
+      ex = @extractor
+      ex ? Extract.new(ex, assembler, @host, @port) : nil
+    end
+
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,
                            assembler : Assembler) : Nil
       rw = @rewriter
       heads = rw ? HeadRewrite.new(direction, rw, assembler, @host) : nil
+      extract = direction == "in" ? extract_for(assembler) : nil
       begin
         loop do
           frame = Frame.read(src)
           break if frame.nil? # clean EOF at a frame boundary
           if heads
-            heads.accept(frame) { |f, pre| emit(dst, conn_id, direction, assembler, f, pre) }
+            heads.accept(frame) { |f, pre| emit(dst, conn_id, direction, assembler, f, pre, extract) }
           else
-            emit(dst, conn_id, direction, assembler, frame, nil)
+            emit(dst, conn_id, direction, assembler, frame, nil, extract)
           end
         end
       rescue
@@ -117,7 +129,7 @@ module Gori::Proxy::H2
         # (this path is usually reached BECAUSE the peer went away), which is fine: the
         # capture and the projection are what still matter here.
         if h = heads
-          h.drain { |f, pre| emit(dst, conn_id, direction, assembler, f, pre) rescue nil }
+          h.drain { |f, pre| emit(dst, conn_id, direction, assembler, f, pre, extract) rescue nil }
         end
       end
     end
@@ -127,11 +139,13 @@ module Gori::Proxy::H2
     # (P6). `pre` is the already-decoded projection for a header block the rewrite path
     # owns — the assembler must not decode such a block a second time.
     private def emit(dst : IO, conn_id : Int64, direction : String, assembler : Assembler,
-                     frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
+                     frame : Frame::Header, pre : Assembler::HeadBlock?, extract : Extract? = nil) : Nil
       dst.write(frame.wire_bytes) # original wire bytes when untouched — no re-serialize/copy
       dst.flush
       @sink.on_h2_frame(conn_id, direction, frame.type, frame.flags, frame.stream_id, frame.payload)
       assembler.feed(direction, frame, pre)
+      # Session-binding extraction (#501 slice 2), after the frame is on the wire.
+      extract.try(&.observe(frame, pre))
     end
 
     private def now_us : Int64

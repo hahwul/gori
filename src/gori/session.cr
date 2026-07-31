@@ -87,11 +87,17 @@ module Gori
         # below), never on a view-only 2nd instance (which would send duplicate active probes to
         # targets and race issue-writes on the shared DB against the real capturer).
         probe = Probe::Analyzer.new(store, scope, probe_events, store.probe_mode, !config.insecure_upstream?)
+        # `extractor: bindings` is the SECOND wiring of the same object and the one slice 2 is
+        # about: `Env.layer` above makes `$SESSION` resolvable at send time, this makes proxy
+        # traffic able to BIND it. Threaded explicitly rather than read off the `Env` global,
+        # matching how `rewriter` and `interceptor` reach the same sockets — a listener built
+        # anywhere else then has to name it, instead of inheriting it invisibly.
         tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
           rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
-          serve_landing: Settings.serve_landing?)
+          serve_landing: Settings.serve_landing?, extractor: bindings)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
-          rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
+          rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
+          extractor: bindings)
         # ADDITIONAL listeners (settings.json "listeners"), sharing this project's sink, rules,
         # interceptor and host overrides — so a transparent listener captures into the same
         # project and obeys the same scope/sandbox as the primary. `proxy` above stays THE proxy
@@ -102,7 +108,7 @@ module Gori
         # operator's only other signal is traffic that never arrives).
         listener_errs = Settings.listener_config_errors
         extra = Settings.valid_listeners.map do |l|
-          build_listener(l, sink, tunnel, rules, interceptor, host_overrides)
+          build_listener(l, sink, tunnel, rules, interceptor, host_overrides, bindings)
         end
         # Per-PROJECT capture lock decides whether THIS instance captures. A 2nd
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
@@ -184,16 +190,18 @@ module Gori
 
     # Build (but do not start) the socket for one listener entry. Shared by `open` and the live
     # reconcile so a listener added at runtime is wired to the same sink, TLS tunnel, rewriter,
-    # interceptor and host overrides as one that was there at startup — a second construction
-    # site is how a reconciled listener would quietly stop obeying the project's scope.
+    # interceptor, host overrides and binding table as one that was there at startup — a second
+    # construction site is how a reconciled listener would quietly stop obeying the project's
+    # scope (or, since #501 slice 2, quietly stop binding `$SESSION`).
     def self.build_listener(l : Settings::Listener, sink : Proxy::FlowSink,
                             tunnel : Proxy::Tls::Tunnel, rules : Rules,
                             interceptor : Interceptor,
-                            host_overrides : HostOverrides) : ExtraListener
+                            host_overrides : HostOverrides,
+                            bindings : Bindings) : ExtraListener
       ExtraListener.new(l, Proxy::Server.new(l.host, l.port, sink, tls: tunnel,
         rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
         transparent: l.transparent?, target_port: l.target_port,
-        origin: l.origin_target, rewrite_host: l.rewrite_host))
+        origin: l.origin_target, rewrite_host: l.rewrite_host, extractor: bindings))
     end
 
     # The one spelling of a bind failure. `listener_rows` matches a failure back to its server by
@@ -322,7 +330,7 @@ module Gori
       failed = [] of String
       @extra_listeners = keep
       pending.each do |l|
-        e = Session.build_listener(l, @sink, @tunnel, @rules, @interceptor, @host_overrides)
+        e = Session.build_listener(l, @sink, @tunnel, @rules, @interceptor, @host_overrides, @bindings)
         @extra_listeners << e
         next unless capturing?
         begin

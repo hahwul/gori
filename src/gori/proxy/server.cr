@@ -2,6 +2,7 @@ require "socket"
 require "./sink"
 require "./connect"
 require "./head_rewriter"
+require "./extractor"
 require "../interceptor"
 require "../host_overrides"
 require "./socket_tuning"
@@ -54,7 +55,8 @@ module Gori::Proxy
                    @host_overrides : Gori::HostOverrides? = nil,
                    max_connections : Int32 = MAX_CONNECTIONS,
                    @transparent : Bool = false, @target_port : Int32 = 0,
-                   @origin : {String, String, Int32}? = nil, @rewrite_host : Bool = false)
+                   @origin : {String, String, Int32}? = nil, @rewrite_host : Bool = false,
+                   @extractor : ResponseExtract? = nil)
       @server = nil.as(TCPServer?)
       @running = false
       @slots = Channel(Nil).new(max_connections) # counting semaphore: send=acquire, receive=release
@@ -181,7 +183,8 @@ module Gori::Proxy
           serve_transparent(client)
         else
           ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor,
-            host_overrides: @host_overrides, self_addr: {@host, @port}, local_host: local_host).run
+            host_overrides: @host_overrides, self_addr: {@host, @port}, local_host: local_host,
+            extractor: @extractor).run
         end
       rescue
         # Setup (setsockopt) can raise if the peer RST'd between accept and here;
@@ -235,7 +238,7 @@ module Gori::Proxy
       ClientConn.new(client, scheme, @sink,
         fixed_host: host, fixed_port: port, tls_upstream: scheme == "https",
         rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
-        self_addr: {@host, @port}, rewrite_fixed_host: @rewrite_host).run
+        self_addr: {@host, @port}, rewrite_fixed_host: @rewrite_host, extractor: @extractor).run
     end
 
     # TLS terminated by a reverse listener. The leaf is minted for the CONFIGURED origin host,
@@ -286,7 +289,7 @@ module Gori::Proxy
         ClientConn.new(client, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides,
           default_port: Settings.listener_target_port(@target_port, tls: false),
-          origin_dst: dst).run
+          origin_dst: dst, extractor: @extractor).run
       end
     end
 

@@ -2,6 +2,7 @@ require "./frame"
 require "./head_codec"
 require "./head_rewrite"
 require "./assembler"
+require "./extract"
 require "../sink"
 require "../upstream"
 require "../../interceptor"
@@ -143,7 +144,8 @@ module Gori::Proxy::H2
 
     def initialize(@direction : String, @dst : IO, @conn_id : Int64, @sink : FlowSink,
                    @assembler : Assembler, @host : String, @port : Int32,
-                   @interceptor : Gori::Interceptor, @heads : HeadRewrite)
+                   @interceptor : Gori::Interceptor, @heads : HeadRewrite,
+                   @extract : Extract? = nil)
       @mutex = Mutex.new
       @slots = {} of UInt32 => Slot
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
@@ -652,6 +654,11 @@ module Gori::Proxy::H2
       @dst.flush
       @sink.on_h2_frame(@conn_id, @direction, frame.type, frame.flags, frame.stream_id, frame.payload)
       @assembler.feed(@direction, frame, pre)
+      # Session-binding extraction (#501 slice 2), on the frames that were actually WRITTEN.
+      # A head the sandbox suppressed or the operator dropped goes to `project`, not here, so
+      # "delivered, not arrived" holds structurally. Response direction only, and nil for every
+      # frame that is not the end of a header block.
+      @extract.try(&.observe(frame, pre))
     end
 
     # Feed a held head to the assembler for the DECODED projection only, without logging it as

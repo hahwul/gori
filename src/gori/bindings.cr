@@ -2,6 +2,8 @@ require "./env"
 require "./intercept_filter"
 require "./store"
 require "./token_extract"
+require "./proxy/extractor"
+require "./proxy/codec/http1"
 require "./repeater/engine"
 
 module Gori
@@ -32,6 +34,8 @@ module Gori
   # Repeater send path (which writes it) and every send seam (which reads it), so a Mutex
   # guards both the rule snapshot and the value table. Same contract as `Rules`.
   class Bindings < Env::Layer
+    include Proxy::ResponseExtract
+
     # What one name looks like to a readout. `value` is the raw bound value and is only
     # ever handed to a surface that masks it (`preview`) or to an explicit one-row reveal;
     # nothing here goes near a log line or an event message.
@@ -81,6 +85,16 @@ module Gori
       @compiled = compile(rules)
       @values = {} of String => Bound
       @rev = 0_u64
+      # Lock-free fast-path counts, the same pattern and for the same reason as `Rules`'
+      # (`rules.cr`): slice 2 puts this object on the PROXY RESPONSE PATH, where the common
+      # case is no extract rule at all. `@enabled_count` lets a response skip the mutex + the
+      # select-array allocation entirely; `@body_count` additionally decides whether ClientConn
+      # BUFFERS a response body that would otherwise stream, which is the expensive half (P6).
+      @enabled_count = Atomic(Int32).new(rules.count(&.enabled?))
+      @body_count = Atomic(Int32).new(rules.count { |r| r.enabled? && r.body_scoped? })
+      # Rule ids already reported as needing an entity that was not buffered, at that rule
+      # revision — see `miss_no_entity`.
+      @no_entity_reported = Set(Int64).new
     end
 
     def self.load(store : Store) : Bindings
@@ -257,16 +271,118 @@ module Gori
     def observe(raw : Repeater::Result, subject : InterceptFilter::Subject,
                 flow_id : Int64? = nil) : Array(String)
       return [] of String if raw.error
-      candidates = @mutex.synchronize do
+      run(candidates(subject), raw, flow_id, entity_available: true)
+    end
+
+    # ── Proxy::ResponseExtract (the proxy response path, slice 2) ─────────────
+
+    # Both counts are read per response on the proxy path, so both are lock-free.
+    def extracts? : Bool
+      @enabled_count.get > 0
+    end
+
+    def extracts_body? : Bool
+      @body_count.get > 0
+    end
+
+    # Whether a BODY-scoped extract rule that can actually MATCH `host` is live (#526/#531).
+    # `extracts_body?` above answers "is any live", which is the right question for `ClientConn`
+    # (already pinned to one host, deciding whether to pay for a buffer) and the WRONG one for
+    # the h2 downgrade gate: that gate costs the host its protocol, and a rule scoped to
+    # `alpha.test` must not cost `127.0.0.1` anything. Same split, same shape and the same
+    # atomic-count fast path as `Rules#rewrites_body_for_host?`.
+    #
+    # Once per CONNECT, so the mutex here is not on any hot path.
+    def extracts_body_for_host?(host : String) : Bool
+      return false if @body_count.get == 0 # lock-free fast path
+      @mutex.synchronize do
+        @rules.any? { |r| r.enabled? && r.body_scoped? && Rules.host_matches?(r.host, host) }
+      end
+    end
+
+    # A response the proxy DELIVERED to the client. See `Proxy::ResponseExtract` for why the
+    # delivered bytes and not the arrived ones, and for the framing contract on the pair.
+    #
+    # `body` is nil when the response was not buffered (streaming / oversized / the h2 relay).
+    # `body_available` is deliberately `!body.nil?` and NOT "the body is non-empty": a buffered
+    # response whose body is genuinely empty is a body we HAVE, and a body-scoped rule missing
+    # on it is an ordinary miss rather than gori never having offered it one.
+    #
+    # ## The `ContentDecode` question this settles
+    #
+    # A body-scoped descriptor runs over the DECODED body, always — `TokenExtract` decodes
+    # through `Proxy::Codec::ContentDecode`, and this path reaches it the same way
+    # `Repeater::Sender` does in slice 1. There is no per-rule "decode" flag, and that is the
+    # answer to the decision the design left open:
+    #
+    #   * **The two surfaces must not disagree.** The same `TokenLoc` on the same response has
+    #     to mean one thing whether a Repeater send or the proxy saw it. A per-rule flag would
+    #     make one descriptor mean two things depending on which observer got there first,
+    #     which is the drift the design forbade. Here both call the same function.
+    #   * **`Position` has no text-only reading at all.** `body[100...140]` over a gzip stream
+    #     is forty bytes of DEFLATE. "Document body extraction as text-only" is not a narrower
+    #     feature, it is a broken one for two of the five kinds.
+    #   * **A flag would re-open the failure class this epic exists to close.** The operator
+    #     writes `regex /csrf_token=([a-f0-9]+)/`, the page is gzipped, and the rule silently
+    #     never fires unless they also find a checkbox they had no reason to suspect. That is
+    #     #488/#489/#491/#493 with an extra step.
+    #
+    # And the hot-path cost the design was right to ask about is gated in TWO stages, neither
+    # of which is a flag:
+    #
+    #   1. `extracts_body?` — a lock-free atomic. No body-scoped rule anywhere means ClientConn
+    #      never buffers a response body at all, so nothing is decoded because nothing is held.
+    #   2. the rule's own host glob and `InterceptFilter` condition, evaluated BEFORE any decode
+    #      (see the `candidates` call below). This is the structural difference from a
+    #      Match&Replace body rule, whose `gsub` runs on EVERY response for a matching host: an
+    #      extract descriptor runs only on the responses the operator's condition SELECTS. A
+    #      `path:/login AND status:200` rule decodes one response per login, not one per
+    #      subresource, and the condition is an opt-in the operator already had to write.
+    #
+    # Best-effort by contract: an extract rule must never be able to fail a response the client
+    # is waiting on, so everything here is caught.
+    def observe_response(head : Bytes, body : Bytes?, *,
+                         method : String, host : String, target : String,
+                         scheme : String, status : Int32, flow_id : Int64? = nil) : Nil
+      return unless extracts? # lock-free: nothing configured, nothing allocated
+      subject = InterceptFilter::Subject.new(method: method, host: host, target: target,
+        scheme: scheme, status: status)
+      picked = candidates(subject)
+      return if picked.empty?
+      # Parsed only now — after the host glob and the condition have both matched. A response
+      # no rule claims never pays for this, and neither does one no rule's condition selects.
+      raw = Repeater::Result.new(head, body, Proxy::Codec::Http1.parse_response_head(head), 0_i64)
+      run(picked, raw, flow_id, entity_available: !body.nil?)
+    rescue ex
+      ::Log.warn { "extract rules skipped for a proxied response: #{ex.message}" }
+    end
+
+    # ── the shared core ───────────────────────────────────────────────────────
+
+    # The enabled rules whose host glob AND condition claim this message. Taken under the lock
+    # once; the extraction itself (which decodes a body and can run a regex) runs outside it.
+    private def candidates(subject : InterceptFilter::Subject) : Array(Compiled)
+      @mutex.synchronize do
         @compiled.select do |c|
           c.rule.enabled? && Rules.host_matches?(c.rule.host, subject.host) && c.filter.matches?(subject)
         end
       end
-      return [] of String if candidates.empty?
+    end
 
+    private def run(picked : Array(Compiled), raw : Repeater::Result, flow_id : Int64?,
+                    *, entity_available : Bool) : Array(String)
+      return [] of String if picked.empty?
       bound = [] of String
       now = Time.utc
-      candidates.each do |c|
+      picked.each do |c|
+        # A body-scoped descriptor on a response gori never buffered cannot possibly match, and
+        # saying "found nothing" would blame the selector for gori's own decision. Say which it
+        # was — once per rule per revision, because a matching condition over a long-lived SSE
+        # stream would otherwise write one row per response.
+        if !entity_available && c.rule.body_scoped?
+          miss_no_entity(c.rule, flow_id)
+          next
+        end
         value = Gori::TokenExtract.extract(raw, c.rule.token_loc, c.re)
         if value.nil? || value.empty?
           miss(c.rule, value.nil? ? "no match" : "matched an empty value", flow_id)
@@ -288,6 +404,14 @@ module Gori
     private def miss(rule : Store::ExtractRule, reason : String, flow_id : Int64?) : Nil
       @store.insert_event("bindings", "extract_miss", "warn",
         "$#{rule.name}: #{rule.token_loc.label} found nothing (#{reason})", flow_id: flow_id)
+    end
+
+    private def miss_no_entity(rule : Store::ExtractRule, flow_id : Int64?) : Nil
+      return unless @mutex.synchronize { @no_entity_reported.add?(rule.id) }
+      @store.insert_event("bindings", "extract_no_body", "warn",
+        "$#{rule.name}: #{rule.token_loc.label} needs the response body, and this response was " \
+        "streamed rather than buffered (a server-sent-event / close-delimited / 101 body, or " \
+        "one over the buffering ceiling) — the rule did not run", flow_id: flow_id)
     end
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -324,7 +448,11 @@ module Gori
         names = fresh.map(&.name)
         @values.reject! { |k, _| !names.includes?(k) }
         @rev &+= 1
+        # An edit is the operator looking at this rule, so let it say the no-body thing again.
+        @no_entity_reported.clear
       end
+      @enabled_count.set(fresh.count(&.enabled?))
+      @body_count.set(fresh.count { |r| r.enabled? && r.body_scoped? })
       # A rule edit changes which names are DECLARED, and `token_regions` paints on that.
       Env.bump_highlight_rev
     end
