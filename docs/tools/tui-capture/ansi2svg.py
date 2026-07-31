@@ -83,7 +83,15 @@ def hexc(c): return "#%02x%02x%02x" % c
 def lum(c): return (0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]) / 255.0
 def mix(a, b, t): return tuple(round(a[i]+(b[i]-a[i])*t) for i in range(3))
 
-def render(rows, title, fs=15.0, pad=18.0):
+# The window title may carry glyphs no monospace face covers (the README hero
+# uses the Mathematical Bold Script "𝓰𝓸𝓻𝓲"). Name the fonts that do carry
+# Mathematical Alphanumerics first so readers get the letters instead of tofu,
+# then fall back to the body monospace stack for ordinary titles.
+TITLE_FONTS = ("'Apple Symbols','Segoe UI Symbol','Cambria Math','STIX Two Math',"
+               "'Noto Sans Math','DejaVu Sans',"
+               "ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace")
+
+def render(rows, title, fs=15.0, pad=18.0, aria=None):
     cw = fs*0.60
     ch = fs*1.20
     cols = max((len(r) for r in rows), default=0)
@@ -116,7 +124,9 @@ def render(rows, title, fs=15.0, pad=18.0):
     titleh = 34.0 if title is not None else 0.0
     W = cols*cw + pad*2
     H = nrows*ch + pad*2 + titleh
-    aria = html.escape(title or "gori terminal screenshot")
+    # A decorative title (see TITLE_FONTS) says nothing to a screen reader, so
+    # the caller can pass a spoken label separately.
+    aria = html.escape(aria or title or "gori terminal screenshot")
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" '
                f'viewBox="0 0 {W:.1f} {H:.1f}" font-family="ui-monospace,\'SF Mono\',\'JetBrains Mono\',Menlo,Consolas,monospace" '
@@ -130,7 +140,8 @@ def render(rows, title, fs=15.0, pad=18.0):
         for k,(cx,col) in enumerate([(0,"#e0645f"),(1,"#e0b24f"),(2,"#4fb06a")]):
             out.append(f'<circle cx="{pad+cx*16:.1f}" cy="{titleh/2:.1f}" r="5.5" fill="{col}"/>')
         out.append(f'<text x="{W/2:.1f}" y="{titleh/2+5:.1f}" text-anchor="middle" '
-                   f'fill="{hexc(label_col)}" font-size="{fs*0.82:.1f}px">{html.escape(title)}</text>')
+                   f'fill="{hexc(label_col)}" font-family="{TITLE_FONTS}" '
+                   f'font-size="{fs*0.82:.1f}px">{html.escape(title)}</text>')
     y0 = pad + titleh
     body = []
     txt = []
@@ -176,12 +187,13 @@ if __name__ == "__main__":
     ap.add_argument("infile")
     ap.add_argument("outfile")
     ap.add_argument("--title", default=None)
+    ap.add_argument("--aria", default=None, help="spoken label; defaults to --title")
     ap.add_argument("--fs", type=float, default=15.0)
     a = ap.parse_args()
     with open(a.infile, "r", encoding="utf-8", errors="replace") as f:
         data = f.read()
     rows = parse(data)
-    svg = render(rows, a.title, fs=a.fs)
+    svg = render(rows, a.title, fs=a.fs, aria=a.aria)
     with open(a.outfile, "w", encoding="utf-8") as f:
         f.write(svg)
     print(f"wrote {a.outfile} ({len(svg)} bytes)")

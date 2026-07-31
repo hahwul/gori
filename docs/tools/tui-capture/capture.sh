@@ -46,9 +46,16 @@ trap 'tmux kill-session -t goricap 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 # A minimal settings.json so the first-run wizard is skipped. The theme is
 # rewritten before each palette pass; the seed run below doesn't care which.
+# write_settings <theme> [pet] — pass "pet" to wake Miss Ring in the body's
+# bottom-right corner. She ships OFF, so only the hero shot asks for her; the
+# doc scenes document the default install.
 write_settings() {
+  local pet=""
+  if [ "${2:-}" = pet ]; then
+    pet='"pet":{"enabled":true,"placement":"body","motion":"lively","notices":true},'
+  fi
   cat > "$GORI_HOME/settings.json" <<JSON
-{"theme":"$1","mouse":true,"pretty_bodies":true,
+{"theme":"$1","mouse":true,"pretty_bodies":true,$pet
  "network":{"bind_host":"127.0.0.1","bind_port":8070,"upstream_proxy":""}}
 JSON
 }
@@ -91,7 +98,8 @@ done
 # Launches `gori <subcmd>` in a fresh tmux pane, optionally walks the project
 # picker preamble, sends the keys, and renders the capture to SVG. Interleave
 # the literal token SLEEP<seconds> to pause between keys.
-# Set SHOT_COLS for a single call to widen that pane beyond the default $COLS.
+# Set SHOT_COLS for a single call to widen that pane beyond the default $COLS,
+# and SHOT_ARIA when the window title is decorative and needs a spoken label.
 _shoot() {
   local name="$1" rows="$2" title="$3" subcmd="$4" preamble="$5"; shift 5
   local cols="${SHOT_COLS:-$COLS}"
@@ -119,7 +127,10 @@ _shoot() {
   python3 - "$WORK/$name.ansi" <<'PY'
 import sys; p=sys.argv[1]; t=open(p).read().replace("8091","8070"); open(p,"w").write(t)
 PY
-  python3 "$HERE/ansi2svg.py" "$WORK/$name.ansi" "$OUT/$name.svg" --title "$title" --fs 15
+  local aria=()
+  if [ -n "${SHOT_ARIA:-}" ]; then aria=(--aria "$SHOT_ARIA"); fi
+  python3 "$HERE/ansi2svg.py" "$WORK/$name.ansi" "$OUT/$name.svg" \
+    --title "$title" ${aria[@]+"${aria[@]}"} --fs 15
 }
 
 # run_scene <name> <rows> <title> <tmux-keys...> — the full TUI over the seeded DB.
@@ -172,6 +183,11 @@ shoot_themes() {
 # a working engagement instead of a dozen rows over a lot of empty space. Only
 # the README shot wants these, and it runs last, so the doc scenes above keep
 # the smaller, stable flow set.
+#
+# Ten, not "as many as fit": the 38-row pane lists 25 flows, and seed_all
+# already lands 11, so this leaves the last few rows empty — which is where
+# Miss Ring sits. Add more and she covers live SIZE/DUR cells, and a hero with
+# a half-eaten number column reads as a rendering bug.
 seed_readme_extra() {
   seed "https://httpbingo.org/anything/api/v2/orders?status=paid&limit=50"
   seed "https://httpbingo.org/anything/api/v2/orders/9182"
@@ -180,30 +196,41 @@ seed_readme_extra() {
   seed "https://httpbingo.org/anything/admin/config?debug=true"
   seed https://httpbingo.org/status/401
   seed https://httpbingo.org/status/403
-  seed https://httpbingo.org/status/404
   seed https://httpbingo.org/redirect/1
-  seed https://httpbingo.org/gzip
-  seed https://httpbingo.org/html
-  seed https://httpbingo.org/uuid
   seed https://api.github.com/repos/hahwul/gori
-  seed https://api.github.com/rate_limit
   seed https://example.com/robots.txt
 }
 
-# The README hero (readme.svg): History with the Space menu open, shot on a much
-# wider pane than the doc scenes. The README renders one image edge to edge with
+# The README hero (readme.svg): the History tab, shot on a much wider pane than
+# the doc scenes. The README renders one image edge to edge with
 # no sidebar, so the 132x26 doc geometry reads as a cramped little window there;
 # 180x38 fills the width and still lands near a 2:1 card.
+#
+# This one shot wears the brand wordmark in the window chrome instead of a
+# "gori · Scene" caption: it is the hero on both the README and the docs
+# landing, where it stands for the tool rather than for one screen. The spoken
+# label still says what the screen is (see SHOT_ARIA / ansi2svg --aria).
+#
+# It shows plain History — no menu over it — with Miss Ring on: a hero should
+# read as the tool at rest, and she fills the corner the way an open Space menu
+# used to. Every other scene keeps her off, defaults being what docs document.
+readme_seeded=0
 shoot_readme() {
-  OUT="$TUI_ROOT"
-  write_settings goridark
-  echo "▸ topping up the throwaway project for the README shot…"
-  "$GORI" run capture --listen 127.0.0.1 --port "$PORT" >/dev/null 2>&1 &
-  local cap=$!; sleep 2
-  seed_readme_extra
-  sleep 1; kill "$cap" 2>/dev/null || true; sleep 1
-  SHOT_COLS=180 run_scene readme 38 "gori · History · Space menu" \
-    3 SLEEP1 Down SLEEP0.3 Space SLEEP1.2
+  local theme="$1" out="$2"
+  OUT="$out"; mkdir -p "$OUT"
+  write_settings "$theme" pet
+  # Top up once, not once per palette: a second pass would double every extra
+  # flow and the light hero would no longer match the dark one.
+  if [ "$readme_seeded" = 0 ]; then
+    echo "▸ topping up the throwaway project for the README shot…"
+    "$GORI" run capture --listen 127.0.0.1 --port "$PORT" >/dev/null 2>&1 &
+    local cap=$!; sleep 2
+    seed_readme_extra
+    sleep 1; kill "$cap" 2>/dev/null || true; sleep 1
+    readme_seeded=1
+  fi
+  SHOT_COLS=180 SHOT_ARIA="gori TUI — the History tab listing captured HTTP flows" \
+    run_scene readme 38 "𝓰𝓸𝓻𝓲" 3 SLEEP1 Enter SLEEP2.5
 }
 
 # One pass per "theme:subdir" spec in $SHOTS. The seeded DB is shared across
@@ -225,9 +252,14 @@ if want themes; then
   shoot_themes
 fi
 
+# The hero is the docs landing showcase too, and that image swaps with the
+# reader's theme, so it follows the same "theme:subdir" passes as the scenes.
 if want readme; then
-  echo "▸ capturing the README hero → $TUI_ROOT/readme.svg"
-  shoot_readme
+  for spec in $SHOTS; do
+    theme="${spec%%:*}" subdir="${spec#*:}"
+    echo "▸ capturing the README hero ($theme) → $TUI_ROOT${subdir:+/$subdir}/readme.svg"
+    shoot_readme "$theme" "$TUI_ROOT${subdir:+/$subdir}"
+  done
 fi
 
 echo "▸ done. Review the SVGs under $TUI_ROOT"

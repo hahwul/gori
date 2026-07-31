@@ -46,7 +46,20 @@ the same run by `shoot_themes` — the History scene under each gallery palette.
 `readme.svg` is its own shot (`shoot_readme`), not part of the doc set: the
 repo README renders one image edge to edge with no sidebar, so it uses a much
 wider 180x38 pane and tops the throwaway project up with extra traffic first.
-It runs last, so the doc scenes above keep the smaller, stable flow set.
+It runs last, so the doc scenes above keep the smaller, stable flow set. It is
+also the docs landing showcase, which swaps with the reader's theme, so it is
+shot once per `SHOTS` palette like the scenes are (the traffic top-up happens
+only on the first pass, so light and dark show the same flows).
+
+Its window chrome carries the `𝓰𝓸𝓻𝓲` wordmark instead of a `gori · Scene`
+caption — it stands for the tool, not for one screen. Decorative glyphs say
+nothing out loud, so the shot passes `SHOT_ARIA` and `ansi2svg.py` writes that
+as the SVG's `aria-label` instead of the title.
+
+It is also the only shot with Miss Ring on (`write_settings <theme> pet`); she
+ships off, and the doc scenes document the default install. Her corner is why
+`seed_readme_extra` stops at ten: the flow list has to end a few rows short of
+the bottom or she covers live SIZE/DUR cells.
 
 ## Render a single frame by hand
 
