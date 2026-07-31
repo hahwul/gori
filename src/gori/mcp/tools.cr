@@ -107,6 +107,7 @@ module Gori
         "create_oast_provider", "update_oast_provider", "set_oast_provider_enabled", "delete_oast_provider",
         "minimize_repeater",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
+        "create_extract_rule", "update_extract_rule", "delete_extract_rule", "set_extract_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
         "oast_start", "oast_stop",
@@ -206,8 +207,15 @@ module Gori
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil)
+        # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
+        # call: an MCP server is long-lived and IS an extraction source — `send_request` goes
+        # through `Repeater::Sender`, so a `$SESSION` bound by a login here has to still be
+        # bound on the next tool call. Rebuilding it per call would silently make every
+        # binding write-only.
+        @bindings = nil.as(Gori::Bindings?)
         if s = @store
           Env.load_project(s)
+          bind_binding_layer(s)
         end
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
@@ -245,6 +253,19 @@ module Gori
       private def refresh_project_env : Nil
         return unless s = @store
         Env.load_project(s)
+        # RELOAD the existing table rather than replacing it: an extract rule may have been
+        # added by the TUI or `gori run` since the last call, but the VALUES this process
+        # observed are its own and must survive the refresh.
+        @bindings.try(&.reload)
+      end
+
+      # Publish this project's extract rules as `Env`'s send-time layer. Same per-project
+      # global the TUI's `Session.open` and the CLI's `open_store` install, so `$SESSION`
+      # means one thing on all three surfaces.
+      private def bind_binding_layer(s : Store) : Nil
+        b = Gori::Bindings.load(s)
+        @bindings = b
+        Env.layer = b
       end
 
       # Tools that work with no project store open.
@@ -716,6 +737,12 @@ module Gori
             "List the project's Match & Replace rules (the Rewriter tab — literal/regex replace or " \
             "add/set/remove header, applied to in-flight request/response HEAD or BODY), in apply order." { }
 
+          tool j, "list_extract_rules",
+            "List the project's EXTRACT rules — the read half of a session binding. Each one " \
+            "observes a response and binds one named value ($SESSION) in memory, which a Match & " \
+            "Replace rule injects with replacement \"$SESSION\". Values are never persisted and are " \
+            "not readable here. Unordered: an extract rule produces no bytes, so two cannot compose." { }
+
           tool j, "list_projects",
             "List gori projects on this host (name, slug, db_path, db_size, last_modified, " \
             "workspace binding) and which one this server is currently serving (current:true). " \
@@ -939,6 +966,48 @@ module Gori
 
             tool j, "delete_rule", "Delete a Match & Replace rule by id." do |s|
               s.field "id", intprop("rule id from list_rules"), required: true
+            end
+
+            tool j, "create_extract_rule",
+              "Add an EXTRACT rule: observe a response and bind one named value ($NAME) in memory " \
+              "for a Match & Replace rule to inject with replacement \"$NAME\". Only a DELIBERATE " \
+              "single send (Repeater / send_request) feeds extraction — sweeps deliberately do not, " \
+              "because a response echoing an attacker-shaped payload back could otherwise rebind the " \
+              "operator's session to it. One name, one writer: a duplicate name is refused." do |s|
+              s.field "name", strprop("the binding name, without the $ (letters, digits and _, not starting with a digit)"), required: true
+              s.field "kind", strprop("cookie | header | regex | position | jsonpath (default cookie). regex/position/jsonpath read the DECODED body; cookie/header read the parsed head")
+              s.field "selector", strprop("cookie name, header name, regex source, or JSON path ($.a.b[0]) — required for every kind except position")
+              s.field "when", strprop("which messages to read, in intercept-filter syntax (host:/path:/method:/scheme:/status:, AND/OR/NOT, '' = any). status: matches responses only")
+              s.field "host", strprop("optional host glob scoping the rule ('example.com' substring, '*.example.com' wildcard; empty = all hosts)")
+              s.field "pos_start", intprop("kind=position only: start byte offset into the decoded body")
+              s.field "pos_end", intprop("kind=position only: end byte offset (exclusive); must exceed pos_start")
+              s.field "enabled", boolprop("create the rule already enabled (default true)")
+            end
+
+            tool j, "update_extract_rule",
+              "Update an existing extract rule by id. Omitted fields are left unchanged. Renaming " \
+              "drops the old name's bound value rather than re-labelling it." do |s|
+              s.field "id", intprop("extract rule id from list_extract_rules"), required: true
+              s.field "name", strprop("new binding name (without the $)")
+              s.field "kind", strprop("cookie | header | regex | position | jsonpath")
+              s.field "selector", strprop("cookie/header name, regex source, or JSON path")
+              s.field "when", strprop("intercept-filter condition ('' = any message)")
+              s.field "host", strprop("host glob ('' = all hosts)")
+              s.field "pos_start", intprop("kind=position only: start byte offset")
+              s.field "pos_end", intprop("kind=position only: end byte offset (exclusive)")
+              s.field "enabled", boolprop("enable/disable the rule")
+            end
+
+            tool j, "set_extract_rule_enabled",
+              "Enable or disable an extract rule by id. Disabling also UN-DECLARES its name, so a " \
+              "Match & Replace rule injecting it goes back to refusing rather than sending a value " \
+              "nothing is refreshing." do |s|
+              s.field "id", intprop("extract rule id from list_extract_rules"), required: true
+              s.field "enabled", boolprop("true to enable, false to disable"), required: true
+            end
+
+            tool j, "delete_extract_rule", "Delete an extract rule by id (its bound value is forgotten too)." do |s|
+              s.field "id", intprop("extract rule id from list_extract_rules"), required: true
             end
 
             tool j, "delete_project",
@@ -1589,6 +1658,7 @@ module Gori
         when "jwt_attacks"             then jwt_attacks_tool(h)
         when "sequence_analyze"        then sequence_analyze(h)
         when "list_rules"              then list_rules
+        when "list_extract_rules"      then list_extract_rules
         when "list_projects"           then list_projects
         when "ql_explain"              then ql_explain(h)
         end
@@ -1670,6 +1740,10 @@ module Gori
         when "update_rule"               then gated { update_rule(h) }
         when "preview_rule"              then gated { preview_rule(h) }
         when "set_rule_enabled"          then gated { set_rule_enabled(h) }
+        when "create_extract_rule"       then gated { create_extract_rule(h) }
+        when "update_extract_rule"       then gated { update_extract_rule(h) }
+        when "delete_extract_rule"       then gated { delete_extract_rule(h) }
+        when "set_extract_rule_enabled"  then gated { set_extract_rule_enabled(h) }
         when "delete_rule"               then gated { delete_rule(h) }
           # switch is always available (selecting a DB is not a data mutation).
         when "switch_project" then switch_project(h)

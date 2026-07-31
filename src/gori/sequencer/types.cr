@@ -1,3 +1,5 @@
+require "../token_extract"
+
 module Gori
   # The token-randomness analyzer ("Sequencer"): collects a large sample of a
   # security token (session cookie, CSRF token, reset token, API key) and grades
@@ -28,58 +30,13 @@ module Gori
       end
     end
 
-    # How a token is pulled out of a response. Enum order is the display order in the
-    # descriptor editor / config overlay.
-    enum ExtractKind
-      Cookie   # a Set-Cookie value by name
-      Header   # a named response header value
-      Regex    # capture group 1 (else whole match) over the decoded body
-      Position # a fixed byte range of the decoded body
-      JsonPath # a dotted/bracketed path into a JSON body
-
-      def label : String
-        case self
-        in Cookie   then "cookie"
-        in Header   then "header"
-        in Regex    then "regex"
-        in Position then "position"
-        in JsonPath then "jsonpath"
-        end
-      end
-
-      def self.parse?(token : String) : ExtractKind?
-        case token.downcase.strip
-        when "cookie", "c"           then Cookie
-        when "header", "h"           then Header
-        when "regex", "re", "r"      then Regex
-        when "position", "pos", "p"  then Position
-        when "jsonpath", "json", "j" then JsonPath
-        end
-      end
-    end
-
-    # Where the token lives in a response. One `selector` string is reused per kind
-    # (cookie name | header name | regex source | jsonpath expr); Position uses the
-    # ints (a half-open byte range over the DECODED body).
-    record TokenLoc,
-      kind : ExtractKind,
-      selector : String = "",
-      pos_start : Int32 = 0,
-      pos_end : Int32 = 0 do
-      def label : String
-        case kind
-        in ExtractKind::Cookie   then "cookie #{selector.inspect}"
-        in ExtractKind::Header   then "header #{selector}"
-        in ExtractKind::Regex    then "regex /#{selector}/"
-        in ExtractKind::Position then "body[#{pos_start}...#{pos_end}]"
-        in ExtractKind::JsonPath then "jsonpath #{selector}"
-        end
-      end
-
-      def self.cookie(name : String) : TokenLoc
-        new(ExtractKind::Cookie, name)
-      end
-    end
+    # The descriptor types moved to `Gori::ExtractKind` / `Gori::TokenLoc` when session
+    # bindings (#501) became their second consumer. Aliased rather than renamed at the ~40
+    # call sites that spell them `Sequencer::` — the Sequencer is still where an operator
+    # meets them, and a rename would have been churn in five surfaces for no reader's
+    # benefit. See `token_extract.cr`.
+    alias ExtractKind = Gori::ExtractKind
+    alias TokenLoc = Gori::TokenLoc
 
     # One collected token: a network row in live mode, or a pasted line in manual
     # mode. `token` is nil on an extraction miss (still emitted so the operator sees

@@ -31,6 +31,133 @@ module Gori
       h
     end
 
+    # ── the send-time layer (session bindings, #501) ──────────────────────────
+    #
+    # `$NAME` has exactly ONE syntax and TWO resolution times, and the split is the
+    # point of the feature. An env var is BUILD-time: every plan builder expands it
+    # once before a run starts (#356), and a name that resolves to nothing is refused
+    # there (#519/#525). A BINDING is SEND-time: its value is observed from a response
+    # and may change between request 1 and request 20 of the same run, which is exactly
+    # the run that otherwise produces a page of 401s.
+    #
+    # So the two layers are never merged for expansion. `expand`'s default stays
+    # `effective_vars` — build-time and static — and the send pass below resolves the
+    # binding half ALONE. That is what keeps #356's "one Env.expand, at plan-build"
+    # invariant literally true: nothing re-expands an env var, and a var whose value
+    # happens to contain a `$` cannot acquire a second meaning on the way to the socket.
+    #
+    # An abstract Layer rather than a direct reference to `Gori::Bindings` so `env.cr`
+    # stays free of Store/Repeater/InterceptFilter — everything the binding table needs
+    # and nothing this module should know about.
+    abstract class Layer
+      # Names an extract rule declares, whether or not one is bound yet.
+      abstract def declared : Array(String)
+      # Currently bound values, by name.
+      abstract def values : Hash(String, String)
+      # Bumped on every rule edit and every rebind, so a consumer can cache a merged
+      # snapshot instead of rebuilding one per message (see `Rules`).
+      abstract def rev : UInt64
+    end
+
+    # The open project's binding table, or nil when none is open. Set by `Session.open`
+    # and cleared on close — the same per-project-global lifetime `Settings.project_env_vars`
+    # already has, and for the same reason: `$SESSION` must mean one thing in the Rewriter,
+    # a Repeater tab, a Fuzzer template and `--target` alike. A constructor argument would
+    # have guaranteed only that the four send seams remember it, while leaving every OTHER
+    # surface free to forget — the opposite of the property the feature needs.
+    @@layer : Layer? = nil
+
+    def self.layer : Layer?
+      @@layer
+    end
+
+    def self.layer=(l : Layer?) : Layer?
+      @@layer = l
+      bump_highlight_rev
+      l
+    end
+
+    # Names declared by an extract rule. A declared name is NOT "unresolved" at plan-build
+    # time — it resolves later, at send — so `unresolved` skips it by default and the send
+    # seams pass `deferred: nil` to get it back.
+    def self.declared_bindings : Array(String)
+      @@layer.try(&.declared) || [] of String
+    end
+
+    # Bound values only. Never merged into `effective_vars`; see the note above.
+    def self.binding_values : Hash(String, String)
+      @@layer.try(&.values) || {} of String => String
+    end
+
+    def self.binding_rev : UInt64
+      @@layer.try(&.rev) || 0_u64
+    end
+
+    # What a DISPLAY path should treat as known: build-time vars plus whatever is bound
+    # right now. Widening the default of `mask_secrets` / `token_regions` to this is what
+    # makes every surface that already masks (or paints a `$KEY`) cover bindings too,
+    # with no per-surface change. Deliberately NOT the default of `expand`.
+    def self.display_vars : Hash(String, String)
+      h = effective_vars
+      binding_values.each { |(k, v)| h[k] = v }
+      h
+    end
+
+    # Substitute BOUND binding values in final wire bytes, at send time. Returns the same
+    # slice when there is nothing to do — the common case, and byte-fidelity (P7) besides.
+    #
+    # Scans the whole message, head and body: injecting a token into a body is a designed
+    # case (a `Replace` rule with `part: Body`, an operator's Repeater template). That is
+    # safe here in a way `unresolved_wire`'s head-only rule was not, because this matches a
+    # SPECIFIC declared name rather than the `$`+`[A-Za-z_]` shape — a random collision with
+    # `$SESSION` in a binary body is a 2^-56 event, not the ~3-per-4KB one #525 measured.
+    def self.expand_bindings(bytes : Bytes) : Bytes
+      vals = binding_values
+      return bytes if vals.empty?
+      prefix = Settings.env_prefix
+      return bytes if prefix.empty? || !contains_prefix?(bytes, prefix)
+      expand(String.new(bytes), vals, prefix).to_slice
+    end
+
+    def self.expand_bindings(text : String) : String
+      vals = binding_values
+      return text if vals.empty?
+      expand(text, vals, Settings.env_prefix)
+    end
+
+    # Declared binding names in `bytes` that have no value yet, first-appearance order.
+    # A send seam asks this BEFORE `expand_bindings` and refuses, naming what it wants —
+    # the same shape #525 gave plan-build, one stage later.
+    def self.unbound(bytes : Bytes) : Array(String)
+      unbound(String.new(bytes))
+    end
+
+    def self.unbound(text : String) : Array(String)
+      declared = declared_bindings
+      return [] of String if declared.empty?
+      prefix = Settings.env_prefix
+      return [] of String if prefix.empty? || !text.byte_index(prefix)
+      vals = binding_values
+      # `deferred: nil` — the whole point here is to REPORT a declared name, and only a
+      # declared one: an unknown `$FOO` is plan-build's business (#525) and reporting it
+      # again from a send seam would be the second behaviour for one syntax the design
+      # rules out.
+      names = scan_unresolved(text.to_slice, vals, prefix, nil)
+      names.select { |n| declared.includes?(n) }
+    end
+
+    private def self.contains_prefix?(bytes : Bytes, prefix : String) : Bool
+      pb = prefix.to_slice
+      return false if pb.empty? || pb.size > bytes.size
+      i = 0
+      last = bytes.size - pb.size
+      while i <= last
+        return true if pb.each_with_index.all? { |b, j| bytes[i + j] == b }
+        i += 1
+      end
+      false
+    end
+
     # Expand env tokens in wire-form HTTP text (LF or CRLF) and return CRLF bytes.
     # Normalizes newlines with a byte-level scan (`normalize_crlf`) — NOT
     # `gsub(/\r?\n/, "\r\n")` and NOT `split('\n').join("\r\n")` — for two reasons:
@@ -132,11 +259,17 @@ module Gori
     # UTF-8 (a captured flow's body loaded verbatim). `String#chars` decodes lossily
     # to U+FFFD, which can both invent and destroy a token boundary — the exact
     # hazard `expand` was made byte-level to avoid.
+    #
+    # `deferred` names are skipped: a name an extract rule declares is not unresolved, it
+    # is resolved LATER (see `unbound`). Without that, `$SESSION` in a Fuzzer template
+    # would be refused at plan-build — leaving one syntax with two contradictory rules,
+    # which is the thing #525's shape exists to prevent. Pass `nil` to get every name back.
     def self.unresolved(text : String, vars : Hash(String, String) = effective_vars,
-                        prefix : String = Settings.env_prefix) : Array(String)
+                        prefix : String = Settings.env_prefix,
+                        deferred : Array(String)? = declared_bindings) : Array(String)
       return [] of String if prefix.empty?
       return [] of String unless text.byte_index(prefix) # same fast no-op as `expand`
-      scan_unresolved(text.to_slice, vars, prefix)
+      scan_unresolved(text.to_slice, vars, prefix, deferred)
     end
 
     # `unresolved` over the HEAD of wire-form text ALONE — the request line and
@@ -156,11 +289,12 @@ module Gori
     # question is which tokens the author wrote in the head — not where the head ends
     # after some var's value has been spliced in.
     def self.unresolved_wire(text : String, vars : Hash(String, String) = effective_vars,
-                             prefix : String = Settings.env_prefix) : Array(String)
+                             prefix : String = Settings.env_prefix,
+                             deferred : Array(String)? = declared_bindings) : Array(String)
       return [] of String if prefix.empty?
       return [] of String unless text.byte_index(prefix)
       bytes = text.to_slice
-      scan_unresolved(bytes[0...head_body_boundary(bytes)], vars, prefix)
+      scan_unresolved(bytes[0...head_body_boundary(bytes)], vars, prefix, deferred)
     end
 
     # Render token names back into the spelling the operator typed (`["A"]` → `"$A"`),
@@ -170,8 +304,17 @@ module Gori
       names.join(", ") { |n| "#{prefix}#{n}" }
     end
 
+    # The one spelling of a send refused because a declared binding has no value. Every
+    # send seam returns this same sentence so the Fuzzer's result rows, a `gori run` abort
+    # and an MCP error cannot drift about what happened — and it NAMES the binding, which
+    # is the whole lesson of #491: a refusal that does not name its gate is barely better
+    # than silence. Each surface prefixes its own prescription (#525's shape).
+    def self.unbound_error(names : Array(String)) : String
+      "unbound session binding #{token_list(names)} — nothing has extracted it yet"
+    end
+
     private def self.scan_unresolved(bytes : Bytes, vars : Hash(String, String),
-                                     prefix : String) : Array(String)
+                                     prefix : String, deferred : Array(String)?) : Array(String)
       names = [] of String
       seen = Set(String).new
       prefix_bytes = prefix.to_slice
@@ -185,10 +328,14 @@ module Gori
             if vars.has_key?(key)
               i += plen + consumed
             else
-              names << key if seen.add?(key)
-              # `i += plen`, NOT `plen + consumed`: `expand` re-scans from just past
-              # the prefix on a miss, and this has to walk the same offsets or the two
+              # A DEFERRED name is dropped from the report but still walks the MISS
+              # branch: `expand` does not know about bindings, so it re-scans from just
+              # past the prefix here, and this has to walk the same offsets or the two
               # could disagree about what a later token even is.
+              if seen.add?(key)
+                names << key unless deferred && deferred.includes?(key)
+              end
+              # `i += plen`, NOT `plen + consumed`: see above.
               i += plen
             end
           else
@@ -258,7 +405,10 @@ module Gori
     # just the masked spans. Byte-level value matching is also strictly more
     # precise than char matching: it finds a value's literal bytes regardless of
     # whether the surrounding haystack happens to be well-formed UTF-8.
-    def self.mask_secrets(text : String, vars : Hash(String, String) = effective_vars,
+    # `display_vars`, not `effective_vars`: a bound session token is exactly the value a
+    # masking surface must not print, and widening the default here is what makes every
+    # existing caller mask it without a per-caller change (the design's "for free").
+    def self.mask_secrets(text : String, vars : Hash(String, String) = display_vars,
                           prefix : String = Settings.env_prefix) : String
       return text if prefix.empty? || vars.empty?
 
@@ -293,8 +443,11 @@ module Gori
     # Char-based (not byte) — the consumer (Highlight.env_spans_in) slices with
     # `text[a...b]`, which is char-indexed in Crystal, so multi-byte text stays aligned.
     # `known` is true when KEY is registered in `vars`.
+    # `known` is `display_vars`-wide, so a BOUND `$SESSION` paints like a set env var and
+    # a declared-but-unbound one paints like an unknown key — visible before send, which is
+    # the affordance the TUI gets for free and the CLI/MCP have to state in a refusal.
     def self.token_regions(text : String, prefix : String = Settings.env_prefix,
-                           vars : Hash(String, String) = effective_vars) : Array({Int32, Int32, Bool})
+                           vars : Hash(String, String) = display_vars) : Array({Int32, Int32, Bool})
       return [] of {Int32, Int32, Bool} if prefix.empty?
       regions = [] of {Int32, Int32, Bool}
       chars = text.chars
@@ -415,6 +568,14 @@ module Gori
     # since a byte that's part of an invalid sequence simply won't match `[A-Za-z0-9_]`
     # and gets left alone by the caller.
     private def self.read_key_bytes(bytes : Bytes, start : Int32, n : Int32) : {String, Int32}?
+      read_key_bytes?(bytes, start, n)
+    end
+
+    # Public form: `Rules#substitute` (#501) resolves `$KEY` inside a rule's replacement in
+    # ONE pass that also handles `$1` and `$$`, so it cannot call `expand` — but it must
+    # read a key EXACTLY the way `expand` does, or the two would disagree about where a
+    # token ends.
+    def self.read_key_bytes?(bytes : Bytes, start : Int32, n : Int32) : {String, Int32}?
       return nil if start >= n || !KEY_HEAD.matches?(bytes[start].chr.to_s)
       j = start + 1
       while j < n && KEY_TAIL.matches?(bytes[j].chr.to_s)

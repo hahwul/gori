@@ -3,6 +3,7 @@ require "../repeater/engine"
 require "../repeater/h2_engine"
 require "../proxy/codec/http1"
 require "../outbound"
+require "../env"
 require "../scope"
 require "../repeater/conn_pool"
 
@@ -83,6 +84,22 @@ module Gori::Fuzz
     end
 
     def send(bytes : Bytes) : Repeater::Result
+      # Session bindings (#501) resolve HERE, per send, not at plan-build: a rotating token
+      # can change between request 1 and request 20 of the same run, which is exactly the
+      # run that otherwise produces a page of 401s. Env vars are untouched — the plan
+      # builders already expanded those once (#356), and this pass only ever substitutes a
+      # name an extract rule declares.
+      #
+      # A declared-but-unbound name REFUSES rather than shipping `""` or the literal
+      # `$SESSION`, and is charged to `blocked` rather than to a second counter — the same
+      # argument the comment below makes for the scope gate. The refusal names the binding.
+      if (unbound = Gori::Env.unbound(bytes)).present?
+        @blocked += 1
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Env.unbound_error(unbound))
+      end
+      # BEFORE the scope gate, because the gate keys on the target actually sent — the same
+      # rule `ClientConn` states for Match&Replace on the proxy path.
+      bytes = Gori::Env.expand_bindings(bytes)
       # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect

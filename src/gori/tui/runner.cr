@@ -37,6 +37,7 @@ require "./notes_view"
 require "./project_view"
 require "./intercept_view"
 require "./rewriter_rule_overlay"
+require "./extract_rule_overlay"
 require "./rewriter_stub_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
@@ -4354,6 +4355,19 @@ module Gori::Tui
       ov.on_preview = ->rewriter_preview_text(Store::MatchRule)
       ov.on_commit = -> { rewriter_controller.apply_rewriter_rule(ov) }
       ov.on_edit_stub = -> { open_rewriter_stub_editor(ov) }
+      open_overlay(ov)
+    end
+
+    # Host: open the extract-rule popup on the Rewriter tab's `extract` sub-tab (#501).
+    # `on_validate` is injected for the same reason `on_preview` is above: "is `$SESSION`
+    # already written by another rule" is a question only the live binding table can answer,
+    # and the form stays store-free.
+    def open_extract_rule_editor(rule : Store::ExtractRule?) : Nil
+      ov = rule ? ExtractRuleOverlay.editing(rule) : ExtractRuleOverlay.adding
+      ov.on_validate = ->(form : ExtractRuleOverlay) do
+        @session.bindings.validate(form.name, form.kind, form.selector, except_id: form.edit_id)
+      end
+      ov.on_commit = -> { rewriter_controller.apply_extract_rule(ov) }
       open_overlay(ov)
     end
 

@@ -1086,7 +1086,11 @@ module Gori::Tui
       return unless ec
       prefix = Settings.env_prefix
       return ec.close if prefix.empty?
-      vars = Env.effective_vars
+      # `display_vars`, so a bound `$SESSION` completes beside the env vars — one syntax,
+      # one dropdown. `declared` is read ONCE here, not per candidate row: it takes the
+      # binding table's mutex.
+      vars = Env.display_vars
+      declared = Env.declared_bindings
       return ec.close if vars.empty?
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
@@ -1110,7 +1114,7 @@ module Gori::Tui
         .select { |k| pl.empty? || k.downcase.starts_with?(pl) }
         .sort!
         .first(40)
-        .map { |k| {k, env_value_preview(vars[k])} }
+        .map { |k| {k, env_value_preview(vars[k], declared.includes?(k))} }
       if matches.empty? || (matches.size == 1 && matches[0][0] == partial)
         ec.close # nothing to offer, or already fully typed
       else
@@ -1127,7 +1131,15 @@ module Gori::Tui
     end
 
     # A one-line, whitespace-collapsed, length-capped value hint for the dropdown row.
-    private def env_value_preview(v : String) : String
+    #
+    # A BINDING is masked and an env var is not, and the difference is deliberate. An env
+    # var is what the operator typed, and the Project tab's ENV pane shows it in plaintext
+    # two tabs over — hiding it here would be theatre. A binding value came off the wire, is
+    # never printed anywhere else in gori, and is usually a credential; the length-capped
+    # form showed its first 19 characters, which is right for `$HOST` and wrong for a
+    # session cookie. `mask_preview` shows enough to tell two tokens apart and no more.
+    private def env_value_preview(v : String, masked : Bool = false) : String
+      return Bindings.mask_preview(v) if masked
       s = v.gsub(/\s+/, " ").strip
       s.size > 20 ? "#{s[0, 19]}…" : s
     end
@@ -1157,9 +1169,13 @@ module Gori::Tui
       key = line[ks...ke]
       # A valid identifier: non-empty and starting with a key head (`$1` never expands).
       return nil if key.empty? || !env_key_head?(key[0])
-      val = Env.effective_vars[key]?
+      # `display_vars`: the peek is the operator's answer to "is my `$SESSION` bound, and to
+      # what?" in the editor where they are writing the token — Repeater, Fuzzer, Intercept —
+      # with no new surface at all. A declared-but-UNBOUND name has no value and so gets no
+      # peek, which is the same answer `token_regions` paints (it stays `env_unknown`).
+      val = Env.display_vars[key]?
       return nil unless val # unregistered → just a literal string, not an env reference
-      {key, env_value_preview(val)}
+      {key, env_value_preview(val, Env.declared_bindings.includes?(key))}
     end
   end
 end

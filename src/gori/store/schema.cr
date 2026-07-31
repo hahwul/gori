@@ -612,7 +612,35 @@ module Gori
         "ALTER TABLE flows ADD COLUMN short_circuited INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5]
+      # Session bindings (#501), the READ half. An extract rule observes a response and
+      # writes one named value into an IN-MEMORY table; the write half is an ordinary
+      # `match_rules` row whose `replacement` says `$NAME`, which is why this migration adds
+      # no column there and no second ordered list.
+      #
+      # `name` is UNIQUE and that is load-bearing, not hygiene: a binding is keyed by NAME
+      # ALONE (the host constraint lives on the rule), so two rules writing `$SESSION` would
+      # force every reader to answer "which one?" — the question the design refuses to
+      # create. `Bindings#validate` refuses it first with a message; this is the backstop.
+      #
+      # No `position` column: extraction transforms nothing, so extract rules cannot compose
+      # and have no meaningful order. No column for the VALUE either — see `ExtractRule`.
+      V6 = [
+        <<-SQL,
+        CREATE TABLE extract_rules (
+          id           INTEGER PRIMARY KEY,
+          enabled      INTEGER NOT NULL DEFAULT 1,
+          name         TEXT    NOT NULL UNIQUE,
+          match_filter TEXT    NOT NULL DEFAULT '',
+          kind         TEXT    NOT NULL,
+          selector     TEXT    NOT NULL DEFAULT '',
+          pos_start    INTEGER NOT NULL DEFAULT 0,
+          pos_end      INTEGER NOT NULL DEFAULT 0,
+          host         TEXT    NOT NULL DEFAULT ''
+        )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

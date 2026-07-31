@@ -18,6 +18,11 @@ module Gori::Tui
       @view = RewriterView.new
       @sel = 0
       @scroll = 0
+      # `rules` writes a value, `extract` reads one, `bindings` says whether the read worked.
+      # One workflow, one body, three sub-tabs — see RewriterView::SUBS.
+      @sub = :rules
+      @sub_sel = 0
+      @sub_scroll = 0
       @focus = :list # :list | :preview_in | :preview_out
       @preview_input = TextArea.new(DEFAULT_SAMPLE)
       @out_scroll = 0
@@ -40,18 +45,36 @@ module Gori::Tui
       @host.session.rules
     end
 
+    private def bindings : Bindings
+      @host.session.bindings
+    end
+
     private def rule_list : Array(Store::MatchRule)
       rules_engine.rules
+    end
+
+    private def extract_list : Array(Store::ExtractRule)
+      bindings.rules
+    end
+
+    private def binding_rows : Array(Bindings::Row)
+      bindings.rows
+    end
+
+    private def sub_count : Int32
+      @sub == :extract ? extract_list.size : binding_rows.size
     end
 
     # Pull external (MCP / other-instance) rule edits when the tab becomes active.
     def on_enter : Nil
       rules_engine.reload
+      bindings.reload
       @sel = @sel.clamp(0, {rule_list.size - 1, 0}.max)
     end
 
     def on_external_change : Nil
       rules_engine.reload
+      bindings.reload
     end
 
     def selected_rule : Store::MatchRule?
@@ -64,12 +87,58 @@ module Gori::Tui
       shell = BodyChrome.shell_focused(focus, multi_pane: true)
       BodyChrome.framed(screen, rect, shell) do |inner|
         @last_body = inner
-        list = rule_list
-        @sel = @sel.clamp(0, {list.size - 1, 0}.max)
-        ensure_visible(inner, list.size)
-        @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
-          @focus, body_focused, rules_engine.active?, @preview_input, preview_output, @out_scroll)
+        case @sub
+        when :extract  then render_extract(screen, inner, body_focused)
+        when :bindings then render_bindings(screen, inner, body_focused)
+        else                render_rules(screen, inner, body_focused)
+        end
       end
+    end
+
+    private def render_rules(screen : Screen, inner : Rect, body_focused : Bool) : Nil
+      list = rule_list
+      @sel = @sel.clamp(0, {list.size - 1, 0}.max)
+      ensure_visible(inner, list.size)
+      @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
+        @focus, body_focused, rules_engine.active?, @preview_input, preview_output, @out_scroll)
+    end
+
+    private def render_extract(screen : Screen, inner : Rect, body_focused : Bool) : Nil
+      rules = extract_list
+      bound = Set(String).new
+      binding_rows.each { |r| bound << r.name if r.bound? }
+      @sub_sel = @sub_sel.clamp(0, {rules.size - 1, 0}.max)
+      ensure_sub_visible(inner, rules.size)
+      @view.render_extract(screen, inner, rules, bound, @sub_sel, @sub_scroll, body_focused)
+    end
+
+    private def render_bindings(screen : Screen, inner : Rect, body_focused : Bool) : Nil
+      rows = binding_rows
+      @sub_sel = @sub_sel.clamp(0, {rows.size - 1, 0}.max)
+      ensure_sub_visible(inner, rows.size)
+      @view.render_bindings(screen, inner, rows, @sub_sel, @sub_scroll, body_focused, Time.utc)
+    end
+
+    private def ensure_sub_visible(inner : Rect, count : Int32) : Nil
+      lh = @view.sub_row_capacity(inner)
+      return if lh <= 0
+      if @sub_sel < @sub_scroll
+        @sub_scroll = @sub_sel
+      elsif @sub_sel >= @sub_scroll + lh
+        @sub_scroll = @sub_sel - lh + 1
+      end
+      @sub_scroll = @sub_scroll.clamp(0, {count - lh, 0}.max)
+    end
+
+    # ⇥ / ⇧⇥ cycles the sub-tab strip. Selection and scroll reset because the three lists
+    # are unrelated — carrying row 7 from `rules` into a two-row `bindings` list would be a
+    # selection the operator never made.
+    private def cycle_sub(d : Int32) : Nil
+      i = RewriterView::SUBS.index(@sub) || 0
+      @sub = RewriterView::SUBS[(i + d) % RewriterView::SUBS.size]
+      @sub_sel = 0
+      @sub_scroll = 0
+      @focus = :list
     end
 
     private def ensure_visible(inner : Rect, count : Int32) : Nil
@@ -102,11 +171,59 @@ module Gori::Tui
 
     # --- keys ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
+      # `[` / `]` switch sub-tabs from ANY focus in the body, including the preview editor:
+      # the strip is the body's own navigation and must not be reachable only from the list.
+      #
+      # NOT ⇥. The shell owns Tab/BackTab for its focus cycle and says so at the gate
+      # (`runner.cr`: "wins over the per-tab body editors below — Repeater used to hijack
+      # Tab"), so a body binding for it never fires. Driving the built TUI is what showed
+      # that: ⇥ moved focus to the tab bar and back, and the sub-tab never changed.
+      c = ev.char || ev.key.to_char
+      if !ev.ctrl? && !ev.alt? && (c == ']' || c == '[')
+        cycle_sub(c == ']' ? 1 : -1)
+        return true
+      end
+      return handle_sub_key(ev) unless @sub == :rules
       case @focus
       when :preview_in  then handle_preview_in_key(ev)
       when :preview_out then handle_preview_out_key(ev)
       else                   handle_list_key(ev)
       end
+    end
+
+    # The `extract` and `bindings` sub-tabs share one list model: they are both a flat,
+    # unordered list (extraction produces no bytes, so extract rules have no position to
+    # reorder), so neither offers ⇧J/⇧K.
+    private def handle_sub_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      c = ev.char || key.to_char
+      case
+      when key.space? && !ev.ctrl? && !ev.alt? then @host.open_space_menu
+      when key.escape?                         then @host.request_focus(:menu)
+      when key.up?, c == 'k'
+        @sub_sel <= 0 ? @host.request_focus(:menu) : (@sub_sel -= 1)
+      when key.down?, c == 'j'
+        @sub_sel = (@sub_sel + 1).clamp(0, {sub_count - 1, 0}.max)
+      else
+        return handle_sub_action_key(key, c)
+      end
+      true
+    end
+
+    private def handle_sub_action_key(key : Termisu::Input::Key, c : Char?) : Bool
+      if @sub == :bindings
+        return false unless c == 'd'
+        binding_clear
+        return true
+      end
+      case
+      when key.enter?, c == 'e' then extract_edit
+      when c == 'a'             then extract_add
+      when c == 'd'             then extract_delete
+      when c == 'x'             then extract_toggle
+      else                           return false
+      end
+      true
     end
 
     private def handle_list_key(ev : Termisu::Event::Key) : Bool
@@ -235,6 +352,21 @@ module Gori::Tui
       @host.focus_body
       inner = BodyChrome.frame_inner(rect)
       @last_body = inner
+      if s = @view.sub_at(inner, mx, my)
+        unless s == @sub
+          @sub = s
+          @sub_sel = 0
+          @sub_scroll = 0
+          @focus = :list
+        end
+        return true
+      end
+      unless @sub == :rules
+        if idx = @view.sub_row_at(inner, mx, my, @sub_scroll, sub_count)
+          @sub_sel = idx
+        end
+        return true
+      end
       case @view.pane_at(inner, mx, my)
       when :list
         @focus = :list
@@ -252,6 +384,10 @@ module Gori::Tui
     end
 
     def handle_wheel(step : Int32) : Bool
+      unless @sub == :rules
+        @sub_sel = (@sub_sel + step).clamp(0, {sub_count - 1, 0}.max)
+        return true
+      end
       case @focus
       when :preview_in  then @preview_input.scroll_view(step)
       when :preview_out then @out_scroll = {@out_scroll + step, 0}.max
@@ -329,14 +465,85 @@ module Gori::Tui
       true
     end
 
+    # --- extract sub-tab actions (#501) ---
+
+    def selected_extract_rule : Store::ExtractRule?
+      extract_list[@sub_sel]?
+    end
+
+    def extract_add : Nil
+      @host.open_extract_rule_editor(nil)
+    end
+
+    def extract_edit : Nil
+      if rule = selected_extract_rule
+        @host.open_extract_rule_editor(rule)
+      else
+        @host.status("no extract rule selected")
+      end
+    end
+
+    def extract_toggle : Nil
+      rule = selected_extract_rule || return @host.status("no extract rule selected")
+      bindings.toggle(rule.id)
+      # Disabling the WRITER also un-declares the name, so a rewrite rule naming it goes
+      # back to refusing rather than injecting a value nothing is refreshing any more.
+      @host.status(rule.enabled? ? "$#{rule.name} extract rule disabled" : "$#{rule.name} extract rule enabled")
+    end
+
+    def extract_delete : Nil
+      rule = selected_extract_rule || return @host.status("no extract rule selected")
+      @host.confirm("Delete extract rule", "Delete “$#{rule.name}”? Its binding is forgotten too.",
+        confirm_label: "Delete", danger: true) do
+        bindings.remove(rule.id)
+        @sub_sel = @sub_sel.clamp(0, {extract_list.size - 1, 0}.max)
+        @host.status("extract rule deleted")
+      end
+    end
+
+    # Forget one bound value without touching its rule — the next send naming it refuses
+    # instead of going out with a stale token, which is the point of having the action.
+    def binding_clear : Nil
+      row = binding_rows[@sub_sel]? || return @host.status("no binding selected")
+      return @host.status("$#{row.name} is not bound") unless row.bound?
+      bindings.clear(row.name)
+      @host.status("$#{row.name} cleared")
+    end
+
+    # Commit the extract-rule editor overlay. Returns false — and says why — when the table
+    # refuses the rule (a duplicate name, an uncompilable regex), so the form stays open.
+    def apply_extract_rule(ov : ExtractRuleOverlay) : Bool
+      err =
+        if id = ov.edit_id
+          bindings.update(id, ov.name, ov.match_filter, ov.kind, ov.selector,
+            ov.pos_start, ov.pos_end, ov.host)
+        else
+          bindings.add(ov.name, ov.match_filter, ov.kind, ov.selector,
+            ov.pos_start, ov.pos_end, ov.host)
+        end
+      if err
+        @host.status(err)
+        return false
+      end
+      @sub = :extract
+      @sub_sel = {extract_list.index { |r| r.name == ov.name } || 0, 0}.max
+      true
+    end
+
     def body_hint(focus : Symbol) : String
+      case @sub
+      when :extract
+        return "[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc tabs"
+      when :bindings
+        return "[/] sub-tab · ↑/↓ select · d clear · space cmds · esc tabs"
+      end
       case @focus
       when :preview_in
         "type sample HTTP · ↑ list · ↓/→ output · esc list"
       when :preview_out
         "↑/↓ scroll · ← input · esc input"
       else
-        "↑/↓ select · ↓ preview · a add · ↵/e edit · x on/off · d delete · ⇧J/⇧K reorder · space cmds · esc tabs"
+        "[/] sub-tab · ↑/↓ select · ↓ preview · a add · ↵/e edit · x on/off · d delete · ⇧J/⇧K reorder · esc tabs"
       end
     end
   end

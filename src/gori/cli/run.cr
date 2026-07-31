@@ -167,7 +167,7 @@ module Gori
         {"links", "List/add/delete an issue's or note's evidence links"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
         {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
-        {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},
+        {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview, extract, bindings)"},
         {"project [list]", "List known projects"},
         {"project create", "Create (or reopen) a project by name"},
         {"project delete", "Delete a project and everything captured in it"},
@@ -273,6 +273,13 @@ module Gori
       private def self.open_store(project : Project) : Store
         store = Store.open(project.db_path, retention_flows: Settings.retention_flows)
         Env.load_project(store)
+        # The project's extract rules become `Env`'s send-time layer here too (#501) — with
+        # NO values, because a binding lives in the memory of the gori that observed it and
+        # nothing writes one to disk. That is not a gap to paper over: it is what makes a
+        # headless send refuse with "unbound session binding $SESSION" instead of the much
+        # less useful "unresolved env $SESSION" that an undeclared name would earn. One
+        # syntax, one rule, and a refusal that names its gate on every surface.
+        Env.layer = Bindings.load(store)
         store
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"

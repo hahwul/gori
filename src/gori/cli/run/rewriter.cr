@@ -10,6 +10,8 @@ module Gori
         when "disable"      then cmd_rewriter_set_enabled(false, args[1..])
         when "preview"      then cmd_rewriter_preview(args[1..])
         when "list"         then cmd_rewriter_list(args[1..])
+        when "extract"      then cmd_rewriter_extract(args[1..])
+        when "bindings"     then cmd_rewriter_bindings(args[1..])
         when nil            then cmd_rewriter_list(args)
         else
           if (s = sub) && s.starts_with?('-')
@@ -17,8 +19,237 @@ module Gori
           else
             STDERR.puts "gori run rewriter: unknown subcommand '#{sub}'"
             STDERR.puts "Usage: gori run rewriter [list options] | add | rm|delete <id> | enable <id> | disable <id> | preview"
+            STDERR.puts "       gori run rewriter extract [list|add|rm|enable|disable] | bindings"
             exit 1
           end
+        end
+      end
+
+      # --- session bindings, the READ half (#501) ------------------------------
+      #
+      # `gori run rewriter extract ...` mirrors the Rewriter tab's `extract` sub-tab and the
+      # MCP `*_extract_rule` tools, one CRUD for one table. It lives UNDER `rewriter` rather
+      # than beside it because it is half of one workflow: an extract rule writes `$SESSION`
+      # and a Match & Replace rule reads it, and splitting them into two top-level commands
+      # would hide that.
+
+      private def self.cmd_rewriter_extract(args : Array(String)) : Nil
+        case sub = args.first?
+        when "add"          then cmd_extract_add(args[1..])
+        when "rm", "delete" then cmd_extract_rm(args[1..])
+        when "enable"       then cmd_extract_set_enabled(true, args[1..])
+        when "disable"      then cmd_extract_set_enabled(false, args[1..])
+        when "list"         then cmd_extract_list(args[1..])
+        when nil            then cmd_extract_list(args)
+        else
+          if (s = sub) && s.starts_with?('-')
+            cmd_extract_list(args)
+          else
+            STDERR.puts "gori run rewriter extract: unknown subcommand '#{sub}'"
+            STDERR.puts "Usage: gori run rewriter extract [list] | add | rm|delete <id> | enable <id> | disable <id>"
+            exit 1
+          end
+        end
+      end
+
+      # `#3 [x] $SESSION <- status:200 AND path:/login <- cookie "sid" @acme.test`
+      private def self.extract_rule_row(r : Store::ExtractRule) : String
+        mark = r.enabled? ? "x" : " "
+        host = r.host.empty? ? "" : " @#{r.host}"
+        cond = r.match_filter.empty? ? "any message" : r.match_filter
+        "##{r.id} [#{mark}] $#{r.name} <- #{cond} <- #{r.token_loc.label}#{host}"
+      end
+
+      private def self.cmd_extract_list(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run rewriter extract [list] [options]"
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run rewriter extract: unknown option: #{f}\n#{p}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          rules = store.extract_rules
+          if format == :json
+            puts(JSON.build { |j| j.array { rules.each { |r| extract_rule_json(j, r) } } })
+          elsif rules.empty?
+            puts "No extract rules configured."
+          else
+            rules.each { |r| puts extract_rule_row(r) }
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.extract_rule_json(j : JSON::Builder, r : Store::ExtractRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "enabled", r.enabled?
+          j.field "name", r.name
+          j.field "when", r.match_filter
+          j.field "host", r.host
+          j.field "kind", r.kind.label
+          j.field "selector", r.selector
+          j.field "pos_start", r.pos_start
+          j.field "pos_end", r.pos_end
+        end
+      end
+
+      private def self.cmd_extract_add(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        name = ""
+        when_s = ""
+        host = ""
+        kind_s = "cookie"
+        selector = ""
+        range_s = ""
+        disabled = false
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run rewriter extract add --name=SESSION --kind=cookie --selector=sid [options]\n\n" \
+                     "The rule OBSERVES a response and binds one named value in memory; a Match &\n" \
+                     "Replace rule then injects it with `--value='$SESSION'`. The value itself is\n" \
+                     "never persisted — see `gori run rewriter bindings`."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--name=NAME", "Binding name, without the $ (required)") { |v| name = v }
+          p.on("--when=FILTER", "Which messages to read, in intercept-filter syntax ('' = any)") { |v| when_s = v }
+          p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
+          p.on("--kind=KIND", "cookie|header|regex|position|jsonpath (default cookie)") { |v| kind_s = v }
+          p.on("--selector=SEL", "Cookie/header name, regex, or JSON path") { |v| selector = v }
+          p.on("--range=A:B", "position only: a half-open byte range of the decoded body") { |v| range_s = v }
+          p.on("--disabled", "Create the rule disabled") { disabled = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run rewriter extract add: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter extract add: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        kind = Gori::ExtractKind.parse?(kind_s) ||
+               abort("gori run rewriter extract add: invalid --kind '#{kind_s}' (cookie|header|regex|position|jsonpath)")
+        a, b = parse_extract_range(range_s)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          # Through `Bindings`, not `store.insert_extract_rule`, so the CLI gets the SAME
+          # refusals the TUI and MCP do — one name one writer, a valid key, a regex that
+          # compiles — rather than a UNIQUE-constraint failure that reads as "store busy".
+          bindings = Bindings.new(store, store.extract_rules)
+          if err = bindings.add(name, when_s, kind, selector, a, b, host)
+            abort "gori run rewriter extract add: #{err}"
+          end
+          id = store.extract_rules.find { |r| r.name == name }.try(&.id) || 0_i64
+          abort "gori run rewriter extract add: failed to persist rule (store busy or unwritable)" if id == 0
+          store.set_extract_rule_enabled(id, false) if disabled
+          puts "Extract rule ##{id} added — $#{name} binds from #{kind.label}."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.parse_extract_range(raw : String) : {Int32, Int32}
+        return {0, 0} if raw.empty?
+        a, _, b = raw.partition(':')
+        ai = a.to_i32?
+        bi = b.to_i32?
+        abort "gori run rewriter extract: invalid --range '#{raw}' (expected A:B)" if ai.nil? || bi.nil? || bi <= ai
+        {ai, bi}
+      end
+
+      private def self.cmd_extract_rm(args : Array(String)) : Nil
+        id, store = extract_target(args, "rm|delete")
+        begin
+          abort "gori run rewriter extract rm: no rule ##{id}" unless store.extract_rules.any?(&.id.==(id))
+          abort "gori run rewriter extract rm: failed to delete (store busy or unwritable)" unless store.delete_extract_rule(id)
+          puts "Extract rule ##{id} deleted."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_extract_set_enabled(enabled : Bool, args : Array(String)) : Nil
+        verb = enabled ? "enable" : "disable"
+        id, store = extract_target(args, verb)
+        begin
+          abort "gori run rewriter extract #{verb}: no rule ##{id}" unless store.extract_rules.any?(&.id.==(id))
+          abort "gori run rewriter extract #{verb}: failed to persist (store busy or unwritable)" unless store.set_extract_rule_enabled(id, enabled)
+          puts "Extract rule ##{id} #{enabled ? "enabled" : "disabled"}."
+        ensure
+          store.close
+        end
+      end
+
+      # The shared `<id> [--project|--db]` parse for rm/enable/disable.
+      private def self.extract_target(args : Array(String), verb : String) : {Int64, Store}
+        db_path : String? = nil
+        project_name : String? = nil
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run rewriter extract #{verb} <id> [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run rewriter extract #{verb}: unknown option: #{f}\n#{p}" }
+        end
+        rest = [] of String
+        parser.unknown_args { |before, _| rest = before }
+        parser.parse(args)
+        id = rest.first?.try(&.to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
+        {id, open_store(resolve_read_project(project_name, db_path))}
+      end
+
+      # The `bindings` readout. A binding VALUE lives only in the memory of the gori instance
+      # that observed it — nothing writes one to `settings.json`, the project DB, the event
+      # feed, an issue, a note or a log line. So from another process this can honestly report
+      # only which names are DECLARED and by what, and it says so rather than printing an
+      # empty "value" column that would read like "not bound".
+      private def self.cmd_rewriter_bindings(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run rewriter bindings [options]\n\n" \
+                     "Lists the names extract rules declare. Values are held in memory by the\n" \
+                     "running gori and are never written anywhere, so another process cannot\n" \
+                     "read them — open the Rewriter tab's `bindings` sub-tab for the live table."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run rewriter bindings: unknown option: #{f}\n#{p}" }
+        end
+        parser.parse(args)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          rules = store.extract_rules
+          if format == :json
+            puts(JSON.build do |j|
+              j.object do
+                j.field "values_readable", false
+                j.field "note", "binding values live in the running gori's memory and are never persisted"
+                j.field "bindings" { j.array { rules.each { |r| extract_rule_json(j, r) } } }
+              end
+            end)
+          elsif rules.empty?
+            puts "No bindings declared — add an extract rule with `gori run rewriter extract add`."
+          else
+            rules.each do |r|
+              puts "$#{r.name}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
+            end
+            puts
+            puts "Values are held in memory by the running gori and are never persisted."
+          end
+        ensure
+          store.close
         end
       end
 

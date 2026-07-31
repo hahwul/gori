@@ -33,6 +33,11 @@ module Gori
     # writes grouped issues; runs for both the TUI and headless capture.
     getter probe : Probe::Analyzer
     getter rules : Rules
+    # Session bindings (#501): the persisted extract rules plus the IN-MEMORY name→value
+    # table they write. Same "shared: proxy reads, TUI edits (Mutex-guarded)" contract as
+    # `rules`, and the same lifetime — the values are gone when the project closes, which
+    # is the point (a restored token is stale by construction).
+    getter bindings : Bindings
     getter scope : Scope
     getter host_overrides : HostOverrides
     getter interceptor : Interceptor
@@ -66,7 +71,14 @@ module Gori
         config.port = Settings.effective_bind_port
         lock = nil.as(CaptureLock?)
         sink = Proxy::StoreSink.new(store)
-        rules = Rules.load(store)                  # shared: proxy reads, TUI edits (Mutex-guarded)
+        rules = Rules.load(store)       # shared: proxy reads, TUI edits (Mutex-guarded)
+        bindings = Bindings.load(store) # #501: extract rules persist, values stay in memory
+        # Publish this project's binding table as `Env`'s send-time layer. A per-project
+        # global, exactly like `Settings.project_env_vars` two lines up and for exactly the
+        # same reason: `$SESSION` has to mean one thing in the Rewriter, in a Repeater tab,
+        # in a Fuzzer template and in `--target` alike. Assigning here (rather than passing
+        # the table to each sender) is what makes that true for a surface nobody remembered.
+        Env.layer = bindings
         scope = Scope.load(store)                  # shared by the TUI lens AND intercept gating
         host_overrides = HostOverrides.load(store) # per-project /etc/hosts; proxy reads, TUI edits (Mutex-guarded)
         interceptor = Interceptor.new(scope)       # shared: proxy fibers hold, TUI decides
@@ -145,13 +157,16 @@ module Gori
           store.clear_intercept_state!
           probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, sink, bind_error, lock, extra, listener_errs)
+        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, scope, host_overrides, interceptor, sink, bind_error, lock, extra, listener_errs)
         session.sync_capture_status!
         session
       rescue ex
         # A store/rules/scope failure (NOT the bind, which is handled above) would
         # otherwise leak the store's writer fiber + db fd, the events channels, the Probe
         # fibers, and the lock fd. Tear them down, then re-raise for the caller.
+        # The binding layer is cleared with them: a half-opened project must not leave a
+        # dangling table whose `$KEY`s the next surface would happily resolve.
+        Env.layer = nil
         lock.try(&.close) rescue nil
         probe.try(&.stop) rescue nil
         store.close rescue nil
@@ -193,7 +208,7 @@ module Gori
     getter intercept_token : String
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
-                   @rules, @scope, @host_overrides, @interceptor, @sink : Proxy::FlowSink,
+                   @rules, @bindings, @scope, @host_overrides, @interceptor, @sink : Proxy::FlowSink,
                    @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil,
                    @extra_listeners : Array(ExtraListener) = [] of ExtraListener,
@@ -468,6 +483,11 @@ module Gori
     end
 
     def close : Nil
+      # Drop the binding layer FIRST, before any fiber can send again: the values are
+      # per-project and must not survive into the next project, and a `$SESSION` resolved
+      # against a closed project's table would be the worst kind of cross-project leak.
+      # The values themselves die with the object — nothing wrote them anywhere.
+      Env.layer = nil if Env.layer.same?(@bindings)
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       stop_extra_listeners

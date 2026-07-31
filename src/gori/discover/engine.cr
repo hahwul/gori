@@ -7,6 +7,7 @@ require "./calibrate"
 require "../repeater/engine"
 require "../repeater/h2_engine"
 require "../repeater/conn_pool"
+require "../env"
 require "../proxy/codec/content_decode"
 
 module Gori::Discover
@@ -109,6 +110,12 @@ module Gori::Discover
       # every send (only Host varies, per target). Host + Connection are emitted
       # separately in build_get and never come from user input.
       @header_block = Headers.merge(headers).map { |name, value| "#{name}: #{value}\r\n" }.join
+      # Whether ANY `$` survives in the block. When none does — the overwhelming case — every
+      # fetch skips the binding path entirely and reuses the constructed block verbatim.
+      @header_tokens = !Settings.env_prefix.empty? && !@header_block.byte_index(Settings.env_prefix).nil?
+      @header_resolved = nil.as(String?)
+      @header_unbound = [] of String
+      @header_rev = 0_u64
       # h2 is excluded for the reason Fuzz::Sender excludes it: H2Engine frames its own
       # connection per send, and multiplexing it is a separate change with its own
       # stream-state rules.
@@ -144,7 +151,11 @@ module Gori::Discover
       unless Proxy::Codec::Http1.request_token_safe?(target) && Proxy::Codec::Http1.request_token_safe?(host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
       end
-      req = build_get(scheme, host, port, target)
+      headers = binding_headers
+      if headers.nil?
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Env.unbound_error(@header_unbound))
+      end
+      req = build_get(scheme, host, port, target, headers)
       if @http2
         Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
           verify_upstream: @verify, timeout: @timeout, overrides: @overrides)
@@ -182,7 +193,39 @@ module Gori::Discover
       pool
     end
 
-    private def build_get(scheme : String, host : String, port : Int32, target : String) : Bytes
+    # The header block with session bindings (#501) resolved, or nil when one of them is
+    # declared and unbound (the caller then refuses, naming it).
+    #
+    # **This is the one injection seam that is not a byte rewrite, and the asymmetry is
+    # real.** `Fuzz::Backend#send`, `Repeater::Sender#send` and `Rules#apply_rule` all
+    # receive final wire bytes and substitute into them. `fetch` receives
+    # `(scheme, host, port, target)` and BUILDS the request here, so there are no bytes to
+    # rewrite until after this method has run — hence a header hook rather than a byte pass.
+    # Stated rather than papered over, because it is exactly the shape of omission that lets
+    # one surface silently miss a feature every other surface has.
+    #
+    # Consequences worth being explicit about: the crawler's injection surface is the
+    # OPERATOR-SUPPLIED HEADERS ALONE. Not the request target — a crawl derives its targets
+    # from the responses it reads, so a token in one has no meaning — and not the body,
+    # since `build_get` is GET-only. `Discover::Headers.expand` already ran `Env.expand` over
+    # these values once at plan-build, so what survives here is exactly the declared binding
+    # names, resolved now instead of then.
+    #
+    # Recomputed only when the binding table moves: a brute-force pass is ~278 sends per
+    # directory, and the block is identical for every one of them.
+    private def binding_headers : String?
+      return @header_block unless @header_tokens
+      rev = Gori::Env.binding_rev
+      if rev != @header_rev || (@header_resolved.nil? && @header_unbound.empty?)
+        @header_rev = rev
+        @header_unbound = Gori::Env.unbound(@header_block)
+        @header_resolved = @header_unbound.empty? ? Gori::Env.expand_bindings(@header_block) : nil
+      end
+      @header_resolved
+    end
+
+    private def build_get(scheme : String, host : String, port : Int32, target : String,
+                          header_block : String) : Bytes
       default = scheme == "https" ? 443 : 80
       hostline = port == default ? host : "#{host}:#{port}"
       # `Connection: close` only when NOT pooling. It is what made every send single-use, and
@@ -192,7 +235,7 @@ module Gori::Discover
       # persistent, and an origin that disagrees says so in its own `Connection` header,
       # which `reusable_response?` reads.
       conn = @keep_alive ? "" : "Connection: close\r\n"
-      "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\n#{@header_block}#{conn}\r\n".to_slice
+      "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\n#{header_block}#{conn}\r\n".to_slice
     end
   end
 

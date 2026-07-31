@@ -1,3 +1,5 @@
+require "../token_extract"
+
 module Gori
   class Store
     # Lifecycle of a captured flow. Stored as the enum value (INTEGER).
@@ -430,6 +432,53 @@ module Gori
       def initialize(@id, @enabled, @target, @part, @pattern, @replacement,
                      @op = RuleOp::Replace, @match_kind = MatchKind::Literal,
                      @name = "", @host = "", @body_file = "")
+      end
+    end
+
+    # An extract rule (#501): the READ half of a session binding. It observes a response
+    # and writes ONE named value into the in-memory binding table; the WRITE half is an
+    # ordinary `MatchRule` whose `replacement` says `$NAME`.
+    #
+    # The RULE persists here. The VALUE never does — not in this table, not in settings.json,
+    # not anywhere on disk. A restored token is stale by construction (minutes to days old on
+    # reopen) and would produce exactly the 401s this feature exists to remove; re-extracting
+    # costs one request, so there is nothing to save.
+    #
+    # No `position` column, unlike `match_rules`: ordering is only meaningful among
+    # transformations that compose on the same bytes, and an extract rule produces no bytes.
+    # Two extract rules can never contend either — `name` is UNIQUE, which is the
+    # one-name-one-writer invariant the design rests on, enforced by the storage layer as
+    # well as by `Bindings#validate`.
+    #
+    # `match_filter` is an `InterceptFilter` source string (the same boolean grammar the
+    # conditional-intercept bar uses, evaluated against a live in-flight message), NOT a
+    # sixth dialect. `host` is the same glob dialect `match_rules.host` uses.
+    struct ExtractRule
+      getter id : Int64
+      getter? enabled : Bool
+      # The binding name, WITHOUT the `$` prefix. Always a valid `Env` key.
+      getter name : String
+      getter match_filter : String
+      getter kind : Gori::ExtractKind
+      getter selector : String
+      getter pos_start : Int32
+      getter pos_end : Int32
+      getter host : String
+
+      def initialize(@id, @enabled, @name, @match_filter, @kind,
+                     @selector = "", @pos_start = 0, @pos_end = 0, @host = "")
+      end
+
+      def token_loc : Gori::TokenLoc
+        Gori::TokenLoc.new(@kind, @selector, @pos_start, @pos_end)
+      end
+
+      # Body-scoped kinds need the response entity; head-scoped ones read parsed headers
+      # alone. Slice 1 extracts only from `Repeater::Sender` results, which always carry a
+      # full body, so nothing gates on this yet — it is what Slice 2's proxy-side observer
+      # will count to decide whether a response has to be buffered at all.
+      def body_scoped? : Bool
+        !(@kind.cookie? || @kind.header?)
       end
     end
 

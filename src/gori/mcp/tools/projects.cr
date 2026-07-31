@@ -124,6 +124,9 @@ module Gori
         @workspace_root = reg.workspace_of(proj)
         @selection_source = source
         Env.load_project(new_store)
+        # A REPLACEMENT, not a reload: bindings are per project, and carrying one project's
+        # `$SESSION` into another would be the worst kind of cross-project leak.
+        bind_binding_layer(new_store)
         Result.new(JSON.build do |j|
           j.object do
             j.field "switched", true

@@ -1,3 +1,4 @@
+require "./env"
 require "./proxy/head_rewriter"
 require "./rules/stub"
 require "./store"
@@ -34,6 +35,15 @@ module Gori
       # `replacement` is a whole HTTP response and gsub'ing that into live traffic is exactly
       # the silent corruption the count exists to avoid.
       @short_circuit_count = Atomic(Int32).new(stub_count(@rules))
+      # Pre-merged `$KEY` snapshot for `replacement_for`, invalidated by revision rather
+      # than rebuilt per message — see `subst_snapshot`.
+      @subst_vars = nil.as(Hash(String, String)?)
+      @subst_declared = [] of String
+      @subst_env_rev = 0_u32
+      @subst_binding_rev = 0_u64
+      # Rule ids already reported as blocked on an unbound binding, at that binding revision.
+      @unbound_reported = Set(Int64).new
+      @unbound_reported_rev = 0_u64
     end
 
     # Count enabled, non-empty-pattern REWRITE rules matching an optional target + a part.
@@ -229,12 +239,16 @@ module Gori
     # full HTTP message (head + body split on the first blank line). Host-scoped rules
     # use `host` (typically parsed from the sample's Host header). Empty host → only
     # unscoped rules match. Order matches the proxy path (head rules then body rules).
+    #
+    # `report: false` — a preview is a keystroke path over stored flows and must not write
+    # an "unbound binding" event per keypress. It still SKIPS such a rule, so the preview
+    # shows the operator what the proxy would really do.
     def transform_message(text : String, target : Store::RuleTarget, host : String = "") : String
       head, body, sep = split_message(text)
       new_head = String.new(apply(head.to_slice, target, Store::RulePart::Head,
-        target.request? ? @req_head_count : @resp_head_count, host))
+        target.request? ? @req_head_count : @resp_head_count, host, report: false))
       new_body = String.new(apply(body.to_slice, target, Store::RulePart::Body,
-        target.request? ? @req_body_count : @resp_body_count, host))
+        target.request? ? @req_body_count : @resp_body_count, host, report: false))
       "#{new_head}#{sep}#{new_body}"
     end
 
@@ -257,7 +271,7 @@ module Gori
     # heads) — ClientConn's body path compares content, so an unchanged body still frames
     # byte-exact.
     private def apply(bytes : Bytes, target : Store::RuleTarget, part : Store::RulePart,
-                      count : Atomic(Int32), host : String) : Bytes
+                      count : Atomic(Int32), host : String, report : Bool = true) : Bytes
       return bytes if count.get == 0 # lock-free fast path: no rules to apply
       active = @mutex.synchronize do
         @rules.select do |r|
@@ -267,52 +281,187 @@ module Gori
       end
       return bytes if active.empty? # nothing in scope → same bytes, byte-fidelity preserved
       text = String.new(bytes)
-      active.each { |r| text = apply_rule(text, r) }
+      active.each { |r| text = apply_rule(text, r, report) }
       text.to_slice
     end
 
     # Apply ONE rule to `text` (a head or a body already decoded to a String). Returns a
     # new String, or the same content when the rule doesn't touch it. A bad regex or a
     # regex over non-UTF-8 bytes is swallowed → the text passes through unchanged.
-    private def apply_rule(text : String, rule : Store::MatchRule) : String
+    private def apply_rule(text : String, rule : Store::MatchRule, report : Bool = true) : String
+      # A rule naming a binding that has no value is NOT applied. Nothing else is a safe
+      # answer: injecting `""` sends a request with an empty session header, and injecting
+      # the literal `$SESSION` — which is what `Env.expand` does with an unknown key
+      # (env.cr) — puts eight meaningless characters on the wire in a credential's place.
+      # The operator hears about it through the event feed rather than through a 401.
+      repl = replacement_for(rule)
+      unless repl
+        report_unbound(rule) if report
+        return text
+      end
       case rule.op
       in Store::RuleOp::Replace
         if rule.match_kind.regex?
           begin
-            text.gsub(SafeRegexp.compile(rule.pattern), regex_replacement(rule.replacement))
+            text.gsub(SafeRegexp.compile(rule.pattern), repl)
           rescue
             text
           end
         else
-          text.gsub(rule.pattern, rule.replacement)
+          text.gsub(rule.pattern, repl)
         end
-      in Store::RuleOp::AddHeader    then head_add_header(text, rule.pattern, rule.replacement)
-      in Store::RuleOp::SetHeader    then head_set_header(text, rule.pattern, rule.replacement)
+      in Store::RuleOp::AddHeader    then head_add_header(text, rule.pattern, repl)
+      in Store::RuleOp::SetHeader    then head_set_header(text, rule.pattern, repl)
       in Store::RuleOp::RemoveHeader then head_remove_header(text, rule.pattern)
       in Store::RuleOp::ShortCircuit then text # answers, never rewrites — `apply` filters it out
       end
     end
 
-    # Translate Caido-style `$1` capture refs to Crystal's `\1`, and `$$` to a literal
-    # `$`. Existing backslash refs (`\1`, `\k<name>`) pass through untouched.
-    private def regex_replacement(repl : String) : String
-      return repl unless repl.includes?('$')
-      String.build do |io|
-        i = 0
-        while i < repl.size
-          c = repl[i]
-          if c == '$' && i + 1 < repl.size
-            nxt = repl[i + 1]
-            if nxt == '$'
-              io << '$'; i += 2; next
-            elsif nxt.ascii_number?
-              io << '\\' << nxt; i += 2; next
-            end
-          end
-          io << c
+    # The replacement string this rule should actually apply, or nil when it names a
+    # DECLARED binding that has no value yet (see `apply_rule`).
+    #
+    # This is the whole injection half of #501: `Store::MatchRule#replacement` is a literal
+    # string in the database and becomes a resolved one here, at apply time. That single
+    # change buys header injection (`SetHeader`/`AddHeader` with replacement `$SESSION`),
+    # body injection (`Replace` with `part: Body`), static env vars in M&R rules — which
+    # simply did not work before — and one syntax everywhere, with no schema change and no
+    # new rule kind.
+    private def replacement_for(rule : Store::MatchRule) : String?
+      repl = rule.replacement
+      prefix = Settings.env_prefix
+      # The overwhelmingly common case, and the one that must cost nothing: no `$` in the
+      # replacement means the identical String comes back, exactly as before this feature.
+      return repl if prefix.empty? || !repl.byte_index(prefix)
+      vars, declared = subst_snapshot
+      substitute(repl, prefix, vars, declared, rule.op.replace? && rule.match_kind.regex?)
+    end
+
+    # ONE left-to-right pass that resolves `$NAME`, translates the Caido-style `$1` capture
+    # ref to Crystal's `\1`, and unescapes `$$` → `$`. One pass and not three, because the
+    # order between them is the whole safety argument:
+    #
+    #   * `$1` cannot collide with a binding name — `Env::KEY_HEAD` is `[A-Za-z_]`, so a
+    #     digit never starts a key — but a substituted VALUE containing `$1` would be read
+    #     as a capture ref if this ran `regex_replacement` afterwards over the result. It
+    #     does not: a value is emitted and never re-scanned.
+    #   * `$$` resolves LAST in meaning: `$$SESSION` is the literal text `$SESSION`, not the
+    #     bound value. That is the only way an operator can write a literal `$NAME` at all.
+    #     (New for the literal-replace and header ops, which previously had no escape
+    #     because they had nothing to escape from.)
+    #   * A binding value is **server-controlled**, and for `MatchKind::Regex` the
+    #     replacement is interpreted by `gsub`: Crystal reads `\1`, `\0` and `\k<name>` in a
+    #     replacement string, so a token containing `\1` would splice a capture group into
+    #     the wire bytes and one containing `\k<x>` raises. `escape_backrefs` doubles every
+    #     backslash in a substituted value before it lands there. `$` needs no escaping —
+    #     Crystal's replacement grammar does not read it — and the literal-replace and the
+    #     three header ops interpret nothing at all, so they take the value verbatim.
+    #
+    # Byte-level for the same reason `Env.expand` is: a BODY replacement can carry bytes
+    # that are not valid UTF-8, and `String#chars` would turn each of them into U+FFFD.
+    private def substitute(repl : String, prefix : String, vars : Hash(String, String),
+                           declared : Array(String), regex : Bool) : String?
+      bytes = repl.to_slice
+      prefix_bytes = prefix.to_slice
+      n = bytes.size
+      plen = prefix_bytes.size
+      buf = IO::Memory.new(n)
+      i = 0
+      while i < n
+        unless prefix_at?(bytes, prefix_bytes, i)
+          buf.write_byte(bytes[i])
           i += 1
+          next
         end
+        # `$$` → one literal prefix, consuming both.
+        if prefix_at?(bytes, prefix_bytes, i + plen)
+          buf << prefix
+          i += 2 * plen
+          next
+        end
+        if parsed = Env.read_key_bytes?(bytes, i + plen, n)
+          key, consumed = parsed
+          # Declared by an extract rule but not bound yet → the rule must not apply.
+          return nil if !vars.has_key?(key) && declared.includes?(key)
+          i += emit_key(buf, bytes, vars, key, consumed, prefix, plen, regex)
+          next
+        end
+        # `$1`..`$9` → `\1`..`\9`, regex replacements only (unchanged from `regex_replacement`).
+        if regex && i + plen < n && bytes[i + plen].chr.ascii_number?
+          buf << '\\'
+          buf.write_byte(bytes[i + plen])
+          i += plen + 1
+          next
+        end
+        buf << prefix
+        i += plen
       end
+      String.new(buf.to_slice)
+    end
+
+    private def prefix_at?(bytes : Bytes, prefix_bytes : Bytes, at : Int32) : Bool
+      return false if at + prefix_bytes.size > bytes.size
+      prefix_bytes.each_with_index.all? { |b, j| bytes[at + j] == b }
+    end
+
+    # Write one resolved (or literal) `prefix+KEY` and answer how many bytes it consumed.
+    # A key that is neither a var nor a declared binding stays LITERAL — `Env.expand`'s
+    # documented contract, and the meaning every pre-existing rule already had. Refusing
+    # here instead would be a one-way door on a persisted, operator-authored table.
+    private def emit_key(buf : IO::Memory, bytes : Bytes, vars : Hash(String, String),
+                         key : String, consumed : Int32, prefix : String,
+                         plen : Int32, regex : Bool) : Int32
+      if val = vars[key]?
+        buf << (regex ? Rules.escape_backrefs(val) : val)
+        plen + consumed
+      else
+        buf << prefix
+        plen
+      end
+    end
+
+    # Double every backslash so a substituted value cannot be read as a capture reference
+    # by `String#gsub(Regex, String)`. `gsub(String, String)` interprets nothing, so this is
+    # applied to the regex path alone.
+    def self.escape_backrefs(value : String) : String
+      value.includes?('\\') ? value.gsub("\\", "\\\\") : value
+    end
+
+    # Env vars + currently-bound bindings, plus the declared-name list, cached until either
+    # moves. `Env.expand`'s default argument rebuilds a merged Hash on EVERY call
+    # (`env.cr`, and `highlight.cr` already carries a comment warning about it) — and this
+    # runs on the proxy path per message per matching rule, so calling `display_vars` here
+    # would be a per-message allocation. `Env.bump_highlight_rev` fires on a settings load,
+    # a project env write, a rule edit and every rebind, which is exactly the set of events
+    # that can move either half.
+    private def subst_snapshot : {Hash(String, String), Array(String)}
+      erev = Env.highlight_rev
+      brev = Env.binding_rev
+      cached = @subst_vars
+      if cached.nil? || erev != @subst_env_rev || brev != @subst_binding_rev
+        cached = Env.display_vars
+        @subst_vars = cached
+        @subst_declared = Env.declared_bindings
+        @subst_env_rev = erev
+        @subst_binding_rev = brev
+      end
+      {cached, @subst_declared}
+    end
+
+    # One warn event per (rule, binding revision): a rule injecting an unbound `$SESSION`
+    # into every proxied request would otherwise write one row per message. The value is
+    # never in the message — only the rule and the name, which is what #491 asked for.
+    private def report_unbound(rule : Store::MatchRule) : Nil
+      brev = Env.binding_rev
+      if brev != @unbound_reported_rev
+        @unbound_reported_rev = brev
+        @unbound_reported.clear
+      end
+      return unless @unbound_reported.add?(rule.id)
+      names = Env.unbound(rule.replacement)
+      return if names.empty?
+      label = rule.name.presence || rule.pattern
+      @store.insert_event("bindings", "unbound", "warn",
+        "rewrite rule #{label.inspect} not applied: #{Env.token_list(names)} is not bound yet")
     end
 
     # The line terminator a head uses — CRLF for real HTTP, LF as a fallback so a
@@ -373,10 +522,19 @@ module Gori
       kept.join(eol)
     end
 
+    private def host_matches?(glob : String, host : String) : Bool
+      Rules.host_matches?(glob, host)
+    end
+
     # Does `host` satisfy a rule's host glob? Empty = all hosts. A glob with `*` is an
     # anchored wildcard (`*.example.com`); without `*` it is a case-insensitive substring
     # (`example.com` matches `api.example.com`).
-    private def host_matches?(glob : String, host : String) : Bool
+    #
+    # Exposed on the class because an extract rule (#501) carries the same host glob and
+    # must mean the same thing by it — an operator who learned the dialect in the Rewriter's
+    # `rules` sub-tab types it again two sub-tabs over. NOT `HostPattern`, which is Scope's
+    # separate suffix-matching dialect.
+    def self.host_matches?(glob : String, host : String) : Bool
       return true if glob.empty?
       h = host.downcase
       g = glob.downcase
@@ -439,7 +597,7 @@ module Gori
       return false if rule.part.body? && rule.op.header?
       bytes = flow_part_bytes(detail, rule)
       return false unless bytes
-      apply_rule(String.new(bytes), rule).to_slice != bytes
+      apply_rule(String.new(bytes), rule, report: false).to_slice != bytes
     end
 
     private def flow_part_bytes(detail : Store::FlowDetail, rule : Store::MatchRule) : Bytes?

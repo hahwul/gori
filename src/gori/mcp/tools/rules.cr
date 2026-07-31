@@ -255,6 +255,171 @@ module Gori
       private def rule_exists?(id : Int64) : Bool
         store.match_rules.any? { |r| r.id == id }
       end
+
+      # --- extract rules / session bindings (#501) -----------------------------
+      #
+      # The READ half of a binding: an extract rule observes a response and writes ONE named
+      # value into an in-memory table, which a Match & Replace rule then injects with
+      # `replacement: "$SESSION"`. Same CRUD shape as the rules above so an agent that learned
+      # one has learned the other.
+
+      private def extract_rule_json(j : JSON::Builder, r : Store::ExtractRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "enabled", r.enabled?
+          j.field "name", r.name
+          j.field "when", r.match_filter
+          j.field "host", r.host
+          j.field "kind", r.kind.label
+          j.field "selector", r.selector
+          j.field "pos_start", r.pos_start
+          j.field "pos_end", r.pos_end
+        end
+      end
+
+      private def list_extract_rules : Result
+        rules = store.extract_rules
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "count", rules.size
+            j.field "rules" { j.array { rules.each { |r| extract_rule_json(j, r) } } }
+            # The whole point of the feature, stated where an agent reading this list will
+            # see it — otherwise "no value field" reads as an omission rather than a design.
+            j.field "note", "Values are bound in the memory of the gori that observed them and are " \
+                            "never persisted, so they are not readable here. Inject one from a Match & " \
+                            "Replace rule with replacement \"$NAME\"."
+          end
+        end)
+      end
+
+      # A throwaway `Bindings` over the store, so the MCP surface gets the SAME refusals the
+      # TUI and CLI do (one name one writer, a valid key, a regex that compiles) instead of a
+      # UNIQUE-constraint failure surfacing as "store busy". It holds no values — an MCP
+      # process is not the process that observed them.
+      private def extract_bindings : Gori::Bindings
+        Gori::Bindings.new(store, store.extract_rules)
+      end
+
+      private def extract_kind_arg(h, dft : Gori::ExtractKind) : Gori::ExtractKind | Result
+        raw = str(h, "kind").try(&.strip)
+        return dft if raw.nil? || raw.empty?
+        Gori::ExtractKind.parse?(raw) ||
+          err("invalid 'kind' (expected cookie|header|regex|position|jsonpath)", "INVALID_ARGUMENT", field: "kind")
+      end
+
+      # The `$` is stripped so an agent may pass the token the way an operator reads it.
+      private def extract_name_arg(raw : String?) : String?
+        n = raw.try(&.strip)
+        return nil if n.nil? || n.empty?
+        n.starts_with?('$') ? n[1..] : n
+      end
+
+      # An omitted field keeps the row's current value — the "omitted fields are left
+      # unchanged" contract every update_* tool here states, spelled once.
+      private def keep(h, field : String, current : String) : String
+        present?(h, field) ? (str(h, field) || "") : current
+      end
+
+      private def keep_int(h, field : String, current : Int32) : Int32
+        (present?(h, field) ? int(h, field) : current.to_i64).try(&.to_i32) || 0
+      end
+
+      # kind=position needs a real range; every other kind ignores the two ints.
+      private def extract_range_error(kind : Gori::ExtractKind, pos_start : Int32, pos_end : Int32) : Result?
+        return nil unless kind.position? && pos_end <= pos_start
+        err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
+      end
+
+      private def create_extract_rule(h) : Result
+        name = extract_name_arg(str(h, "name"))
+        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
+        kind = extract_kind_arg(h, Gori::ExtractKind::Cookie)
+        return kind if kind.is_a?(Result)
+        selector = str(h, "selector") || ""
+        pos_start = (int(h, "pos_start") || 0_i64).to_i32
+        pos_end = (int(h, "pos_end") || 0_i64).to_i32
+        if bad = extract_range_error(kind, pos_start, pos_end)
+          return bad
+        end
+        bindings = extract_bindings
+        if bad = bindings.add(name, str(h, "when") || "", kind, selector, pos_start, pos_end, str(h, "host") || "")
+          return err(bad, "INVALID_ARGUMENT", field: "name")
+        end
+        row = store.extract_rules.find { |r| r.name == name }
+        return busy("failed to persist extract rule (store busy or unwritable)") unless row
+        enabled = bool_arg(h, "enabled", true)
+        if bad = apply_created_extract_state(row.id, enabled)
+          return bad
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", row.id
+            j.field "name", name
+            j.field "kind", kind.label
+            j.field "enabled", enabled
+          end
+        end)
+      end
+
+      # Atomic disabled creation, matching create_rule: flip before returning so there is no
+      # window in which a just-created rule is already declaring its name.
+      private def apply_created_extract_state(id : Int64, enabled : Bool) : Result?
+        return nil if enabled
+        return nil if store.set_extract_rule_enabled(id, false)
+        busy("extract rule created but the disable did not persist (store busy or unwritable); retry")
+      end
+
+      private def update_extract_rule(h) : Result
+        id = int(h, "id")
+        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        existing = store.extract_rules.find { |r| r.id == id }
+        return not_found("no extract rule with id #{id}") unless existing
+        name = extract_name_arg(present?(h, "name") ? str(h, "name") : existing.name)
+        return err("name must not be empty", "INVALID_ARGUMENT", field: "name") unless name
+        kind = extract_kind_arg(h, existing.kind)
+        return kind if kind.is_a?(Result)
+        selector = keep(h, "selector", existing.selector)
+        pos_start = keep_int(h, "pos_start", existing.pos_start)
+        pos_end = keep_int(h, "pos_end", existing.pos_end)
+        if bad = extract_range_error(kind, pos_start, pos_end)
+          return bad
+        end
+        filter = keep(h, "when", existing.match_filter)
+        host = keep(h, "host", existing.host)
+        if bad = extract_bindings.update(id, name, filter, kind, selector, pos_start, pos_end, host)
+          return err(bad, "INVALID_ARGUMENT", field: "name")
+        end
+        if present?(h, "enabled")
+          en = bool_arg(h, "enabled", existing.enabled?)
+          return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "updated", true
+            j.field "name", name
+            j.field "kind", kind.label
+          end
+        end)
+      end
+
+      private def set_extract_rule_enabled(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        enabled = bool(h, "enabled")
+        return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
+        return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
+        return busy("enable/disable NOT applied (store busy or unwritable); the extract rule is unchanged") unless store.set_extract_rule_enabled(id, enabled)
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
+      end
+
+      private def delete_extract_rule(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
+        return busy("extract rule NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_extract_rule(id)
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+      end
     end
   end
 end

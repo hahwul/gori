@@ -48,6 +48,7 @@ module Gori::Tui
     OastProvider
     ProbeRule
     RewriterRule
+    ExtractRule
     RewriterStub
     CaImport
     Import

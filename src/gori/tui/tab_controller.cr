@@ -38,6 +38,7 @@ module Gori::Tui
     abstract def open_custom_rule_editor(rule : Probe::CustomRule?) : Nil
     # Open the Rewriter (Match & Replace) rule popup (nil = add; else edit the given rule).
     abstract def open_rewriter_rule_editor(rule : Store::MatchRule?) : Nil
+    abstract def open_extract_rule_editor(rule : Store::ExtractRule?) : Nil
     # Open the OAST provider add/edit popup (nil = add a new provider; else edit the given
     # provider — global or project scope, per Oast::ProviderConfig#scope).
     abstract def open_oast_provider_editor(provider : Oast::ProviderConfig?) : Nil

@@ -1,4 +1,8 @@
+require "log"
 require "../outbound"
+require "../bindings"
+require "../env"
+require "../intercept_filter"
 require "../host_overrides"
 require "./engine"
 require "./h2_engine"
@@ -30,14 +34,26 @@ module Gori
                      @timeout : Time::Span? = nil, @overrides : Gori::HostOverrides? = nil)
       end
 
-      # The reason this request may not go out, or nil to proceed. Sandbox mode is the only
-      # rule that stops a deliberate single send (see `Outbound#send_block`).
+      # The reason this request may not go out, or nil to proceed. Two rules stop a
+      # deliberate single send: Sandbox mode (see `Outbound#send_block`), and a `$NAME` that
+      # an extract rule declares but nothing has bound yet (#501).
+      #
+      # The binding check comes FIRST and lives here rather than only in `send`, so every
+      # caller that already asks `refusal` in order to report a block in its own idiom — a
+      # TUI status line, a CLI abort, an MCP error — reports this one the same way, with no
+      # per-surface change. `send_group` and `send_ws` inherit it through `refusal` too.
       def refusal(bytes : Bytes) : String?
-        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(bytes))
+        if (unbound = Gori::Env.unbound(bytes)).present?
+          return Gori::Env.unbound_error(unbound)
+        end
+        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(bytes)))
       end
 
       def refusal(text : String) : String?
-        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(text))
+        if (unbound = Gori::Env.unbound(text)).present?
+          return Gori::Env.unbound_error(unbound)
+        end
+        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(text)))
       end
 
       # The first refusal across a whole send-group, or nil when every request may proceed.
@@ -53,21 +69,31 @@ module Gori
         if reason = refusal(bytes)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
-        if @http2
-          H2Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
-            verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-        else
-          Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
-            verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-        end
+        bytes = Gori::Env.expand_bindings(bytes)
+        result =
+          if @http2
+            H2Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
+              verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+          else
+            Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
+              verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+          end
+        extract(bytes, result)
+        result
       end
 
       def send_group(requests : Array(Bytes)) : Array(Result)
         if reason = group_refusal(requests)
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
-        Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
+        requests = requests.map { |b| Gori::Env.expand_bindings(b) }
+        results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+        # A group is ONE connection carrying a deliberate sequence, so every member is as
+        # hand-authored as a lone `send` and every response is an equally legitimate source.
+        # Later members win on a name both write, which is the wire order.
+        requests.each_with_index { |b, i| results[i]?.try { |r| extract(b, r) } }
+        results
       end
 
       def send_ws(upgrade : Bytes, messages : Array(WsEngine::OutMsg),
@@ -75,8 +101,34 @@ module Gori
         if reason = refusal(upgrade)
           return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
         end
-        WsEngine.send(upgrade, messages, scheme: @scheme, host: @host, port: @port,
-          verify_upstream: @verify, sni: @sni, idle: idle, overrides: @overrides)
+        # The handshake alone: a WS frame is not an HTTP response and `TokenExtract`'s five
+        # descriptors are all defined over one. Slice 1 does not extract from WS traffic.
+        WsEngine.send(Gori::Env.expand_bindings(upgrade), messages, scheme: @scheme, host: @host,
+          port: @port, verify_upstream: @verify, sni: @sni, idle: idle, overrides: @overrides)
+      end
+
+      # Offer this response to the binding table's extract rules.
+      #
+      # THIS class is the extraction source, and `Fuzz::Sender` deliberately is not. Not a
+      # scope trim — a security argument: a sweep sends attacker-shaped payloads, and a
+      # response echoing one back could rebind the operator's session to a payload-derived
+      # value that is then injected into every subsequent request. The line between "a
+      # deliberate send" and "an automated sweep" is one this codebase had already drawn,
+      # exactly here, and reusing it beats inventing a second one.
+      #
+      # Best-effort: an extract rule must never be able to fail a send the operator made.
+      private def extract(request : Bytes, result : Result) : Nil
+        bindings = Gori::Env.layer.as?(Gori::Bindings)
+        return unless bindings
+        return if result.error
+        line = String.new(request).each_line.first? || ""
+        parts = line.split
+        subject = Gori::InterceptFilter::Subject.new(
+          method: parts[0]? || "GET", host: @host, target: parts[1]? || "/",
+          scheme: @scheme, status: result.response.try(&.status))
+        bindings.observe(result, subject)
+      rescue ex
+        ::Log.warn { "extract rules skipped: #{ex.message}" }
       end
     end
   end
