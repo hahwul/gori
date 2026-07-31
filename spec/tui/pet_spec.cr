@@ -570,6 +570,35 @@ describe Gori::Tui::Pet do
       end
     end
 
+    # The bubble used to stop growing at 34 columns, so a notice was cut with an '…' on an
+    # 80-column terminal that had twice that free. Sweep the widths a real Layout produces
+    # rather than pinning one number: the guarantees are monotonicity, the floor, the
+    # ceiling, and never crossing the body.
+    it "widens the bubble cap with the body, between its floor and its ceiling" do
+      caps = [40, 60, 80, 100, 120, 160, 220].map do |cols|
+        Pet.bubble_cap(Layout.compute(cols, 24).body.w)
+      end
+      caps.should eq(caps.sort)                         # never narrower on a wider terminal
+      caps.first.should eq(Pet::BUBBLE_BASE_W)          # the narrow end keeps today's width
+      caps.last.should eq(Pet::BUBBLE_MAX_W)            # …and a huge terminal stops at the ceiling
+      Pet.bubble_cap(76).should be > Pet::BUBBLE_BASE_W # 80 cols, where she is actually read
+    end
+
+    # The fluid cap must not outgrow the narrow bodies the floor is above: at 40x24 the body
+    # is 36, and BUBBLE_BASE_W alone would overhang it.
+    it "keeps a wide bubble inside the body, floor included" do
+      [40, 80, 120, 200].each do |cols|
+        # NOT `body` — an `it` block closes over the describe-level local, and assigning to
+        # it here would hand every later example a 200-column body on an 80x24 backend.
+        wide = Layout.compute(cols, 24).body
+        plate = Pet.place(wide).not_nil!
+        box = Pet.bubble_box(wide, plate, "probe " * 60).not_nil!
+        box.x.should be >= wide.x
+        box.right.should be <= wide.right
+        box.w.should be <= Pet.bubble_cap(wide.w)
+      end
+    end
+
     it "truncates a long bubble inside the body" do
       backend = MemoryBackend.new(80, 24)
       long = "probe " * 60

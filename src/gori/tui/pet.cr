@@ -86,7 +86,17 @@ module Gori::Tui
 
     BUBBLE_H     =  3
     BUBBLE_MIN_W = 14 # narrower than this is unreadable — drop the bubble, keep the pose
-    BUBBLE_MAX_W = 34
+    # The bubble's cap is FLUID: it tracks the body, floored at BUBBLE_BASE_W and ceilinged
+    # at BUBBLE_MAX_W. A flat cap sized for the narrow case truncated notices with an '…'
+    # on terminals with columns to spare, which is where most of her lines actually get
+    # read. BUBBLE_SHARE is the slice of the body she may claim — she draws OVER the tab's
+    # content, so a note is never worth more than a comfortable minority of the row, and
+    # past ~60 columns a one-line bubble stops reading as speech and starts reading as a
+    # banner. body.w - 4 still wins over all of it (see .bubble_box).
+    BUBBLE_BASE_W  = 34
+    BUBBLE_MAX_W   = 64
+    BUBBLE_SHARE_N =  2
+    BUBBLE_SHARE_D =  3
 
     getter frame : Mascot::Frame?
     # When the live bubble was set. The bar placement shares the status row's single text
@@ -417,11 +427,18 @@ module Gori::Tui
       Rect.new(x, y, Mascot::W, Mascot::H)
     end
 
+    # How wide she may speak in a body this wide, BEFORE the body's own `- 4` clamp. Pure
+    # arithmetic on a width so a spec can sweep it without a Screen.
+    def self.bubble_cap(body_w : Int32) : Int32
+      share = body_w * BUBBLE_SHARE_N // BUBBLE_SHARE_D
+      share.clamp(BUBBLE_BASE_W, BUBBLE_MAX_W)
+    end
+
     # Above the sprite, right-aligned to it, tail pointing down at her cap. Above rather
     # than beside because the body's right edge is a pane border or a scroll gauge, and a
     # side bubble would cover the list rows the user is actually reading.
     def self.bubble_box(body : Rect, plate : Rect, msg : String) : Rect?
-      cap = {BUBBLE_MAX_W, body.w - 4}.min
+      cap = {bubble_cap(body.w), body.w - 4}.min
       return nil if cap < BUBBLE_MIN_W
       want = {Screen.display_width(msg) + 4, BUBBLE_MIN_W}.max
       w = {want, cap}.min
