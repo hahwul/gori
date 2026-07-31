@@ -1,6 +1,14 @@
 require "../spec_helper"
 require "socket"
 
+# A minimal WebSocket client handshake; `extra` lands between the version and the
+# User-Agent so a stripped line has neighbours on both sides to preserve.
+private def handshake(extra : String) : Bytes
+  ("GET /ws HTTP/1.1\r\nHost: echo.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+   "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n#{extra}" \
+   "User-Agent: probe\r\n\r\n").to_slice
+end
+
 # Builds a masked client text frame for short payloads (<126 bytes).
 private def masked_frame(text : String) : Bytes
   payload = text.to_slice
@@ -15,12 +23,14 @@ end
 
 private class IntegSink < Gori::Proxy::FlowSink
   getter ws = [] of {String, String}
+  getter heads = [] of String
 
   def initialize(@ws_chan : Channel(Nil))
     @next = 0_i64
   end
 
   def on_request(req : Gori::Store::CapturedRequest) : Int64
+    @heads << String.new(req.head)
     @next += 1
   end
 
@@ -328,6 +338,89 @@ describe Gori::Proxy::WS do
   end
 end
 
+describe Gori::Proxy::WS::Handshake do
+  describe ".offers_extensions?" do
+    it "is true for a WebSocket upgrade carrying the header" do
+      req = Gori::Proxy::Codec::Http1.parse_request_head(
+        handshake("Sec-WebSocket-Extensions: permessage-deflate\r\n"))
+      Gori::Proxy::WS::Handshake.offers_extensions?(req.headers).should be_true
+    end
+
+    it "matches the field-name and the upgrade token case-insensitively" do
+      req = Gori::Proxy::Codec::Http1.parse_request_head(
+        ("GET /ws HTTP/1.1\r\nUpgrade: WebSocket\r\n" \
+         "SEC-WEBSOCKET-EXTENSIONS: permessage-deflate\r\n\r\n").to_slice)
+      Gori::Proxy::WS::Handshake.offers_extensions?(req.headers).should be_true
+    end
+
+    it "reads Upgrade as a protocol LIST, not one value" do
+      # RFC 7230 §6.7: `Upgrade: websocket, h2c` is still a WebSocket handshake, and a
+      # whole-value compare would miss it and leave the offer in place.
+      req = Gori::Proxy::Codec::Http1.parse_request_head(
+        ("GET /ws HTTP/1.1\r\nUpgrade: h2c, websocket\r\n" \
+         "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n").to_slice)
+      Gori::Proxy::WS::Handshake.offers_extensions?(req.headers).should be_true
+    end
+
+    it "is false without the header" do
+      req = Gori::Proxy::Codec::Http1.parse_request_head(handshake(""))
+      Gori::Proxy::WS::Handshake.offers_extensions?(req.headers).should be_false
+    end
+
+    it "is false when the request is not a WebSocket upgrade" do
+      # The field is defined only for the handshake, so on an ordinary request it is inert
+      # and the head stays byte-exact (P7) rather than being rewritten for nothing.
+      req = Gori::Proxy::Codec::Http1.parse_request_head(
+        ("GET /p HTTP/1.1\r\nHost: echo.test\r\n" \
+         "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n").to_slice)
+      Gori::Proxy::WS::Handshake.offers_extensions?(req.headers).should be_false
+    end
+  end
+
+  describe ".strip_extensions" do
+    it "removes the offer and leaves every other byte alone" do
+      stripped = Gori::Proxy::WS::Handshake.strip_extensions(
+        handshake("Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n"))
+      stripped.should eq(handshake(""))
+    end
+
+    it "removes EVERY extension line (RFC 6455 allows the offer split across fields)" do
+      stripped = Gori::Proxy::WS::Handshake.strip_extensions(
+        handshake("Sec-WebSocket-Extensions: permessage-deflate\r\n" \
+                  "sec-websocket-extensions: x-webkit-deflate-frame\r\n"))
+      stripped.should eq(handshake(""))
+    end
+
+    it "is a byte-exact no-op when there is no extension line" do
+      Gori::Proxy::WS::Handshake.strip_extensions(handshake("")).should eq(handshake(""))
+    end
+
+    it "keeps a header whose name only STARTS with the stripped name" do
+      extra = "Sec-WebSocket-Extensions-Note: keep\r\n"
+      Gori::Proxy::WS::Handshake.strip_extensions(handshake(extra)).should eq(handshake(extra))
+    end
+
+    it "never drops the start-line, even one shaped like the stripped header" do
+      raw = "sec-websocket-extensions: permessage-deflate\r\nUpgrade: websocket\r\n\r\n"
+      Gori::Proxy::WS::Handshake.strip_extensions(raw.to_slice).should eq(raw.to_slice)
+    end
+
+    it "copies non-UTF-8 header VALUE bytes verbatim" do
+      # A cookie/auth token carrying raw high bytes must survive the rebuild byte-exact —
+      # the strip walks bytes and never round-trips a value through String.
+      io = IO::Memory.new
+      io << "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nCookie: sid="
+      io.write(Bytes[0xFF, 0xFE, 0x80])
+      io << "\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n"
+      want = IO::Memory.new
+      want << "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nCookie: sid="
+      want.write(Bytes[0xFF, 0xFE, 0x80])
+      want << "\r\n\r\n"
+      Gori::Proxy::WS::Handshake.strip_extensions(io.to_slice).should eq(want.to_slice)
+    end
+  end
+end
+
 describe "WebSocket through the proxy (end-to-end)" do
   it "detects the 101 upgrade, relays frames, and captures both directions" do
     # origin: respond 101, then echo one client frame back (unmasked)
@@ -371,6 +464,95 @@ describe "WebSocket through the proxy (end-to-end)" do
 
     sink.ws.should contain({"out", "ping"})
     sink.ws.should contain({"in", "ping"})
+  end
+
+  it "strips the client's permessage-deflate offer from the handshake it relays (#518)" do
+    # Without the strip the origin accepts the extension, both peers compress, and every
+    # frame WS::Relay captures is a deflate stream stored as if it were the message. The
+    # offer is the side that gets cut: negotiation is offer-driven, so an origin with
+    # nothing to accept leaves the socket uncompressed.
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    seen = Channel(String).new(1)
+    spawn do
+      conn = origin.accept
+      head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+      seen.send(String.new(head))
+      # Answer as a conformant origin would with nothing offered: no acceptance.
+      conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      conn.flush
+      frame = Gori::Proxy::WS.read_frame(conn).not_nil!
+      conn.write(Bytes[0x81_u8, frame.payload.size.to_u8])
+      conn.write(frame.payload)
+      conn.flush
+    rescue
+    end
+
+    ws_chan = Channel(Nil).new(4)
+    sink = IntegSink.new(ws_chan)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n" \
+              "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
+              "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n" \
+              "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n" \
+              "User-Agent: probe\r\n\r\n"
+    client.flush
+
+    origin_head = seen.receive
+    origin_head.downcase.should_not contain("sec-websocket-extensions")
+    origin_head.should contain("Sec-WebSocket-Key: dGhlIHNhbXBsZQ==") # everything else survives
+    origin_head.should contain("User-Agent: probe")
+
+    resp_head = Gori::Proxy::Codec::Http1.read_head(client).not_nil!
+    String.new(resp_head).should contain("101")
+
+    client.write(masked_frame("hello"))
+    client.flush
+    Gori::Proxy::WS.read_frame(client).not_nil!
+    ws_chan.receive # out
+    ws_chan.receive # in
+    client.close
+    proxy.stop
+
+    # The RECORDED request is the handshake gori sent, not the client's offer: an offer
+    # captured beside a 101 with no acceptance would read as "the origin declined".
+    sink.heads.size.should eq(1)
+    sink.heads[0].downcase.should_not contain("sec-websocket-extensions")
+    sink.ws.should contain({"out", "hello"})
+  end
+
+  it "leaves the header alone on a request that is not upgrading" do
+    # The field is defined only for the handshake, so on an ordinary request it is inert
+    # and gori has no reason to spend a byte change on it (P7).
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    seen = Channel(String).new(1)
+    spawn do
+      conn = origin.accept
+      seen.send(String.new(Gori::Proxy::Codec::Http1.read_head(conn).not_nil!))
+      conn << "HTTP/1.1 204 No Content\r\n\r\n"
+      conn.flush
+    rescue
+    end
+
+    sink = IntegSink.new(Channel(Nil).new(1))
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "GET /p HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n" \
+              "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n"
+    client.flush
+
+    seen.receive.should contain("Sec-WebSocket-Extensions: permessage-deflate")
+    Gori::Proxy::Codec::Http1.read_head(client)
+    client.close
+    proxy.stop
   end
 
   it "blind-tunnels a NON-WebSocket 101 upgrade instead of parsing the post-upgrade bytes as HTTP (desync)" do

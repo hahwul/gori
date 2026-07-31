@@ -91,9 +91,11 @@ gori는 지나가는 프로토콜을 인식합니다.
 |----------|---------|
 | **HTTP/1.1** | 전체 캡처 및 리피터 |
 | **HTTP/2** | ALPN 이후 투명 릴레이, 원시 프레임 로그, HPACK 디코드, stream → flow 조립 |
-| **WebSocket** | 실시간 메시지 캡처 및 리피터 (permessage-deflate 미지원) |
+| **WebSocket** | 실시간 메시지 캡처 및 리피터. 핸드셰이크에서 압축이 제거됩니다(아래 참고) |
 | **gRPC** | HTTP/2 위에 프레이밍되고 status 트레일러 포함; protobuf는 원시 바이트로 표시 (`.proto` 스키마 없음) |
 | **Server-Sent Events** | 표시 시점에 개별 이벤트로 파싱 |
+
+**gori를 지나는 WebSocket은 압축되지 않습니다.** gori가 중계하는 핸드셰이크에서 `Sec-WebSocket-Extensions`를 제거하므로 `permessage-deflate`는 협상되지 않고, 캡처된 프레임은 실제로 오간 메시지 그대로입니다. 이 제거가 없으면 양쪽 피어는 gori가 해독하지 않는 압축에 합의하게 되고, History와 상세 뷰, `gori run history show`, MCP 도구, export가 전부 deflate 스트림을 페이로드인 양 보여 주게 됩니다. 믿을 수 있는 캡처의 대가로, 원래라면 압축을 쓸 앱이 gori를 지나는 동안에는 압축을 쓰지 못합니다. 특정 호스트의 소켓을 있는 그대로 중계해야 한다면 그 호스트를 [TLS passthrough](/ko/reference/config/#tls-passthrough)에 등록하세요. 연결에 손대지 않는 대신 그 호스트는 아무것도 캡처되지 않습니다.
 
 와이어 프로토콜 위에서, gori는 흔히 쓰이는 페이로드를 인라인으로 디코드합니다.
 
