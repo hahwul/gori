@@ -119,7 +119,7 @@ describe Gori::Tui::Pet do
     with_pet(true) do
       pet.tick(t0 + Pet::BEAT)
       f = pet.frame.not_nil!
-      f.bubble.should be_nil
+      f.bubble.should eq(Pet::GREETING) # her own hello, not the note that landed while she was off
       f.mood.should eq(:info)
     end
   end
@@ -159,6 +159,67 @@ describe Gori::Tui::Pet do
       beats(pet, t0, n)
     end
     calm.should be < lively
+  end
+
+  # --- the greeting ---------------------------------------------------------
+
+  it "says hello on the frame she first appears on" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      f = pet.frame.not_nil!
+      f.bubble.should eq(Pet::GREETING)
+      f.mood.should eq(:info) # a hello is not a reaction — the face stays idle
+      f.pose.should eq(:idle)
+    end
+  end
+
+  it "holds the greeting longer than a note, then drops it" do
+    with_pet(true) do
+      pet = Pet.new(Notifications.new)
+      t0 = Time.instant
+      pet.tick(t0)
+      # Past a note's TTL (3.5s) but still inside the greeting's.
+      pet.tick(t0 + 5.seconds)
+      pet.frame.not_nil!.bubble.should eq(Pet::GREETING)
+      pet.tick(t0 + Pet::GREET_TTL + Pet::BEAT)
+      pet.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  # Once per Pet, not once per enable edge: someone toggling her in the settings view to
+  # see what she looks like is not asking to be greeted again each time.
+  it "greets once, not on every re-enable" do
+    pet = Pet.new(Notifications.new)
+    t0 = Time.instant
+    with_pet(true) { pet.tick(t0) }
+    pet.frame.not_nil!.bubble.should eq(Pet::GREETING)
+    with_pet(false) { pet.tick(t0 + Pet::BEAT) } # disable edge drops the frame and the bubble
+    with_pet(true) do
+      pet.tick(t0 + Pet::BEAT * 2)
+      pet.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  it "does not greet while notices are off" do
+    with_pet(true, notices: false) do
+      pet = Pet.new(Notifications.new)
+      pet.tick(Time.instant)
+      pet.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  # The flag burns whether or not she was allowed to speak, so turning notices on an hour
+  # into the session does not produce a stale hello.
+  it "does not greet late when notices are turned on afterwards" do
+    pet = Pet.new(Notifications.new)
+    t0 = Time.instant
+    with_pet(true, notices: false) { pet.tick(t0) }
+    with_pet(true, notices: true) do
+      beats(pet, t0, 3)
+      pet.frame.not_nil!.bubble.should be_nil
+    end
   end
 
   # --- notifications --------------------------------------------------------
@@ -275,7 +336,7 @@ describe Gori::Tui::Pet do
       pet = Pet.new(notes)
       t0 = Time.instant
       pet.tick(t0)
-      pet.bubble_at.should be_nil
+      pet.bubble_at.should eq(t0) # the greeting takes the bubble on the first frame
       notes.push(:info, "scan complete")
       pet.tick(t0 + Pet::BEAT)
       pet.bubble_at.should eq(t0 + Pet::BEAT)

@@ -184,17 +184,16 @@ shoot_themes() {
 # the README shot wants these, and it runs last, so the doc scenes above keep
 # the smaller, stable flow set.
 #
-# Ten, not "as many as fit": the 38-row pane lists 25 flows, and seed_all
-# already lands 11, so this leaves the last few rows empty — which is where
-# Miss Ring sits. Add more and she covers live SIZE/DUR cells, and a hero with
-# a half-eaten number column reads as a rendering bug.
+# Eight, not "as many as fit": the 38-row pane lists 25 flows and seed_all
+# already lands 11, so this leaves the bottom rows empty — which is where Miss
+# Ring sits, under a speech bubble three rows taller than she is. Add more and
+# the greeting eats live SIZE/DUR cells, and a hero with a half-covered number
+# column reads as a rendering bug.
 seed_readme_extra() {
   seed "https://httpbingo.org/anything/api/v2/orders?status=paid&limit=50"
-  seed "https://httpbingo.org/anything/api/v2/orders/9182"
   seed -X PUT -H 'Content-Type: application/json' -d '{"role":"editor"}' https://httpbingo.org/anything/api/users/42
   seed -X DELETE https://httpbingo.org/anything/api/sessions/8f3a1c
   seed "https://httpbingo.org/anything/admin/config?debug=true"
-  seed https://httpbingo.org/status/401
   seed https://httpbingo.org/status/403
   seed https://httpbingo.org/redirect/1
   seed https://api.github.com/repos/hahwul/gori
@@ -229,8 +228,11 @@ shoot_readme() {
     sleep 1; kill "$cap" 2>/dev/null || true; sleep 1
     readme_seeded=1
   fi
+  # Keys land fast on purpose: Miss Ring greets on the frame she first appears on and
+  # holds it for Pet::GREET_TTL (8s) from TUI start, and _shoot has already slept 3s
+  # waiting for the pane. Pad these and the hero loses the speech bubble.
   SHOT_COLS=180 SHOT_ARIA="gori TUI — the History tab listing captured HTTP flows" \
-    run_scene readme 38 "𝓰𝓸𝓻𝓲" 3 SLEEP1 Enter SLEEP2.5
+    run_scene readme 38 "𝓰𝓸𝓻𝓲" 3 SLEEP0.4 Enter SLEEP1
 }
 
 # One pass per "theme:subdir" spec in $SHOTS. The seeded DB is shared across

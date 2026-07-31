@@ -46,6 +46,14 @@ module Gori::Tui
     # live one — a burst of :info must not stomp on an error reaction.
     RANK = {:info => 0, :happy => 1, :warn => 2, :alarm => 3}
 
+    # Her one unprompted line — see #greet. Everything else she says is a notification
+    # someone else raised.
+    GREETING = "hi! ready when you are"
+    # Held longer than a notification bubble (3.5s). A note is a reaction to something
+    # the operator just did, so they are already looking at her corner; the hello lands
+    # while the tab body is still painting and their eyes are on the tab bar.
+    GREET_TTL = 8.seconds
+
     # Sprite geometry within the body.
     #
     # Calibrated against the REAL floor: Layout.usable? refuses to render below 40x8, and
@@ -94,6 +102,7 @@ module Gori::Tui
       @wake_until_beat = 0
       @settle_beat = -1
       @seen_id = @notes.latest_id # don't announce a backlog on enable
+      @greeted = false
       @bubble = nil.as(String?)
       @bubble_at = nil.as(Time::Instant?)
       @bubble_until = nil.as(Time::Instant?)
@@ -119,7 +128,10 @@ module Gori::Tui
       # hidden — otherwise everything that landed in the meantime is still "new" and she
       # announces a stale result as though it had just happened. Deliberately swallows a
       # note that arrives on this very tick too: "don't announce a backlog on enable".
-      @seen_id = @notes.latest_id if @frame.nil?
+      if @frame.nil?
+        @seen_id = @notes.latest_id
+        greet(now)
+      end
       @last_poke ||= now
       changed = consume_note(now)
       changed = true if expire_bubble(now)
@@ -297,6 +309,23 @@ module Gori::Tui
     end
 
     # --- notifications -------------------------------------------------------
+
+    # Say hello the first time she appears. ONCE per Pet, not once per enable edge: the
+    # Runner holds one for the whole session, and someone flipping her on and off in the
+    # settings view to see what she looks like is not asking to be greeted each time.
+    #
+    # Gated on `notices` like everything else she says — a reader who turned her speech
+    # off asked for a silent mascot — and it burns the flag either way, so turning
+    # notices on an hour later does not produce a stale hello. The mood stays :info: a
+    # mood is a reaction to a note's LEVEL, and a greeting has none.
+    private def greet(now : Time::Instant) : Nil
+      return if @greeted
+      @greeted = true
+      return unless Settings.pet_notices?
+      @bubble = GREETING
+      @bubble_at = now
+      @bubble_until = now + GREET_TTL
+    end
 
     private def consume_note(now : Time::Instant) : Bool
       id = @notes.latest_id
