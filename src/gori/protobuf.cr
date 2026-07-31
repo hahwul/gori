@@ -27,6 +27,12 @@ module Gori
     # allocate unbounded Field arrays. Far above any realistic message.
     MAX_FIELDS = 100_000
 
+    # A tag's field-number half must fit here. UInt32::MAX rather than the spec's 2^29-1
+    # because the job is the P7 contract, not conformance: past this the `to_u32` that turns
+    # a tag into a field number RAISES, which is the one thing this module promises not to do.
+    # A tag varint that wide is corrupt either way and takes the corrupt-tag exit.
+    MAX_FIELD_NUMBER = UInt32::MAX.to_u64
+
     # Wire types from the protobuf encoding (https://protobuf.dev/programming-guides/encoding/).
     # Groups (3/4) are long-deprecated; we skip them rather than surface a tree.
     enum WireType : UInt8
@@ -141,12 +147,19 @@ module Gori
           complete = false
           break
         end
-        number = (tag >> 3).to_u32
+        # Range-checked BEFORE the conversion: a tag varint of 2^35 or more (six bytes of
+        # `ff ff ff ff ff 1f` is enough) makes `to_u32` RAISE `OverflowError`, in a module
+        # whose contract is "never raises on hostile / truncated input" — and it is reached
+        # through the nested-message probe too, so the bytes need only sit inside a
+        # length-delimited field. A field number that wide is not a legal protobuf tag anyway,
+        # so it is corrupt input and takes the same exit every other corrupt tag does.
+        wide = (tag >> 3) > MAX_FIELD_NUMBER
         wt = WireType.from_value?((tag & 0x7).to_u8)
-        unless wt
+        if wide || wt.nil?
           complete = false
           break
         end
+        number = (tag >> 3).to_u32
 
         # Lone end-group at message level is not a clean message (groups must be
         # opened first). Hard-stop so a nested probe rejects the payload.
@@ -245,6 +258,7 @@ module Gori
       while depth > 0 && pos < data.size
         tag, pos, ok = read_varint(data, pos)
         return {pos, false} unless ok
+        return {pos, false} if (tag >> 3) > MAX_FIELD_NUMBER # see `decode`: `to_u32` RAISES past 2^35
         field = (tag >> 3).to_u32
         wt = WireType.from_value?((tag & 0x7).to_u8) || return {pos, false}
         case wt

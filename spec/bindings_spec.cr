@@ -135,6 +135,45 @@ describe Gori::Bindings do
       end
     end
 
+    # A binding value is the ORIGIN'S, not the operator's, and it is spliced into a request
+    # gori then sends — `Rules#substitute` writes it straight into `Authorization: <value>`.
+    # So `abc\r\nX-Admin: true` forged a second header line and `abc\r\n\r\nGET /…` forged a
+    # whole second request onto a pooled keep-alive upstream. `escape_backrefs` already
+    # covers this value being re-read by `gsub`'s replacement grammar; the message boundary
+    # is the other half, and `Import::Builder` guards exactly it on the sibling path.
+    it "never binds a value that would forge a message boundary" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::JsonPath, "$.token").should be_nil
+        head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        # A JSON-escaped CRLF: the origin's own bytes, decoded into a real CR LF by the
+        # extractor — which is exactly how it would reach the header line.
+        forged = response_result(head, %({"token":"abc\\r\\nX-Admin: true"}))
+        b.observe(forged, subject).should be_empty
+        b.bound?("SESSION").should be_false
+        store.events_after(0, 20).any? { |e| e.message.includes?("CR, LF or NUL") }.should be_true
+
+        # A previous GOOD value is not cleared by the refusal — a miss never unbinds.
+        b.observe(response_result(head, %({"token":"clean"})), subject).should eq(["SESSION"])
+        b.observe(forged, subject).should be_empty
+        b.values["SESSION"].should eq("clean")
+      end
+    end
+
+    it "refuses a NUL as readily as a CR or an LF" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("A", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        b.observe(response_result(head, %({"t":"ab\\u0000cd"})), subject).should be_empty
+        b.bound?("A").should be_false
+        # A value with no boundary byte still binds — the guard is the three bytes
+        # `Import::Builder::HEADER_INJECT` names, not "anything unusual". A horizontal tab is
+        # legal in a field-value (RFC 7230 §3.2) and stays legal here.
+        b.observe(response_result(head, %({"t":"ab\\tcd"})), subject).should eq(["A"])
+      end
+    end
+
     it "reports whether a toggle or a delete actually committed" do
       with_store do |store|
         b = Gori::Bindings.load(store)

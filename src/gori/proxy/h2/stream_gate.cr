@@ -575,9 +575,22 @@ module Gori::Proxy::H2
     end
 
     # {head incl. its terminating blank line, whether anything followed it}.
+    #
+    # The EARLIEST blank line, in either spelling — `Rules#split_message`'s rule and for the
+    # same reason. `||` preferred the CRLF form wherever it appeared, so an operator whose
+    # edited head is LF-joined (the intercept editor's `TextArea#text` is) and whose BODY
+    # carries a CRLFCRLF got the boundary taken inside the body: the "head" handed to the
+    # codec would then include body bytes.
     private def split_edit(bytes : Bytes) : {Bytes, Bool}
       text = String.new(bytes)
-      idx = text.index("\r\n\r\n").try(&.+(4)) || text.index("\n\n").try(&.+(2))
+      crlf = text.index("\r\n\r\n")
+      lf = text.index("\n\n")
+      idx =
+        if crlf && (lf.nil? || crlf < lf)
+          crlf + 4
+        elsif lf
+          lf + 2
+        end
       return {bytes, false} unless idx
       {bytes[0, idx], idx < bytes.size}
     end
@@ -653,12 +666,15 @@ module Gori::Proxy::H2
       @dst.write(frame.wire_bytes)
       @dst.flush
       @sink.on_h2_frame(@conn_id, @direction, frame.type, frame.flags, frame.stream_id, frame.payload)
-      @assembler.feed(@direction, frame, pre)
       # Session-binding extraction (#501 slice 2), on the frames that were actually WRITTEN.
       # A head the sandbox suppressed or the operator dropped goes to `project`, not here, so
       # "delivered, not arrived" holds structurally. Response direction only, and nil for every
       # frame that is not the end of a header block.
+      #
+      # BEFORE `feed`, and see `Relay#emit` for why: a bodiless response head completes the
+      # exchange inside `feed`, which deletes the stream the extractor needs to scope on.
       @extract.try(&.observe(frame, pre))
+      @assembler.feed(@direction, frame, pre)
     end
 
     # Feed a held head to the assembler for the DECODED projection only, without logging it as

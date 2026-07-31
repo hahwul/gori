@@ -75,6 +75,39 @@ module Gori
     # WHICH rule wrote a name after the operator has edited several.
     private record Bound, value : String, rule_id : Int64, at : Time
 
+    # Bytes that would forge a message boundary out of a value, so a value carrying one is
+    # never bound. `Import::Builder::HEADER_INJECT`, deliberately the same set and the same
+    # reasoning: only CR/LF/NUL, because a value may legally contain a horizontal tab and
+    # bytes that merely break a value without forging a boundary are not this feature's
+    # business.
+    #
+    # ## Why this is a refusal and not a P7 passthrough
+    #
+    # The axis is PROVENANCE. Everywhere else in this codebase a malformed value is the
+    # OPERATOR'S PAYLOAD and is replayed byte-exact — an imported target, a hand-typed header,
+    # a Repeater template. A binding value is the ORIGIN'S, and it is spliced into a request
+    # gori then sends: `Rules#substitute` writes it into `Authorization: <value>`, so
+    # `abc\r\nX-Admin: true` becomes two header lines and `abc\r\n\r\nGET /...` forges a whole
+    # second request onto a pooled keep-alive upstream. `rules.cr` already reasons about a
+    # binding value being re-interpreted downstream — that is what `escape_backrefs` is for —
+    # and covers `gsub`'s replacement grammar only; the message boundary is the other half.
+    #
+    # Refused at EXTRACTION rather than at each injection site because there are five of them
+    # (`Rules#substitute` plus `Env.expand_bindings` on the four send seams) and a value that
+    # never enters the table cannot reach any of them. The cost is stated plainly: a
+    # `position`/`regex` descriptor that deliberately spans a line break no longer binds, and
+    # the miss event says which byte it was.
+    #
+    # A BYTE scan and not a Regex: a header value or a `position` slice can carry bytes that
+    # are not valid UTF-8, and Crystal's Regex raises `ArgumentError` on such a subject — which
+    # would turn this guard into an exception on exactly the input it exists to stop.
+    def self.boundary_forging?(value : String) : Bool
+      value.each_byte do |b|
+        return true if b == 0x0d_u8 || b == 0x0a_u8 || b == 0x00_u8
+      end
+      false
+    end
+
     @rules : Array(Store::ExtractRule)
     @compiled : Array(Compiled)
     @values : Hash(String, Bound)
@@ -426,9 +459,12 @@ module Gori
           next
         end
         value = Gori::TokenExtract.extract(raw, c.rule.token_loc, c.re)
-        if value.nil? || value.empty?
-          reason = value.nil? ? "no match" : "matched an empty value"
-          miss(c.rule, reason, flow_id) if !throttle || report_miss?(c.rule.id)
+        if value.nil?
+          record_miss(c.rule, "no match", flow_id, throttle)
+          next
+        end
+        if reason = unusable(value)
+          record_miss(c.rule, reason, flow_id, throttle)
           next
         end
         @mutex.synchronize { @values[c.rule.name] = Bound.new(value, c.rule.id, now) }
@@ -442,6 +478,23 @@ module Gori
         Env.bump_highlight_rev
       end
       bound
+    end
+
+    # Why an extracted value may not be bound, or nil to bind it. A value that HIT but cannot
+    # be used is still a miss — the previous binding stands and the operator is told which it
+    # was, rather than being left to wonder why `$NAME` did not move.
+    private def unusable(value : String) : String?
+      return "matched an empty value" if value.empty?
+      if Bindings.boundary_forging?(value)
+        return "matched a value carrying CR, LF or NUL, which would forge a message boundary " \
+               "where it is injected"
+      end
+      nil
+    end
+
+    private def record_miss(rule : Store::ExtractRule, reason : String, flow_id : Int64?,
+                            throttle : Bool) : Nil
+      miss(rule, reason, flow_id) if !throttle || report_miss?(rule.id)
     end
 
     # Whether this rule's miss is worth an `events` row right now. One row per (rule, binding

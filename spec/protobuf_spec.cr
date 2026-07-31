@@ -252,4 +252,27 @@ describe Gori::Protobuf do
       PB.message?(Bytes[0x08, 0x80]).should be_false
     end
   end
+
+  # The module's contract is "never raises on hostile / truncated input (P7)", and a tag
+  # varint of 2^35 or more made the `to_u32` that extracts the field number raise
+  # OverflowError. Unrescued from `cli/run/history.cr`, so `gori run show --format json` on
+  # such a captured flow died with an unhandled exception mid-JSON.
+  describe "a tag whose field number overflows" do
+    # Tag varint = 2^36, so wire type 0 (a VALID one — the wire-type check is not what stops
+    # this) and field number 2^33, which does not fit in a UInt32.
+    wide = Bytes[0x80, 0x80, 0x80, 0x80, 0x80, 0x02]
+
+    it "is corrupt input, not an exception" do
+      m = PB.decode(wide)
+      m.complete.should be_false
+      PB.message?(wide).should be_false
+    end
+
+    it "is caught inside a length-delimited field too (the nested-message probe)" do
+      # field 1, wire type 2 (length-delimited), length 6, then the hostile tag.
+      nested = Bytes[0x0a, 0x06] + wide
+      PB.decode(nested).complete.should be_true # the OUTER message is well-formed…
+      PB.message?(wide).should be_false         # …and the probe rejects the inner bytes
+    end
+  end
 end

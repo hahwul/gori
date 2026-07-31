@@ -198,9 +198,22 @@ module Gori
             next if k.compare("content-length", case_insensitive: true) == 0
             b << k << ": " << v << "\r\n"
           end
-          b << "Content-Length: " << (content_length || body.size) << "\r\n" if body
+          # Not alongside a `Transfer-Encoding`. A chunked message is stored RAW-chunked, so
+          # its entity length is not the byte count here — and CL+TE is the shape gori's own
+          # `Codec::Body.request_framing` rejects as illegal, which a HAR round trip was
+          # manufacturing out of a flow that had been captured legally. The export's
+          # fixed-point invariant (`export/har.cr`) needs this too: without it, re-export is
+          # not byte-identical.
+          b << "Content-Length: " << (content_length || body.size) << "\r\n" if body && !chunked?(headers)
           b << "\r\n"
         end.to_slice
+      end
+
+      # Whether the headers declare a `Transfer-Encoding` — any value, not just `chunked`.
+      # Its mere presence is what makes a synthesized `Content-Length` illegal (RFC 7230
+      # §3.3.3), and gori never re-frames on import: the stored body is the wire body.
+      private def self.chunked?(headers : Headers) : Bool
+        headers.any? { |(k, _)| k.compare("transfer-encoding", case_insensitive: true) == 0 }
       end
 
       def self.response_head(http_version : String, status : Int32, reason : String,
@@ -215,7 +228,8 @@ module Gori
             has_cl = true if !has_cl && k.compare("content-length", case_insensitive: true) == 0
             b << k << ": " << v << "\r\n"
           end
-          b << "Content-Length: " << (body.try(&.size) || 0) << "\r\n" unless has_cl
+          # See `request_head`: never synthesize a length beside a Transfer-Encoding.
+          b << "Content-Length: " << (body.try(&.size) || 0) << "\r\n" unless has_cl || chunked?(headers)
           b << "\r\n"
         end.to_slice
       end

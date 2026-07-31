@@ -344,11 +344,22 @@ module Gori
     # Split an HTTP message into {head, body, separator}. Separator is "\r\n\r\n" or
     # "\n\n" when a blank line exists; otherwise the whole text is the head and sep/body
     # are empty (so header-only samples still rewrite).
+    #
+    # The EARLIEST blank line wins, in either spelling. Preferring `\r\n\r\n` wherever it
+    # appeared let the message's own BODY move the boundary: the Rewriter preview feeds
+    # LF-joined text (`TextArea#text`), so a pasted sample whose body carries a CRLFCRLF —
+    # a multipart part, a captured message — put the CRLF hit after the real separator, and
+    # the preview then ran the HEAD rules inside the body and the body rules over the head.
+    # It showed the operator the opposite of what the proxy does. Same defect as the one
+    # fixed in `RuleStub.split`; two spellings of one delimiter take min(index), never a
+    # fixed preference order.
     private def split_message(text : String) : {String, String, String}
-      if idx = text.index("\r\n\r\n")
-        {text[0, idx], text[idx + 4..], "\r\n\r\n"}
-      elsif idx = text.index("\n\n")
-        {text[0, idx], text[idx + 2..], "\n\n"}
+      crlf = text.index("\r\n\r\n")
+      lf = text.index("\n\n")
+      if crlf && (lf.nil? || crlf < lf)
+        {text[0, crlf], text[crlf + 4..], "\r\n\r\n"}
+      elsif lf
+        {text[0, lf], text[lf + 2..], "\n\n"}
       else
         {text, "", ""}
       end

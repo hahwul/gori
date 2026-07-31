@@ -208,8 +208,15 @@ module Gori::Proxy::H2
       @block_bytes += frame.payload.size
 
       # Same 1 MiB ceiling the assembler enforces: a peer that never sends END_HEADERS must
-      # not grow this buffer without bound. Past it the block goes out as it arrived.
+      # not grow this buffer without bound. Past it the block goes out as it arrived — but
+      # the `Deferrer` hears about it FIRST, exactly as `unreadable` does. This block is
+      # never decoded either, so it is the same situation the hook was written for: a head
+      # with no URL to scope-test, walking past a BLOCKING gate. Without it a client could
+      # reach any host the sandbox excludes by sending HEADERS with no END_HEADERS followed
+      # by 64 MiB of CONTINUATION. With the sandbox off `undecodable` is a no-op and this
+      # stays the verbatim forward it has always been.
       if @block_bytes > Assembler::MAX_HEADER_BLOCK
+        @deferrer.try(&.undecodable(@block_stream))
         @buf.each { |f| yield f, nil }
         reset
         return
@@ -321,7 +328,13 @@ module Gori::Proxy::H2
       # `parse_*` refuses it anyway; checking here keeps the rules from running for nothing
       # and, more to the point, keeps the log from blaming a rule for the peer's bytes.
       return warn_unfaithful(@block_stream, request) unless HeadCodec.h1_faithful?(fields, request)
-      authority = request ? (HeadCodec.pseudo_of(fields, ":authority") || @host) : @host
+      # The BARE host, because that is what a rule's host glob is written against and what
+      # every other host-scoping site in this pipeline passes (`notice_coalesced` below,
+      # `H2::Extract`, `StreamGate`'s three gates). `:authority` may carry a port, and
+      # `Rules.host_matches?` compiles an anchored regex — so `api.example.com:8443` silently
+      # matched no `*.example.com` glob, leaving a head rule that fires on h1 and on this
+      # stream's own RESPONSE head (which gets the bare `@host`) inert on the request.
+      authority = request ? request_host(fields) : @host
       rewritten_head = request ? rw.rewrite_request(head, authority) : rw.rewrite_response(head, @host)
       return nil if rewritten_head == head # `Rules` returns the same content when nothing matched
 
@@ -392,6 +405,16 @@ module Gori::Proxy::H2
     # that did not name them would send the operator to the wrong rule table (#536). Costs a
     # string compare per request head on every normal connection (the authority IS the host, and
     # that returns before any lock); only a genuinely coalesced stream reaches the rule lookups,
+    # This stream's request host, port stripped, falling back to the CONNECT host when the
+    # block carries no `:authority`. One spelling of "which host is this stream for", so the
+    # rule gate and the coalescing notice below cannot drift on it.
+    private def request_host(fields : Array(HPACK::Field)) : String
+      authority = HeadCodec.pseudo_of(fields, ":authority")
+      return @host if authority.nil? || authority.empty?
+      host, _ = Upstream.split_host_port(authority, 0)
+      host.empty? ? @host : host
+    end
+
     # and only until the line is written.
     private def notice_coalesced(fields : Array(HPACK::Field)) : Nil
       return if @warned_coalesced

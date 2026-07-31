@@ -182,6 +182,33 @@ describe Gori::Export::Har do
     end
   end
 
+  # A chunked message is stored RAW-chunked, so the byte count in the HAR is not the entity
+  # length — and re-emitting it as a Content-Length manufactured the CL+TE shape gori's own
+  # `Codec::Body.request_framing` REJECTS as illegal, out of a flow that had been captured
+  # legally and is replayable through the Repeater. It also broke the fixed-point invariant
+  # this file states: re-export was no longer byte-identical.
+  it "round-trips a chunked message without inventing a Content-Length beside it" do
+    with_store do |store|
+      detail = capture_flow(store,
+        req_head: "POST /u HTTP/1.1\r\nHost: shop.test\r\nTransfer-Encoding: chunked\r\n\r\n",
+        req_body: "9\r\nfirst-part\r\n0\r\n\r\n".to_slice,
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n",
+        resp_body: "4\r\ndone\r\n0\r\n\r\n".to_slice,
+        method: "POST", target: "/u", content_type: "text/plain")
+      har, _ = export([detail])
+      back = reimport(har)
+
+      req = String.new(back.request_head)
+      req.should contain("Transfer-Encoding: chunked")
+      req.should_not contain("Content-Length")
+      resp = String.new(back.response_head.not_nil!)
+      resp.should contain("Transfer-Encoding: chunked")
+      resp.should_not contain("Content-Length")
+      # Which is what makes the round trip a fixed point again.
+      export([back])[0].should eq(har)
+    end
+  end
+
   it "writes the WIRE body, not the decompressed view, so it stays in sync with Content-Encoding" do
     # Chrome writes the decoded text here. That is fine for a debugging view and wrong for a
     # capture artifact: `Content-Encoding: gzip` stays in `headers` either way, so a decoded

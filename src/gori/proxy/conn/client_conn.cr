@@ -1106,7 +1106,16 @@ module Gori::Proxy
       SocketTuning.relax(client)
       SocketTuning.relax(upstream)
       begin
-        H2::Relay.run(client, upstream, host, port, @sink, extractor: @extractor)
+        # The same four lenses the TLS h2 path wires in (`tls/tunnel.cr#relay_h2`). Only the
+        # extractor was threaded here by #501 slice 2, and `HeadRewrite` is the ONLY producer
+        # of the decoded projection an extract rule needs — so without a rewriter the
+        # extractor was structurally inert on this path, and Match&Replace head rules and
+        # intercept holds did not reach h2c-in-CONNECT at all. Nothing about this tunnel makes
+        # those rules less applicable than on the TLS one; the asymmetry was a wiring gap, not
+        # a decision (the surrounding comments enumerate the sandbox and `http2_disabled?`
+        # gates and say nothing about rules or intercept).
+        H2::Relay.run(client, upstream, host, port, @sink,
+          rewriter: @rewriter, interceptor: @interceptor, extractor: @extractor)
       ensure
         upstream.close rescue nil
       end

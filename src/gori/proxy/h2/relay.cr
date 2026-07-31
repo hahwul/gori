@@ -143,9 +143,14 @@ module Gori::Proxy::H2
       dst.write(frame.wire_bytes) # original wire bytes when untouched — no re-serialize/copy
       dst.flush
       @sink.on_h2_frame(conn_id, direction, frame.type, frame.flags, frame.stream_id, frame.payload)
-      assembler.feed(direction, frame, pre)
-      # Session-binding extraction (#501 slice 2), after the frame is on the wire.
+      # Session-binding extraction (#501 slice 2), after the frame is on the wire and BEFORE
+      # the assembler is fed. The order is load-bearing: a response head carrying END_STREAM
+      # (a 204, a 304, a reply to HEAD, a bodiless 3xx) COMPLETES the exchange inside `feed`,
+      # which deletes the stream — so `Extract#observe`'s `request_ref` then found nothing and
+      # the descriptor never ran, while `warn_unscopable` blamed the live-stream ceiling.
+      # `feed` puts nothing on the wire, so moving it after costs the peer nothing.
       extract.try(&.observe(frame, pre))
+      assembler.feed(direction, frame, pre)
     end
 
     private def now_us : Int64

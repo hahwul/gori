@@ -257,6 +257,13 @@ module Gori::Proxy::WS
         clean_close
       rescue
         false # peer closed / reset: this direction ends
+      ensure
+        # The abnormal exits (EOF, a truncated frame, a reset) reach here too, and they are
+        # withholding the same bytes a CLOSE would have been. Best-effort: this path is
+        # usually taken BECAUSE a peer went away, so the write can itself fail — but the
+        # byte-exact pump would already have forwarded these bytes, and dropping them
+        # silently is the difference between the two pumps that must not exist.
+        (bypass("this direction ended mid-message") { flush_withheld }) rescue nil
       end
 
       # A control frame (ping/pong/close) never takes part in a rewrite or a hold and is
@@ -282,7 +289,17 @@ module Gori::Proxy::WS
         end
         ctl = WS.read_body(@src, h) || return false
         if ctl.close?
-          bypass("the peer closed this direction") { write_direct(ctl.raw) }
+          # The queue is resolved AND this pump's own half-assembled message is put out, in
+          # that order, before the CLOSE. §5.5.1 forbids data frames after it, so bytes this
+          # pump is WITHHOLDING have exactly this one chance — `start_message`'s comment
+          # already states the rule ("they have to go out here or they are lost on the wire")
+          # and it was applied at that one exit only. A `TEXT fin=0 "secret "` followed by a
+          # CLOSE reached the origin as the CLOSE alone, on neither the wire nor in capture,
+          # while the byte-exact pump forwards those bytes.
+          bypass("the peer closed this direction") do
+            flush_withheld
+            write_direct(ctl.raw)
+          end
         elsif gate = @gate
           gate.write_control(ctl.raw)
         else
@@ -304,11 +321,15 @@ module Gori::Proxy::WS
         # peer judge; this pump is WITHHOLDING those bytes, so they have to go out here or
         # they are lost on the wire. Emitted non-final, so gori does not invent the FIN the
         # sender never sent — the violation is passed on, not repaired.
-        if !@passthrough && @buffer.size > 0
-          bypass("a message arrived before the previous one sent its FIN") { flush_buffered }
-          @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, @buffer.to_slice.dup)
-          reset_buffer
-        end
+        #
+        # The RESET is unconditional and the flush is not, which is the half that was missing:
+        # a PASSTHROUGH message feeds the same `@buffer` through `capture_frame`, and that
+        # empties only on FIN — so a passthrough message that never FIN'd left its bytes in
+        # front of the next message's. With a `part: ws` rule live and no gate, BINARY is
+        # passthrough and TEXT is not, so `BIN fin=0 "LEAK"` then `TEXT fin=1 "second"` put
+        # `LEAKSECOND` on the wire as one TEXT frame. Its bytes need no flush (they were
+        # already written frame by frame) but they must not stay in the buffer.
+        bypass("a message arrived before the previous one sent its FIN") { flush_withheld } if @buffer.size > 0
         @opcode = opcode
         @rewritable = opcode == OP_TEXT && !@rewriter.nil?
         @passthrough = !@rewritable && @gate.nil?
@@ -321,14 +342,17 @@ module Gori::Proxy::WS
       # reason — captured prefix bytes must not be dropped, and a later small FIN fragment
       # must not surface as if it were the whole message), then stream the frame through.
       private def forward_oversized(h : WS::Header) : Bool
+        # The prefix's capture row goes in FIRST, because it preceded the oversized frame on
+        # the wire and `Relay.pump` records the two in that order. Emitting it afterwards put
+        # the "[gori] N-byte … too large to capture" marker ABOVE the fragment it followed, so
+        # the two pumps disagreed about an identical frame sequence.
+        prefix = @buffer.size > 0 ? @buffer.to_slice.dup : nil
+        prefix.try { |p| @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, p) }
         forwarded = bypassing("a frame too large to buffer arrived") do
           flush_buffered unless @passthrough
           Relay.forward_oversized_frame(@src, @dst, h, @direction, @flow_id, @sink, @opcode, @scratch)
         end
-        if @buffer.size > 0
-          @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, @buffer.to_slice.dup)
-          reset_buffer
-        end
+        reset_buffer if prefix
         @passthrough = true
         @rewritable = false
         @single_raw = nil
@@ -388,6 +412,15 @@ module Gori::Proxy::WS
           @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, rewritten.dup)
         end
         reset_buffer
+        # This message is over, so the NEXT data frame starts one — even a stray `OP_CONT`,
+        # which does not go through `start_message`. Without the reset that frame found
+        # `@fresh == false`, dropped its own `raw`, and was re-emitted under the PREVIOUS
+        # message's opcode with a fresh mask key: gori silently REPAIRING a §5.4 violation
+        # that the byte-exact pump passes through for the peer to judge. That breaks this
+        # class's stated invariant — gori's own framing is used only for a message a rule or
+        # the operator actually changed.
+        @fresh = true
+        @single_raw = nil
       end
 
       # Match & Replace, or the payload untouched when this message is not eligible (binary,
@@ -405,6 +438,19 @@ module Gori::Proxy::WS
       private def flush_buffered : Nil
         return if @buffer.size == 0
         write_direct(WS.encode(@opcode, @buffer.to_slice, mask: @mask, fin: false))
+      end
+
+      # Put a half-assembled message on the wire and into capture, then forget it. Only the
+      # bytes this pump is WITHHOLDING: in passthrough they went out frame by frame already,
+      # so there is nothing owed to the wire — but the buffer still has to be cleared, or its
+      # bytes ride in front of the next message (see `start_message`).
+      #
+      # Emitted NON-final, so gori does not invent a FIN the sender never sent.
+      private def flush_withheld : Nil
+        return if @buffer.size == 0
+        flush_buffered unless @passthrough
+        @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, @buffer.to_slice.dup)
+        reset_buffer
       end
 
       # A write that goes STRAIGHT to the socket, bypassing the queue. Every caller either
