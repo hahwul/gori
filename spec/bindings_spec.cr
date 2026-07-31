@@ -208,7 +208,30 @@ describe Gori::Bindings do
         b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
         b.observe(response_result("HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n\r\n"), subject)
         b.toggle(b.rules.first.id)
+        # Retained, so re-enabling does not cost a round trip — but read from the table the
+        # Bindings pane reads, NOT from `values`, which is what resolves `$NAME` (below).
+        b.bound?("SESSION").should be_true
+        b.rows.first.value.should eq("abc")
+        b.toggle(b.rules.first.id)
         b.values["SESSION"].should eq("abc")
+      end
+    end
+
+    it "stops resolving a disabled rule's name instead of injecting the stale value" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        b.observe(response_result("HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n\r\n"), subject)
+        b.toggle(b.rules.first.id)
+        # `declared` already dropped the name; `values` has to agree, or every reader that
+        # asks "is this key known?" first — `Env.expand_bindings`, `Rules#substitute` on the
+        # proxy path — keeps substituting a token whose writer the operator switched off.
+        b.declared.should be_empty
+        b.values.has_key?("SESSION").should be_false
+        with_layer(b) do
+          Gori::Env.expand_bindings("Cookie: sid=$SESSION").should eq("Cookie: sid=$SESSION")
+          Gori::Env.display_vars.has_key?("SESSION").should be_false
+        end
       end
     end
   end

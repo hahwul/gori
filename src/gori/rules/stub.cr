@@ -91,13 +91,24 @@ module Gori
       "#{status_line} · #{body}"
     end
 
-    # Split the authored text into {head, inline body} on the first blank line. Without one,
-    # the whole text is the head and the body is empty (a head-only stub).
+    # Split the authored text into {head, inline body} on the FIRST blank line, in either
+    # spelling. Without one, the whole text is the head and the body is empty (a head-only
+    # stub).
+    #
+    # The earliest of the two wins; preferring `\r\n\r\n` wherever it appears made the stub's
+    # own BODY able to move the boundary. A stub authored in the TUI is LF-joined
+    # (`TextArea#text`), so a body carrying a CRLFCRLF of its own — a captured message, a
+    # multipart part, a raw mail — put the CRLF hit AFTER the real separator and swallowed the
+    # first body lines into the head. The operator then saw "unparseable stub response" (a
+    # body line has no colon) or, worse, a body line that happened to look like a header
+    # silently became one.
     private def self.split(text : String) : {String, String}
-      if idx = text.index("\r\n\r\n")
-        {text[0, idx], text[(idx + 4)..]}
-      elsif idx = text.index("\n\n")
-        {text[0, idx], text[(idx + 2)..]}
+      crlf = text.index("\r\n\r\n")
+      lf = text.index("\n\n")
+      if crlf && (lf.nil? || crlf < lf)
+        {text[0, crlf], text[(crlf + 4)..]}
+      elsif lf
+        {text[0, lf], text[(lf + 2)..]}
       else
         {text, ""}
       end

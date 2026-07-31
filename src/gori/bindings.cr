@@ -95,6 +95,10 @@ module Gori
       # Rule ids already reported as needing an entity that was not buffered, at that rule
       # revision — see `miss_no_entity`.
       @no_entity_reported = Set(Int64).new
+      # Rule ids that already reported a plain miss at binding revision `@miss_reported_rev`
+      # — see `report_miss?`.
+      @miss_reported = Set(Int64).new
+      @miss_reported_rev = 0_u64
     end
 
     def self.load(store : Store) : Bindings
@@ -112,10 +116,23 @@ module Gori
       @mutex.synchronize { @compiled.select(&.rule.enabled?).map(&.rule.name) }
     end
 
+    # Values an ENABLED rule declares. This is what `Env.expand_bindings` and
+    # `Rules#substitute` resolve `$NAME` against, so the enabled test has to be HERE and not
+    # only on `declared`: `substitute` asks `vars.has_key?(key)` FIRST and emits the value it
+    # finds, so an unfiltered table left every reader — the proxy Match&Replace path most of
+    # all, which has no plan-build refusal in front of it — silently injecting the stale value
+    # of a rule the operator had switched off. That is the outcome `declared` above documents
+    # as ruled out, so both halves now answer the same question.
+    #
+    # The value itself SURVIVES in `@values` (see `refresh`): toggling a rule off and back on
+    # must not lose the token. `rows` and `bound?` read that table directly, which is what
+    # keeps the Bindings pane showing a disabled rule's value while nothing resolves it.
     def values : Hash(String, String)
       @mutex.synchronize do
+        live = Set(String).new
+        @rules.each { |r| live << r.name if r.enabled? }
         h = {} of String => String
-        @values.each { |(k, b)| h[k] = b.value }
+        @values.each { |(k, b)| h[k] = b.value if live.includes?(k) }
         h
       end
     end
@@ -271,7 +288,8 @@ module Gori
     def observe(raw : Repeater::Result, subject : InterceptFilter::Subject,
                 flow_id : Int64? = nil) : Array(String)
       return [] of String if raw.error
-      run(candidates(subject), raw, flow_id, entity_available: true)
+      # Not throttled: one deliberate send is one operator action, and they asked for it.
+      run(candidates(subject), raw, flow_id, entity_available: true, throttle: false)
     end
 
     # ── Proxy::ResponseExtract (the proxy response path, slice 2) ─────────────
@@ -352,7 +370,9 @@ module Gori
       # Parsed only now — after the host glob and the condition have both matched. A response
       # no rule claims never pays for this, and neither does one no rule's condition selects.
       raw = Repeater::Result.new(head, body, Proxy::Codec::Http1.parse_response_head(head), 0_i64)
-      run(picked, raw, flow_id, entity_available: !body.nil?)
+      # Throttled: this runs per RESPONSE, so an unthrottled miss writes one `events` row per
+      # message on the response path — see `report_miss?`.
+      run(picked, raw, flow_id, entity_available: !body.nil?, throttle: true)
     rescue ex
       ::Log.warn { "extract rules skipped for a proxied response: #{ex.message}" }
     end
@@ -370,7 +390,7 @@ module Gori
     end
 
     private def run(picked : Array(Compiled), raw : Repeater::Result, flow_id : Int64?,
-                    *, entity_available : Bool) : Array(String)
+                    *, entity_available : Bool, throttle : Bool) : Array(String)
       return [] of String if picked.empty?
       bound = [] of String
       now = Time.utc
@@ -385,7 +405,8 @@ module Gori
         end
         value = Gori::TokenExtract.extract(raw, c.rule.token_loc, c.re)
         if value.nil? || value.empty?
-          miss(c.rule, value.nil? ? "no match" : "matched an empty value", flow_id)
+          reason = value.nil? ? "no match" : "matched an empty value"
+          miss(c.rule, reason, flow_id) if !throttle || report_miss?(c.rule.id)
           next
         end
         @mutex.synchronize { @values[c.rule.name] = Bound.new(value, c.rule.id, now) }
@@ -399,6 +420,26 @@ module Gori
         Env.bump_highlight_rev
       end
       bound
+    end
+
+    # Whether this rule's miss is worth an `events` row right now. One row per (rule, binding
+    # revision), which is `Rules#report_unbound`'s key and it is the same flood: on the proxy
+    # path `observe_response` runs for every response the rule's host glob AND condition
+    # select, so a cookie descriptor scoped to a host the operator browses writes one row —
+    # one synchronous store write, on the response path — per subresource. `miss_no_entity`
+    # already deduped for exactly this reason; a plain miss is the far more common one.
+    #
+    # Keyed on the revision rather than latched forever so the report self-resets: `@rev`
+    # moves on every rebind, every clear and every rule edit, which is precisely when "this
+    # rule found nothing" becomes news again.
+    private def report_miss?(rule_id : Int64) : Bool
+      @mutex.synchronize do
+        if @miss_reported_rev != @rev
+          @miss_reported_rev = @rev
+          @miss_reported.clear
+        end
+        @miss_reported.add?(rule_id)
+      end
     end
 
     private def miss(rule : Store::ExtractRule, reason : String, flow_id : Int64?) : Nil

@@ -61,6 +61,27 @@ describe Gori::RuleStub do
     # Head-only stub: no blank line at all.
     Gori::RuleStub.inline_body("204 No Content").size.should eq(0)
   end
+
+  it "takes the FIRST blank line even when the body carries a CRLFCRLF of its own" do
+    # A stub authored in the TUI is LF-joined (`TextArea#text`), so a body that embeds a
+    # captured message / multipart part puts a `\r\n\r\n` AFTER the real separator. Scanning
+    # for the CRLF spelling first swallowed the leading body lines into the head, which then
+    # either failed to parse (a body line has no colon) or — worse — promoted a body line
+    # that happened to look like a header into a real one.
+    stub = "200 OK\nContent-Type: message/http\n\nGET / HTTP/1.1\r\nX-Injected: yes\r\n\r\nnested"
+    String.new(Gori::RuleStub.inline_body(stub))
+      .should eq("GET / HTTP/1.1\r\nX-Injected: yes\r\n\r\nnested")
+    head = Gori::RuleStub.parse_head(stub).not_nil!
+    head.status.should eq(200)
+    String.new(head.bytes).should_not contain("X-Injected")
+  end
+
+  it "still takes a CRLF-authored head's own separator" do
+    stub = "200 OK\r\nContent-Type: text/plain\r\n\r\nbody\n\ntail"
+    String.new(Gori::RuleStub.inline_body(stub)).should eq("body\n\ntail")
+    String.new(Gori::RuleStub.parse_head(stub).not_nil!.bytes)
+      .should eq("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n")
+  end
 end
 
 describe Gori::RuleStubBodyCache do

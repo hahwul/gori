@@ -43,6 +43,17 @@ private def observe(bindings : Gori::Bindings, head : String, body : Bytes? = ni
     method: method, host: host, target: target, scheme: "https", status: status)
 end
 
+# The deliberate-send shape of the same observation, for the contrast the throttle draws
+# between one operator action and one response off the proxy.
+private def sent(head : String) : {Gori::Repeater::Result, Gori::InterceptFilter::Subject}
+  bytes = head.to_slice
+  result = Gori::Repeater::Result.new(bytes, Bytes.empty,
+    Gori::Proxy::Codec::Http1.parse_response_head(bytes), 1_i64, nil)
+  subject = Gori::InterceptFilter::Subject.new(method: "POST", host: "acme.test",
+    target: "/login", scheme: "https", status: 200)
+  {result, subject}
+end
+
 describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
   describe "the gates the hot path reads" do
     it "reports nothing live when no rule exists" do
@@ -213,6 +224,43 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         events.count { |e| e.kind == "extract_no_body" }.should eq 1
         events.any? { |e| e.kind == "extract_miss" }.should be_false
         b.bound?("CSRF").should be_false
+      end
+    end
+
+    # Same flood, same key, and the far more common half: a cookie descriptor scoped to a
+    # host the operator is browsing misses on every subresource, and each row was a
+    # synchronous store write ON the proxy response path.
+    it "reports a plain miss once per rule too, not once per response" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        20.times { observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: other=x\r\n\r\n") }
+        store.events_after(0, 100).count { |e| e.kind == "extract_miss" }.should eq 1
+      end
+    end
+
+    # The throttle is keyed on the binding revision, not latched: once something actually
+    # moves — a rebind here — the rule missing again is news again.
+    it "reports a plain miss again after a rebind moves the revision" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: other=x\r\n\r\n")
+        observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n\r\n") # binds → @rev moves
+        observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: other=x\r\n\r\n")
+        store.events_after(0, 100).count { |e| e.kind == "extract_miss" }.should eq 2
+      end
+    end
+
+    # A deliberate `#observe` (one Repeater send) is one operator action, so it is never
+    # throttled — they asked for that send and want to hear about each one.
+    it "does not throttle a deliberate single send" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        raw, subject = sent("HTTP/1.1 200 OK\r\nSet-Cookie: other=x\r\n\r\n")
+        3.times { b.observe(raw, subject) }
+        store.events_after(0, 100).count { |e| e.kind == "extract_miss" }.should eq 3
       end
     end
 
