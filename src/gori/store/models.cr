@@ -314,12 +314,21 @@ module Gori
     end
 
     # Which PART of a message a Match&Replace rule rewrites: the HEAD (request/
-    # status line + headers) or the BODY (the entity — de-chunked, but not
-    # decompressed). Stored as the lowercase member name ("head"/"body"); pre-body
-    # rules migrate to `head` (V30 default), so old rows keep their exact meaning.
+    # status line + headers), the BODY (the entity — de-chunked, but not
+    # decompressed), or `Ws` — a WebSocket MESSAGE carried by an upgraded (101) flow,
+    # reassembled to FIN. Stored as the lowercase member name ("head"/"body"/"ws");
+    # pre-body rules migrate to `head` (V30 default), so old rows keep their exact meaning.
+    #
+    # `Ws` is deliberately its OWN member rather than a reuse of `Body` (#500): a WS
+    # message is neither a head nor an entity body, and folding it into `Body` would make
+    # every existing `reqbody:` rule start rewriting WebSocket frames — a silent behaviour
+    # change on live operator config. Direction comes from `RuleTarget` the same way it
+    # does for the other parts: Request ⇒ client→server ("out"), Response ⇒ server→client
+    # ("in").
     enum RulePart
       Head
       Body
+      Ws
 
       def label : String
         to_s.downcase
@@ -327,6 +336,18 @@ module Gori
 
       def self.from_label(s : String) : RulePart
         parse(s)
+      end
+
+      # One-letter tag for a rule row (the TUI Rewriter list and `gori run rewriter`).
+      # Exhaustive on purpose — a future member must not silently render as an existing
+      # one, which is exactly how the two-way `part.body? ? 'B' : 'H'` ternary this
+      # replaced would have shown a WS rule as a head rule.
+      def badge : Char
+        case self
+        in Head then 'H'
+        in Body then 'B'
+        in Ws   then 'W'
+        end
       end
     end
 

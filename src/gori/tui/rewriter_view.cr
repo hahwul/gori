@@ -327,7 +327,7 @@ module Gori::Tui
       case rule.op
       when .replace?
         kind = rule.match_kind.regex? ? "re" : "sub"
-        "#{kind}/#{rule.part.body? ? 'B' : 'H'}"
+        "#{kind}/#{rule.part.badge}"
       when .add_header?    then "+hdr"
       when .set_header?    then "~hdr"
       when .remove_header? then "-hdr"

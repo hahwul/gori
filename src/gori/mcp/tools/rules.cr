@@ -68,6 +68,9 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        if bad = ws_shape_error(op, part)
+          return bad
+        end
         target, part = Gori::Rules.normalize_shape(op, target, part) # header ops head-only; a stub is request/head
         # Reject an uncompilable regex up front (the CLI does; the proxy would otherwise
         # rescue the compile to passthrough and the rule would silently never fire).
@@ -111,6 +114,9 @@ module Gori
         ok = rule_op_kind(h, existing.op, existing.match_kind)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        if bad = ws_shape_error(op, part)
+          return bad
+        end
         target, part = Gori::Rules.normalize_shape(op, target, part)
         pattern = present?(h, "pattern") ? str(h, "pattern") : existing.pattern
         return err("pattern must not be empty", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -155,6 +161,9 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        if bad = ws_shape_error(op, part)
+          return bad
+        end
         target, part = Gori::Rules.normalize_shape(op, target, part)
         # Reject an uncompilable regex up front, same as create/update_rule — otherwise
         # Rules#apply_rule's own rescue (a deliberate passthrough so a bad LIVE rule
@@ -192,8 +201,21 @@ module Gori
         return err("invalid 'target' (expected request|response)", "INVALID_ARGUMENT", field: "target") unless target
         part_s = str(h, "part").try(&.strip)
         part = part_s.nil? || part_s.empty? ? dft_part : Store::RulePart.parse?(part_s)
-        return err("invalid 'part' (expected head|body)", "INVALID_ARGUMENT", field: "part") unless part
+        return err("invalid 'part' (expected head|body|ws)", "INVALID_ARGUMENT", field: "part") unless part
         {target, part}
+      end
+
+      # Only `replace` acts on a WebSocket message: a header op names a header and a WS
+      # message has none, and a short-circuit rule answers a request that a WS message is
+      # not. Refused rather than normalized — `Rules.normalize_shape` would coerce the part
+      # to `head`, which does not narrow the rule but moves it to a different PROTOCOL: the
+      # caller asked to rewrite WebSocket frames and would have got one rewriting HTTP heads.
+      private def ws_shape_error(op : Store::RuleOp, part : Store::RulePart) : Result?
+        return nil unless part.ws?
+        return nil if op.replace?
+        err("op '#{op.label}' cannot target part 'ws' — only 'replace' rewrites a WebSocket " \
+            "message; use part=head for an HTTP header or short-circuit rule",
+          "INVALID_ARGUMENT", field: "part")
       end
 
       # Parse op/match from args, defaulting to the given fallbacks. Returns the pair or

@@ -39,7 +39,7 @@ Reading a held message needs no marks and no editor: `Shift-←` / `Shift-→` s
 
 ### What gets held
 
-Requests are held on HTTP/1.1 and HTTP/2, gRPC included. So are responses, except the ones that have no last byte to wait for: a WebSocket upgrade (`101`), a Server-Sent Events stream, and a close-delimited response are forwarded as they arrive rather than held. WebSocket messages after the upgrade are relayed frame by frame and captured, never held, so a socket cannot be paused, edited, or dropped once it is open. The request that opened it can be, like any other request.
+Requests are held on HTTP/1.1 and HTTP/2, gRPC included. So are responses, except the ones that have no last byte to wait for: a WebSocket upgrade (`101`), a Server-Sent Events stream, and a close-delimited response are forwarded as they arrive rather than held. WebSocket messages after the upgrade are relayed and captured, never held, so a socket cannot be paused or dropped once it is open and no message reaches the editor. The request that opened it can be, like any other request. A [Match & Replace rule](#match-replace-websocket) can still rewrite messages on an open socket — that is a rule applied in flight, not a hold.
 
 ### Intercept on HTTP/2
 
@@ -95,7 +95,7 @@ gori understands the protocols it carries:
 |----------|---------|
 | **HTTP/1.1** | Full capture and repeater |
 | **HTTP/2** | Relay after ALPN with per-stream intercept and head rules, raw frame log, HPACK decode, stream → flow assembly |
-| **WebSocket** | Live message capture and repeater. Compression is removed from the handshake (see below) |
+| **WebSocket** | Live message capture, repeater, and Match & Replace on messages. Compression is removed from the handshake (see below) |
 | **gRPC** | Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no `.proto` schema) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
 
@@ -167,13 +167,34 @@ Each rule has an operation:
 | **Remove header** | Drop a header by name |
 | **Short circuit** | Answer the request from the rule, without dialing the origin at all |
 
-A **Replace** rule targets the request or response, and the **head** (request/status line + headers) or **body** (the entity). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
+A **Replace** rule targets the request or response, and the **head** (request/status line + headers), the **body** (the entity), or **ws** (a WebSocket message — see [Match & Replace on WebSocket](#match-replace-websocket) below). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
 
 Scope any rule to a **host** glob so it only fires for matching traffic: a plain string matches as a substring (`example.com` matches `api.example.com`), and `*` is a wildcard (`*.example.com`). Leave it empty to apply to every host.
 
 Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules are per-project and take effect as soon as you save, with no restart.
 
 A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. **A body rule still forces matching hosts to HTTP/1.1.** On HTTP/2 Match & Replace applies to heads; body rewriting there is not implemented and is not planned, because HTTP/2 flow control makes a rewrite that changes a body's length either fail outright or deadlock the stream. So a body rule takes its hosts down to HTTP/1.1, and an h2 client that can't take that downgrade (gRPC) won't connect while one is enabled. `gori.log` records that once per host, naming the host and the reason.
+
+### Match & Replace on WebSocket {#match-replace-websocket}
+
+Set **part** to `ws` and the rule rewrites WebSocket messages instead of an HTTP head or body. **Target picks the direction**: `request` is client → server, `response` is server → client. Everything else works the same way — literal or regex, capture groups, `$NAME` bindings, and the host glob, which is matched against the host that opened the socket.
+
+```
+gori run rewriter add --target=request --part=ws --find='"role":"user"' --value='"role":"admin"'
+```
+
+The rule fires on the whole message, reassembled from its fragments, so a pattern that spans a fragment boundary still matches. It is deliberately a separate part rather than a flavour of `body`: an existing body rule never starts rewriting frames because you turned WebSocket on.
+
+Six things are worth knowing before you rely on it:
+
+- **A rule takes effect on the next handshake, not the open socket.** gori decides once, at the `101`, whether a socket needs the rewriting path. Reconnect the client after enabling a rule.
+- **Only text messages are rewritten.** A binary message (opcode 2) is carried through untouched, because a text find/replace over protobuf or msgpack corrupts rather than edits. So is a text message that is not valid UTF-8.
+- **A rewritten message is re-framed as one frame**, and a client → server message is re-masked with a fresh key. Once the length changes the sender's fragmentation cannot be reproduced. A message no rule changed is forwarded as the peer's own frame, mask key and all.
+- **Header and short-circuit operations cannot use `ws`.** A WebSocket message has no headers, and a stub answers a request that a message is not. gori refuses the combination instead of quietly turning it into an HTTP head rule.
+- **The message log records what gori sent**, not what arrived — the same rule the rest of the proxy follows, so History shows the bytes the peer actually saw.
+- **A message larger than 16 MiB is forwarded untouched**, as is any single frame past the same cap. The rewrite needs the whole message in memory and a long-lived socket should not be able to grow the proxy heap without bound.
+
+WebSocket messages still cannot be **held** — see [What gets held](#what-gets-held). A rule rewrites in flight and nothing pauses.
 
 ### Short circuit — answer without an origin
 

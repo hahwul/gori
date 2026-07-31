@@ -220,4 +220,118 @@ describe Gori::Rules do
       out3.should_not contain("nope")
     end
   end
+
+  # --- part: ws (#500 step 1) ----------------------------------------------
+
+  describe "the ws part" do
+    # THE regression this member exists to prevent. Folding a WS message into RulePart::Body
+    # would have made every `reqbody:` rule an operator already has start rewriting frames.
+    it "leaves a WebSocket message alone for a BODY rule, and a body alone for a WS rule" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "secret", "REDACTED")
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "secret", "REDACTED")
+
+        # the body rules are live...
+        rules.rewrites_request_body?.should be_true
+        String.new(rules.rewrite_request_body("a secret value".to_slice, "acme.test"))
+          .should eq("a REDACTED value")
+        # ...and reach no WS message, on either direction or any host
+        rules.rewrites_ws_out_for_host?("acme.test").should be_false
+        rules.rewrites_ws_in_for_host?("acme.test").should be_false
+        msg = "a secret value".to_slice
+        rules.rewrite_ws_out(msg, "acme.test").should eq(msg)
+        rules.rewrite_ws_in(msg, "acme.test").should eq(msg)
+
+        # and the converse: a ws rule never reaches the entity body or the heads
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws, "ping", "pong")
+        body = "ping me".to_slice
+        String.new(rules.rewrite_request_body(body, "acme.test")).should eq("ping me")
+        head = "POST / HTTP/1.1\r\nX-Note: ping\r\n\r\n".to_slice
+        rules.rewrite_request(head, "acme.test").should eq(head)
+      end
+    end
+
+    it "maps target onto direction: request = out (client→server), response = in" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws, "up", "UP")
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Ws, "down", "DOWN")
+
+        rules.rewrites_ws_out_for_host?("acme.test").should be_true
+        rules.rewrites_ws_in_for_host?("acme.test").should be_true
+        String.new(rules.rewrite_ws_out("up down".to_slice, "acme.test")).should eq("UP down")
+        String.new(rules.rewrite_ws_in("up down".to_slice, "acme.test")).should eq("up DOWN")
+      end
+    end
+
+    it "scopes the per-socket gate to the host glob, so an unrelated socket keeps streaming" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws, "a", "b",
+          host: "*.acme.test")
+        rules.rewrites_ws_out_for_host?("ws.acme.test").should be_true
+        rules.rewrites_ws_out_for_host?("other.test").should be_false
+        # and the rewrite itself agrees with the gate
+        rules.rewrite_ws_out("a".to_slice, "other.test").should eq("a".to_slice)
+      end
+    end
+
+    # `rules.cr`'s filter used to read `!(part.body? && r.op.header?)`. For a part that is
+    # neither head nor body that predicate is FALSE, so a header op would have passed the
+    # filter and spliced `Name: value` into the payload.
+    it "never lets a header op reach a WS payload" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        # persisted directly: `add` normalizes a header op to head, so this is the shape a
+        # hand-edited row (or a future surface that forgets the guard) could still produce.
+        store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws,
+          "X-Trace", "on", Gori::Store::RuleOp::AddHeader)
+        rules.reload
+        payload = %({"cmd":"subscribe"}).to_slice
+        rules.rewrite_ws_out(payload, "acme.test").should eq(payload)
+      end
+    end
+
+    it "passes a non-UTF-8 payload through untouched instead of scrubbing it to U+FFFD" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws, "zzz", "yyy")
+        payload = Bytes[0x7b, 0xff, 0xfe, 0x7d] # `{`, two invalid bytes, `}`
+        rules.rewrite_ws_out(payload, "acme.test").should eq(payload)
+      end
+    end
+
+    it "gives a ws rule its own badge instead of rendering it as a head rule" do
+      Gori::Store::RulePart::Head.badge.should eq('H')
+      Gori::Store::RulePart::Body.badge.should eq('B')
+      Gori::Store::RulePart::Ws.badge.should eq('W')
+      Gori::Store::RulePart.from_label("ws").should eq(Gori::Store::RulePart::Ws)
+      Gori::Store::RulePart::Ws.label.should eq("ws")
+    end
+
+    it "counts WS messages, not flow bodies, in the rule preview" do
+      with_store do |store|
+        flow = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80,
+          method: "GET", target: "/ws", http_version: "HTTP/1.1",
+          head: "GET /ws HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: flow, status: 101,
+          head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice, body: nil))
+        store.insert_ws_message(flow, "out", 1, %({"cmd":"ping"}).to_slice)
+        store.insert_ws_message(flow, "in", 1, %({"ack":true}).to_slice)
+        store.flush
+
+        rules = Gori::Rules.load(store)
+        hit = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Request,
+          Gori::Store::RulePart::Ws, "ping", "pong")
+        rules.preview(hit).matched.should eq(1)
+        # the same pattern on the OTHER direction matches nothing — direction is the target
+        miss = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Response,
+          Gori::Store::RulePart::Ws, "ping", "pong")
+        rules.preview(miss).matched.should eq(0)
+      end
+    end
+  end
 end

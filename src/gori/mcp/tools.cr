@@ -922,7 +922,7 @@ module Gori
               s.field "pattern", strprop("for replace: the substring/regex to match; for a header op: the HEADER NAME; for short_circuit: the substring/regex matched against the REQUEST head"), required: true
               s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body")
               s.field "target", strprop("request|response (default request; short_circuit is always request)")
-              s.field "part", strprop("head|body — head = request/status line + headers, body = entity body (default head; ignored by header ops and short_circuit, which are head-only)")
+              s.field "part", strprop("head|body|ws — head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws")
               s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist")
               s.field "body_file", strprop("short_circuit only: serve this file's bytes as the response BODY instead of the inline one (re-read when the file changes). Empty = inline")
               s.field "match", strprop("for replace: literal | regex (default literal). Regex supports $1/\\1 capture groups")
@@ -937,7 +937,7 @@ module Gori
               s.field "pattern", strprop("new match substring/regex, or header name")
               s.field "replacement", strprop("new replacement / header value / canned response")
               s.field "target", strprop("request|response")
-              s.field "part", strprop("head|body")
+              s.field "part", strprop("head|body|ws (ws = a WebSocket message; replace only)")
               s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header")
               s.field "body_file", strprop("short_circuit only: file served as the response body ('' = inline)")
               s.field "match", strprop("literal | regex")
@@ -953,7 +953,7 @@ module Gori
               s.field "pattern", strprop("the substring/regex to match, or header name"), required: true
               s.field "replacement", strprop("replacement / header value (matters for header ops, which change the head regardless of match)")
               s.field "target", strprop("request|response (default request)")
-              s.field "part", strprop("head|body (default head)")
+              s.field "part", strprop("head|body|ws (default head; ws counts captured WebSocket messages, replace only)")
               s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header (default replace). For short_circuit this counts the flows the rule WOULD have answered instead of sending")
               s.field "match", strprop("literal | regex (default literal)")
               s.field "host", strprop("host glob ('' = all hosts)")

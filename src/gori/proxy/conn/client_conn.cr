@@ -681,7 +681,12 @@ module Gori::Proxy
         SocketTuning.relax(upstream)
         if websocket_upgrade?(resp)
           warn_unoffered_ws_extension(resp, host, sent_req.target)
-          WS::Relay.run(@io, upstream, flow_id, @sink) # frames until close (P6/P7)
+          # `@rewriter` + `host` carry Match & Replace into the tunnel (#500 step 1). The
+          # relay asks the lens once, here, whether a `part: ws` rule can match this host;
+          # every socket without one keeps the byte-exact pump (P6/P7). `host` is the
+          # handshake's, which is what a rule's host glob means for a WS message — the
+          # message has no authority of its own.
+          WS::Relay.run(@io, upstream, flow_id, @sink, @rewriter, host) # frames until close
         else
           Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
         end

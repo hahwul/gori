@@ -28,6 +28,11 @@ module Gori
       @resp_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Body))
+      # The WS pair (#500). Same job as the body counts and for the same reason: they gate
+      # whether `WS::Relay` buffers a message at all, so a socket with no WS rule stays on
+      # the byte-exact streaming pump. Request ⇒ "out" (client→server), Response ⇒ "in".
+      @ws_out_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Ws))
+      @ws_in_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Ws))
       # Short-circuit rules get their OWN gate and are excluded from all four counts above.
       # A stub rule is stored request/head like a header op, so it would otherwise inflate
       # @req_head_count and make every request head pay the mutex + select for a rule that
@@ -105,6 +110,12 @@ module Gori
     # rule is additionally request-only, because it matches a request and there is no response
     # to match against — the request never gets sent. Forced here (and mirrored by the CLI /
     # MCP / TUI surfaces) so a rule can never be persisted in a shape the proxy would ignore.
+    #
+    # `part: ws` + a header op is REFUSED by the CLI and MCP surfaces (`gori run rewriter`,
+    # `create_rule`/`update_rule`) instead of arriving here, because this coercion would
+    # silently move the rule off WebSocket messages and onto HTTP heads — a different
+    # protocol, not a narrower shape. The TUI cannot produce the pair at all: its `part:` row
+    # draws "n/a" the moment a header op is selected.
     def self.normalize_shape(op : Store::RuleOp, target : Store::RuleTarget,
                              part : Store::RulePart) : {Store::RuleTarget, Store::RulePart}
       return {Store::RuleTarget::Request, Store::RulePart::Head} if op.short_circuit?
@@ -186,6 +197,42 @@ module Gori
 
     def rewrite_response_body(entity : Bytes, host : String) : Bytes
       apply(entity, Store::RuleTarget::Response, Store::RulePart::Body, @resp_body_count, host)
+    end
+
+    # --- WebSocket messages (#500 step 1) ------------------------------------
+
+    # Whether a WS rule that can actually MATCH `host` is live for that direction. Asked
+    # ONCE per socket (right after the 101), never per message, so the mutex here is not on
+    # a hot path — and answering false is what keeps that direction on `WS::Relay`'s
+    # byte-exact pump, frame boundaries and mask keys included.
+    #
+    # Host-scoped rather than host-blind (unlike `rewrites_request_body?`) because a socket
+    # is pinned to one host from the handshake, so the narrower question is available and
+    # the wrong answer costs every message on an unrelated host its framing.
+    def rewrites_ws_out_for_host?(host : String) : Bool
+      ws_rule_for_host?(@ws_out_count, Store::RuleTarget::Request, host)
+    end
+
+    def rewrites_ws_in_for_host?(host : String) : Bool
+      ws_rule_for_host?(@ws_in_count, Store::RuleTarget::Response, host)
+    end
+
+    private def ws_rule_for_host?(count : Atomic(Int32), target : Store::RuleTarget, host : String) : Bool
+      return false if count.get == 0 # lock-free fast path
+      @mutex.synchronize do
+        @rules.any? do |r|
+          r.enabled? && r.op.rewrite? && !r.pattern.empty? && r.part.ws? &&
+            r.target == target && host_matches?(r.host, host)
+        end
+      end
+    end
+
+    def rewrite_ws_out(payload : Bytes, host : String) : Bytes
+      apply(payload, Store::RuleTarget::Request, Store::RulePart::Ws, @ws_out_count, host)
+    end
+
+    def rewrite_ws_in(payload : Bytes, host : String) : Bytes
+      apply(payload, Store::RuleTarget::Response, Store::RulePart::Ws, @ws_in_count, host)
     end
 
     # --- short circuit (#511) ------------------------------------------------
@@ -309,11 +356,17 @@ module Gori
       active = @mutex.synchronize do
         @rules.select do |r|
           r.enabled? && r.op.rewrite? && r.target == target && r.part == part && !r.pattern.empty? &&
-            !(part.body? && r.op.header?) && host_matches?(r.host, host)
+            !(r.op.header? && !part.head?) && host_matches?(r.host, host)
         end
       end
       return bytes if active.empty? # nothing in scope → same bytes, byte-fidelity preserved
       text = String.new(bytes)
+      # A WS message is arbitrary application bytes, and `gsub` over a String holding
+      # invalid UTF-8 turns those bytes into U+FFFD — so a rule would corrupt a payload it
+      # never even matched. Gate rather than `scrub`: 9 µs vs 130 µs on a 40 KB payload, and
+      # this is a per-MESSAGE path, not a per-response one. Heads and bodies keep their
+      # pre-existing behaviour (a body rule simply won't match a compressed body).
+      return bytes if part.ws? && !text.valid_encoding?
       active.each { |r| text = apply_rule(text, r, report) }
       text.to_slice
     end
@@ -597,6 +650,12 @@ module Gori
     # the preview is already documented as approximate.
     RULE_PREVIEW_BODY_MAX = 64 * 1024
 
+    # Cap the captured WS messages read per flow for a `part: ws` preview, for the same
+    # keystroke-path reason: a chatty socket can hold thousands of rows. The MOST RECENT
+    # ones are read (`Store#ws_messages`'s `limit` semantics), which is what an operator
+    # tuning a rule is looking at.
+    RULE_PREVIEW_WS_MAX = 50
+
     record Preview, scanned : Int32, matched : Int32, total : Int64
 
     # How many of up to `limit` recent stored flows a candidate rule WOULD affect, by
@@ -627,10 +686,31 @@ module Gori
     private def rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
       return false unless host_matches?(rule.host, detail.row.host)
       return stub_matches?(rule, String.new(detail.request_head)) if rule.op.short_circuit?
-      return false if rule.part.body? && rule.op.header?
+      return false if rule.op.header? && !rule.part.head?
+      return ws_rule_affects?(rule, detail) if rule.part.ws?
       bytes = flow_part_bytes(detail, rule)
       return false unless bytes
       apply_rule(String.new(bytes), rule, report: false).to_slice != bytes
+    end
+
+    # The `part: ws` half of `rule_affects?`. A WS rule's subject is not in `FlowDetail` at
+    # all — the messages live in their own table — so the preview reads them from
+    # `Store#ws_messages`, which is the same projection the detail view and export show.
+    # Only a 101 flow can have any, so a non-upgrade flow costs no query.
+    #
+    # The three filters here are exactly the live relay's: direction from the rule's target,
+    # text opcode only (a binary message is never rewritten, so counting it would promise a
+    # match the proxy will not make), and valid UTF-8.
+    private def ws_rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
+      return false unless detail.row.status == 101
+      want_out = rule.target.request?
+      @store.ws_messages(detail.row.id, RULE_PREVIEW_WS_MAX).any? do |msg|
+        next false unless msg.text?
+        next false unless (msg.direction == "out") == want_out
+        text = String.new(msg.payload)
+        next false unless text.valid_encoding?
+        apply_rule(text, rule, report: false).to_slice != msg.payload
+      end
     end
 
     private def flow_part_bytes(detail : Store::FlowDetail, rule : Store::MatchRule) : Bytes?
@@ -648,6 +728,8 @@ module Gori
       @resp_head_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Body))
+      @ws_out_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Ws))
+      @ws_in_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Ws))
       @short_circuit_count.set(stub_count(fresh))
       # An edit may have repointed a rule at a different file; the cache is keyed by path and
       # revalidated per read, so this only drops entries no rule refers to any more.

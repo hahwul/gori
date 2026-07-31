@@ -264,7 +264,7 @@ module Gori
 
       private def self.rewriter_op_tag(r : Store::MatchRule) : String
         case r.op
-        when .replace?       then "#{r.match_kind.regex? ? "re" : "sub"}/#{r.part.body? ? 'B' : 'H'}"
+        when .replace?       then "#{r.match_kind.regex? ? "re" : "sub"}/#{r.part.badge}"
         when .add_header?    then "+hdr"
         when .set_header?    then "~hdr"
         when .short_circuit? then "stub"
@@ -386,7 +386,7 @@ module Gori
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
           p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal; replace/short_circuit only)") { |v| match_s = v }
-          p.on("--part=PART", "head|body (default head; replace only)") { |v| part_s = v }
+          p.on("--part=PART", "head|body|ws (default head; replace only; ws = a WebSocket message)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
@@ -409,6 +409,7 @@ module Gori
           abort "gori run rewriter add: invalid regex --find (failed to compile)"
         end
         value = check_short_circuit_args(op, value, response_file, body_file)
+        check_ws_part(op, part, "add")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
         project = resolve_read_project(project_name, db_path)
@@ -440,6 +441,18 @@ module Gori
                 "(expected a status line such as '200 OK', then headers, then a blank line and the body)"
         end
         value
+      end
+
+      # Only `replace` acts on a WebSocket message: a header op names a header and a WS
+      # message has none, and a short-circuit rule answers a request that a WS message is
+      # not. Refused rather than normalized — `Rules.normalize_shape` would coerce the part
+      # to `head`, which does not narrow the rule but moves it to a different PROTOCOL: the
+      # operator asked to rewrite WebSocket frames and would have got a rule rewriting HTTP
+      # request heads, with nothing on screen to say so.
+      private def self.check_ws_part(op : Store::RuleOp, part : Store::RulePart, verb : String) : Nil
+        return unless part.ws? && !op.replace?
+        abort "gori run rewriter #{verb}: --op=#{op.label} cannot use --part=ws — only replace " \
+              "rewrites a WebSocket message; use --part=head for an HTTP header or short-circuit rule"
       end
 
       private def self.valid_regex?(pattern : String) : Bool
@@ -538,7 +551,7 @@ module Gori
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
           p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal)") { |v| match_s = v }
-          p.on("--part=PART", "head|body (default head)") { |v| part_s = v }
+          p.on("--part=PART", "head|body|ws (default head)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob") { |v| host = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
           p.on("-vVALUE", "--value=VALUE", "Replacement, or header value") { |v| value = v }
@@ -559,6 +572,7 @@ module Gori
         if match.regex? && !op.header? && !valid_regex?(f)
           abort "gori run rewriter preview: invalid regex --find (failed to compile)"
         end
+        check_ws_part(op, part, "preview")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
         project = resolve_read_project(project_name, db_path)

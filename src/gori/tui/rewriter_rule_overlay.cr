@@ -39,7 +39,10 @@ module Gori::Tui
     OPS       = %w[replace add_header set_header remove_header short_circuit]
     OP_LABELS = ["replace", "add header", "set header", "remove header", "stub"]
     MATCHES   = %w[literal regex]
-    PARTS     = %w[head body]
+    # `ws` rewrites a WebSocket MESSAGE on an upgraded (101) flow, with `target:` picking
+    # the direction (request = client→server, response = server→client). It is its own part
+    # rather than a flavour of `body` so that no existing body rule starts touching frames.
+    PARTS = %w[head body ws]
 
     getter edit_id : Int64?
 

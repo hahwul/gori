@@ -62,6 +62,59 @@ end
 private MASKED_HI   = Bytes[0x81, 0x82, 0x01, 0x02, 0x03, 0x04, 0x69, 0x6b] # masked text "hi"
 private UNMASKED_YO = Bytes[0x81, 0x02, 0x79, 0x6f]                         # unmasked text "yo"
 
+# A masked client frame of any opcode, for payloads under 126 bytes.
+private def masked_op_frame(opcode : UInt8, payload : Bytes, fin : Bool = true) : Bytes
+  mask = Bytes[0xAA, 0xBB, 0xCC, 0xDD]
+  io = IO::Memory.new
+  io.write_byte((fin ? 0x80_u8 : 0_u8) | opcode)
+  io.write_byte((0x80 | payload.size).to_u8)
+  io.write(mask)
+  payload.each_with_index { |b, i| io.write_byte(b ^ mask[i & 3]) }
+  io.to_slice
+end
+
+# A Match & Replace lens that only knows about WebSocket messages (#500 step 1); each
+# direction is either nil (no rule live) or one literal find/replace pair. `to_server` is
+# the "out" direction, `to_client` is "in" — `in` and `out` are Crystal keywords.
+private class WsRewriter < Gori::Proxy::HeadRewriter
+  def initialize(@to_server : {String, String}? = nil, @to_client : {String, String}? = nil)
+  end
+
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    head
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    head
+  end
+
+  def rewrites_ws_out_for_host?(host : String) : Bool
+    !@to_server.nil?
+  end
+
+  def rewrites_ws_in_for_host?(host : String) : Bool
+    !@to_client.nil?
+  end
+
+  def rewrite_ws_out(payload : Bytes, host : String) : Bytes
+    sub(payload, @to_server)
+  end
+
+  def rewrite_ws_in(payload : Bytes, host : String) : Bytes
+    sub(payload, @to_client)
+  end
+
+  # Mirrors `Rules#apply`'s contract: the SAME bytes back when nothing matched, so the
+  # relay can forward the peer's original frame instead of re-framing it.
+  private def sub(payload : Bytes, pair : {String, String}?) : Bytes
+    return payload unless pair
+    text = String.new(payload)
+    return payload unless text.valid_encoding?
+    out = text.gsub(pair[0], pair[1])
+    out == text ? payload : out.to_slice
+  end
+end
+
 describe Gori::Proxy::WS do
   describe ".read_frame" do
     it "parses + unmasks a client (masked) text frame, preserving raw bytes" do
@@ -288,6 +341,187 @@ describe Gori::Proxy::WS do
       # message's final fragment turned out to be oversized), plus the oversized marker.
       sink.messages.should contain({"in", 1, "abc"})
       sink.messages.any? { |(_, _, s)| s.includes?("too large to capture") }.should be_true
+    end
+
+    # --- Match & Replace over WebSocket (#500 step 1) ----------------------
+
+    it "rewrites an out-direction message and re-frames it as ONE masked frame" do
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "hi there".to_slice)); cs_w.close
+      ss_w.write(UNMASKED_YO); ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_server: {"hi", "HELLO"}), "echo.test")
+
+      h = Gori::Proxy::WS.read_header(ts_r).not_nil!
+      h.fin?.should be_true
+      h.opcode.should eq(Gori::Proxy::WS::OP_TEXT)
+      h.masked?.should be_true # RFC 6455 §5.3 — a re-emitted client frame gets a fresh key
+      String.new(Gori::Proxy::WS.read_body(ts_r, h).not_nil!.payload).should eq("HELLO there")
+
+      # The other direction has no rule, so it never leaves the byte-exact pump.
+      fwd_client = Bytes.new(UNMASKED_YO.size)
+      tc_r.read_fully(fwd_client)
+      fwd_client.should eq(UNMASKED_YO)
+
+      # Capture records what gori WROTE — the bytes the peer actually sees.
+      sink.messages.should contain({"out", 1, "HELLO there"})
+      sink.messages.should contain({"in", 1, "yo"})
+    end
+
+    it "rewrites the in direction and emits it UNMASKED (server→client)" do
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      cs_w.close
+      ss_w.write(UNMASKED_YO); ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_client: {"yo", "YOYO"}), "echo.test")
+
+      h = Gori::Proxy::WS.read_header(tc_r).not_nil!
+      h.masked?.should be_false # a server→client frame must never be masked
+      String.new(Gori::Proxy::WS.read_body(tc_r, h).not_nil!.payload).should eq("YOYO")
+      sink.messages.should contain({"in", 1, "YOYO"})
+    end
+
+    it "forwards a text message no rule matched as the peer's OWN frame, byte-exact" do
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      cs_w.write(MASKED_HI); cs_w.close
+      ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_server: {"absent", "x"}), "echo.test")
+
+      fwd = Bytes.new(MASKED_HI.size)
+      ts_r.read_fully(fwd)
+      fwd.should eq(MASKED_HI) # same mask key, same framing — not re-encoded
+      sink.messages.should contain({"out", 1, "hi"})
+    end
+
+    it "never rewrites a BINARY message — a text find/replace over binary is corruption" do
+      bin = masked_op_frame(Gori::Proxy::WS::OP_BIN, "hi there".to_slice)
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      cs_w.write(bin); cs_w.close
+      ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_server: {"hi", "HELLO"}), "echo.test")
+
+      fwd = Bytes.new(bin.size)
+      ts_r.read_fully(fwd)
+      fwd.should eq(bin) # byte-exact: opcode 2 stays on the streaming path whole
+      sink.messages.should contain({"out", 2, "hi there"})
+    end
+
+    it "assembles a fragmented text message to FIN and emits the rewrite as one frame" do
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "hi ".to_slice, fin: false))
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_CONT, "there".to_slice))
+      cs_w.close
+      ss_w.close
+
+      sink = WsSink.new
+      # The pattern spans the fragment boundary, so it can only match on the assembled
+      # message — which is what makes this an assembly test rather than a rewrite test.
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_server: {"hi there", "bye"}), "echo.test")
+
+      h = Gori::Proxy::WS.read_header(ts_r).not_nil!
+      h.fin?.should be_true
+      h.opcode.should eq(Gori::Proxy::WS::OP_TEXT) # one frame, not two
+      String.new(Gori::Proxy::WS.read_body(ts_r, h).not_nil!.payload).should eq("bye")
+      sink.messages.should contain({"out", 1, "bye"})
+    end
+
+    it "forwards a PING past an assembling message instead of parking it behind the FIN" do
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      # RFC 6455 §5.4 lets a control frame land inside a fragmented message. Parking it
+      # behind the assembly is how a server's 20-30 s ping timer closes the socket while
+      # the rewrite is still buffering.
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "hi ".to_slice, fin: false))
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_PING, Bytes.empty))
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_CONT, "there".to_slice))
+      cs_w.close
+      ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_server: {"hi there", "bye"}), "echo.test")
+
+      first = Gori::Proxy::WS.read_header(ts_r).not_nil!
+      first.opcode.should eq(Gori::Proxy::WS::OP_PING) # ahead of the message it arrived inside
+      Gori::Proxy::WS.read_body(ts_r, first).not_nil!
+      second = Gori::Proxy::WS.read_header(ts_r).not_nil!
+      second.opcode.should eq(Gori::Proxy::WS::OP_TEXT)
+      String.new(Gori::Proxy::WS.read_body(ts_r, second).not_nil!.payload).should eq("bye")
+    end
+
+    it "puts a never-FINished message on the wire rather than losing it to the next one" do
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      client = IO::Stapled.new(cs_r, tc_w)
+      upstream = IO::Stapled.new(ss_r, ts_w)
+
+      # RFC 6455 §5.4 violation: a new data message while the previous one is unfinished.
+      # The byte-exact pump has already forwarded those bytes; this pump is withholding
+      # them, so they have to go out here instead of being overwritten.
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "orphan".to_slice, fin: false))
+      cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "second".to_slice))
+      cs_w.close
+      ss_w.close
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink,
+        WsRewriter.new(to_server: {"second", "SECOND"}), "echo.test")
+
+      first = Gori::Proxy::WS.read_header(ts_r).not_nil!
+      first.fin?.should be_false # gori does not invent the FIN the sender never sent
+      String.new(Gori::Proxy::WS.read_body(ts_r, first).not_nil!.payload).should eq("orphan")
+      second = Gori::Proxy::WS.read_header(ts_r).not_nil!
+      String.new(Gori::Proxy::WS.read_body(ts_r, second).not_nil!.payload).should eq("SECOND")
+      sink.messages.should contain({"out", 1, "orphan"})
+      sink.messages.should contain({"out", 1, "SECOND"})
     end
 
     it "waits for the peer's replying CLOSE frame instead of tearing the tunnel down the instant one side forwards one (RFC 6455 closing handshake)" do

@@ -101,5 +101,36 @@ module Gori::Proxy
     def rewrite_response_body(entity : Bytes, host : String) : Bytes
       entity
     end
+
+    # --- WebSocket messages (#500 step 1) ------------------------------------
+    #
+    # A WS message is neither a head nor an entity body, so it gets its own pair of
+    # seams rather than borrowing the body one — see `Store::RulePart::Ws`.
+    #
+    # These two predicates are HOST-SCOPED and asked ONCE per socket, right after the
+    # 101, because their answer decides whether `WS::Relay` runs its byte-exact pump
+    # (today's code, untouched) or the buffering one. A direction with no live rule for
+    # this host therefore keeps frame boundaries, mask keys and fragmentation exactly as
+    # the peer sent them (P7) and pays nothing per message. An implementation may take a
+    # lock here; it must not on `rewrite_ws_*`, which runs per MESSAGE.
+    def rewrites_ws_out_for_host?(host : String) : Bool
+      false
+    end
+
+    def rewrites_ws_in_for_host?(host : String) : Bool
+      false
+    end
+
+    # Rewrite one reassembled WS message payload. "out" is client→server (a `Request`
+    # rule), "in" is server→client (a `Response` rule). MUST return bytes equal to the
+    # input when nothing matched, so the relay can forward the peer's original frame
+    # verbatim instead of re-framing it.
+    def rewrite_ws_out(payload : Bytes, host : String) : Bytes
+      payload
+    end
+
+    def rewrite_ws_in(payload : Bytes, host : String) : Bytes
+      payload
+    end
   end
 end
