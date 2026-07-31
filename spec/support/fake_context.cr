@@ -461,6 +461,16 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:mine_repeater_selected)
   end
 
+  property? fuzzer_has_result = false
+
+  def fuzzer_result_selected? : Bool
+    @fuzzer_has_result
+  end
+
+  def fuzz_repeater_selected : Nil
+    rec(:fuzz_repeater_selected)
+  end
+
   def sitemap_move(delta : Int32) : Nil
     rec(:sitemap_move, delta)
   end

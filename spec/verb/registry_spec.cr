@@ -420,6 +420,14 @@ private class FakeContext < ExecContext
     @calls << :mine_repeater_selected
   end
 
+  def fuzzer_result_selected? : Bool
+    false
+  end
+
+  def fuzz_repeater_selected : Nil
+    @calls << :fuzz_repeater_selected
+  end
+
   def sitemap_move(delta : Int32) : Nil
     @calls << :sitemap_move
   end

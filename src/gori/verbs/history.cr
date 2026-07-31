@@ -446,10 +446,23 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
+      # Send the selected result row (the request that produced it) to Repeater — the
+      # Miner's mine.repeater for a fuzz result; gated on a selected row so it hides
+      # before the first run. COMMON like the Miner's, so it survives the detail
+      # overlay (FuzzerView#focus goes to :detail, which a section :results entry
+      # would not reach). 'p' is the sibling's key but is taken here by
+      # fuzz.pretty-template (:template, and every section view includes COMMON), so
+      # 'R' — the letter the other tabs use for Repeater, free in Fuzzer.
+      r.register Verb::Definition.new(
+        "fuzz.repeater", "Send to Repeater", "Open the selected result's request in Repeater (payload spliced in)",
+        Verb::Scope::Fuzzer,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_result_selected? },
+        mnemonic: 'R') { |ctx| ctx.fuzz_repeater_selected; nil }
       # COMMON (Round 5), not :tab: New-session is a top action the user reaches for
       # from anywhere in the Fuzzer tab, not just the tab bar — mirrors repeater.new
       # (Repeater) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
-      # is now curated most-used-first: Run, Stop, New, Copy, Link-issue, Link-note.
+      # is now curated most-used-first: Run, Stop, Send-to-Repeater, New, Copy,
+      # Link-issue, Link-note.
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
         [Verb::Chord.new("n", ctrl: true)],

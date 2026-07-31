@@ -446,6 +446,35 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
+  describe "result_request_bytes (detail pane + Send to Repeater, #540)" do
+    it "hands back the bytes the engine actually sent when the run retained them" do
+      view = loaded_fuzzer
+      sent = "GET /?x=SENT HTTP/1.1\r\nHost: h\r\n\r\n"
+      view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 1200_i64, 40, 5, 1000_i64,
+        nil, true, false, nil, "HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, sent.to_slice))
+      r = view.selected_result.not_nil!
+      String.new(view.result_request_bytes(r)).should eq(sent)
+
+      # …and the detail's REQUEST pane reads from the same method, so what the operator
+      # sees is what "Send to Repeater" hands over.
+      view.open_detail
+      view.detail_step_pane(-1) # :response → :request
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("GET /?x=SENT HTTP/1.1").should be_true
+    end
+
+    it "falls back to re-rendering the template when the row's request was not retained" do
+      view = FuzzerView.new
+      view.load_request("https://h", "GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.append_result(fuzz_result(0, 404, 12)) # keep_bodies dropped head/body/request
+      r = view.selected_result.not_nil!
+      # The marked position takes the row's payload, so the row still reads as its own
+      # request. The editor holds LF text; the Repeater seed re-expands to CRLF on send.
+      String.new(view.result_request_bytes(r)).should eq("GET /?x=p0 HTTP/1.1\nHost: h\n\n")
+    end
+  end
+
   it "hscroll_detail scrolls a long RESULT response line sideways into view (shift+←/→)" do
     view = loaded_fuzzer
     long_line = "HEAD" + ("." * 100) + "TAIL"

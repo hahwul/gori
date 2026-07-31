@@ -303,6 +303,17 @@ describe "Gori::Verbs.register_history" do
       end
     end
 
+    it "gates 'Send to Repeater' on a selected result, not just the Fuzzer tab" do
+      ctx = on(:fuzzer)
+      r["fuzz.repeater"].available?(ctx).should be_false
+      ctx.fuzzer_has_result = true
+      r["fuzz.repeater"].available?(ctx).should be_true
+      other_tab = on(:miner)
+      other_tab.fuzzer_has_result = true
+      r["fuzz.repeater"].available?(other_tab).should be_false
+      verb_intents(r, "fuzz.repeater").should eq([:fuzz_repeater_selected])
+    end
+
     it "shares one sub-tab search/filter counter across the workbench tabs" do
       ctx = on(:fuzzer)
       ctx.subtab_search_tab_count = 2

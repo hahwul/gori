@@ -930,6 +930,34 @@ module Gori::Tui
       @host.status("duplicated fuzz session (#{@fuzzers.size} open)")
     end
 
+    # Seed handed to RepeaterController for "Send to Repeater" (a fuzz result row → the
+    # request that produced it). Same shape as MinerController::RepeaterSeed.
+    record RepeaterSeed,
+      target : String,
+      request_text : String,
+      http2 : Bool,
+      sni : String?,
+      label : String # sub-tab chip + toast ("#index payload")
+
+    # True when the focused session has a result row under the cursor (gates space →
+    # Send to Repeater): no run yet, or a filter that hides every row, means no request
+    # to hand over.
+    def result_selected? : Bool
+      !current_view.try(&.selected_result).nil?
+    end
+
+    # The selected result as a Repeater-ready request; nil when nothing is selected.
+    def selected_repeater_seed : RepeaterSeed?
+      return nil unless v = current_view
+      return nil unless r = v.selected_result
+      # Repeater editors store LF text; send expands back to CRLF (RepeaterView#expanded_text_to_bytes).
+      # Same LF shape as History→Repeater (origin_form_text) and the Miner path.
+      text = String.new(v.result_request_bytes(r)).scrub.gsub("\r\n", "\n")
+      payload = r.payloads.join(", ")
+      payload = "#{payload[0, 23]}…" if payload.size > 24
+      RepeaterSeed.new(v.target_origin, text, v.http2?, v.sni_override, "##{r.index} #{payload}".rstrip)
+    end
+
     # ⇧I from History (or Issues evidence): open a captured flow as a fuzz session.
     def fuzz_flow(id : Int64) : Nil
       return unless detail = @host.session.store.get_flow(id)

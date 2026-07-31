@@ -951,7 +951,7 @@ module Gori::Tui
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
         verify: verify, sni: sni_override, overrides: overrides)
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
-      @pending_template = plan.template # committed to @run_template in begin_run (see detail_request_bytes)
+      @pending_template = plan.template # committed to @run_template in begin_run (see result_request_bytes)
       {plan.engine, nil}
     rescue ex : Fuzz::PlanError
       {nil, fuzz_plan_error(ex)}
@@ -1132,7 +1132,7 @@ module Gori::Tui
       end
       return if @decoded_index == r.index # already decoded this row
       @decoded_index = r.index
-      req = detail_request_bytes(r)
+      req = result_request_bytes(r)
       off, sep_w = req_head_end(req)
       req_head = off ? req[0, off] : req
       req_body = off ? req[(off + sep_w)..] : Bytes.empty
@@ -2153,16 +2153,27 @@ module Gori::Tui
       styled
     end
 
-    # The reconstructed wire request for a result (template with its payloads spliced in).
-    private def detail_request_bytes(r : Fuzz::Result) : Bytes
-      # Render against the run's frozen template (env-expanded, as sent) so a post-run
-      # edit to the live buffer can't truncate/garble the reconstructed request.
+    # The wire request for a result — what the detail pane shows and what "Send to
+    # Repeater" hands over (see FuzzerController#selected_repeater_seed), so the two can
+    # never disagree. Public because the controller needs it for a row the operator
+    # picked in the results table, not just for the open detail.
+    #
+    # `Result#request` is the byte-exact request the engine sent (Job#bytes: payload
+    # chains applied, Content-Length synced), retained under the run's keep_bodies
+    # policy. When it wasn't retained (:none, or :matched and this row missed) fall back
+    # to re-rendering the run's frozen template — env-expanded as sent, so a post-run
+    # edit to the live buffer can't truncate/garble it — which reproduces everything but
+    # the per-position chain transform and the CL sync.
+    def result_request_bytes(r : Fuzz::Result) : Bytes
+      if sent = r.request
+        return sent
+      end
       tmpl = @run_template || Fuzz::Template.parse(Env.expand(@editor.text), @http2)
       tmpl.render(r.payloads)
     end
 
     private def detail_request_lines(r : Fuzz::Result) : Array(String)
-      String.new(detail_request_bytes(r)).scrub.split('\n').map(&.rstrip('\r'))
+      String.new(result_request_bytes(r)).scrub.split('\n').map(&.rstrip('\r'))
     end
 
     private def detail_response_lines(r : Fuzz::Result) : Array(String)

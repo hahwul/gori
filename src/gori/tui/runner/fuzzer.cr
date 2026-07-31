@@ -92,4 +92,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def fuzzer_read_mode? : Bool
     fuzzer_controller.fuzzer_read_mode?
   end
+
+  def fuzzer_result_selected? : Bool
+    fuzzer_controller.result_selected?
+  end
+
+  # CROSS-TAB: open the selected fuzz result's request in Repeater (the Miner's
+  # mine_repeater_selected, for a result row instead of a finding).
+  def fuzz_repeater_selected : Nil
+    seed = fuzzer_controller.selected_repeater_seed
+    return (@toast = "select a result first") unless seed
+    repeater_controller.repeater_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
+      name: seed.label)
+    @toast = "repeater ← fuzz: #{seed.label}"
+  end
 end
