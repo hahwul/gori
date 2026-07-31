@@ -61,7 +61,7 @@ module Gori
         # answering a flat success: the common causes are a typo and a trailing slash
         # (Sitemap.add drops one, so /api/users/ is stamped as /api/users).
         matched = sitemap_node_exists?(host, path)
-        store.set_sitemap_tag(host, path, tag)
+        return busy("tag NOT applied (store busy or unwritable); the node is unchanged") unless store.set_sitemap_tag(host, path, tag)
         Result.new(JSON.build do |j|
           j.object do
             j.field "host", host

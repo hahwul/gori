@@ -147,7 +147,7 @@ module Gori
             unless store.link_id(owner_kind, oid, ref_kind, rid)
               abort "gori run links delete: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid}"
             end
-            store.remove_link(owner_kind, oid, ref_kind, rid)
+            abort "gori run links rm: NOT removed (project busy) — the link is unchanged" unless store.remove_link(owner_kind, oid, ref_kind, rid)
             puts "Unlinked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}."
           end
         ensure

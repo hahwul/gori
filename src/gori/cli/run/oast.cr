@@ -239,7 +239,7 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           row = oast_provider_row_id(store, id, verb)
-          store.set_oast_provider_enabled(row, enabled)
+          abort "gori run oast providers: enable/disable NOT applied (project busy)" unless store.set_oast_provider_enabled(row, enabled)
           puts "OAST provider p_#{row} is now #{enabled ? "enabled" : "disabled"}."
         ensure
           store.close
@@ -265,7 +265,7 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           row = oast_provider_row_id(store, id, "delete")
-          store.delete_oast_provider(row)
+          abort "gori run oast providers: NOT deleted (project busy) — the provider is unchanged" unless store.delete_oast_provider(row)
           puts "OAST provider p_#{row} deleted."
         ensure
           store.close

@@ -55,10 +55,15 @@ module Gori
       # action. Returns the status it landed on. Note the asymmetry: only an OPEN issue is
       # dismissed; anything else (including a Confirmed/promoted one) re-opens, so this doubles
       # as "un-dismiss" and as "undo a promotion's status change" without a second verb.
+      # The status the row is ACTUALLY in afterwards — the issue's own when the write did not
+      # commit, not the one that was intended. `promote` right above already takes this care
+      # (its comment: "0 is TRUTHY … would report success — permanently blocking any retry");
+      # this one returned the intent unconditionally, so MCP `probe_dismiss` and
+      # `gori run probe dismiss` told the operator a security finding was muted while it was
+      # still Open.
       def toggle_dismiss(store : Store, issue : Store::ProbeIssue) : Store::Status
         landed = issue.status.open? ? Store::Status::FalsePositive : Store::Status::Open
-        store.update_probe_issue_status(issue.id, landed)
-        landed
+        store.update_probe_issue_status(issue.id, landed) ? landed : issue.status
       end
     end
   end

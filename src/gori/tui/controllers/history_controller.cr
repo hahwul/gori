@@ -513,9 +513,9 @@ module Gori::Tui
       @host.confirm("CLEAR HISTORY",
         "Delete ALL #{n} History flow#{n == 1 ? "" : "s"} for this project?\nThis can't be undone.",
         confirm_label: "clear", danger: true, return_to: @host.overlay == :detail ? :detail : :none) do
-        @history.clear(@host.session.store)
+        ok = @history.clear(@host.session.store)
         @host.request_overlay(:none) if @host.overlay == :detail
-        @host.status("history cleared")
+        @host.status(ok ? "history cleared" : "history NOT cleared (project busy) — every flow is still there")
       end
     end
 

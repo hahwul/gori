@@ -68,7 +68,7 @@ module Gori
         key = sitemap_tag_path(path)
         text = clear ? "" : tag.to_s
         matched = sitemap_node_exists?(store, host, key)
-        store.set_sitemap_tag(host, key, text)
+        abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
         puts text.empty? ? "Tag cleared on #{host}#{key}." : "Tagged #{host}#{key}: #{text}"
         unless matched || text.empty?
           STDERR.puts "gori run sitemap tag: warning: no captured endpoint at #{host}#{key} — this tag will not show in the tree until one exists (check for a typo or a trailing slash)"

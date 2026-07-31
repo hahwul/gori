@@ -2620,6 +2620,14 @@ module Gori::Tui
       # shows a blank count for an empty query and "no matches" for a fruitless one.
       return if @search_buffer.empty?
       n = search_match_count
+      # -1 = the buffer is not valid UTF-8, so a PCRE cannot run over it (see
+      # `TextArea#searchable?`). Named rather than folded into "no matches": this is the
+      # ordinary shape of a Repeater tab seeded from a captured upload, and silence would
+      # read as "your query is not in there".
+      if n < 0
+        return status("replace: this buffer holds bytes that are not valid UTF-8 — " \
+                      "search and replace cannot run over it (^F highlighting still works)")
+      end
       return if n == 0
       q, r = @search_buffer, @search_replace_buffer
       plural = n == 1 ? "" : "s"

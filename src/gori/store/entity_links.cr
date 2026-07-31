@@ -68,12 +68,15 @@ module Gori
       list
     end
 
-    def remove_link(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM entity_links WHERE id = ?", id); nil }
+    # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
+    # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
+    # (`reads.cr`), whose comment states the reasoning once.
+    def remove_link(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM entity_links WHERE id = ?", id); nil }
     end
 
-    def remove_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Nil
-      exec_task ->(c : DB::Connection) {
+    def remove_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec(
           "DELETE FROM entity_links WHERE owner_kind = ? AND owner_id = ? AND ref_kind = ? AND ref_id = ?",
           owner_kind.label, owner_id, ref_kind.label, ref_id)
@@ -81,8 +84,8 @@ module Gori
       }
     end
 
-    def delete_links_for_owner(owner_kind : LinkOwnerKind, owner_id : Int64) : Nil
-      exec_task ->(c : DB::Connection) {
+    def delete_links_for_owner(owner_kind : LinkOwnerKind, owner_id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM entity_links WHERE owner_kind = ? AND owner_id = ?", owner_kind.label, owner_id)
         nil
       }

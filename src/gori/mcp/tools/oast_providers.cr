@@ -66,7 +66,7 @@ module Gori
         enabled = bool(h, "enabled")
         enabled = existing.enabled? if enabled.nil?
 
-        store.update_oast_provider(row, name, kind.label, host, token, enabled)
+        return busy("provider NOT updated (store busy or unwritable); it is unchanged") unless store.update_oast_provider(row, name, kind.label, host, token, enabled)
         Result.new({"id" => "p_#{row}", "name" => name, "kind" => kind.label}.to_json)
       end
 
@@ -75,14 +75,14 @@ module Gori
         return row if row.is_a?(Result)
         enabled = bool(h, "enabled")
         return err("missing required 'enabled'", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
-        store.set_oast_provider_enabled(row, enabled)
+        return busy("enable/disable NOT applied (store busy or unwritable); the provider is unchanged") unless store.set_oast_provider_enabled(row, enabled)
         Result.new({"id" => "p_#{row}", "enabled" => enabled}.to_json)
       end
 
       private def delete_oast_provider(h) : Result
         row = oast_provider_row(h)
         return row if row.is_a?(Result)
-        store.delete_oast_provider(row)
+        return busy("provider NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_oast_provider(row)
         Result.new({"deleted" => 1, "id" => "p_#{row}"}.to_json)
       end
 

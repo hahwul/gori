@@ -262,11 +262,27 @@ module Gori
         {size, eol + 1}
       end
 
-      # After the terminating zero chunk a message may carry trailer fields and MUST end with
-      # a blank line. Anything else means the walk did not really consume a chunked body.
+      # After the terminating zero chunk a message may carry TRAILER FIELDS and must end with
+      # a blank line. The first version accepted only a bare CRLF, which the name already
+      # contradicted — and it dropped the Transfer-Encoding off every trailered message
+      # (`grpc-status` / `grpc-message` on gRPC and gRPC-web over h1, anything declared via
+      # `Trailer:`), re-framing raw chunk octets as a plain entity. That is the very
+      # head-lies-about-body shape this walker exists to prevent, inverted.
+      #
+      # `name: value CRLF` repeated, then the terminating CRLF. Deliberately strict — a bare
+      # LF, a missing colon or trailing garbage all mean the bytes were not really a chunked
+      # message, and a false positive here keeps a TE over a body that is not chunked.
       private def self.trailer_only?(body : Bytes, pos : Int32) : Bool
-        rest = body[pos, body.size - pos]
-        rest.size == 2 && rest[0] == 0x0d_u8 && rest[1] == 0x0a_u8
+        loop do
+          return false if pos >= body.size
+          eol = body.index(0x0a_u8, pos)
+          return false unless eol && eol > pos && body[eol - 1] == 0x0d_u8
+          line_len = eol - 1 - pos
+          return eol + 1 == body.size if line_len == 0 # the terminating blank line
+          colon = body[pos, line_len].index(0x3a_u8)
+          return false unless colon && colon > 0
+          pos = eol + 1
+        end
       end
 
       def self.response_head(http_version : String, status : Int32, reason : String,

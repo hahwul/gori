@@ -235,11 +235,11 @@ module Gori
         begin
           if c = code
             n = store.probe_issues.count { |i| i.code == c && i.status.open? }
-            store.dismiss_probe_by_code(c)
+            abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_code(c)
             puts "Dismissed #{n} open \"#{c}\" finding#{n == 1 ? "" : "s"}."
           elsif hst = host
             n = store.probe_issues.count { |i| i.host == hst && i.status.open? }
-            store.dismiss_probe_by_host(hst)
+            abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_host(hst)
             puts "Dismissed #{n} open finding#{n == 1 ? "" : "s"} on #{hst}."
           elsif iid = id
             issue = store.get_probe_issue(iid) || abort("gori run probe dismiss: no probe finding with id #{iid}")
@@ -327,11 +327,11 @@ module Gori
             unless yes
               abort "gori run probe delete: refusing to delete #{n} finding#{n == 1 ? "" : "s"} (and every suppression) without --yes"
             end
-            store.clear_probe_issues
+            abort "gori run probe delete: NOT cleared (project busy) — every finding is still there" unless store.clear_probe_issues
             puts "Deleted #{n} finding#{n == 1 ? "" : "s"} and cleared every suppression."
           elsif iid = id
             issue = store.get_probe_issue(iid) || abort("gori run probe delete: no probe finding with id #{iid}")
-            store.delete_probe_issue(issue.id)
+            abort "gori run probe delete: finding ##{issue.id} NOT deleted (project busy)" unless store.delete_probe_issue(issue.id)
             puts "Deleted finding ##{issue.id}."
           end
         ensure

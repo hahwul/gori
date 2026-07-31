@@ -491,9 +491,32 @@ module Gori::Tui
     # ^F find&replace: how many times `query` occurs — same matching as search_lines
     # but counted per OCCURRENCE, not per line (a line with three hits counts three).
     # The confirm prompt quotes this before the edit commits.
+    # -1 when the buffer cannot be searched at all — see `searchable?`. The caller reports
+    # that; it must not be folded into 0, which reads as "no matches" and would make
+    # find-and-replace a silent no-op on exactly the buffers where it looks like it worked.
     def match_count(query : String) : Int32
       return 0 if query.empty?
+      return -1 unless searchable?
       text.scan(search_regex(query)).size
+    end
+
+    # Whether a PCRE may be run over this buffer. Crystal's Regex RAISES
+    # `ArgumentError: UTF-8 error: illegal byte` on a subject that is not valid UTF-8, and
+    # this buffer is routinely loaded from RAW CAPTURED BYTES — a Repeater tab seeded from a
+    # POST with a multipart/protobuf/gzip body, a held request in the intercept editor. That
+    # raise had no `rescue` between here and `Runner#run`, so ^F + replace on such a buffer
+    # took the whole TUI down mid-triage, losing every unsaved buffer and force-forwarding the
+    # intercept queue on the way out.
+    #
+    # NOT solved by scrubbing at load: these bytes are the request the operator is about to
+    # send, and replacing an invalid sequence with U+FFFD would change what goes on the wire
+    # (P7). NOT solved by scrubbing here either, because `replace_matches` writes its result
+    # BACK into the buffer. So the operation is refused and named. The codebase already takes
+    # this shape elsewhere — `fuzz/template.cr` rescues the identical raise "rather than crash
+    # the TUI auto-mark", and `fuzz/matcher.cr` scrubs before its regexes because there the
+    # result is only read.
+    def searchable? : Bool
+      text.valid_encoding?
     end
 
     # Swap every occurrence of `query` for `replacement` as ONE undoable edit (so a
@@ -503,6 +526,7 @@ module Gori::Tui
     # (clamped): a bulk edit has no single site to land on.
     def replace_matches(query : String, replacement : String) : Int32
       return 0 if query.empty?
+      return 0 unless searchable? # see `searchable?`; the confirm never opens for these
       n = 0
       swapped = text.gsub(search_regex(query)) { n += 1; replacement }
       return 0 if n == 0

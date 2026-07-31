@@ -677,13 +677,19 @@ module Gori::Tui
       true
     end
 
-    # Wipe every History flow, close detail/preview, and reload the empty list.
-    def clear(store : Store) : Nil
-      store.clear_flows
+    # Wipe every History flow, close detail/preview, and reload the list.
+    #
+    # Returns whether the wipe COMMITTED. `delete_ids` one method up already answers this and
+    # its caller branches on it; `clear` was the one History write that dropped it — and the
+    # `reload` below made the contradiction visible, repopulating the list with the flows that
+    # are still there while the status line said they were gone.
+    def clear(store : Store) : Bool
+      ok = store.clear_flows
       close_detail
       clear_preview
       clear_marks
       reload(store)
+      ok
     end
 
     # --- QL bar editing ------------------------------------------------------

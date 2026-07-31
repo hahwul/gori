@@ -72,7 +72,7 @@ module Gori
         unless store.link_id(owner_kind, owner_id, ref_kind, ref_id)
           return not_found("no link from #{owner_kind.label} #{owner_id} to #{ref_kind.label} #{ref_id}")
         end
-        store.remove_link(owner_kind, owner_id, ref_kind, ref_id)
+        return busy("link NOT removed (store busy or unwritable); it is unchanged") unless store.remove_link(owner_kind, owner_id, ref_kind, ref_id)
         Result.new({"removed" => true, "owner_kind" => owner_kind.label, "owner_id" => owner_id,
                     "ref_kind" => ref_kind.label, "ref_id" => ref_id}.to_json)
       end

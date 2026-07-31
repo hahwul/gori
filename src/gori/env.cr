@@ -153,7 +153,11 @@ module Gori
       return head if boundary >= bytes.size
       raw_body = bytes[boundary..]
       body = expand(String.new(raw_body), vals, prefix).to_slice
-      head = shift_content_length(head, body.size - raw_body.size) unless body.size == raw_body.size
+      unless body.size == raw_body.size
+        shifted = shift_content_length(head, body.size - raw_body.size)
+        warn_unshiftable_framing if shifted.same?(head)
+        head = shifted
+      end
       buf = IO::Memory.new(head.size + body.size)
       buf.write(head)
       buf.write(body)
@@ -193,25 +197,118 @@ module Gori
     # one did they mean" that is not a guess. Refusing leaves their bytes alone — the request
     # still goes out exactly as authored.
     private def self.shift_content_length(head : Bytes, delta : Int32) : Bytes
-      text = String.new(head)
-      eol = text.includes?("\r\n") ? "\r\n" : "\n"
-      lines = text.split(eol)
-      hits = [] of Int32
-      lines.each_with_index { |l, i| hits << i if l.lstrip.downcase.starts_with?("content-length:") }
-      return head unless hits.size == 1
-      line = lines[hits[0]]
-      colon = line.index(':')
-      return head unless colon
-      value = line[(colon + 1)..]
-      lead = value.size - value.lstrip.size
-      trail = value.size - value.rstrip.size
-      current = value[lead, value.size - lead - trail].to_i64?
+      span = content_length_digits(head)
+      return head unless span
+      start, stop = span
+      current = String.new(head[start, stop - start]).to_i64?
       return head unless current
-      lines[hits[0]] = String.build do |b|
-        b << line[0, colon + 1] << value[0, lead] << {current + delta, 0_i64}.max
-        b << value[(value.size - trail)..] if trail > 0
+      shifted = {current + delta, 0_i64}.max.to_s
+      buf = IO::Memory.new(head.size + shifted.bytesize)
+      buf.write(head[0, start])
+      buf << shifted
+      buf.write(head[stop, head.size - stop])
+      buf.to_slice
+    end
+
+    # The byte range of the Content-Length VALUE's digits, or nil when this head must not be
+    # touched. Everything outside that range is copied verbatim, which is the whole point:
+    # header casing, the space after the colon and a leading zero are live smuggling and
+    # WAF-bypass variables on the send path, and this runs unconditionally with no
+    # auto-Content-Length opt-out. `Fuzz::ContentLength.sync` is the same discipline.
+    #
+    # nil — leave the head exactly as authored — for each of:
+    #
+    #   * a `Transfer-Encoding` anywhere in the head. The framing is the chunk-size lines
+    #     inside the BODY, and gori cannot re-chunk without rewriting the operator's framing
+    #     payload. `ContentLength.sync` returns unchanged for chunked too. The caller warns,
+    #     because a `$NAME` in a chunked body still desyncs and silence would be worse.
+    #   * more than one Content-Length. A CL.CL request is a desync probe whose content IS the
+    #     relationship between the two numbers; there is no "which one did they mean" that is
+    #     not a guess.
+    #   * a line starting with SP or HTAB — an obs-fold continuation. ` Content-Length: 2`
+    #     folded under `X-Note:` is part of THAT header's value and invisible to a strict
+    #     parser, which is exactly what an obfuscated-framing probe is built on.
+    #
+    # Line splitting is on LF with an optional preceding CR, per line, so a deliberately
+    # MIXED-EOL head is handled rather than silently skipped.
+    private def self.content_length_digits(head : Bytes) : {Int32, Int32}?
+      found = nil.as({Int32, Int32}?)
+      pos = 0
+      first = true
+      while pos < head.size
+        lf = head.index(0x0a_u8, pos)
+        stop = lf || head.size
+        line_end = (stop > pos && head[stop - 1] == 0x0d_u8) ? stop - 1 : stop
+        unless first || fold_or_blank?(head, pos, line_end)
+          case header_name(head, pos, line_end)
+          when "transfer-encoding" then return nil
+          when "content-length"
+            return nil if found # a second one: refuse, see above
+            found = value_digits(head, pos, line_end)
+          end
+        end
+        first = false
+        break unless lf
+        pos = lf + 1
       end
-      lines.join(eol).to_slice
+      found
+    end
+
+    # An obs-fold continuation (SP/HTAB first) or an empty line — neither is a header of its
+    # own, and treating a fold as one is how a `Content-Length` hidden inside another header's
+    # value gets edited.
+    private def self.fold_or_blank?(head : Bytes, pos : Int32, line_end : Int32) : Bool
+      pos >= line_end || head[pos] == 0x20_u8 || head[pos] == 0x09_u8
+    end
+
+    private def self.header_name(head : Bytes, pos : Int32, line_end : Int32) : String?
+      colon = index_in(head, 0x3a_u8, pos, line_end)
+      colon ? String.new(head[pos, colon - pos]).strip.downcase : nil
+    end
+
+    # The value's digit span with the OWS on both sides excluded, or nil when the value is
+    # empty. The colon is re-found rather than threaded so `header_name` stays a pure lookup.
+    private def self.value_digits(head : Bytes, pos : Int32, line_end : Int32) : {Int32, Int32}?
+      colon = index_in(head, 0x3a_u8, pos, line_end)
+      return nil unless colon
+      vs = colon + 1
+      while vs < line_end && (head[vs] == 0x20_u8 || head[vs] == 0x09_u8)
+        vs += 1
+      end
+      ve = line_end
+      while ve > vs && (head[ve - 1] == 0x20_u8 || head[ve - 1] == 0x09_u8)
+        ve -= 1
+      end
+      ve > vs ? {vs, ve} : nil
+    end
+
+    @@warned_unshiftable = false
+
+    # A binding substitution changed the body's length and the head's framing could not follow
+    # — chunked, a CL.CL pair, an obs-folded Content-Length, or no Content-Length at all. The
+    # message goes out as authored, which for a chunked body means the chunk-size lines now
+    # disagree with the chunk: the same desync the Content-Length shift exists to prevent,
+    # surviving in the other framing mode. gori will not re-chunk (that would rewrite the
+    # framing the operator authored), so the honest answer is to say so. Once per process:
+    # this is a send loop.
+    private def self.warn_unshiftable_framing : Nil
+      return if @@warned_unshiftable
+      @@warned_unshiftable = true
+      ::Log.warn do
+        "a session binding changed a request body's length, but its head's framing could not " \
+        "be adjusted (chunked, more than one Content-Length, an obs-folded one, or none). The " \
+        "request goes out exactly as authored, so its declared framing may now disagree with " \
+        "the body — bind the value into a header, or size the body yourself"
+      end
+    end
+
+    private def self.index_in(bytes : Bytes, byte : UInt8, from : Int32, to : Int32) : Int32?
+      i = from
+      while i < to
+        return i if bytes[i] == byte
+        i += 1
+      end
+      nil
     end
 
     # The String form has no head/body split to take, so the caller says whether what it holds

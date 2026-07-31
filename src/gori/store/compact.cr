@@ -161,16 +161,19 @@ class Gori::Store
     # flow whose body is gone AND that body's own trigram tokens (up to `FTS_INDEX_MAX` of
     # them) stayed in the file, which is the opposite of what compact is asked for.
     #
-    # Wiped whole and re-flagged rather than deleted per row: the index holds head text too
-    # (`flows_fts(req, resp)` is head+body), and compact is not dropping heads — so the rows
-    # are marked `fts_dirty` and the off-commit indexer rebuilds them from what is left. That
-    # is the same self-healing path a failed index pass already relies on, and it runs at the
-    # next project open because compact works on a closed store. `'delete-all'` rather than a
-    # tombstone per flow so the run that is meant to SHRINK the file does not leave a
-    # full-size index behind.
+    # SCOPED to the rows whose bodies were actually emptied — `changes()` right after each
+    # UPDATE, and the same `WHERE` re-expressed as the rows now carrying an empty blob with
+    # the truncation flag set. A `'delete-all'` + blanket `fts_dirty = 1` was the first
+    # version and was far too wide: the index holds HEAD text too (`flows_fts(req, resp)`),
+    # so wiping it blinded `body:` and free-text search PROJECT-WIDE — including rows compact
+    # never touched — until a drain that runs 32 rows per tick on the single writer fiber,
+    # behind which live capture blocks and which `index_pending!` makes the first `body:`
+    # query wait for. It also regrew the trigram index immediately after the VACUUM the
+    # operator had just paid for. The two siblings delete precise rowids (`delete_flow_one`,
+    # `prune_old_flows`) and only `clear_flows` wipes, because there nothing survives.
     if plan.response_bodies || plan.request_bodies
-      conn.exec("INSERT INTO flows_fts(flows_fts) VALUES('delete-all')")
-      conn.exec("UPDATE flows SET fts_dirty = 1")
+      conn.exec("DELETE FROM flows_fts WHERE rowid IN (SELECT id FROM flows WHERE #{emptied_where(plan)})")
+      conn.exec("UPDATE flows SET fts_dirty = 1 WHERE #{emptied_where(plan)}")
     end
     if plan.h2_frames
       # The raw h2 frame log is a detail-view-only diagnostic; each flow rebuilds
@@ -197,6 +200,17 @@ class Gori::Store
   # Keep only the newest `keep` flows (by id, which is monotonic), cascading to
   # their ws messages, FTS rows and orphaned h2 frames/connections — the same
   # cascade the retention sweep (`prune`) uses, but with an explicit keep count.
+  # The rows this plan just emptied: an empty blob with the truncation flag set is exactly
+  # what the two UPDATEs above leave behind, and it is stable across a re-run (a second
+  # compact re-selects the same rows and re-dirties them, which is harmless). Kept as one
+  # expression so the FTS delete and the dirty flag can never select different rows.
+  private def self.emptied_where(plan : CompactPlan) : String
+    parts = [] of String
+    parts << "(response_body IS NOT NULL AND LENGTH(response_body) = 0 AND response_body_truncated = 1)" if plan.response_bodies
+    parts << "(request_body IS NOT NULL AND LENGTH(request_body) = 0 AND request_body_truncated = 1)" if plan.request_bodies
+    parts.join(" OR ")
+  end
+
   # The cutoff is the id of the OLDEST flow that survives, taken from the rows that actually
   # exist rather than from `MAX(id) - keep`. That arithmetic is "keep the newest N" only on a
   # gap-free id space, and gaps are ordinary: a `history delete`, an earlier compact, a

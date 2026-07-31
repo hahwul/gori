@@ -27,23 +27,26 @@ module Gori
     end
 
     def update_oast_provider(id : Int64, name : String, kind : String, host : String,
-                             token : String?, enabled : Bool) : Nil
-      exec_task ->(c : DB::Connection) {
+    # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
+    # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
+    # (`reads.cr`), whose comment states the reasoning once.
+                             token : String?, enabled : Bool) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE oast_providers SET name=?, kind=?, host=?, token=?, enabled=?, updated_at=? WHERE id=?",
           name, kind, host, token, enabled ? 1 : 0, now_us, id)
         nil
       }
     end
 
-    def set_oast_provider_enabled(id : Int64, enabled : Bool) : Nil
-      exec_task ->(c : DB::Connection) {
+    def set_oast_provider_enabled(id : Int64, enabled : Bool) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE oast_providers SET enabled=?, updated_at=? WHERE id=?", enabled ? 1 : 0, now_us, id)
         nil
       }
     end
 
-    def delete_oast_provider(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM oast_providers WHERE id = ?", id); nil }
+    def delete_oast_provider(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM oast_providers WHERE id = ?", id); nil }
     end
 
     def oast_sessions : Array(OastSessionRecord)

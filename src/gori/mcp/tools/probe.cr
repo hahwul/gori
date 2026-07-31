@@ -108,12 +108,12 @@ module Gori
 
         if code
           n = store.probe_issues.count { |i| i.code == code && i.status.open? }
-          store.dismiss_probe_by_code(code)
+          return busy("dismiss NOT applied (store busy or unwritable); the findings are unchanged") unless store.dismiss_probe_by_code(code)
           return Result.new({"dismissed" => n, "code" => code}.to_json)
         end
         if host
           n = store.probe_issues.count { |i| i.host == host && i.status.open? }
-          store.dismiss_probe_by_host(host)
+          return busy("dismiss NOT applied (store busy or unwritable); the findings are unchanged") unless store.dismiss_probe_by_host(host)
           return Result.new({"dismissed" => n, "host" => host}.to_json)
         end
 
@@ -169,13 +169,13 @@ module Gori
             return err("refusing to delete #{n} finding#{n == 1 ? "" : "s"} without confirm:true — this also clears every hard-delete suppression, so a rescan re-discovers them",
               "CONFIRM_REQUIRED", field: "confirm", details: JSON.parse({"findings" => n}.to_json))
           end
-          store.clear_probe_issues
+          return busy("findings NOT cleared (store busy or unwritable); every one is still there") unless store.clear_probe_issues
           return Result.new({"deleted" => n, "all" => true, "suppressions_cleared" => true}.to_json)
         end
         return err("pass 'id' (one finding) or all:true (clear every finding)", "INVALID_ARGUMENT", field: "id") unless id
         issue = store.get_probe_issue(id)
         return not_found("no probe issue with id #{id}") unless issue
-        store.delete_probe_issue(id)
+        return busy("finding NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_probe_issue(id)
         Result.new({"deleted" => 1, "id" => id}.to_json)
       end
 

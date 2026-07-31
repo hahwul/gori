@@ -226,6 +226,64 @@ describe Gori::Bindings do
       end
     end
 
+    # Everything outside the digit span is the operator's payload on this path: header casing,
+    # the space after the colon and a leading zero are live smuggling / WAF-bypass variables,
+    # and an obs-folded `Content-Length` under another header is the whole content of an
+    # obfuscated-framing probe. The shift runs unconditionally with no auto-CL opt-out, so it
+    # has to leave all of that byte-exact.
+    it "moves only the digits, never the operator's framing bytes" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("T", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"t":"0123456789"})), subject)
+        with_layer(b) do
+          shift = ->(head : String) { String.new(Gori::Env.expand_bindings("#{head}\r\n$T".to_slice)) }
+          # Spelling and spacing survive; only the number moves (2 → 10, a +8 body delta).
+          shift.call("POST /a HTTP/1.1\r\ncontent-length: 2\r\n").should contain("content-length: 10")
+          shift.call("POST /a HTTP/1.1\r\nCONTENT-LENGTH: 2\r\n").should contain("CONTENT-LENGTH: 10")
+          shift.call("POST /a HTTP/1.1\r\nContent-Length:2\r\n").should contain("Content-Length:10")
+          # An obs-fold continuation belongs to the header ABOVE it and is invisible to a
+          # strict parser — promoting or editing it would send a different probe than authored.
+          folded = shift.call("POST /a HTTP/1.1\r\nX-Note: see\r\n Content-Length: 2\r\n")
+          folded.should contain("X-Note: see\r\n Content-Length: 2\r\n")
+        end
+      end
+    end
+
+    # A MIXED-EOL head is itself a parser-discrepancy probe. Splitting the whole head on one
+    # spelling glued three lines into one, so the shift silently did nothing.
+    it "shifts through a mixed-EOL head" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("T", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"t":"0123456789"})), subject)
+        with_layer(b) do
+          wire = "POST /a HTTP/1.1\nX-Inj: v\r\nContent-Length: 2\nX-Other: keep\n\n$T"
+          out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+          out.should contain("Content-Length: 10")
+          out.should contain("X-Other: keep") # nothing else moved
+          out.should contain("X-Inj: v\r\n")  # the CRLF line kept its own terminator
+        end
+      end
+    end
+
+    # Chunked framing lives in the BODY's chunk-size lines, which gori will not rewrite — that
+    # would replace the operator's framing payload. So the head is left exactly as authored
+    # (`Fuzz::ContentLength.sync` does the same) and the caller warns rather than going quiet.
+    it "leaves a chunked head alone rather than bumping a stray Content-Length" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("T", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", %({"t":"0123456789"})), subject)
+        with_layer(b) do
+          wire = "POST /a HTTP/1.1\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n$T\r\n0\r\n\r\n"
+          out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+          out.should contain("Content-Length: 2\r\n") # untouched
+          out.should contain("2\r\n0123456789\r\n")    # the body still substituted
+        end
+      end
+    end
+
     it "leaves a head-only substitution's Content-Length alone" do
       with_store do |store|
         b = Gori::Bindings.load(store)

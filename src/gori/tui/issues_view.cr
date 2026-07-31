@@ -624,7 +624,13 @@ module Gori::Tui
 
     def save_notes(store : Store) : Nil
       return unless issue = @detail
-      store.update_issue(issue.id, notes: String.new(@notes.to_bytes))
+      # `#text`, not `#to_bytes`. `to_bytes` joins with CRLF because it exists for WIRE text;
+      # this is prose in a DB column, and the CRLF made `issues.notes` mean two different
+      # things depending on the writer — the TUI stored `a\r\nb` while MCP `update_issue` and
+      # `gori run issues` store the caller's LF string verbatim, so `get_issue` and the export
+      # hand an agent one or the other. The TUI hid it from itself because `set_text` rstrips
+      # `\r` on load. `NotesView` uses `#text` throughout for exactly this reason.
+      store.update_issue(issue.id, notes: @notes.text)
       exit_notes_insert!
       # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
       # notes-insert mode is off), and it nil-guards a peer-deleted issue — so no

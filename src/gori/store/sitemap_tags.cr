@@ -17,8 +17,11 @@ module Gori
     end
 
     # Upsert a node's tag; a blank tag clears it (DELETE) so the row never lingers empty.
-    def set_sitemap_tag(host : String, path : String, tag : String) : Nil
-      exec_task ->(c : DB::Connection) {
+    # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
+    # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
+    # (`reads.cr`), whose comment states the reasoning once.
+    def set_sitemap_tag(host : String, path : String, tag : String) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         if tag.blank?
           c.exec("DELETE FROM sitemap_tags WHERE host = ? AND path = ?", host, path)
         else

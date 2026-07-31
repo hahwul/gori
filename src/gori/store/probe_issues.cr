@@ -114,42 +114,50 @@ module Gori
       nil
     end
 
-    def update_probe_issue_status(id : Int64, status : Status) : Nil
-      exec_task ->(c : DB::Connection) {
+    # `exec_task_ok`, not `exec_task`: these mute or delete a security FINDING, and the store
+    # already answers whether the write committed. Dropping that answer made every caller —
+    # MCP `probe_dismiss`/`probe_delete`, `gori run probe dismiss|delete` — report the change
+    # for a rolled-back batch, so an agent told a finding is dismissed moves on while it is
+    # still Open. The sibling in this same module got it right: `Triage.promote` guards its
+    # `insert_issue == 0` with a comment about permanently blocking a retry.
+    def update_probe_issue_status(id : Int64, status : Status) : Bool
+      ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE probe_issues SET status = ?, last_seen = ? WHERE id = ?", status.value, now_us, id)
         nil
       }
       bump_probe_generation
+      ok
     end
 
     # Bulk-mute every OPEN issue sharing this code (or host) — mark false-positive so the
     # whole group leaves the default open-only view and stays muted across re-hits. A plain
     # delete can't durably mute: `upsert_probe_issue` resurrects the row as `open` on the
     # next matching observation. Already-triaged rows (confirmed/fp/resolved) are left as-is.
-    def dismiss_probe_by_code(code : String) : Nil
+    def dismiss_probe_by_code(code : String) : Bool
       bulk_dismiss_probe("code = ?", code)
     end
 
-    def dismiss_probe_by_host(host : String) : Nil
+    def dismiss_probe_by_host(host : String) : Bool
       bulk_dismiss_probe("host = ?", host)
     end
 
     # `clause` is a fixed internal predicate ("code = ?" / "host = ?"), never user text.
-    private def bulk_dismiss_probe(clause : String, arg : DB::Any) : Nil
-      exec_task ->(c : DB::Connection) {
+    private def bulk_dismiss_probe(clause : String, arg : DB::Any) : Bool
+      ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE probe_issues SET status = ?, last_seen = ? WHERE #{clause} AND status = ?",
           Status::FalsePositive.value, now_us, arg, Status::Open.value)
         nil
       }
       bump_probe_generation
+      ok
     end
 
     # Hard-delete one issue and durably suppress (code, host) so Active backfill / passive
     # re-hits cannot resurrect it after Project leave/re-open. Suppress + delete are one
     # writer transaction (no window where a concurrent upsert re-inserts mid-delete).
-    def delete_probe_issue(id : Int64) : Nil
+    def delete_probe_issue(id : Int64) : Bool
       ts = now_us
-      exec_task ->(c : DB::Connection) {
+      ok = exec_task_ok ->(c : DB::Connection) {
         if row = c.query_one?("SELECT code, host FROM probe_issues WHERE id = ?", id, as: {String, String})
           code, host = row
           c.exec("INSERT OR IGNORE INTO probe_suppressions (code, host, created_at) VALUES (?,?,?)",
@@ -159,16 +167,18 @@ module Gori
         nil
       }
       bump_probe_generation
+      ok
     end
 
     # Wipe every issue AND every hard-delete suppression so a full rescan can re-discover.
-    def clear_probe_issues : Nil
-      exec_task ->(c : DB::Connection) {
+    def clear_probe_issues : Bool
+      ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM probe_issues")
         c.exec("DELETE FROM probe_suppressions")
         nil
       }
       bump_probe_generation
+      ok
     end
 
     # (code, host) pairs hard-deleted this project — Analyzer reloads these on start.
