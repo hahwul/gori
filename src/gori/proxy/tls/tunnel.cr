@@ -110,7 +110,8 @@ module Gori::Proxy::Tls
     # that decides "given this name, which address". nil means resolve the name, i.e. every
     # pre-#529 caller is unchanged.
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink,
-                  tls_upstream : Bool = true, dial_addr : String? = nil) : Nil
+                  tls_upstream : Bool = true, dial_addr : String? = nil,
+                  rewrite_host : Bool = false) : Nil
       # ALPN reflection (#323): advertise h2 to the client only when the ORIGIN speaks it. A
       # non-nil result is a live upstream already confirmed h2 (reflect_origin_h2 dials it and
       # keeps it for reuse); nil means fall the client back to the h1 path. See that helper.
@@ -159,6 +160,11 @@ module Gori::Proxy::Tls
           # short-circuits on `fixed_host` before either is consulted — so what this actually
           # hands over is the DIAL PIN, which `ClientConn#dial_pin` reads back off it.
           origin_dst: dial_addr.try { |a| {a, port} },
+          # A reverse listener's `rewrite_host`. It reaches ClientConn on the CLEARTEXT
+          # branch through `Server#serve_reverse`, and this is the TLS branch of the same
+          # listener — without it the setting was honoured or ignored depending on whether
+          # the client happened to speak TLS, which is not a distinction the operator made.
+          rewrite_fixed_host: rewrite_host,
         ).run
       end
     rescue

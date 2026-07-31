@@ -214,6 +214,29 @@ describe "reverse listener" do
       end
     end
 
+    # Every other example here reaches the listener in CLEARTEXT, and that was the whole gap:
+    # `serve_reverse` passed `rewrite_fixed_host:` straight to ClientConn, while
+    # `serve_reverse_tls` went through `TlsMitm#intercept`, whose signature had no such
+    # parameter — so one listener honoured the setting or ignored it depending on whether the
+    # client happened to speak TLS, a distinction the operator never made.
+    it "replaces the Host for a TLS client too, not only a cleartext one" do
+      seen = Channel(String).new(1)
+      origin_port = start_plain_origin(seen)
+      with_reverse_proxy({"http", "localhost", origin_port}, rewrite_host: true) do |proxy, _sink, done, dir|
+        raw = TCPSocket.new("127.0.0.1", proxy.port)
+        tls = trusting_client(raw, dir, "localhost")
+        tls << "GET /p HTTP/1.1\r\nHost: elsewhere.invalid\r\nX-Keep: 1\r\n\r\n"
+        tls.flush
+        tls.gets_to_end
+        tls.close
+        done.receive
+        head = seen.receive
+        head.should contain("Host: localhost:#{origin_port}")
+        head.should_not contain("elsewhere.invalid")
+        head.should contain("X-Keep: 1")
+      end
+    end
+
     # A header whose VALUE contains "host:" must not be mistaken for the field.
     it "matches the field name, not the value" do
       seen = Channel(String).new(1)

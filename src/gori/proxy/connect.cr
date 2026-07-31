@@ -29,8 +29,15 @@ module Gori::Proxy
     # TRANSPARENT listener sets it from the kernel's original destination (`Proxy::OrigDst`),
     # which is where the client was going before the redirect; nil (every other caller, and a
     # transparent connection the kernel could not answer for) resolves the name as before.
+    # `rewrite_host` replaces the forwarded `Host` header with the pinned authority. Only a
+    # REVERSE listener sets it: there the client dials gori under some name of its own and the
+    # origin is declared, so a vhosted origin has to be addressed by the name gori forwards to.
+    # The CONNECT and transparent paths must never set it — there the client's `Host` IS the
+    # authority it asked for, and rewriting it would be gori changing the request's meaning.
+    # Defaulted to false so those two paths keep their exact behaviour.
     abstract def intercept(host : String, port : Int32, client : IO, sink : FlowSink,
-                           tls_upstream : Bool = true, dial_addr : String? = nil) : Nil
+                           tls_upstream : Bool = true, dial_addr : String? = nil,
+                           rewrite_host : Bool = false) : Nil
 
     # Serve the self-page over TLS after a CONNECT to a RESERVED host (SelfPage.magic_host?)
     # — a proxy-configured client that browsed to `https://gori.proxy/`. No origin is dialed

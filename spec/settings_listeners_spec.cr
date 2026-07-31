@@ -77,6 +77,22 @@ describe Gori::Settings do
       end
     end
 
+    # `bind_host_error` accepts every all-zero spelling and they all bind as a full wildcard,
+    # but `wildcard_bind?` was a two-string literal test — so the fold above happened under
+    # `::` and not under `::0`, and the entry it should have dropped bound beside the wildcard,
+    # failed EADDRINUSE, and was reported as a listener error for an address configured once.
+    # `Upstream.unspecified?` already carries this same fix, for the same reason.
+    it "folds every spelling of the wildcard, not just 0.0.0.0 and ::" do
+      ["::0", "0:0:0:0:0:0:0:0", "0000:0000:0000:0000:0000:0000:0000:0000"].each do |spelling|
+        with_listeners(spelling, 8070, [listener("::1", 8070)]) do
+          Gori::Settings.valid_listeners.should be_empty
+        end
+        with_listeners("::1", 8070, [listener(spelling, 8070)]) do
+          Gori::Settings.valid_listeners.should be_empty
+        end
+      end
+    end
+
     it "keeps a listener that only shares the host, or only the port" do
       with_listeners("127.0.0.1", 8070, [
         listener("127.0.0.1", 8071),

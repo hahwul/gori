@@ -39,10 +39,21 @@ module Gori
   # dispatcher, and the couple of generic JSON-parsing helpers (load_bool/
   # load_bool_h/normalize_os) reused across sections.
   module Settings
-    # The exact JSON this process last read from disk (nil = never loaded). It's the
-    # 3-way-merge BASE at save time: a top-level section this process didn't change
-    # (in-memory == base) yields to whatever is on disk now, so a concurrent writer's
-    # unrelated edit isn't clobbered by this process persisting one unrelated field.
+    # THIS process's own serialization of the state it last read from (or wrote to) disk;
+    # nil = never loaded. It's the 3-way-merge BASE at save time: a top-level section this
+    # process didn't change (in-memory == base) yields to whatever is on disk now, so a
+    # concurrent writer's unrelated edit isn't clobbered by this process persisting one
+    # unrelated field.
+    #
+    # SERIALIZATION, not the raw file text, and that distinction is the whole guarantee.
+    # `mine` is always gori's canonical form, so basing on the operator's raw text makes the
+    # test "is my form of this section byte-identical to how they happened to write it?" —
+    # which is false for every section written in a valid but non-canonical spelling
+    # (`listeners` entries omitting the defaulted `"mode"`, a key gori does not know, a
+    # `target_port: 0` gori drops). Such a section then reads as "this process changed it",
+    # so gori WINS the merge and a hand edit made in between is silently deleted. That is
+    # exactly the clobber `listener_error`'s `among:` comment (settings/listeners.cr) and
+    # #508 are written around, reached through the base rather than through a write-back.
     @@loaded_raw : String? = nil
 
     # An explicit settings file for THIS process (`gori --config PATH`), overriding both
@@ -70,8 +81,14 @@ module Gori
       return unless raw # no file yet / unreadable — first run, keep defaults
       root = load_root(raw)
       return unless root # present but unparseable — kept a .corrupt copy, keep defaults
+      # Set before `apply_sections` so a section that raises partway still leaves SOME base
+      # behind (a nil base skips the merge entirely, which would let this process's full
+      # state overwrite the file).
       @@loaded_raw = raw
       apply_sections(root)
+      # Re-base on our OWN serialization of what we just read, the same rule `save` applies
+      # to `mine`. See `@@loaded_raw` for why the raw text cannot be the base.
+      @@loaded_raw = serialize
     rescue
       # a malformed individual section — keep whatever loaded so far
     end

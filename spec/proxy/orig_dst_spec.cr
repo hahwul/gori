@@ -32,6 +32,29 @@ describe Gori::Proxy::OrigDst do
     end
   end
 
+  # The self-address guard's actual rule, split out of `.lookup` so it is testable without the
+  # platform FFI this file cannot reach (see the note at the top).
+  describe ".same_socket?" do
+    it "folds the v4-mapped spelling of one address" do
+      # The pairing the guard is written for, and the one a raw string compare missed:
+      # `lookup_raw` answers a dual-stack listener's redirected v4 connection through the v4
+      # socket option, which yields a plain dotted quad, while the socket's own local address
+      # renders v4-mapped. Same socket, two spellings — and the miss made gori dial itself.
+      plain = Socket::IPAddress.new("192.168.1.5", 8080)
+      mapped = Socket::IPAddress.new("::ffff:192.168.1.5", 8080)
+      mapped.address.should_not eq(plain.address) # the raw compare that used to be here
+      Gori::Proxy::OrigDst.same_socket?(plain, mapped).should be_true
+    end
+
+    it "still separates a different address or port" do
+      here = Socket::IPAddress.new("192.168.1.5", 8080)
+      Gori::Proxy::OrigDst.same_socket?(here, Socket::IPAddress.new("192.168.1.6", 8080)).should be_false
+      Gori::Proxy::OrigDst.same_socket?(here, Socket::IPAddress.new("192.168.1.5", 8081)).should be_false
+      # A real IPv6 address is not the v4 one it embeds no part of.
+      Gori::Proxy::OrigDst.same_socket?(here, Socket::IPAddress.new("::1", 8080)).should be_false
+    end
+  end
+
   describe ".dial_host" do
     # A dual-stack listener reports a redirected v4 peer in the v4-mapped form. That string is
     # what would otherwise reach the resolver, the upstream-reuse pool key and History, so it is

@@ -334,7 +334,16 @@ module Gori::Settings
     end
   end
 
+  # The all-zero address in ANY spelling. `bind_host_error` accepts `::0` and
+  # `0:0:0:0:0:0:0:0` as readily as `0.0.0.0`/`::` and they all bind as a full wildcard, so a
+  # literal two-string test made a duplicate entry survive de-duplication under one spelling
+  # and not another — it then binds beside the wildcard, fails EADDRINUSE, and the operator
+  # gets a "listener error" for an address they configured exactly once. `Upstream.unspecified?`
+  # already carries the same fix for the same reason (`upstream.cr`, where the literal test had
+  # silently disabled the self-page and the self-loop refusal under a `::0` bind); parsing is
+  # what makes the two agree instead of drifting a third time.
   private def self.wildcard_bind?(h : String) : Bool
-    h == "0.0.0.0" || h == "::"
+    return true if h.empty?
+    !!(Socket::IPAddress.new(h, 0).unspecified? rescue nil)
   end
 end

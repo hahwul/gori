@@ -566,6 +566,48 @@ describe Gori::Settings do
     end
   end
 
+  # Both merge examples above build their baseline with `Settings.save`, so the file they load
+  # is ALREADY gori's canonical serialization and `mine == base` holds for free. That is
+  # precisely why neither caught this: the merge base was the operator's RAW TEXT, and a
+  # section written by a HUMAN is routinely valid-but-non-canonical — a `listeners` entry
+  # omitting the defaulted `"mode"` is the documented minimal form. `mine != base` then read
+  # as "this process changed the section", so gori WON the merge and deleted an edit made in
+  # between. `listeners` is the sharpest case because it is the one section with no editor,
+  # hand-edited by design.
+  it "does not clobber a hand edit to a section it never changed, written non-canonically" do
+    dir = File.tempname("gori-settings-merge-raw")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    prev_listeners = Gori::Settings.listeners
+    begin
+      ENV["GORI_HOME"] = dir
+      path = File.join(dir, "settings.json")
+      # Hand-written: `listeners` omits "mode", which gori fills in on serialize.
+      File.write(path, %({"theme":"goriday","listeners":[{"host":"127.0.0.1","port":9000}]}))
+      Gori::Settings.load
+      Gori::Settings.listeners.map(&.port).should eq([9000])
+
+      # While gori runs, the operator hand-adds a second listener.
+      File.write(path, %({"theme":"goriday","listeners":[) +
+                       %({"host":"127.0.0.1","port":9000},) +
+                       %({"host":"127.0.0.1","port":9200,"mode":"transparent"}]}))
+
+      # An UNRELATED save (a theme toggle in the TUI).
+      Gori::Settings.theme = "monokai"
+      Gori::Settings.save.should be_true
+
+      written = JSON.parse(File.read(path))
+      written["listeners"].as_a.map(&.["port"].as_i).should eq([9000, 9200])
+      written["theme"].as_s.should eq("monokai") # this process's own change still won
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.listeners = prev_listeners
+    end
+  end
+
   it "keeps defaults on a missing/garbled settings file" do
     dir = File.tempname("gori-settings-empty")
     Dir.mkdir_p(dir)

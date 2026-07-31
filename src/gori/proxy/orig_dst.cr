@@ -103,8 +103,21 @@ module Gori::Proxy::OrigDst
     local = (client.local_address.as?(::Socket::IPAddress) rescue nil)
     found = lookup_raw(client, local)
     return nil unless found
-    return nil if local && found.address == local.address && found.port == local.port
+    return nil if local && same_socket?(found, local)
     found
+  end
+
+  # Whether two addresses name the SAME socket, folding the v4-mapped spelling — which is the
+  # only reason this is not a raw `==`, and it is the case the self-address guard above exists
+  # for rather than an exotic one. `lookup_raw` picks the socket option by the LOCAL address's
+  # family, and its own comment says why: a v4-mapped connection on a dual-stack socket was
+  # redirected by iptables (v4), so the v4 option holds the answer. That option answers out of
+  # a `sockaddr_in`, so `found` renders as a plain dotted quad while the socket's local address
+  # on a `::` listener renders `::ffff:` — and `"192.168.1.5" != "::ffff:192.168.1.5"`. A raw
+  # compare therefore let the guard miss exactly the pairing the file is built around, and gori
+  # dialled its own listener once per connection until the accept loop wedged.
+  def self.same_socket?(a : ::Socket::IPAddress, b : ::Socket::IPAddress) : Bool
+    a.port == b.port && dial_host(a) == dial_host(b)
   end
 
   # The interface the answer came through, for the line that tells the operator which source

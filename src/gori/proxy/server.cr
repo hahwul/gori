@@ -263,7 +263,8 @@ module Gori::Proxy
       # No PrefixIO: `peek` above did not consume, so the ClientHello is still in the socket's
       # buffer for OpenSSL to read. (The transparent path needs one only because peek_sni does
       # consume what it parses.)
-      tls.intercept(host, port, client, @sink, tls_upstream: scheme == "https")
+      tls.intercept(host, port, client, @sink, tls_upstream: scheme == "https",
+        rewrite_host: @rewrite_host)
     end
 
     # A transparent connection. Route on the first byte, the same discriminator the CONNECT path
