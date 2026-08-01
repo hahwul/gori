@@ -453,6 +453,34 @@ describe Gori::Probe::Analyzer do
     end
   end
 
+  # The disabled-rule list is the ONLY thing between a disabled active rule and a real request.
+  # `store.probe_disabled_rules` used to swallow a store/parse failure into an empty set — read
+  # as "nothing is disabled" — so a corrupt value made ACTIVE probing send everything. The
+  # commit that added the `degraded` flag could never fire because of that swallow.
+  it "fails closed on active probing when the disabled-rule list cannot be read" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        target: "/reflect?q=hi", body: "<p>hi</p>")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      detail = store.recent_flows(1).first.try { |r| store.get_flow(r.id) }.not_nil!
+
+      # Sanity: a readable (empty) disabled list estimates at least one active rule for this flow.
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      ok = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Active, true)
+      ok.active_estimate(detail).should_not be_empty
+
+      # Corrupt the stored value to a truncated JSON blob — probe_disabled_rules now RAISES.
+      store.@db.exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('probe_disabled_rules', '[\"reflected')")
+      expect_raises(JSON::ParseException) { store.probe_disabled_rules }
+
+      # An analyzer built on the corrupt store is degraded → estimates NOTHING (sends nothing).
+      feed2 = Channel(Gori::Store::FlowEvent).new(8)
+      degraded = Gori::Probe::Analyzer.new(store, scope, feed2, Gori::Probe::Mode::Active, true)
+      degraded.active_estimate(detail).should be_empty
+    end
+  end
+
   # AGGRESSIVE drives the SAME automatic pipeline as ACTIVE (probes_actively?), but with widened
   # Options (unsafe methods + raised caps). It stays scope-gated. No network assert — the queue may
   # drop and sends to acme.test won't resolve; this verifies the pipeline re-arms and persists the

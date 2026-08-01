@@ -84,7 +84,9 @@ module Gori
         # same value and must not mean the same thing.
         private def self.load_disabled(store : Store) : {Set(String), Bool}
           {store.probe_disabled_rules, true}
-        rescue DB::Error | SQLite3::Exception
+        rescue DB::Error | SQLite3::Exception | JSON::ParseException
+          # `probe_disabled_rules` now RAISES a parse failure too (it used to swallow it into an
+          # empty set, which made this rescue — and the whole `degraded` flag — dead code).
           {Set(String).new, false}
         end
 

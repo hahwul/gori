@@ -122,6 +122,23 @@ describe Gori::Sequencer::Stats do
     seq_detail(["1", "5", "3"]).should eq("non-monotonic")
   end
 
+  # A counter behind a constant >=8-char prefix: the general (non-numeric) path reads only the
+  # first 8 bytes as a magnitude, so a fixed prefix made every leading value constant → variance
+  # 0 → correlation 0 → mislabeled "none". A tester reading WHY a set is weak was told the
+  # obviously-sequential suffix looked random. Dropping the shared prefix puts the varying region
+  # under the window.
+  it "detects a counter hidden behind a constant prefix (general path)" do
+    tokens = (1..220).map { |i| "PREFIXAB%06d" % i }
+    report = S.analyze(tokens)
+    report.sequential.should be_true
+  end
+
+  it "still does not flag genuinely random tokens behind a shared prefix" do
+    rng = Random.new(7_u64)
+    tokens = Array.new(220) { "PREFIXAB" + Array.new(8) { rng.rand(16).to_s(16) }.join }
+    S.analyze(tokens).sequential.should be_false
+  end
+
   # ── detect_sequential: order-independent (concurrency-reordering) detection ─────
 
   it "detects a shuffled-order sequential counter once the sample is large enough" do
@@ -174,9 +191,12 @@ describe Gori::Sequencer::Stats do
     # Each value exceeds Int64::MAX (9_223_372_036_854_775_807); a to_i64 attempt would raise.
     big = ["9999999999999999999", "9999999999999999998", "9999999999999999997"]
     big.each(&.size.should(eq(19)))
-    report = S.analyze(big)                    # must not raise
-    seq_detail(big).should start_with("corr=") # general (correlation) path, not "constant step"
-    report.sequential.should be_false          # identical leading bytes → r = 0
+    report = S.analyze(big)                    # must not raise (each exceeds Int64::MAX)
+    seq_detail(big).should start_with("corr=") # general (correlation) path, not the numeric one
+    # These ARE a descending counter in the last digit. Dropping the shared 18-char prefix now
+    # surfaces that — before, only the identical first 8 bytes were weighed, so it read r=0 and
+    # the general path MISSED an obviously-sequential set (the same defect as the prefix case).
+    report.sequential.should be_true
   end
 
   it "never reports a NaN correlation for a constant leading-byte series (fix #16)" do

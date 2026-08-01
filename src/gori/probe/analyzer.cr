@@ -35,7 +35,9 @@ module Gori
       property? verify_upstream : Bool
 
       @disabled : Set(String)     # RuleInfo#id of built-ins the operator turned off (Rules sub-tab)
+      @disabled_degraded : Bool   # the disabled-list could not be READ — fail closed on active
       @custom : Array(CustomRule) # merged global+project user match rules
+      @warned_degraded : Bool     # one-shot: the "active skipped, list unreadable" warning
 
       # One enabled active rule that WOULD run against a given flow, plus the request count it
       # sends. `active_estimate` returns these (empty when nothing applies) so the manual "Run
@@ -67,7 +69,8 @@ module Gori
         # Rules sub-tab config: built-ins the operator disabled (by RuleInfo#id) + the merged
         # global+project custom match rules. Read once here so even a one-shot scan_detail
         # (CLI/MCP/Repeater, no start) honours them; reload_rule_config refreshes on UI edits.
-        @disabled = load_disabled
+        @disabled, @disabled_degraded = load_disabled
+        @warned_degraded = false
         @custom = load_custom
       end
 
@@ -76,15 +79,32 @@ module Gori
       # a new custom rule over already-seen traffic. Disabling a rule only stops NEW detections —
       # existing findings persist until dismissed/deleted/cleared.
       def reload_rule_config : Nil
-        @disabled = load_disabled
+        @disabled, @disabled_degraded = load_disabled
         @custom = load_custom
         @analyzed.clear
       end
 
-      private def load_disabled : Set(String)
-        @store.probe_disabled_rules
-      rescue DB::Error | SQLite3::Exception
-        Set(String).new
+      # {the operator's disabled set, degraded}. `degraded` = the list could NOT be read (store
+      # error or corrupt JSON), which is NOT the same as "nothing is disabled": that set is the
+      # only thing between a disabled ACTIVE rule and a real request, so when it is unknown the
+      # active pipeline fails CLOSED (see the guards below). Passive analysis is request-free and
+      # runs regardless. `probe_disabled_rules` now RAISES on a read/parse failure precisely so
+      # this rescue is live — before, the store swallowed it and this could never fire.
+      private def load_disabled : {Set(String), Bool}
+        {@store.probe_disabled_rules, false}
+      rescue DB::Error | SQLite3::Exception | JSON::ParseException
+        {Set(String).new, true}
+      end
+
+      # Fail-closed guard for every active entry point: with the disabled-list unreadable we do
+      # not know which active probes the operator authorised, so we send none and say so once.
+      private def active_degraded? : Bool
+        return false unless @disabled_degraded
+        unless @warned_degraded
+          @warned_degraded = true
+          ::Log.warn { "probe: the disabled-rule list could not be read — ACTIVE probing skipped (fail-closed). Passive analysis still runs. Fix the store/settings and re-scan." }
+        end
+        true
       end
 
       private def load_custom : Array(CustomRule)
@@ -175,6 +195,7 @@ module Gori
       # sent — so it's safe on the render path. Matches exactly what run_active_now will fire.
       def active_estimate(detail : Store::FlowDetail,
                           opts : Active::Options = Active::Options::DEFAULT) : Array(ActiveEstimate)
+        return [] of ActiveEstimate if active_degraded?
         Active::RULES.compact_map do |rule|
           next if @disabled.includes?(rule.info.id)
           next unless rule.dedup_key(detail, opts)
@@ -197,6 +218,7 @@ module Gori
                          allow_unsafe : Bool = false,
                          notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Nil
         return if @stopped
+        return if active_degraded?
         opts = Active::Options.new(allow_unsafe: allow_unsafe)
         spawn(name: "gori-probe-active-manual") do
           found = 0
@@ -359,6 +381,7 @@ module Gori
       private def maybe_enqueue_active(detail : Store::FlowDetail) : Nil
         return if @stopped
         return unless @mode.probes_actively?
+        return if active_degraded? # fail closed: unknown which rules are disabled
         # Skipped here too, purely to keep stubbed flows out of the queue — `Active.analyze`
         # is the refusal that matters and would reject this job anyway (#511).
         return if detail.row.short_circuited?

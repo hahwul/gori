@@ -439,10 +439,29 @@ module Gori::Sequencer
       # shuffled by concurrency), but isn't fixed here — a coordinate-only fix couldn't
       # reuse the sort-then-diff trick since this path also weighs HOW closely order
       # tracks magnitude, not just whether the values are evenly spaced.
+      # Skip the constant prefix every token shares before reading the leading magnitude. A
+      # counter behind an >=8-char fixed prefix (`PREFIXAB000001`, `PREFIXAB000002`, …) has a
+      # CONSTANT leading value in the first 8 bytes → variance 0 → correlation 0 → mislabeled
+      # "none/random", exactly the token shape a tester is trying to catch. Dropping the shared
+      # prefix puts the varying region under the 8-byte window.
+      skip = common_prefix_len(tokens)
       xs = Array(Float64).new(n, &.to_f)
-      ys = tokens.map { |t| leading_value(t) }
+      ys = tokens.map { |t| leading_value(t, skip) }
       r = pearson(xs, ys)
       {r.abs > 0.9, "corr=#{fmt(r)}"}
+    end
+
+    # Length of the longest prefix every token shares, byte-wise. Bounded by the shortest
+    # token. Zero when the tokens diverge at the first byte (the common case).
+    private def self.common_prefix_len(tokens : Array(String)) : Int32
+      return 0 if tokens.size < 2
+      first = tokens[0].to_slice
+      limit = tokens.min_of(&.bytesize)
+      i = 0
+      while i < limit && tokens.all? { |t| t.to_slice[i] == first[i] }
+        i += 1
+      end
+      i
     end
 
     # The constant gap between every consecutive pair in `values`, or nil if the gaps
@@ -457,9 +476,11 @@ module Gori::Sequencer
       (2...values.size).all? { |i| values[i] - values[i - 1] == step } ? step : nil
     end
 
-    private def self.leading_value(t : String) : Float64
+    private def self.leading_value(t : String, skip : Int32 = 0) : Float64
       v = 0.0
-      t.to_slice[0, {8, t.bytesize}.min].each { |b| v = v * 256.0 + b }
+      slice = t.to_slice
+      start = {skip, slice.size}.min
+      slice[start, {8, slice.size - start}.min].each { |b| v = v * 256.0 + b }
       v
     end
 

@@ -399,6 +399,27 @@ describe Gori::Proxy::H2::HeadRewrite do
       pipe.drain { |_, _| fail "nothing should be left buffered" }
     end
 
+    # The FIFTH site: a block with no END_HEADERS never reaches `finish`, so it is still buffered
+    # when the connection ends — and `StreamGate#close` calls `drain`, which wrote it to the peer.
+    # Measured at the wire as one HEADERS(no END_HEADERS) for an out-of-scope path plus a hangup.
+    # `drain(discard: true)` is the sandbox's answer; `discard: false` keeps the P7 verbatim
+    # release. `StreamGate#close` computes the flag as `@ordered && sandbox_enabled?`.
+    it "drains a no-END_HEADERS block verbatim by default but drops it when discard is set" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      block = HPACK::Encoder.new.encode(req("/blocked"))
+      push(pipe, assembler, headers(1_u32, block, 0_u8)).should be_empty # buffered, no END_HEADERS
+
+      released = [] of Frame::Header
+      pipe.drain(discard: false) { |f, _| released << f }
+      released.map(&.payload).should eq([block]) # P7: verbatim when the sandbox is off
+    end
+
+    it "drops a buffered no-END_HEADERS block under discard, leaving close nothing to write" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/blocked")), 0_u8)).should be_empty
+      pipe.drain(discard: true) { |_, _| fail "discard must not yield the unexamined block" }
+    end
+
     it "does not forward a completed block when the gate refuses the connection at defer?" do
       # `defer?` raises past MAX_REFUSED_STREAMS, and `accept`'s `reset` only ran after `finish`
       # RETURNED — so the completed block sat in `@buf` and teardown wrote it to the peer.
@@ -412,6 +433,29 @@ describe Gori::Proxy::H2::HeadRewrite do
       drained = [] of Frame::Header
       pipe.drain { |f, _| drained << f }
       drained.should be_empty
+    end
+  end
+
+  # `StreamGate` now routes connection-level frames through `accept`, and a HEADERS/PUSH_PROMISE
+  # on stream 0 is a §6.2 connection error. It must NOT open a buffered block — otherwise a Slot
+  # keyed 0 could be minted and later PINGs would park behind it (the freeze D1 rule 1 forbids).
+  describe "a header-type frame on stream 0" do
+    it "is yielded straight through, never buffered" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      zero = headers(0_u32, HPACK::Encoder.new.encode(req("/x")))
+      sent = push(pipe, assembler, zero)
+      sent.size.should eq(1)
+      sent.first.stream_id.should eq(0_u32)
+      pipe.drain { |_, _| fail "a stream-0 HEADERS must not be left buffered" }
+    end
+
+    it "does not become the opener a following CONTINUATION on stream 1 attaches to" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      push(pipe, assembler, headers(0_u32, HPACK::Encoder.new.encode(req("/x")))) # not an opener
+      # A real block on stream 1 now opens cleanly; the stream-0 frame did not leave state behind.
+      out = push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/y"))))
+      out.size.should eq(1)
+      out.first.stream_id.should eq(1_u32)
     end
   end
 
