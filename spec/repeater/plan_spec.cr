@@ -387,4 +387,39 @@ describe Gori::Repeater::Plan do
       String.new(plan.bytes).lines.first.should eq("GET /v HTTP/2")
     end
   end
+  # `--request-raw` / `--request-file` are documented as verbatim, and were not: `expand_wire`
+  # promotes a bare LF to CRLF on every headless send, and `--no-auto-cl` only disabled the
+  # Content-Length resync. A bare-LF header terminator is a standard front-end/back-end desync
+  # primitive, so that removed a whole payload class from the headless surfaces while the TUI's
+  # byte modes could still send it. `expand_request: false` is the flag every surface already
+  # uses to mean "these bytes ARE the message"; `gori run repeater send --verbatim` sets it.
+  describe "verbatim sends" do
+    it "keeps a bare LF in the head instead of promoting it to CRLF" do
+      raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-Bare: lf\n\r\n".to_slice
+      plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
+        expand_request: false, auto_content_length: false), ungated)
+      String.new(plan.bytes).should eq(String.new(raw))
+    end
+
+    it "promotes it by default, which is what every other send still does" do
+      raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-Bare: lf\n\r\n".to_slice
+      plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test"), ungated)
+      String.new(plan.bytes).should eq("GET /v HTTP/1.1\r\nHost: h.test\r\nX-Bare: lf\r\n\r\n")
+    end
+
+    it "also leaves the version line alone, since the operator asked for these exact bytes" do
+      raw = "GET /v HTTP/2\r\nHost: h.test\r\n\r\n".to_slice
+      plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
+        expand_request: false, auto_content_length: false), ungated)
+      String.new(plan.bytes).lines.first.should eq("GET /v HTTP/2")
+    end
+
+    it "still refuses an unresolved $VAR, which is checked regardless of expansion" do
+      raw = "GET /v HTTP/1.1\r\nHost: h.test\r\nX-T: $NOPE\r\n\r\n".to_slice
+      expect_raises(R::PlanError) do
+        R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
+          expand_request: false, auto_content_length: false), ungated)
+      end
+    end
+  end
 end

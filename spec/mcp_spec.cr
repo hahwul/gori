@@ -2166,6 +2166,28 @@ describe Gori::MCP::Serialize do
 end
 
 describe Gori::MCP::RequestBuilder do
+  # `normalize_raw` exists so a hand-typed request still frames, but a bare-LF header
+  # terminator is a standard front-end/back-end desync primitive — promoting it removed a
+  # whole payload class from this surface while the TUI's byte modes could always send it.
+  it "promotes a bare LF in the head by default" do
+    raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-B: lf\n\r\n"
+    args = JSON.parse({"url" => "http://h.test/", "raw" => raw}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes)
+      .should eq("GET /v HTTP/1.1\r\nHost: h.test\r\nX-B: lf\r\n\r\n")
+  end
+
+  it "keeps the bare LF byte-exact under verbatim" do
+    raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-B: lf\n\r\n"
+    args = JSON.parse({"url" => "http://h.test/", "raw" => raw, "verbatim" => true}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should eq(raw)
+  end
+
+  it "leaves a $VAR unexpanded under verbatim, for Plan.build to refuse" do
+    raw = "GET /v HTTP/1.1\r\nHost: h.test\r\nX-T: $NOPE\r\n\r\n"
+    args = JSON.parse({"url" => "http://h.test/", "raw" => raw, "verbatim" => true}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should contain("$NOPE")
+  end
+
   it "builds exact request bytes with Host + Content-Length" do
     args = JSON.parse(%({"url":"https://h.test:8443/a?b=1","method":"post","headers":{"X-Test":"y"},"body":"hi"})).as_h
     built = Gori::MCP::RequestBuilder.build(args)

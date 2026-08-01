@@ -197,7 +197,13 @@ module Gori
 
     # Wipe every captured History flow in this project (and their WS/FTS/h2 logs and
     # flow entity_links). Repeater-owned WS rows (repeater_id set) and workbench sessions
-    # are left intact. Issues/Probe keep dangling sample flow ids.
+    # are left intact, and so are `sitemap_tags`: a tag is the OPERATOR'S memo on a path, in
+    # the same class as a note or an issue, and `history clear` clears captured traffic rather
+    # than the operator's own annotations. It is keyed by `(host, path)` and not by a flow id,
+    # so it survives correctly and re-attaches if that path is captured again — it is simply
+    # unreachable from the Sitemap tree meanwhile, and `sitemap tag --list` is where to find
+    # it. Spelled out because this list is what a reader checks, and tags were the one spared
+    # table it did not name.
     # Returns whether the wipe committed; see `delete_flow`. A rolled-back clear reported as
     # done is the worst of the three, because the operator moves on believing the project is
     # empty.

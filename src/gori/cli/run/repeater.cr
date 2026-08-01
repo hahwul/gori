@@ -236,10 +236,12 @@ module Gori
       # here silently overwrites a `repeater create --no-auto-cl` session's hand-set
       # Content-Length on every replay, and no `Plan`-level spec would notice.
       private def self.session_plan_options(rec : Store::RepeaterRecord, insecure : Bool,
-                                            overrides : Gori::HostOverrides?) : Repeater::PlanOptions
+                                            overrides : Gori::HostOverrides?,
+                                            verbatim : Bool = false) : Repeater::PlanOptions
         Repeater::PlanOptions.new([rec.request],
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
-          auto_content_length: rec.auto_content_length?, verify: !insecure,
+          expand_request: !verbatim,
+          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure,
           overrides: overrides)
       end
 
@@ -294,6 +296,7 @@ module Gori
         ws_messages = [] of String
         idle_ms : Int64? = nil
         allow_unscoped = false
+        verbatim = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -305,6 +308,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--verbatim", "Send the stored bytes EXACTLY: no $VAR expansion, no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix") { verbatim = true }
           p.on("--message=TEXT", "WebSocket: outbound text message (repeatable; replaces the session's stored messages)") { |v| ws_messages << v }
           p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -333,7 +337,7 @@ module Gori
         outbound = project_outbound(project_name, db_path, allow_unscoped)
 
         plan = begin
-          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides), outbound)
+          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end

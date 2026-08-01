@@ -56,12 +56,25 @@ module Gori
 
         bytes =
           if (raw = args["raw"]?.try(&.as_s?)) && !raw.empty?
-            normalize_raw(Env.expand(raw))
+            # `verbatim` means the operator's bytes ARE the message: no `$VAR` expansion and no
+            # bare-LF promotion. `normalize_raw` exists so a hand-typed request still frames,
+            # but a bare-LF header terminator is a standard front-end/back-end desync
+            # primitive, so promoting it removes a payload class from this surface — the TUI's
+            # byte modes have always been able to send it. `Plan.build` still refuses an
+            # unresolved `$VAR` regardless of expansion, so nothing ships a literal token.
+            raw_bytes(raw, args)
           else
             build_from_parts(uri, scheme, host, port, args)
           end
 
         Built.new(bytes, scheme, host, port)
+      end
+
+      # `verbatim` means the operator's bytes ARE the message. Kept out of `build` so that
+      # method's branch count stays where it was.
+      private def self.raw_bytes(raw : String, args : Hash(String, JSON::Any)) : Bytes
+        return raw.to_slice if args["verbatim"]?.try(&.as_bool?)
+        normalize_raw(Env.expand(raw))
       end
 
       private def self.build_from_parts(uri : URI, scheme : String, host : String, port : Int32,

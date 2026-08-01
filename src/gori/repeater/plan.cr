@@ -211,7 +211,12 @@ module Gori::Repeater
       # share. It is deliberately narrow (only the h2/h3 spellings; `HTTP/1.0` and a probe's
       # `HTTP/9.9` are left alone), and it cannot touch an h2 send, which never builds a
       # version line from this text.
-      wires = wires.map { |b| FlowRequest.downgrade_request_line(b) } unless options.http2?
+      # Gated on `expand_request?` as well: that flag is what a surface sets to mean "these
+      # bytes are the message, do not help" — the TUI's hex/byte modes, MCP's pre-expanded
+      # `raw`, and `gori run repeater send --verbatim`. Every other normalization on this path
+      # is already behind it, and a version line is the operator's to get wrong when they asked
+      # for verbatim.
+      wires = wires.map { |b| FlowRequest.downgrade_request_line(b) } if options.expand_request? && !options.http2?
 
       unless scheme.in?("http", "https")
         raise PlanError.new(PlanError::Reason::UnsupportedScheme,

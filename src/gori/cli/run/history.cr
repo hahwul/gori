@@ -119,9 +119,7 @@ module Gori
           rows =
             if q = query
               filter = QL.parse(q)
-              QL.invalid_regex_terms(q).each do |t|
-                STDERR.puts "gori run history: warning: invalid regex in #{t.inspect} — that term matches nothing"
-              end
+              warn_query_terms(q)
               # A query that fails to compile to ANY clause (e.g. `status:>=foo`)
               # yields the match-all EMPTY filter — silently dumping every flow,
               # the opposite of what the user asked. Refuse it instead.
@@ -168,6 +166,23 @@ module Gori
       # STDOUT stays a pure HAR document (pipe it straight to a file); every caveat — flows
       # skipped, bodies capped — goes to STDERR, because a silently short export is exactly
       # the failure this file keeps having to fix.
+      # Both ways a typed term can fail to do what it says, on STDERR so `--format=json` stays
+      # machine-readable. An invalid regex matches NOTHING (indistinguishable from a genuinely
+      # empty result); a term gori could not compile at all is DROPPED, and a dropped term
+      # BROADENS — `QL::REFERENCE` calls that the dangerous direction. MCP has had `strict:true`
+      # and `ql_explain` for the second case from the start; the CLI had neither and no warning,
+      # so `history -q 'path:/graphql size:>bogus'` printed every /graphql flow with exit 0 and
+      # nothing to suggest the size filter had not been applied.
+      private def self.warn_query_terms(q : String) : Nil
+        QL.invalid_regex_terms(q).each do |t|
+          STDERR.puts "gori run history: warning: invalid regex in #{t.inspect} — that term matches nothing"
+        end
+        ignored = QL.analyze(q).ignored
+        return if ignored.empty?
+        STDERR.puts "gori run history: warning: ignored #{ignored.map(&.inspect).join(", ")} " \
+                    "— unrecognized or invalid, so the result is BROADER than the query asks for"
+      end
+
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
                                 limit : Int32) : Nil
         details = rows.reverse.each.compact_map { |r| store.get_flow(r.id) }

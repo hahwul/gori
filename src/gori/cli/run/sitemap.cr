@@ -25,7 +25,10 @@ module Gori
                      "       gori run sitemap tag --list [--host=H]\n\n" \
                      "Pin a free-text memo onto one sitemap path (the same tags the TUI Sitemap\n" \
                      "tab shows). --path is the node path AS THE TREE SHOWS IT, INCLUDING any\n" \
-                     "query string — /search?q=1 is a different node from /search."
+                     "query string — /search?q=1 is a different node from /search.\n" \
+                     "A tag is keyed by host+path, not by a flow, so it OUTLIVES 'history clear'\n" \
+                     "and re-attaches if that path is captured again; --list finds one whose\n" \
+                     "node is not currently in the tree."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--host=HOST", "Host the path belongs to") { |v| host = v }
