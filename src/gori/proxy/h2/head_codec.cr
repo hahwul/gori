@@ -79,8 +79,40 @@ module Gori::Proxy::H2
     # Every path that could put these bytes back on an h2 wire refuses them before reaching
     # here, so nothing that was byte-exact stops being byte-exact.
     private def line_safe(s : String) : String
-      return s unless line_broken?(s)
-      s.gsub('\r', "\\r").gsub('\n', "\\n")
+      return s unless needs_escape?(s)
+      String.build do |io|
+        chars = s.each_char.to_a
+        chars.each_with_index do |c, i|
+          case c
+          when '\r' then io << "\\r"
+          when '\n' then io << "\\n"
+          when '\\'
+            # A backslash is escaped ONLY when it could be read back as one of the escapes
+            # above. Without this the projection is not injective in the direction that
+            # matters: a value carrying the two literal characters `\` `r` rendered
+            # identically to one carrying a real CR, and "was this CRLF injected by the
+            # origin, or did it always contain that text?" is the question an operator opens
+            # this view to ask. Leaving `\` alone before anything else keeps an ordinary
+            # `C:\path` or a regex value byte-identical, so a Match&Replace rule written
+            # against one still matches.
+            nxt = chars[i + 1]?
+            io << (nxt == 'r' || nxt == 'n' || nxt == '\\' ? "\\\\" : "\\")
+          else io << c
+          end
+        end
+      end
+    end
+
+    # `line_safe`'s guard, in one allocation-free pass: a real CR/LF, or a backslash that would
+    # be read back as one of its escapes.
+    private def needs_escape?(s : String) : Bool
+      prev_backslash = false
+      s.each_char do |c|
+        return true if c == '\r' || c == '\n'
+        return true if prev_backslash && (c == 'r' || c == 'n' || c == '\\')
+        prev_backslash = c == '\\'
+      end
+      false
     end
 
     # Invert `synth_request`. `original` supplies everything the h1 text cannot carry.

@@ -177,6 +177,24 @@ describe Gori::Proxy::H2::HeadCodec do
       head.should eq("HTTP/2 200\r\na: x\\ry\r\nb: x\\ny\r\nc: plain value\r\n\r\n")
     end
 
+    # Injectivity in the direction that matters: an operator opens this view to ask "did the
+    # ORIGIN inject a CRLF here, or did the value always contain that text?" A literal
+    # backslash-r used to render identically to a real CR, so the view could not answer it.
+    it "distinguishes a real CRLF from a value that literally contains backslash-r-backslash-n" do
+      injected = String.new(HeadCodec.synth_response(tuples([f(":status", "200"), f("x", "A\r\nB")])))
+      literal = String.new(HeadCodec.synth_response(tuples([f(":status", "200"), f("x", "A\\r\\nB")])))
+      injected.should contain("x: A\\r\\nB")
+      literal.should contain("x: A\\\\r\\\\nB")
+      injected.should_not eq(literal)
+    end
+
+    it "leaves an ordinary backslash byte-identical, so a rule written against it still matches" do
+      head = String.new(HeadCodec.synth_response(tuples([f(":status", "200"),
+                                                         f("x-path", "C:\\Users\\admin"), f("x-re", "\\d+\\s*")])))
+      head.should contain("x-path: C:\\Users\\admin")
+      head.should contain("x-re: \\d+\\s*")
+    end
+
     it "keeps the start line and the synthetic Host line to one line each" do
       fields = [f(":method", "GET"), f(":scheme", "https"), f(":authority", "h\r\nx: 1"),
                 f(":path", "/p\r\nx: 2")]

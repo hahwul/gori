@@ -543,10 +543,12 @@ module Gori::Proxy::H2
       return nil if status < 200
       ref = @assembler.request_ref(block.stream_id)
       if ref.nil?
-        # No request projected for this stream (past `Assembler::MAX_LIVE_STREAMS`). h1 scopes a
-        # response hold on the REQUEST's target (`client_conn.cr:501`); with no request target
-        # there is nothing to scope against, and inventing one is how a hold escapes scope.
-        warn_unscopable(block.stream_id)
+        # No request projected for this stream. h1 scopes a response hold on the REQUEST's
+        # target (`client_conn.cr:501`); with no request target there is nothing to scope
+        # against, and inventing one is how a hold escapes scope. Warn only when a hold could
+        # actually have happened — this runs before `intercepts_response?`, so it used to fire
+        # on connections with intercept switched off entirely.
+        warn_unscopable(block.stream_id) if @interceptor.enabled?
         return nil
       end
       host, port = Upstream.split_host_port(ref.authority, @port)
@@ -836,8 +838,15 @@ module Gori::Proxy::H2
       return if @warned_scope
       @warned_scope = true
       ::Log.warn do
-        "h2 in: stream #{stream_id} is not tracked (over #{Assembler::MAX_LIVE_STREAMS} live " \
-        "streams), so its response has no request target to scope an intercept hold against — not held"
+        # Do NOT assert the cause. This message named the live-stream ceiling unconditionally,
+        # and it fired on connections carrying a SINGLE stream — where the real reason was an
+        # undecodable request head, so the assembler never tracked the stream in the first
+        # place. An operator asking "why did my hold not fire / why did $SESSION not bind" was
+        # sent to look at a limit they were nowhere near. Same shape as the #536 note about
+        # this message.
+        "h2 in: stream #{stream_id} has no projected request, so its response has no request " \
+        "target to scope an intercept hold against — not held. Either the request head could " \
+        "not be decoded, or the connection is past #{Assembler::MAX_LIVE_STREAMS} live streams"
       end
     end
   end

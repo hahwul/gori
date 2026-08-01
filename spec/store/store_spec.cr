@@ -583,4 +583,51 @@ describe Gori::Store do
       store.recent_flows(1000, before_id: older.last.id).size.should eq(500)
     end
   end
+  # `flows.id` is a plain INTEGER PRIMARY KEY — the rowid, which SQLite REUSES. Delete the
+  # newest flow (or clear the project) and the next capture is handed the same id, so a
+  # cross-reference deliberately left dangling does not resolve to "gone": it re-points at
+  # whatever traffic arrives next. Measured on a live project before the fix: a probe finding
+  # promoted to an Issue cited a flow captured AFTER the clear, and `get_repeater_context`
+  # reported a session as seeded from an unrelated request. On a tool whose product is
+  # evidence, silently wrong evidence is the worst outcome available.
+  describe "flow cross-references when a flow goes away" do
+    it "detaches an issue rather than letting it re-bind to the reused id" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "victim.test", port: 80,
+          method: "GET", target: "/victim", http_version: "HTTP/1.1",
+          head: "GET /victim HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        issue = store.insert_issue("evidence on the victim flow",
+          Gori::Store::Severity::High, "victim.test", id)
+
+        store.delete_flow(id)
+        reused = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 2_i64, scheme: "http", host: "unrelated.test", port: 80,
+          method: "GET", target: "/UNRELATED-ADMIN-PANEL", http_version: "HTTP/1.1",
+          head: "GET /UNRELATED-ADMIN-PANEL HTTP/1.1\r\n\r\n".to_slice, body: nil))
+
+        reused.should eq(id) # the id really is handed out again — that is the whole problem
+        store.issues.find { |i| i.id == issue }.not_nil!.flow_id.should be_nil
+      end
+    end
+
+    it "detaches every flow cross-reference on a whole-project clear" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "victim.test", port: 80,
+          method: "GET", target: "/victim", http_version: "HTTP/1.1",
+          head: "GET /victim HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        issue = store.insert_issue("cleared", Gori::Store::Severity::Low, "victim.test", id)
+        store.@db.exec(
+          "INSERT INTO probe_issues (code, category, host, title, severity, sample_flow_id, " \
+          "first_seen, last_seen) VALUES ('c', 'cat', 'victim.test', 't', 0, ?, 1, 1)", id)
+
+        store.clear_flows.should be_true
+
+        store.issues.find { |i| i.id == issue }.not_nil!.flow_id.should be_nil
+        store.@db.query_one("SELECT count(*) FROM probe_issues WHERE sample_flow_id IS NOT NULL",
+          as: Int64).should eq(0)
+      end
+    end
+  end
 end

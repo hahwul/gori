@@ -76,9 +76,13 @@ module Gori::Proxy::H2
       return if @warned_unscopable
       @warned_unscopable = true
       ::Log.warn do
-        "h2 in: stream #{stream_id} is not tracked (over #{Assembler::MAX_LIVE_STREAMS} live " \
-        "streams), so its response has no request target to scope a session-binding extract " \
-        "rule against — nothing was extracted from it"
+        # Its `stream_gate.cr` twin named the live-stream ceiling unconditionally and fired on
+        # single-stream connections, where the real cause was an undecodable request head. Same
+        # wording here, for the same reason: do not send the operator to a limit they are not near.
+        "h2 in: stream #{stream_id} has no projected request, so its response has no request " \
+        "target to scope a session-binding extract rule against — nothing was extracted from " \
+        "it. Either the request head could not be decoded, or the connection is past " \
+        "#{Assembler::MAX_LIVE_STREAMS} live streams"
       end
     end
   end

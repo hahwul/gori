@@ -71,6 +71,19 @@ private class QuietDeferrer
   end
 end
 
+# A gate whose `defer?` RAISES — `StreamGate` ends the connection once `remember_refused`
+# passes MAX_REFUSED_STREAMS, and that raise unwinds through the same `close`/`drain` path.
+private class RefusingDeferrer
+  include Gori::Proxy::H2::HeadRewrite::Deferrer
+
+  def defer?(block : Gori::Proxy::H2::HeadRewrite::Block) : Bool
+    raise Gori::Error.new("h2 out: over 4096 streams refused on one connection")
+  end
+
+  def undecodable(stream_id : UInt32) : Nil
+  end
+end
+
 private def pipeline(rewriter : Gori::Proxy::HeadRewriter, direction = "out",
                      sink = RecSink.new) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler, RecSink}
   assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
@@ -345,6 +358,60 @@ describe Gori::Proxy::H2::HeadRewrite do
       drained = [] of Frame::Header
       pipe.drain { |f, _| drained << f }
       drained.should be_empty # and not left behind to be written a second time
+    end
+  end
+
+  # The same buffered-block leak as the `undecodable` pair, reached through the two OTHER ways
+  # `accept` can part with a block. Both were measured at the wire against a real client.
+  describe "a block abandoned without ever being scope-tested" do
+    it "does not forward an intruder-interrupted block, which never reached the decode at all" do
+      # Three frames: HEADERS with END_HEADERS cleared, ANY intruder (a bare PRIORITY does it),
+      # then the CONTINUATION. The block never reaches `finish`, so it is never decoded and
+      # never scope-tested — and flushing it verbatim put an out-of-scope request on the wire
+      # that the origin ANSWERED, while the same request without the intruder got RST_STREAM.
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      pipe.deferrer = deferrer = BlockingDeferrer.new
+      block = HPACK::Encoder.new.encode(req("/blocked"))
+
+      push(pipe, assembler, headers(1_u32, block, 0_u8)).should be_empty # buffered, no END_HEADERS
+      expect_raises(Gori::Error, /undecodable/) do
+        push(pipe, assembler, Frame::Header.new(Frame::Type::Priority.value, 0_u8, 3_u32, Bytes.new(5)))
+      end
+
+      deferrer.told.should eq([1_u32])
+      drained = [] of Frame::Header
+      pipe.drain { |f, _| drained << f }
+      drained.should be_empty
+    end
+
+    it "still releases an intruder-interrupted block verbatim, in arrival order, with the sandbox OFF" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      pipe.deferrer = QuietDeferrer.new
+      block = HPACK::Encoder.new.encode(req("/blocked"))
+      intruder = Frame::Header.new(Frame::Type::Priority.value, 0_u8, 3_u32, Bytes.new(5))
+
+      push(pipe, assembler, headers(1_u32, block, 0_u8)).should be_empty
+      sent = push(pipe, assembler, intruder)
+
+      sent.size.should eq(2)
+      sent[0].payload.should eq(block) # the held block first...
+      sent[1].frame_type.should eq(Frame::Type::Priority)
+      pipe.drain { |_, _| fail "nothing should be left buffered" }
+    end
+
+    it "does not forward a completed block when the gate refuses the connection at defer?" do
+      # `defer?` raises past MAX_REFUSED_STREAMS, and `accept`'s `reset` only ran after `finish`
+      # RETURNED — so the completed block sat in `@buf` and teardown wrote it to the peer.
+      pipe, assembler, _ = pipeline(SubRewriter.new("x-tag: a", "x-tag: b"))
+      pipe.deferrer = RefusingDeferrer.new
+
+      expect_raises(Gori::Error, /streams refused/) do
+        push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/blocked"))))
+      end
+
+      drained = [] of Frame::Header
+      pipe.drain { |f, _| drained << f }
+      drained.should be_empty
     end
   end
 

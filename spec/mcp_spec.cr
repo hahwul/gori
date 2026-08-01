@@ -266,6 +266,35 @@ describe Gori::MCP::Server do
       end
     end
 
+    # `flows.id` is a REUSABLE rowid, so a clear restarts numbering and a forward cursor held
+    # from before it is permanently ahead of every row. `since` then returned `[]` forever
+    # while the rows sat right there — "no new flows" and "your cursor is stranded" were the
+    # same answer, and an agent polling this feed simply went blind.
+    it "names a stranded 'since' cursor instead of answering with an empty page forever" do
+      with_store do |store|
+        3.times { |i| seed_flow(store, "h.test", "GET", "/p#{i}", 200) }
+        store.clear_flows
+        fresh = seed_flow(store, "h.test", "GET", "/after-clear", 200)
+        fresh.should eq(1) # ids really do restart — that is what strands the cursor
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"since":22}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        text = resp["result"]["content"][0]["text"].as_s
+        text.should contain("ahead of the newest flow")
+        text.should contain("since=0")
+      end
+    end
+
+    it "still answers an in-range 'since' cursor normally" do
+      with_store do |store|
+        a = seed_flow(store, "h.test", "GET", "/a", 200)
+        b = seed_flow(store, "h.test", "GET", "/b", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"since":#{a}}}})
+        tool_payload(drive(store, call)[0]).as_a.map(&.["id"].as_i64).should eq([b])
+      end
+    end
+
     it "paginates filtered results with before_id" do
       with_store do |store|
         a = seed_flow(store, "h.test", "GET", "/a", 500)

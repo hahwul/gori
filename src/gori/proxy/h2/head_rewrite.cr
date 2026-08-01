@@ -194,8 +194,21 @@ module Gori::Proxy::H2
       # handling (and the assembler's #409 guard) take it from there. Order and P7 both
       # survive, and the assembler sees exactly the frames it would have seen.
       if pending? && !continues
-        @buf.each { |f| yield f, nil }
+        # The buffered block is abandoned here WITHOUT ever reaching `finish`, so it is never
+        # decoded and never scope-tested — flushing it verbatim was a live sandbox bypass in
+        # three frames: HEADERS(1) with END_HEADERS cleared for an out-of-scope path, ANY
+        # intruder frame (a bare PRIORITY does it), then the CONTINUATION. Measured: the origin
+        # received both halves of `/blocked` and ANSWERED it, while the control without the
+        # intruder got `RST_STREAM code=8` and the origin got nothing. That every route in is
+        # itself a §6.10 violation is not a mitigation gori may lean on — it is the reasoning
+        # `undecodable`'s own comment rejects, and the out-of-scope bytes reach the origin
+        # either way. So tell the deferrer, exactly as the ceiling and HPACK-failure branches
+        # do: this IS "a head with no URL to scope-test". Sandbox ON ends the connection;
+        # sandbox OFF keeps the verbatim forward the paragraph above describes (P7).
+        frames, stream = @buf.dup, @block_stream
         reset
+        @deferrer.try(&.undecodable(stream))
+        frames.each { |f| yield f, nil }
       end
 
       unless opens || continues
@@ -295,6 +308,15 @@ module Gori::Proxy::H2
                 Block.new(reframe(first, prefix, @encoder.encode(emit_fields)),
                   Assembler::HeadBlock.new(pairs(emit_fields)), emit_fields, shown, first, prefix, request)
               end
+      # `defer?` can RAISE — `StreamGate` ends the connection once `remember_refused` passes
+      # MAX_REFUSED_STREAMS — and `accept`'s `reset` only runs after `finish` RETURNS, so the
+      # completed block sat in `@buf` and `close`'s drain wrote it to the peer. That is the
+      # third site of the leak the ceiling and `unreadable` branches were fixed for: measured
+      # at 4200 refused streams on one connection, the 4097th refusal reached the origin
+      # complete (END_HEADERS|END_STREAM) at the moment the ceiling fired. `built.frames` is
+      # already an independent array, so clearing first is safe and `accept`'s trailing
+      # `reset` becomes a no-op.
+      reset
       return {[] of Frame::Header, built.pre} if @deferrer.try(&.defer?(built))
       {built.frames, built.pre}
     end

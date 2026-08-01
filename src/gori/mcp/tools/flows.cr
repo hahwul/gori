@@ -16,6 +16,17 @@ module Gori
           return err("pass only one of 'since' (tail newer, oldest-first) or 'before_id' (page older, newest-first)",
             "INVALID_ARGUMENT", field: "since")
         end
+        # `flows.id` is a REUSABLE rowid, so a clear (or deleting the newest flow) restarts
+        # numbering — and a forward cursor held from before that is then permanently ahead of
+        # every row. `since: 22` returned `[]` forever while the rows sat right there at ids
+        # 1-3, with no signal an agent could act on: "no new flows" and "your cursor is
+        # stranded" were the same answer. Say which. Cheap enough to check per call (a
+        # rightmost-leaf seek), and it also covers a cursor held across a project switch.
+        if (cur = since_id) && (newest = store.max_flow_id) && cur > newest
+          return err("cursor #{cur} is ahead of the newest flow #{newest} — history was cleared " \
+                     "or the flows were deleted; restart from since=0",
+            "INVALID_ARGUMENT", field: "since")
+        end
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
