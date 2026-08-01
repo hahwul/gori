@@ -65,6 +65,55 @@ private class KeepAliveOrigin
   end
 end
 
+# An origin that answers each request on one socket, but on the chosen path leaves EXTRA bytes
+# on the wire past the framed body (a whole second response glued behind a short
+# Content-Length) — the response-desync shape a keep-alive pool must not paper over by parking
+# a socket that still has bytes on it.
+private class PoisonOrigin
+  getter port : Int32
+  getter connections : Int32 = 0
+
+  def initialize(@poison_tail : String)
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    spawn do
+      while conn = @server.accept?
+        @connections += 1
+        spawn { serve(conn) rescue nil }
+      end
+    rescue
+      # server closed
+    end
+  end
+
+  def close : Nil
+    @server.close
+  end
+
+  private def serve(conn : TCPSocket) : Nil
+    loop do
+      head = Gori::Proxy::Codec::Http1.read_head(conn)
+      break unless head
+      req = Gori::Proxy::Codec::Http1.parse_request_head(head)
+      if (cl = req.headers.get?("Content-Length")) && (n = cl.to_i?) && n > 0
+        conn.read_fully?(Bytes.new(n))
+      end
+      tail = req.target.lchop("/f/")
+      ident = "ID:#{tail}"
+      if tail == @poison_tail
+        # framed body is 4 bytes; a WHOLE extra response is glued on behind it
+        ghost = "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nID:GHOST!"
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nPOIS" << ghost
+        conn.flush
+      else
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: #{ident.bytesize}\r\n\r\n" << ident
+        conn.flush
+      end
+    end
+    conn.close rescue nil
+  end
+end
+
 describe F::ConnPool do
   describe ".reusable_request?" do
     it "accepts a bodyless HTTP/1.1 request" do
@@ -264,6 +313,26 @@ describe F::ConnPool do
       end
       pool.dialed.should eq(2)
       pool.reused.should eq(0)
+      pool.close_all
+      origin.close
+    end
+
+    it "retires a socket the origin left residue on, so the next payload gets its OWN response" do
+      # A body longer than its Content-Length: gori reads the framed 4 bytes and the rest sits
+      # in the receive buffer. Parking it would hand the next request that leftover response —
+      # a 200 attributed to the wrong payload, silently. `reusable_response?` sees only the
+      # head, so `drained?` is what has to catch this.
+      origin = PoisonOrigin.new(poison_tail: "EXTRA")
+      pool = F::ConnPool.new("http", "127.0.0.1", origin.port, false, nil, nil, nil, 4)
+      bodies = %w[A01 EXTRA A03 A04].map do |p|
+        r = pool.send(req("GET /f/#{p} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"))
+        String.new(r.body || Bytes.empty)
+      end
+      # A03 and A04 must each read their OWN identity, never the ghost glued behind EXTRA.
+      bodies[2].should eq("ID:A03")
+      bodies[3].should eq("ID:A04")
+      bodies.none?(&.includes?("GHOST")).should be_true
+      pool.dialed.should be >= 2 # the poisoned socket was retired, not reused
       pool.close_all
       origin.close
     end
