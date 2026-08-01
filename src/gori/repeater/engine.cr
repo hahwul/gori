@@ -20,8 +20,17 @@ module Gori
       # a consumer must not treat a half-delivered response as the whole thing. Distinct
       # from a *display* truncation (gori capping what it shows).
       getter? incomplete : Bool
+      # Whether ANY response byte (even an interim 1xx) was received before this Result was
+      # built. It answers the one question the pool's stale-retry needs and `response.nil?`
+      # cannot: a failure with no response yet means the request never reached the application
+      # and is safe to re-send, but a failure AFTER a 1xx means the origin already has the whole
+      # request (gori writes it up front), so re-sending would double a non-idempotent side
+      # effect. Only set on the error paths; a normal Result carries a non-nil `response`, where
+      # this is irrelevant.
+      getter? delivered : Bool
 
-      def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false)
+      def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false,
+                     @delivered = false)
       end
 
       def ok? : Bool
@@ -149,14 +158,14 @@ module Gori
           # (Content-Length / Transfer-Encoding) is malformed and a desync vector
           # (its body can embed a fake final response) — refuse it.
           if resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding")
-            return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started)
+            return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started, delivered: true)
           end
           # Cap the run so an origin streaming endless body-less 103s can't hang the
           # repeater/fuzz worker fiber indefinitely (there is no whole-request deadline).
           interim_seen += 1
-          return error("too many interim 1xx responses from #{host}:#{port}", started) if interim_seen > MAX_INTERIM
+          return error("too many interim 1xx responses from #{host}:#{port}", started, delivered: true) if interim_seen > MAX_INTERIM
           head = read_response_head(upstream)
-          return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
+          return error("upstream closed after interim 1xx from #{host}:#{port}", started, delivered: true) unless head
           resp = Proxy::Codec::Http1.parse_response_head(head)
         end
         # A reply whose status-line can't be parsed (no HTTP-version, or a non-numeric status —
@@ -186,7 +195,11 @@ module Gori
           Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed", incomplete: true)
         end
       rescue ex
-        error(ex.message || "repeater error", started)
+        # `head` is nil iff we failed before/at the FIRST head read (a write error, or a reset
+        # on a parked socket) — the pre-delivery case the pool may re-send. A raise AFTER a head
+        # was read (an interim-1xx read that then reset) means the origin already has the whole
+        # request, so mark it delivered and do not re-send a non-idempotent one.
+        error(ex.message || "repeater error", started, delivered: !head.nil?)
       end
 
       # Read a response head with a TOTAL head-assembly deadline (parity with the proxy's
@@ -204,8 +217,8 @@ module Gori
 
       # An error Result with no head/body, timed from `started` (shared with the pool, which
       # reports a failed dial the same way `send` does).
-      def self.error(message : String, started : Time::Instant) : Result
-        Result.new(Bytes.new(0), nil, nil, elapsed(started), message)
+      def self.error(message : String, started : Time::Instant, delivered : Bool = false) : Result
+        Result.new(Bytes.new(0), nil, nil, elapsed(started), message, delivered: delivered)
       end
 
       # The dialer collapses DNS failure / connection refused / timeout / TLS-verify

@@ -95,8 +95,13 @@ module Gori::Proxy::H2
             # this view to ask. Leaving `\` alone before anything else keeps an ordinary
             # `C:\path` or a regex value byte-identical, so a Match&Replace rule written
             # against one still matches.
+            #
+            # A REAL CR/LF as the next char counts too: it is itself rendered as `\r`/`\n`
+            # below, so a lone `\` in front of it would merge into `\\r` — indistinguishable
+            # from a literal backslash-r. Escaping the `\` here makes `x\<CR>y` come back as
+            # `x\\\ry` (three) versus a literal `x\ry` as `x\\ry` (two).
             nxt = chars[i + 1]?
-            io << (nxt == 'r' || nxt == 'n' || nxt == '\\' ? "\\\\" : "\\")
+            io << (nxt == 'r' || nxt == 'n' || nxt == '\\' || nxt == '\r' || nxt == '\n' ? "\\\\" : "\\")
           else io << c
           end
         end

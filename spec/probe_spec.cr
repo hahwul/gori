@@ -472,7 +472,8 @@ describe Gori::Probe::Analyzer do
 
       # Corrupt the stored value to a truncated JSON blob — probe_disabled_rules now RAISES.
       store.@db.exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('probe_disabled_rules', '[\"reflected')")
-      expect_raises(JSON::ParseException) { store.probe_disabled_rules }
+      expect_raises(JSON::ParseException) { store.probe_disabled_rules_strict } # active-send read raises
+      store.probe_disabled_rules.should be_empty                                # display read degrades
 
       # An analyzer built on the corrupt store is degraded → estimates NOTHING (sends nothing).
       feed2 = Channel(Gori::Store::FlowEvent).new(8)

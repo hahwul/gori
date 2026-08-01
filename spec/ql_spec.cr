@@ -130,17 +130,20 @@ describe Gori::QL do
 
   it "falls back to a byte-wise blob scan for a body: value below the 3-char trigram floor" do
     f = Gori::QL.parse("body:ab")
-    f.sql.should contain("instr(request_body, CAST(? AS BLOB)) > 0")
-    f.sql.should contain("instr(response_body, CAST(? AS BLOB)) > 0")
+    f.sql.should contain("COALESCE(instr(request_body, CAST(? AS BLOB)), 0) > 0")
+    f.sql.should contain("COALESCE(instr(response_body, CAST(? AS BLOB)), 0) > 0")
     f.args.should eq(["ab", "ab", "aB", "aB", "Ab", "Ab", "AB", "AB"]) # every case spelling
   end
 
-  # The fallback used `CAST(request_body AS TEXT)`, which SQLite truncates at the first NUL —
-  # so a SHORTER needle matched FEWER rows than a longer one, a monotonicity violation that
-  # cannot be explained to an operator. This is a tool whose targets deliberately put NULs in
-  # bodies, so the short path has to be byte-wise. Both halves are asserted against a real
-  # store because the bug lived in SQLite's cast, not in the SQL text.
-  it "finds a short body: needle that sits AFTER a NUL byte, like the >=3-char path does" do
+  # The <3-char fallback used `CAST(request_body AS TEXT)`, which SQLite truncates at the first
+  # NUL — so a needle sitting AFTER a NUL byte was invisible, a monotonicity violation (a
+  # shorter needle matching fewer rows) that cannot be explained to an operator. This is a tool
+  # whose targets deliberately put NULs in bodies, so the short path is now byte-wise `instr`,
+  # which is NUL-transparent. Asserted against a real store because the bug lived in SQLite's
+  # cast, not in the SQL text. (The FTS >=3-char path's handling of a NUL is the trigram
+  # tokenizer's, which varies by SQLite build, so it is deliberately not pinned here — this
+  # test targets the blob fallback that the fix actually changed.)
+  it "finds a short (<3-char) body: needle that sits AFTER a NUL byte" do
     tmp_store do |store|
       buried = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
@@ -154,12 +157,22 @@ describe Gori::QL do
         body: "plain".to_slice))
       store.flush
 
-      # `NULNEED` sits past the NUL. The long needle takes the FTS path, the short one the
-      # blob path; they must agree about this row.
-      store.search(Gori::QL.parse("body:NULNEED"), 50).map(&.id).should eq([buried])
+      # `NU` sits past the NUL. The <3-char blob path is byte-wise, so it finds it regardless of
+      # the cast-at-NUL truncation the fix removed.
       store.search(Gori::QL.parse("body:NU"), 50).map(&.id).should eq([buried])
       store.search(Gori::QL.parse("body:nu"), 50).map(&.id).should eq([buried]) # still case-insensitive
       store.search(Gori::QL.parse("body:zz"), 50).map(&.id).should be_empty
+
+      # `-body:x` (negation) must KEEP a bodyless flow, not drop it. `instr(NULL,…)` is NULL and
+      # `NOT (NULL > 0)` is NULL, which SQLite excludes — so an un-COALESCE'd instr silently
+      # narrowed the negated form. `buried` has `NU`, `bodyless` has no body at all.
+      bodyless = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 3_i64, scheme: "http", host: "acme.test", port: 80,
+        method: "GET", target: "/none", http_version: "HTTP/1.1",
+        head: "GET /none HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+      neg = store.search(Gori::QL.parse("-body:NU"), 50).map(&.id)
+      neg.should contain(bodyless)   # kept — it has no body to match
+      neg.should_not contain(buried) # excluded — its body does contain NU
     end
   end
 

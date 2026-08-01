@@ -86,6 +86,32 @@ describe "Gori::Repeater::Engine (malformed response — fix #8)" do
     String.new(result.body.not_nil!).should eq("ok")
   end
 
+  # `Result#delivered?` distinguishes a pre-delivery failure (re-sendable) from a failure
+  # AFTER the origin already received the request. The pool's stale-retry keys on it: retrying
+  # a non-idempotent request the origin already has doubles its side effect.
+  it "marks a failure after an interim 1xx as delivered (not re-sendable)" do
+    # A 1xx that illegally declares a body — exchange refuses it, but the request was delivered.
+    port = start_reply_origin("HTTP/1.1 100 Continue\r\nContent-Length: 5\r\n\r\n")
+    result = Gori::Repeater::Engine.send("POST / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result.ok?.should be_false
+    result.response.should be_nil    # no final response — the shape stale? used to catch
+    result.delivered?.should be_true # ...but the request WAS delivered, so not re-sendable
+  end
+
+  it "marks a clean no-response (idle-closed socket) as NOT delivered (re-sendable)" do
+    # Origin accepts then closes with no byte — the parked-socket-closed race the pool retries.
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn { (conn = origin.accept?) && (Gori::Proxy::Codec::Http1.read_head(conn); conn.close) rescue nil }
+    result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result.ok?.should be_false
+    result.response.should be_nil
+    result.delivered?.should be_false # no response byte arrived → safe to re-send
+    origin.close
+  end
+
   it "send_pipeline retires the connection after a malformed response (surfaces desync)" do
     origin = TCPServer.new("127.0.0.1", 0)
     port = origin.local_address.port

@@ -188,6 +188,20 @@ describe Gori::Proxy::H2::HeadCodec do
       injected.should_not eq(literal)
     end
 
+    it "distinguishes a backslash immediately before a REAL CR/LF from a literal backslash-r" do
+      # `x\<CR>y` (backslash then a real CR) must not render the same as `x\ry` (backslash then
+      # the letter r), or the injected CR is disguised as innocuous literal text.
+      injected_cr = String.new(HeadCodec.synth_response(tuples([f(":status", "200"), f("x", "x\\\ry")])))
+      literal_r = String.new(HeadCodec.synth_response(tuples([f(":status", "200"), f("x", "x\\ry")])))
+      injected_cr.should contain("x: x\\\\\\ry") # three backslashes then r
+      literal_r.should contain("x: x\\\\ry")     # two backslashes then r
+      injected_cr.should_not eq(literal_r)
+
+      injected_lf = String.new(HeadCodec.synth_response(tuples([f(":status", "200"), f("x", "x\\\ny")])))
+      literal_n = String.new(HeadCodec.synth_response(tuples([f(":status", "200"), f("x", "x\\ny")])))
+      injected_lf.should_not eq(literal_n)
+    end
+
     it "leaves an ordinary backslash byte-identical, so a rule written against it still matches" do
       head = String.new(HeadCodec.synth_response(tuples([f(":status", "200"),
                                                          f("x-path", "C:\\Users\\admin"), f("x-re", "\\d+\\s*")])))

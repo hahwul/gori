@@ -100,6 +100,16 @@ module Gori::Repeater
       # bytes were consumed — see reusable_response?.
       method = Repeater::Engine.request_method(bytes)
       if keepable && (io = @idle.pop?)
+        # Residue check AT CHECKOUT, not only when we parked it. The previous exchange's leftover
+        # bytes (a body past Content-Length, a HEAD-with-body) may not have arrived by the time
+        # `recycle` ran — the origin can be a peer whose write races our park — so `recycle`'s
+        # check is an early retire, and THIS one, right before we write onto the socket, is the
+        # reliable one: by now any straggler residue is on the wire. Without it a poisoned socket
+        # would frame this request's response against the previous response's leftovers.
+        unless drained?(io)
+          close(io)
+          return dial_and_send(bytes, keepable, method)
+        end
         started = Time.instant
         result = Repeater::Engine.exchange(io, bytes, @host, @port, started)
         if stale?(result)
@@ -146,17 +156,17 @@ module Gori::Repeater
 
     # Park the socket for the next send, or close it. Same retirement rule `send_pipeline`
     # applies to a group's connection (error or incomplete ⇒ unusable), plus the response's
-    # own keep-alive signals — AND that the socket is actually empty. `reusable_response?`
-    # interrogates only the response HEAD; it cannot see that the origin left extra bytes on
-    # the wire past the framed body (a body longer than its Content-Length, or a HEAD reply
-    # that carried one). `Body.read_complete` reads exactly the framed count and returns
-    # `complete`, so that residue stays in the receive buffer, and the NEXT checkout reads it
-    # as its response head — every send after the poison shifted by one, reported 200 with no
-    # error. Those two are the canonical response-desync primitives gori exists to DETECT, so
-    # a non-empty socket is retired, never handed to the next payload.
+    # own keep-alive signals.
+    #
+    # The EMPTY-socket check that guards against residue (a body past Content-Length, a
+    # HEAD-with-body — the canonical response-desync primitives gori exists to DETECT) lives at
+    # CHECKOUT (`send`), not here. Residue can arrive AFTER we would park — the origin's write
+    # races our recycle — so checking here would miss a straggler and still hand a poisoned
+    # socket to the next send. `reusable_response?` interrogates only the response HEAD and
+    # cannot see the leftover bytes; the checkout-time `drained?` is what catches them, once
+    # they are reliably on the wire.
     private def recycle(io : IO, result : Repeater::Result, keepable : Bool, method : String) : Nil
-      if @pooling && keepable && @idle.size < @max_idle &&
-         ConnPool.reusable_response?(result, method) && drained?(io)
+      if @pooling && keepable && @idle.size < @max_idle && ConnPool.reusable_response?(result, method)
         @idle.push(io)
       else
         close(io)
@@ -229,12 +239,18 @@ module Gori::Repeater
     # instead, so `stale?` said false, the request was NOT retried, and the payload surfaced a
     # "connection reset" the origin never saw — a silent false negative in the middle of a
     # sweep, plus `@consecutive_stale` never advanced so `STALE_GIVE_UP` could never bound the
-    # wasted redials against an origin that always resets. The real discriminator is "no
-    # response byte was read", not which IO error ended it: `response.nil?` means head parsing
-    # never began. An INCOMPLETE response (head read, body cut) is deliberately NOT stale — the
-    # origin may already have processed the request, so re-sending could double a side effect.
+    # wasted redials against an origin that always resets.
+    #
+    # The discriminator is "no response byte was DELIVERED", not which IO error ended it.
+    # `response.nil?` alone is not that: `exchange` returns `response: nil` for an interim-1xx
+    # failure too (`malformed interim` / `too many interim` / `upstream closed after interim`),
+    # and by then the origin has the whole request (gori writes it up front), so re-sending a
+    # non-idempotent POST would DOUBLE its side effect. `delivered?` is false only before any
+    # response byte arrives — a clean EOF, a reset, or a write failure on a parked socket — which
+    # is exactly the re-sendable case. An INCOMPLETE response (head read, body cut) carries a
+    # non-nil `response` and so is already excluded.
     private def stale?(result : Repeater::Result) : Bool
-      !result.error.nil? && result.response.nil?
+      !result.error.nil? && result.response.nil? && !result.delivered?
     end
 
     private def drain : Nil

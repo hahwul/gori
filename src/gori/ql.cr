@@ -326,17 +326,22 @@ module Gori
         # `head\0NULNEEDLE tail` was invisible to `body:nu` while `body:NULNEEDLE` (the FTS
         # path, >=3 chars) found it. A SHORTER needle matching FEWER rows is a monotonicity
         # violation that cannot be explained to an operator, and this is a tool whose targets
-        # deliberately put NULs in bodies. `instr` over the raw BLOB is NUL-transparent, and a
-        # NULL body yields NULL (falsy), so `-body:x` still KEEPS a bodyless flow.
+        # deliberately put NULs in bodies. `instr` over the raw BLOB is NUL-transparent.
         #
         # `instr` is case-SENSITIVE while `body:` promises case-insensitive substring matching,
         # so match every case permutation of the needle instead — at most four, since this
         # branch only runs for one or two characters.
+        # `COALESCE`-wrapped, and that is load-bearing: a NULL body (a bodyless GET, or any
+        # response-less/in-flight flow — the common case) makes `instr(NULL, …)` NULL, and
+        # `NOT (NULL > 0)` is NULL, which SQLite's three-valued logic then EXCLUDES — so a bare
+        # `instr` made `-body:x` silently drop every bodyless flow (a silent NARROW, the mirror
+        # of the broaden this path guards against). `COALESCE(…, 0) > 0` is FALSE for a NULL
+        # body, so the positive term still skips it and `NOT FALSE` keeps it under negation.
         conds = [] of String
         params = [] of DB::Any
         case_permutations(value).each do |v|
-          conds << "instr(request_body, CAST(? AS BLOB)) > 0"
-          conds << "instr(response_body, CAST(? AS BLOB)) > 0"
+          conds << "COALESCE(instr(request_body, CAST(? AS BLOB)), 0) > 0"
+          conds << "COALESCE(instr(response_body, CAST(? AS BLOB)), 0) > 0"
           params << v << v
         end
         return {"(#{conds.join(" OR ")})", params}

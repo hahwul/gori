@@ -80,6 +80,7 @@ module Gori
       # existing findings persist until dismissed/deleted/cleared.
       def reload_rule_config : Nil
         @disabled, @disabled_degraded = load_disabled
+        @warned_degraded = false unless @disabled_degraded # re-arm the warning if the store re-breaks
         @custom = load_custom
         @analyzed.clear
       end
@@ -91,7 +92,7 @@ module Gori
       # runs regardless. `probe_disabled_rules` now RAISES on a read/parse failure precisely so
       # this rescue is live — before, the store swallowed it and this could never fire.
       private def load_disabled : {Set(String), Bool}
-        {@store.probe_disabled_rules, false}
+        {@store.probe_disabled_rules_strict, false}
       rescue DB::Error | SQLite3::Exception | JSON::ParseException
         {Set(String).new, true}
       end

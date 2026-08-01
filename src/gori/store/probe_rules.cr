@@ -16,19 +16,27 @@ module Gori
     # as a JSON array under one settings key (like probe_mode); the analyzer skips these.
     PROBE_DISABLED_KEY = "probe_disabled_rules"
 
-    # The built-in probe rules the operator turned OFF. This set is the ONLY thing standing
-    # between an ACTIVE rule the operator disabled and a real request going out, so it must NOT
-    # swallow a read failure into an empty set — "the store was unreadable" and "nothing is
-    # disabled" are the same value but must not mean the same thing. It therefore RAISES on a
-    # store or parse error (the callers in `Scan`/`Analyzer` rescue it and fail CLOSED — skip
-    # active probing rather than send everything). A malformed-but-readable value is still
-    # tolerated per element, since a single bad entry should not blind the whole set.
+    # The built-in probe rules the operator turned OFF, tolerant form: an unreadable/corrupt
+    # value degrades to the empty set. This is the DISPLAY/edit read — the Rules sub-tab, the
+    # rule list, and the toggle commands — where an unreadable value should render as
+    # "nothing disabled" rather than crash the surface (the TUI event loop has no catch-all).
     def probe_disabled_rules : Set(String)
+      probe_disabled_rules_strict
+    rescue
+      Set(String).new
+    end
+
+    # The AUTHORIZATION read for active probing. This set is the ONLY thing between an ACTIVE
+    # rule the operator disabled and a real request, so here a read failure must NOT look like
+    # "nothing is disabled": it RAISES, and the callers in `Scan`/`Analyzer` rescue it and fail
+    # CLOSED (skip active probing rather than send everything). A malformed-but-readable value
+    # is still tolerated per element — a single bad entry should not blind the whole set.
+    def probe_disabled_rules_strict : Set(String)
       out = Set(String).new
       raw = setting(PROBE_DISABLED_KEY)
       if raw && !raw.strip.empty?
         # A truncated/corrupt JSON blob RAISES here (JSON::ParseException) — deliberately not
-        # rescued, so the failure reaches the fail-closed callers.
+        # rescued, so the failure reaches the fail-closed active-send callers.
         JSON.parse(raw).as_a?.try &.each { |e| e.as_s?.try { |s| out << s unless s.empty? } }
       end
       out
