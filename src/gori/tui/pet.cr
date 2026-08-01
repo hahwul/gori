@@ -263,12 +263,23 @@ module Gori::Tui
     end
 
     # The :error reaction gets a three-beat shudder; every other mood sits still.
+    #
+    # LEFT-ONLY, and that is geometry rather than taste. GUTTER reserves exactly three
+    # columns at the body's right edge and .draw's right plate strip already claims one of
+    # them, so a single column of rightward travel puts that strip back on the nested
+    # Frame.card rule at body.right - 2 — the bug GUTTER was widened to 3 to fix, returning
+    # for the 200ms of the beat. .draw clamps it away, but a Frame whose shake the draw
+    # silently folds is no longer an exact description of what is painted, and #tick's
+    # field-wise compare (which is what makes "did the drawn thing change" answerable at
+    # all) would report a change that produces identical cells.
+    #
+    # So flinch-back-flinch instead of left-right-still: same three beats, same read, and
+    # every offset it emits is one .draw honours.
     private def shake_for(mood : Symbol) : Int32
       return 0 unless mood == :alarm
       case @beat - @mood_beat
-      when 0 then -1
-      when 1 then 1
-      else        0
+      when 0, 2 then -1
+      else           0
       end
     end
 
@@ -490,8 +501,13 @@ module Gori::Tui
         end
       end
 
-      # Shake the plate, clamped so she can never walk out of the body.
-      x = (rect.x + frame.shake).clamp(body.x, body.right - rect.w)
+      # Shake the plate. The ceiling is `rect.x`, NOT `body.right - rect.w`: GUTTER reserves
+      # exactly three columns at the right edge and the right plate strip already claims one
+      # of them, so a single column of rightward travel puts that strip back on the nested
+      # Frame.card rule at body.right - 2 — the very bug GUTTER was widened to 3 to fix. The
+      # ceiling therefore folds a +1 to 0 and the shudder plays as a flinch LEFT and back,
+      # which is the only direction with room. The floor keeps her inside the body.
+      x = (rect.x + frame.shake).clamp(body.x, rect.x)
       # A column of plate either side so she never butts against body text. Only the two
       # STRIPS — Mascot.draw already claims every cell it covers opaquely, so filling the
       # whole box first would rewrite cells that are about to be overwritten, on every

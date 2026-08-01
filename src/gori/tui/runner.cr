@@ -520,7 +520,16 @@ module Gori::Tui
           # changes, and stops reporting at all once she dozes off (Pet::SLEEP_AFTER).
           # Placed after every controller drain, so a note pushed this tick is announced
           # on THIS frame rather than the next.
-          dirty = true if @pet.tick(now)
+          #
+          # TICKED UNCONDITIONALLY, but her dirty is gated on her actually being ON SCREEN.
+          # #render_pet drops her outright under any overlay, the space menu and a body
+          # editor (see #pet_visible?), and Pet.place drops her again on a terminal too
+          # short for her — in every one of those states her `changed` verdict would buy a
+          # full frame rebuild that paints not one different cell. Left ungated that is ~1
+          # wasted render/second for as long as a modal is up, and for as long as you keep
+          # typing in an editor (every keystroke pokes her, so she never dozes there). The
+          # tick itself still has to run or the frame she comes back with would be stale.
+          dirty = true if @pet.tick(now) && pet_on_screen?
           # Debounced QL filter: fire the deferred search once typing has paused.
           dirty = true if history_controller.flush_query_reload_if_due(now)
           dirty = true if sitemap_controller.flush_query_reload_if_due(now)
@@ -3070,6 +3079,19 @@ module Gori::Tui
       return format_status_message(toast) unless notice
       return notice unless toast && (at = @toast_at)
       @pet.bubble_at.try { |b| b > at } ? notice : format_status_message(toast)
+    end
+
+    # Will she paint anything at all this frame? This is the gate the run loop puts in front
+    # of her `dirty` — see the #tick call site for why her verdict alone is not enough.
+    #
+    # Mirrors #render_pet: the bar chip is drawn unconditionally, so it is always on screen;
+    # the body sprite needs the visibility gate below AND a body tall enough for Pet.place to
+    # seat her. Height is the only Pet.place term that can fail from a real Layout — the
+    # narrowest body it produces is 36, comfortably over Pet::MIN_W — and @body_h being one
+    # frame stale is harmless, since the resize that changed it is itself an event.
+    private def pet_on_screen? : Bool
+      return true if Settings.pet_in_bar?
+      pet_visible? && @body_h >= Pet::MIN_H
     end
 
     private def pet_visible? : Bool

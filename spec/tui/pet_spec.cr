@@ -597,25 +597,55 @@ describe Gori::Tui::Pet do
     #
     # Driven by painting the rules FIRST and asserting they survive, rather than by pinning
     # the gutter to a number: the number is the thing that was wrong.
+    #
+    # SWEPT OVER THE SHAKE, because a still frame was not enough the second time either. The
+    # gutter is sized for where she STANDS, and the :error reaction moves her — a frame with
+    # shake: 1 put the right plate strip straight back on the nested rule, reopening the
+    # exact bug below for the 200ms of that beat. Every offset Pet#shake_for can emit has to
+    # hold the same invariant a still frame does.
     it "leaves both stacked pane rules intact, on the right and at the bottom" do
-      backend = MemoryBackend.new(80, 24)
-      screen = Screen.new(backend)
-      # A sub-tabbed tab's shape: the outer card's rule on the body edge, and a nested
-      # Frame.card's one cell inside it. Discover, Sitemap and Repeater all draw this.
-      [1, 2].each do |inset|
-        (body.y...body.bottom).each { |y| screen.cell(body.right - inset, y, '│', Theme.text, Theme.bg) }
-        (body.x...body.right).each { |x| screen.cell(x, body.bottom - inset, '─', Theme.text, Theme.bg) }
+      (-1..1).each do |shake|
+        backend = MemoryBackend.new(80, 24)
+        screen = Screen.new(backend)
+        # A sub-tabbed tab's shape: the outer card's rule on the body edge, and a nested
+        # Frame.card's one cell inside it. Discover, Sitemap and Repeater all draw this.
+        [1, 2].each do |inset|
+          (body.y...body.bottom).each { |y| screen.cell(body.right - inset, y, '│', Theme.text, Theme.bg) }
+          (body.x...body.right).each { |x| screen.cell(x, body.bottom - inset, '─', Theme.text, Theme.bg) }
+        end
+        Pet.draw(screen, body, Mascot::Frame.new(mood: :alarm, shake: shake))
+        rect = Pet.place(body).not_nil!
+        Mascot::H.times do |i|
+          row = backend.row(rect.y + i)
+          row[body.right - 1].should eq('│') # the outer card's rule
+          row[body.right - 2].should eq('│') # …and the nested pane's, the one she ate
+        end
+        [1, 2].each do |inset|
+          rule = backend.row(body.bottom - inset)
+          # She can travel left, so the span she may occlude starts at her leftmost plate.
+          (rect.x - 2..rect.right).each { |x| rule[x].should eq('─') }
+        end
       end
-      Pet.draw(screen, body, Mascot::Frame.new)
-      rect = Pet.place(body).not_nil!
-      Mascot::H.times do |i|
-        row = backend.row(rect.y + i)
-        row[body.right - 1].should eq('│') # the outer card's rule
-        row[body.right - 2].should eq('│') # …and the nested pane's, the one she ate
-      end
-      [1, 2].each do |inset|
-        rule = backend.row(body.bottom - inset)
-        (rect.x - 1..rect.right).each { |x| rule[x].should eq('─') }
+    end
+
+    # The shudder itself, at the source: an offset .draw would have to fold is an offset the
+    # Frame is lying about, and #tick's field-wise compare would then report a change that
+    # paints identical cells. Asserting on the emitted values (not on the painted grid) is
+    # what pins that — the grid assertion above passes either way once .draw clamps.
+    it "never asks to travel into the gutter it reserved" do
+      with_pet(true) do
+        notes = Notifications.new
+        pet = Pet.new(notes)
+        t0 = Time.instant
+        pet.tick(t0)
+        notes.push(:error, "upstream refused the connection")
+        seen = (1..10).map do |i|
+          pet.tick(t0 + Pet::BEAT * i)
+          pet.frame.not_nil!.shake
+        end
+        seen.min.should be >= -1 # she stays inside the body
+        seen.max.should eq(0)    # …and never travels toward the reserved right edge
+        seen.should contain(-1)  # the shudder still plays
       end
     end
 
