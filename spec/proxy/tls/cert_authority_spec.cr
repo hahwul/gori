@@ -117,6 +117,71 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  # Regression: `File.exists?(cert) && File.exists?(key)` collapsed "neither exists" (fine,
+  # first run) and "exactly one exists" (a broken pair — partial restore, an accidental `rm`,
+  # a disk fault) into the SAME else-branch, which silently minted and installed a brand-new
+  # root over the survivor: a different keypair, a different serial, a different fingerprint,
+  # reported as full success. An operator (or their whole team) who already trusted the old
+  # root got a new one out from under them with no signal anything changed.
+  describe "a broken pair (exactly one of cert/key survives)" do
+    it "refuses (does not silently mint) when the cert survives but the key is gone" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir) # mint a real pair first
+        original_pem = ca.ca_cert_pem
+        File.delete(File.join(dir, "root.key.pem")) # simulate the lost/corrupted key
+
+        expect_raises(Gori::Error, /root\.crt\.pem.*root\.key\.pem.*missing/) do
+          Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        end
+
+        # The survivor must be untouched — no silent regeneration happened.
+        File.read(File.join(dir, "root.crt.pem")).should eq(original_pem)
+        File.exists?(File.join(dir, "root.key.pem")).should be_false
+      end
+    end
+
+    it "refuses (does not silently mint) when the key survives but the cert is gone" do
+      with_ca_dir do |dir|
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir) # mint a real pair first
+        key_bytes = File.read(File.join(dir, "root.key.pem"))
+        File.delete(File.join(dir, "root.crt.pem")) # simulate the lost/corrupted cert
+
+        expect_raises(Gori::Error, /root\.key\.pem.*root\.crt\.pem.*missing/) do
+          Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        end
+
+        # The survivor must be untouched — no silent regeneration happened.
+        File.read(File.join(dir, "root.key.pem")).should eq(key_bytes)
+        File.exists?(File.join(dir, "root.crt.pem")).should be_false
+      end
+    end
+
+    it "still succeeds silently on a genuine first run (neither file exists)" do
+      with_ca_dir do |dir|
+        Gori::Proxy::Tls::CertAuthority.load_or_create(dir) # must not raise
+        File.exists?(File.join(dir, "root.crt.pem")).should be_true
+        File.exists?(File.join(dir, "root.key.pem")).should be_true
+      end
+    end
+
+    it "still loads a healthy existing pair unchanged (complement of the broken-pair guard)" do
+      with_ca_dir do |dir|
+        pem1 = Gori::Proxy::Tls::CertAuthority.load_or_create(dir).ca_cert_pem
+        pem2 = Gori::Proxy::Tls::CertAuthority.load_or_create(dir).ca_cert_pem
+        pem2.should eq(pem1) # both files present → load, not raise, not regenerate
+      end
+    end
+
+    it "still lets `regenerate!` deliberately replace a healthy pair" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        before = ca.ca_cert_pem
+        ca.regenerate!
+        ca.ca_cert_pem.should_not eq(before) # deliberate swap still works
+      end
+    end
+  end
+
   it "exports the root CA as DER matching its PEM body" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)

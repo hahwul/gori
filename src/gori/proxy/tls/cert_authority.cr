@@ -51,6 +51,23 @@ module Gori::Proxy::Tls
         # 0600 (a mounted share) must not make gori refuse to start.
         File.chmod(key_path, 0o600) rescue nil
         new(Cert.read_pem(cert_path), KeyPair.read_pem(key_path), cert_path)
+      elsif File.exists?(cert_path) || File.exists?(key_path)
+        # Exactly ONE of the pair survives — a partial restore, an accidental `rm
+        # root.key.pem`, a disk fault that clobbered one inode. This is NOT the first-run
+        # case (neither file exists, handled below) and must not be folded into it: a lone
+        # cert can't sign anything without its key, and a lone key has no certificate left
+        # to present as the root a client already trusts. Silently minting a fresh pair here
+        # would overwrite the survivor with a brand-new root — same identity swap as
+        # `regenerate!`, but done by ACCIDENT and reported as clean success. Refuse instead,
+        # naming exactly which file is missing, so the operator can restore it from backup
+        # or make the swap deliberately via `gori ca regenerate` (which also re-trusts
+        # clients as part of the workflow, not as a silent side effect).
+        present = File.exists?(cert_path) ? CA_CERT_FILE : CA_KEY_FILE
+        missing = File.exists?(cert_path) ? CA_KEY_FILE : CA_CERT_FILE
+        raise Gori::Error.new(
+          "CA pair broken in #{dir}: found #{present} but #{missing} is missing — restore " \
+          "#{missing} from backup, or run `gori ca regenerate` to mint a fresh CA (existing " \
+          "clients will need to re-trust it)")
       else
         cert, key = CertBuilder.build_root(common_name)
         cert.write_pem(cert_path)
