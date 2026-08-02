@@ -1,0 +1,6 @@
+POST /graphql HTTP/1.1
+Host: 127.0.0.1:19301
+Content-Type: application/json
+Content-Length: 111
+
+{"query":"query GetUser($id: ID!, $userId: ID) { user(id: $id) { name } }","variables":{"id":"1","userId":"2"}}

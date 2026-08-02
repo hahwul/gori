@@ -88,13 +88,21 @@ module Gori
       # 401 on a probe; erring the other way costs a live credential on the wire, silently.
       # Widening this back is a provenance signal on FlowDetail, never a re-widening here.
       #
-      # NOT private, and that is the point: `Probe::Analyzer#execute_active` is a SECOND send
-      # loop over the same plans (the live TUI path, which never enters `.analyze`), and the
-      # reason this defect survived is that the two look interchangeable. One spelling, called
-      # from both, so they cannot drift again.
-      def self.all_verbatim(bytes : Bytes) : Array({Int32, Int32})
-        [{0, bytes.size}]
-      end
+      # Spelled as `Fuzz::Backend.all_verbatim` at every call site — including the SECOND send
+      # loop in `Probe::Analyzer#execute_active` (the live TUI path, which never enters
+      # `.analyze`). The reason this defect survived is that the two loops look
+      # interchangeable, so they share one spelling and cannot drift again.
+      #
+      # Probe marks whole-buffer AT THE CALL SITE rather than taking `Fuzz::Sender`'s
+      # `evidence:` flag, because of the inverted polarity argued above: the flag says "this
+      # engine's buffer is a capture", which is true here, but probe reaches the sender through
+      # `Scan.scan_repeaters` too, whose blob is mixed. Marking at the call site keeps the
+      # decision next to the reasoning for it.
+      #
+      # (This block documents the four `Fuzz::Backend.all_verbatim` call sites below and in
+      # `Probe::Analyzer#execute_active`. It used to document a `Probe::Active.all_verbatim`
+      # twin of the same one-liner; the two were collapsed onto `Fuzz::Backend`'s, which is the
+      # type every call site already holds.)
 
       # Compact per-flow request-count label for the Rules sub-tab + manual-run estimate:
       # "1 req/flow" for the fixed-cost rules, "4–8 req/flow" for the differential BackslashPowered.
@@ -152,7 +160,7 @@ module Gori
           begin
             plan = rule.plan(detail, opts)
             next unless plan
-            result = sender.send(plan.request, all_verbatim(plan.request))
+            result = sender.send(plan.request, Fuzz::Backend.all_verbatim(plan.request))
             unless result.ok?
               # A refused or failed send is NOT an exception — `Fuzz::Sender` returns an
               # errored Result for a sandbox block, an unbound binding, a connect failure —
@@ -175,7 +183,7 @@ module Gori
             # Same verbatim marking as the primary above — a followup is built by the same
             # rule from the same captured request, so a differential whose baseline resolved
             # `$id` and whose followup did not would be measuring the substitution.
-            plan.followups.each { |req| results << sender.send(req, all_verbatim(req)) }
+            plan.followups.each { |req| results << sender.send(req, Fuzz::Backend.all_verbatim(req)) }
             dets = rule.detections_all(plan, results, detail)
             out.concat(dets)
           rescue ex

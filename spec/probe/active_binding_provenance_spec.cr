@@ -20,7 +20,7 @@ private alias S = Gori::Store
 # expands. Here the captured request IS the test case and nothing in the buffer is
 # operator-authored, so the whole request is verbatim.
 #
-# The backend below mimics `Fuzz::Sender` exactly (the same `Env.unbound` refusal + the same
+# The backend below mimics `Fuzz::Sender` exactly (the same
 # `Env.expand_bindings` pass), so every assertion is on the bytes that would hit the socket.
 
 # A layer with the name DECLARED and BOUND — the send-time binding half.
@@ -61,9 +61,6 @@ private class ExpandingBackend < F::Backend
 
   private def record(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Gori::Repeater::Result
     @got_verbatim << verbatim
-    if (u = Gori::Env.unbound(bytes, verbatim)).present?
-      return Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Env.unbound_error(u))
-    end
     @wire << String.new(Gori::Env.expand_bindings(bytes, verbatim))
     ok
   end

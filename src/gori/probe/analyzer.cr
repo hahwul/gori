@@ -488,12 +488,12 @@ module Gori
         http2 = detail.http_version.starts_with?("HTTP/2")
         sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
         # The WHOLE probe is captured evidence plus this rule's own canary — see
-        # `Active.all_verbatim` for why nothing in it is eligible for session-binding
+        # `Fuzz::Backend.all_verbatim` for why nothing in it is eligible for session-binding
         # expansion. This loop is the TWIN of the one in `Active.analyze`: same plans, same
         # rules, different surface (live TUI here, `gori run probe` / MCP `probe_scan`
         # there). It leaked for months after the headless path was audited precisely because
         # the two are separate loops that look like one, so they call the SAME helper.
-        result = sender.send(plan.request, Active.all_verbatim(plan.request))
+        result = sender.send(plan.request, Fuzz::Backend.all_verbatim(plan.request))
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
         # only ONCE per host: a flapping origin with many distinct param sets would
         # otherwise flood the notification tray (one event per unique plan.dedup_key).
@@ -508,7 +508,7 @@ module Gori
         results = [result]
         # Verbatim here too — a differential whose baseline resolved `$id` and whose followup
         # did not would be measuring the substitution rather than the target.
-        plan.followups.each { |req| results << sender.send(req, Active.all_verbatim(req)) }
+        plan.followups.each { |req| results << sender.send(req, Fuzz::Backend.all_verbatim(req)) }
         detections = rule.detections_all(plan, results, detail)
         return 0 if detections.empty?
         wrote = 0

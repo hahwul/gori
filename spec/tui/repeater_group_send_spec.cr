@@ -129,8 +129,17 @@ describe "Gori::Tui::RepeaterView#pipeline_requests with live markers" do
     # what `render_marked`'s own comment says the shared render exists to prevent.
     view.request_text.should contain("Content-Length: 12")
 
-    # And the same text through the SINGLE send is rendered, as it always was.
-    single = String.new(view.request_bytes)
+    # The SINGLE send used to render this same text and hand back one whole-buffer request.
+    # It now refuses first, and for the OTHER half of the same disagreement: with `%%%` live
+    # and auto-CL on, `Content-Length: 12` describes chunk 1 while a whole-buffer read would
+    # ship every chunk under it. The refusal names both ways out.
+    expect_raises(Gori::Fuzz::ChainError, /%%% separator/) { view.request_bytes }
+
+    # With auto-CL off nothing is chunk-scoped, so the whole-buffer send is expressible again —
+    # and it still RENDERS the markers, which is the property this example was pinning.
+    plain = RepeaterView.new
+    plain.restore("http://127.0.0.1", MARKED_GROUP, false, false)
+    single = String.new(plain.request_bytes)
     single.should contain("UEFZTE9BRC1B")
     single.should_not contain("¦base64-encode")
   end
