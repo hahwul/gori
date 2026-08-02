@@ -90,12 +90,18 @@ describe "MCP mine_results over gRPC" do
     begin
       with_store do |store|
         tools = tools_for(store)
+        # `bucket` deliberately LARGE (not forced small): `wordlist` is MERGED with the
+        # built-in ~400-name list (the same merge `mine_status{skipped}` above pins), so a
+        # small bucket here would fan out into a couple hundred real TCP round trips through
+        # this Python origin — still correct, but needlessly slow/flaky under a busy test
+        # run. A big bucket keeps clean buckets at ONE request each; only the bucket holding
+        # `secret` bisects, which is all this spec needs to exercise.
         start = call_json(tools, "mine_start",
           {"template" => "GET /pkg.Svc/Method HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
            "url" => "http://127.0.0.1:#{port}", "locations" => "query",
-           "wordlist" => wl, "bucket" => 4, "concurrency" => 2,
+           "wordlist" => wl, "bucket" => 128, "concurrency" => 2,
            "allow_unscoped" => true}.to_json)
-        poll_until_done(tools, start["job_id"].as_s)
+        poll_until_done(tools, start["job_id"].as_s, 40)
         res = call_json(tools, "mine_results", %({"job_id":#{start["job_id"].as_s.to_json}}))
         findings = res["findings"].as_a
         secret = findings.find { |f| f["name"].as_s == "secret" }
