@@ -325,11 +325,12 @@ module Gori::Miner
 
     private def self.inject_json(request : Bytes, params : Array({String, String})) : {Bytes, Array({Int32, Int32})}
       head, body, eol = split(request)
-      new_body = inject_json_text(String.new(body).scrub, params)
+      new_body = inject_json_body(body, params)
       return {request, [] of {Int32, Int32}} unless new_body
-      io = IO::Memory.new(head.size + new_body.bytesize + eol.bytesize * 2)
+      io = IO::Memory.new(head.size + new_body.size + eol.bytesize * 2)
       io.write(head)
-      io << eol << eol << new_body
+      io << eol << eol
+      io.write(new_body)
       out = io.to_slice
 
       # A JSON candidate is reserialized (`any.to_json`) or textually spliced, so its final
@@ -340,12 +341,11 @@ module Gori::Miner
       # collide with pre-existing body content, and merge_spans folds any incidental overlap so
       # the list stays sorted+disjoint for `Env.expand_bindings`' cursor.
       body_off = head.size + eol.bytesize * 2
-      nb = new_body.to_slice
       spans = [] of {Int32, Int32}
       params.each do |(n, v)|
         frag = "#{n.to_json}:#{v.to_json}".to_slice
         from = 0
-        while idx = forward_index_of(nb, frag, from)
+        while idx = forward_index_of(new_body, frag, from)
           spans << {body_off + idx, body_off + idx + frag.size}
           from = idx + frag.size
         end
@@ -353,11 +353,71 @@ module Gori::Miner
       {out, merge_spans(spans)}
     end
 
+    # The new JSON body for `body`, or nil when this location has nothing to inject into.
+    # Bytes in, bytes out.
+    #
+    # BYTE SAFETY — read before reaching for `String.new(body).scrub` here, which is exactly
+    # what this used to hand `inject_json_text`. `body` can be a CAPTURE (the miner's `--flow`
+    # / MCP `flow_id` road) and may legitimately not be valid UTF-8: a latin-1 form field, a
+    # binary blob a lax server accepts inside a JSON string. `String#scrub` substitutes the
+    # three bytes of U+FFFD for every byte that is not valid UTF-8, and the miner then SENT
+    # that. Measured through `Inject.apply`, body `{"q":"hi","bin":"<ff fe 01 02>"}`:
+    #
+    #   before  … 62 69 6e 22 3a 22 ef bf bd ef bf bd 01 02 22 7d   4 captured bytes → 8
+    #   after   … 62 69 6e 22 3a 22 ff fe 01 02 22 7d               intact
+    #
+    # …while the FORM location on the same shape was already byte-exact, which is the control.
+    #
+    # A body that is not valid UTF-8 cannot round-trip through `JSON::Any` AT ALL — `JSON.parse`
+    # takes a String and `any.to_json` emits one — so it takes the road a body that does not
+    # cleanly parse already takes: the top-level `{`-splice, done on BYTES here so every
+    # captured byte survives. And `json_object_node_count`, the gate `Detect` asks, reports 0
+    # for such a body, so the Json location is not OFFERED for it and `gori run mine` names it
+    # skipped (`warn_mine_locations`) instead of quietly mining a request it had rewritten.
+    private def self.inject_json_body(body : Bytes, params : Array({String, String})) : Bytes?
+      text = String.new(body)
+      return splice_json_object(body, params) unless text.valid_encoding?
+      inject_json_text(text, params).try(&.to_slice)
+    end
+
+    # The top-level `{`-splice on BYTES: the pairs go in right after the FIRST `{`, every other
+    # byte of `body` copied through verbatim. Same spelling and same position as the String
+    # fallback in `inject_json_text` produces, so the two paths agree; this one exists for the
+    # bodies `JSON::Any` cannot hold. nil when there is no `{` to splice into.
+    private def self.splice_json_object(body : Bytes, params : Array({String, String})) : Bytes?
+      bi = forward_index_of(body, "{".to_slice, 0)
+      return nil unless bi
+      at = bi + 1
+      inserts = params.map { |(n, v)| "#{n.to_json}:#{v.to_json}" }.join(',')
+      sep = closes_immediately?(body, at) ? "" : ","
+      io = IO::Memory.new(body.size + inserts.bytesize + 1)
+      io.write(body[0, at])
+      io << inserts << sep
+      io.write(body[at, body.size - at])
+      io.to_slice
+    end
+
+    # Whether the object just spliced into closes immediately (only JSON whitespace between
+    # `from` and its `}`) — then the inserted pairs need no trailing comma. This is what the
+    # String fallback spells `after.lstrip.starts_with?('}')`.
+    private def self.closes_immediately?(body : Bytes, from : Int32) : Bool
+      i = from
+      while i < body.size
+        b = body[i]
+        return b == 0x7d_u8 unless b == 0x20_u8 || b == 0x09_u8 || b == 0x0a_u8 || b == 0x0d_u8
+        i += 1
+      end
+      false
+    end
+
     # Inject candidate keys into EVERY object node of the JSON body — the root object, objects
     # inside a root array, and nested objects — capped BFS shallow-first (MAX_JSON_NODES). Returns
     # nil when the body carries no object node (array-of-scalars / scalar / bool / null root),
     # leaving it unchanged (Detect won't offer Json there; this only guards a hand-driven call).
     # A body that doesn't cleanly parse falls back to the top-level textual `{`-splice.
+    #
+    # `btext` must be valid UTF-8 — `inject_json_body` owns that check and routes bytes that
+    # are not to `splice_json_object`. Do NOT restore a `scrub` here to make it total.
     def self.inject_json_text(btext : String, params : Array({String, String})) : String?
       begin
         any = JSON.parse(btext)
@@ -396,8 +456,19 @@ module Gori::Miner
 
     # How many injectable object nodes the body carries (capped). Shared by Detect (is Json
     # applicable?) and the engine (per-name bucket byte-budget), so the two never drift.
+    #
+    # 0 for a body that is not valid UTF-8, and NOT via a `scrub`: `JSON.parse` cannot hold
+    # those bytes (see `inject_json_body`), so there is no node set to count. The scrubbed
+    # parse this used to do answered "yes, N nodes" about a body it had just rewritten — which
+    # is how the Json location came to be auto-selected for `application/json` traffic the
+    # miner could then only send corrupted. Reporting 0 makes `Detect` stop offering it, so a
+    # surface that names it anyway gets the inapplicable-location warning it already has.
+    # `splice_json_object` still injects into exactly ONE node on that road, which is what the
+    # engine's `{count, 1}.max` byte budget then assumes.
     def self.json_object_node_count(body : Bytes, cap : Int32) : Int32
-      collect_object_nodes(JSON.parse(String.new(body).scrub), cap).size
+      text = String.new(body)
+      return 0 unless text.valid_encoding?
+      collect_object_nodes(JSON.parse(text), cap).size
     rescue JSON::ParseException
       0
     end

@@ -6,6 +6,14 @@ private def opt(opts : Array(CopyMenu::Option), key : Char) : CopyMenu::Option?
   opts.find { |o| o.key == key }
 end
 
+# True when `needle` appears as a contiguous byte subsequence of `hay` — for asserting that a
+# captured byte survived a copy format. String matching would mangle the bytes under test.
+private def subseq?(hay : Bytes, needle : Bytes) : Bool
+  return true if needle.empty?
+  return false if needle.size > hay.size
+  (0..hay.size - needle.size).any? { |i| hay[i, needle.size] == needle }
+end
+
 describe Gori::Tui::CopyMenu do
   describe ".request_options" do
     wire = "POST /api/login?next=/home HTTP/1.1\r\n" \
@@ -136,6 +144,55 @@ describe Gori::Tui::CopyMenu do
       curl = opt(CopyMenu.request_options(req, "http://h"), 'l').not_nil!.text
       curl.should contain("-H 'X-Note: it'\\''s here'")
     end
+
+    # ── byte safety ──────────────────────────────────────────────────────────────────
+    #
+    # `shell_quote` was `s.gsub("'", "'\\''")` — a ONE-BYTE needle, which makes Crystal
+    # delegate to the Char overload and substitute the three bytes of U+FFFD for every byte
+    # that is not valid UTF-8. `--data-raw` gets the CAPTURED body straight off the wire, so
+    # "Copy as cURL" of a binary body handed the operator a command that did not reproduce the
+    # request: `ff fe 01 02` came out `ef bf bd ef bf bd 01 02`. The head had a second, separate
+    # loss of its own — it was `scrub`ed before the PCRE line split. Assertions are byte-wise;
+    # `String#includes?` would mangle exactly what is under test.
+
+    it "quotes a body that is not valid UTF-8 byte-exact for --data-raw" do
+      bin = Bytes[0xff_u8, 0xfe_u8, 0x01_u8, 0x02_u8]
+      b = IO::Memory.new
+      b << "a='x'&bin="
+      b.write(bin)
+      body = String.new(b.to_slice)
+      req = "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+      curl = CopyMenu.curl_text(req, "http://h").not_nil!.to_slice
+      subseq?(curl, bin).should be_true
+      subseq?(curl, Bytes[0xef_u8, 0xbf_u8, 0xbd_u8]).should be_false
+      # the ' escaping still happens, on the same bytes
+      subseq?(curl, "--data-raw 'a='\\''x'\\''&bin=".to_slice).should be_true
+    end
+
+    it "keeps an obs-text header value byte-exact in -H" do
+      bin = Bytes[0xff_u8, 0xfe_u8, 0x01_u8, 0x02_u8]
+      b = IO::Memory.new
+      b << "GET /p HTTP/1.1\r\nHost: h\r\nX-Ob: "
+      b.write(bin)
+      b << "\r\n\r\n"
+      curl = CopyMenu.curl_text(String.new(b.to_slice), "http://h").not_nil!.to_slice
+      subseq?(curl, "-H 'X-Ob: ".to_slice).should be_true
+      subseq?(curl, bin).should be_true
+      subseq?(curl, Bytes[0xef_u8, 0xbf_u8, 0xbd_u8]).should be_false
+    end
+
+    it "names a NUL body instead of emitting a --data-raw no shell can carry" do
+      b = IO::Memory.new
+      b << "a=1&z="
+      b.write(Bytes[0x00_u8, 0x41_u8])
+      body = String.new(b.to_slice)
+      req = "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+      curl = CopyMenu.curl_text(req, "http://h").not_nil!
+      curl.should contain("# body omitted: 8 bytes holding a NUL")
+      curl.should_not contain("--data-raw")
+      # …and the note is the last word on the line, so a paste still runs as a bodyless curl.
+      curl.lines.last.lstrip.should start_with("# body omitted")
+    end
   end
 
   describe ".response_options" do
@@ -154,6 +211,20 @@ describe Gori::Tui::CopyMenu do
     it "rejoins head+body with exactly one separator for raw" do
       opt(CopyMenu.response_options(head, body), 'r').not_nil!.text
         .should eq("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>hi</h1>")
+    end
+
+    it "keeps an obs-text response head byte-exact" do
+      bin = Bytes[0xff_u8, 0xfe_u8, 0x01_u8, 0x02_u8]
+      b = IO::Memory.new
+      b << "HTTP/1.1 200 OK\r\nX-Ob: "
+      b.write(bin)
+      b << "\r\n\r\n"
+      opts = CopyMenu.response_options(String.new(b.to_slice), "body")
+      h = opt(opts, 'h').not_nil!.text.to_slice
+      subseq?(h, bin).should be_true
+      subseq?(h, Bytes[0xef_u8, 0xbf_u8, 0xbd_u8]).should be_false
+      # the ONE trailing blank line is still stripped
+      subseq?(h, "\r\n\r\n".to_slice).should be_false
     end
 
     it "omits the body row for an empty body" do

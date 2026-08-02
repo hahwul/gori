@@ -18,10 +18,7 @@ module Gori::Tui
     def self.request_options(wire : String, target : String, *,
                              websocket_messages : Array(String)? = nil) : Array(Option)
       head, body = split_message(wire)
-      # scrub: `wire` is a captured request kept byte-exact; an obs-text/binary byte in the head
-      # would make the PCRE split raise and crash the TUI copy menu. Scrub only the head we parse
-      # into lines — the "Raw request" row below still copies the untouched `wire`.
-      lines = head.scrub.split(/\r?\n/)
+      lines = split_lines(head)
       request_line = lines.first? || ""
       header_lines = lines.size > 1 ? lines[1..] : [] of String
       method, req_target, _ = parse_request_line(request_line)
@@ -52,7 +49,7 @@ module Gori::Tui
     # matching request_options dropping the row in that case.
     def self.curl_text(wire : String, target : String) : String?
       head, body = split_message(wire)
-      lines = head.scrub.split(/\r?\n/)
+      lines = split_lines(head)
       header_lines = lines.size > 1 ? lines[1..] : [] of String
       method, req_target, _ = parse_request_line(lines.first? || "")
       url = resolve_url(req_target, target, header_lines)
@@ -66,9 +63,7 @@ module Gori::Tui
     # offered ONLY when both parts are present, since with just one it would be a
     # byte-identical duplicate of the Status+headers (empty body) or Body (empty head) row.
     def self.response_options(head : String, body : String) : Array(Option)
-      # scrub: server response head bytes can carry obs-text (0x80-0xFF); the PCRE sub would
-      # otherwise raise and crash the TUI copy menu. (Clipboard content is text anyway.)
-      head_clean = head.scrub.sub(/\r?\n\r?\n\z/, "")
+      head_clean = chomp_blank_line(head)
       opts = [] of Option
       opts << Option.new("Status + headers", 'h', head_clean) unless head_clean.strip.empty?
       opts << Option.new("Body", 'b', body) unless body.empty?
@@ -88,6 +83,42 @@ module Gori::Tui
       else
         {text, ""}
       end
+    end
+
+    # `head` split into lines on LF, each with one trailing CR dropped — what `split(/\r?\n/)`
+    # spelled. Hand-rolled for two reasons, both about a head that is not valid UTF-8 (a
+    # capture legitimately can be: obs-text in a header value, a latin-1 filename): a Regexp
+    # over those bytes RAISES, which is why this used to `scrub` first — and that scrub then
+    # REWROTE the operator's bytes, so a "Copy as cURL" `-H` came out carrying the three bytes
+    # of U+FFFD where the wire had one. Byte-wise, neither happens.
+    private def self.split_lines(head : String) : Array(String)
+      bytes = head.to_slice
+      lines = [] of String
+      start = 0
+      i = 0
+      while i < bytes.size
+        if bytes[i] == 0x0a_u8
+          stop = (i > start && bytes[i - 1] == 0x0d_u8) ? i - 1 : i
+          lines << String.new(bytes[start, stop - start])
+          start = i + 1
+        end
+        i += 1
+      end
+      lines << String.new(bytes[start, bytes.size - start])
+      lines
+    end
+
+    # `head` without ONE trailing blank line — what `sub(/\r?\n\r?\n\z/, "")` spelled, byte-wise
+    # for the same two reasons `split_lines` is. Longest suffix first, so a CRLF pair is taken
+    # whole rather than leaving a stray CR behind.
+    private def self.chomp_blank_line(head : String) : String
+      bytes = head.to_slice
+      {"\r\n\r\n", "\r\n\n", "\n\r\n", "\n\n"}.each do |suffix|
+        s = suffix.to_slice
+        next unless bytes.size >= s.size && bytes[bytes.size - s.size, s.size] == s
+        return String.new(bytes[0, bytes.size - s.size])
+      end
+      head
     end
 
     # {method, request-target, version} from a request line, best-effort (missing
@@ -166,8 +197,21 @@ module Gori::Tui
         next if down == "host" || down == "content-length"
         parts << "-H #{shell_quote("#{name}: #{value}")}"
       end
-      parts << "--data-raw #{shell_quote(body)}" unless body.empty?
+      parts << data_argument(body) unless body.empty?
       parts.join(" \\\n  ")
+    end
+
+    # The body as a curl argument, or a named refusal. `shell_quote` carries ANY byte verbatim
+    # inside '…' except one: 0x00. A shell command line is a NUL-terminated argv, so no quoting
+    # can put a NUL into it — bash drops the byte and curl would send a body SHORTER than the
+    # one gori captured, with nothing on the line saying so. A captured gRPC/protobuf body has
+    # them routinely. So say it. The note is a `#` comment and `--data-raw` is the last part of
+    # the command, so a paste still runs (sending no body) instead of sending a different one,
+    # and the "Body" row of the same copy menu still hands over the exact bytes.
+    private def self.data_argument(body : String) : String
+      return "--data-raw #{shell_quote(body)}" unless body.to_slice.includes?(0_u8)
+      "# body omitted: #{body.bytesize} bytes holding a NUL, which no shell argument can " \
+      "carry; copy \"Body\" instead and pass it with --data-binary @FILE"
     end
 
     # A copy-pasteable wscat invocation for a WebSocket Repeater. wscat owns the
@@ -219,8 +263,31 @@ module Gori::Tui
 
     # POSIX single-quote: wrap in '…' and rewrite each embedded ' as '\'' so the
     # result is one safe shell word regardless of what's inside (incl. newlines).
+    #
+    # BYTE SAFETY — this was `s.gsub("'", "'\\''")`. `String#gsub(String, String)` delegates to
+    # the CHAR overload as soon as the needle is ONE BYTE long, and Crystal's char iteration
+    # substitutes the three bytes of U+FFFD for every byte that is not valid UTF-8. `s` here is
+    # a CAPTURE — `--data-raw` gets the request body straight off the wire — so "Copy as cURL"
+    # of a binary body handed the operator a command that did not reproduce the request.
+    # Measured on body `a='x'&bin=<ff fe 01 02>`:
+    #
+    #   before  … 26 62 69 6e 3d ef bf bd ef bf bd 01 02   4 captured bytes → 8
+    #   after   … 26 62 69 6e 3d ff fe 01 02               intact
+    #
+    # Scanning and splicing BYTES is the rule `Fuzz::Plan.wrap_token` already writes down.
     private def self.shell_quote(s : String) : String
-      "'" + s.gsub("'", "'\\''") + "'"
+      bytes = s.to_slice
+      io = IO::Memory.new(bytes.size + 2)
+      io << '\''
+      bytes.each do |b|
+        if b == 0x27_u8 # '
+          io << "'\\''"
+        else
+          io.write_byte(b)
+        end
+      end
+      io << '\''
+      String.new(io.to_slice)
     end
   end
 end
