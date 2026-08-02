@@ -703,7 +703,6 @@ describe "Intercept verbs (P1)" do
         view.toggle_edit
         view.replace_editor(%({"sig":"$NOT_A_VAR"}))
         String.new(view.pending_edit.not_nil![1]).should eq(%({"sig":"$NOT_A_VAR"}))
-        view.unresolved_env.should be_empty # ... so a forward is never refused over one
       end
     end
 

@@ -29,9 +29,9 @@ module Gori
             # bare-LF promotion. `normalize_raw` exists so a hand-typed request still frames,
             # but a bare-LF header terminator is a standard front-end/back-end desync
             # primitive, so promoting it removes a payload class from this surface — the TUI's
-            # byte modes have always been able to send it. An unresolved `$VAR` is NOT refused
-            # under `verbatim` — see `PlanOptions#refuse_unresolved_env?`; the literal `$` is
-            # the SSTI/shell payload the flag exists to deliver.
+            # byte modes have always been able to send it. An unresolved `$VAR` is not refused
+            # anywhere any more (see `Env::Escape`); the literal `$` is the SSTI/shell payload
+            # this flag exists to deliver, and now every surface delivers it.
             raw_bytes(raw, args)
           else
             build_from_parts(uri, scheme, host, port, args)

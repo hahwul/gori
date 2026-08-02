@@ -193,8 +193,13 @@ module Gori::Fuzz
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
-      # ONE `Env.expand_wire` over the template, before anything reads it — and first, a
-      # refusal when a token in the HEAD resolves to nothing (see `refuse_unresolved`).
+      # ONE `Env.expand_wire` over the template, before anything reads it.
+      #
+      # There USED to be a refusal in front of it, when a token in the HEAD resolved to
+      # nothing (#519). It is gone: a `$NAME` with no value is a literal string on the wire
+      # (see `Env::Escape`), and this check refused a GraphQL query string, a Mongo `$where`
+      # filter and a JSON Schema `$ref` in a header — all of them the operator's test case.
+      # `$$` is the escape for a name that DOES resolve.
       #
       # `expand_wire`, not `expand`: this was the ONE plan builder of the three that skipped
       # the head's LF→CRLF promotion (`miner/plan.cr` and `sequencer/plan.cr` have always
@@ -209,12 +214,7 @@ module Gori::Fuzz
       # marking, template parse and payload splice below are unchanged either way — a
       # position is a position whether the operator marked it in an editor or `--auto`
       # found it in a capture.
-      text = if options.evidence?
-               options.template
-             else
-               refuse_unresolved(Env.unresolved_wire(options.template))
-               String.new(Env.expand_wire(options.template))
-             end
+      text = options.evidence? ? options.template : String.new(Env.expand_wire(options.template))
       text = Template.auto_mark(text) if options.auto_mark?
       marker = Template::MARKER
       mark_matches = options.marks.map do |tok|
@@ -289,13 +289,14 @@ module Gori::Fuzz
       Origin.new(scheme, host, port)
     end
 
-    # Refuse a run whose template or target still carries a token that resolves to
-    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
-    # a display path, wrong here, because the seven characters `$SESSION` then go out as
-    # a header value, the origin answers 401, and the results read as findings about the
-    # target rather than as a variable the operator never set (#519). This builder is the
-    # surface-independent chokepoint every fuzz surface expands through, so the check
-    # lives here once instead of in each of the three.
+    # Refuse a run whose TARGET carries a token that resolves to nothing.
+    #
+    # The template half of this is gone — a `$NAME` with no value is a literal string on the
+    # wire now, everywhere. A DIAL TUPLE is the exception the note at the call site argues:
+    # `$` is not a legal byte in a hostname, so there is no operator test case to protect,
+    # and a literal `$SESSION` there makes `Outbound.scope_url` ask about `https://$SESSION/a`
+    # — a URL no rule can match — so the run comes back refused as OUT-OF-SCOPE, naming a
+    # gate that was never the problem. Refusing here names the real one.
     private def self.refuse_unresolved(names : Array(String)) : Nil
       return if names.empty?
       detail = Env.token_list(names)

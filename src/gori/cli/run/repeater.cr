@@ -387,10 +387,6 @@ module Gori
         Repeater::PlanOptions.new([rec.request],
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
           expand_request: !verbatim,
-          # `--verbatim` says "no $VAR expansion" — so an unresolved `$VAR` is the payload,
-          # not a mistake to refuse. Without this the flag could not send the SSTI/shell
-          # probes (`$user.name`, `$IFS`) that are the reason to leave a `$` unexpanded.
-          refuse_unresolved_env: !verbatim,
           # …and on an h2 session it used to change NOTHING the encoder does: the flag
           # promised "the stored bytes EXACTLY" while `H2Engine` still lowercased every field
           # name. Field case is the one normalization left on that path, so this is what
@@ -580,22 +576,22 @@ module Gori
       # `--verbatim` reaches this at all now: it was threaded into `session_plan_options`
       # (the handshake head) but was not a parameter of `cmd_repeater_send_ws`, so a WS
       # message was expanded on the wire despite the flag's own help text saying "no $VAR
-      # expansion". Under verbatim a literal `$TOKEN` IS the payload — the same reasoning
-      # `PlanOptions#refuse_unresolved_env?` carries on the h1 side — so the refusal is
-      # skipped too, or the one flag that can send it would be the one that refuses it.
+      # expansion". Under verbatim a literal `$TOKEN` IS the payload.
       #
       # No `.scrub` anywhere on this path. `Env.expand` scans BYTES and copies every span
       # that is not a matched token through unchanged (its own header says so), so a TEXT
       # frame carrying invalid UTF-8 survives to the wire; scrubbing it turned 9 bytes into
       # 13 and sent those instead, with no warning.
       #
-      # `evidence` — the session was seeded from a CAPTURED flow — turns both the refusal
-      # and the expansion off for its stored rows. The rationale this used to carry, "a text
-      # frame is UTF-8 the operator typed, the same provenance as a header value", is simply
-      # false for a seeded session: those rows are the client's frames, recorded by the WS
-      # relay. So a capture of `{"$where":"this.a==1"}` was unreplayable without project env
-      # vars, and setting them the way the refusal advises sent `{"WHEREVAL":"this.a==1"}`.
-      # `--message` / `--message-frame` stay a DRAFT and keep today's policy exactly.
+      # `evidence` — the session was seeded from a CAPTURED flow — turns the expansion off
+      # for its stored rows. The rationale this used to carry, "a text frame is UTF-8 the
+      # operator typed, the same provenance as a header value", is simply false for a seeded
+      # session: those rows are the client's frames, recorded by the WS relay. So a capture of
+      # `{"$where":"this.a==1"}` was unreplayable without project env vars, and setting them
+      # the way the old refusal advised sent `{"WHEREVAL":"this.a==1"}`. There is no refusal
+      # left to pair with it — an unresolved name is literal on every path now — but the
+      # expansion split still matters: `--message` / `--message-frame` stay a DRAFT and DO
+      # resolve a `$KEY` the operator set.
       private def self.ws_out_messages(store : Store, id : Int64,
                                        override : Array(Store::WsOutMessage),
                                        verbatim : Bool = false,
@@ -609,7 +605,6 @@ module Gori
                    override
                  end
         seeded = stored && evidence
-        refuse_unresolved_ws(source.select(&.text?).map { |m| String.new(m.payload) }, id) unless verbatim || seeded
         source.map do |m|
           payload = m.text? && !verbatim && !seeded ? Env.expand(String.new(m.payload)).to_slice : m.payload
           Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, seeded)
@@ -684,20 +679,6 @@ module Gori
       # before the handshake is dialed. Same fact as the builder's refusal, checked where
       # the expansion actually happens (#524).
       #
-      # Whole payload, not `unresolved_wire`'s head — a frame has no head/body split to take
-      # (`head_body_boundary` returns the whole slice unless the payload happens to contain a
-      # blank line, which would then silently check a prefix of a JSON body and nothing else).
-      # The axis #519 drew as an offset is carried here by the OPCODE instead: a text frame is
-      # UTF-8 the operator typed, the same provenance as a header value, and a BINARY frame is
-      # not checked at all — it is not even expanded, so nothing there can reach the wire as a
-      # literal token and there is nothing to refuse.
-      private def self.refuse_unresolved_ws(texts : Array(String), id : Int64) : Nil
-        names = texts.flat_map { |t| Env.unresolved(t) }.uniq!
-        return if names.empty?
-        abort "gori run repeater send: " +
-              env_unresolved_error(Env.token_list(names), " in a WebSocket message for session ##{id}")
-      end
-
       # One transcript row. An ordinary masked TEXT frame prints as bare text, exactly as it
       # always did; anything else names its shape first, because the whole point of being able
       # to send a PING or an unmasked frame is being able to read back that you did.
@@ -1059,24 +1040,25 @@ module Gori
         out
       end
 
-      # Refuse a flow replay whose OPERATOR-TYPED parts still name a variable that resolves to
-      # nothing. `Repeater::Plan` runs this over the whole wire for a draft; a flow replay
-      # marks its wire as evidence, so the drafts have to be checked on their own or a typo'd
-      # `-H "Authorization: Bearer $TOKN"` would ship the token's own characters, the origin
-      # would answer 401, and the operator would read that as the target rejecting a token
-      # (#519). Same sentence `Plan` produces, so the two cannot drift.
-      private def self.refuse_unresolved_overrides(headers : Array(String), body_override : String?,
-                                                   target_override : String?, sni_override : String?) : Nil
+      # Refuse a flow replay whose DIAL TUPLE still names a variable that resolves to nothing.
+      #
+      # `-H` and `-b` are no longer checked: they are WIRE BYTES, and a `$NAME` with no value
+      # is a literal string on the wire everywhere now (see `Env::Escape`) — `-H 'X-Filter:
+      # $where'` is a Mongo operator the operator meant to send. `--target` and `--sni` keep
+      # the refusal for the reason `Repeater::Plan#refuse_unresolved` gives: `$` is not a legal
+      # byte in a hostname, and a literal one there comes back as an OUT-OF-SCOPE refusal
+      # naming a gate that was never the problem.
+      private def self.refuse_unresolved_overrides(target_override : String?,
+                                                   sni_override : String?) : Nil
         names = [] of String
-        headers.each { |h| names.concat(Env.unresolved(h)) }
-        body_override.try { |b| names.concat(Env.unresolved(b)) }
         target_override.try { |t| names.concat(Env.unresolved(t, deferred: nil)) }
         sni_override.try { |s| names.concat(Env.unresolved(s, deferred: nil)) }
         names.uniq!
         return if names.empty?
-        abort "gori run repeater: unresolved env #{Env.token_list(names)} in -H/-b/--target/--sni — " \
+        abort "gori run repeater: unresolved env #{Env.token_list(names)} in --target/--sni — " \
               "set it with `gori run project env set KEY value`, or remove the token. " \
-              "(Tokens in the CAPTURED bytes are replayed literally; only your overrides are checked.)"
+              "(A token in the request bytes, in -H or in -b is sent literally; only the dial " \
+              "target is checked.)"
       end
 
       # Say that `FlowRequest.build` turned the capture's absolute-form request line into
@@ -1248,7 +1230,7 @@ module Gori
         # heads, and the builder's blanket refusal made every one of them unreplayable while
         # offering a "remedy" (`project env set filter …`) that would have SUBSTITUTED a value
         # and sent a different request. So the check moves here, onto the drafts alone.
-        refuse_unresolved_overrides(headers, body_override, target_override, sni_override)
+        refuse_unresolved_overrides(target_override, sni_override)
 
         wire, explicit_cl = build_single_flow_request(head_bytes, body_bytes, headers, body_override, target_override, removed_headers)
         outbound = project_outbound(project_name, db_path, allow_unscoped)

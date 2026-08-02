@@ -548,9 +548,10 @@ module Gori::Tui
     # A tab seeded from a CAPTURED 101 flow is EVIDENCE and is not expanded at all — the
     # same rule `gori run repeater send` and MCP `send_websocket` now apply to a flow-seeded
     # session's stored rows. A captured `{"$where":"this.a==1"}` is a MongoDB injection test,
-    # not a reference to a project variable; with the draft policy on it was unsendable
-    # (`ws_unresolved_env` named `$where`) and setting the variable to get past that sent
-    # `{"WHEREVAL":"this.a==1"}`.
+    # not a reference to a project variable; with the draft policy on it was unsendable (the
+    # send named `$where`) and setting the variable to get past that sent
+    # `{"WHEREVAL":"this.a==1"}`. Neither half can happen now — an unresolved name is never
+    # refused, and evidence is never expanded.
     def ws_out_messages : Array(Repeater::WsEngine::OutMsg)
       ws_out_messages_raw.map do |m|
         # `Env.expand` scans BYTES and copies every unmatched span through untouched, so a
@@ -647,37 +648,6 @@ module Gori::Tui
       @decoded.set_text(joined) unless same
       @ws_out_seed = messages
       @ws_out_edited = false
-    end
-
-    # The env tokens in the outbound message lines that resolve to nothing — what
-    # `ws_out_messages` would leave on the wire as their own characters. Empty means every
-    # token resolved. A QUERY, deliberately separate from `ws_out_messages`: that one also
-    # feeds the COPY menu (repeater_controller#repeater_request_options), a display path
-    # where a literal `$KEY` is the honest answer. Only the SEND path consults this (#524).
-    #
-    # Whole line, not `Env.unresolved_wire`'s head: a frame has no head/body split to take,
-    # and every line here becomes a TEXT frame — UTF-8 the operator typed into the editor,
-    # the same provenance as a header value, which #519 already checks in full.
-    #
-    # `valid_encoding?` is where the CLI/MCP paths check `m.text?` instead, and it is the
-    # SAME question. The pane is seeded from the session's stored OUT frames with no opcode
-    # filter (repeater_controller: `String.new(m.payload)`), so a captured BINARY frame
-    # arrives here as a line of arbitrary bytes. RFC 6455 §5.6 makes UTF-8 the definition of
-    # a text frame, so a line that is not valid UTF-8 is a binary payload the pane happens to
-    # be displaying, not text an operator typed — and `$` followed by `[A-Za-z_]` turns up in
-    # such bytes roughly once per 1.2KB by chance (#519). Without this the pane refused a
-    # real captured binary frame, naming the `$A` inside a JPEG.
-    #
-    # Empty for an EVIDENCE tab, because nothing on that path expands: a check that refuses
-    # a send the expansion would not have touched is not a check, it is a second policy.
-    def ws_unresolved_env : Array(String)
-      return [] of String if @evidence
-      # The list that is actually going out (`ws_out_messages_raw`), for the same reason
-      # `ws_out_messages` reads it: a check run against a different list than the send is not
-      # a check. Pre-splice this branched on `ws_out_seeded?` and read the pane's raw lines.
-      ws_out_messages_raw.select(&.text?).map { |m| String.new(m.payload) }
-        .select { |line| !line.empty? && line.valid_encoding? }
-        .flat_map { |line| Env.unresolved(line) }.uniq!
     end
 
     # The outbound messages to persist (env tokens UNexpanded). The store masks secrets and

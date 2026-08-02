@@ -153,10 +153,10 @@ module Gori::Discover
       unless Headers.safe_value?(seed)
         raise PlanError.new(PlanError::Reason::BadTarget, "seed contains a control character", raw)
       end
-      # The SECOND expansion this builder owns, and the one easiest to miss: custom header
-      # values go through `Headers.expand` below, so an unresolved `$SESSION` there rides
-      # every probe the crawl sends. Checked on the raw pairs, before that call.
-      refuse_unresolved(config.headers.flat_map { |(_, value)| Env.unresolved(value) }.uniq!)
+      # Custom header values go through `Headers.expand` below. An unresolved `$NAME` there
+      # used to refuse the crawl; it now rides every probe LITERALLY, which is the policy
+      # everywhere — `--header 'X-Filter: $ne'` is a Mongo operator the operator meant to
+      # send, not a variable they forgot to set. `Headers.safe_value?` still gates the bytes.
       words = load_words(config.user_wordlist)
       policy = resolve_policy(outbound, seed, parts.host)
       # `idle_conns` is the run's concurrency for the reason Fuzz uses it: one worker fiber

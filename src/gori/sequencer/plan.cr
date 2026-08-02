@@ -161,15 +161,12 @@ module Gori::Sequencer
       # it at all, so a `$TOKEN` in a sequenced request went out literally there while
       # resolving on the other two surfaces; `gori run sequence` and MCP each ran it in
       # their source reader, and doing it there AND here would resolve a var whose value
-      # itself contains a `$TOKEN` twice. A token in the HEAD that resolves to nothing
-      # refuses the run first (see `refuse_unresolved`).
-      # Both are DRAFT-time passes and are skipped for EVIDENCE — see `PlanOptions#evidence?`.
-      request = if options.evidence?
-                  options.request
-                else
-                  refuse_unresolved(Env.unresolved_wire(String.new(options.request)))
-                  Env.expand_wire(String.new(options.request))
-                end
+      # itself contains a `$TOKEN` twice. A DRAFT-time pass, skipped for EVIDENCE — see
+      # `PlanOptions#evidence?`.
+      #
+      # The head-only refusal that used to run first (#519) is gone: a `$NAME` with no value
+      # is a literal string on the wire (see `Env::Escape`).
+      request = options.evidence? ? options.request : Env.expand_wire(String.new(options.request))
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides)
       new(engine: Engine.new(request, options.http2?, sender, config), config: config,

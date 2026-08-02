@@ -44,7 +44,7 @@ module Gori
     # One place deliberately keeps `$$` as two bytes: a DIAL TUPLE (a `--target`, a URL, an
     # SNI). Those run `Env.expand` once and are never re-scanned by a send seam, so nothing
     # consumes the escape — and there is nothing to escape FROM, because `$` is not a legal
-    # byte in a hostname. `unresolved`/`unresolved_wire` still walk the escape correctly, so a
+    # byte in a hostname. `unresolved` still walks the escape correctly, so a
     # `$$` there cannot be mis-reported as an unresolved name; it simply fails to resolve as a
     # host, visibly, which is the honest outcome.
     #
@@ -174,9 +174,9 @@ module Gori
     #
     # Scans the whole message, head and body: injecting a token into a body is a designed
     # case (a `Replace` rule with `part: Body`, an operator's Repeater template). That is
-    # safe here in a way `unresolved_wire`'s head-only rule was not, because this matches a
-    # SPECIFIC declared name rather than the `$`+`[A-Za-z_]` shape — a random collision with
-    # `$SESSION` in a binary body is a 2^-56 event, not the ~3-per-4KB one #525 measured.
+    # safe in a way a head-only rule was not, because this matches a SPECIFIC declared name
+    # rather than the `$`+`[A-Za-z_]` shape — and in any case nothing here refuses: a name
+    # that does not resolve simply stays literal.
     # A value carrying CR/LF/NUL is withheld from the HEAD half and substituted freely in the
     # BODY. A binding value is the ORIGIN'S — see `Bindings.boundary_forging?` — and in a head
     # `abc\r\nX-Admin: true` becomes two header lines while `abc\r\n\r\nGET /...` forges a whole
@@ -648,31 +648,6 @@ module Gori
       return [] of String if prefix.empty?
       return [] of String unless text.byte_index(prefix) # same fast no-op as `expand`
       scan_unresolved(text.to_slice, vars, prefix, deferred)
-    end
-
-    # `unresolved` over the HEAD of wire-form text ALONE — the request line and
-    # headers, through the blank-line separator — never the body.
-    #
-    # Same split, and the same reason, as `expand_wire`'s CRLF normalization: in the
-    # head a `$` starts a reference, in the body it is just a byte. The body is where
-    # that distinction bites, because a body is often not text at all. A `$` followed
-    # by `[A-Za-z_]` occurs by chance roughly once per 1.2KB of high-entropy bytes, so
-    # a whole-request check would refuse essentially EVERY replay carrying a
-    # compressed, encrypted, or otherwise binary body — measured on random bodies:
-    # ~3 token-shaped hits per 4KB, hit in 20 of 20 samples; ~51 per 64KB. Refusing a
-    # captured multipart upload because its JPEG happened to contain `$A` would be a
-    # far worse failure than the one this check exists to stop.
-    #
-    # The boundary is taken on the text as AUTHORED (pre-expansion), because the
-    # question is which tokens the author wrote in the head — not where the head ends
-    # after some var's value has been spliced in.
-    def self.unresolved_wire(text : String, vars : Hash(String, String) = effective_vars,
-                             prefix : String = Settings.env_prefix,
-                             deferred : Array(String)? = declared_bindings) : Array(String)
-      return [] of String if prefix.empty?
-      return [] of String unless text.byte_index(prefix)
-      bytes = text.to_slice
-      scan_unresolved(bytes[0...head_body_boundary(bytes)], vars, prefix, deferred)
     end
 
     # Render token names back into the spelling the operator typed (`["A"]` → `"$A"`),

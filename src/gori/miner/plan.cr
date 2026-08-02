@@ -174,15 +174,13 @@ module Gori::Miner
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
-      # ONE `Env.expand_wire` over the request, before anything reads it — and first, a
-      # refusal when a token in the HEAD resolves to nothing (see `refuse_unresolved`).
-      # Both are DRAFT-time passes and are skipped for EVIDENCE — see `PlanOptions#evidence?`.
-      request = if options.evidence?
-                  options.request.to_slice
-                else
-                  refuse_unresolved(Env.unresolved_wire(options.request))
-                  Env.expand_wire(options.request)
-                end
+      # ONE `Env.expand_wire` over the request, before anything reads it. A DRAFT-time pass,
+      # skipped for EVIDENCE — see `PlanOptions#evidence?`.
+      #
+      # The head-only refusal that used to run first (#519) is gone: a `$NAME` with no value
+      # is a literal string on the wire (see `Env::Escape`). It refused a Mongo `$ne` and a
+      # GraphQL `$id` in a query string — the operator's test case, not a typo.
+      request = options.evidence? ? options.request.to_slice : Env.expand_wire(options.request)
       request_target = Gori::Outbound.request_target(request)
       origin = resolve_origin(options)
 

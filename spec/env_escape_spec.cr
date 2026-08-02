@@ -101,6 +101,34 @@ describe "Gori::Env — $NAME with no value is a literal string" do
       String.new(Gori::Env.expand_bindings(captured.to_slice)).should eq(captured)
     end
   end
+
+  # The HEAD half, added when the owner extended the policy past the send seams (#519's
+  # plan-build refusal). Until then an unset `$KEY` was literal in a BODY and a REFUSAL in
+  # the HEAD, which meant a GraphQL query in a query string, a Mongo `$where` header and a
+  # JSON Schema `$ref` header could not be sent at all.
+  it "leaves an unset name in the HEAD literal — request line and header alike" do
+    with_env do
+      head = "GET /graphql?query=query%20G($id)&f=$ne HTTP/1.1\r\nHost: h\r\nX-Ref: $ref\r\n\r\n"
+      String.new(Gori::Env.expand_wire(head)).should eq(head)
+      # `unresolved` is still the QUERY behind the DIAL-TUPLE refusal, so it must still
+      # report — it simply no longer gates a request.
+      Gori::Env.unresolved(head).should eq(["id", "ne", "ref"])
+    end
+  end
+
+  it "expands a HEAD name that HAS a value (the complement)" do
+    with_env(vars: [{"ref", "REFVALUE"}]) do
+      String.new(Gori::Env.expand_wire("GET /a HTTP/1.1\r\nX-Ref: $ref\r\n\r\n"))
+        .should eq("GET /a HTTP/1.1\r\nX-Ref: REFVALUE\r\n\r\n")
+    end
+  end
+
+  it "leaves a head with no $ byte-identical" do
+    with_env(vars: [{"ref", "REFVALUE"}]) do
+      head = "GET /a?q=1 HTTP/1.1\r\nHost: h\r\nX-Plain: nodollar\r\n\r\nbody"
+      String.new(Gori::Env.expand_wire(head)).should eq(head)
+    end
+  end
 end
 
 describe "Gori::Env — the $$ escape" do
@@ -149,15 +177,28 @@ describe "Gori::Env — the $$ escape" do
     end
   end
 
-  # The escape must not fabricate an "unresolved env" name for the plan-build refusal that
-  # still guards the HEAD (#519). `scan_unresolved` mirrors `expand`'s scan positions, so it
-  # has to walk the escape with the same advance.
+  # The escape must not fabricate an "unresolved env" name for the DIAL-TUPLE refusal that
+  # `unresolved` still backs. `scan_unresolved` mirrors `expand`'s scan positions, so it has
+  # to walk the escape with the same advance.
   it "is not reported as an unresolved env name" do
     with_env do
       Gori::Env.unresolved("Host: $$id.example").should be_empty
-      Gori::Env.unresolved_wire("GET /?q=$$ne HTTP/1.1\r\nX: $$ref\r\n\r\n").should be_empty
-      # Complement: a REAL unresolved name in the head is still reported.
-      Gori::Env.unresolved_wire("GET /?q=1 HTTP/1.1\r\nX: $ref\r\n\r\n").should eq(["ref"])
+      Gori::Env.unresolved("http://$$host.example/a", deferred: nil).should be_empty
+      # Complement: a REAL unresolved name is still reported, which is what keeps the dial
+      # tuple's refusal working.
+      Gori::Env.unresolved("http://$host.example/a", deferred: nil).should eq(["host"])
+    end
+  end
+
+  # The invariant the two-mode design rests on, re-checked now that the HEAD no longer
+  # refuses: a `$$` in the head has to survive `expand_wire` to reach `expand_bindings`,
+  # which is the only consumer. Before the head half was opened this path never ran — the
+  # refusal fired first — so this is genuinely new ground.
+  it "survives the HEAD's two passes, in a request line and a header" do
+    with_env(vars: [{"id", "ENVVAL"}], declared: ["sess"], bound: {"sess" => "LIVE"}) do
+      head = "GET /graphql?query=q($$id)&s=$$sess HTTP/1.1\r\nHost: h\r\nX-E: $$id\r\nX-R: $id\r\n\r\n"
+      two_pass(head).should eq(
+        "GET /graphql?query=q($id)&s=$sess HTTP/1.1\r\nHost: h\r\nX-E: $id\r\nX-R: ENVVAL\r\n\r\n")
     end
   end
 
