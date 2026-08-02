@@ -63,10 +63,14 @@ module Gori
         resolve = minimize_resolver(id, text, verbatim, auto_cl)
         # Fuzz::Sender applies the Outbound gate (Sandbox / exclude) at the socket seam;
         # CappedBackend bounds total sends. Same stack the TUI builds.
+        # `evidence: verbatim` is the SEND-seam half of the same flag `resolve` honours just
+        # above — see `Fuzz::Sender#evidence?`. Without it `--verbatim` stopped `$KEY`
+        # expansion and then let the session-binding pass substitute a live token into the
+        # captured body of every one of up to SEND_CAP probes.
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
             !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
-            overrides: host_overrides),
+            overrides: host_overrides, evidence: verbatim),
           Repeater::Minimize::SEND_CAP)
 
         meter = STDERR.tty?

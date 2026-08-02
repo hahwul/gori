@@ -255,10 +255,20 @@ module Gori::Fuzz
       generator = Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
       # One parked connection per worker fiber is the ceiling that can ever be checked out
       # at once, so the pool is sized to the (clamped) concurrency the engine will run at.
+      #
+      # `evidence:` carries the SAME provenance decision the template branch above took, one
+      # stage further — to the send seam, where session bindings resolve (`Sender#evidence?`).
+      # Skipping `expand_wire` at plan time and then expanding `$id` per send is the shape
+      # this whole axis is made of: the run's own `--mark`/`--auto` payload spans protected
+      # the operator's payloads while the CAPTURED body around them was still substituted.
+      # It reaches all three of the engine's send sites at once — the sweep, the redirect
+      # hops, and `calibrate_baseline`, whose nonces are safe but whose CARRIER is this same
+      # template rendered with them.
       sender = Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
         keep_alive: config.keep_alive?,
-        idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY))
+        idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY),
+        evidence: options.evidence?)
       new(engine: Engine.new(generator, matcher, sender, config), generator: generator,
         matcher: matcher, config: config, origin: origin, template: template,
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,

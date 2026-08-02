@@ -79,10 +79,18 @@ module Gori
         # Repeater::Plan, so it needs the project's host overrides threaded by hand — without
         # them this was the one repeater send path left resolving the target for real while
         # every other surface honoured the operator's pin (#367).
+        # `evidence: verbatim` is the SEND-seam half of the flag the resolver above already
+        # honours. `verbatim` means "the stored bytes ARE the message", and the resolver duly
+        # stops expanding `$KEY` — but the session-binding pass lives one seam later, inside
+        # `Fuzz::Sender`, and ran anyway. A repeater seeded from a capture whose body carries
+        # `$id`/`$ne`/`$ref` therefore had a live session token spliced into every probe:
+        # measured at 12 copies of the token across 6 sends of one `minimize_repeater
+        # {verbatim: true}` call, with the tool reporting a clean minimization. See
+        # `Fuzz::Sender#evidence?`.
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, rec.http2?,
             @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
-            overrides: HostOverrides.load(store)),
+            overrides: HostOverrides.load(store), evidence: verbatim),
           Repeater::Minimize::SEND_CAP)
 
         report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }

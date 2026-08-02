@@ -205,8 +205,16 @@ module Gori::Miner
       end
 
       names = load_names(config.user_wordlist)
+      # `evidence:` carries the branch above to the SEND seam, where session bindings resolve
+      # (`Fuzz::Sender#evidence?`). Round 6 marked the miner's INJECTED candidates verbatim
+      # and cleared the carrier as safe because gori's canaries cannot contain a `$` — true
+      # of the material and false of the message: on an evidence run the carrier is this
+      # untouched captured request, and `Baseline#calibrate` sends it raw before any
+      # injection at all. Reproduced: `gori run mine <flow> --bind-from <flow>` put the live
+      # session token on the wire in 6 of 8 requests.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
-        sni: options.sni, timeout: config.timeout, overrides: options.overrides)
+        sni: options.sni, timeout: config.timeout, overrides: options.overrides,
+        evidence: options.evidence?)
       new(engine: Engine.new(request, options.http2?, names, sender, config), sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
         request_target: request_target, names: names, inapplicable: inapplicable)

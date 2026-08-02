@@ -55,6 +55,32 @@ module Gori::Fuzz
       send(bytes)
     end
 
+    # The MAXIMAL `verbatim` span: "no byte of this buffer is eligible to expand."
+    #
+    # One spelling, because EVIDENCE and a payload exclusion are the same mechanism at
+    # different widths — see `Sender#evidence?`. `Env.expand` and `Env.scan_unresolved` walk
+    # `verbatim` with a cursor, so a `{0, n}` span is hit on the first iteration, copies the
+    # whole buffer in one write and sets `i = n`: both halves of the gate become exact no-ops
+    # rather than "a scan that happens to match nothing". `Env.clip_spans` splits it correctly
+    # across the head/body boundary, so this is honest at the two-slice level too.
+    def self.all_verbatim(bytes : Bytes) : Array({Int32, Int32})
+      [{0, bytes.size}]
+    end
+
+    # PROVENANCE of the buffers this backend is being handed: true when they are CAPTURED
+    # evidence rather than something an operator authored. Answered by the BACKEND rather
+    # than re-decided at each `send` call, because the call sites are engines
+    # (`Fuzz::Engine`, `Miner::Baseline`, `Sequencer::Engine`, `Repeater::Minimize`) that
+    # receive a ready-made Backend and never see the plan options — while the plan builder
+    # that DOES know is the one constructing the `Sender`. See `Sender#evidence?`.
+    #
+    # Reported here, and delegated (not defaulted) by the wrappers below, for the same
+    # reason `blocked` and `extra_requests` are: a wrapper is what the engine holds, so a
+    # `false` that stopped at the outermost layer would describe every wrapped run wrongly.
+    def evidence? : Bool
+      false
+    end
+
     # Sends this backend REFUSED before the socket — Sandbox, an explicit exclude rule, or
     # a session binding nothing has bound yet. Zero for a backend with no gate.
     #
@@ -107,6 +133,45 @@ module Gori::Fuzz
     # Exposed so a surface can report how many handshakes a run actually paid for.
     getter pool : ConnPool?
 
+    # PROVENANCE, carried from the plan builder's `PlanOptions#evidence?` — the twin of
+    # `Repeater::Sender#evidence?`, which has gated this same pair of passes since #501.
+    #
+    # Every plan builder already skips its DRAFT-time passes for a captured request
+    # (`fuzz/plan.cr`, `miner/plan.cr`, `sequencer/plan.cr` all branch on `evidence?`; the
+    # three minimize surfaces branch the same way inside their `resolve` proc). The decision
+    # then stopped at the plan and the SEND seam ran unconditionally — so the intent was
+    # preserved for env vars and silently reversed for session bindings, one seam later.
+    #
+    # It matters because captured traffic is full of `$NAME`-shaped bytes nobody typed. The
+    # grammar is `$` + `[A-Za-z_]` + `[A-Za-z0-9_]*` with no delimiter requirement and it
+    # runs over the BODY too, so Mongo's `$ne`/`$gt`/`$where`, JSON Schema's `$ref`/`$schema`
+    # and a GraphQL operation — which is MADE of `$variable` references — are all tokens
+    # here. With an ordinary extract rule named `id` bound, a captured
+    #
+    #   {"query":"query GetUser($id: ID!) { user(id: $id) { name } }", ...}
+    #
+    # left for the target as `query GetUser(<live session token>: ID!)`: a real credential in
+    # the target's access log, inside a request nobody authored, and no longer valid GraphQL,
+    # so the sweep's verdict was about a parse error. Measured on one capture: 12 copies of
+    # the token across 6 `minimize_repeater {verbatim: true}` probes, 6 across 8 `gori run
+    # mine` requests, 5 across 6 `gori run sequence` requests.
+    #
+    # EVIDENCE IS JUST THE MAXIMAL SPAN, which is why this composes with `verbatim` rather
+    # than competing with it: `send` widens the caller's spans to `Backend.all_verbatim`, a
+    # strict superset of the fuzz payload spans and of the miner's injected-candidate spans,
+    # so every narrower exclusion those already won still holds.
+    #
+    # The cost is the same one `Repeater::Sender#evidence?` names: an operator's own `$TOKEN`
+    # merged INTO a capture (a TUI edit over a seeded tab) now ships literally rather than
+    # resolving. That is the direction that can only be read wrong, never sent wrong.
+    #
+    # A ctor keyword rather than a required argument, deliberately — unlike `Gori::Outbound`,
+    # which is required because there was no existing answer and a caller could silently omit
+    # a scope decision. Here every caller that matters already HOLDS the boolean and is only
+    # forwarding it; a required arg would buy nothing but churn across the spec doubles and
+    # the probe/analyzer paths, whose buffers are handled at their own call sites.
+    getter? evidence : Bool
+
     # `keep_alive` reuses one connection across many sends (see ConnPool) — the sweep
     # senders (Fuzzer) opt in; the one-shot senders (Repeater minimize, Probe active) have
     # nothing to amortise and leave it off. `idle_conns` bounds the parked sockets and
@@ -115,7 +180,8 @@ module Gori::Fuzz
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
-                   keep_alive : Bool = false, idle_conns : Int32 = 0)
+                   keep_alive : Bool = false, idle_conns : Int32 = 0,
+                   @evidence : Bool = false)
       # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
       # a separate change with its own stream-state rules.
       @pool = (keep_alive && !@http2) ? ConnPool.new(@origin.scheme, @origin.host, @origin.port,
@@ -134,6 +200,14 @@ module Gori::Fuzz
     # surface (the terminal row, `--format json`, MCP `fuzz_results`) still reported
     # `$TOKEN`.
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
+      # PROVENANCE first, and by WIDENING rather than by branching: on an evidence run no
+      # byte of `bytes` was authored by anyone, so the exclusion the caller asked for grows
+      # to cover the whole buffer. Both halves below then read the widened list, which is the
+      # invariant `Env.unbound`'s comment demands ("it has to be the SAME list"). See
+      # `evidence?` for why this is the only place the two ideas need to meet: a run is
+      # either template+payloads (narrow spans) or evidence (the maximal one), and the
+      # maximal span contains every narrow one, so nothing a previous fix protected is lost.
+      verbatim = Backend.all_verbatim(bytes) if @evidence
       # Session bindings (#501) resolve HERE, per send, not at plan-build: a rotating token
       # can change between request 1 and request 20 of the same run, which is exactly the
       # run that otherwise produces a page of 401s. Env vars are untouched — the plan
@@ -217,6 +291,14 @@ module Gori::Fuzz
       @inner.extra_requests
     end
 
+    # Delegated for that same reason once more. Nothing here CONSUMES it — the widening
+    # happens inside `Sender#send`, below this wrapper — but this is the object every
+    # minimize surface and the Miner hold, so a `false` stopping at the cap would make the
+    # run's provenance unreadable from the outside and let a spec assert the wrong thing.
+    def evidence? : Bool
+      @inner.evidence?
+    end
+
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
     end
@@ -249,6 +331,11 @@ module Gori::Fuzz
 
     def extra_requests : Int64
       @inner.extra_requests
+    end
+
+    # Delegated, as on `CappedBackend` — see `Backend#evidence?`.
+    def evidence? : Bool
+      @inner.evidence?
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -526,7 +613,7 @@ module Gori::Fuzz
         # is either a literal gori wrote (`GET`, `Host:`, `Connection: close`) or the origin's
         # own `Location`. Neither is a place an operator could have written a `$NAME` for a
         # binding to resolve, so there is nothing here to substitute in the first place.
-        current = @backend.send(nxt, [{0, nxt.size}])
+        current = @backend.send(nxt, Backend.all_verbatim(nxt))
         retried ||= current.retried?
         total_us += current.duration_us
         hops += 1

@@ -176,8 +176,16 @@ module Gori::Sequencer
                 else
                   resync_expanded_body(options.request, Env.expand_wire(String.new(options.request)))
                 end
+      # `evidence:` carries the branch above to the SEND seam, where session bindings resolve
+      # (`Fuzz::Sender#evidence?`). The Sequencer is the worst place in gori to get this
+      # wrong for the same reason `resync_expanded_body` gives below: its whole output is a
+      # VERDICT about a token, and every one of the `--count` samples is the same captured
+      # request re-sent. Substituting a `$id` in that capture makes the entropy report a
+      # statement about a request the operator never captured — measured at 5 tainted sends
+      # out of 6 on `gori run sequence <flow> --bind-from <flow>`.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
-        sni: options.sni, timeout: config.timeout, overrides: options.overrides)
+        sni: options.sni, timeout: config.timeout, overrides: options.overrides,
+        evidence: options.evidence?)
       new(engine: Engine.new(request, options.http2?, sender, config), config: config,
         origin: origin, request: request,
         request_target: Gori::Outbound.request_target(request), http2: options.http2?)

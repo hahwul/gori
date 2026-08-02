@@ -1354,11 +1354,18 @@ module Gori::Tui
       # the project's host overrides (#367 — without them this path resolves the target for
       # real while ^R honours the operator's pin), and `Env.expand` over the SNI, which the
       # CLI and MCP minimize paths have always done and this one did not.
+      #
+      # And `evidence:` — the third. The `resolve` proc above already acts on it, and the
+      # comment on it already says the `$KEY` substitution is not owed to captured bytes; the
+      # SESSION-BINDING substitution lives one seam later, inside `Fuzz::Sender`, and ran
+      # regardless. This is the most exposed of the three minimize surfaces because a live TUI
+      # holds bound bindings continuously, which is the normal state and not the exceptional
+      # one. See `Fuzz::Sender#evidence?`.
       backend = Fuzz::CappedBackend.new(
         Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, view.http2?,
           !@host.session.config.insecure_upstream?,
           view.sni_override.try { |s| Env.expand(s).presence }, timeout: 10.seconds,
-          overrides: @host.session.host_overrides),
+          overrides: @host.session.host_overrides, evidence: evidence),
         Repeater::Minimize::SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report

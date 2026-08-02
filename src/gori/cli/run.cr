@@ -419,8 +419,20 @@ module Gori
         if err = bind_from_blocker(bindings)
           abort "#{cmd}: #{err}"
         end
+        # `evidence: true` is not conditional here and cannot be: `built` is
+        # `Repeater::FlowRequest.build(detail)`, which reads `request_head`/`request_body` and
+        # nothing else, and the operator supplied one integer. There is no draft on this path
+        # — every byte is a capture — so it is exactly the case `Sender#evidence?` describes.
+        #
+        # Ordering makes it look harmless and is precisely why it must be set: the binding
+        # table is empty at this instant (that is what the replay is FOR), so nothing
+        # substitutes today. But `Env.layer` is a per-project global that any surface may have
+        # filled — and `--bind-from` is the one command whose contract is "these are somebody
+        # else's bytes, sent to mint a token". A seed that spliced an already-held token into
+        # the capture would corrupt the very response the run's bindings are read from.
         sender = Repeater::Sender.new(outbound, scheme: scheme, host: host, port: port,
-          verify: !insecure, http2: built.http2, sni: built.sni, overrides: overrides)
+          verify: !insecure, http2: built.http2, sni: built.sni, overrides: overrides,
+          evidence: true)
         result = sender.send(built.bytes)
         if err = result.error
           abort "#{cmd}: --bind-from: replaying flow ##{flow_id} failed: #{err}"
