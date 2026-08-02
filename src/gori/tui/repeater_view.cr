@@ -1211,11 +1211,45 @@ module Gori::Tui
     end
 
     # "Minimize request" removes header/cookie/param lines from the plain-text request and
-    # re-sends to verify the response is unchanged — so it needs plain HTTP text: hex / gRPC
-    # / WS / decode carry their own byte semantics, and §…§ markers make line-removal +
-    # resolution ambiguous. h2 is fine (H2Engine reframes the h1-form text).
+    # re-sends to verify the response is unchanged.
     def minimizable? : Bool
-      !(@req_hex_edit || @grpc_mode || @ws_mode || @decode_kind) && marker_regions.empty?
+      minimize_refusal.nil?
+    end
+
+    # Why minimize cannot run on this buffer, or nil. Public and NAMED because these are three
+    # different problems and "not minimizable" answers none of them; `minimizable?` is defined
+    # in terms of it so the predicate and the sentence cannot drift.
+    #
+    # The `%%%` clause is the third whole-buffer reader on this branch. `repeater_minimize`
+    # never calls `request_bytes` — it snapshots `request_text` and re-syncs Content-Length
+    # over the whole buffer in its own `resolve` — so the framing `^R` now refuses ONCE, a
+    # minimize did up to `Minimize::SEND_CAP` times in one keypress:
+    #
+    #   pane     Content-Length: 3     minimizable?  true
+    #   resolve  Content-Length: 60    ×hundreds of probe sends
+    #
+    # Unlike `group_framing_refusal` this is NOT scoped to auto-CL: `Minimize.run` reads
+    # `base_text` STRUCTURALLY as one request (head/body split, then header/cookie/param
+    # candidates), so on a group buffer it strips lines out of the operator's SECOND request
+    # and reports them as headers removed from the first — meaningless whether or not gori
+    # wrote the Content-Length. With `^L` off a whole-buffer `^R` is still a legitimate
+    # byte-exact send, which is why that one stays allowed and this one does not.
+    #
+    # h2 is fine, via `group_framing_applies?`: `%%%` is not a group there (send_pipeline is
+    # an h1 primitive), the pane already reflects the whole buffer, and there is nothing
+    # chunk-scoped to misread.
+    def minimize_refusal : String?
+      if @req_hex_edit || @grpc_mode || @ws_mode || @decode_kind
+        return "minimize needs a plain HTTP text request (not hex/gRPC/WS/decode)"
+      end
+      unless marker_regions.empty?
+        return "minimize does not render §…§ markers — clear them first (line removal and chain resolution are ambiguous together)"
+      end
+      if group_document?(@editor.wire_lines)
+        return "request holds a %%% separator, so minimize would read several requests as one — " \
+               "remove it, or minimize each request in its own tab"
+      end
+      nil
     end
 
     # The requests a "send group" pipelines: the editor text split on a lone `%%%` line,
@@ -1300,13 +1334,21 @@ module Gori::Tui
     # both the reflection that writes them and the refusal that stops a whole-buffer send from
     # reading them — they are the same question, and letting them drift apart is the bug.
     #
-    # `group_framing_applies?` (NOT `group_sendable?` — see there): in gRPC / WS / decode / h2
-    # the controller will not run a group send at all, so chunking the pane there would carry
-    # every cost of the split with none of its point. Those modes reflect the whole buffer and
-    # need no refusal. Hex is in, because its bytes are a snapshot of a chunked pane.
+    # `group_document?` is the structural half — "this buffer is SEVERAL requests" — and the
+    # auto-CL clause is the "…and gori wrote a number for the first one" half. Split because
+    # the two readers need different halves: `^R`/`^X` only lie when gori wrote the number
+    # (with `^L` off a whole-buffer send is byte-exact and legitimate), while minimize is
+    # meaningless on several requests whatever the number is. See `minimize_refusal`.
     private def chunked_reflection?(wl : Array({String, String})) : Bool
-      @auto_content_length && group_framing_applies? &&
-        pipeline_live?(wl) && pipeline_sep_count(wl) > 0
+      @auto_content_length && group_document?(wl)
+    end
+
+    # Is this buffer several requests rather than one? `group_framing_applies?` (NOT
+    # `group_sendable?` — see there): in gRPC / WS / decode / h2 a lone `%%%` is not a
+    # separator at all, so those modes reflect the whole buffer and need no refusal. Hex is
+    # in, because its bytes are a snapshot of a chunked pane.
+    private def group_document?(wl : Array({String, String})) : Bool
+      group_framing_applies? && pipeline_live?(wl) && pipeline_sep_count(wl) > 0
     end
 
     # Record how many `%%%` lines the just-seeded buffer arrived with. Called from every

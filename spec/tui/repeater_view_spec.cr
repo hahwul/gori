@@ -947,6 +947,56 @@ describe Gori::Tui::RepeaterView do
           "POST /g1 HTTP/1.1\r\nHost: h.test\r\nContent-Length: 3\r\n\r\nAAA")
       end
 
+      # The THIRD whole-buffer reader. `repeater_minimize` never calls `request_bytes` — it
+      # snapshots `request_text` and re-syncs Content-Length over the whole buffer in its own
+      # `resolve` — so the framing `^R` refuses ONCE, a minimize did up to SEND_CAP times in
+      # one keypress. See `RepeaterView#minimize_refusal`.
+      it "refuses MINIMIZE, whose one keypress carries that framing hundreds of times" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, false, true)
+        view.minimizable?.should be_false # was true
+        view.minimize_refusal.not_nil!.should contain("%%% separator")
+        view.minimize_refusal.not_nil!.should contain("several requests as one")
+      end
+
+      it "refuses MINIMIZE with auto-CL OFF too — unlike ^R, which stays allowed there" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, false, false)
+        # `Minimize.run` reads base_text STRUCTURALLY as one request, so on a group buffer it
+        # strips lines out of the operator's SECOND request whatever the Content-Length says.
+        # A whole-buffer `^R` with ^L off is a legitimate byte-exact send; this is not.
+        view.minimizable?.should be_false
+        String.new(view.request_bytes).should contain("Content-Length: 99") # ^R still allowed
+      end
+
+      it "COMPLEMENT: minimize still runs on an ordinary request, and names its other refusals" do
+        plain = RepeaterView.new
+        plain.restore("http://h.test", "GET /a?x=1 HTTP/1.1\nHost: h.test\n\n", false, true)
+        plain.minimizable?.should be_true
+        plain.minimize_refusal.should be_nil
+
+        marked = RepeaterView.new
+        marked.restore("http://h.test", "GET /a?x=§1§ HTTP/1.1\nHost: h.test\n\n", false, true)
+        marked.minimizable?.should be_false
+        marked.minimize_refusal.not_nil!.should contain("§…§")
+
+        hex = RepeaterView.new
+        hex.restore("http://h.test", "GET /a HTTP/1.1\nHost: h.test\n\n", false, true)
+        hex.focus_pane(:request)
+        hex.toggle_request_hex
+        hex.minimize_refusal.not_nil!.should contain("plain HTTP text")
+      end
+
+      it "COMPLEMENT: h2 minimizes and sends whole — %%% is not a separator there" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, true, true) # http2: true
+        view.minimizable?.should be_true                 # send_pipeline is an h1 primitive
+        # 61, not the 60 of the auto-CL-ON group: with no chunking the SECOND request's own
+        # `Content-Length: 99` is left as body text rather than resynced to 2.
+        view.request_text.should contain("Content-Length: 61")              # pane reads whole-buffer
+        String.new(view.request_bytes).should contain("Content-Length: 61") # …and the wire agrees
+      end
+
       it "COMPLEMENT: a CAPTURED %%% is inert, so it reflects and sends WHOLE, unrefused" do
         repeater_tmp_store do |store|
           view = RepeaterView.new
