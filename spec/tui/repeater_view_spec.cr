@@ -1452,6 +1452,35 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  it "carries a binary out-frame's invalid UTF-8 byte-exact into a wscat -x command" do
+    # `RepeaterController#repeater_request_options` turns each `ws_out_messages` payload into
+    # the `String` `CopyMenu.request_options` feeds to `wscat_command`. That String used to go
+    # through `.scrub` first, so "Copy as wscat" of a binary out-frame handed the operator a
+    # command that did not reproduce what gori actually sent — the same defect a round-7 fixer
+    # closed for "Copy as cURL"'s `--data-raw` (see `CopyMenu.shell_quote`'s comment). Fixed by
+    # dropping the controller's `.scrub`, since `shell_quote` is byte-safe on its own. This
+    # reproduces the controller's exact composition — `RepeaterView` for the frame, the
+    # controller's own map expression, then the real (unmodified) `CopyMenu` — without needing
+    # a full `Host` (no spec anywhere constructs a TUI controller; see `tab_controller.cr`).
+    bin = Bytes[0xff_u8, 0xfe_u8, 0x01_u8, 0x02_u8]
+    repeater_tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/ws", http_version: "HTTP/1.1",
+        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+      view = RepeaterView.new
+      view.load_ws(store.get_flow(id).not_nil!, [Gori::Store::WsOutMessage.new(2, bin)])
+
+      # The exact expression now in `repeater_controller.cr` (`String.new`, not `.scrub`).
+      ws_messages = view.ws_out_messages.map { |message| String.new(message.payload) }
+      opts = Gori::Tui::CopyMenu.request_options(
+        String.new(view.request_bytes), "https://ws.test", websocket_messages: ws_messages)
+      wscat = opts.find! { |o| o.key == 'w' }
+      wscat.text.to_slice.hexstring.should contain(bin.hexstring)
+      wscat.text.to_slice.hexstring.should_not contain("efbfbd")
+    end
+  end
+
   it "keeps an unsaved message edit when a peer's request-side change reconciles in" do
     # `apply_peer_request` runs on every cross-session request-side change and re-seeds the
     # message pane. Adopting the peer's messages under an unsaved local edit would send

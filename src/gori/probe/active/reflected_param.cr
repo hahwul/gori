@@ -74,7 +74,10 @@ module Gori
             req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
             ct = (req.headers.get?("Content-Type") || "").downcase
             if ct.includes?("x-www-form-urlencoded")
-              each_param_name(String.new(body).scrub) { |raw| names << {decode_name(raw), "form"} }
+              # Not `.scrub`: the body is captured bytes and this key must stay
+              # byte-identical to `plan`'s (see `canary_pairs` below), which reads the
+              # same un-scrubbed text to build the request it actually SENDS.
+              each_param_name(String.new(body)) { |raw| names << {decode_name(raw), "form"} }
             elsif ct.includes?("json")
               each_json_string_key(body) { |k| names << {k, "json"} }
             end
@@ -103,7 +106,15 @@ module Gori
           if body && !body.empty?
             ct = (req.headers.get?("Content-Type") || "").downcase
             if ct.includes?("x-www-form-urlencoded")
-              nb, fp = canary_pairs(String.new(body).scrub, "form")
+              # Not `.scrub`: this rebuilds the BODY THE PROBE SENDS. `canary_pairs` only
+              # ever emits a fresh canary for a param's VALUE — never reads it back — but
+              # every param NAME and every pair the split/`=` scan skips (no `=`, empty
+              # name) is copied out of this text verbatim. Scrubbing first meant an
+              # untouched, unrelated field carrying a raw non-UTF-8 byte reached the origin
+              # as three `U+FFFD` bytes instead of the one the operator's capture had.
+              # `String#split(Char)`/`#index`/`#[]` only slice on byte offsets found by
+              # scanning, so the un-scrubbed text is safe to split.
+              nb, fp = canary_pairs(String.new(body), "form")
               params.concat(fp)
               new_body = nb.to_slice
             elsif ct.includes?("json")
@@ -147,9 +158,12 @@ module Gori
         end
 
         # The top-level JSON keys with a STRING value — the SAME fields canary_json canaries.
+        # Not `.scrub`: must read the same bytes `canary_json` does, or a key name carrying
+        # invalid UTF-8 would compute a different dedup key than `plan` does. `JSON.parse`
+        # does not require valid UTF-8 inside a string body to parse it.
         private def each_json_string_key(body : Bytes, & : String ->)
           h = begin
-            JSON.parse(String.new(body).scrub).as_h?
+            JSON.parse(String.new(body)).as_h?
           rescue JSON::ParseException
             nil
           end
@@ -294,10 +308,16 @@ module Gori
 
         # Replace top-level JSON string values with canaries; nil unless the root is an object
         # with at least one string field.
+        #
+        # Not `.scrub`: this rebuilds the BODY THE PROBE SENDS. Every string field NOT chosen
+        # for a canary is carried through as the `JSON::Any` this parse produced (`merged[k] =
+        # v`), so scrubbing first meant any non-canaried string field holding a raw non-UTF-8
+        # byte reached the origin as `U+FFFD`. `JSON.parse` does not require its input to be
+        # valid UTF-8 to parse a string value's bytes, and `to_json` round-trips them as-is.
         private def canary_json(body : Bytes) : {Bytes?, Array(Param)}
           params = [] of Param
           h = begin
-            JSON.parse(String.new(body).scrub).as_h?
+            JSON.parse(String.new(body)).as_h?
           rescue JSON::ParseException
             nil
           end

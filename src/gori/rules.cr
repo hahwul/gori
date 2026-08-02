@@ -482,7 +482,15 @@ module Gori
             text
           end
         else
-          text.gsub(rule.pattern, repl)
+          # `&block`, not `text.gsub(rule.pattern, repl)`: when `rule.pattern` is a single
+          # byte, `String#gsub(String, String)` delegates to the `Char` overload, which (for
+          # a multi-byte `repl`) walks ALL of `text` with `each_char` — corrupting every
+          # invalid UTF-8 byte anywhere in the message, matched or not, to U+FFFD. A body is
+          # captured bytes and a one-character literal pattern is an ordinary operator
+          # choice, so this reached the wire on any binary body a single-char rule happened
+          # to touch. The block form scans by byte index and copies with `unsafe_byte_slice`
+          # — byte-exact regardless of what `text` or `repl` contain.
+          text.gsub(rule.pattern) { repl }
         end
       in Store::RuleOp::AddHeader    then head_add_header(text, rule.pattern, repl)
       in Store::RuleOp::SetHeader    then head_set_header(text, rule.pattern, repl)
@@ -640,8 +648,22 @@ module Gori
     # Double every backslash so a substituted value cannot be read as a capture reference
     # by `String#gsub(Regex, String)`. `gsub(String, String)` interprets nothing, so this is
     # applied to the regex path alone.
+    #
+    # Byte-scanned, not `value.gsub("\\", "\\\\")`: a 1-byte `String` needle makes `gsub`
+    # delegate to the `Char` overload, which walks the value with `each_char` and rewrites
+    # any invalid UTF-8 byte to U+FFFD — three wire bytes for one. A `value` bound from
+    # `TokenExtract.position` is exactly the case this bites: it is `String.new`'d
+    # unscrubbed off a captured byte range (see the comment there), so it can carry
+    # arbitrary bytes on the way into a regex-rule replacement.
     def self.escape_backrefs(value : String) : String
-      value.includes?('\\') ? value.gsub("\\", "\\\\") : value
+      bytes = value.to_slice
+      return value unless bytes.includes?(0x5C_u8)
+      buf = IO::Memory.new(bytes.size + 8)
+      bytes.each do |b|
+        buf.write_byte(0x5C_u8) if b == 0x5C_u8
+        buf.write_byte(b)
+      end
+      String.new(buf.to_slice)
     end
 
     # Env vars + currently-bound bindings, plus the declared-name list, cached until either
