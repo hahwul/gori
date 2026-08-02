@@ -199,6 +199,25 @@ module Gori::Tui
       @host.status(@view.empty? ? "dismissed #{label} — no runs left" : "dismissed #{label}")
     end
 
+    # Halt EVERY live crawl (running OR paused) on a project-level exit — leave project /
+    # quit close the whole Runner, and a crawl's engine fiber is referenced by nothing they
+    # unwind, so without this it keeps its own sockets and runs the frontier to completion
+    # against the target while the operator is back at the project picker with no bottom
+    # bar, no run list and no key that could stop it.
+    #
+    # Same order and the same pair every tab-level close already uses: `request_stop` so
+    # the engine unwinds, then `jobs.finish` NOW, because once the Runner exits
+    # `drain_events` never runs again to see the Done event. A PAUSED run is included
+    # deliberately — `running?` covers :paused, and a paused crawl still holds its
+    # connections and would resume nothing but still never be reachable again.
+    def stop_all : Nil
+      @view.runs.each do |run|
+        next unless run.running?
+        run.request_stop
+        @host.jobs.finish(run.job_id, :stopped, "project closed") if run.job_id != 0
+      end
+    end
+
     def discover_toggle_pause : Nil
       return unless run = @view.current
       if run.paused?

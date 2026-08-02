@@ -554,6 +554,11 @@ module Gori::Tui
           break unless @outcome == :running
         end
       ensure
+        # NOT a stop_all_jobs backstop: a raise out of this loop is not caught between here
+        # and `CLI.run`, so it ends the PROCESS (`abort` for a Gori::Error, a backtrace for
+        # anything else) and the engine fibers die with it. `leave_project` / `quit!` are
+        # the only exits that hand the terminal back with fibers still able to send.
+        #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
@@ -989,13 +994,13 @@ module Gori::Tui
         if Settings.confirm_quit?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
-          confirm("QUIT GORI", "Quit gori? (pending edits are committed first)",
+          confirm("QUIT GORI", quit_message,
             confirm_label: "quit", danger: true) { quit! } unless @overlay.confirm?
         elsif @quit_armed
           quit!
         else
           @quit_armed = true
-          @toast = "press ^D (or ^C) again to quit · q: back to projects"
+          @toast = quit_arm_hint
         end
         return
       end
@@ -3154,16 +3159,91 @@ module Gori::Tui
     # --- ExecContext (verbs drive the UI through these) ----------------------
 
     def quit! : Nil
+      stop_all_jobs
       commit_pending_edits
       @outcome = :quit
     end
 
+    # `q` from the TABS row. When jobs are live the confirm NAMES them and says what
+    # leaving does to them, and the accept path stops them — the per-tab closes already
+    # do exactly this (`request_stop` + `jobs.finish(:stopped, …)`); the project-level
+    # exit was the one that skipped it, so a Discover crawl kept its own sockets and ran
+    # the frontier to completion against the target while the operator was back at the
+    # picker with no bottom bar, no run list and no key that could stop it.
+    #
+    # With NOTHING running the modal is byte-identical to what it always was: no extra
+    # line, and still a non-danger confirm — closing an idle project discards nothing.
     def leave_project : Nil
-      confirm("LEAVE PROJECT", "Close this project and return to the picker?",
-        confirm_label: "leave", danger: false, return_to: @overlay.to_sym) do
+      active = @jobs.active_summary
+      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size),
+        confirm_label: "leave", danger: !active.nil?, return_to: @overlay.to_sym) do
+        # Inside the accept block, so a CANCEL leaves every job running untouched.
+        stop_all_jobs
         commit_pending_edits
         @outcome = :back
       end
+    end
+
+    # Halt every background engine on the way out of a project. Each controller applies
+    # the same `request_stop` + `jobs.finish(:stopped, …)` pair its own tab-close applies;
+    # this is the project-level twin of that, and the reason it must run HERE rather than
+    # be left to `Session#close` is that nothing the Runner unwinds holds a reference to an
+    # engine fiber — it owns its own sockets and would keep sending. Order does not matter
+    # (each controller only touches its own tabs), but every job-owning controller must be
+    # listed: the ones that call `@host.jobs.start` are discover / fuzzer / miner /
+    # sequencer / repeater(minimize) / oast.
+    private def stop_all_jobs : Nil
+      discover_controller.stop_all
+      fuzzer_controller.stop_all
+      miner_controller.stop_all
+      sequencer_controller.stop_all
+      repeater_controller.stop_all
+      oast_controller.stop_all
+    end
+
+    private def quit_message : String
+      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size)
+    end
+
+    private def quit_arm_hint : String
+      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size)
+    end
+
+    # The three EXIT prompts, as pure functions of `Jobs#active_summary` + the active
+    # count. `self.` and pure because the Runner needs a live tty to instantiate and these
+    # strings ARE the decision the operator makes on the way out — the same reason
+    # `RepeaterController.literal_bindings` is a class method. See
+    # `spec/tui/exit_jobs_spec.cr`.
+    #
+    # `active == nil` (nothing running) must return the ORIGINAL sentence, byte for byte:
+    # closing an idle project or quitting an idle gori gains no prompt noise from this.
+    #
+    # The two modal messages put the count/consequence and the per-kind inventory on
+    # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
+    # columns, so one combined sentence lost its own verb to the ellipsis.
+    def self.leave_confirm_message(active : String?, count : Int32) : String
+      base = "Close this project and return to the picker?"
+      return base unless active
+      "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}"
+    end
+
+    # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
+    # for the same reason the leave confirm does: quitting abandons them.
+    def self.quit_confirm_message(active : String?, count : Int32) : String
+      base = "Quit gori? (pending edits are committed first)"
+      return base unless active
+      "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}"
+    end
+
+    # A status toast, not a card, so this one stays on a single line.
+    def self.quit_arm_hint(active : String?, count : Int32) : String
+      base = "press ^D (or ^C) again to quit · q: back to projects"
+      return base unless active
+      "#{job_count(count)} running (#{active}) — press ^D (or ^C) again to quit and stop #{count == 1 ? "it" : "them"}"
+    end
+
+    private def self.job_count(count : Int32) : String
+      "#{count} job#{count == 1 ? "" : "s"}"
     end
 
     # Flush any in-progress editor before leaving/quitting (quit is now centralized,

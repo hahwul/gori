@@ -287,6 +287,16 @@ module Gori::Tui
       @host.status("stopped listening with #{prov.name}")
     end
 
+    # Stop every live listener on a project-level exit (leave project / quit). A listener
+    # is an `:oast` job like any other, so it answers `Jobs#any_active?` and is named in the
+    # leave confirm — leaving it polling a third-party provider from a project the operator
+    # believes they closed is the same defect as a crawl that keeps sending. Reuses
+    # stop_listener, so the provider is deregistered exactly as an explicit stop does.
+    # Iterates a COPY: stop_listener deletes from @listeners.
+    def stop_all : Nil
+      @listeners.dup.each { |l| stop_listener(l) }
+    end
+
     private def start_listening(prov : Oast::ProviderConfig, want_payload : Bool) : Nil
       # A register round-trip takes a few seconds and only appends the Listener on the
       # drain tick AFTER it returns, so listener_for is nil the whole time. Without an

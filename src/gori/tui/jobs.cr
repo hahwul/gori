@@ -40,6 +40,14 @@ module Gori::Tui
 
     CAP = 50 # cap finished jobs kept (running ones are never pruned)
 
+    # Kinds `active_summary` names before the tail collapses to "+N more". A hard bound,
+    # not a nicety: `ConfirmDialog` clamps its card at 60 columns and ellipsises anything
+    # wider, and the line it ate first was the exit confirm's own verb. Two named kinds
+    # plus the tail is 41 cells at the worst count this registry can hold (CAP), three is
+    # 46 — both inside the 54 a card line gets. Only the 4th kind onward collapses, so the
+    # ordinary one- and two-engine cases read in full.
+    SUMMARY_KINDS = 2
+
     def initialize
       @jobs = [] of Job
       @next_id = 0
@@ -79,6 +87,23 @@ module Gori::Tui
 
     def any_active? : Bool
       @jobs.any?(&.running?)
+    end
+
+    # The live jobs per kind, for an EXIT prompt: "discovering 1 · fuzzing 2". nil when
+    # nothing is active, so a caller can keep its no-jobs wording byte-identical rather
+    # than growing a "0 jobs" clause. Shares KIND_LABELS with activity_label so the prompt
+    # names the work exactly as the status-bar chip already does.
+    #
+    # Unlike the chip it never collapses to "jobs:N": an exit prompt is the one place the
+    # operator has to decide with, and "leaving stops them" is only actionable if it says
+    # WHAT it is stopping. The inventory alone — the SENTENCE around it belongs to the
+    # caller, which is also what keeps each line inside ConfirmDialog's 60-column card.
+    def active_summary : String?
+      a = active
+      return nil if a.empty?
+      parts = a.group_by(&.kind).map { |kind, js| "#{KIND_LABELS.fetch(kind, "jobs")} #{js.size}" }
+      return parts.join(" · ") if parts.size <= SUMMARY_KINDS + 1
+      "#{parts.first(SUMMARY_KINDS).join(" · ")} · +#{parts.size - SUMMARY_KINDS} more"
     end
 
     # The status-bar chip text (the Runner prepends a spinner glyph). nil → no chip.
