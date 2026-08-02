@@ -4,6 +4,7 @@ require "./inject"
 require "./fingerprint"
 require "./baseline"
 require "../fuzz/engine"
+require "../fuzz/matcher"
 
 module Gori::Miner
   # The hard-cap wrapper (baseline calibration + bucket probes + confirmation rounds all
@@ -272,6 +273,8 @@ module Gori::Miner
       last_status = nil.as(Int32?)
       last_delta = 0_i64
       last_canary = canary
+      last_grpc_status = nil.as(Int32?)
+      last_grpc_message = nil.as(String?)
       rounds.times do
         c = Canary.fresh
         # Same span-protection as the main loop — the confirm re-send injects the same name.
@@ -287,12 +290,17 @@ module Gori::Miner
           last_status = probe.metrics.status
           last_delta = probe.metrics.length - r.base_length
           last_canary = c if evidence.reflection?
+          # Same projection the Fuzzer uses (`Fuzz::GrpcVerdict.response`): the h2 `:status`
+          # above is 200 for every gRPC call, so for a gRPC target this — not `last_status` —
+          # is the isolated candidate's real outcome. nil/nil for a non-gRPC response, at the
+          # cost of one allocation-free byte scan.
+          last_grpc_status, last_grpc_message = Fuzz::GrpcVerdict.response(raw.head)
           break if hits >= majority
         end
       end
       return nil if hits == 0
       Finding.new(name, location, evidence, confidence_for(hits >= majority, location),
-        last_canary, last_status, last_delta)
+        last_canary, last_status, last_delta, last_grpc_status, last_grpc_message)
     end
 
     private def confidence_for(reproduced : Bool, location : Location) : Confidence

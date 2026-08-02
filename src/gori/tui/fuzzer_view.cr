@@ -15,6 +15,7 @@ require "./chain_pane"
 require "./chain_overlay"
 require "../store"
 require "../fuzz"
+require "../proxy/h2/grpc"
 require "../decoder"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
@@ -2196,7 +2197,17 @@ module Gori::Tui
         # isn't invisible among clean rows. #567/H3 Finding 1.
         screen.text(x, y, "⚠ ¦chain not applied", Theme.yellow, bg, width: {inner.right - x, 1}.max)
       else
-        screen.text(x, y, "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}", selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+        line = "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}"
+        # For a gRPC target the h2 `:status` to the left is 200 by definition; THIS is the
+        # call's real outcome. Only rendered when the response carried it, so a non-gRPC row
+        # is unchanged — same fields `cli/output.cr:fuzz_row_text` already renders.
+        if gs = r.grpc_status
+          x2 = screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+          gline = " grpc #{gs} #{Proxy::H2::Grpc.status_name(gs)}#{r.grpc_message ? " · #{r.grpc_message}" : ""}"
+          screen.text(x2, y, gline, gs == 0 ? Theme.green : Theme.red, bg, width: {inner.right - x2, 1}.max)
+        else
+          screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+        end
       end
     end
 
