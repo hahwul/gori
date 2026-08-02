@@ -282,6 +282,48 @@ module Gori::Fuzz
 
     # ── Marking helpers (shared by the TUI editor and the CLI) ────────────────────
 
+    # PROVENANCE, for a SEED path: neutralise every `§` in bytes that arrived off the WIRE,
+    # by doubling it into the `§§` escape `parse` already folds back to a single literal `§`.
+    #
+    # `§` is U+00A7 — ordinary text, ubiquitous in German and legal bodies — so a capture
+    # carries it for reasons that have nothing to do with gori. Dropped into a template
+    # buffer raw, a captured `§…§` pair IS the injection-position syntax: the site's own
+    # text becomes a position nobody marked, and a run replaces it with every payload in the
+    # set. Escaping keeps the bytes (`render` puts the single `§` back on the wire) and
+    # leaves the buffer honest — the operator can still delete a `§` to mark it deliberately.
+    #
+    # Returns `raw` ITSELF when there is no `§` in it, so the overwhelmingly common seed is
+    # byte-identical and allocation-free.
+    def self.escape_literal_markers(raw : Bytes) : Bytes
+      return raw unless marker_bytes_in?(raw)
+      io = IO::Memory.new(raw.size + 8)
+      i = 0
+      while i < raw.size
+        if raw[i] == MARKER_BYTES[0] && i + 1 < raw.size && raw[i + 1] == MARKER_BYTES[1]
+          io.write(MARKER_BYTES) # §§ — one literal § again after `parse`
+          io.write(MARKER_BYTES)
+          i += 2
+        else
+          io.write_byte(raw[i])
+          i += 1
+        end
+      end
+      io.to_slice
+    end
+
+    # True when `raw` holds the two-byte UTF-8 encoding of `§`. A BYTE scan, so a buffer
+    # carrying invalid UTF-8 is never walked as chars (`String#includes?('§')` would be, and
+    # this is asked about captured request bytes). As precise as the char test: UTF-8 is
+    # self-synchronizing and 0xC2 is a lead byte, never a continuation.
+    def self.marker_bytes_in?(raw : Bytes) : Bool
+      i = 0
+      while i < raw.size - 1
+        return true if raw[i] == MARKER_BYTES[0] && raw[i + 1] == MARKER_BYTES[1]
+        i += 1
+      end
+      false
+    end
+
     # Wrap every query / cookie / urlencoded-or-JSON body VALUE in `§…§`. A no-op if
     # the text already contains any marker (don't double-mark).
     def self.auto_mark(text : String) : String
@@ -313,6 +355,10 @@ module Gori::Fuzz
     # existing pair → strip it; on a word → wrap it; on a delimiter/space → unchanged
     # (a bare `§§` would parse as an escaped literal §, so empty positions aren't made
     # this way — use auto_mark or type the default between the markers).
+    #
+    # `chars` decides WHERE the marker goes; the returned text is spliced out of `text`
+    # itself. See the BYTE-SAFETY note under `split_raw_interior` for why the two are not
+    # the same thing.
     def self.mark_word(text : String, cursor : Int32) : String
       chars = text.chars
       n = chars.size
@@ -322,7 +368,7 @@ module Gori::Fuzz
         # Drop the whole marker: both `§` AND any `¦chain` (keep only the raw value),
         # else unmarking `§v¦b64§` would leave a stray `v¦b64`.
         value, _ = split_raw_interior(chars[(a + 1)...b])
-        return "#{chars[0, a].join}#{value.join}#{chars[(b + 1)..].join}"
+        return "#{text[0, a]}#{text[a + 1, value.size]}#{text[(b + 1)..]}"
       end
       lo = cur
       while lo > 0 && word_char?(chars[lo - 1])
@@ -333,9 +379,9 @@ module Gori::Fuzz
         hi += 1
       end
       if lo == hi
-        chars.join # on a delimiter/space: no token to wrap (a bare §§ would parse as an escaped literal §, not a position)
+        text # on a delimiter/space: no token to wrap (a bare §§ would parse as an escaped literal §, not a position)
       else
-        "#{chars[0, lo].join}#{MARKER}#{chars[lo, hi - lo].join}#{MARKER}#{chars[hi, n - hi].join}"
+        "#{text[0, lo]}#{MARKER}#{text[lo, hi - lo]}#{MARKER}#{text[hi..]}"
       end
     end
 
@@ -382,8 +428,12 @@ module Gori::Fuzz
       close = b - 1 # index of the closing §
       value, _ = split_raw_interior(chars[(a + 1)...close])
       clean = chain.strip
-      interior = clean.empty? ? value.join : "#{value.join}#{CHAIN_SEP}#{escape_chain(clean)}"
-      "#{chars[0, a + 1].join}#{interior}#{chars[close..].join}"
+      # The value is spliced out of `text`, never rebuilt from its chars — see the
+      # BYTE-SAFETY note under `split_raw_interior`. (`escape_chain` runs on the CHAIN,
+      # which is a converter spec the operator typed, not captured bytes.)
+      raw_value = text[a + 1, value.size]
+      interior = clean.empty? ? raw_value : "#{raw_value}#{CHAIN_SEP}#{escape_chain(clean)}"
+      "#{text[0, a + 1]}#{interior}#{text[close..]}"
     end
 
     # The closed `§…§` span `{a, b}` (b == closing-§ index + 1) whose STRUCTURE the
@@ -424,7 +474,8 @@ module Gori::Fuzz
       a, b = span
       close = b - 1
       value, _ = split_raw_interior(chars[(a + 1)...close])
-      new_text = "#{chars[0, a].join}#{value.join}#{chars[b..].join}"
+      # Spliced out of `text` — see the BYTE-SAFETY note under `split_raw_interior`.
+      new_text = "#{text[0, a]}#{text[a + 1, value.size]}#{text[b..]}"
       {new_text, a + value.size}
     end
 
@@ -447,6 +498,21 @@ module Gori::Fuzz
     # Split a marker's RAW interior chars at the first UNESCAPED `¦` into
     # {value, chain}. `§§` and `¦¦` are escapes (skip both), so an escaped `¦` isn't a
     # boundary. `chain` is nil when the marker carries no chain.
+    #
+    # BYTE SAFETY — read before touching a marking helper. Its callers use only the
+    # `.size` of what comes back, never the chars themselves, and that is the rule the
+    # whole marking layer follows: a `text.chars` array may decide WHERE a boundary is,
+    # but the text handed back must be spliced out of the ORIGINAL String (`text[a, n]`,
+    # which copies bytes), never rebuilt with `.join` — and never passed through
+    # `String#gsub`, which walks chars just the same. Crystal's char iteration substitutes
+    # U+FFFD for every byte that is not valid UTF-8, so a `chars.join` rebuild turns each
+    # such byte into the THREE bytes of the replacement character. `parse`/`render` were
+    # made byte-oriented for exactly this reason (see the header); `mark_word`,
+    # `strip_marker` and `set_chain` were not, and ^K on a token in a captured binary
+    # request rewrote the rest of that request — measured, on `x=1 bin=<ff fe 01 02>`:
+    # `ff fe` came back as `ef bf bd ef bf bd`, +4 bytes under a Content-Length that then
+    # resynced to the corruption. `auto_mark` below was always safe and is the model:
+    # it slices the String, it does not walk it.
     private def self.split_raw_interior(interior : Array(Char)) : {Array(Char), Array(Char)?}
       i = 0
       n = interior.size

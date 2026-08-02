@@ -1130,3 +1130,110 @@ describe "Gori::Tui::FuzzerView matched_count accounting" do
     view.matched_count.should eq(0)
   end
 end
+
+describe "Gori::Tui::FuzzerView ⇧I capture seeding" do
+  # PROVENANCE, on the Fuzzer's own road into a capture (⇧I from History / Issues evidence).
+  # `§` (U+00A7) is ordinary text — a German or legal body carries it constantly — but `#load`
+  # dropped the capture's bytes straight into the template buffer, where `§…§` IS the
+  # injection-position syntax. So the site's own text became a position the operator never
+  # marked, and a run replaced it with every payload in the set. The same line also `.scrub`ed,
+  # so a capture that is not valid UTF-8 was rewritten to U+FFFD before the operator saw it —
+  # under a Content-Length the plan then resynced to the corruption.
+  #
+  # RepeaterView solved the sibling case by escaping an inert `§` to the `§§` literal
+  # `Fuzz::Template.parse` already defines; this is the same escape at the same kind of seam.
+  describe "⇧I: a CAPTURED § is data, not a fuzz position" do
+    # `§SEED§` next to every other byte class a template must carry unchanged: a CRLF inside
+    # the body, invalid UTF-8, a captured `$TOKEN`, a tab.
+    body = IO::Memory.new.tap { |io|
+      io << %({"note":"a\r\nb","mk":"§SEED§","env":"$TOKEN","bin":")
+      io.write(Bytes[0xFF, 0xFE, 0x01, 0x02])
+      io << %(","tab":"\tx"})
+    }.to_slice
+    head = "POST /seed?q=1 HTTP/1.1\r\nHost: h.test\r\n" \
+           "Content-Type: application/json\r\nContent-Length: #{body.size}\r\n" \
+           "Connection: close\r\n\r\n"
+    wire = head.to_slice.to_a + body.to_a
+
+    seed = ->(store : Gori::Store, b : Bytes, h : String) do
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/seed?q=1", http_version: "HTTP/1.1",
+        head: h.to_slice, body: b))
+      store.get_flow(id).not_nil!
+    end
+
+    it "escapes the capture's § instead of fuzzing the site's own text" do
+      with_fuzz_store do |store|
+        view = FuzzerView.new
+        view.load(seed.call(store, body, head))
+        tmpl = Gori::Fuzz::Template.parse(view.template_text)
+        tmpl.position_count.should eq(0) # was 1 — `SEED` swept as an injection position
+        view.template_text.should contain(%("mk":"§§SEED§§"))
+        # …and the template renders back to the captured request BYTE FOR BYTE.
+        tmpl.render(tmpl.default_payloads).to_a.should eq(wire)
+      end
+    end
+
+    it "does not scrub a capture that is not valid UTF-8" do
+      with_fuzz_store do |store|
+        view = FuzzerView.new
+        view.load(seed.call(store, body, head))
+        seeded = view.template_text.to_slice
+        # `ff fe 01 02` survived — `.scrub` used to make it `ef bf bd ef bf bd 01 02`, four
+        # bytes of growth the Content-Length knew nothing about.
+        (0..(seeded.size - 4)).any? { |i| seeded[i, 4] == Bytes[0xFF, 0xFE, 0x01, 0x02] }.should be_true
+        # Exactly the two doubled § (2 bytes each) separate the buffer from the wire.
+        seeded.size.should eq(wire.size + 4)
+      end
+    end
+
+    it "^A names the literal § rather than reporting nothing to mark" do
+      with_fuzz_store do |store|
+        view = FuzzerView.new
+        view.load(seed.call(store, body, head))
+        view.focus_pane(:template)
+        # `Template.auto_mark` is a documented no-op once ANY § is in the text, and the escape
+        # puts one there. The old "no query, cookie or body values found" line would be a
+        # plain untruth about a request with `?q=1` and a JSON body in it.
+        msg = view.auto_mark
+        msg.should contain("literal")
+        msg.should contain("^K")
+        view.template_text.should contain(%("mk":"§§SEED§§")) # refused, not silently rewritten
+      end
+    end
+
+    it "^K still marks a token on the capture, and only that token" do
+      with_fuzz_store do |store|
+        view = FuzzerView.new
+        view.load(seed.call(store, body, head))
+        view.focus_pane(:template)
+        view.mark_word.should eq("marked position") # cursor at 0 → the METHOD token
+        tmpl = Gori::Fuzz::Template.parse(view.template_text)
+        tmpl.position_count.should eq(1)
+        tmpl.positions[0].default.should eq("POST")
+        # The capture's own § stayed literal, and its binary field is still intact.
+        String.new(tmpl.render(["GET"])).should contain(%("mk":"§SEED§"))
+        rendered = tmpl.render(["POST"])
+        rendered.to_a.should eq(wire)
+      end
+    end
+
+    it "COMPLEMENT: a capture with NO § seeds byte-identically" do
+      with_fuzz_store do |store|
+        plain = %({"note":"a\r\nb","env":"$TOKEN"}).to_slice
+        h = "POST /seed?q=1 HTTP/1.1\r\nHost: h.test\r\nContent-Length: #{plain.size}\r\n\r\n"
+        view = FuzzerView.new
+        view.load(seed.call(store, plain, h))
+        view.template_text.to_slice.to_a.should eq(h.to_slice.to_a + plain.to_a)
+        view.auto_mark.should eq("auto-marked 3 positions")
+      end
+    end
+
+    it "COMPLEMENT: a § the OPERATOR typed still marks and fuzzes" do
+      view = FuzzerView.new
+      view.load_request("https://h.test", "GET /?x=§1§ HTTP/1.1\r\nHost: h.test\r\n\r\n", false, "")
+      Gori::Fuzz::Template.parse(view.template_text).position_count.should eq(1)
+    end
+  end
+end
