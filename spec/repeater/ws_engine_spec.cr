@@ -142,6 +142,39 @@ describe Gori::Repeater::WsEngine do
     result.ok?.should be_false
   end
 
+  # Round 9 / r9-tls Finding 2, verified on the WS engine (the round's "verify at least one
+  # additional engine" requirement — the h1 repeater was the hunter's live repro). A `ws://`
+  # target behind a proxy that answers 200 to CONNECT and then closes without relaying is the
+  # same shape as a plain h1 clean-EOF: `read_head` returns nil on the very first read, and
+  # (before this fix) `WsEngine.send` built its OWN hardcoded "no response from …" string
+  # instead of reusing `Engine.no_response_error` — so it silently missed the proxy-tunnel
+  # clause the h1 builder now carries. This exercises that exact sibling gap.
+  it "names the proxy when a ws:// target's tunnel opens and then produces no data" do
+    proxy = TCPServer.new("127.0.0.1", 0)
+    pport = proxy.local_address.port
+    spawn do
+      conn = proxy.accept
+      while (h = conn.gets("\r\n", chomp: true)) && !h.empty?
+      end
+      conn << "HTTP/1.1 200 Connection Established\r\n\r\n"
+      conn.flush rescue nil
+      conn.close rescue nil # no relay — the tunnel produced nothing
+    end
+
+    Gori::Settings.upstream_proxy = "127.0.0.1:#{pport}"
+    begin
+      result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+        scheme: "http", host: "127.0.0.1", port: 20999, verify_upstream: false)
+      result.ok?.should be_false
+      result.error.not_nil!.should eq(
+        "no response from 127.0.0.1:20999 (reached via upstream HTTP proxy 127.0.0.1:#{pport} " \
+        "— the tunnel produced no data; the proxy may be at fault, not the target)")
+    ensure
+      Gori::Settings.upstream_proxy = ""
+      proxy.close rescue nil
+    end
+  end
+
   it "preserves non-UTF-8 header value bytes verbatim in the replayed handshake" do
     got = Channel(Bytes).new(1)
     origin = TCPServer.new("127.0.0.1", 0)

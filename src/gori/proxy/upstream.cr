@@ -311,6 +311,32 @@ module Gori::Proxy
       "upstream #{route.socks5? ? "SOCKS5" : "HTTP"} proxy #{route.host}:#{route.port}"
     end
 
+    # `proxy_label`, but nil for a direct route — the question a FAILURE BUILDER asks once it
+    # already has a socket (or a clean EOF) and needs to know whether that socket came through
+    # a tunnel. `Settings.upstream_route` is the SAME single decision point `dial_result` reads
+    # (see its own comment: "ONE decision point for how do we reach this host"), so re-asking it
+    # here — rather than threading a value through every dial's return tuple — reaches every
+    # caller (repeater h1/h2/WS engines, ConnPool, the live MITM `ClientConn`) without changing
+    # any of their signatures. Public: `Repeater::Engine#no_response_error` has no `DialError` to
+    # read (a proxy that opens the tunnel and then goes silent is not a dial FAILURE — the dial
+    # succeeded; the silence shows up later, on the first read) and needs to ask this question
+    # directly.
+    def self.proxied_via(host : String) : String?
+      route = Settings.upstream_route(host)
+      route.direct? ? nil : proxy_label(route)
+    end
+
+    # The clause to append when a failure happened on a socket that reached this far via an
+    # upstream proxy tunnel and produced no origin bytes at all: a proxy that answers `200
+    # Connection Established` and then closes is, on the bare socket, indistinguishable from the
+    # ORIGIN itself refusing or hanging — nothing on that socket remembers it came through a
+    # tunnel. Left unqualified (`label` rather than re-deriving it) so `DialError#proxy_note` and
+    # `proxied_via`'s callers share exactly one wording.
+    def self.proxy_tunnel_note(label : String?) : String
+      return "" unless label
+      " (reached via #{label} — the tunnel produced no data; the proxy may be at fault, not the target)"
+    end
+
     # Whether this route has credentials to present. A username alone is legitimate (some
     # proxies key on it), so either half being present counts.
     private def self.authenticating?(route : Settings::UpstreamRoute) : Bool
@@ -795,8 +821,16 @@ module Gori::Proxy
       getter kind : DialErrorKind
       getter detail : String?
       getter cause : String?
+      # The upstream proxy this dial's socket came through (see `Upstream.proxied_via`), set
+      # ONLY for the kinds where the failure happened after a proxy tunnel opened but before any
+      # origin byte arrived (`Tls`, `Timeout`) — never `TlsVerify` (a certificate WAS exchanged
+      # and judged, so the origin, not the tunnel, is what failed) and never `Connect`/`Proxy`
+      # (those already name the proxy precisely via `detail`, e.g. "…refused CONNECT…"). nil for
+      # a direct dial, or for any kind where a proxy tag would be redundant or wrong.
+      getter via_proxy : String?
 
-      def initialize(@kind : DialErrorKind, @detail : String? = nil, @cause : String? = nil)
+      def initialize(@kind : DialErrorKind, @detail : String? = nil, @cause : String? = nil,
+                     @via_proxy : String? = nil)
       end
 
       # A direct dial that did not connect. Deliberately carries NO detail: the caller already
@@ -817,6 +851,14 @@ module Gori::Proxy
       def because : String
         c = @cause
         c && !c.empty? ? " (#{c})" : ""
+      end
+
+      # The proxy-tunnel clause (see `via_proxy` above), appended AFTER `because` — the OpenSSL
+      # cause ("Unexpected EOF while reading") and the proxy attribution are two separate facts,
+      # not alternatives: the first says WHAT happened, the second says WHERE the fault most
+      # likely sits. Empty when this dial was not proxied (or the kind doesn't carry the tag).
+      def proxy_note : String
+        Upstream.proxy_tunnel_note(@via_proxy)
       end
     end
 
@@ -864,7 +906,7 @@ module Gori::Proxy
       # per failed origin → fd exhaustion). `tcp` is non-nil here: `dial` never raises
       # (it returns nil), so the only raising step runs after the nil-guard above.
       tcp.try(&.close) rescue nil
-      {nil, tls_dial_error(ex, io_timeout)}
+      {nil, tls_dial_error(ex, io_timeout, host)}
     end
 
     # What actually broke inside the TLS attempt. This used to be a bare `rescue` that threw
@@ -874,14 +916,24 @@ module Gori::Proxy
     # trusted; retry with --insecure-upstream or set SSL_CERT_FILE" when no certificate had
     # been exchanged at all — a wrong diagnosis with two useless remedies. OpenSSL already
     # separates the cases; this only stops discarding the answer.
-    private def self.tls_dial_error(ex : Exception, io_timeout : Time::Span) : DialError
+    #
+    # `host` is the name being dialed — used ONLY to ask `proxied_via` whether this socket came
+    # through an upstream proxy tunnel, for the two kinds below where that fact would otherwise
+    # be lost: a proxy that answers `200 Connection Established` and then closes leaves a socket
+    # that looks, to OpenSSL, exactly like a direct connection to a broken/non-TLS origin — the
+    # `Tls`/`Timeout` cases are precisely "origin reached (the tunnel opened) and then nothing
+    # came back", which is also exactly what an accept-then-close proxy produces. `TlsVerify` is
+    # deliberately excluded: a certificate WAS exchanged and rejected, so real bytes crossed the
+    # tunnel and the origin — not the proxy — earned that verdict.
+    private def self.tls_dial_error(ex : Exception, io_timeout : Time::Span, host : String) : DialError
       # A read timeout is not a TLS verdict — nothing came back to judge. Naming the layer
       # TLS here is precisely what produced the certificate advice for a black hole, so it
       # gets its own kind and carries how long gori actually waited (the stall was otherwise
       # invisible: a failed dial records no duration).
       if ex.is_a?(IO::TimeoutError)
         return DialError.new(DialErrorKind::Timeout,
-          cause: "no TLS response within #{io_timeout.total_seconds.round(1)}s")
+          cause: "no TLS response within #{io_timeout.total_seconds.round(1)}s",
+          via_proxy: proxied_via(host))
       end
       cause = exception_cause(ex)
       # OpenSSL says "certificate verify failed" for an untrusted chain, an expired leaf AND a
@@ -889,7 +941,7 @@ module Gori::Proxy
       # three. Everything else it raises is a protocol-level refusal, where offering a CA file
       # is the wrong advice.
       return DialError.new(DialErrorKind::TlsVerify, cause: cause) if cause.includes?("certificate verify failed")
-      DialError.new(DialErrorKind::Tls, cause: cause)
+      DialError.new(DialErrorKind::Tls, cause: cause, via_proxy: proxied_via(host))
     end
 
     # Longest library verdict worth carrying into a stored flow error. OpenSSL's are ~60 bytes.

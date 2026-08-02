@@ -177,8 +177,17 @@ module Gori
       # pool matches on it to tell "the origin had already closed this parked socket" (retry
       # once on a fresh connection) apart from a timeout or a mid-response failure (never
       # retried — the origin may well have processed the request).
+      #
+      # There is no `DialError` to read here — the DIAL succeeded (a proxy that answers `200
+      # Connection Established` and then closes is a successful tunnel open, by the CONNECT
+      # protocol's own rules); the silence only shows up later, on this first read. So this
+      # asks `Settings.upstream_route` directly, the same single decision point `dial_result`
+      # itself consults — the only way to reach the fact from here without threading a new
+      # value through every dial's return tuple (which would touch `ClientConn`'s live-MITM
+      # path and every other engine's signature for a clause only THIS message needs). A plain,
+      # unproxied miss keeps today's exact wording: `proxied_via` is nil for a direct route.
       def self.no_response_error(host : String, port : Int32) : String
-        "no response from #{host}:#{port}"
+        "no response from #{host}:#{port}#{Proxy::Upstream.proxy_tunnel_note(Proxy::Upstream.proxied_via(host))}"
       end
 
       # Writes one request on an already-open connection and reads its single response
@@ -338,11 +347,11 @@ module Gori
                    "or set SSL_CERT_FILE#{err.because}"
           when .tls?
             return "TLS handshake failed: #{host}:#{port} — the port may not be TLS, or the origin " \
-                   "refused the protocol/cipher#{err.because}"
+                   "refused the protocol/cipher#{err.because}#{err.proxy_note}"
           when .timeout?
             return "TLS handshake timed out: #{host}:#{port} — the origin accepted the connection " \
                    "and then sent nothing; no certificate was exchanged, so -k and SSL_CERT_FILE " \
-                   "cannot help#{err.because}"
+                   "cannot help#{err.because}#{err.proxy_note}"
           when .dns?
             return "connect failed: #{host} — the name did not resolve, so nothing was dialed#{err.because}"
           end

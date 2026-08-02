@@ -120,4 +120,96 @@ describe "Gori::Repeater::Engine.connect_error" do
     ]
     all.uniq.size.should eq(5)
   end
+
+  # Round 9 / r9-tls Finding 2. A proxy that answers 200 to CONNECT and then closes without
+  # relaying anything hands the TLS handshake a socket that fails EXACTLY like a direct
+  # black-hole/non-TLS origin — before this fix, the operator was told the ORIGIN's port "may
+  # not be TLS" when the origin was never contacted. `via_proxy` on the DialError is the fix;
+  # these assert how `connect_error` renders it.
+  describe "the proxy-tunnel clause (round 9 / Finding 2)" do
+    it "appends the clause, AFTER the OpenSSL cause, for a proxied Tls failure" do
+      err = U::DialError.new(U::DialErrorKind::Tls,
+        cause: "SSL_connect: Unexpected EOF while reading",
+        via_proxy: "upstream HTTP proxy 127.0.0.1:8080")
+      msg = E.connect_error("https", "h.test", 443, false, err)
+      msg.should eq(
+        "TLS handshake failed: h.test:443 — the port may not be TLS, or the origin refused " \
+        "the protocol/cipher (SSL_connect: Unexpected EOF while reading) (reached via " \
+        "upstream HTTP proxy 127.0.0.1:8080 — the tunnel produced no data; the proxy may be " \
+        "at fault, not the target)")
+    end
+
+    it "appends the same clause for a proxied Timeout (the tunnel opened, then silence)" do
+      err = U::DialError.new(U::DialErrorKind::Timeout,
+        cause: "no TLS response within 3.0s", via_proxy: "upstream SOCKS5 proxy 127.0.0.1:1080")
+      msg = E.connect_error("https", "h.test", 443, true, err)
+      msg.should contain("TLS handshake timed out: h.test:443")
+      msg.should contain("no TLS response within 3.0s")
+      msg.should contain("reached via upstream SOCKS5 proxy 127.0.0.1:1080")
+      msg.should contain("tunnel produced no data")
+    end
+
+    # Complement of the two above: the UNPROXIED (direct) case must render BYTE-IDENTICAL to
+    # what it did before this fix (`handshake_error`/`blackhole_error` above never set
+    # `via_proxy`) — this is the regression risk the round explicitly flags.
+    it "adds nothing for a direct dial — today's wording is unchanged" do
+      E.connect_error("https", "h.test", 443, false, handshake_error)
+        .should eq("TLS handshake failed: h.test:443 — the port may not be TLS, or the origin " \
+                   "refused the protocol/cipher (SSL_connect: error:0A00010B:SSL routines::wrong version number)")
+      E.connect_error("https", "h.test", 443, true, blackhole_error)
+        .should eq("TLS handshake timed out: h.test:443 — the origin accepted the connection " \
+                   "and then sent nothing; no certificate was exchanged, so -k and " \
+                   "SSL_CERT_FILE cannot help (no TLS response within 3.0s)")
+    end
+
+    # Complement: a certificate REJECTION through a proxy must not get the tunnel-blame clause
+    # — real bytes crossed the tunnel, so the ORIGIN (not the proxy) earned the verdict. Even
+    # if `via_proxy` were (incorrectly) set on a TlsVerify error, `connect_error`'s OWN rendering
+    # must not surface it — this is defensive on the render side, independent of the fact that
+    # `tls_dial_error` never sets `via_proxy` for this kind.
+    it "never shows the clause for TlsVerify, even if via_proxy were set" do
+      err = U::DialError.new(U::DialErrorKind::TlsVerify,
+        cause: "certificate verify failed", via_proxy: "upstream HTTP proxy 127.0.0.1:8080")
+      E.connect_error("https", "h.test", 443, true, err).should_not contain("reached via upstream")
+    end
+
+    # Complement: the proxy's OWN refusal (407/403/502) already names itself precisely via
+    # `detail`, used verbatim — this must keep working unchanged (no double-tagging).
+    it "does not touch the existing verbatim wording for a proxy that refused the tunnel outright" do
+      err = U::DialError.new(U::DialErrorKind::Proxy, "upstream HTTP proxy proxy.test:8080 refused CONNECT h.test:443: HTTP/1.1 407 Proxy Authentication Required — the proxy requires authentication; set `username` + `password_env` on the matching upstream rule")
+      E.connect_error("https", "h.test", 443, true, err)
+        .should eq("connect failed: upstream HTTP proxy proxy.test:8080 refused CONNECT h.test:443: HTTP/1.1 407 Proxy Authentication Required — the proxy requires authentication; set `username` + `password_env` on the matching upstream rule")
+    end
+  end
+end
+
+# Round 9 / r9-tls Finding 2, the PLAIN-HTTP half. `Engine.exchange` gets no `DialError` at all
+# when the dial itself SUCCEEDED (a proxy answering 200 to CONNECT is a successful tunnel open,
+# by the CONNECT protocol's own rules) — the silence only shows up later, on the very first
+# read. So `no_response_error` has to ask `Settings.upstream_route` directly rather than reading
+# a `DialError` field; these specs exercise exactly that live global-state seam, save/restoring
+# it the same way `spec/settings_spec.cr` does around every other `Settings.upstream_proxy=` use.
+describe "Gori::Repeater::Engine.no_response_error" do
+  it "stays exactly today's wording for a direct (unproxied) host" do
+    Gori::Repeater::Engine.no_response_error("origin.test", 8080)
+      .should eq("no response from origin.test:8080")
+  end
+
+  it "appends the proxy-tunnel clause when the host currently routes through a configured proxy" do
+    Gori::Settings.upstream_proxy = "127.0.0.1:1"
+    begin
+      Gori::Repeater::Engine.no_response_error("origin.test", 8080).should eq(
+        "no response from origin.test:8080 (reached via upstream HTTP proxy 127.0.0.1:1 — " \
+        "the tunnel produced no data; the proxy may be at fault, not the target)")
+    ensure
+      Gori::Settings.upstream_proxy = ""
+    end
+  end
+
+  it "goes back to the plain sentence once the proxy is cleared" do
+    Gori::Settings.upstream_proxy = "127.0.0.1:1"
+    Gori::Settings.upstream_proxy = ""
+    Gori::Repeater::Engine.no_response_error("origin.test", 8080)
+      .should eq("no response from origin.test:8080")
+  end
 end

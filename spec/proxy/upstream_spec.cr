@@ -85,6 +85,98 @@ describe Gori::Proxy::Upstream do
       end
     end
 
+    # Round 9 / r9-tls Finding 2. A proxy that answers `200 Connection Established` and then
+    # closes WITHOUT relaying anything (an overloaded proxy, an ACL that 200s before checking,
+    # a proxy whose own backend dial failed after it already committed) hands back a socket
+    # that, to the subsequent TLS handshake, looks EXACTLY like a direct connection to a broken
+    # origin — nothing on the bare socket remembers it came through a tunnel. Before this fix
+    # `tls_dial_error` reported plain `Tls` with no proxy context, so the operator was told the
+    # ORIGIN's port "may not be TLS" when the origin was never contacted at all.
+    it "tags the DialError with the proxy when it answers 200 and then closes with no data" do
+      proxy = TCPServer.new("127.0.0.1", 0)
+      pport = proxy.local_address.port
+      spawn do
+        conn = proxy.accept
+        while (h = conn.gets("\r\n", chomp: true)) && !h.empty?
+        end
+        conn << "HTTP/1.1 200 Connection Established\r\n\r\n"
+        conn.flush rescue nil
+        conn.close rescue nil # no relay at all — the tunnel produced nothing
+      end
+
+      Gori::Settings.upstream_proxy = "127.0.0.1:#{pport}"
+      begin
+        sock, err = Gori::Proxy::Upstream.dial_tls_result("example.test", 443, verify: false,
+          io_timeout: 3.seconds)
+        sock.should be_nil
+        # Same kind a direct black-hole/non-TLS port gets (Tls, via OpenSSL's own EOF verdict) —
+        # the NEW information is `via_proxy` / `proxy_note`, not a new DialErrorKind.
+        err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Tls)
+        err.try(&.via_proxy).should eq("upstream HTTP proxy 127.0.0.1:#{pport}")
+        note = err.try(&.proxy_note).to_s
+        note.should contain("upstream HTTP proxy 127.0.0.1:#{pport}")
+        note.should contain("tunnel produced no data")
+        note.should contain("proxy may be at fault, not the target")
+      ensure
+        Gori::Settings.upstream_proxy = ""
+        proxy.close rescue nil
+      end
+    end
+
+    # Complement: an untrusted-cert rejection through the SAME proxy shape must NOT get the
+    # tunnel-blame clause — real handshake bytes crossed the tunnel and the ORIGIN's chain is
+    # what failed, so `proxy_note` must stay empty even though the dial went via a proxy.
+    it "does NOT tag a TlsVerify failure with the proxy note — real bytes crossed the tunnel" do
+      ca_cert, ca_key = Gori::Proxy::Tls::CertBuilder.build_root("gori-spec Untrusted CA (r9)")
+      leaf_cert, leaf_key = Gori::Proxy::Tls::CertBuilder.build_leaf("localhost", ca_cert, ca_key)
+      origin_ctx = Gori::Proxy::Tls::ContextFactory.server_context(leaf_cert, leaf_key, ca_cert: ca_cert)
+
+      origin = TCPServer.new("127.0.0.1", 0)
+      oport = origin.local_address.port
+      spawn do
+        next unless raw = origin.accept?
+        begin
+          ssl = OpenSSL::SSL::Socket::Server.new(raw, origin_ctx, sync_close: true)
+          ssl.close rescue nil
+        rescue
+          raw.close rescue nil
+        end
+      end
+
+      proxy = TCPServer.new("127.0.0.1", 0)
+      pport = proxy.local_address.port
+      spawn do
+        conn = proxy.accept
+        while (h = conn.gets("\r\n", chomp: true)) && !h.empty?
+        end
+        conn << "HTTP/1.1 200 Connection Established\r\n\r\n"
+        conn.flush rescue nil
+        # A real (bidirectional) tunnel this time — bytes DO cross it, unlike the
+        # accept-then-close example above.
+        upstream = TCPSocket.new("127.0.0.1", oport)
+        done = Channel(Nil).new(2)
+        spawn { IO.copy(conn, upstream) rescue nil; done.send(nil) }
+        spawn { IO.copy(upstream, conn) rescue nil; done.send(nil) }
+        2.times { done.receive }
+        conn.close rescue nil
+        upstream.close rescue nil
+      end
+
+      Gori::Settings.upstream_proxy = "127.0.0.1:#{pport}"
+      begin
+        sock, err = Gori::Proxy::Upstream.dial_tls_result("127.0.0.1", oport, verify: true,
+          sni: "localhost", io_timeout: 3.seconds)
+        sock.should be_nil
+        err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::TlsVerify)
+        err.try(&.via_proxy).should be_nil
+        err.try(&.proxy_note).should eq("")
+      ensure
+        Gori::Settings.upstream_proxy = ""
+        proxy.close rescue nil
+        origin.close rescue nil
+      end
+    end
+
     it "fails the dial (rather than buffering unboundedly) when the proxy floods the CONNECT reply headers" do
       proxy = TCPServer.new("127.0.0.1", 0)
       pport = proxy.local_address.port
@@ -561,6 +653,38 @@ describe Gori::Proxy::Upstream do
         .because.should eq("")
       Gori::Proxy::Upstream::DialError.new(Gori::Proxy::Upstream::DialErrorKind::Tls,
         cause: "wrong version number").because.should eq(" (wrong version number)")
+    end
+  end
+
+  # Round 9 / r9-tls Finding 2.
+  describe "DialError#proxy_note" do
+    it "is empty for a direct (non-proxied) DialError, whatever its kind" do
+      Gori::Proxy::Upstream::DialError::ORIGIN_UNREACHABLE.proxy_note.should eq("")
+      Gori::Proxy::Upstream::DialError.new(Gori::Proxy::Upstream::DialErrorKind::Tls,
+        cause: "wrong version number").proxy_note.should eq("")
+      Gori::Proxy::Upstream::DialError.new(Gori::Proxy::Upstream::DialErrorKind::Timeout,
+        cause: "no TLS response within 3.0s").proxy_note.should eq("")
+    end
+
+    it "names the proxy and blames the tunnel, not the target, when via_proxy is set" do
+      err = Gori::Proxy::Upstream::DialError.new(Gori::Proxy::Upstream::DialErrorKind::Tls,
+        cause: "SSL_connect: Unexpected EOF while reading",
+        via_proxy: "upstream HTTP proxy 127.0.0.1:8080")
+      err.proxy_note.should eq(
+        " (reached via upstream HTTP proxy 127.0.0.1:8080 — the tunnel produced no data; " \
+        "the proxy may be at fault, not the target)")
+    end
+  end
+
+  describe "Upstream.proxied_via" do
+    it "is nil for a direct route and the proxy label for a configured one" do
+      Gori::Proxy::Upstream.proxied_via("h.test").should be_nil
+      Gori::Settings.upstream_proxy = "10.0.0.1:3128"
+      begin
+        Gori::Proxy::Upstream.proxied_via("h.test").should eq("upstream HTTP proxy 10.0.0.1:3128")
+      ensure
+        Gori::Settings.upstream_proxy = ""
+      end
     end
   end
 end
