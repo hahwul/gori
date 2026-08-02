@@ -414,6 +414,45 @@ describe "MCP fuzz tools" do
     end
   end
 
+  # Round 7 / H2 F4. `record_history` is a string enum here but a BOOLEAN on `send_request`,
+  # the sibling tool a caller learns the argument name from — and `true` used to fall through
+  # to `:none`, i.e. the audit trail the caller explicitly asked for was silently not kept,
+  # with a cheerful `"record_history":"none"` in the echo. Booleans are now the obvious
+  # aliases; anything else is refused BY NAME rather than degraded (the contract
+  # `optional_bool_arg` already states: a lenient coercion is fine, a SILENT one is not).
+  it "accepts record_history true/false as all/none and refuses any other value by name" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+              "url"            => "http://127.0.0.1:#{port}",
+              "payloads"       => %([{"list":["a"]}]),
+              "allow_unscoped" => true}
+
+      start = call_json(tools, "fuzz_start", base.merge({"record_history" => true}).to_json)
+      start["record_history"].as_s.should eq("all")
+      start = call_json(tools, "fuzz_start", base.merge({"record_history" => false}).to_json)
+      start["record_history"].as_s.should eq("none")
+
+      # The pre-existing valid values keep working, case-insensitively.
+      {"none", "matched", "all", "ALL"}.each do |v|
+        s = call_json(tools, "fuzz_start", base.merge({"record_history" => v}).to_json)
+        s["record_history"].as_s.should eq(v.downcase)
+      end
+
+      # And the values that used to mean a silent "none" are now named refusals.
+      [%("yes"), "1"].each do |raw|
+        text, err = call_raw(tools, "fuzz_start",
+          %({"template":"GET /?q=§x§ HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n\\r\\n",) +
+          %("url":"http://127.0.0.1:#{port}","payloads":[{"list":["a"]}],) +
+          %("allow_unscoped":true,"record_history":#{raw}}))
+        err.should be_true
+        text.should contain("invalid 'record_history'")
+        text.should contain("none | matched | all")
+      end
+    end
+  end
+
   it "records matched results to History with a redacted flow_id when record_history:matched" do
     port = start_origin
     with_store do |store|

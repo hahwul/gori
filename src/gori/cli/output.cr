@@ -189,6 +189,17 @@ module Gori
           if ce = r.chain_error
             j.field "chain_error", ce.scrub
           end
+          # The gRPC CALL's outcome. `status` is 200 for EVERY gRPC response, so without these
+          # a sweep against an origin denying every call was byte-identical to one against an
+          # origin allowing them all. Emitted only when the response actually carried them, so
+          # a non-gRPC run's JSON is unchanged. `.scrub`: `grpc-message` is origin-chosen text.
+          if gs = r.grpc_status
+            j.field "grpc_status", gs
+            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          end
+          if gm = r.grpc_message
+            j.field "grpc_message", gm.scrub
+          end
           j.field "extracted", r.extracted
           # Only when true. This is an exception rather than a per-row property, and a `false`
           # on every row of every clean run would bury the one row that matters.
@@ -374,6 +385,12 @@ module Gori
           io << "  " << human_size(r.length).ljust(8)
           io << "  " << "#{r.words}w".ljust(7)
           io << "  " << human_us(r.duration_us)
+          # For a gRPC target the 200 to the left is a constant; THIS is the call's outcome.
+          # Only rendered when the response carried it, so a non-gRPC row is unchanged.
+          if gs = r.grpc_status
+            io << "  grpc " << gs << ' ' << Proxy::H2::Grpc.status_name(gs)
+            io << " · " << r.grpc_message if r.grpc_message
+          end
           io << "  ⟦" << r.extracted << '⟧' if r.extracted
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).

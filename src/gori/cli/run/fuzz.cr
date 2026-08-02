@@ -80,6 +80,12 @@ module Gori
           p.on("--verbatim", "Send the template's Content-Length as written — no auto-resync after payload substitution (for CL / CL-TE desync payloads)") { update_cl = false }
           p.on("--mc=SPEC", "Match status (e.g. 200,302,500-599,2xx)") { |v| matcher.match_status = v }
           p.on("--fc=SPEC", "Filter out status") { |v| matcher.filter_status = v }
+          # The h2 `:status` of a gRPC response is 200 by definition, so --mc/--fc cannot tell
+          # a granted call from `7 PERMISSION_DENIED`; the call status is in the `grpc-status`
+          # trailer, which every row now carries. Numeric spec (7, >0, 1-16) — a `2xx` class
+          # means nothing for a gRPC code.
+          p.on("--mg=SPEC", "Match gRPC status from the grpc-status trailer (e.g. 7, >0, 1-16)") { |v| matcher.match_grpc = v }
+          p.on("--fg=SPEC", "Filter out gRPC status") { |v| matcher.filter_grpc = v }
           p.on("--ms=SPEC", "Match response size (e.g. 1500,>1000)") { |v| matcher.match_size = v }
           p.on("--fs=SPEC", "Filter out response size") { |v| matcher.filter_size = v }
           p.on("--mw=SPEC", "Match word count") { |v| matcher.match_words = v }
@@ -328,6 +334,19 @@ module Gori
                     "#{total - p.sent} of #{total} payloads untried"
       end
 
+      # The template was a cleanly-framed gRPC request and a payload of a different length left
+      # its 5-byte length prefix declaring the OLD one — bytes a real gRPC server rejects, sent
+      # under `N sent · 0 errors`. The bytes are NOT changed (P7: the payload is the test case,
+      # and `--verbatim` exists because a silent re-frame is the complaint elsewhere); this is
+      # the disclosure Content-Length has always had and this declaration never did.
+      private def self.warn_fuzz_grpc_framing(p : Fuzz::Progress) : Nil
+        return unless p.grpc_stale > 0
+        STDERR.puts "gori run fuzz: note: #{p.grpc_stale_reason}" if p.grpc_stale_reason
+        STDERR.puts "gori run fuzz: note: the template's gRPC length prefix is not recomputed " \
+                    "when a payload changes the message length — #{p.grpc_stale} of " \
+                    "#{p.grpc_requests} requests left it stale"
+      end
+
       private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::ConnPool?,
                                  max_requests : Int64? = nil) : Nil
         STDERR.print "\r" if STDERR.tty? # clear the in-place meter (none was drawn when piped)
@@ -338,9 +357,11 @@ module Gori
         extra = p.requests > p.sent ? " · #{p.requests} requests on the wire" : ""
         STDERR.puts "done · #{p.sent} sent#{extra} · #{emitted} shown · #{p.errors} errors#{ev.stopped ? " (stopped)" : ""}"
         warn_fuzz_budget(p, max_requests)
+        warn_fuzz_grpc_framing(p)
         # Sends stopped BEFORE the socket (Sandbox, an exclude rule). They already appear as
         # per-row errors, but a run that is 100% refused reads as "the target is down" unless
         # the gate is named once.
+
         if (blocked = ev.progress.blocked) > 0
           note = ev.progress.blocked_reason
           STDERR.puts "blocked · #{blocked} refused before the socket#{note ? " — #{note}" : ""}"
