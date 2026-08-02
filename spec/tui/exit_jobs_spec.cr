@@ -41,7 +41,7 @@ describe "Jobs#active_summary" do
   it "names one live job by kind" do
     jobs = Jobs.new
     jobs.start(:discover, "http://t/")
-    jobs.active_summary.should eq("1 job still running (discovering 1)")
+    jobs.active_summary.should eq("discovering 1")
   end
 
   it "names every live kind rather than collapsing to jobs:N the way the chip does" do
@@ -54,7 +54,13 @@ describe "Jobs#active_summary" do
     # one place the operator decides with, and "leaving stops them" is only actionable if
     # it says what it is stopping.
     jobs.activity_label.should eq("jobs:4")
-    jobs.active_summary.should eq("4 jobs still running (discovering 1 · mining 1 · fuzzing 2)")
+    jobs.active_summary.should eq("discovering 1 · mining 1 · fuzzing 2")
+  end
+
+  it "collapses the tail past SUMMARY_KINDS + 1 so a card line cannot overflow" do
+    jobs = Jobs.new
+    {:discover, :fuzz, :miner, :sequence, :minimize, :oast}.each { |k| jobs.start(k, "x") }
+    jobs.active_summary.should eq("discovering 1 · fuzzing 1 · +4 more")
   end
 
   it "drops a job that finished, and goes back to nil when the last one does" do
@@ -62,7 +68,7 @@ describe "Jobs#active_summary" do
     a = jobs.start(:discover, "http://t/")
     b = jobs.start(:miner, "GET /api")
     jobs.finish(a, :stopped, "project closed")
-    jobs.active_summary.should eq("1 job still running (mining 1)")
+    jobs.active_summary.should eq("mining 1")
     jobs.finish(b, :stopped, "project closed")
     jobs.active_summary.should be_nil
   end
@@ -79,12 +85,28 @@ describe "Runner exit prompts" do
     jobs.start(:discover, "http://127.0.0.1:19703/")
     Runner.leave_confirm_message(jobs.active_summary, jobs.active.size).should eq(
       "Close this project and return to the picker?\n" \
-      "1 job still running (discovering 1) — leaving stops it.")
+      "1 job still running — leaving stops it.\n" \
+      "discovering 1")
 
     jobs.start(:fuzz, "GET /a")
     Runner.leave_confirm_message(jobs.active_summary, jobs.active.size).should eq(
       "Close this project and return to the picker?\n" \
-      "2 jobs still running (discovering 1 · fuzzing 1) — leaving stops them.")
+      "2 jobs still running — leaving stops them.\n" \
+      "discovering 1 · fuzzing 1")
+  end
+
+  # ConfirmDialog sizes its card to the longest line and clamps the whole card at 60
+  # columns (`overlay_box`: `(content + 6).clamp(16, {area.w - 2, 60}.min)`), so a line
+  # over 54 display cells loses its tail to the ellipsis — which first cost this very
+  # confirm its verb ("… — leaving stops i…"). Every line the exit prompts can produce
+  # has to fit, including the widest realistic job mix.
+  it "keeps every confirm line inside ConfirmDialog's card" do
+    jobs = Jobs.new
+    {:discover, :fuzz, :miner, :sequence, :minimize, :oast}.each { |k| jobs.start(k, "x") }
+    [Runner.leave_confirm_message(jobs.active_summary, jobs.active.size),
+     Runner.quit_confirm_message(jobs.active_summary, jobs.active.size)].each do |msg|
+      msg.split('\n').each { |line| Screen.display_width(line).should be <= 54 }
+    end
   end
 
   it "keeps both quit prompts byte-identical when nothing is running" do
@@ -97,9 +119,10 @@ describe "Runner exit prompts" do
     jobs.start(:miner, "GET /api")
     Runner.quit_confirm_message(jobs.active_summary, jobs.active.size).should eq(
       "Quit gori? (pending edits are committed first)\n" \
-      "1 job still running (mining 1) — quitting stops it.")
+      "1 job still running — quitting stops it.\n" \
+      "mining 1")
     Runner.quit_arm_hint(jobs.active_summary, jobs.active.size).should eq(
-      "1 job still running (mining 1) — press ^D (or ^C) again to quit and stop it")
+      "1 job running (mining 1) — press ^D (or ^C) again to quit and stop it")
   end
 end
 

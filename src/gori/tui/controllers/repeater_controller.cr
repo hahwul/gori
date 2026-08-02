@@ -14,7 +14,6 @@ require "../../repeater/ws_engine"
 require "../../repeater/minimize"
 require "../../repeater/plan"
 require "../../fuzz/engine"
-require "../../fuzz/template" # Template.marker_regions — the §…§ probe repeater_send_group refuses on
 
 module Gori::Tui
   # One open repeater session (a "sub-tab" under the top-level Repeater tab). Each carries
@@ -1434,7 +1433,7 @@ module Gori::Tui
         @host.status(view.http2? ? "send group is HTTP/1.1 only — ^V to switch off h2" : "send group needs plain text mode (not hex/gRPC/WS/decode)")
         return
       end
-      if reason = RepeaterController.group_marker_refusal(view.request_text)
+      if reason = RepeaterController.group_marker_refusal(view.markers_active?)
         @host.status(reason)
         return
       end
@@ -1519,7 +1518,7 @@ module Gori::Tui
       Env.binding_values.keys.select { |n| text.includes?("#{prefix}#{n}") }.sort!
     end
 
-    # Why a `%%%` group send refuses while §…§ markers are present, or nil to proceed.
+    # Why a `%%%` group send refuses while LIVE §…§ markers are present, or nil to proceed.
     #
     # `RepeaterView#pipeline_requests` goes straight to
     # `finalize_wire(expanded_text_to_bytes(…))` and never reaches `marked_request_bytes` →
@@ -1531,18 +1530,22 @@ module Gori::Tui
     # chain that `^R` refuses two keystrokes earlier — one of the two send buttons on the
     # pane protected and the other not.
     #
+    # Takes `RepeaterView#markers_active?`, NOT a raw `Fuzz::Template.marker_regions` scan:
+    # a `§` that arrived as CAPTURED evidence is data (a German/legal body carries them),
+    # it is inert until the operator declares markers, and `pipeline_requests` puts inert
+    # bytes on the wire exactly as `^R` does — so refusing on it would block a group send
+    # that was never wrong. One predicate for both send buttons.
+    #
     # The condition's home is `RepeaterView#group_sendable?`, whose own comment already
     # names MARK alongside hex / gRPC / WS / decode; it simply never grew the term its
     # sibling `minimizable?` has. It sits here for now, at the ONE call site of
-    # `pipeline_requests`, over the same public `Fuzz::Template.marker_regions` probe MCP
-    # `minimize.cr:129` and CLI `repeater_minimize.cr:187` use to refuse the same shape from
-    # outside the view.
+    # `pipeline_requests`.
     #
     # `self.` and pure for the reason `.literal_bindings` above is: what the operator is
     # told instead of a send is the whole behaviour, and a Host double is not the thing
     # worth building to pin it.
-    def self.group_marker_refusal(text : String) : String?
-      return nil if Fuzz::Template.marker_regions(text).empty?
+    def self.group_marker_refusal(markers_active : Bool) : String?
+      return nil unless markers_active
       "send group does not render §…§ markers — remove them, or ^R to send one request with the chains applied"
     end
 

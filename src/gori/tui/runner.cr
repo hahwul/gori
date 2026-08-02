@@ -554,6 +554,11 @@ module Gori::Tui
           break unless @outcome == :running
         end
       ensure
+        # NOT a stop_all_jobs backstop: a raise out of this loop is not caught between here
+        # and `CLI.run`, so it ends the PROCESS (`abort` for a Gori::Error, a backtrace for
+        # anything else) and the engine fibers die with it. `leave_project` / `quit!` are
+        # the only exits that hand the terminal back with fibers still able to send.
+        #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
@@ -3212,10 +3217,14 @@ module Gori::Tui
     #
     # `active == nil` (nothing running) must return the ORIGINAL sentence, byte for byte:
     # closing an idle project or quitting an idle gori gains no prompt noise from this.
+    #
+    # The two modal messages put the count/consequence and the per-kind inventory on
+    # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
+    # columns, so one combined sentence lost its own verb to the ellipsis.
     def self.leave_confirm_message(active : String?, count : Int32) : String
       base = "Close this project and return to the picker?"
       return base unless active
-      "#{base}\n#{active} — leaving stops #{count == 1 ? "it" : "them"}."
+      "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}"
     end
 
     # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
@@ -3223,13 +3232,18 @@ module Gori::Tui
     def self.quit_confirm_message(active : String?, count : Int32) : String
       base = "Quit gori? (pending edits are committed first)"
       return base unless active
-      "#{base}\n#{active} — quitting stops #{count == 1 ? "it" : "them"}."
+      "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}"
     end
 
+    # A status toast, not a card, so this one stays on a single line.
     def self.quit_arm_hint(active : String?, count : Int32) : String
       base = "press ^D (or ^C) again to quit · q: back to projects"
       return base unless active
-      "#{active} — press ^D (or ^C) again to quit and stop #{count == 1 ? "it" : "them"}"
+      "#{job_count(count)} running (#{active}) — press ^D (or ^C) again to quit and stop #{count == 1 ? "it" : "them"}"
+    end
+
+    private def self.job_count(count : Int32) : String
+      "#{count} job#{count == 1 ? "" : "s"}"
     end
 
     # Flush any in-progress editor before leaving/quitting (quit is now centralized,
