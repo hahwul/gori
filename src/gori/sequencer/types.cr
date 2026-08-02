@@ -47,7 +47,14 @@ module Gori
       status : Int32?,
       length : Int32,
       duration_us : Int64,
-      error : String?
+      error : String?,
+      # The gRPC CALL's outcome (`grpc-status`/`grpc-message` trailers) — `status` above is
+      # 200 for every gRPC response, so a live-replay collection against a gRPC endpoint that
+      # is actually rejecting every call (an expired session token, say) looked identical to
+      # one collecting from a healthy target: every sample read "200". nil for a manual-mode
+      # sample (no network) and for any non-gRPC response (see `Fuzz::GrpcVerdict`).
+      grpc_status : Int32? = nil,
+      grpc_message : String? = nil
 
     # Live counters. `collected` counts successful extractions (the goal is met by
     # these); `sent` is the real request count (always ≥ collected — misses + retries).

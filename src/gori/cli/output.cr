@@ -278,6 +278,17 @@ module Gori
             j.field "token", s.token
             j.field "length", s.length
             j.field "error", s.error
+            # The gRPC CALL's outcome. `status` above is 200 for every gRPC response, so
+            # without these a collection against a target denying every call read as healthy.
+            # Emitted only when the response actually carried them, so a non-gRPC sample's
+            # JSON line is unchanged. `.scrub`: `grpc-message` is origin-chosen text.
+            if gs = s.grpc_status
+              j.field "grpc_status", gs
+              j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+            end
+            if gm = s.grpc_message
+              j.field "grpc_message", gm.scrub
+            end
           end
         end
       end
