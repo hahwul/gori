@@ -509,6 +509,41 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
       end
     end
 
+    # R9/F1-b. `apply_intercept_command`'s "edited" ack used to pass `desc = item.label`
+    # (computed BEFORE the edit, off the item's ORIGINAL held bytes) unconditionally — so an
+    # edit that legitimately changes a WS message's length acked the WRONG size: the caller's
+    # only receipt for an irreversible forward named bytes that never went on the wire. `size:`
+    # lets the settle side report what it is ACTUALLY about to forward.
+    it "reports the size the caller PASSES, not the held item's original raw size (#123 ack fix)" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        out = ic.enqueue_ws("line1\nline2\nline3".to_slice, to_server: true, method: "GET",
+          target: "/ws", host: "acme.test", port: 443, scheme: "https", flow_id: 9_i64,
+          binary: false).not_nil!
+        out.raw.size.should eq(17)
+        # An edit that grows the payload (e.g. appends text) must ack the NEW size.
+        out.label(size: 19).should eq("acme.test/ws client->server 19B")
+        # The default (no size: argument) still reflects the HELD bytes, for a plain
+        # forward/drop where nothing was rewritten.
+        out.label.should eq("acme.test/ws client->server 17B")
+      end
+    end
+
+    # `size:` is a no-op for request/response — neither branch of `Item#label`'s case renders a
+    # byte count — so passing it from the one shared call site in `apply_intercept_command`
+    # cannot regress an HTTP ack (the complement `size:` has to hold).
+    it "ignores size: for a request/response label — only the WS branches render a byte count" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        req = ic.enqueue_request("x".to_slice, method: "GET", target: "/held",
+          host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
+        req.label(size: 999).should eq(req.label)
+        req.label(size: 999).should eq("GET 127.0.0.1/held")
+      end
+    end
+
     # R4. The composition is ONE definition now: `InterceptView#row_label` and
     # `InterceptController#intercept_label` had their own per-kind branches and call this
     # instead, passing the EDITED method/target so a queue row and a forward toast name the

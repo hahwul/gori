@@ -586,7 +586,7 @@ module Gori::Tui
         # surface described a CRLF-carrying h2 message as ordinarily editable.
         Store::HeldRow.new(token, it.id, it.kind.to_s.downcase, it.method, it.host, it.port,
           it.scheme, it.target, it.raw, it.held_at_ms, it.flow_id, false, 0_i64,
-          it.edit_refusal, it.head_only?)
+          it.edit_refusal, it.head_only?, it.binary?)
       end
       @session.store.publish_intercept_held(token, rows)
     end
@@ -675,8 +675,13 @@ module Gori::Tui
             store.ack_intercept_command(cmd.id, "error", "already decided by another surface: #{desc}")
             return false
           end
-          store.ack_intercept_command(cmd.id, "edited", desc)
-          push_agent_note(:success, "forwarded (edited) #{desc}", item)
+          # `size: bytes.size`, NOT `desc`'s default (the item's ORIGINAL held size): an edit
+          # that changes a WS message's length must say so in its own ack, the caller's only
+          # record of what actually went out. Has no effect on a request/response label (that
+          # branch of `Item#label` doesn't render a byte count), so this is safe for every kind.
+          edited_desc = item.label(size: bytes.size)
+          store.ack_intercept_command(cmd.id, "edited", edited_desc)
+          push_agent_note(:success, "forwarded (edited) #{edited_desc}", item)
         end
         true
       when "toggle"

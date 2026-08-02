@@ -376,7 +376,11 @@ module Gori
                      "(whichever leg — request or response — is held). The BODY is forwarded\n" \
                      "VERBATIM (no $KEY expansion, no line-ending rewrite); header lines are\n" \
                      "CRLF-terminated and Content-Length is resynced to the new body unless\n" \
-                     "--no-update-content-length holds the value you declared."
+                     "--no-update-content-length holds the value you declared.\n\n" \
+                     "A held WebSocket message has no head at all, so it is taken literally —\n" \
+                     "no CRLF rewrite, no Content-Length resync. A BINARY WS frame additionally\n" \
+                     "requires --raw-file (the byte-exact channel): --raw is a shell argument\n" \
+                     "and cannot carry a byte over 0x7F unchanged."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--raw=RAW", "Verbatim replacement wire message") { |v| raw = v }
@@ -403,17 +407,73 @@ module Gori
                   end
         abort "gori run intercept edit: replacement message must not be empty" if content.empty?
 
-        # CRLF-normalize the HEAD ALONE, bounded by `Env.head_body_boundary` — the split
-        # every other edit path on this branch already uses (`Env.expand_wire`, the TUI's
-        # `intercept_view`). Only HTTP header lines require CRLF termination; a raw 0x0A in
-        # the BODY is a byte (binary data, or a bare LF the operator deliberately wrote), and
-        # rewriting it contradicted this subcommand's own "forwarded VERBATIM" contract —
-        # `--raw-file` is its only byte-exact channel, and an `alpha\rbeta\ngamma` body came
-        # out a byte longer with the LF promoted. (That split, and the Content-Length choice
-        # beside it, live in `intercept_edit_bytes` so a spec can pin the exact bytes.)
-        bytes = intercept_edit_bytes(content, update_cl)
+        # A WebSocket message (held row's `kind` is wsout/wsin) is not an HTTP head+body — no
+        # start line, no headers, no head/body split — so the CRLF-normalize/Content-Length
+        # rewrite below (written for an HTTP head) must never touch it: with no blank line to
+        # bound a "header block", the whole payload was treated as one and every bare LF the
+        # operator typed got promoted to CRLF. `row` is nil (falls through to the HTTP-shaped
+        # path below, harmlessly — `enqueue_intercept` resolves `no_such_item` on its own) when
+        # there is no live bridge, no session token, or the item is no longer held.
+        row = held_row_for_edit(project_name, db_path, item_id)
+        bytes =
+          if row.try(&.ws?)
+            result = ws_edit_bytes(content, item_id, row.try(&.binary?) || false, used_raw_file: !raw_file.nil?)
+            abort "gori run intercept edit: #{result}" if result.is_a?(String)
+            result
+          else
+            # CRLF-normalize the HEAD ALONE, bounded by `Env.head_body_boundary` — the split
+            # every other edit path on this branch already uses (`Env.expand_wire`, the TUI's
+            # `intercept_view`). Only HTTP header lines require CRLF termination; a raw 0x0A in
+            # the BODY is a byte (binary data, or a bare LF the operator deliberately wrote),
+            # and rewriting it contradicted this subcommand's own "forwarded VERBATIM" contract
+            # — `--raw-file` is its byte-exact channel for an HTTP body, and an
+            # `alpha\rbeta\ngamma` body came out a byte longer with the LF promoted. (That
+            # split, and the Content-Length choice beside it, live in `intercept_edit_bytes` so
+            # a spec can pin the exact bytes.)
+            intercept_edit_bytes(content, update_cl)
+          end
         status, detail = enqueue_intercept(project_name, db_path, "forward_edit", item_id: item_id, bytes: bytes)
         emit_intercept_ack(status, detail, format)
+      end
+
+      # The held row for `item_id`, straight off the #123 bridge — nil when no live bridge, no
+      # session token, or the item is no longer held. Mirrors MCP's `held_row_for_edit`; needed
+      # here for the identical reason (`kind`/`binary?` before choosing a normalization rule).
+      private def self.held_row_for_edit(project_name : String?, db_path : String?, item_id : Int64) : Store::HeldRow?
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          bridge = intercept_bridge_state(store)
+          return nil unless bridge
+          token = bridge["session_token"]?.try(&.as_s?) || ""
+          return nil if token.empty?
+          store.intercept_held(token).find { |r| r.item_id == item_id }
+        ensure
+          store.close
+        end
+      end
+
+      # The replacement bytes for a held WS item's `raw`/`raw-file` edit — taken LITERALLY, no
+      # CRLF-normalize, no Content-Length resync (a WS message has no head for either to apply
+      # to; see the matching comment on MCP's `Tools#intercept_edit_bytes`) — or the refusal
+      # message when the channel cannot carry it byte-exact.
+      #
+      # `--raw-file` reads the FILE's bytes directly (no shell/argv re-encoding), so it is
+      # byte-exact for a BINARY WS frame the same way MCP's `raw_base64` is; `--raw` is an argv
+      # STRING — already re-encoded as text before this process ever saw it, so a byte over
+      # 0x7F is unrecoverable here (the OS/shell owns that re-encoding, not gori). A binary WS
+      # item through `--raw` is refused by name rather than forwarding the wrong bytes,
+      # mirroring the TUI's read-only stance on a binary WS message (`read_only_selection?`).
+      #
+      # Public and pure (no store, no process exit) so a spec can pin the decision without a
+      # live capturing instance.
+      def self.ws_edit_bytes(content : String, item_id : Int64, binary : Bool, *, used_raw_file : Bool) : Bytes | String
+        if binary && !used_raw_file
+          return "held item #{item_id} is a WebSocket BINARY message — --raw is a shell argument and cannot " \
+                 "carry it byte-exact (a byte over 0x7F is already re-encoded before gori sees it); use " \
+                 "--raw-file with the exact bytes"
+        end
+        content.to_slice
       end
 
       # The exact bytes `edit` enqueues, from the replacement message and the CL choice.

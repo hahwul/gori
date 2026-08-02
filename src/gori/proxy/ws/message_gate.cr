@@ -149,8 +149,19 @@ module Gori::Proxy::WS
         # A control frame that arrived between its fragments cannot wait with it: a PONG
         # parked behind a hold is how the peer's ping timer closes the socket (this class's
         # header). So THIS is where the interleave is given up, and the only place — the
-        # controls go out now, the message's own frames follow on release.
-        raw.try(&.controls).try { |c| write_raw(c) }
+        # controls go out now, the message's own frames follow on release. Deliberate, and
+        # the STORE stays honest (`capture_control` records the TRUE arrival order, so History
+        # shows it correctly) — only the LIVE wire reorders. Every other routine edge case in
+        # this class gets a `note()`; this one didn't, so an operator watching live traffic saw
+        # a PING ahead of the data it was actually interleaved with and no signal that gori
+        # did that on purpose.
+        raw.try(&.controls).try do |c|
+          write_raw(c)
+          note("a control frame interleaved with this message was sent ahead of it, because " \
+               "the message itself has to wait (held, or queued behind an earlier hold) and a " \
+               "control frame cannot wait with it. The true arrival order is preserved in " \
+               "History; only the live wire is reordered")
+        end
         kept = payload.dup
         slot = Slot.new(opcode, kept, raw, shape)
         item = held ? start_hold(opcode, kept) : nil

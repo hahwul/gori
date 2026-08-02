@@ -69,6 +69,21 @@ module Gori
         Result.new(JSON.build { |j| Serialize.intercept_item_detail(j, row, include_sensitive, Time.utc.to_unix_ms) })
       end
 
+      # The held row for `item_id`, straight off the #123 bridge — nil when no live bridge, no
+      # session token, or the item is no longer held (already forwarded/dropped elsewhere).
+      # `intercept_forward_edit` needs this BEFORE it picks a normalization rule: a WS item has
+      # no HTTP head at all, so the rule that CRLF-promotes bare LF in a "header block" must
+      # never run on it (see `intercept_edit_bytes`). A nil here just falls back to the
+      # HTTP-shaped rule, which is harmless — the enqueue below will resolve `no_such_item` on
+      # its own if the row really is gone.
+      private def held_row_for_edit(item_id : Int64) : Store::HeldRow?
+        bridge = intercept_bridge_state
+        return nil unless bridge
+        token = bridge["session_token"]?.try(&.as_s?) || ""
+        return nil if token.empty?
+        store.intercept_held(token).find { |r| r.item_id == item_id }
+      end
+
       # --- #123 live intercept (write side; gated behind allow_actions) -------
 
       # A capturing instance is "live" only if its bridge says capturing AND the heartbeat is
@@ -99,7 +114,8 @@ module Gori
       private def intercept_forward_edit(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
-        edited = intercept_edit_bytes(h)
+        row = held_row_for_edit(id)
+        edited = intercept_edit_bytes(h, row)
         return edited if edited.is_a?(Result)
         # Bytes are LITERAL — no Env.expand_wire, so a remote agent's $SECRET references are
         # never expanded into forwarded traffic; and no smuggling guard, because byte-exact
@@ -113,20 +129,48 @@ module Gori
         # byte-exact. Default on keeps the ordinary edit ("I changed the body, frame it for
         # me") working; `update_content_length:false` is the desync switch, and the result
         # says which one ran so the caller never has to assume.
-        sync = bool_arg(h, "update_content_length", true)
+        #
+        # A WS item never gets this rewrite, full stop — not even when the caller asked for it.
+        # There is no head, so `ContentLength.sync` would have to invent a header LINE and
+        # splice it into the payload body (`add_when_missing` was written for a GET growing a
+        # body, not for turning a chat message into one), exactly the trap the TUI's own
+        # `pending_edit` comment calls out. Mirrors the TUI: WS is never offered the toggle.
+        ws = row.try(&.ws?) || false
+        sync = !ws && bool_arg(h, "update_content_length", true)
         bytes = sync ? Fuzz::ContentLength.sync(edited, add_when_missing: true) : edited
         enqueue_intercept("forward_edit", item_id: id, bytes: bytes,
           extra: {"content_length_synced" => JSON::Any.new(sync && bytes != edited)})
       end
 
-      # The replacement wire message. `raw_base64` is the byte-exact channel — a JSON string
-      # cannot carry arbitrary octets, so it is the ONLY way a binary body survives the round
-      # trip `intercept_get` starts when it hands back `raw_base64`. `raw` stays for the common
-      # text edit; there, lone LFs in the HEADER block become CRLF (a hand-typed message still
-      # frames) while the BODY is left untouched, via the same rule send_request's `raw` uses.
-      # Exactly one of the two, so a caller that sends both is told rather than silently having
-      # one ignored.
-      private def intercept_edit_bytes(h) : Bytes | Result
+      # The replacement wire message.
+      #
+      # `raw_base64` is the byte-exact channel for ANY held item — a JSON string cannot carry
+      # arbitrary octets, so it is the only way a binary body (or a binary WS frame) survives
+      # the round trip `intercept_get` starts when it hands back `raw_base64`.
+      #
+      # `raw` behaves differently depending on WHAT is held, because the two shapes are not the
+      # same message:
+      #   - An HTTP head+body: lone LFs in the HEADER block become CRLF (a hand-typed message
+      #     still frames) while the BODY is left untouched — `RequestBuilder.normalize_raw`,
+      #     the same rule `send_request`'s `raw` uses.
+      #   - A WebSocket message (`row.ws?`): there IS no header block — no start line, no
+      #     headers, no head/body split — so running the HTTP rule on it is not "safe
+      #     normalization", it is corruption: with no blank line to bound it, the WHOLE payload
+      #     is treated as "header" and every bare LF the operator typed is promoted to CRLF (a
+      #     17-byte unedited round trip came back 19 bytes on the wire). `raw` is taken
+      #     LITERALLY instead, mirroring the TUI's `@loaded_ws` branch in
+      #     `intercept_view#pending_edit` (`wire_bytes`, never `Env.expand_wire`/normalize).
+      #   - A WebSocket BINARY frame (`row.binary?`): even taken literally, a JSON string
+      #     cannot carry an arbitrary octet — a byte above 0x7F round-trips through JSON's
+      #     Unicode text encoding as MULTIPLE bytes, silently growing the payload (`0xFF` came
+      #     back `0xC3 0xBF`). The TUI refuses to even open its editor on a binary WS message
+      #     for the identical reason (`read_only_selection?`); `raw` refuses here by name
+      #     instead of forwarding the wrong bytes, and `raw_base64` is the byte-exact escape
+      #     hatch it already is for a binary HTTP body.
+      #
+      # Exactly one of `raw`/`raw_base64`, so a caller that sends both is told rather than
+      # silently having one ignored.
+      private def intercept_edit_bytes(h, row : Store::HeldRow?) : Bytes | Result
         b64 = str(h, "raw_base64").presence
         raw = str(h, "raw").presence
         if b64 && raw
@@ -144,6 +188,13 @@ module Gori
         unless raw
           return err("missing required 'raw' (the full edited wire message) — or 'raw_base64' for byte-exact bytes",
             "INVALID_ARGUMENT", field: "raw")
+        end
+        if row.try(&.ws?)
+          if row.try(&.binary?)
+            return err("held item #{row.not_nil!.item_id} is a WebSocket BINARY message — 'raw' is a JSON string and cannot carry it byte-exact (a byte over 0x7F re-encodes to multiple bytes); use 'raw_base64' instead",
+              "INVALID_ARGUMENT", field: "raw")
+          end
+          return raw.to_slice
         end
         RequestBuilder.normalize_raw(raw)
       end
