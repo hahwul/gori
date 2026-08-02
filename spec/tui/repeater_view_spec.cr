@@ -626,6 +626,181 @@ describe Gori::Tui::RepeaterView do
     String.new(view.request_bytes).should eq("POST /x HTTP/1.1\r\nHost: a.test\r\n\r\nq=hi")
   end
 
+  # PROVENANCE: `§` (U+00A7) is ordinary text — a German/legal body carries it constantly —
+  # so a `§…§` pair that arrived as CAPTURED evidence is data, not the operator's marker
+  # syntax. The Repeater used to parse it as a template anyway: both § were deleted from the
+  # wire and `Content-Length` was re-synced behind the loss, while `gori run repeater <id>`
+  # and MCP `send_request{flow_id}` replayed the same flow byte-exact. See
+  # `RepeaterView#markers_live?`.
+  describe "§ in a CAPTURED body is data, not marker syntax" do
+    # The hunter's vector: `§` next to every other byte class that already survives a send —
+    # a CRLF in the body, invalid UTF-8, a captured `$TOKEN`, a tab — so a failure here can
+    # only be the marker path.
+    body = IO::Memory.new.tap { |io|
+      io << %({"note":"a\r\nb","mk":"§SEED§","env":"$TOKEN","bin":")
+      io.write(Bytes[0xFF, 0xFE, 0x01, 0x02])
+      io << %(","tab":"\tx"})
+    }.to_slice
+    head = "POST /seed?q=1&r=2 HTTP/1.1\r\nHost: h.test\r\n" \
+           "Content-Type: application/json\r\nContent-Length: #{body.size}\r\n" \
+           "Connection: close\r\n\r\n"
+    wire = head + String.new(body)
+
+    # `§SEED§` as it sits on the wire: c2 a7 53 45 45 44 c2 a7. Searched byte-wise — the
+    # surrounding body is deliberately not valid UTF-8.
+    marker_run = Bytes[0xC2, 0xA7, 0x53, 0x45, 0x45, 0x44, 0xC2, 0xA7]
+    carries_marker = ->(b : Bytes) do
+      (0..(b.size - marker_run.size)).any? { |i| b[i, marker_run.size] == marker_run }
+    end
+
+    seed = ->(store : Gori::Store) do
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/seed?q=1&r=2", http_version: "HTTP/1.1",
+        head: head.to_slice, body: body))
+      store.get_flow(id).not_nil!
+    end
+
+    it "sends the captured § byte-exact and leaves Content-Length alone" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+
+        sent = view.request_bytes
+        # The whole request, byte for byte: § kept, CRLF-in-body kept, invalid UTF-8 kept,
+        # the captured `$TOKEN` kept, CL still the captured 70.
+        String.new(sent).should eq(wire)
+        sent.size.should eq(head.bytesize + body.size)
+        String.new(sent).should contain("Content-Length: #{body.size}")
+        # …and the two § really are still on the wire (c2 a7 SEED c2 a7).
+        carries_marker.call(sent).should be_true
+      end
+    end
+
+    it "reflects the CAPTURED Content-Length in the editor, so ^X hex sends a consistent request" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        # The auto-CL reflection is what ^X snapshots. It used to write the RENDERED (marker-
+        # stripped) length into the visible head, so the byte-exact escape hatch shipped a
+        # 70-byte body under `Content-Length: 66` — a CL/body desync gori invented out of a
+        # benign capture.
+        view.request_text.should contain("Content-Length: #{body.size}")
+        view.request_text.should_not contain("Content-Length: #{body.size - 4}")
+
+        view.focus_pane(:request)
+        view.toggle_request_hex.should be_true # ^X: the byte buffer is authoritative now
+        String.new(view.request_bytes).should eq(wire)
+      end
+    end
+
+    it "does not hand the capture's § to the Fuzzer as an injection position" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        # `space ▸ f` seeds a tab that reads §…§ as syntax; the capture's own § must not
+        # become a position there either. The escape `Fuzz::Template` already defines (§§)
+        # carries it as a literal, so the template still renders the captured bytes.
+        tmpl = Gori::Fuzz::Template.parse(view.fuzz_seed_text)
+        tmpl.position_count.should eq(0) # was 1 — the site's own text as a fuzz position
+        # …and the escape really does render back to the single captured § (`§§` → `§`).
+        # (Compared on the marked region: `Template#render` rebuilds through String, which
+        # scrubs the deliberately-invalid UTF-8 further down this fixture's body — a separate
+        # concern of the Fuzzer's own seed path, not of the escape.)
+        String.new(tmpl.render(tmpl.default_payloads)).should contain(%("mk":"§SEED§"))
+        view.fuzz_seed_text.should contain(%("mk":"§§SEED§§"))
+        # …and the escape is byte-level: a `String#gsub` here walks CHARS, which rewrites the
+        # invalid UTF-8 this capture also carries to U+FFFD (measured: `ff fe 01 02` became
+        # `ef bf bd ef bf bd 01 02`, inflating Content-Length with it). Round 4's T1 again.
+        seed_bytes = view.fuzz_seed_text.to_slice
+        (0..(seed_bytes.size - 4)).any? { |i| seed_bytes[i, 4] == Bytes[0xFF, 0xFE, 0x01, 0x02] }.should be_true
+        seed_bytes.size.should eq(wire.bytesize + 4) # exactly the two doubled § (2 bytes each)
+      end
+    end
+
+    it "keeps the § inert while the operator edits an unrelated header" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        view.focus_pane(:request)
+        view.goto_request_line(2) # the Host line
+        view.edit_end
+        view.edit_insert('x') # an edit is not a marker declaration — see markers_live?
+        String.new(view.request_bytes).should contain("Host: h.testx")
+        String.new(view.request_bytes).should contain("Content-Length: #{body.size}")
+        carries_marker.call(view.request_bytes).should be_true
+      end
+    end
+
+    it "^A auto-mark refuses by name rather than adopting the capture's § for nothing" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        view.focus_pane(:request)
+        # Template.auto_mark is a no-op once ANY § is present, so declaring here would cost
+        # the capture's bytes and buy no positions.
+        view.auto_mark.should contain("capture's own §")
+        view.markers_active?.should be_false
+        String.new(view.request_bytes).should eq(wire)
+      end
+    end
+
+    it "^K on a token DOES declare the buffer a template — and says the § came along" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        view.focus_pane(:request)
+        view.goto_request_line(1) # the request line — mark the METHOD token
+        msg = view.mark_word
+        msg.should contain("marked position")
+        msg.should contain("the capture's own § are markers now")
+        view.markers_active?.should be_true
+        view.request_text.should contain("§POST§")
+        # Declared: the capture's § now render like any other marker (visible, and the border
+        # chip is lit) — the operator asked for a template.
+        String.new(view.request_bytes).should contain(%("mk":"SEED"))
+      end
+    end
+
+    it "clear-marks refuses on an undeclared capture (it would delete the captured §)" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        view.focus_pane(:request)
+        view.clear_marks.should contain("captured data")
+        String.new(view.request_bytes).should eq(wire)
+      end
+    end
+
+    it "COMPLEMENT: the same bytes as a DRAFT still mark, chain and fuzz" do
+      draft = RepeaterView.new
+      draft.restore("http://h.test",
+        "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\ntok=§secret¦base64-encode§",
+        false, true) # evidence: false — the operator typed this
+      draft.markers_active?.should be_true
+      sent = String.new(draft.request_bytes)
+      sent.should contain("tok=c2VjcmV0")
+      sent.should contain("Content-Length: 12")
+      Gori::Fuzz::Template.parse(draft.fuzz_seed_text).position_count.should eq(1)
+    end
+
+    it "COMPLEMENT: a capture with NO § is byte-identical to before the gate" do
+      repeater_tmp_store do |store|
+        plain = %({"note":"a\r\nb","env":"$TOKEN"})
+        h = "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: #{plain.bytesize}\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/x", http_version: "HTTP/1.1",
+          head: h.to_slice, body: plain.to_slice))
+        view = RepeaterView.new
+        view.load(store.get_flow(id).not_nil!)
+        String.new(view.request_bytes).should eq(h + plain)
+        view.fuzz_seed_text.should eq(view.request_text)
+        view.markers_active?.should be_false
+      end
+    end
+  end
+
   it "CHAIN pane: focus a marker, type a chain, commit writes it back" do
     view = RepeaterView.new
     # marker at offset 0 → set_text zeroes the cursor, so it sits inside §v§

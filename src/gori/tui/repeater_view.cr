@@ -189,9 +189,12 @@ module Gori::Tui
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
       # `§…§` markers carry inline Decoder chains applied on send (mark a value, attach
-      # base64-encode → it's encoded on the wire). Always active (like the Fuzzer): a request
-      # that contains a marker region renders it on send, a marker-free request is byte-
-      # identical to a plain send. Highlighting + the CHAIN pane surface contextually — no mode.
+      # base64-encode → it's encoded on the wire). On a DRAFT they are always active (like the
+      # Fuzzer): a request that contains a marker region renders it on send, a marker-free
+      # request is byte-identical to a plain send. Highlighting + the CHAIN pane surface
+      # contextually — no mode. On an EVIDENCE tab they are inert until declared, see
+      # `@markers_declared` / `markers_live?`.
+      @markers_declared = false
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
       # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)
@@ -386,6 +389,51 @@ module Gori::Tui
       (h = @req_hex_edit) ? String.new(h.to_bytes) : @editor.wire_text
     end
 
+    # The same request handed to a tab that reads `§…§` as TEMPLATE SYNTAX — `space ▸ f`
+    # (Send to Fuzzer). Where this tab's markers are inert (a capture whose body legitimately
+    # carries `§`; see `markers_live?`), the literal `§` are escaped to `§§` — the escape
+    # `Fuzz::Template.parse` already defines — so the receiving template renders them back to
+    # one `§` on the wire instead of turning the site's own text into an injection position
+    # the operator never marked. Byte-identical to `request_text` in every other case, which
+    # is every request without a `§` in it.
+    #
+    # Done over BYTES, not `String#gsub`: this request is a capture, so its body may hold
+    # genuinely invalid UTF-8 (round 4's T1), and every String rebuild that walks chars
+    # rewrites those bytes to U+FFFD — measured, on this very fixture, turning
+    # `ff fe 01 02` into `ef bf bd ef bf bd 01 02` and inflating Content-Length with it.
+    def fuzz_seed_text : String
+      text = request_text
+      src = text.to_slice
+      return text if markers_live? || !RepeaterView.marker_bytes_in?(src)
+      io = IO::Memory.new(src.size + 8)
+      i = 0
+      while i < src.size
+        if marker_byte_pair?(src, i)
+          io.write(Fuzz::Template::MARKER_BYTES) # §§ — one literal § after `parse`
+          io.write(Fuzz::Template::MARKER_BYTES)
+          i += 2
+        else
+          io.write_byte(src[i])
+          i += 1
+        end
+      end
+      String.new(io.to_slice)
+    end
+
+    # `§` is U+00A7 = C2 A7. Byte-level so an invalid-UTF-8 capture is never walked as chars.
+    def self.marker_bytes_in?(b : Bytes) : Bool
+      i = 0
+      while i < b.size - 1
+        return true if b[i] == 0xC2_u8 && b[i + 1] == 0xA7_u8
+        i += 1
+      end
+      false
+    end
+
+    private def marker_byte_pair?(b : Bytes, i : Int32) : Bool
+      b[i] == 0xC2_u8 && i + 1 < b.size && b[i + 1] == 0xA7_u8
+    end
+
     # The buffer the external editor (^E) round-trips: the ACTIVE request sub-pane — the
     # envelope, or the decoded payload when it's the split's active pane (so you can edit
     # a big SAML XML / GraphQL query in $EDITOR). Non-decode tabs = the envelope, as before.
@@ -472,7 +520,8 @@ module Gori::Tui
 
     def load(detail : Store::FlowDetail) : Nil
       @flow = detail
-      @evidence = true # a CAPTURED request — see `evidence?`
+      @evidence = true          # a CAPTURED request — see `evidence?`
+      @markers_declared = false # a fresh capture: any § in it is the origin's (see markers_live?)
       @http2 = detail.http_version == "HTTP/2"
       @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
       @tcx = @target.size
@@ -507,6 +556,7 @@ module Gori::Tui
     def load_ws(detail : Store::FlowDetail, out_messages : Array(Store::WsOutMessage)) : Nil
       @flow = detail
       @evidence = true # the handshake AND the seeded frames are the capture's
+      @markers_declared = false
       @ws_mode = true
       @ws_keep_key = false # a fresh capture: the regenerated key is the default (see the ivar)
       @http2 = false       # WebSocket is HTTP/1.1
@@ -816,6 +866,7 @@ module Gori::Tui
     def load_grpc(detail : Store::FlowDetail) : Nil
       @flow = detail
       @evidence = true
+      @markers_declared = false
       @grpc_mode = true
       @ws_mode = false
       @http2 = true # gRPC is HTTP/2
@@ -894,6 +945,7 @@ module Gori::Tui
     private def seed_decode(detail : Store::FlowDetail, kind : Symbol, payload : String) : Nil
       @flow = detail
       @evidence = true
+      @markers_declared = false
       @decode_kind = kind
       @ws_mode = false
       @grpc_mode = false
@@ -1267,6 +1319,11 @@ module Gori::Tui
       # same carrier `FuzzerView`/`MinerView` restore from. Without it a reopened capture
       # silently reverted to a draft on the next gori start.
       @evidence = evidence
+      # …and provenance is all that arrives: the row holds the request TEXT and the flow id,
+      # nothing that says which `§` in it the operator typed. Undeclared is the answer gori
+      # can defend — see `markers_live?`. (A marked-up capture reopens with its markers inert
+      # and the border chip saying so; ^K re-declares.)
+      @markers_declared = false
       apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key)
 
       @original_lines = [] of String
@@ -1300,6 +1357,8 @@ module Gori::Tui
                            ws_keep_key : Bool = false,
                            evidence : Bool = false) : Nil
       @evidence = evidence
+      # A peer's row carries the same two facts a restore does, so the same answer: see restore.
+      @markers_declared = false
       apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key)
       @req_hex_edit = nil
       # Leave @result / @prev_result / @focus / @scroll / @resp_mode / @original_lines alone.
@@ -1381,7 +1440,8 @@ module Gori::Tui
     # scaffold URL is a placeholder you almost always change first.
     def load_blank : Nil
       @flow = nil
-      @evidence = false # ^N: a draft the operator is about to type
+      @evidence = false         # ^N: a draft the operator is about to type
+      @markers_declared = false # moot on a draft (markers_live? is true either way) — kept in lockstep
       @http2 = false
       @target = BLANK_TARGET
       @link_host_to_target = true # first target edit mirrors into the Host header (see the field)
@@ -1410,7 +1470,8 @@ module Gori::Tui
     # chip name (+ " copy"). Drops source flow linkage, inflight state, and scroll/cursor.
     def duplicate_from(src : RepeaterView) : Nil
       @flow = nil
-      @evidence = src.evidence? # the same bytes carry the same provenance
+      @evidence = src.evidence?                 # the same bytes carry the same provenance
+      @markers_declared = src.@markers_declared # …and the same reading of their §
       @http2 = src.@http2
       @target = src.@target
       @tcx = @target.size
@@ -1761,6 +1822,7 @@ module Gori::Tui
     def focus_chain_pane : String?
       return "not available in hex edit" if request_hex?
       return "move to the REQUEST pane first (↹)" unless @focus == :request
+      return literal_marker_hint unless markers_live?
       chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
       return "put the cursor in a §…§ marker · ^A mark all · ^T insert §" if chain.nil?
       @chain_marker_cursor = @editor.cursor_offset
@@ -1809,11 +1871,18 @@ module Gori::Tui
     end
 
     # --- marking (§…§ Decoder-chain positions) -------------------------------
-    # These mirror the Fuzzer's marking helpers, gated on the REQUEST pane (markers are
-    # always meaningful on send now — a marked value renders through its chain). All
-    # delegate to the shared Fuzz::Template helpers.
+    # These mirror the Fuzzer's marking helpers, gated on the REQUEST pane (a marked value
+    # renders through its chain on send). All delegate to the shared Fuzz::Template helpers.
+    # Each of the three that CREATES a marker also declares the buffer a template — see
+    # `markers_live?` for why an evidence tab needs to be told.
     def auto_mark : String
       return mark_hint unless markable?
+      # `Fuzz::Template.auto_mark` is a documented no-op once the text holds ANY `§`, so on a
+      # capture that carries one there is nothing to gain by declaring — and everything to
+      # lose: the capture's own `§` would become live positions in exchange for zero new ones.
+      # Name that instead of doing it silently.
+      return "the capture's own § would become markers and auto-mark adds none — ^K marks the token at the cursor" if literal_markers?
+      declare_markers
       @editor.set_text(Fuzz::Template.auto_mark(@editor.text))
       @dirty = true
       n = Fuzz::Template.parse(@editor.text).position_count
@@ -1825,29 +1894,104 @@ module Gori::Tui
       before = @editor.text
       after = Fuzz::Template.mark_word(before, @editor.cursor_offset)
       return "no word at the cursor — place it on a token (or auto-mark)" if after == before
+      note = adopted_literals_note
+      declare_markers
       @editor.set_text(after)
       @dirty = true
-      Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
+      msg = Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
+      "#{msg}#{note}"
     end
 
     def insert_marker : String
       return mark_hint unless markable?
+      note = adopted_literals_note
+      declare_markers
       @editor.insert(Fuzz::Template::MARKER)
       @editor.set_preedit("")
       @dirty = true
       if @editor.text.count(Fuzz::Template::MARKER).odd?
-        "marker opened — move the cursor and mark again to close the region"
+        "marker opened — move the cursor and mark again to close the region#{note}"
       else
         n = Fuzz::Template.parse(@editor.text).position_count
-        "marked point — #{n} position#{n == 1 ? "" : "s"}"
+        "marked point — #{n} position#{n == 1 ? "" : "s"}#{note}"
       end
     end
 
+    # NOT a declaring action: `Template.clear_markers` renders the defaults, i.e. it DELETES
+    # every `§` in the buffer. On an evidence tab those are the capture's bytes, so running
+    # it would do exactly the damage this whole gate exists to prevent — refuse by name.
     def clear_marks : String
       return mark_hint unless markable?
+      return literal_marker_hint unless markers_live?
       @editor.set_text(Fuzz::Template.clear_markers(@editor.text))
+      @markers_declared = false # back to a buffer with no markers of its own
+      invalidate_marker_caches
       @dirty = true
       "cleared all § markers"
+    end
+
+    # PROVENANCE: `§…§` (and its `¦chain`) is the operator's DRAFT language, not a value the
+    # wire can carry. A `§` that arrived as captured evidence is DATA — U+00A7 is ordinary
+    # text, ubiquitous in German and legal bodies — and rendering it as syntax deletes two
+    # bytes the origin really sent, silently, with `Content-Length` re-synced behind it so
+    # the loss leaves no trace. `gori run repeater <id>` and MCP `send_request` both replay
+    # those bytes exactly; the TUI was the one surface that did not.
+    #
+    # So on an EVIDENCE tab markers start INERT and the operator declares them — by marking
+    # (^A / ^K / insert §), the same explicit act the Fuzzer's ⇧I → ^A workflow already is.
+    # Declaring is per-buffer and monotone: from then on every `§` in the buffer is a marker
+    # (the status line says so when the capture carried one), which is the honest reading of
+    # "this buffer is now a template".
+    #
+    # Deliberately NOT keyed on `@dirty`. `evidence?` documents that an operator edit does
+    # not clear provenance — editing a header does not make the `§` in the body something the
+    # operator typed — and gating on the first keystroke would put the deletion straight back
+    # on the commonest workflow there is (seed a capture, tweak a header, send).
+    #
+    # A restore()/reconcile lands undeclared: the persisted row carries the request text and
+    # its `flow_id`, and nothing that says which `§` in it the operator typed. gori does not
+    # know, and for evidence the answer when gori does not know is the wire's. The REQUEST
+    # border chip says which state the tab is in whenever a `§` is present at all.
+    private def markers_live? : Bool
+      !@evidence || @markers_declared
+    end
+
+    # Public for the send-path guards that live in the controller (group send / minimize):
+    # "are there §…§ regions this send has to render?", provenance included, so a capture's
+    # own `§` neither renders nor blocks an unrelated action.
+    def markers_active? : Bool
+      !marker_regions.empty?
+    end
+
+    # True when the buffer holds a `§` that is being treated as literal capture bytes — the
+    # only state the REQUEST border needs a chip for (a marker-free request renders exactly
+    # as before).
+    def literal_markers? : Bool
+      !markers_live? && RepeaterView.marker_bytes_in?(@editor.text.to_slice)
+    end
+
+    private def declare_markers : Nil
+      return if @markers_declared
+      @markers_declared = true
+      invalidate_marker_caches
+    end
+
+    # The caches key on `@editor.edits`, which a pure state flip does not bump.
+    private def invalidate_marker_caches : Nil
+      @marker_regions_rev = -1
+      @marker_spans_rev = -1
+      @chain_rev = -1
+    end
+
+    # Named in the status line when declaring adopts `§` the capture brought with it: those
+    # bytes stop being data on the very next send, and that is not something to discover from
+    # a 4-byte-shorter request.
+    private def adopted_literals_note : String
+      literal_markers? ? " — the capture's own § are markers now (^Z undoes)" : ""
+    end
+
+    private def literal_marker_hint : String
+      "§ here is captured data, not a marker — ^K marks a token (the capture's § become markers too)"
     end
 
     # Insert an OAST payload URL at the request-editor caret (cross-tab "Insert OAST
@@ -2869,6 +3013,7 @@ module Gori::Tui
     end
 
     private def marker_spans : Array({Int32, Int32})
+      return NO_SPANS unless markers_live?
       if @editor.edits != @marker_spans_rev
         @marker_spans_rev = @editor.edits
         @marker_spans_cache = Fuzz::Template.marked_spans(@editor.text)
@@ -2880,6 +3025,7 @@ module Gori::Tui
     # no chain). Cached on {editor revision, cursor} so a stationary cursor doesn't re-join +
     # re-scan the whole buffer every render frame the CHAIN pane is visible.
     private def chain_under_cursor : String?
+      return nil unless markers_live? # a captured `¦` isn't a chain — no tooltip over evidence
       cur = @editor.cursor_offset
       if @editor.edits != @chain_rev || cur != @chain_cursor
         @chain_rev = @editor.edits
@@ -3049,7 +3195,13 @@ module Gori::Tui
       end
       cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
       mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^U", "PRETTY", false)
-      Frame.mode_badge(screen, mode_x, rect.y, min_x, ins)
+      mark_x = Frame.mode_badge(screen, mode_x, rect.y, min_x, ins)
+      # Only when a `§` is actually in the buffer, so a request without one draws exactly the
+      # border it drew before. Unlit = the capture's § are literal bytes (^K declares them);
+      # lit = this buffer is a template and ^R renders them. See `markers_live?`.
+      if literal_markers? || (@evidence && markers_active?)
+        Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^K", "MARK", markers_live?)
+      end
       update_request_marker_tint
       inner = rect.inset(1, 1)
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
@@ -3124,13 +3276,23 @@ module Gori::Tui
     # {open, sep, close} marker regions cached on the editor revision — update_request_marker_tint
     # (and request_bytes / chain_split_visible?) read it every render; the cache skips
     # marker_regions' 2× whole-buffer `text.chars` on an unchanged request buffer.
+    #
+    # Empty while the markers are INERT (see `markers_live?`), which is the one place that
+    # decision has to live: every consumer — the send (`request_bytes`), the Content-Length
+    # reflection, the tint/conceal paint, `minimizable?`, the editor's delimiter guards —
+    # reads it, and they must not be able to disagree about whether a `§` in this buffer is
+    # syntax or data.
     private def marker_regions : Array({Int32, Int32, Int32})
+      return NO_REGIONS unless markers_live?
       if @editor.edits != @marker_regions_rev
         @marker_regions_rev = @editor.edits
         @marker_regions_cache = Fuzz::Template.marker_regions(@editor.text)
       end
       @marker_regions_cache
     end
+
+    NO_REGIONS = [] of {Int32, Int32, Int32}
+    NO_SPANS   = [] of {Int32, Int32}
 
     private def render_ws_handshake(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
