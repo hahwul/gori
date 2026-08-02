@@ -136,7 +136,7 @@ module Gori
           Fuzz::Plan.build(options, outbound)
         rescue ex : Fuzz::PlanError
           outbound.close
-          abort "gori run fuzz: #{fuzz_plan_error(ex)}"
+          abort "gori run fuzz: #{fuzz_plan_error(ex, text)}"
         end
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
@@ -163,10 +163,23 @@ module Gori
 
       # `gori run fuzz`'s wording for a plan the options can't produce. The builder reports
       # the machine-readable `reason`; the sentence (and the flags it names) is ours.
-      private def self.fuzz_plan_error(ex : Fuzz::PlanError) : String
+      # `template` is the seeded text, needed only to tell the two NoPositions cases apart.
+      private def self.fuzz_plan_error(ex : Fuzz::PlanError, template : String? = nil) : String
         case ex.reason
         in Fuzz::PlanError::Reason::NoPositions
-          "no positions — add §…§ markers, --auto, or --mark TOKEN"
+          # Every `§` present is LITERAL: an escaped `§§`, which is what the `--flow` seed
+          # makes of a capture's own `§`, or an unpaired one the operator typed. `Template
+          # .auto_mark` is a documented no-op once ANY `§` is in the text, so naming `--auto`
+          # here would send the operator round the same loop — and on a `--flow --auto` run it
+          # would deny that `--auto` had been passed at all, about a request that visibly has
+          # a query string and a body full of values. `--mark` still names a position.
+          if (t = template) && Fuzz::Template.marker_bytes_in?(t.to_slice)
+            "no positions — every § in this template is literal (a --flow capture's § is " \
+            "escaped to §§ so the site's own text is not swept), and --auto adds nothing " \
+            "while any § is present; name a position with --mark TOKEN"
+          else
+            "no positions — add §…§ markers, --auto, or --mark TOKEN"
+          end
         in Fuzz::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Fuzz::PlanError::Reason::BadTarget
@@ -222,7 +235,23 @@ module Gori
           # while its line names another needs its own design, not a boolean.
           warn_request_line_rewrite(built, "gori run fuzz",
             "replay it with `gori run repeater #{id} --keep-request-line` to keep it")
-          {String.new(built.bytes).scrub, built.target, built.http2, true}
+          # Two things the DRAFT branches above must not get, and this one must — see
+          # `FuzzerView#load`, which is the same seam on the TUI's ⇧I road:
+          #
+          #   * every `§` is escaped to the `§§` literal `Fuzz::Template.parse` already
+          #     defines. `§…§` is this template's injection-position syntax, but `§` is also
+          #     U+00A7 — ordinary text a German or legal body carries constantly — so a
+          #     captured `"mk":"§SEED§"` used to arrive as a live position nobody marked, and
+          #     the sweep replaced the site's own text with every payload in the set with no
+          #     `--auto` and no `--mark` passed. Escaping keeps the bytes: `render` puts the
+          #     single `§` back on the wire and the Content-Length still agrees.
+          #   * no `.scrub`. A capture is EVIDENCE and may legitimately not be valid UTF-8 (a
+          #     protobuf/gRPC frame, a gzip'd POST, a latin-1 field). Scrubbing rewrote each
+          #     such byte to the three bytes of U+FFFD before the sweep ran, and `Plan.build`
+          #     then resynced Content-Length to the corruption — measured, `ff fe 01 02` went
+          #     out as `ef bf bd ef bf bd 01 02`. `Template.parse`/`render` are byte-oriented,
+          #     so nothing downstream needed the scrub in the first place.
+          {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true}
         elsif !STDIN.tty?
           {STDIN.gets_to_end, nil, false, false}
         else

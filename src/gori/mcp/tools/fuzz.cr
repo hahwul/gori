@@ -260,7 +260,7 @@ module Gori
         plan = Fuzz::Plan.build(options, ob)
         {plan.engine, plan.origin, plan.total, use_h2}
       rescue ex : Fuzz::PlanError
-        raise FuzzArgError.new(fuzz_plan_error(ex))
+        raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")
       rescue ex : Gori::Error
@@ -271,10 +271,22 @@ module Gori
 
       # MCP's wording for a plan the args can't produce — the builder reports the
       # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
-      private def fuzz_plan_error(ex : Fuzz::PlanError) : String
+      # `template` is the seeded text, needed only to tell the two NoPositions cases apart.
+      private def fuzz_plan_error(ex : Fuzz::PlanError, template : String? = nil) : String
         case ex.reason
         in Fuzz::PlanError::Reason::NoPositions
-          "template has no §…§ positions (add markers, or pass auto:true with a flow_id)"
+          # Every `§` present is LITERAL: an escaped `§§`, which is what the `flow_id` seed
+          # makes of a capture's own `§`, or an unpaired one the caller typed. `Template
+          # .auto_mark` is a documented no-op once ANY `§` is in the text, so "pass auto:true"
+          # is advice that cannot work here — and telling an agent to retry with it would send
+          # it round the same loop. `marks` still names a position, so that is what is offered.
+          if (t = template) && Fuzz::Template.marker_bytes_in?(t.to_slice)
+            "template has no §…§ positions — every § in it is literal (a flow_id capture's § " \
+            "is escaped to §§ so the site's own text is not swept), and 'auto' adds nothing " \
+            "while any § is present; name a position with 'marks'"
+          else
+            "template has no §…§ positions (add markers, or pass auto:true with a flow_id)"
+          end
         in Fuzz::PlanError::Reason::NoTarget
           "provide a 'url' target (scheme://host) or a flow_id that carries one"
         in Fuzz::PlanError::Reason::BadTarget
@@ -312,7 +324,15 @@ module Gori
           detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
-          return {String.new(built.bytes).scrub, built.target, built.http2, true}
+          # The capture's `§` is escaped to the `§§` literal `Fuzz::Template.parse` defines,
+          # and nothing is scrubbed — the same seed treatment `gori run fuzz --flow` and
+          # `FuzzerView#load` apply, for the same two reasons. `§…§` is the position syntax
+          # but `§` is also U+00A7, ordinary text: a captured `"mk":"§SEED§"` used to be swept
+          # with every payload though the agent passed neither `auto` nor `marks`. And a
+          # capture that is legitimately not valid UTF-8 had every such byte rewritten to
+          # U+FFFD, with Content-Length resynced to the corruption, before the sweep ran.
+          # `render` puts the single `§` back, so the request still replays byte-exact.
+          return {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true}
         end
         raise FuzzArgError.new("provide a 'template' (raw request with §…§) or a 'flow_id'")
       end
