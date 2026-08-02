@@ -214,4 +214,101 @@ describe Gori::Import::Burp do
       end
     end
   end
+
+  # PROVENANCE, at the one seam where a corrupted read is PERMANENT: the store IS the
+  # evidence, so a byte lost here is lost for every surface, forever, with the import
+  # reporting `count: 1, skipped: 0` over it.
+  #
+  # `parse_file` used to `.scrub` the WHOLE FILE before the `<request>` bytes were cut out
+  # of it, on the theory that "scrubbing keeps the scanner's ASCII needles working". The
+  # scanner never needed it — `String#index` and `String#[]` agree on char boundaries and
+  # `String#[](a, n)` copies bytes — but a `base64="false"` item, which carries its message
+  # inline rather than encoded, went through that scrub with everything else. Measured
+  # through `gori run import --burp` into a real SQLite store, source body
+  # `a=1&bin=<ff fe 01 02>&b=2`:
+  #
+  #   stored request_body  61 3d 31 26 62 69 6e 3d ef bf bd ef bf bd 01 02 26 62 3d 32
+  #
+  # …20 bytes under a stored head still declaring `Content-Length: 16`.
+  describe "a non-base64 item whose message is not valid UTF-8" do
+    bin = Bytes[0xFF, 0xFE, 0x01, 0x02]
+    body = String.build do |io|
+      io << "a=1&bin="
+      io.write(bin)
+      io << "&b=2"
+    end
+    req = "POST /p?q=1 HTTP/1.1\r\nHost: target.test\r\n" \
+          "Content-Type: application/x-www-form-urlencoded\r\n" \
+          "Content-Length: #{body.bytesize}\r\n\r\n#{body}"
+    xml = items(<<-XML)
+      <item>
+        <url><![CDATA[https://target.test/p?q=1]]></url>
+        <request base64="false"><![CDATA[#{req}]]></request>
+        <response base64="false"></response>
+      </item>
+      XML
+
+    it "stores the message byte for byte" do
+      pair = parse(xml).flows.first
+      stored = pair.request.head.to_a + (pair.request.body.try(&.to_a) || [] of UInt8)
+      stored.should eq(req.to_slice.to_a) # byte-wise; the fixture is not valid UTF-8
+      stored_body = pair.request.body.not_nil!
+      (0..(stored_body.size - bin.size)).any? { |i| stored_body[i, bin.size] == bin }.should be_true
+      # `.scrub` grew the body by 4 while the head kept declaring the original length.
+      stored_body.size.should eq(body.bytesize)
+    end
+
+    it "keeps the bytes through the STORE, which is where the loss became permanent" do
+      with_xml(xml) do |path|
+        with_store do |store|
+          Gori::Import.import_file(store, :burp, path).count.should eq(1)
+          row = store.search(Gori::QL::EMPTY, 10).first
+          detail = store.get_flow(row.id).not_nil!
+          read_back = detail.request_body.not_nil!
+          read_back.to_a.should eq(body.to_slice.to_a)
+          String.new(detail.request_head).should contain("Content-Length: #{read_back.size}")
+        end
+      end
+    end
+
+    # …and the surrounding TEXT elements of the same item still read correctly, because the
+    # invalid bytes sit in a sibling element and the scanner walks past them.
+    it "still reads <url>, <host> and <time> out of the same file" do
+      pair = parse(xml).flows.first
+      pair.request.host.should eq("target.test")
+      pair.request.target.should eq("/p?q=1")
+      pair.request.scheme.should eq("https")
+    end
+  end
+
+  # COMPLEMENT: an ordinary base64 export — the shape Burp writes by default — is untouched
+  # by any of this, including when its DECODED message is not valid UTF-8.
+  it "is unchanged for a base64 export carrying binary bytes" do
+    bin = Bytes[0xFF, 0xFE, 0x01, 0x02]
+    body = String.build do |io|
+      io << "a=1&bin="
+      io.write(bin)
+      io << "&b=2"
+    end
+    req = "POST /p HTTP/1.1\r\nHost: target.test\r\n" \
+          "Content-Length: #{body.bytesize}\r\n\r\n#{body}"
+    pair = parse(items(item("https://target.test/p", req))).flows.first
+    (pair.request.head.to_a + pair.request.body.not_nil!.to_a).should eq(req.to_slice.to_a)
+  end
+
+  # COMPLEMENT: entity decoding, which `bytes_of` reaches for a non-base64 item that is NOT
+  # CDATA-wrapped. Named, decimal, hex and unknown entities must resolve exactly as before —
+  # and now do so without walking the message as chars.
+  it "unescapes entities in an inline non-CDATA message, and leaves unknown ones verbatim" do
+    inline = "GET /e?a=1&amp;b=2&amp;c=&#65;&#x42;&amp;d=&bogus; HTTP/1.1&#13;&#10;" \
+             "Host: target.test&#13;&#10;&#13;&#10;"
+    xml = items(<<-XML)
+      <item>
+        <url><![CDATA[https://target.test/e]]></url>
+        <request base64="false">#{inline}</request>
+      </item>
+      XML
+    head = String.new(parse(xml).flows.first.request.head)
+    head.should eq("GET /e?a=1&b=2&c=AB&d=&bogus; HTTP/1.1\r\nHost: target.test\r\n\r\n")
+  end
 end

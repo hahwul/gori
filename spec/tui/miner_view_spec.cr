@@ -177,3 +177,95 @@ describe Gori::Tui::MinerView do
     end
   end
 end
+
+# PROVENANCE, on the Miner → Repeater handoff (space ▸ Send to Repeater from a finding).
+#
+# The Miner ENGINE is byte-clean — it holds the session request as `Bytes` and puts a
+# latin-1/binary field on the wire untouched, which a live mine against a reflecting origin
+# confirms. This is the other road out of the same evidence: the seed the Repeater tab opens
+# with, which ^R then RE-SENDS. It used to be built with `String.new(injected).scrub` plus a
+# CRLF→LF collapse, so on the live mine of `q=hi&bin=<ff fe 01 02>&z=1`:
+#
+#   miner sent  71 3d 68 69 26 62 69 6e 3d ff fe 01 02 26 7a 3d 31 26 64 65 62 75 67 3d …
+#   repeater    71 3d 68 69 26 62 69 6e 3d ef bf bd ef bf bd 01 02 26 7a 3d 31 26 …
+#
+# — four bytes of growth under the `Content-Length: 34` the seed still carried.
+#
+# NOTE: these are REGRESSION guards, not control-red evidence. `repeater_seed_for` is
+# extracted here (mirroring `FuzzerController.repeater_seed_for`, which exists for exactly
+# this reason), so at the base commit the examples would not compile. The behaviour control
+# is the live mine above plus the recorded wire bytes quoted in the fix.
+describe "Gori::Tui::MinerController Miner → Repeater seed" do
+  bin = Bytes[0xFF, 0xFE, 0x01, 0x02]
+  body = String.build do |io|
+    io << "q=hi&bin="
+    io.write(bin)
+    io << "&z=1"
+  end
+  req = String.build do |io|
+    io << "POST /m HTTP/1.1\r\nHost: h.test\r\n"
+    io << "Content-Type: application/x-www-form-urlencoded\r\n"
+    io << "Content-Length: #{body.bytesize}\r\n\r\n"
+    io << body
+  end.to_slice
+
+  finding = Gori::Miner::Finding.new("debug", Gori::Miner::Location::Form,
+    Gori::Miner::Evidence::Reflection, Gori::Miner::Confidence::Confirmed,
+    "gq22fbb1be", 200, 10_i64)
+
+  loaded = -> do
+    view = Gori::Tui::MinerView.new
+    view.load("http://h.test", req, false, nil, Gori::Miner::Config.new)
+    view
+  end
+
+  it "hands the Repeater the bytes the miner injected, not a scrubbed copy" do
+    view = loaded.call
+    injected = view.request_with_finding(finding)
+    seed = Gori::Tui::MinerController.repeater_seed_for(view, finding)
+    # Byte-for-byte, no `should include?` — the fixture is deliberately not valid UTF-8.
+    seed.request_text.to_slice.to_a.should eq(injected.to_a)
+    sb = seed.request_text.to_slice
+    (0..(sb.size - bin.size)).any? { |i| sb[i, bin.size] == bin }.should be_true
+    # `.scrub` turned each of those two bytes into the three of U+FFFD, so the seed's body
+    # ran four bytes past the Content-Length the seed itself still carried.
+    head, seeded_body = seed.request_text.split("\r\n\r\n", 2)
+    head.should contain("Content-Length: #{seeded_body.bytesize}")
+    seed.label.should eq("debug (form)")
+  end
+
+  it "keeps the head's CRLFs instead of collapsing them to LF" do
+    seed = Gori::Tui::MinerController.repeater_seed_for(loaded.call, finding)
+    seed.request_text.should start_with("POST /m HTTP/1.1\r\nHost: h.test\r\n")
+    seed.request_text.should_not contain("\n\n") # a bare-LF head terminator
+  end
+
+  it "keeps a body's OWN CRLF, which the collapse used to flatten" do
+    crlf_body = "a=1\r\nb=2"
+    raw = "POST /m HTTP/1.1\r\nHost: h.test\r\nContent-Type: text/plain\r\n" \
+          "Content-Length: #{crlf_body.bytesize}\r\n\r\n#{crlf_body}"
+    view = Gori::Tui::MinerView.new
+    view.load("http://h.test", raw.to_slice, false, nil, Gori::Miner::Config.new)
+    hdr = Gori::Miner::Finding.new("X-Debug", Gori::Miner::Location::Headers,
+      Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, 200, 1_i64)
+    seed = Gori::Tui::MinerController.repeater_seed_for(view, hdr)
+    seed.request_text.should end_with("a=1\r\nb=2")
+  end
+
+  # COMPLEMENT: a valid-UTF-8 finding keeps every character it always had — `.scrub` was a
+  # no-op on it and stays one. Its head's CRLFs DO survive now where they used to be
+  # collapsed; that is the deliberate half of this change, and it matches what the Fuzzer's
+  # seed and History→Repeater (`origin_form_text`) already hand over.
+  it "carries a valid-UTF-8 session request through unchanged, byte for byte" do
+    utf8_body = "q=관리자&z=1"
+    raw = "POST /m HTTP/1.1\r\nHost: h.test\r\n" \
+          "Content-Type: application/x-www-form-urlencoded\r\n" \
+          "Content-Length: #{utf8_body.bytesize}\r\n\r\n#{utf8_body}"
+    view = Gori::Tui::MinerView.new
+    view.load("http://h.test", raw.to_slice, false, nil, Gori::Miner::Config.new)
+    seed = Gori::Tui::MinerController.repeater_seed_for(view, finding)
+    seed.request_text.should contain("q=관리자")
+    seed.request_text.should contain("debug=gq22fbb1be")
+    seed.request_text.to_slice.to_a.should eq(view.request_with_finding(finding).to_a)
+  end
+end

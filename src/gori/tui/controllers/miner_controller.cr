@@ -388,11 +388,37 @@ module Gori::Tui
     def selected_repeater_seed : RepeaterSeed?
       return nil unless v = current_view
       return nil unless f = v.selected_finding
-      injected = v.request_with_finding(f)
-      # Repeater editors store LF text; send expands back to CRLF (RepeaterView#expanded_text_to_bytes).
-      # Same LF shape as History→Repeater (origin_form_text) and hand-authored tabs.
-      text = String.new(injected).scrub.gsub("\r\n", "\n")
-      RepeaterSeed.new(v.target, text, v.http2?, v.sni_override, "#{f.name} (#{f.location.label})")
+      MinerController.repeater_seed_for(v, f)
+    end
+
+    # The seed for one {session, finding} pair. A class method because it reads no shell
+    # state — `selected_repeater_seed` above only picks the pair — so a spec can drive the
+    # REAL byte handling below without standing up a Host. Same shape as
+    # `FuzzerController.repeater_seed_for`, and for the same reason.
+    def self.repeater_seed_for(view : MinerView, f : Miner::Finding) : RepeaterSeed
+      # `String.new`, NOT `.scrub`, and NO CRLF→LF collapse — the sibling rule
+      # `FuzzerController.repeater_seed_for` already spells out one tab over.
+      #
+      # These are the bytes the MINER put on the wire (`Miner::Inject.apply` over the
+      # session request, which for a flow-seeded session is a CAPTURE), so they may
+      # legitimately not be valid UTF-8: a latin-1 form field, a protobuf/gRPC frame, a
+      # gzip'd POST. `.scrub` rewrote each such byte to the three bytes of U+FFFD in a
+      # request the tab then presents as "the one that found this" — measured on a live
+      # mine of `q=hi&bin=<ff fe 01 02>&z=1` against a reflecting origin:
+      #
+      #   sent  71 3d 68 69 26 62 69 6e 3d ff fe 01 02 26 7a 3d 31 26 64 65 62 75 67 3d …
+      #   seed  71 3d 68 69 26 62 69 6e 3d ef bf bd ef bf bd 01 02 26 7a 3d 31 26 …
+      #
+      # …+4 bytes under the `Content-Length: 34` the seed still carried, so ^R re-sent a
+      # request the miner never made and gori had no way left to notice.
+      #
+      # The CRLF→LF collapse was justified by "Repeater editors store LF text", which the
+      # @eols work made false: `TextArea#set_text` round-trips each line's own terminator
+      # and the send path reads `wire_text`, so collapsing here flattened a body's own
+      # CRLFs to bare LFs on the way in — exactly the loss the Fuzzer's seed stopped taking.
+      text = String.new(view.request_with_finding(f))
+      RepeaterSeed.new(view.target, text, view.http2?, view.sni_override,
+        "#{f.name} (#{f.location.label})")
     end
 
     private def persist_new(view : MinerView, flow_id : Int64?) : Int64?
