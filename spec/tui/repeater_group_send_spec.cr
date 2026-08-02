@@ -175,26 +175,34 @@ describe "minimize on a live %%% group buffer" do
   it "is refused, because it is the same whole-buffer framing ^R is refused" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", group, false, true)
-    # `minimizable?` alone does NOT stop it — this is why the gate is needed at all.
-    view.minimizable?.should be_true
+    # The gate now lives INSIDE the predicate: `minimizable?` is defined as
+    # `minimize_refusal.nil?`, so the two cannot drift and the controller narrates the
+    # sentence rather than a generic "not minimizable".
+    view.minimizable?.should be_false
     view.request_text.should contain("Content-Length: 3")
     # What repeater_minimize's `resolve` would hand Repeater::Minimize.run for EVERY probe
     # send: the two-request document reframed as one.
     resolved = String.new(Gori::Repeater::FlowRequest.resync_content_length(Gori::Env.expand_wire(view.request_text)))
     resolved.should contain("Content-Length: 63")
 
-    reason = RepeaterController.whole_buffer_refusal(view)
+    reason = view.minimize_refusal
     reason.should_not be_nil
     reason.not_nil!.should contain("%%%")
   end
 
   # The complements: the gate must not refuse a minimize that was never wrong. Each is a
   # state in which nothing chunk-scoped is in the visible head.
-  it "is allowed with auto-CL off — the numbers are the operator's" do
+  # NOT a complement, and the one place minimize differs from `^R`. This example asserted
+  # "allowed" while the gate was asked through `request_bytes`, which inherited that method's
+  # auto-CL scoping. `Minimize.run` reads the buffer STRUCTURALLY as one request, so on a
+  # group document it strips lines out of the operator's SECOND request and reports them as
+  # headers removed from the first — meaningless whether or not gori wrote the number. A
+  # whole-buffer `^R` with `^L` off is still a byte-exact send, so that one stays allowed.
+  it "is refused with auto-CL off too — the misreading is structural, not about the number" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", group, false, false)
     view.request_text.should contain("Content-Length: 99")
-    RepeaterController.whole_buffer_refusal(view).should be_nil
+    view.minimize_refusal.not_nil!.should contain("%%%")
   end
 
   it "is allowed on h2 — the pane is never chunked there" do
@@ -202,13 +210,13 @@ describe "minimize on a live %%% group buffer" do
     view.restore("http://127.0.0.1", group, false, true)
     view.toggle_http2
     view.request_text.should contain("Content-Length: 63") # whole buffer, not chunk 1
-    RepeaterController.whole_buffer_refusal(view).should be_nil
+    view.minimize_refusal.should be_nil
   end
 
   it "is allowed for an ordinary request with no %%%" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nAAA", false, true)
-    RepeaterController.whole_buffer_refusal(view).should be_nil
+    view.minimize_refusal.should be_nil
   end
 
   it "is untouched for a group with no markers" do

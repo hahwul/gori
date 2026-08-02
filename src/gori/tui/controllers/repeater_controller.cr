@@ -1304,11 +1304,12 @@ module Gori::Tui
     # request back into the editor when done. One minimize at a time, per project.
     def repeater_minimize : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      unless view.minimizable?
-        @host.status("minimize needs a plain HTTP text request (not hex/gRPC/WS/decode or §markers)")
-        return
-      end
-      if reason = RepeaterController.whole_buffer_refusal(view)
+      # `minimize_refusal` rather than `minimizable?`: the view now distinguishes three
+      # different reasons a buffer cannot be minimized (a non-text mode, live §markers, and a
+      # `%%%` group document), and the one sentence that used to cover them answers none of
+      # them for the third. Predicate and sentence come from the same method so they cannot
+      # drift — `minimizable?` is defined as `minimize_refusal.nil?`.
+      if reason = view.minimize_refusal
         @host.status("minimize: #{reason}")
         return
       end
@@ -1546,36 +1547,21 @@ module Gori::Tui
       "send group does not render §…§ markers — remove them, or ^R to send one request with the chains applied"
     end
 
-    # The refusal a WHOLE-BUFFER read of `view` owes the operator, or nil to proceed.
+    # (A `whole_buffer_refusal` helper used to live here, asking the view through
+    # `request_bytes` whether a WHOLE-BUFFER read was refusable — minimize is one by
+    # definition, since its `resolve` re-syncs Content-Length over the entire buffer, and
+    # `minimizable?` had no `%%%` clause. It found a real defect: pane `Content-Length: 3`,
+    # minimize's resolve `Content-Length: 63`, applied once per PROBE send, i.e. hundreds of
+    # times against the origin under one `space ▸ M`.
     #
-    # `RepeaterView#request_bytes` refuses a buffer holding a live `%%%` under auto-CL: the
-    # visible Content-Length is chunk 1's, and reading the buffer whole reinterprets a
-    # two-request document as one. MINIMIZE is a whole-buffer read by exactly that
-    # definition — `repeater_minimize`'s `resolve` re-syncs Content-Length over the entire
-    # buffer — but `minimizable?` has no `%%%` clause, so the refusal did not reach it.
-    # Measured on a two-chunk draft: pane `Content-Length: 3`, minimize's resolve
-    # `Content-Length: 63`, applied once per PROBE send rather than once, i.e. several
-    # hundred times against the origin under a single `space ▸ M`.
-    #
-    # Asked THROUGH `request_bytes` because that is the one public route to the view's
-    # `group_framing_refusal`, and asking it in the same words `^R` does is the point: a run
-    # of hundreds of `^R`-shaped sends cannot be allowed a framing one `^R` is refused. For
-    # minimize it can only be that refusal — `minimizable?` already excluded §markers, the
-    # only other `Fuzz::ChainError` on this path.
-    #
-    # Verified not to over-refuse, and each pinned: auto-CL OFF (the numbers are the
-    # operator's, nothing was invented), h2 (the pane is never chunked there), and a buffer
-    # with no `%%%` all return nil.
-    #
-    # `self.` and pure for the reason `.literal_bindings` and `.group_marker_refusal` are:
-    # what the operator is told instead of a run is the whole behaviour, and a Host double is
-    # not the thing worth building to pin it.
-    def self.whole_buffer_refusal(view : RepeaterView) : String?
-      view.request_bytes
-      nil
-    rescue ex : Fuzz::ChainError
-      ex.message
-    end
+    # It is gone because routing through `request_bytes` inherited that method's auto-CL
+    # scoping, and minimize legitimately differs there: `Minimize.run` reads the buffer
+    # STRUCTURALLY as one request, so on a group document it strips lines out of the
+    # operator's SECOND request and reports them as headers removed from the first —
+    # meaningless whatever the Content-Length says, and true with auto-CL off too. The view
+    # now splits `group_document?` (structural) from `chunked_reflection?` (structural, plus
+    # gori wrote the number) and answers through `minimize_refusal`, which `repeater_minimize`
+    # calls directly.)
 
     # The scope decision Repeater's direct sends (^R, send-group, WS, minimize) dial through.
     # Unlike ordinary proxied traffic these dial Repeater::Engine/H2Engine/WsEngine straight
