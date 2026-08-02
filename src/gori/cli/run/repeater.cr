@@ -193,6 +193,11 @@ module Gori
 
       # The optional post-insert labels (insert_repeater takes neither). Split out of
       # cmd_repeater_create, which is already over the cyclomatic-complexity bar.
+      #
+      # These two KEEP `mask_secrets`, unlike the target and the SNI beside them: a name and a
+      # tag are the TUI's tab and subtab captions and never reach a socket, so masking them is
+      # a display choice with no wire consequence. The rule is "does this field become bytes
+      # the origin sees", not "did the operator type it".
       private def self.apply_repeater_metadata(store : Store, id : Int64,
                                                name : String?, tags : String?) : Nil
         store.set_repeater_name(id, Env.mask_secrets(name)) if name
@@ -305,14 +310,22 @@ module Gori
 
           pos = store.repeaters_meta.size
 
-          # The REQUEST is stored as authored, the target (a short operator-typed field with
-          # no wire semantics of its own) is masked as before. Same seam and same reason as
-          # `MCP::Tools#stored_request`: `mask_secrets` here rewrote an author's live value —
-          # or, on `--flow`, a CAPTURE's own bytes — to `$KEY` in the stored row, and the TUI
-          # then read that row through `RepeaterView#evidence?`, which does not expand
+          # The REQUEST, the TARGET and the SNI are all stored as authored. Same seam and same
+          # reason as `MCP::Tools#stored_request`: `mask_secrets` here rewrote an author's live
+          # value — or, on `--flow`, a CAPTURE's own bytes — to `$KEY` in the stored row, and
+          # the TUI then read that row through `RepeaterView#evidence?`, which does not expand
           # `$NAME`. One row, `$KEY` on the wire from the TUI and the value from here.
+          #
+          # The target was the one field left masked, on the theory that it has "no wire
+          # semantics of its own". It has: it is the dial tuple, and it supplies the TLS
+          # ClientHello ServerName whenever `--sni` is absent. And masking resolves against
+          # `Env.masking_vars` (env vars PLUS every session-binding value held) while the send
+          # path resolves with `Env.effective_vars` and refuses a declared binding name
+          # outright — so a binding value masked in here mints a `$NAME` no surface can ever
+          # resolve, and the operator's string is gone. `--sni` was already stored verbatim;
+          # this makes the two agree. See `MCP::Tools#wire_field`, which argues it at length.
           id = store.insert_repeater(
-            target: Env.mask_secrets(tgt_str),
+            target: tgt_str,
             request: req_content.to_slice,
             http2: http2,
             auto_cl: auto_cl,

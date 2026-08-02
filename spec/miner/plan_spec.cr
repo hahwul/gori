@@ -280,6 +280,144 @@ describe Gori::Miner::Plan do
       Gori::Settings.env_vars = [] of {String, String}
       Gori::Settings.project_env_vars = [] of {String, String}
     end
+
+    # The expansion runs over the BODY too, and this builder framed nothing afterwards — so
+    # every request the run sent declared the PRE-expansion length and wrote the post-
+    # expansion body. A raw sink counting bytes saw 30 body bytes behind `Content-Length: 19`;
+    # the 11 orphans sit in the connection as the front of the next request line. The origin
+    # cannot see it (it reads exactly CL bytes), so the run reported `baseline: stable · 0
+    # found · 0 errors` over a conversation a strict origin had 400'd. `Repeater::Plan` and
+    # `Fuzz::Generator` both re-framed here and only the miner did not.
+    it "re-frames Content-Length when expansion GROWS the body" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = %({"a":"$id","b":"x"})
+      plan = M::Plan.build(M::PlanOptions.new(
+        "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+        "Content-Length: #{body.bytesize}\r\n\r\n#{body}",
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+      wire = String.new(plan.request)
+      sent_body = wire.split("\r\n\r\n", 2)[1]
+      sent_body.should eq(%({"a":"99999-EVIL-ENV","b":"x"}))
+      wire.should contain("Content-Length: #{sent_body.bytesize}\r\n")
+      # The pre-fix bytes, spelled out: the token's own width, not the value's.
+      wire.should_not contain("Content-Length: #{body.bytesize}\r\n")
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: a value SHORTER than its token under-fills the declared length instead of
+    # overflowing it, which hangs the origin waiting for bytes that never come rather than
+    # smuggling. Same defect, opposite sign, and a resync-on-growth-only fix would miss it.
+    it "re-frames Content-Length when expansion SHRINKS the body" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"LONGNAME", "z"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = %({"a":"$LONGNAME"})
+      plan = M::Plan.build(M::PlanOptions.new(
+        "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+        "Content-Length: #{body.bytesize}\r\n\r\n#{body}",
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+      wire = String.new(plan.request)
+      sent_body = wire.split("\r\n\r\n", 2)[1]
+      sent_body.should eq(%({"a":"z"}))
+      wire.should contain("Content-Length: #{sent_body.bytesize}\r\n")
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: the overwhelmingly common request has no `$KEY` in its body at all, and it
+    # must come out byte-identical — including a deliberately-wrong `Content-Length`, which is
+    # the CL-desync probe an operator mines that endpoint to test. `Fuzz::ContentLength.sync`
+    # is a RESYNC, so running it unconditionally would silently correct their payload.
+    it "leaves a body with no token alone, including a deliberately-wrong Content-Length" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+            "Content-Length: 99\r\n\r\n{\"a\":\"x\"}"
+      plan = M::Plan.build(M::PlanOptions.new(raw, target: "http://t.test",
+        locations: [M::Location::Json], config: config), ungated)
+      String.new(plan.request).should eq(raw)
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: a bodyless request must not GROW a Content-Length, and a head-only
+    # expansion must not be mistaken for a body change.
+    it "does not add a Content-Length to a request that had none" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"UA", "gori-probe-agent"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      plan = M::Plan.build(M::PlanOptions.new(
+        "GET /a?x=1 HTTP/1.1\r\nHost: t.test\r\nUser-Agent: $UA\r\n\r\n",
+        target: "http://t.test", locations: [M::Location::Query], config: config), ungated)
+      wire = String.new(plan.request)
+      wire.should eq("GET /a?x=1 HTTP/1.1\r\nHost: t.test\r\nUser-Agent: gori-probe-agent\r\n\r\n")
+      wire.downcase.should_not contain("content-length")
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: EVIDENCE never expands, so it must never re-frame either. A captured
+    # `Content-Length: 99` over a 2-byte body is the thing the operator captured.
+    it "does not touch a captured request's framing on the evidence path" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+            "Content-Length: 4\r\n\r\n{\"a\":\"$id\"}"
+      plan = M::Plan.build(M::PlanOptions.new(raw, evidence: true, target: "http://t.test",
+        locations: [M::Location::Json], config: config), ungated)
+      String.new(plan.request).should eq(raw)
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: the TUI Miner tab holds its editor buffer LF-joined, so the head reaching
+    # this builder is bare-LF and `expand_wire` promotes it. A `\r\n\r\n`-only measurement of
+    # "did the body change" (which is what `FlowRequest.resync_content_length_if_body_changed`
+    # does) silently skips exactly that input; `Env.head_body_boundary` accepts both.
+    it "re-frames a bare-LF authored request too" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = %({"a":"$id"})
+      plan = M::Plan.build(M::PlanOptions.new(
+        "POST /api HTTP/1.1\nHost: t.test\nContent-Type: application/json\n" \
+        "Content-Length: #{body.bytesize}\n\n#{body}",
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+      wire = String.new(plan.request)
+      sent_body = wire.split("\r\n\r\n", 2)[1]
+      sent_body.should eq(%({"a":"99999-EVIL-ENV"}))
+      wire.should contain("Content-Length: #{sent_body.bytesize}\r\n")
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: chunked framing lives in the BODY, and gori cannot re-chunk without
+    # rewriting the operator's framing payload — the rule `Env.content_length_digits` and
+    # `Fuzz::ContentLength.sync` both already follow. The head must survive untouched.
+    it "leaves a chunked request's head alone even when the body expanded" do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      plan = M::Plan.build(M::PlanOptions.new(
+        "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+        "Transfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n9\r\n$id\r\n0\r\n\r\n",
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+      String.new(plan.request).should contain("Content-Length: 5\r\n")
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
   end
 
   # #367: every CLI/MCP tool passed `overrides:` to its sender and no TUI tool did, so a

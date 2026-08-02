@@ -32,6 +32,41 @@ module Gori
         request.to_slice
       end
 
+      # A repeater field that REACHES THE WIRE, to PERSIST: the author's own, verbatim.
+      #
+      # `target` and `sni` used to go through `Env.mask_secrets` on the way in, justified as
+      # "short author-typed fields with no wire semantics of their own … re-expanded
+      # identically by every surface". Half of that is true and the half that is not destroys
+      # the value:
+      #
+      #   * **They have wire semantics.** `sni` IS the TLS `server_name` extension — the field
+      #     a vhost-confusion, certificate-routing or CDN-origin test exists to control — and
+      #     `target` is the dial tuple, which also supplies the ClientHello ServerName whenever
+      #     `sni` is absent. Neither is a label.
+      #   * **The two ends do not share a vocabulary.** Masking resolves against
+      #     `Env.masking_vars`, which folds in every session-binding value currently held
+      #     (including disabled rules); the send path resolves with `Env.effective_vars` — env
+      #     vars only — and `Repeater::Plan` additionally runs
+      #     `refuse_unresolved(Env.unresolved(s, deferred: nil))`, which refuses a declared
+      #     binding name outright. So a binding value masked into an SNI mints a `$NAME` that
+      #     can never resolve on any send path, from any surface. A one-way door.
+      #
+      # An author who typed `prod-edge-07.internal.example.com` while a rule bound `$edge` to
+      # `prod-edge-07` got `$edge.internal.example.com` in the row, every send refused, the
+      # original string unrecoverable, and a prescription ("set the env var") that would put a
+      # GUESSED hostname in the ClientHello of a vhost test. `update_repeater` re-reads and
+      # re-masks a field the caller never mentioned, so a plain RENAME destroyed an SNI the
+      # CLI had stored correctly.
+      #
+      # Same seam, same reason and same resolution as `stored_request` (round 5) and the
+      # WebSocket-frame store (round 6): a store row is a claim that those exact bytes are the
+      # author's. Redaction stays on the way OUT — `masked_target` still feeds every field
+      # this tool returns to the LLM. `name` and `tags` keep masking on the way in because
+      # they are TUI labels and never reach a socket.
+      private def wire_field(value : String) : String
+        value
+      end
+
       # Only when it FIRED. `summary` is the masked projection, so without this an author who
       # sent a live value reads a summary spelling it `$CTOK` with no statement anywhere that
       # the two are the same bytes — a silent substitution where a named report belonged.
@@ -162,12 +197,14 @@ module Gori
           return Result.new("'position' out of range", is_error: true)
         end
 
-        # Masked for the REPLY only — see `stored_request`. `target`, `sni` and `name` are
-        # short author-typed fields with no wire semantics of their own and are re-expanded
-        # identically by every surface, so masking those on the way in is harmless and stays.
+        # Masked for the REPLY only — see `stored_request` and `wire_field`. There is no
+        # `masked_sni`: this reply never carried the SNI, so that projection existed for the
+        # STORE alone, which is exactly what `wire_field` argues it must not do.
         masked_target = Env.mask_secrets(target)
         masked_request = Env.mask_secrets(request)
-        masked_sni = sni.try { |s| Env.mask_secrets(s) }
+        # `name` is a TAB LABEL: it never reaches a socket, so masking it on the way in costs
+        # nothing and keeps a secret out of a string the TUI paints. `target` and `sni` do
+        # reach one, and are stored as authored — see `wire_field`.
         name = str(h, "name").try { |n| Env.mask_secrets(n) }
 
         # WebSocket mode check — on the bytes that will be STORED and sent, not a projection.
@@ -183,13 +220,13 @@ module Gori
           end
 
         id = store.insert_repeater(
-          target: masked_target,
+          target: wire_field(target),
           request: stored_request(request),
           http2: http2,
           auto_cl: auto_cl,
           flow_id: flow_id,
           position: position.to_i32,
-          sni: masked_sni,
+          sni: sni.try { |s| wire_field(s) },
           ws_keep_key: bool_arg(h, "ws_keep_key", false)
         )
 
@@ -396,9 +433,12 @@ module Gori
         sni = present?(h, "sni") ? str(h, "sni") : existing.sni
         ws_keep_key = bool_arg(h, "ws_keep_key", existing.ws_keep_key?)
 
+        # Masked for the REPLY only. `target`/`sni` are stored as authored (`wire_field`) —
+        # this is the write that made a plain RENAME destroy them: both fall back to the
+        # EXISTING row when the caller did not mention them, so re-masking here rewrote a
+        # field nobody touched.
         masked_target = Env.mask_secrets(target)
         masked_request = Env.mask_secrets(request)
-        masked_sni = sni.try { |s| Env.mask_secrets(s) }
         name = present?(h, "name") ? str(h, "name").try { |n| Env.mask_secrets(n) } : existing.name
 
         # Parsed before the first write, as in create_repeater: a refused frame must not leave
@@ -407,11 +447,11 @@ module Gori
 
         unless store.update_repeater(
                  id: id,
-                 target: masked_target,
+                 target: wire_field(target),
                  request: stored_request(request),
                  http2: http2,
                  auto_cl: auto_cl,
-                 sni: masked_sni,
+                 sni: sni.try { |s| wire_field(s) },
                  ws_keep_key: ws_keep_key
                )
           return busy("repeater NOT updated (store busy or unwritable); it is unchanged")
