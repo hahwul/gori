@@ -214,13 +214,30 @@ module Gori::Tui
     # --- loading -------------------------------------------------------------
     # ⇧I: a CAPTURED flow becomes this session's template. `evidence` is set here and
     # nowhere else, because this is the only loader whose bytes came off the wire.
+    #
+    # Which is exactly why the bytes get two things done to them here and nowhere else:
+    #
+    #   * every `§` is escaped to the `§§` literal `Fuzz::Template.parse` already defines.
+    #     `§…§` is this pane's INJECTION-POSITION syntax, but `§` is also U+00A7, ordinary
+    #     text a German or legal body carries constantly — so a captured `"mk":"§SEED§"`
+    #     used to arrive as a live position the operator never marked, and a run replaced
+    #     the site's own text with every payload in the set. Escaping keeps the bytes:
+    #     `render` puts the single `§` back on the wire, the Content-Length still agrees,
+    #     and ^K still marks whatever the operator actually points at. (RepeaterView's
+    #     `space ▸ f` seed applies the same escape at the same kind of seam.)
+    #   * no `.scrub`. A capture is EVIDENCE and may legitimately not be valid UTF-8 — a
+    #     protobuf/gRPC frame, a gzip'd POST, a latin-1 form field. Scrubbing rewrote each
+    #     such byte to the three bytes of U+FFFD before the operator ever saw the request,
+    #     and `Plan.build` then resynced Content-Length to the corruption. `Template.parse`
+    #     / `render` and `evidence_template` are all byte-oriented, and RepeaterView#load
+    #     never scrubbed; this was the one loader that did.
     def load(detail : Store::FlowDetail) : Nil
       built = Repeater::FlowRequest.build(detail)
       @http2 = built.http2
       @target = built.target
       @tcx = @target.size
       @target_field = :url
-      @editor.set_text(String.new(built.bytes).scrub)
+      @editor.set_text(String.new(Fuzz::Template.escape_literal_markers(built.bytes)))
       @evidence = true
       @focus = :template
       @loaded = true
@@ -615,7 +632,13 @@ module Gori::Tui
       # as if this keystroke had placed them (mark_word already refuses honestly).
       if text == before
         n = Fuzz::Template.parse(before).position_count
-        return n.zero? ? "nothing to auto-mark — no query, cookie or body values found" : "already marked (#{n} position#{n == 1 ? "" : "s"}) — Clear markers first to re-derive"
+        return "already marked (#{n} position#{n == 1 ? "" : "s"}) — Clear markers first to re-derive" unless n.zero?
+        # A `§` with no POSITION around it — an escaped `§§`, which is what `#load` makes of
+        # a capture's own `§`, or a half-open one the operator typed. `Template.auto_mark`
+        # is a no-op on either, and the "nothing to mark" line below would be a plain untruth
+        # about a request that visibly has a query string and a body full of values.
+        return "§ here is literal (escaped §§) — auto-mark won't add positions; ^K marks the token at the cursor" if Fuzz::Template.marker_bytes_in?(before.to_slice)
+        return "nothing to auto-mark — no query, cookie or body values found"
       end
       @editor.set_text(restore_wire_eols(text))
       @dirty = true
