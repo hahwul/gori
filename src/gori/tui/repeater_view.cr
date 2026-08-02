@@ -1197,7 +1197,17 @@ module Gori::Tui
     # A group send is meaningful only in plain HTTP text mode (hex / gRPC / WS / decode /
     # MARK have their own byte semantics), over HTTP/1.1 (send_pipeline is an h1 primitive).
     def group_sendable? : Bool
-      !(@req_hex_edit || @grpc_mode || @ws_mode || @decode_kind || @http2)
+      !@req_hex_edit && group_framing_applies?
+    end
+
+    # The modes in which a lone `%%%` line means "group" at all — `group_sendable?` minus the
+    # hex clause. Split out because the two questions differ on exactly that clause: you
+    # cannot RUN a group send from hex, but the hex buffer is a SNAPSHOT of the chunked pane
+    # taken before `^X`, so it is still carrying a group's Content-Length and must still be
+    # refused a whole-buffer send. Folding hex into this predicate is what let the sharpest
+    # face of the defect through on the first attempt at the fix.
+    private def group_framing_applies? : Bool
+      !(@grpc_mode || @ws_mode || @decode_kind || @http2)
     end
 
     # "Minimize request" removes header/cookie/param lines from the plain-text request and
@@ -1252,6 +1262,51 @@ module Gori::Tui
 
     private def pipeline_sep_count(wl : Array({String, String})) : Int32
       wl.count { |(l, _)| l.strip == PIPELINE_SEP }
+    end
+
+    # The reason a WHOLE-BUFFER send is refused, or nil.
+    #
+    # A buffer holding a live `%%%` is TWO documents in one: the operator wrote requests, and
+    # `reflect_content_length_in_editor` writes each one's OWN Content-Length into it — the
+    # numbers `space ▸ g` puts on the wire, and the only reading of that pane that means
+    # anything (no request in it has a whole-buffer-sized body). `^R` and the `^X` snapshot
+    # then read the same buffer WHOLE, and one number cannot be right for both framings:
+    #
+    #   pane      Content-Length: 3     ← chunk 1's body, "AAA"
+    #   ^R        Content-Length: 60    ← re-synced by finalize_wire; self-consistent, but the
+    #                                     pane never said 60 and the operator authored 2 requests
+    #   ^X then ^R  Content-Length: 3 over a 60-byte body  ← hex sends the snapshot verbatim:
+    #                                     a CL/body desync gori INVENTED out of a correct draft
+    #
+    # So the whole-buffer framing is the one that has no meaning here, and it is refused by
+    # name rather than picked silently. The alternative — reflecting the whole-buffer number
+    # instead — only moves the lie onto `g`, which this method's own neighbour already calls
+    # "the worse way round for a tool whose whole job is telling the operator what it sent".
+    #
+    # Scoped to auto-CL ON, because that is exactly when gori has written a number of its
+    # own. With `^L` off the pane, `^R` and `g` all carry the operator's numbers unchanged,
+    # nothing is invented, and a literal `%%%` line in a body stays expressible — which is
+    # why the message names `^L` as the second remedy and not just `space ▸ g`.
+    #
+    # An EVIDENCE buffer whose capture merely CONTAINS `%%%` never reaches this: its separator
+    # is not live (see `pipeline_live?`), nothing chunks, and `^R` sends it byte-exact.
+    private def group_framing_refusal : String?
+      return nil unless chunked_reflection?(@editor.wire_lines)
+      "request holds a %%% separator, so its Content-Length describes the first request only — " \
+      "space ▸ g sends the group on one connection, or turn ^L off to send the buffer whole as one request"
+    end
+
+    # Is the visible head carrying CHUNK-scoped Content-Lengths? The single predicate behind
+    # both the reflection that writes them and the refusal that stops a whole-buffer send from
+    # reading them — they are the same question, and letting them drift apart is the bug.
+    #
+    # `group_framing_applies?` (NOT `group_sendable?` — see there): in gRPC / WS / decode / h2
+    # the controller will not run a group send at all, so chunking the pane there would carry
+    # every cost of the split with none of its point. Those modes reflect the whole buffer and
+    # need no refusal. Hex is in, because its bytes are a snapshot of a chunked pane.
+    private def chunked_reflection?(wl : Array({String, String})) : Bool
+      @auto_content_length && group_framing_applies? &&
+        pipeline_live?(wl) && pipeline_sep_count(wl) > 0
     end
 
     # Record how many `%%%` lines the just-seeded buffer arrived with. Called from every
@@ -1617,6 +1672,12 @@ module Gori::Tui
     end
 
     def request_bytes : Bytes
+      # BEFORE the hex branch on purpose — the hex buffer is a SNAPSHOT of this same editor,
+      # so it carries the same chunk-scoped Content-Length and sending it verbatim is the
+      # sharpest face of the refusal below.
+      if reason = group_framing_refusal
+        raise Fuzz::ChainError.new(reason)
+      end
       return grpc_request_bytes if @grpc_mode                  # edited head + reframed body (owns its own hex buffer)
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode
       return decoded_request_bytes if @decode_kind             # envelope + re-encoded decoded payload
@@ -2102,13 +2163,15 @@ module Gori::Tui
       return if @decode_kind && @req_pane == :decoded
 
       wl = @editor.wire_lines
-      # `pipeline_live?`, not "is there a `%%%` anywhere": a separator the CAPTURE brought
-      # does not chunk the send, so reflecting through it would put chunk 1's length in the
-      # visible head while ^R frames the whole buffer — and `^X` snapshots that head.
-      if !pipeline_live?(wl) || pipeline_sep_count(wl).zero?
-        reflect_chunk_content_length(@editor.wire_text, wl, 0...wl.size)
-      else
+      # `chunked_reflection?`, not "is there a `%%%` anywhere". A separator the CAPTURE brought
+      # is not live, and a mode that cannot group-send has no chunks — in both cases chunking
+      # would put chunk 1's length in the visible head while ^R (and the `^X` snapshot of that
+      # head) frame the whole buffer. Where it IS chunked, `group_framing_refusal` reads the
+      # same predicate and stops the whole-buffer send rather than let the two disagree.
+      if chunked_reflection?(wl)
         chunk_line_spans(wl).each { |sp| reflect_chunk_content_length(chunk_text(wl, sp), wl, sp) }
+      else
+        reflect_chunk_content_length(@editor.wire_text, wl, 0...wl.size)
       end
     end
 
