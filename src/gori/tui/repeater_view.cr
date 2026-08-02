@@ -195,6 +195,13 @@ module Gori::Tui
       # contextually — no mode. On an EVIDENCE tab they are inert until declared, see
       # `@markers_declared` / `markers_live?`.
       @markers_declared = false
+      # The `%%%` twin of `@markers_declared`, and deliberately NOT the same flag: `§` and
+      # `%%%` are different syntaxes an operator types independently, so sharing one would
+      # both over-declare (mark a word → the capture's own `%%%` starts splitting the send)
+      # and under-declare. This one counts instead of latching because `%%%` has no marking
+      # verb to latch on — see `pipeline_live?`. Baseline = the separators the CAPTURE
+      # arrived with; 0 on a draft, where every `%%%` is the operator's by definition.
+      @evidence_pipeline_seps = 0
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
       # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)
@@ -529,6 +536,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_form_text(detail))
+      seed_pipeline_baseline
       @original_lines = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
 
       @result = nil
@@ -569,6 +577,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(String.new(detail.request_head))
+      seed_pipeline_baseline
       seed_ws_out(out_messages)
       @original_lines = [] of String
       @result = nil
@@ -866,6 +875,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_head_text(detail))
+      seed_pipeline_baseline
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
@@ -926,6 +936,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_form_text(detail))
+      seed_pipeline_baseline
       @decoded.set_text(payload)
       @req_pane = :envelope
       @decoded_dirty = false
@@ -1156,7 +1167,17 @@ module Gori::Tui
     # A group send is meaningful only in plain HTTP text mode (hex / gRPC / WS / decode /
     # MARK have their own byte semantics), over HTTP/1.1 (send_pipeline is an h1 primitive).
     def group_sendable? : Bool
-      !(@req_hex_edit || @grpc_mode || @ws_mode || @decode_kind || @http2)
+      !@req_hex_edit && group_framing_applies?
+    end
+
+    # The modes in which a lone `%%%` line means "group" at all — `group_sendable?` minus the
+    # hex clause. Split out because the two questions differ on exactly that clause: you
+    # cannot RUN a group send from hex, but the hex buffer is a SNAPSHOT of the chunked pane
+    # taken before `^X`, so it is still carrying a group's Content-Length and must still be
+    # refused a whole-buffer send. Folding hex into this predicate is what let the sharpest
+    # face of the defect through on the first attempt at the fix.
+    private def group_framing_applies? : Bool
+      !(@grpc_mode || @ws_mode || @decode_kind || @http2)
     end
 
     # "Minimize request" removes header/cookie/param lines from the plain-text request and
@@ -1185,12 +1206,101 @@ module Gori::Tui
       end
     end
 
+    # PROVENANCE, the `%%%` half of `markers_live?` — and the reason that one is not enough.
+    # `%%%` is draft syntax too: it means "split here" only because the OPERATOR typed it.
+    # A capture whose body happens to hold a lone `%%%` line (a diff hunk, a delimiter, a
+    # template fragment) is not two requests, and treating it as two produced the same three
+    # faces the `§` defect did — the visible `Content-Length` covering only the pre-`%%%`
+    # bytes while `^R` sent the whole 17, `^X` snapshotting that head into a byte-exact send,
+    # and `space ▸ g` manufacturing a second request whose request LINE was the capture's own
+    # `line2`. Nobody authored that request.
+    #
+    # Unlike `§` there is no marking VERB to declare with, so the declaration is the count:
+    # a separator the buffer holds beyond the ones the capture arrived with is one the
+    # operator typed. Same question as `markers_live?` ("did the operator author this
+    # token?"), answered with the strongest signal this seam has. Once they add one the whole
+    # buffer is a group draft, captured separators included — the honest reading, and visible
+    # in the per-chunk Content-Lengths the reflection immediately writes.
+    #
+    # A draft is unaffected: `@evidence` is false, so every `%%%` in it splits as it always
+    # has. A restore lands with the baseline set from the restored text, for the same reason
+    # `@markers_declared` lands false — the row says nothing about who typed which line, and
+    # when gori cannot know, evidence wins.
+    private def pipeline_live?(wl : Array({String, String})) : Bool
+      !@evidence || pipeline_sep_count(wl) > @evidence_pipeline_seps
+    end
+
+    private def pipeline_sep_count(wl : Array({String, String})) : Int32
+      wl.count { |(l, _)| l.strip == PIPELINE_SEP }
+    end
+
+    # The reason a WHOLE-BUFFER send is refused, or nil.
+    #
+    # A buffer holding a live `%%%` is TWO documents in one: the operator wrote requests, and
+    # `reflect_content_length_in_editor` writes each one's OWN Content-Length into it — the
+    # numbers `space ▸ g` puts on the wire, and the only reading of that pane that means
+    # anything (no request in it has a whole-buffer-sized body). `^R` and the `^X` snapshot
+    # then read the same buffer WHOLE, and one number cannot be right for both framings:
+    #
+    #   pane      Content-Length: 3     ← chunk 1's body, "AAA"
+    #   ^R        Content-Length: 60    ← re-synced by finalize_wire; self-consistent, but the
+    #                                     pane never said 60 and the operator authored 2 requests
+    #   ^X then ^R  Content-Length: 3 over a 60-byte body  ← hex sends the snapshot verbatim:
+    #                                     a CL/body desync gori INVENTED out of a correct draft
+    #
+    # So the whole-buffer framing is the one that has no meaning here, and it is refused by
+    # name rather than picked silently. The alternative — reflecting the whole-buffer number
+    # instead — only moves the lie onto `g`, which this method's own neighbour already calls
+    # "the worse way round for a tool whose whole job is telling the operator what it sent".
+    #
+    # Scoped to auto-CL ON, because that is exactly when gori has written a number of its
+    # own. With `^L` off the pane, `^R` and `g` all carry the operator's numbers unchanged,
+    # nothing is invented, and a literal `%%%` line in a body stays expressible — which is
+    # why the message names `^L` as the second remedy and not just `space ▸ g`.
+    #
+    # An EVIDENCE buffer whose capture merely CONTAINS `%%%` never reaches this: its separator
+    # is not live (see `pipeline_live?`), nothing chunks, and `^R` sends it byte-exact.
+    private def group_framing_refusal : String?
+      return nil unless chunked_reflection?(@editor.wire_lines)
+      "request holds a %%% separator, so its Content-Length describes the first request only — " \
+      "space ▸ g sends the group on one connection, or turn ^L off to send the buffer whole as one request"
+    end
+
+    # Is the visible head carrying CHUNK-scoped Content-Lengths? The single predicate behind
+    # both the reflection that writes them and the refusal that stops a whole-buffer send from
+    # reading them — they are the same question, and letting them drift apart is the bug.
+    #
+    # `group_framing_applies?` (NOT `group_sendable?` — see there): in gRPC / WS / decode / h2
+    # the controller will not run a group send at all, so chunking the pane there would carry
+    # every cost of the split with none of its point. Those modes reflect the whole buffer and
+    # need no refusal. Hex is in, because its bytes are a snapshot of a chunked pane.
+    private def chunked_reflection?(wl : Array({String, String})) : Bool
+      @auto_content_length && group_framing_applies? &&
+        pipeline_live?(wl) && pipeline_sep_count(wl) > 0
+    end
+
+    # Record how many `%%%` lines the just-seeded buffer arrived with. Called from every
+    # loader AFTER the editor is set, so the baseline is always the bytes gori was handed
+    # rather than anything typed since. On a draft it is 0 either way (`pipeline_live?`
+    # short-circuits on `@evidence`); recording it anyway keeps a later `duplicate_from`
+    # or an evidence flip from inheriting a stale number.
+    private def seed_pipeline_baseline : Nil
+      @evidence_pipeline_seps = pipeline_sep_count_in(@editor.wire_text)
+    end
+
+    # The same count over raw text, for seeding the baseline at load/restore.
+    private def pipeline_sep_count_in(text : String) : Int32
+      text.split('\n').count { |l| l.strip(" \t\r") == PIPELINE_SEP }
+    end
+
     # EDITOR line ranges of each `%%%` chunk, blank edges trimmed. The one place the group
     # split is decided, so the bytes `pipeline_requests` sends and the Content-Length
     # `reflect_content_length_in_editor` shows are derived from the SAME chunking — they used
     # to disagree, and the visible header was the one that was wrong. No separator ⇒ one span
-    # covering the whole buffer, which is the ordinary single-request case.
+    # covering the whole buffer, which is the ordinary single-request case, and so does a
+    # separator that is the CAPTURE's rather than the operator's (see `pipeline_live?`).
     private def chunk_line_spans(wl : Array({String, String})) : Array(Range(Int32, Int32))
+      return [0...wl.size] unless pipeline_live?(wl)
       spans = [] of Range(Int32, Int32)
       push = ->(a : Int32, b : Int32) do
         while a < b && wl[a][0].strip.empty? # drop blank lines around the separator
@@ -1387,6 +1497,7 @@ module Gori::Tui
       end
 
       @auto_content_length = auto_cl
+      seed_pipeline_baseline
       @loaded = true
       @dirty = false
     end
@@ -1420,6 +1531,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(BLANK_REQUEST)
+      @evidence_pipeline_seps = 0 # a draft: every `%%%` in it is the operator's
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
@@ -1440,8 +1552,9 @@ module Gori::Tui
     # chip name (+ " copy"). Drops source flow linkage, inflight state, and scroll/cursor.
     def duplicate_from(src : RepeaterView) : Nil
       @flow = nil
-      @evidence = src.evidence?                 # the same bytes carry the same provenance
-      @markers_declared = src.@markers_declared # …and the same reading of their §
+      @evidence = src.evidence?                             # the same bytes carry the same provenance
+      @markers_declared = src.@markers_declared             # …and the same reading of their §
+      @evidence_pipeline_seps = src.@evidence_pipeline_seps # …and of their `%%%`
       @http2 = src.@http2
       @target = src.@target
       @tcx = @target.size
@@ -1529,6 +1642,12 @@ module Gori::Tui
     end
 
     def request_bytes : Bytes
+      # BEFORE the hex branch on purpose — the hex buffer is a SNAPSHOT of this same editor,
+      # so it carries the same chunk-scoped Content-Length and sending it verbatim is the
+      # sharpest face of the refusal below.
+      if reason = group_framing_refusal
+        raise Fuzz::ChainError.new(reason)
+      end
       return grpc_request_bytes if @grpc_mode                  # edited head + reframed body (owns its own hex buffer)
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode
       return decoded_request_bytes if @decode_kind             # envelope + re-encoded decoded payload
@@ -2014,10 +2133,15 @@ module Gori::Tui
       return if @decode_kind && @req_pane == :decoded
 
       wl = @editor.wire_lines
-      if wl.none? { |(l, _)| l.strip == PIPELINE_SEP }
-        reflect_chunk_content_length(@editor.wire_text, wl, 0...wl.size)
-      else
+      # `chunked_reflection?`, not "is there a `%%%` anywhere". A separator the CAPTURE brought
+      # is not live, and a mode that cannot group-send has no chunks — in both cases chunking
+      # would put chunk 1's length in the visible head while ^R (and the `^X` snapshot of that
+      # head) frame the whole buffer. Where it IS chunked, `group_framing_refusal` reads the
+      # same predicate and stops the whole-buffer send rather than let the two disagree.
+      if chunked_reflection?(wl)
         chunk_line_spans(wl).each { |sp| reflect_chunk_content_length(chunk_text(wl, sp), wl, sp) }
+      else
+        reflect_chunk_content_length(@editor.wire_text, wl, 0...wl.size)
       end
     end
 

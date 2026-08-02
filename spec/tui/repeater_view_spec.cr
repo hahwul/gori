@@ -801,6 +801,179 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # The `%%%` twin of the block above, and the reason one flag would not have covered it:
+  # `%%%` is draft syntax too — it means "split here" only because the operator typed it.
+  # A capture whose body holds a lone `%%%` line was split anyway, which produced the same
+  # three harms: the pane showed chunk 1's Content-Length over a whole-buffer send, `^X`
+  # snapshotted that head (a CL/body desync invented out of ordinary traffic), and
+  # `space ▸ g` manufactured a second request whose REQUEST LINE was the capture's own text.
+  # See `RepeaterView#pipeline_live?`.
+  describe "%%% in a CAPTURED body is data, not a group separator" do
+    body = "line1\r\n%%%\r\nline2" # 17 bytes; the middle line is the capture's, not a split
+    head = "POST /p HTTP/1.1\r\nHost: h.test\r\nContent-Length: #{body.bytesize}\r\n\r\n"
+    wire = head + body
+
+    seed = ->(store : Gori::Store) do
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/p", http_version: "HTTP/1.1",
+        head: head.to_slice, body: body.to_slice))
+      store.get_flow(id).not_nil!
+    end
+
+    it "reflects the WHOLE buffer's Content-Length, so the pane, ^X and ^R agree" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        # Was `Content-Length: 5` (the pre-`%%%` chunk) in a pane whose ^R sent 17.
+        view.request_text.should contain("Content-Length: 17")
+        view.request_text.should_not contain("Content-Length: 5")
+        String.new(view.request_bytes).should eq(wire)
+
+        view.focus_pane(:request)
+        view.toggle_request_hex.should be_true # ^X snapshots the editor buffer
+        String.new(view.request_bytes).should eq(wire)
+      end
+    end
+
+    it "does not split a capture into a request the operator never authored" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        reqs = view.pipeline_requests
+        reqs.size.should eq(1) # was 2 — the second's request LINE was the body's `line2`
+        reqs.first[0].should eq("POST /p HTTP/1.1")
+        String.new(reqs.first[1]).should eq(wire)
+      end
+    end
+
+    it "DOES split once the operator adds a separator of their own" do
+      repeater_tmp_store do |store|
+        view = RepeaterView.new
+        view.load(seed.call(store))
+        # The capture brought one `%%%`; a second one is the operator's, and from then on the
+        # buffer is a group draft — captured separator included, which the per-chunk
+        # Content-Lengths make visible.
+        view.replace_request(wire + "\r\n%%%\r\nGET /second HTTP/1.1\r\nHost: h.test\r\n\r\n")
+        reqs = view.pipeline_requests
+        reqs.size.should eq(3)
+        reqs.last[0].should eq("GET /second HTTP/1.1")
+      end
+    end
+
+    it "COMPLEMENT: an operator-typed %%% on a DRAFT still splits and still group-sends" do
+      view = RepeaterView.new
+      view.restore("http://h.test",
+        "POST /a HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nx=1\n%%%\nGET /b HTTP/1.1\nHost: h.test\n\n",
+        false, true) # evidence: false — the operator typed the separator
+      reqs = view.pipeline_requests
+      reqs.size.should eq(2)
+      reqs[0][0].should eq("POST /a HTTP/1.1")
+      reqs[1][0].should eq("GET /b HTTP/1.1")
+      String.new(reqs[0][1]).should contain("Content-Length: 3") # per-CHUNK, as before
+      view.request_text.should contain("Content-Length: 3")      # …and reflected in the pane
+    end
+
+    # The third face, on a DRAFT the operator wrote correctly. `reflect_content_length_in_editor`
+    # writes a CHUNK-scoped Content-Length into a buffer that `request_bytes` and the `^X`
+    # snapshot both read WHOLE, and one number cannot be right for both framings:
+    #
+    #   pane        Content-Length: 3    ← chunk 1's body, "AAA"; what `space ▸ g` sends
+    #   ^R          Content-Length: 60   ← re-synced whole; self-consistent, but the pane never
+    #                                      said 60 and the operator authored TWO requests
+    #   ^X then ^R  Content-Length: 3 over a 60-byte body — a desync gori INVENTED
+    #
+    # So the whole-buffer framing is refused by name. Reflecting the whole-buffer number
+    # instead would only move the lie onto `g`, which `reflect_content_length_in_editor`'s own
+    # comment calls the worse way round. See `RepeaterView#group_framing_refusal`.
+    describe "a %%% buffer is a GROUP — the whole-buffer send is refused, not guessed" do
+      draft = "POST /g1 HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nAAA\n" \
+              "%%%\nPOST /g2 HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nBB"
+
+      it "refuses ^R by name and names both remedies" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, false, true) # auto-CL ON
+        view.request_text.should contain("Content-Length: 3")
+        ex = expect_raises(Gori::Fuzz::ChainError, /%%% separator/) { view.request_bytes }
+        ex.message.not_nil!.should contain("space ▸ g")
+        ex.message.not_nil!.should contain("^L")
+      end
+
+      it "refuses the ^X snapshot too — the sharp face, an invented CL/body desync" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, false, true)
+        view.focus_pane(:request)
+        view.toggle_request_hex.should be_true
+        # Was: 110 bytes of `Content-Length: 3` over a 60-byte body, sent verbatim.
+        expect_raises(Gori::Fuzz::ChainError, /%%% separator/) { view.request_bytes }
+      end
+
+      it "refuses a TRAILING %%% too — where `g` sees only ONE chunk" do
+        view = RepeaterView.new
+        # The row that rules out any "more than one chunk" predicate: pipeline_requests is 1,
+        # yet the pane says 3 and a whole-buffer ^R would frame 7.
+        view.restore("http://h.test",
+          "POST /g1 HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nAAA\n%%%", false, true)
+        view.pipeline_requests.size.should eq(1)
+        view.request_text.should contain("Content-Length: 3")
+        expect_raises(Gori::Fuzz::ChainError, /%%% separator/) { view.request_bytes }
+      end
+
+      it "COMPLEMENT: `space ▸ g` still splits and still sends per-chunk lengths" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, false, true)
+        reqs = view.pipeline_requests # does NOT go through request_bytes — unrefused
+        reqs.size.should eq(2)
+        String.new(reqs[0][1]).should contain("Content-Length: 3")
+        String.new(reqs[1][1]).should contain("Content-Length: 2")
+      end
+
+      it "COMPLEMENT: auto-CL OFF sends whole, unrefused — gori wrote no number" do
+        view = RepeaterView.new
+        view.restore("http://h.test", draft, false, false) # ^L off
+        # Pane, ^R and g all carry the operator's own 99. Nothing invented ⇒ nothing to refuse,
+        # and a literal `%%%` line in a body stays expressible.
+        view.request_text.should contain("Content-Length: 99")
+        String.new(view.request_bytes).should contain("Content-Length: 99")
+        view.request_text.should_not contain("Content-Length: 3")
+      end
+
+      it "COMPLEMENT: a draft with NO %%% is byte-identical and never refused" do
+        view = RepeaterView.new
+        view.restore("http://h.test",
+          "POST /g1 HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nAAA", false, true)
+        view.request_text.should contain("Content-Length: 3")
+        String.new(view.request_bytes).should eq(
+          "POST /g1 HTTP/1.1\r\nHost: h.test\r\nContent-Length: 3\r\n\r\nAAA")
+      end
+
+      it "COMPLEMENT: a CAPTURED %%% is inert, so it reflects and sends WHOLE, unrefused" do
+        repeater_tmp_store do |store|
+          view = RepeaterView.new
+          view.load(seed.call(store)) # the capture from the describe above: `line1\r\n%%%\r\nline2`
+          view.request_text.should contain("Content-Length: 17")
+          String.new(view.request_bytes).should eq(wire) # no refusal — the separator is not live
+        end
+      end
+    end
+
+    it "COMPLEMENT: a capture with NO %%% is byte-identical to before the gate" do
+      repeater_tmp_store do |store|
+        plain = "line1\r\nline2"
+        h = "POST /p HTTP/1.1\r\nHost: h.test\r\nContent-Length: #{plain.bytesize}\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/p", http_version: "HTTP/1.1",
+          head: h.to_slice, body: plain.to_slice))
+        view = RepeaterView.new
+        view.load(store.get_flow(id).not_nil!)
+        String.new(view.request_bytes).should eq(h + plain)
+        view.request_text.should contain("Content-Length: 12")
+        view.pipeline_requests.size.should eq(1)
+      end
+    end
+  end
+
   it "CHAIN pane: focus a marker, type a chain, commit writes it back" do
     view = RepeaterView.new
     # marker at offset 0 → set_text zeroes the cursor, so it sits inside §v§
