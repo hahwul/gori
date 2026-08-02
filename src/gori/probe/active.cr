@@ -53,6 +53,49 @@ module Gori
         PRIMARY.detections(plan, result, detail)
       end
 
+      # The WHOLE probe request, marked as bytes the session-binding pass must copy through
+      # untouched (`Fuzz::Backend#send`'s `verbatim`). Not a convenience — the provenance of
+      # every byte in `plan.request` is "something other than an operator writing a `$NAME`":
+      #
+      #   * Every rule in `active/` builds its request from the CAPTURED request
+      #     (`detail.request_head` / `detail.request_body` / `detail.row`) and splices in its
+      #     own gori-generated canary. Real captured traffic is full of `$NAME`-shaped bytes
+      #     nobody typed — Mongo `$ne`/`$gt`/`$where`, JSON Schema `$ref`/`$schema`, and a
+      #     GraphQL operation, which is MADE of `$variable` references (we ship a GraphQL rule
+      #     precisely because we expect to see them). The `$`+`[A-Za-z_]`+`[A-Za-z0-9_]*`
+      #     grammar has no delimiter requirement, so with an extract rule named `id` up, the
+      #     captured `query GetUser($id: ID!)` went out as
+      #     `query GetUser(<live session token>: ID!)` — a real credential in the target's
+      #     access log, inside a request nobody authored (and no longer valid GraphQL, so the
+      #     rule's differential measured a parse error), while the scan reported itself clean.
+      #   * No rule authors a `$NAME` of its own: `grep '\$[A-Za-z_]' active/*.cr` is empty
+      #     outside comments. And no operator STRING reaches a rule at all — `Options` is two
+      #     Bools (allow_unsafe, aggressive). This is an automated sweep over stored evidence,
+      #     not an operator draft: there is no editor, no `--payloads`, no template here.
+      #
+      # So there is nothing in this buffer that is eligible to expand, and one span covering
+      # it is the honest description — not a blunt instrument standing in for per-rule spans.
+      # (The miner's `Inject.apply_with_spans` marks the INJECTED material verbatim and lets
+      # the captured seed resolve; here the polarity is inverted, because here the captured
+      # request IS the test case rather than the template around it.)
+      #
+      # The one caller carrying operator-authored bytes is `Scan.scan_repeaters`, whose
+      # `detail_from_repeater` blob is a MIX of editor text and a captured seed with no
+      # provenance marks anywhere in the store — there is no span to track, so the choice is
+      # expand-everything or expand-nothing. Nothing is load-bearing on that path today
+      # anyway: it bypasses `Repeater::Plan`, so an env var `$KEY` already goes out literal
+      # and only a session binding ever resolved. Erring to "nothing expands" costs a visible
+      # 401 on a probe; erring the other way costs a live credential on the wire, silently.
+      # Widening this back is a provenance signal on FlowDetail, never a re-widening here.
+      #
+      # NOT private, and that is the point: `Probe::Analyzer#execute_active` is a SECOND send
+      # loop over the same plans (the live TUI path, which never enters `.analyze`), and the
+      # reason this defect survived is that the two look interchangeable. One spelling, called
+      # from both, so they cannot drift again.
+      def self.all_verbatim(bytes : Bytes) : Array({Int32, Int32})
+        [{0, bytes.size}]
+      end
+
       # Compact per-flow request-count label for the Rules sub-tab + manual-run estimate:
       # "1 req/flow" for the fixed-cost rules, "4–8 req/flow" for the differential BackslashPowered.
       def self.estimate_label(rng : Range(Int32, Int32)) : String
@@ -109,7 +152,7 @@ module Gori
           begin
             plan = rule.plan(detail, opts)
             next unless plan
-            result = sender.send(plan.request)
+            result = sender.send(plan.request, all_verbatim(plan.request))
             unless result.ok?
               # A refused or failed send is NOT an exception — `Fuzz::Sender` returns an
               # errored Result for a sandbox block, an unbound binding, a connect failure —
@@ -129,7 +172,10 @@ module Gori
               next
             end
             results = [result]
-            plan.followups.each { |req| results << sender.send(req) }
+            # Same verbatim marking as the primary above — a followup is built by the same
+            # rule from the same captured request, so a differential whose baseline resolved
+            # `$id` and whose followup did not would be measuring the substitution.
+            plan.followups.each { |req| results << sender.send(req, all_verbatim(req)) }
             dets = rule.detections_all(plan, results, detail)
             out.concat(dets)
           rescue ex
