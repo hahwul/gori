@@ -169,6 +169,14 @@ module Gori
           j.field "canary", Serialize.text(f.canary)
           j.field "status", f.status
           j.field "delta", f.delta
+          # The gRPC CALL's outcome, from the confirming round's `grpc-status`/`grpc-message`
+          # trailers — `status` above is 200 for every gRPC response. Emitted only when the
+          # response actually carried it, so a non-gRPC run's rows are unchanged.
+          if gs = f.grpc_status
+            j.field "grpc_status", gs
+            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          end
+          j.field "grpc_message", Serialize.text(f.grpc_message) if f.grpc_message
         end
       end
 

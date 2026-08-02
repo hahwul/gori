@@ -124,7 +124,13 @@ module Gori
       confidence : Confidence,
       canary : String?, # the value that reflected (nil for metric-based)
       status : Int32?,  # observed response status when isolated
-      delta : Int64     # observed length delta vs baseline (0 for pure reflection)
+      delta : Int64,    # observed length delta vs baseline (0 for pure reflection)
+      # The gRPC CALL's outcome (`grpc-status`/`grpc-message` trailers) off the confirming
+      # round's response head — the h2 `:status` above is 200 for every gRPC response, so
+      # without this a mine against a target that denies every candidate looked identical to
+      # one that allowed them all. nil for any non-gRPC target (see `Fuzz::GrpcVerdict`).
+      grpc_status : Int32? = nil,
+      grpc_message : String? = nil
 
     # Live counters. `names_done/names_total` is the stable progress bar; `sent` is the
     # real request count (always larger — bucketing + bisection + confirmation).

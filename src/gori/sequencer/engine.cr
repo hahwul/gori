@@ -1,6 +1,7 @@
 require "./types"
 require "./extract"
 require "../fuzz/engine"
+require "../fuzz/matcher"
 
 module Gori::Sequencer
   # Collects tokens into an Event stream. LIVE REPLAY sends the ONE fixed @request
@@ -220,7 +221,13 @@ module Gori::Sequencer
         @first_error ||= e unless e == Fuzz::CappedBackend::CAP_ERROR
       end
       @collected += 1 if token
-      @events.send(SampleEvent.new(Sample.new(idx, token, status, len, raw.duration_us, err)))
+      # The gRPC CALL's real outcome — `status` above is 200 for every gRPC response, so
+      # without this a live-replay collection against a target rejecting every call (an
+      # expired session cookie, say) read as healthy on every sample. nil/nil (and free, past
+      # the allocation-free needle scan) for a non-gRPC response.
+      grpc_status, grpc_message = Fuzz::GrpcVerdict.response(raw.head)
+      @events.send(SampleEvent.new(Sample.new(idx, token, status, len, raw.duration_us, err,
+        grpc_status, grpc_message)))
       emit_progress
     end
 

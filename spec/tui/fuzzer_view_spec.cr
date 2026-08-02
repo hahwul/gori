@@ -71,6 +71,48 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
+  # Round 8 — the h2 `:status` in the row's leftmost column is 200 by definition for every
+  # gRPC response, so a fuzzer sweep against a target that PERMISSION_DENIED-ed every call
+  # rendered byte-identical rows to one that granted them all. `Fuzz::Result#grpc_status` /
+  # `#grpc_message` existed since round 7 (the Fuzzer ENGINE had the fields); this pins that
+  # the RESULTS list row — which round 7 never touched — actually renders them.
+  describe "gRPC verdict in the results row" do
+    it "renders grpc-status/grpc-message, distinguishing a denied call from a granted one" do
+      view = loaded_fuzzer
+      view.focus_pane(:results)
+      view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 12_i64, 2, 1, 1000_i64,
+        nil, false, false, nil, grpc_status: 7, grpc_message: "nope; you may not"))
+      # Wide enough that the results row is not ellipsis-truncated before the grpc suffix —
+      # this pins the RENDERED text, not just that it was drawn somewhere off-screen.
+      backend = MemoryBackend.new(220, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 220, 30))
+      backend.contains?("grpc 7 PERMISSION_DENIED").should be_true
+      backend.contains?("nope; you may not").should be_true
+    end
+
+    it "renders a granted call distinctly from a denied one" do
+      view = loaded_fuzzer
+      view.focus_pane(:results)
+      view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 12_i64, 2, 1, 1000_i64,
+        nil, false, false, nil, grpc_status: 0, grpc_message: nil))
+      backend = MemoryBackend.new(220, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 220, 30))
+      backend.contains?("grpc 0 OK").should be_true
+      backend.contains?("PERMISSION_DENIED").should be_false
+    end
+
+    # Complement: an ordinary (non-gRPC) row is byte-identical to what it was — no new
+    # field noise.
+    it "leaves a non-gRPC row unchanged" do
+      view = loaded_fuzzer
+      view.focus_pane(:results)
+      view.append_result(fuzz_result(0, 200, 1200))
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("grpc").should be_false
+    end
+  end
+
   describe "#auto_mark" do
     # Fuzz::Template.auto_mark is a deliberate no-op once ANY § is present: it will not
     # double-mark, and it must not clear the operator's own markers to re-derive them.

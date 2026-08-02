@@ -226,6 +226,17 @@ module Gori
           j.field "canary", f.canary
           j.field "status", f.status
           j.field "delta", f.delta
+          # The gRPC CALL's outcome. `status` above is 200 for every gRPC response, so without
+          # these a mine against a target denying every candidate was byte-identical to one
+          # allowing them all. Emitted only when the confirming round carried them, so a
+          # non-gRPC run's JSON is unchanged. `.scrub`: `grpc-message` is origin-chosen text.
+          if gs = f.grpc_status
+            j.field "grpc_status", gs
+            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          end
+          if gm = f.grpc_message
+            j.field "grpc_message", gm.scrub
+          end
         end
       end
 
@@ -236,6 +247,10 @@ module Gori
           io << f.name.ljust(24)
           io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
+          if gs = f.grpc_status
+            io << "  grpc " << gs << ' ' << Proxy::H2::Grpc.status_name(gs)
+            io << " · " << f.grpc_message if f.grpc_message
+          end
         end
       end
 
@@ -263,6 +278,17 @@ module Gori
             j.field "token", s.token
             j.field "length", s.length
             j.field "error", s.error
+            # The gRPC CALL's outcome. `status` above is 200 for every gRPC response, so
+            # without these a collection against a target denying every call read as healthy.
+            # Emitted only when the response actually carried them, so a non-gRPC sample's
+            # JSON line is unchanged. `.scrub`: `grpc-message` is origin-chosen text.
+            if gs = s.grpc_status
+              j.field "grpc_status", gs
+              j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+            end
+            if gm = s.grpc_message
+              j.field "grpc_message", gm.scrub
+            end
           end
         end
       end
