@@ -997,6 +997,21 @@ describe Gori::Tui::RepeaterView do
         String.new(view.request_bytes).should contain("Content-Length: 61") # …and the wire agrees
       end
 
+      # Four surfaces now split or refuse on this separator (TUI group send, TUI minimize,
+      # `gori run repeater minimize`, MCP minimize). Two spellings of it was the last drift
+      # left in that set, and a separator the TUI and the engine disagreed about would be
+      # precisely the "two places decide the split" failure the seam exists to prevent.
+      it "shares ONE spelling of the separator with the engine the headless surfaces use" do
+        RepeaterView::PIPELINE_SEP.should eq(Gori::Repeater::Minimize::GROUP_SEP)
+        # …and they agree on a real buffer, trimming included.
+        text = "POST /a HTTP/1.1\nHost: h.test\nContent-Length: 9\n\nx\n  %%%\t\nPOST /b HTTP/1.1\nHost: h.test\n\n"
+        Gori::Repeater::Minimize.group_document?(text).should be_true
+        view = RepeaterView.new
+        view.restore("http://h.test", text, false, true)
+        view.pipeline_requests.size.should eq(2)
+        view.minimizable?.should be_false
+      end
+
       it "COMPLEMENT: a CAPTURED %%% is inert, so it reflects and sends WHOLE, unrefused" do
         repeater_tmp_store do |store|
           view = RepeaterView.new
