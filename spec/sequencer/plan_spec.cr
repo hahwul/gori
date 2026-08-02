@@ -215,6 +215,173 @@ describe Gori::Sequencer::Plan do
         config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
       String.new(plan.request).should eq(raw)
     end
+
+    # `expand_wire` runs over the BODY too, and this builder framed nothing afterwards — so
+    # every sample the collection sent declared the PRE-expansion length and wrote the
+    # post-expansion body. A raw sink counting bytes saw 30 body bytes behind
+    # `Content-Length: 19`; the 11 orphans sit in the connection as the front of the next
+    # request line. An origin cannot see it (it reads exactly CL bytes) — a STRICT one just
+    # 400s the truncated body, no `Set-Cookie` comes back, and the report reads
+    # `CRITICAL (no usable tokens) · 0 usable / 0 total · 0.0 bits effective`: an entropy
+    # VERDICT over a request the target rejected as malformed. `Repeater::Plan` and
+    # `Fuzz::Generator` both re-frame here; the Sequencer was the builder that did not.
+    it "re-frames Content-Length when expansion GROWS the body" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = %({"a":"$id","b":"x"})
+      plan = Q::Plan.build(Q::PlanOptions.new(
+        ("POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+         "Content-Length: #{body.bytesize}\r\n\r\n#{body}").to_slice,
+        target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
+        verify: false), ungated)
+      wire = String.new(plan.request)
+      sent_body = wire.split("\r\n\r\n", 2)[1]
+      sent_body.should eq(%({"a":"99999-EVIL-ENV","b":"x"}))
+      wire.should contain("Content-Length: #{sent_body.bytesize}\r\n")
+      # The pre-fix bytes, spelled out: the token's own width, not the value's.
+      wire.should_not contain("Content-Length: #{body.bytesize}\r\n")
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: a value SHORTER than its token under-fills the declared length instead of
+    # overflowing it, so the origin blocks waiting for bytes that never arrive and the whole
+    # collection times out. Same defect, opposite sign — a resync-on-growth-only fix misses it.
+    it "re-frames Content-Length when expansion SHRINKS the body" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"LONGNAME", "z"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = %({"a":"$LONGNAME"})
+      plan = Q::Plan.build(Q::PlanOptions.new(
+        ("POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+         "Content-Length: #{body.bytesize}\r\n\r\n#{body}").to_slice,
+        target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
+        verify: false), ungated)
+      wire = String.new(plan.request)
+      sent_body = wire.split("\r\n\r\n", 2)[1]
+      sent_body.should eq(%({"a":"z"}))
+      wire.should contain("Content-Length: #{sent_body.bytesize}\r\n")
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: the overwhelmingly common request has no `$KEY` in its body at all, and it
+    # must come out byte-identical — including a deliberately-wrong `Content-Length`, which is
+    # the CL-desync probe whose session cookie an operator sequences that endpoint to judge.
+    # `Fuzz::ContentLength.sync` is a RESYNC, so running it unconditionally would silently
+    # correct their test case and then report a verdict about a request gori never sent.
+    it "leaves a body with no token alone, including a deliberately-wrong Content-Length" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+            "Content-Length: 99\r\n\r\n{\"a\":\"x\"}"
+      plan = Q::Plan.build(Q::PlanOptions.new(raw.to_slice, target: "http://t.test",
+        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
+      String.new(plan.request).should eq(raw)
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: a bodyless request must not GROW a Content-Length (`add_when_missing:
+    # false`), and a head-only expansion must not be mistaken for a body change.
+    it "does not add a Content-Length to a request that had none" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"UA", "gori-sequencer-agent"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      plan = Q::Plan.build(Q::PlanOptions.new(
+        "GET /login HTTP/1.1\r\nHost: t.test\r\nUser-Agent: $UA\r\n\r\n".to_slice,
+        target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
+        verify: false), ungated)
+      wire = String.new(plan.request)
+      wire.should eq("GET /login HTTP/1.1\r\nHost: t.test\r\nUser-Agent: gori-sequencer-agent\r\n\r\n")
+      wire.downcase.should_not contain("content-length")
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: EVIDENCE never expands, so it must never re-frame either. A captured
+    # `Content-Length: 4` over a longer body is the thing the operator captured.
+    it "does not touch a captured request's framing on the evidence path" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+            "Content-Length: 4\r\n\r\n{\"a\":\"$id\"}"
+      plan = Q::Plan.build(Q::PlanOptions.new(raw.to_slice, evidence: true,
+        target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
+        verify: false), ungated)
+      String.new(plan.request).should eq(raw)
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # COMPLEMENT: the TUI Sequencer tab holds its editor buffer LF-joined, so the head
+    # reaching this builder is bare-LF and `expand_wire` promotes it. Measuring "did the body
+    # change" against `\r\n\r\n` alone — which is what
+    # `FlowRequest.resync_content_length_if_body_changed` does — silently skips exactly that
+    # input; `Env.head_body_boundary` accepts `\n\n` too.
+    it "re-frames a bare-LF authored request too" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "99999-EVIL-ENV"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = %({"a":"$id"})
+      plan = Q::Plan.build(Q::PlanOptions.new(
+        ("POST /api HTTP/1.1\nHost: t.test\nContent-Type: application/json\n" \
+         "Content-Length: #{body.bytesize}\n\n#{body}").to_slice,
+        target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
+        verify: false), ungated)
+      wire = String.new(plan.request)
+      sent_body = wire.split("\r\n\r\n", 2)[1]
+      sent_body.should eq(%({"a":"99999-EVIL-ENV"}))
+      wire.should contain("Content-Length: #{sent_body.bytesize}\r\n")
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    # A binary body survives the re-frame. `Fuzz::ContentLength.sync` splices at the byte
+    # level for exactly this reason; `FlowRequest.resync_content_length` round-trips the whole
+    # request through `String` and would have replaced the invalid UTF-8 with U+FFFD.
+    it "keeps a non-UTF-8 body byte-exact while re-framing it" do
+      prefix = Gori::Settings.env_prefix
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"id", "AAAA"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      body = Bytes[0xFF, 0xFE, 0x24, 0x69, 0x64, 0x00, 0x80] # \xff\xfe$id\x00\x80
+      head = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Length: #{body.size}\r\n\r\n".to_slice
+      raw = Bytes.new(head.size + body.size)
+      head.copy_to(raw)
+      body.copy_to(raw + head.size)
+      plan = Q::Plan.build(Q::PlanOptions.new(raw, target: "http://t.test",
+        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
+      sent = plan.request
+      boundary = Gori::Env.head_body_boundary(sent)
+      sent[boundary..].should eq(Bytes[0xFF, 0xFE, 0x41, 0x41, 0x41, 0x41, 0x00, 0x80])
+      String.new(sent[0...boundary]).should contain("Content-Length: 8\r\n")
+    ensure
+      Gori::Settings.env_prefix = prefix || "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
   end
 
   describe "analyse-only (manual) plans" do

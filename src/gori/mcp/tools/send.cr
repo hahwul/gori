@@ -373,6 +373,30 @@ module Gori
         # Preserve the original source flow for a flow repeater; otherwise link
         # the Repeater tab to the newly recorded History evidence.
         flow_id = int(h, "flow_id") || recorded_flow_id
+        # Masked for the PROBE SCAN only, exactly like `masked_req` below — never for the row.
+        # `target` is a WIRE field: it is the dial tuple, and it supplies the TLS ClientHello
+        # ServerName whenever `sni` is absent (which it always is on this save-from-send path,
+        # `sni: nil`). See `stored_request` for the seam; the two extra facts that make masking
+        # it destructive rather than merely cosmetic:
+        #
+        #   * The two ends do not share a vocabulary. `mask_secrets` resolves against
+        #     `Env.masking_vars` — env vars PLUS every session-binding value currently held —
+        #     while the send path resolves with `Env.effective_vars` (env vars only) and
+        #     `Repeater::Plan` additionally runs `refuse_unresolved(Env.unresolved(s,
+        #     deferred: nil))`, which refuses a DECLARED binding name outright. So a binding
+        #     value masked in here mints a `$NAME` that can never resolve on any send path,
+        #     from any surface.
+        #   * The author's string is then unrecoverable. An author who sent
+        #     `http://prod-edge-07.internal.example.com:19752/vhost` while an extract rule had
+        #     bound `$edge` to `prod-edge-07` got `http://$edge.internal.example.com:19752` in
+        #     the row, every re-send refused with "unresolved env $edge", and a prescription
+        #     ("set the env var") that would put a GUESSED hostname in the ClientHello of a
+        #     vhost test. A one-way door, and this projection existed for the store alone —
+        #     the reply below never carried a target field at all.
+        #
+        # `name` keeps its mask (further down): a session name is a TUI tab caption and never
+        # becomes bytes an origin sees. The rule is "does this field reach the wire", not "did
+        # the operator type it". Same resolution as the sibling seam in `Tools#create_repeater`.
         masked_target = Env.mask_secrets(target_url)
         # Same reason as `record_outbound_request`: a saved session is a REPLAY source before
         # it is a display, and no surface can send `H2Engine.field_dump` back. Saving the dump
@@ -387,7 +411,7 @@ module Gori
         # from the TUI and another from MCP. Same seam as `Tools#stored_request`.
         masked_req = Env.mask_secrets(String.new(saved_bytes))
         repeater_id = store.insert_repeater(
-          target: masked_target,
+          target: target_url,
           request: saved_bytes,
           http2: http2,
           auto_cl: true,
