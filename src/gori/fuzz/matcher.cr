@@ -1,9 +1,113 @@
 require "../proxy/codec/content_decode"
+require "../proxy/h2/grpc"
 require "../intercept_filter"
 require "../repeater/engine"
 require "../ascii_bytes"
 
 module Gori::Fuzz
+  # gRPC facts a fuzz run needs off raw wire bytes: the CALL's outcome (which for gRPC is
+  # never the h2 `:status` — that is 200 by definition — but the `grpc-status` /
+  # `grpc-message` trailers the Assembler merges into the response head), and whether an
+  # OUTGOING request's body still frames as gRPC after a payload was spliced into it.
+  #
+  # Both answers already existed one surface away — `run show --format json`, MCP `get_flow`,
+  # the Repeater head and the TUI transcript all read them off a STORED flow through
+  # `Proxy::H2::Grpc` — and the fuzz result row was the one place they were thrown away. So
+  # this is a projection over the same `Grpc` primitives, not a second parser: a sweep against
+  # an origin that answers `grpc-status: 7 PERMISSION_DENIED` to every call used to be
+  # byte-identical to one against an origin that allowed them all.
+  module GrpcVerdict
+    # Lowercase needles for the allocation-free pre-checks. `String.new(head)` is only paid
+    # by a response that really carries a gRPC status, so a non-gRPC sweep costs one byte
+    # scan per response and nothing else.
+    STATUS_NEEDLE = "grpc-status".to_slice
+
+    # `{grpc-status, grpc-message}` off a response head, or `{nil, nil}` when it carries no
+    # gRPC status at all (an ordinary HTTP response, or a gRPC one whose origin sent no
+    # trailer — the TUI calls that last case out as `⚠ no grpc-status trailer`).
+    #
+    # LAST value wins, matching `Codec::Message#get?`'s `reverse_each`: the trailers are
+    # merged in after the initial HEADERS block, and the gRPC rule is that the trailer is the
+    # call's real status — an origin that "promotes" a `grpc-status: 0` into the head must not
+    # be able to hide the 7 it actually sent.
+    def self.response(head : Bytes?) : {Int32?, String?}
+      return {nil, nil} unless head && AsciiBytes.contains_ci?(head, STATUS_NEEDLE)
+      code = nil.as(Int32?)
+      msg = nil.as(String?)
+      # scrub: a head is wire bytes and a hostile `grpc-message` is not guaranteed to be
+      # valid UTF-8 — best-effort parsing, never a raise on the result path.
+      String.new(head).scrub.each_line do |raw|
+        line = raw.rstrip
+        next unless idx = line.index(':')
+        value = line[(idx + 1)..].strip
+        case line[0, idx].strip.downcase
+        when "grpc-status"  then code = value.to_i?
+        when "grpc-message" then msg = value.presence
+        end
+      end
+      {code, msg}
+    end
+
+    # Does this REQUEST declare a gRPC content-type? Read once per run off the template's
+    # baseline rendering, never per request.
+    def self.grpc_request?(request : Bytes) : Bool
+      Proxy::H2::Grpc.grpc?(header(request, "content-type"))
+    end
+
+    # Tail bytes of the request body that are NOT a complete gRPC frame — `Grpc.scan`'s
+    # residual, i.e. "a length prefix claiming more than arrived". 0 for a body that frames
+    # cleanly and for a request with no body at all.
+    def self.residual(request : Bytes) : Int32
+      body = body(request)
+      return 0 unless body && !body.empty?
+      Proxy::H2::Grpc.scan(body)[1]
+    end
+
+    # A template whose gRPC framing a payload can INVALIDATE: it declares a gRPC
+    # content-type and its seed body frames cleanly. A seed that was already mis-framed is
+    # the operator's own deliberate parser test (see `Grpc.scan`'s comment), so a run over it
+    # has nothing to report.
+    def self.framed_template?(request : Bytes) : Bool
+      grpc_request?(request) && residual(request) == 0
+    end
+
+    # The body slice of a raw request, or nil when there is no head/body boundary. Same
+    # LFLF-or-CRLFCRLF rule as `Fuzz::ContentLength.boundary` — a bare-LF head is a desync
+    # primitive the fuzzer deliberately crafts, and it still has a body.
+    def self.body(request : Bytes) : Bytes?
+      sep, width = boundary(request)
+      return nil unless sep
+      start = sep + width
+      start >= request.size ? Bytes.empty : request[start, request.size - start]
+    end
+
+    # First value of a header field in the request head, or nil. Only ever called once per
+    # run, so it takes the simple String path rather than a byte scan.
+    private def self.header(request : Bytes, name : String) : String?
+      sep, _ = boundary(request)
+      head = sep ? request[0, sep] : request
+      String.new(head).scrub.each_line do |raw|
+        line = raw.rstrip
+        next unless idx = line.index(':')
+        return line[(idx + 1)..].strip if line[0, idx].strip.downcase == name
+      end
+      nil
+    end
+
+    private def self.boundary(bytes : Bytes) : {Int32?, Int32}
+      i = 0
+      while i + 1 < bytes.size
+        return {i, 2} if bytes[i] == 0x0a_u8 && bytes[i + 1] == 0x0a_u8
+        if i + 3 < bytes.size && bytes[i] == 0x0d_u8 && bytes[i + 1] == 0x0a_u8 &&
+           bytes[i + 2] == 0x0d_u8 && bytes[i + 3] == 0x0a_u8
+          return {i, 4}
+        end
+        i += 1
+      end
+      {nil, 0}
+    end
+  end
+
   # Decoded-response metrics for one send.
   record Metrics,
     status : Int32?,
@@ -56,6 +160,14 @@ module Gori::Fuzz
 
     status_spec match_status
     status_spec filter_status
+    # gRPC call status (`grpc-status`), the dimension the h2 `:status` cannot express: for a
+    # gRPC target EVERY response is 200, so `--mc`/`--fc` — and every downstream reading of
+    # `status` — cannot separate a granted call from `7 PERMISSION_DENIED`. Compiled as a
+    # NUMERIC spec rather than a status one (`2xx` classes are meaningless for a gRPC code,
+    # while `7`, `>0` and `1-16` are exactly the useful forms). Absent = unconstrained, so a
+    # non-gRPC run is unaffected.
+    num_spec match_grpc
+    num_spec filter_grpc
     num_spec match_size
     num_spec filter_size
     num_spec match_words
@@ -86,6 +198,24 @@ module Gori::Fuzz
     getter? reflects_length : Bool = false
     property? auto_calibrate : Bool
     property keep_bodies : Symbol # :none | :matched | :all
+
+    # The template is a gRPC request whose SEED body frames cleanly (set once by
+    # `Fuzz::Plan.build` — see `GrpcVerdict.framed_template?`). While it is on, every rendered
+    # request is re-scanned and the ones a payload left MIS-framed are counted below.
+    #
+    # gori does not touch the bytes either way (P7: the operator's payload goes out verbatim),
+    # but it resyncs `Content-Length` by default and says so loudly, while the gRPC 5-byte
+    # length prefix — the same kind of declaration — got neither the resync nor a word: a
+    # sweep whose payloads change the message length puts a prefix claiming the OLD length on
+    # the wire, a real gRPC server rejects it, and gori reported `3 sent · 0 errors`. So the
+    # verdict is computed and named ONCE per run instead of changing what leaves the machine.
+    property? grpc_template : Bool = false
+    # Rendered requests scanned (the denominator of the notice) and how many of them left the
+    # length prefix stale, plus the first `Grpc.framing_error` sentence. Zero on every
+    # non-gRPC run, so no surface grows a line it did not have.
+    getter grpc_requests : Int64 = 0_i64
+    getter grpc_stale : Int64 = 0_i64
+    getter grpc_stale_reason : String? = nil
 
     def initialize(@keep_bodies : Symbol = :matched, @auto_calibrate : Bool = false)
       @baseline = [] of BaselineSample
@@ -147,15 +277,21 @@ module Gori::Fuzz
     end
 
     def build(job : Job, raw : Repeater::Result) : Result
+      # The OUTGOING request, before anything is said about the response: a payload that
+      # changed the gRPC message length leaves the 5-byte prefix declaring the old one.
+      note_grpc_framing(job.bytes) if @grpc_template
       body = decode(raw)
       status = raw.response.try(&.status)
+      # The call's real outcome for a gRPC target — `status` is 200 for every gRPC response
+      # there is. Nil (and free) for any other response: see `GrpcVerdict.response`.
+      grpc_status, grpc_message = GrpcVerdict.response(raw.head)
       length = body.size.to_i64
       words, lines = count_metrics(body)
 
       need_text = !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
       text = need_text ? String.new(body).scrub : ""
       extracted = extract_value(text)
-      matched = decide(raw, status, length, words, lines, text)
+      matched = decide(raw, status, grpc_status, length, words, lines, text)
       keep = keep?(matched)
 
       Result.new(
@@ -165,15 +301,27 @@ module Gori::Fuzz
         incomplete: raw.incomplete?, extracted: extracted,
         head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil,
         request: keep ? present(job.bytes) : nil, retried: raw.retried?,
-        chain_error: job.chain_error)
+        chain_error: job.chain_error,
+        grpc_status: grpc_status, grpc_message: grpc_message)
     end
 
-    private def decide(raw : Repeater::Result, status : Int32?, length : Int64,
-                       words : Int32, lines : Int32, text : String) : Bool
+    # Count a rendered request whose gRPC framing a payload broke. Only reached while
+    # `grpc_template?` is set, so it costs a non-gRPC run nothing. Never rewrites and never
+    # refuses — the bytes are the operator's test case; the run merely gets to say so once.
+    private def note_grpc_framing(request : Bytes) : Nil
+      @grpc_requests += 1
+      residual = GrpcVerdict.residual(request)
+      return unless residual > 0
+      @grpc_stale += 1
+      @grpc_stale_reason ||= Proxy::H2::Grpc.framing_error(residual)
+    end
+
+    private def decide(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
+                       length : Int64, words : Int32, lines : Int32, text : String) : Bool
       return false unless raw.error.nil?
       return false if calibrated_out?(status, length, words, lines)
-      matchers_pass?(raw, status, length, words, lines, text) &&
-        !filtered?(status, length, words, lines, text)
+      matchers_pass?(raw, status, grpc_status, length, words, lines, text) &&
+        !filtered?(status, grpc_status, length, words, lines, text)
     end
 
     # A response is "noise" when it matches ANY collected baseline sample — not just a
@@ -204,9 +352,10 @@ module Gori::Fuzz
     end
 
     # Every active matcher dimension must pass.
-    private def matchers_pass?(raw : Repeater::Result, status : Int32?, length : Int64,
-                               words : Int32, lines : Int32, text : String) : Bool
+    private def matchers_pass?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
+                               length : Int64, words : Int32, lines : Int32, text : String) : Bool
       status_pass?(@match_status_c, status, default: true) &&
+        grpc_pass?(@match_grpc_c, grpc_status, default: true) &&
         num_pass?(@match_size_c, length, default: true) &&
         num_pass?(@match_words_c, words.to_i64, default: true) &&
         num_pass?(@match_lines_c, lines.to_i64, default: true) &&
@@ -218,9 +367,10 @@ module Gori::Fuzz
     end
 
     # Any filter dimension that passes removes the result.
-    private def filtered?(status : Int32?, length : Int64, words : Int32,
+    private def filtered?(status : Int32?, grpc_status : Int32?, length : Int64, words : Int32,
                           lines : Int32, text : String) : Bool
       status_pass?(@filter_status_c, status, default: false) ||
+        grpc_pass?(@filter_grpc_c, grpc_status, default: false) ||
         num_pass?(@filter_size_c, length, default: false) ||
         num_pass?(@filter_words_c, words.to_i64, default: false) ||
         num_pass?(@filter_lines_c, lines.to_i64, default: false) ||
@@ -257,6 +407,14 @@ module Gori::Fuzz
     private def num_pass?(compiled : Array(NumTerm)?, value : Int64, default : Bool) : Bool
       return default if compiled.nil?
       compiled.any?(&.matches?(value))
+    end
+
+    # `num_pass?` for the gRPC status, which is ABSENT on every non-gRPC response — so a spec
+    # that is present can't match one, exactly as `status_pass?` treats a response with no
+    # status. Without a spec the dimension is unconstrained (matcher) / never fires (filter).
+    private def grpc_pass?(compiled : Array(NumTerm)?, code : Int32?, default : Bool) : Bool
+      return default if compiled.nil?
+      (c = code) ? compiled.any?(&.matches?(c.to_i64)) : false
     end
 
     private def extract_value(text : String) : String?

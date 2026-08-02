@@ -634,8 +634,12 @@ module Gori::Fuzz
     end
 
     private def snapshot : Progress
+      # The gRPC framing tally rides along from the Matcher, which is the one object that
+      # sees every RENDERED request (see `Matcher#grpc_template?`). All zeroes / nil unless
+      # the template was a cleanly-framed gRPC request, so no surface changes for anything else.
       Progress.new(@sent, total, @matched, @errors, @backend.blocked, @backend.blocked_reason,
-        @backend.sent + @backend.extra_requests)
+        @backend.sent + @backend.extra_requests,
+        @matcher.grpc_stale, @matcher.grpc_requests, @matcher.grpc_stale_reason)
     end
   end
 end

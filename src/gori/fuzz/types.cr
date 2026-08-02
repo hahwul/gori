@@ -102,11 +102,25 @@ module Gori
       # Distinct from `error` (a network/send failure): a request can succeed on the wire yet
       # still carry a chain_error. nil when every position's chain ran (or none was declared).
       getter chain_error : String?
+      # The gRPC CALL's outcome, from the response's `grpc-status` / `grpc-message` (the
+      # trailers the Assembler merges into the head). nil for every non-gRPC response, and for
+      # a gRPC one whose origin sent no status at all.
+      #
+      # `status` cannot carry this: for gRPC the h2 `:status` is 200 BY DEFINITION, so a sweep
+      # against an origin that answers `7 PERMISSION_DENIED` to every call produced output
+      # byte-identical to one against an origin that allowed them all — `200 · matched` on
+      # every row, including the denied ones. The engine had the evidence the whole time (it
+      # reaches `run show --format json`, MCP `get_flow`, the Repeater head and the TUI
+      # transcript); the fuzz row was the one place it was dropped. Same shape and the same
+      # argument as `chain_error` above: carried per row, emitted only when present, so a
+      # non-gRPC run's output is unchanged.
+      getter grpc_status : Int32?
+      getter grpc_message : String?
 
       def initialize(@index, @payloads, @position, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @incomplete, @extracted,
                      @head = nil, @body = nil, @request = nil, @retried = false,
-                     @chain_error = nil)
+                     @chain_error = nil, @grpc_status = nil, @grpc_message = nil)
       end
     end
 
@@ -134,7 +148,18 @@ module Gori
       # is the number that matters, and mine/discover have always published it as their own
       # `sent`. Kept as a SECOND field rather than replacing `sent`, because `sent/total` is
       # the progress meter's fraction and would otherwise run past 100%.
-      requests : Int64 = 0_i64
+      requests : Int64 = 0_i64,
+      # Requests that left a STALE gRPC length prefix, out of how many were scanned, plus the
+      # first `Grpc.framing_error` sentence. Non-zero only for a run whose template is a gRPC
+      # request that framed cleanly before a payload was spliced in (`Matcher#grpc_template?`).
+      #
+      # Carried on Progress for the same reason `blocked`/`blocked_reason` are: a surface that
+      # must not report a mis-framed sweep as `3 sent · 0 errors` only ever sees events. gori
+      # does NOT re-frame the body (P7 — the payload is the operator's test case); this is the
+      # one line that says so, the counterpart of the `--verbatim` note Content-Length gets.
+      grpc_stale : Int64 = 0_i64,
+      grpc_requests : Int64 = 0_i64,
+      grpc_stale_reason : String? = nil
 
     # Engine → consumer events. A union (not a class hierarchy) so `Channel(Event)`
     # carries them without boxing surprises. Progress is droppable (latest wins);

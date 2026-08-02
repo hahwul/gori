@@ -253,6 +253,15 @@ module Gori::Fuzz
       # The shared decoder registry applies each position's inline `¦chain` at render time.
       # Wired here so a new surface cannot forget it and silently send un-transformed payloads.
       generator = Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
+      # gRPC framing, decided ONCE off the seed rendering: a template that declares
+      # `content-type: application/grpc` and whose body frames cleanly has a 5-byte length
+      # prefix that a payload of a different length will INVALIDATE. gori keeps the operator's
+      # bytes either way (P7), but Content-Length gets resynced-and-announced while this
+      # declaration got neither — so a sweep in which two of three requests were malformed at
+      # the gRPC layer reported `3 sent · 0 errors`. From here the Matcher counts them and the
+      # surfaces name it once. A seed that was ALREADY mis-framed is the operator's own parser
+      # test and switches this off, because there is nothing left to break.
+      matcher.grpc_template = GrpcVerdict.framed_template?(generator.baseline_raw)
       # One parked connection per worker fiber is the ceiling that can ever be checked out
       # at once, so the pool is sized to the (clamped) concurrency the engine will run at.
       sender = Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,

@@ -242,6 +242,17 @@ module Gori
           # Emitted only when set, so an agent never reads a clean row for a request that sent a
           # different test than asked. `error` stays the network/send failure; this is distinct.
           j.field "chain_error", text(r.chain_error) if r.chain_error
+          # The gRPC CALL's outcome, from the response's `grpc-status`/`grpc-message` trailers.
+          # `status` above is 200 for EVERY gRPC response, so without these an agent fuzzing an
+          # authz bypass read `200` on the granted and the denied calls alike — the result set
+          # carried no bit that separated them, and the only recovery was record_history:"all"
+          # plus a get_flow per row. Emitted only when the response carried them, so a
+          # non-gRPC run's rows are unchanged. `text()`: grpc-message is origin-chosen bytes.
+          if gs = r.grpc_status
+            j.field "grpc_status", gs
+            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          end
+          j.field "grpc_message", text(r.grpc_message) if r.grpc_message
           j.field "extracted", text(r.extracted)
           # This variation's request reached the origin TWICE: the keep-alive pool found its
           # parked socket closed and re-sent (see `Fuzz::Result#retried?`). Emitted only when

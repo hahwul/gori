@@ -139,6 +139,9 @@ module Gori
         fjob.errors = p.errors
         fjob.blocked = p.blocked
         fjob.blocked_reason = p.blocked_reason
+        fjob.grpc_stale = p.grpc_stale
+        fjob.grpc_requests = p.grpc_requests
+        fjob.grpc_stale_reason = p.grpc_stale_reason
       end
 
       private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result, flow_id : Int64?) : Nil
@@ -175,6 +178,19 @@ module Gori
             j.field "blocked", fjob.blocked
             j.field "blocked_reason", fjob.blocked_reason
             j.field "all_blocked", fjob.sent > 0 && fjob.blocked >= fjob.sent
+            # The template was a cleanly-framed gRPC request and a payload of a different
+            # length left its 5-byte length prefix declaring the OLD one — bytes a real gRPC
+            # server rejects, sent under `errors: 0`. gori does NOT re-frame them (P7, the same
+            # reason update_content_length:false exists); it says so. Only emitted for a run
+            # where it happened, so a non-gRPC job's status object is unchanged.
+            if fjob.grpc_stale > 0
+              j.field "grpc_stale_prefix", fjob.grpc_stale
+              j.field "grpc_requests_scanned", fjob.grpc_requests
+              j.field "grpc_stale_prefix_reason",
+                "#{Serialize.text(fjob.grpc_stale_reason)} — the template's gRPC length prefix " \
+                "is not recomputed when a payload changes the message length; " \
+                "#{fjob.grpc_stale} of #{fjob.grpc_requests} requests left it stale"
+            end
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
             j.field "record_history", fjob.record_history.to_s
@@ -289,11 +305,31 @@ module Gori
       # The audit/evidence policy for a fuzz run: none (default) | matched | all.
       # `matched` records each MATCHED result's rendered request + response as a
       # History flow; `all` records every sent request (bounded by FUZZ_HISTORY_MAX).
+      #
+      # `true`/`false` are accepted as aliases for `all`/`none`: `send_request.record_history`
+      # — the sibling tool an agent learns this argument name from — is a BOOLEAN defaulting to
+      # true, and `true` here used to fall through to `:none`, i.e. the audit trail the caller
+      # explicitly asked for was silently not kept. `true` means "record what this run sends",
+      # which for a sweep is `all`.
+      #
+      # Anything else is REFUSED BY NAME rather than degraded to `:none`, the same contract
+      # `optional_bool_arg` states for a boolean ("a lenient coercion is fine, a SILENT one is
+      # not"): `record_history:"yes"` or `1` asked for evidence and got none, with a cheerful
+      # `"record_history":"none"` in the echo.
       private def fuzz_record_policy(h) : Symbol
-        case str(h, "record_history").try(&.strip.downcase)
+        return :none unless present?(h, "record_history")
+        raw = h["record_history"]
+        case bool_value(raw)
+        when true  then return :all
+        when false then return :none
+        end
+        case raw.as_s?.try(&.strip.downcase)
+        when "none"    then :none
         when "matched" then :matched
         when "all"     then :all
-        else                :none
+        else
+          raise FuzzArgError.new("invalid 'record_history' #{raw.to_json} " \
+                                 "(expected none | matched | all; true = all, false = none)")
         end
       end
 
@@ -550,6 +586,9 @@ module Gori
         m = Fuzz::Matcher.new(keep_bodies: fuzz_record_policy(h))
         if c = fuzz_conditions(h["match"]?, "match")
           m.match_status = c[:status]
+          # `status` is 200 for every gRPC response; `grpc` is the dimension that can separate
+          # a granted call from a denied one. Numeric spec (7, >0, 1-16) — see Matcher.
+          m.match_grpc = c[:grpc]
           m.match_size = c[:size]
           m.match_words = c[:words]
           m.match_lines = c[:lines]
@@ -557,6 +596,7 @@ module Gori
         end
         if c = fuzz_conditions(h["filter"]?, "filter")
           m.filter_status = c[:status]
+          m.filter_grpc = c[:grpc]
           m.filter_size = c[:size]
           m.filter_words = c[:words]
           m.filter_lines = c[:lines]
@@ -566,7 +606,7 @@ module Gori
         m
       end
 
-      private alias FuzzConds = NamedTuple(status: String?, size: String?, words: String?, lines: String?, regex: String?)
+      private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, regex: String?)
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
         return nil unless raw
@@ -579,8 +619,9 @@ module Gori
           else
             raise FuzzArgError.new("'#{which}' must be a JSON object (not a bare string/scalar)")
           end
-        {status: jstr(obj, "status"), size: jstr(obj, "size"), words: jstr(obj, "words"),
-         lines: jstr(obj, "lines"), regex: obj["regex"]?.try(&.as_s?)}
+        {status: jstr(obj, "status"), grpc: jstr(obj, "grpc"), size: jstr(obj, "size"),
+         words: jstr(obj, "words"), lines: jstr(obj, "lines"),
+         regex: obj["regex"]?.try(&.as_s?)}
       end
 
       private def jstr(obj : Hash(String, JSON::Any), key : String) : String?
