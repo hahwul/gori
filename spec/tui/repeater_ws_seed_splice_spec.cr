@@ -109,7 +109,10 @@ describe "RepeaterView WebSocket seed splice" do
       .should eq([{9, "pi"}, {1, "a"}, {2, "\xFF"}, {1, ""}])
   end
 
-  it "reports unresolved env from the spliced list, not from a stale seed" do
+  # Was: "reports unresolved env from the spliced list, not from a stale seed". The report
+  # is gone with the refusal it fed (owner's round-7 policy). What still matters is that the
+  # SPLICED list is what goes out — so the same edit is asserted on the outgoing frames.
+  it "sends the spliced list, not a stale seed, and leaves an unset token literal" do
     view = RepeaterView.new
     view.restore("https://ws.test", ws_head, false, true, ws_messages: [
       Gori::Store::WsOutMessage.new(9, "pi".to_slice),
@@ -118,6 +121,6 @@ describe "RepeaterView WebSocket seed splice" do
     view.focus_pane(:request)
     view.edit_end
     "$NOPE".each_char { |c| view.edit_insert(c) }
-    view.ws_unresolved_env.should eq(["NOPE"])
+    String.new(view.ws_out_messages.last.payload).should contain("$NOPE")
   end
 end

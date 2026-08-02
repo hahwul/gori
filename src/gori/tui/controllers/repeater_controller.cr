@@ -1302,21 +1302,15 @@ module Gori::Tui
       end
       view.commit_chain_pane
       # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
-      # design, so the builder's unresolved-token refusal (#519) never runs for it and this
-      # is the only place that check can happen (#524). Before `parse_target`, which expands:
-      # an unresolved `$HOST` survives as the literal host and would otherwise be reported as
-      # an invalid target naming no variable.
+      # design, so the builder's dial-tuple refusal never runs for it and this is the only
+      # place that check can happen (#524). Before `parse_target`, which expands: an
+      # unresolved `$HOST` survives as the literal host and would otherwise be reported as an
+      # invalid target naming no variable.
       #
-      # Head-only on the REQUEST (`unresolved_wire`) for #519's reason — a `$` in a captured
-      # body is a byte, and a whole-request check refuses nearly every binary-body session —
-      # but whole-string on the target and SNI, which are short operator-typed fields with no
-      # body to exclude. The CLI and MCP minimize paths carry the same three checks.
-      # The REQUEST half drops out for an EVIDENCE tab, for the same reason `^R` no longer
-      # expands one: a capture's `$filter`/`$where` is not a variable anybody typed, so it is
-      # neither refusable nor resolvable. The TARGET and SNI stay checked either way — those
-      # are operator-typed fields on any tab.
-      req_names = view.evidence? ? [] of String : Env.unresolved_wire(view.request_text)
-      env_names = req_names | Env.unresolved(view.target) |
+      # The REQUEST is no longer checked at all — a `$NAME` with no value is a literal string
+      # on the wire everywhere now (see `Env::Escape`). Only the TARGET and SNI are refused;
+      # the CLI and MCP minimize paths carry the same two checks.
+      env_names = Env.unresolved(view.target) |
                   (view.sni_override.try { |s| Env.unresolved(s) } || [] of String)
       unless env_names.empty?
         @host.status("minimize: unresolved env #{Env.token_list(env_names)} — add it in the Project tab's ENV pane")
@@ -1381,14 +1375,6 @@ module Gori::Tui
       if reason = plan.refusal
         results.send({view, Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)})
         @host.status("ws repeater: #{reason}")
-        return
-      end
-      # The handshake went through the builder above, which refuses an unresolved token
-      # (#519); the MESSAGES did not — they are expanded one frame at a time, after the
-      # handshake is built, so this is the only place that check can run for them (#524).
-      # Before `inflight` and before the dial: a refused send must leave the tab resendable.
-      unless (names = view.ws_unresolved_env).empty?
-        @host.status("ws repeater: unresolved env #{Env.token_list(names)} in a message — add it in the Project tab's ENV pane")
         return
       end
       messages = view.ws_out_messages
@@ -1494,7 +1480,7 @@ module Gori::Tui
     # split exists for. And these are exactly the bytes `expand_bindings` would have
     # rewritten, so the two cannot disagree about what was withheld. An UNBOUND declared
     # name is deliberately not reported: nothing would have been substituted for it on any
-    # surface, so there is no divergence to name (`Sender#refusal` owns that case).
+    # surface — evidence or draft — so there is no divergence to name.
     def self.literal_bindings(evidence : Bool, text : String) : Array(String)
       return [] of String unless evidence
       prefix = Gori::Settings.env_prefix

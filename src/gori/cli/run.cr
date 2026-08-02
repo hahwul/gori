@@ -434,25 +434,6 @@ module Gori
         STDERR.puts "bind-from: flow ##{flow_id} replayed → bound #{Env.token_list(bound)}"
       end
 
-      # What a headless operator has to know when a send is refused for an unbound binding:
-      # that no amount of retrying will help, and which flag does. `Env.unbound_error` is the
-      # shared FACT ("unbound session binding $SESS"); this is `gori run`'s own prescription,
-      # the #525 shape.
-      private def self.bindings_headless_hint(cmd : String) : String
-        "#{cmd} runs as ONE process and holds no bindings from a previous invocation — " \
-        "a binding is never persisted. Replay the flow that mints the token first with " \
-        "--bind-from FLOW-ID, or drive the two steps over one `gori mcp` session."
-      end
-
-      # An engine's `blocked_reason` with `gori run`'s own prescription attached when — and
-      # only when — the refusal is the unbound-binding one. A binding can also come UNSTUCK
-      # mid-run (a token rotated, an operator cleared it), which the pre-flight cannot see, so
-      # the hint has to exist on this end of the run too.
-      private def self.blocked_reason_line(reason : String?, cmd : String) : String?
-        return nil unless reason
-        reason.starts_with?(Env::UNBOUND_PREFIX) ? "#{reason}. #{bindings_headless_hint(cmd)}" : reason
-      end
-
       # Why `--bind-from` cannot bind anything in this project, or nil to go ahead. Shared by
       # `seed_bindings` (which owns the replay) and `preflight_bind_from` (which runs the same
       # test before the plan exists), so the two can never disagree about what "this project
@@ -486,16 +467,6 @@ module Gori
         return unless bind_from
         err = bind_from_blocker(Env.layer.as?(Gori::Bindings))
         abort "#{cmd}: #{err}" if err
-      end
-
-      # Refuse BEFORE the sweep when the template names a declared-but-unbound binding and no
-      # --bind-from was given. Without this the run still starts and every single row comes
-      # back refused, which reads like a target problem rather than a missing step.
-      private def self.preflight_bindings(text : String, bind_from : Int64?, cmd : String) : Nil
-        return if bind_from
-        unbound = Env.unbound(text)
-        return if unbound.empty?
-        abort "#{cmd}: #{Env.unbound_error(unbound)}. #{bindings_headless_hint(cmd)}"
       end
 
       # One sentence for every `gori run` tool whose builder refused an env token that

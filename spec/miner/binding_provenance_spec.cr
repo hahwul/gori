@@ -13,8 +13,7 @@ private alias F = Gori::Fuzz
 # carry — expanded to the bound value and left gori for the target, the run reporting 0 errors.
 #
 # These drive the real engine through a backend that mimics `Fuzz::Sender` exactly (the same
-# `Env.unbound` refusal + `Env.expand_bindings` pass), so the assertion is on the bytes that
-# would hit the socket.
+# `Env.expand_bindings` pass), so the assertion is on the bytes that would hit the socket.
 
 # A layer with `SECRET` DECLARED and BOUND to `livevalue` — the send-time binding half.
 private class StubLayer < Gori::Env::Layer
@@ -54,9 +53,6 @@ private class ExpandingBackend < F::Backend
 
   private def record(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Gori::Repeater::Result
     @got_verbatim << verbatim
-    if (u = Gori::Env.unbound(bytes, verbatim)).present?
-      return Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Env.unbound_error(u))
-    end
     wire_bytes = Gori::Env.expand_bindings(bytes, verbatim)
     @wire << String.new(wire_bytes)
     ok

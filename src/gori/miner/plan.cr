@@ -175,15 +175,20 @@ module Gori::Miner
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
-      # ONE `Env.expand_wire` over the request, before anything reads it — and first, a
-      # refusal when a token in the HEAD resolves to nothing (see `refuse_unresolved`).
-      # Both are DRAFT-time passes and are skipped for EVIDENCE — see `PlanOptions#evidence?`.
+      # ONE `Env.expand_wire` over the request, before anything reads it. A DRAFT-time pass,
+      # skipped for EVIDENCE — see `PlanOptions#evidence?`.
+      #
+      # The head-only refusal that used to run first (#519) is gone: a `$NAME` with no value
+      # is a literal string on the wire (see `Env::Escape`). It refused a Mongo `$ne` and a
+      # GraphQL `$id` in a query string — the operator's test case, not a typo.
+      #
+      # `resync_expanded_body` re-frames the head when expansion moved the BODY's byte length
+      # — see its own comment. It and the dropped refusal are orthogonal edits to this one
+      # statement, landed independently; the union is what both intended.
       request = if options.evidence?
                   options.request.to_slice
                 else
-                  refuse_unresolved(Env.unresolved_wire(options.request))
-                  raw = options.request.to_slice
-                  resync_expanded_body(raw, Env.expand_wire(options.request))
+                  resync_expanded_body(options.request.to_slice, Env.expand_wire(options.request))
                 end
       request_target = Gori::Outbound.request_target(request)
       origin = resolve_origin(options)
@@ -260,8 +265,8 @@ module Gori::Miner
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
       # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.unbound` +
-      # `expand_bindings` later; this value is read ONCE, frozen into the plan, and never
+      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
+      # later; this value is read ONCE, frozen into the plan, and never
       # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
       # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
       # would move the dial target out from under a scope decision. Deferring bought nothing

@@ -48,14 +48,27 @@ describe "Gori::Repeater::PlanOptions#evidence?" do
       end
     end
 
-    it "still fires on a DRAFT (the default), naming the tokens" do
+    # INVERTED for the owner's round-7 policy: the refusal used to fire on a DRAFT and this
+    # pinned it. A `$NAME` with no value is a literal string on the wire now, whatever its
+    # provenance — so a draft ships `$filter` exactly as an evidence replay does. What
+    # `evidence?` still decides is EXPANSION, which the example above and the CRLF block
+    # below both pin.
+    it "does not fire on a DRAFT either — the token ships literally" do
       raw = "GET /api?$filter=x HTTP/1.1\r\nHost: h\r\n\r\n"
       with_env_vars([] of {String, String}) do
-        ex = expect_raises(R::PlanError) do
-          wire_of(R::PlanOptions.new([raw.to_slice], target: "http://h"))
-        end
-        ex.reason.should eq(R::PlanError::Reason::UnresolvedEnv)
-        ex.detail.should eq("$filter")
+        wire_of(R::PlanOptions.new([raw.to_slice], target: "http://h")).should eq(raw)
+      end
+    end
+
+    # …and the COMPLEMENT that keeps the two apart: with a VALUE, a draft expands and an
+    # evidence replay still does not.
+    it "expands a draft but never evidence when the token HAS a value" do
+      raw = "GET /api?$filter=x HTTP/1.1\r\nHost: h\r\n\r\n"
+      with_env_vars([{"filter", "PWNED"}]) do
+        wire_of(R::PlanOptions.new([raw.to_slice], target: "http://h"))
+          .should eq("GET /api?PWNED=x HTTP/1.1\r\nHost: h\r\n\r\n")
+        wire_of(R::PlanOptions.new([raw.to_slice], target: "http://h",
+          auto_content_length: false, evidence: true)).should eq(raw)
       end
     end
   end

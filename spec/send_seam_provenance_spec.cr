@@ -187,9 +187,12 @@ describe "Fuzz payload provenance (a payload is the test case, not a draft)" do
         gen.each { |j| job = j }
         j = job.not_nil!
         # Unbound is where the old behaviour was worst: it refused, and its remedy
-        # ("replay the flow that mints the token first") produced the substitution.
+        # ("replay the flow that mints the token first") produced the substitution. The
+        # refusal is gone entirely now (see `Env.unbound`), but the SPAN exclusion is not —
+        # `Env.unbound` is still the report `Rules` uses, and it must still skip a payload.
         Gori::Env.unbound(j.bytes, j.payload_spans).should be_empty
-        # …and the COMPLEMENT: the same name in the TEMPLATE still refuses.
+        # …and the COMPLEMENT: the same name in the TEMPLATE is still REPORTED (the spans are
+        # what makes the difference), it simply no longer stops anything.
         Gori::Env.unbound(
           "GET /q?p=x HTTP/1.1\r\nAuthorization: Bearer $TOKEN\r\n\r\n".to_slice,
           j.payload_spans).should eq(["TOKEN"])
@@ -281,7 +284,7 @@ describe "Repeater::Sender provenance (a DECLARED binding at the send seam)" do
         # THE COMPLEMENT — a DRAFT over the identical bytes, same binding, same everything:
         # the send seam still resolves it. Provenance is the only thing that differs.
         draft = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([captured.to_slice],
-          evidence: false, expand_request: false, refuse_unresolved_env: false,
+          evidence: false, expand_request: false,
           target: "http://127.0.0.1:#{origin.port}"), outbound_any)
         draft.send.error.should be_nil
         String.new(origin.requests[1]).should contain("/api?SECRETTOKEN123=1")
@@ -293,7 +296,7 @@ describe "Repeater::Sender provenance (a DECLARED binding at the send seam)" do
   # The seam is `Sender`, but the SIGNAL has to arrive at every flow-replay caller, and
   # this example exists because the first cut of the fix missed one. `gori run repeater
   # <flow-id>` already passed `evidence: true`; MCP `send_request{flow_id}` reached "the
-  # same end state" through `expand_request: false` + `refuse_unresolved_env: false`, which
+  # same end state" through `expand_request: false`, which
   # stop at the BUILDER. So the live repro still put `GET /api?SECRETTOKEN123=1` on the
   # wire from MCP after `Sender` was fixed — two surfaces, one flow id, different requests,
   # which is the exact shape round 3 was burned by. Driven through the real tool, not
@@ -324,7 +327,11 @@ describe "Repeater::Sender provenance (a DECLARED binding at the send seam)" do
     end
   end
 
-  it "does not refuse an evidence send over a declared-but-UNBOUND name" do
+  # POLICY (owner, round 7): `$NAME` with a value follows the value; without one it is a
+  # literal string on the wire. Never a refusal — including for a name an extract rule has
+  # DECLARED but nothing has bound. This spec used to assert the opposite for the DRAFT half;
+  # it is inverted deliberately, not because the old assertion was buggy.
+  it "refuses neither an evidence NOR a draft send over a declared-but-UNBOUND name" do
     with_prov_store do |store|
       with_layer(bound_layer(store, "TOKEN", nil)) do
         captured = "GET /api?$TOKEN=1 HTTP/1.1\r\nHost: h\r\n\r\n"
@@ -332,11 +339,13 @@ describe "Repeater::Sender provenance (a DECLARED binding at the send seam)" do
           target: "http://127.0.0.1:1")
         Gori::Repeater::Plan.build(opts, outbound_any).refusal.should be_nil
 
-        # Complement: the same unbound name in a DRAFT is still a named refusal.
+        # Complement, and the inverted half: a DRAFT carrying the same unbound name used to
+        # come back as a named refusal. It now proceeds, and the token ships literally.
         draft = Gori::Repeater::PlanOptions.new([captured.to_slice], expand_request: false,
-          refuse_unresolved_env: false, target: "http://127.0.0.1:1")
-        Gori::Repeater::Plan.build(draft, outbound_any).refusal
-          .not_nil!.should contain("$TOKEN")
+          target: "http://127.0.0.1:1")
+        plan = Gori::Repeater::Plan.build(draft, outbound_any)
+        plan.refusal.should be_nil
+        String.new(Gori::Env.expand_bindings(plan.bytes)).should contain("/api?$TOKEN=1")
       end
     end
   end
@@ -412,7 +421,6 @@ describe "TUI Repeater provenance" do
         "GET /chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
       view = RepeaterView.new
       view.load_ws(detail, [Gori::Store::WsOutMessage.text(%({"$where":"this.a==1"}))])
-      view.ws_unresolved_env.should be_empty
       String.new(view.ws_out_messages.first.payload).should eq(%({"$where":"this.a==1"}))
       view.ws_out_messages.first.evidence.should be_true
     end

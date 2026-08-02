@@ -192,14 +192,14 @@ module Gori
       #
       # Layer 2 (`Repeater::Sender#refusal`) is Sandbox mode, a hard containment gate that
       # allow_unscoped does NOT lift — the TUI and `gori run repeater` have always enforced
-      # it that way, and MCP used to let allow_unscoped:true walk straight past it. It also
-      # carries the unbound-binding rule, which is NOT a scope decision at all — hence
-      # `refusal_blocked` rather than a direct `sandbox_blocked`.
+      # it that way, and MCP used to let allow_unscoped:true walk straight past it. It used to
+      # carry the unbound-binding rule too; that rule is gone (see `Env.unbound`), so every
+      # refusal reaching here is a Sandbox one again.
       private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
         sc = ob.check(request_scope_url(plan), plan.host)
         return scope_blocked(sc) if sc.blocked?
         if reason = plan.refusal
-          return refusal_blocked(plan, reason, plan.host, "url")
+          return sandbox_blocked(reason, plan.host, "url")
         end
         sc
       end
@@ -694,11 +694,6 @@ module Gori
         # `{"WHEREVAL":…}`. A `messages` argument is the agent's draft and is unaffected.
         seeded = field == "repeater_id" && !repeater.flow_id.nil?
         verbatim = bool_arg(h, "verbatim", false)
-        unless seeded || verbatim
-          if e = ws_unresolved_env_error(source.select(&.text?).map { |m| String.new(m.payload) }, field)
-            return e
-          end
-        end
         # No `.scrub`: `Env.expand` scans BYTES and copies every span that is not a matched
         # token through unchanged, so an invalid-UTF-8 TEXT payload — the §8.1/§5.6 validation
         # test case — reaches the wire as the operator captured it. Scrubbing rewrote it to
@@ -724,7 +719,7 @@ module Gori
             # `update_repeater` while `flow_id` persists, so a flow id is not evidence that
             # THOSE bytes are still the capture's — while nothing but a flow seed ever writes
             # a captured `ws_messages` row's payload.)
-            expand_request: !verbatim, refuse_unresolved_env: !verbatim,
+            expand_request: !verbatim,
             overrides: HostOverrides.load(store)), ob)
         rescue ex : Repeater::PlanError
           return send_plan_error(ex, "repeater_id")
@@ -737,7 +732,7 @@ module Gori
         return scope_blocked(sc) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
         if reason = plan.refusal
-          return refusal_blocked(plan, reason, host, "repeater_id")
+          return sandbox_blocked(reason, host, "repeater_id")
         end
         # Scope passed — now it's safe to persist the issue link.
         if issue_id
@@ -857,19 +852,6 @@ module Gori
       # `Repeater::Plan` built the handshake, so the builder's check (#519) never sees a
       # message payload — this is that gate for the payloads (#524), run before the dial.
       #
-      # Whole payload, not `unresolved_wire`'s head: a frame has no head/body split to take
-      # (`head_body_boundary` returns the whole slice unless the payload happens to hold a
-      # blank line, which would then check a prefix of a JSON body and silently skip the
-      # rest). The axis #519 drew as an offset is carried here by the OPCODE: a text frame is
-      # UTF-8 the operator typed, the same provenance as a header value, while a BINARY frame
-      # is not checked at all — it is never expanded either, so it has no literal token to
-      # put on the wire and nothing to refuse.
-      private def ws_unresolved_env_error(texts : Array(String), field : String) : Result?
-        names = texts.flat_map { |t| Env.unresolved(t) }.uniq!
-        return nil if names.empty?
-        err(env_unresolved_error(Env.token_list(names)), "INVALID_ARGUMENT", field: field)
-      end
-
       # The ready-to-send plan for one `send_request`, or the error Result to return as-is.
       # `Repeater::Plan` owns the assembly (env expansion, the Content-Length policy, target
       # parsing, SNI, host overrides, the gated dialer); everything left here is MCP's own
@@ -1012,16 +994,9 @@ module Gori
           # wants re-sent, not a mistake to correct. `resync_cl_after_expansion` keeps the
           # one case that must still recompute — a `$KEY` in the body changing its length.
           #
-          # `expand_request` and `refuse_unresolved_env` are BOTH off here, for the one reason
-          # `auto_content_length` already was: a captured flow's bytes are EVIDENCE, and the
-          # operator authored none of them. Both were draft-time policies running on a
-          # recording.
-          #   * `refuse_unresolved_env` made a flow whose head merely CONTAINS a `$NAME` token
-          #     unsendable: OData (`$filter`, `$top`, `$select`), MongoDB (`$where`, `$gt`),
-          #     JSONPath, a `;cat$IFS/etc/passwd` shell probe and any app that puts `$` in a
-          #     cookie all land here, and the refusal's own remedy — "set it with set_env_var" —
-          #     is worse than the refusal, because it makes the replay send a DIFFERENT request.
-          #   * `expand_request` ran `Env.expand_wire`, whose head pass PROMOTES a bare LF to
+          # `expand_request` is off here for the one reason `auto_content_length` already was:
+          # a captured flow's bytes are EVIDENCE, and the operator authored none of them. It
+          # ran `Env.expand_wire`, whose head pass PROMOTES a bare LF to
           #     CRLF. A bare-LF header terminator is a front-end/back-end desync primitive gori
           #     can already produce (`verbatim`) and stores byte-exact; replay silently
           #     destroyed it and still reported a clean send.
@@ -1043,7 +1018,7 @@ module Gori
           # keeps `downgrade_request_line` off this path, and an `HTTP/2` version line in a
           # capture is the operator's to replay.
           {Repeater::PlanOptions.new([flow.bytes], default_target: flow.target,
-            expand_request: false, refuse_unresolved_env: false, evidence: true,
+            expand_request: false, evidence: true,
             auto_content_length: false,
             http2: bool_arg(h, "http2", flow.http2), sni: flow.sni, verify: verify,
             timeout: timeout, overrides: overrides), flow.rewrote_request_line}
@@ -1060,12 +1035,7 @@ module Gori
           verbatim = RequestBuilder.verbatim?(h)
           {Repeater::PlanOptions.new([built.bytes], expand_request: false,
             auto_content_length: false,
-            # `verbatim:true` means the operator's bytes ARE the message (RequestBuilder
-            # already skipped expansion for it), so a leftover `$user.name` / `$IFS` is the
-            # SSTI/shell payload and must not be refused here. Non-verbatim callers keep the
-            # refusal: RequestBuilder expanded, so a surviving `$KEY` really is unresolved.
-            refuse_unresolved_env: !verbatim,
-            # The h2 half of the same promise: `verbatim` means the bytes ARE the message, so
+            # The h2 half of the verbatim promise: `verbatim` means the bytes ARE the message, so
             # an uppercase field name is the RFC 9113 §8.2.1 conformance probe and not a
             # copy-paste artifact to repair. See `PlanOptions#preserve_field_case?`.
             preserve_field_case: verbatim,
@@ -1110,19 +1080,6 @@ module Gori
         err("#{reason} — Sandbox mode blocks every request outside the scope allowlist; turn Sandbox off or add a scope include rule",
           "SCOPE_BLOCKED", field: field,
           details: JSON.parse({"scope_decision" => "sandbox", "host" => host}.to_json))
-      end
-
-      # `Plan#refusal` folds two unrelated rules into one string, and this gate used to label
-      # ALL of them a Sandbox block — so an unbound `$SESSION` came back as SCOPE_BLOCKED with
-      # `scope_decision:"sandbox"` on a project whose scope said `in_scope` and whose Sandbox
-      # was never on. The advice was not merely wrong but unfollowable: no scope rule can bind
-      # a session value. The remedy is to run whatever request the extract rule reads from.
-      private def refusal_blocked(plan : Repeater::Plan, reason : String, host : String, field : String) : Result
-        return sandbox_blocked(reason, host, field) unless plan.unbound_refusal?
-        err("#{reason} — send a request that the extract rule matches first (or set the value with set_env_var); " \
-            "this is not a scope or Sandbox block",
-          "UNBOUND_BINDING", field: field,
-          details: JSON.parse({"scope_decision" => "in_scope", "host" => host}.to_json))
       end
 
       # The request-target (path) from the first line of a raw request, for

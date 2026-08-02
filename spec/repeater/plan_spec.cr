@@ -249,7 +249,7 @@ describe Gori::Repeater::Plan do
       String.new(plan.h2_body.not_nil!).should eq("payload")
     end
 
-    # `refusal`, the scope gate and `unbound_refusal?` all key off a request LINE, and a
+    # `refusal` and the scope gate both key off a request LINE, and a
     # field-native send has no head text — so `requests` holds ONE synthetic scope line built
     # from the FIRST :method/:path (the pair a receiver routes on). This pins that derivation
     # so the scope decision cannot silently start reading `/` for every field-native send.
@@ -455,12 +455,15 @@ describe Gori::Repeater::Plan do
       String.new(plan.bytes).lines.first.should eq("GET /v HTTP/2")
     end
 
-    it "still refuses an unresolved $VAR, which is checked regardless of expansion" do
+    # INVERTED for the owner's round-7 policy: this used to refuse, precisely BECAUSE the
+    # check ran regardless of expansion. `expand_request: false` means the operator said the
+    # bytes are the message, and now every path agrees — an unresolved `$VAR` goes out as
+    # itself. (`$user.name`, `$IFS` and OData `$top` are the payloads that motivated it.)
+    it "sends an unresolved $VAR as itself, since these are the exact bytes asked for" do
       raw = "GET /v HTTP/1.1\r\nHost: h.test\r\nX-T: $NOPE\r\n\r\n".to_slice
-      expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
-          expand_request: false, auto_content_length: false), ungated)
-      end
+      plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
+        expand_request: false, auto_content_length: false), ungated)
+      String.new(plan.bytes).should contain("X-T: $NOPE")
     end
   end
 end

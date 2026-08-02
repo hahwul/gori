@@ -132,9 +132,7 @@ module Gori::Fuzz
     # out as the live session token — a real credential in an arbitrary query or body
     # position of a request aimed at the target, landing in its access log, while every
     # surface (the terminal row, `--format json`, MCP `fuzz_results`) still reported
-    # `$TOKEN`. The refusal half is excluded for the same reason and not as a convenience:
-    # unbound, the same payload refused the send with advice ("replay the flow that mints
-    # the token first") that produces exactly that substitution.
+    # `$TOKEN`.
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       # Session bindings (#501) resolve HERE, per send, not at plan-build: a rotating token
       # can change between request 1 and request 20 of the same run, which is exactly the
@@ -142,15 +140,13 @@ module Gori::Fuzz
       # builders already expanded those once (#356), and this pass only ever substitutes a
       # name an extract rule declares.
       #
-      # A declared-but-unbound name REFUSES rather than shipping `""` or the literal
-      # `$SESSION`, and is charged to `blocked` rather than to a second counter — the same
-      # argument the comment below makes for the scope gate. The refusal names the binding.
-      if (unbound = Gori::Env.unbound(bytes, verbatim)).present?
-        @blocked += 1
-        reason = Gori::Env.unbound_error(unbound)
-        @blocked_reason ||= reason
-        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
-      end
+      # A declared-but-unbound name ships LITERALLY, and there is no refusal here any more.
+      # The refusal was right about the credential-shaped case (`$SESSION` with nothing bound)
+      # and wrong about every other one: the token grammar is also GraphQL's variable syntax
+      # and Mongo's operator syntax, so an extract rule named `id` made every captured GraphQL
+      # body in the project unsendable — `Probe::Active` lost 7 of one flow's 9 checks and
+      # still reported the flow scanned. See `Env.unbound`; `$$id` is the escape.
+      #
       # BEFORE the scope gate, because the gate keys on the target actually sent — the same
       # rule `ClientConn` states for Match&Replace on the proxy path.
       bytes = Gori::Env.expand_bindings(bytes, verbatim)

@@ -190,11 +190,10 @@ describe "engine tabs — provenance (T1)" do
     end
   end
 
-  it "the Fuzzer leaves a CAPTURED BODY's `$token` alone — the head-only refusal never saw it" do
-    # `Env.expand_wire` expands the WHOLE text while `Env.unresolved_wire` scans the head
-    # alone, so a `$where` in a captured body was substituted with no refusal at all and
-    # Content-Length was silently resynced to the corrupted body (37 → 39). Provenance is
-    # what closes it: on evidence neither pass runs.
+  it "the Fuzzer leaves a CAPTURED BODY's `$token` alone" do
+    # A `$where` in a captured body used to be substituted with no refusal at all (the
+    # refusal was head-only) and Content-Length silently resynced to the corrupted body
+    # (37 → 39). Provenance is what closes it: on evidence the expansion does not run.
     origin = RecordingOrigin.new
     begin
       with_vars([{"where", "INJECTED"}]) do
@@ -217,7 +216,12 @@ describe "engine tabs — provenance (T1)" do
     end
   end
 
-  it "a capture whose `$token` has NO value runs instead of being refused; a draft is still refused" do
+  # INVERTED for the owner's round-7 policy. This used to assert that a CAPTURE with an
+  # unset `$token` ran while a DRAFT carrying the same token was REFUSED — provenance
+  # deciding which of the two the operator meant. The refusal is gone from both: an unset
+  # `$NAME` is a literal string on the wire whatever its provenance, so `/odata?$filter=…`
+  # builds either way. Provenance still decides EXPANSION, which the examples above pin.
+  it "a capture AND a draft whose `$token` has no value both build" do
     with_vars([] of {String, String}) do
       with_scope do |scope|
         tmpl = "GET /odata?$filter=§Price§&$top=10 HTTP/1.1\r\nHost: t.test\r\n\r\n"
@@ -230,8 +234,8 @@ describe "engine tabs — provenance (T1)" do
         draft = drafted_fuzzer("http://t.test", tmpl)
         draft.apply_set(nil, SetSpec.new(:list, "aa"))
         engine, err = draft.build_engine(false, scope, nil)
-        engine.should be_nil
-        err.should eq("unresolved env $filter, $top — add it in the Project tab's ENV pane")
+        err.should be_nil
+        engine.should_not be_nil
       end
     end
   end
@@ -272,13 +276,16 @@ describe "engine tabs — provenance (T1)" do
         err.should be_nil
         engine.should_not be_nil
 
+        # The draft used to be REFUSED here for the same tokens; under the owner's round-7
+        # policy it builds and ships them literally. What provenance still decides is
+        # EXPANSION, so the flag itself is still asserted.
         draft = MinerView.new
         draft.load("http://t.test", req, false, nil,
           Gori::Miner::Config.new(locations: [Gori::Miner::Location::Query]))
         draft.evidence?.should be_false
         engine, err = draft.build_engine(false, scope, nil)
-        engine.should be_nil
-        err.should eq("unresolved env $filter, $top — add it in the Project tab's ENV pane")
+        err.should be_nil
+        engine.should_not be_nil
       end
     end
   end
@@ -297,12 +304,13 @@ describe "engine tabs — provenance (T1)" do
         err.should be_nil
         engine.should_not be_nil
 
+        # Same inversion as the Miner above: the draft builds now.
         draft = SequencerView.new
         draft.load("http://t.test", req, false, nil,
           Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay, token_loc: loc, goal: 1))
         engine, err = draft.build_engine(false, scope, nil)
-        engine.should be_nil
-        err.should eq("unresolved env $filter — add it in the Project tab's ENV pane")
+        err.should be_nil
+        engine.should_not be_nil
       end
     end
   end

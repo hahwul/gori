@@ -4,19 +4,20 @@ require "socket"
 require "base64"
 require "digest/sha1"
 
-# Issue #524: #519 refused an unresolved `$NAME` at plan-build time, on the five
-# `plan.cr` builders. THREE send paths expand without going through a builder, so they
-# kept putting the token's own characters on the wire — WebSocket message payloads
-# (expanded one frame at a time, after `Repeater::Plan` built the handshake), the TUI's
-# intercept forward, and minimize (which dials `Fuzz::Sender` directly, by design).
+# Issue #524 gave three builder-less send paths their own copy of #519's unresolved-`$NAME`
+# refusal — WebSocket message payloads (expanded one frame at a time, after
+# `Repeater::Plan` built the handshake), the TUI's intercept forward, and minimize (which
+# dials `Fuzz::Sender` directly, by design).
 #
-# This file pins the refusal on each of the three, and — just as important — pins the
-# NON-refusals: a binary WS frame, a body `$`, and every display path keep working.
+# ROUND 7, OWNER POLICY: all three refusals are GONE, along with the builder refusal they
+# mirrored. A `$NAME` with a value is followed; without one it is a literal string on the
+# wire. Never a refusal. The token grammar is byte-identical to GraphQL's `$id`, Mongo's
+# `$ne` and JSON Schema's `$ref`, so the refusal made ordinary captured traffic unsendable.
 #
-# The WS scope rule is the one thing #519 did not settle, because a message payload has
-# no head to check. It is resolved here as: check the WHOLE payload, and only for frames
-# that are EXPANDED — i.e. text frames. The axis #519 drew as an offset (head vs body) is
-# carried for a frame by the OPCODE instead. See `Gori::CLI::Run.refuse_unresolved_ws`.
+# So this file now pins the EXPANSION on each of the three, and the literal fallthrough
+# beside it — which is what the refusals were guarding in the first place: that the operator
+# can tell what the wire will carry. The NON-refusals it already pinned (a binary WS frame,
+# a body `$`, every display path) are unchanged and still here.
 
 include Gori::Tui
 
@@ -90,28 +91,46 @@ module Gori::CLI::Run
 end
 
 describe "WebSocket message payloads (#524)" do
-  # The refusal, on the surface that has a machine-readable answer to assert.
-  it "MCP send_websocket refuses an unresolved token in a `messages` argument, naming it" do
+  # INVERTED for the owner's round-7 policy. These two used to assert that MCP
+  # `send_websocket` REFUSED an unresolved token in a frame, before the dial. It no longer
+  # does: a `$NAME` with no value is a literal string on the wire, and a WS frame is the
+  # place that bites hardest — a captured `{"$where":"this.a==1"}` is a MongoDB injection
+  # test, and the refusal's own remedy (set the var) sent `{"WHEREVAL":"this.a==1"}` instead.
+  #
+  # Asserted against a live origin now rather than as an error string, because "what reached
+  # the socket" is the fact that replaced the refusal.
+  it "MCP send_websocket sends an unresolved token in a `messages` argument literally" do
     with_env_store do |store|
-      rid = store.insert_repeater("ws://127.0.0.1:1", WS_UPGRADE.to_slice, false, true, nil, 0)
+      port = start_env_ws_origin
+      rid = store.insert_repeater("ws://127.0.0.1:#{port}",
+        WS_UPGRADE.gsub("acme.test", "127.0.0.1:#{port}").to_slice, false, true, nil, 0)
       r = env_tools(store).call("send_websocket",
         JSON.parse(%({"repeater_id":#{rid},"messages":["auth $SESSION"],"allow_unscoped":true})))
-      r.is_error.should be_true
-      r.error_code.should eq("INVALID_ARGUMENT")
-      r.text.should contain("$SESSION")    # the refusal names the token…
-      r.text.should contain("set_env_var") # …and MCP's own way to fix it
-      r.text.should_not contain("connect") # refused BEFORE the dial
+      r.is_error.should be_false
+      out = JSON.parse(r.text)["messages"].as_a.first
+      out["payload"].as_s.should eq("auth $SESSION")
+      # Nothing was substituted, so the reply carries no expansion notice either.
+      out["payload_expanded"]?.should be_nil
     end
   end
 
-  it "MCP send_websocket refuses an unresolved token in a STORED text frame too" do
+  # The COMPLEMENT: a token that HAS a value still expands on the same path.
+  it "MCP send_websocket still expands a token that HAS a value" do
     with_env_store do |store|
-      rid = store.insert_repeater("ws://127.0.0.1:1", WS_UPGRADE.to_slice, false, true, nil, 0)
-      store.insert_ws_message(0_i64, "out", 1, %({"token":"$SESSION"}).to_slice, repeater_id: rid)
-      store.flush
-      r = env_tools(store).call("send_websocket", JSON.parse(%({"repeater_id":#{rid},"allow_unscoped":true})))
-      r.is_error.should be_true
-      r.text.should contain("$SESSION")
+      port = start_env_ws_origin
+      # Through the STORE — `Tools` hydrates project env from it, so an in-memory assignment
+      # is clobbered before the call runs.
+      Gori::Env.save_project(store, [{"SESSION", "s3cr3t"}])
+      rid = store.insert_repeater("ws://127.0.0.1:#{port}",
+        WS_UPGRADE.gsub("acme.test", "127.0.0.1:#{port}").to_slice, false, true, nil, 0)
+      r = env_tools(store).call("send_websocket",
+        JSON.parse(%({"repeater_id":#{rid},"messages":["auth $SESSION"],"allow_unscoped":true})))
+      r.is_error.should be_false
+      # The reply MASKS the resolved secret back to `$SESSION` for display, so the honest
+      # machine-readable signal that expansion ran is `payload_expanded`.
+      out = JSON.parse(r.text)["messages"].as_a.first
+      out["payload_expanded"].as_bool.should be_true
+      out["payload_authored"].as_s.should eq("auth $SESSION")
     end
   end
 
@@ -176,39 +195,36 @@ describe "WebSocket message payloads (#524)" do
         [%({"t":"$SESSION"}), "ping $SESSION", "plain"].map { |t| Gori::Store::WsOutMessage.text(t) })
 
       view.evidence?.should be_true
-      view.ws_unresolved_env.should be_empty
+      String.new(view.ws_out_messages[0].payload).should eq(%({"t":"$SESSION"}))
 
-      # A captured BINARY frame is not text an operator typed, and its `$A` is a byte.
-      # Refusing on it took out a real WS session (caught driving the built TUI, not by
-      # this spec: the status line named `$A, $_` alongside the genuine token). It is kept
-      # in the seed with its opcode, so it still replays; it just never reaches the pane.
+      # A captured BINARY frame is not text an operator typed, and its `$A` is a byte. It is
+      # kept in the seed with its opcode, so it still replays; it just never reaches the pane.
       view.load_ws(store.get_flow(id).not_nil!,
         [Gori::Store::WsOutMessage.new(2, Bytes[0x8B, 0x1F, 0x24, 0x41, 0x00, 0xFE, 0x24, 0x5F]),
          Gori::Store::WsOutMessage.text("ping $SESSION")])
-      view.ws_unresolved_env.should be_empty
       # The DISPLAY path is untouched: the copy menu still reads the literal token.
       String.new(view.ws_out_messages[1].payload).should eq("ping $SESSION")
 
       # …and setting the var does NOT change the wire. That is the whole point: a capture
       # replayed twice, under two different project configurations, is the same bytes.
       Gori::Settings.env_vars = [{"SESSION", "s3cr3t"}]
-      view.ws_unresolved_env.should be_empty
       String.new(view.ws_out_messages[1].payload).should eq("ping $SESSION")
     end
   end
 
   # THE COMPLEMENT, and the half that is still a DRAFT: a hand-authored WS tab (no flow
-  # behind it) keeps reporting an unresolved token and keeps expanding a resolved one.
-  it "TUI RepeaterView still reports and expands tokens in a HAND-AUTHORED message pane" do
+  # behind it) keeps EXPANDING a resolved token. It used to REFUSE an unresolved one; under
+  # the owner's round-7 policy it sends it literally instead, which is the assertion that
+  # changed here.
+  it "TUI RepeaterView expands a resolved token in a HAND-AUTHORED pane, literal otherwise" do
     with_no_vars do
       view = RepeaterView.new
       view.restore("ws://ws.test", WS_UPGRADE, false, false,
         ws_messages: [Gori::Store::WsOutMessage.text("ping $SESSION")])
       view.evidence?.should be_false
-      view.ws_unresolved_env.should eq(["SESSION"])
+      String.new(view.ws_out_messages[0].payload).should eq("ping $SESSION")
 
       Gori::Settings.env_vars = [{"SESSION", "s3cr3t"}]
-      view.ws_unresolved_env.should be_empty
       String.new(view.ws_out_messages[0].payload).should eq("ping s3cr3t")
     end
   end
@@ -230,20 +246,18 @@ describe "Intercept forward (#524)" do
         view = InterceptView.new
         view.reload(ic)
 
-        # An unedited hold forwards byte-exact and never expands — nothing to check.
-        view.unresolved_env.should be_empty
+        # An unedited hold forwards byte-exact and never expands.
         view.toggle_edit
-        view.unresolved_env.should be_empty # opened to VIEW only — still not dirty
-
         view.edit_move(1, 0) # onto the Host line — still inside the HEAD
         view.edit_end
         view.edit_newline
         "Auth: Bearer $SESSION".each_char { |c| view.edit_insert(c) }
-        view.unresolved_env.should eq(["SESSION"])
+        # Unset: the token forwards LITERALLY. This used to be a refusal that held the whole
+        # batch — inverted for the owner's round-7 policy.
+        it0 = view.selected_item.not_nil!
+        String.new(view.forward_bytes(it0)).should contain("Bearer $SESSION")
 
         Gori::Settings.env_vars = [{"SESSION", "s3cr3t"}]
-        view.unresolved_env.should be_empty
-        it0 = view.selected_item.not_nil!
         String.new(view.forward_bytes(it0)).should contain("Bearer s3cr3t")
       end
     ensure
@@ -254,9 +268,9 @@ describe "Intercept forward (#524)" do
     end
   end
 
-  # Head-only, exactly as #519 fixed it for the builders: an edited BINARY body must
-  # still forward. `$A` in a body is a byte, not a reference.
-  it "does not report a token-shaped byte pair in an edited BODY" do
+  # An edited BINARY body must still forward untouched. `$A` in a body is a byte, not a
+  # reference — and now the same is true in the head.
+  it "leaves a token-shaped byte pair in an edited BODY on the wire" do
     path = File.tempname("gori-env-icv2", ".db")
     store = Gori::Store.open(path)
     begin
@@ -275,7 +289,6 @@ describe "Intercept forward (#524)" do
         view.edit_end
         "$A$_".each_char { |c| view.edit_insert(c) }
 
-        view.unresolved_env.should be_empty
         String.new(view.forward_bytes(view.selected_item.not_nil!)).should contain("$A$_")
       end
     ensure
@@ -288,15 +301,17 @@ describe "Intercept forward (#524)" do
 end
 
 describe "Minimize (#524)" do
-  it "MCP minimize_repeater refuses an unresolved token in the request head, naming it" do
+  # INVERTED for the owner's round-7 policy: minimize used to refuse an unresolved token in
+  # the REQUEST HEAD. It no longer does — only the TARGET and SNI (the dial tuple) are still
+  # refused, which the next example pins. The error asserted here is now the ordinary
+  # "nothing to dial" one, proving the run got PAST the env gate.
+  it "MCP minimize_repeater does not refuse an unresolved token in the request head" do
     with_env_store do |store|
       id = store.insert_repeater("http://acme.test/",
         "GET / HTTP/1.1\r\nHost: acme.test\r\nAuth: Bearer $SESSION\r\n\r\n".to_slice, false, true, nil, 0)
       r = env_tools(store).call("minimize_repeater", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true})))
-      r.is_error.should be_true
-      r.error_code.should eq("INVALID_ARGUMENT")
-      r.text.should contain("$SESSION")
-      r.text.should contain("set_env_var")
+      r.text.should_not contain("set_env_var")
+      r.text.should_not contain("unresolved env")
     end
   end
 

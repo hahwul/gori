@@ -411,8 +411,7 @@ module Gori::Tui
     #     and content on every edit.
     #
     # Env substitution is dropped along with it rather than downgraded to `Env.expand`: in a
-    # head a `$` starts a reference and in a body it is a byte (#519's rule, and the reason
-    # `unresolved_wire` is head-only), and a WS payload is all body.
+    # head a `$` starts a reference and in a body it is a byte, and a WS payload is all body.
     def pending_edit : {Int64, Bytes}?
       id = @loaded_id
       return nil unless id && @editor_dirty
@@ -426,7 +425,11 @@ module Gori::Tui
       # case, which is most intercept edits, and it shipped different bytes to a live target.
       # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
       # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
-      raw = Env.expand_wire(@editor.wire_text)
+      #
+      # `Escape::Consume`: a forward goes STRAIGHT to the origin — there is no send-seam
+      # `expand_bindings` after this the way there is on every Repeater/Fuzzer path — so this
+      # pass is the last one and therefore the one that owes the operator `$$` → `$`.
+      raw = Env.expand_wire(@editor.wire_text, escape: Env::Escape::Consume)
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
@@ -437,9 +440,8 @@ module Gori::Tui
 
     # Why gori would REFUSE the current pending edit, or nil when it would apply it.
     #
-    # A QUERY beside `pending_edit`, the same shape as `unresolved_env` and for the same
-    # reason: the editor keeps showing what the operator typed, and only the FORWARD consults
-    # this. `Item#refuse_edit` is the single definition of the answer — the CLI/MCP drain
+    # A QUERY beside `pending_edit`, not a change to it: the editor keeps showing what the
+    # operator typed, and only the FORWARD consults this. `Item#refuse_edit` is the single definition of the answer — the CLI/MCP drain
     # (`Runner#apply_intercept_command`) has asked it since R3-F1, and this path did not, so a
     # human editing an h2 message whose head has no HTTP/1.1 text form got `forwarded …` in
     # the status bar while the ORIGINAL request went on the wire byte for byte.
@@ -487,8 +489,8 @@ module Gori::Tui
     # head shifts the line count, and the index would then overwrite an unrelated header.
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
-      return if @loaded_ws # no head to update — see pending_edit
-      raw = Env.expand_wire(@editor.wire_text)
+      return if @loaded_ws                                                   # no head to update — see pending_edit
+      raw = Env.expand_wire(@editor.wire_text, escape: Env::Escape::Consume) # see pending_edit
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first
@@ -505,24 +507,6 @@ module Gori::Tui
 
     private def content_length_line?(line : String) : Bool
       line.lstrip.downcase.starts_with?("content-length:")
-    end
-
-    # The env tokens in a pending edit that resolve to nothing — what `pending_edit`'s
-    # `Env.expand_wire` would forward as their own characters. Empty when the editor is
-    # clean (an unedited forward is byte-exact and never expands, so there is nothing to
-    # check) or when every token resolved.
-    #
-    # A QUERY beside `pending_edit`, not a change to it: the editor keeps painting an
-    # unregistered token and the queue rows keep showing it, which is the honest display
-    # answer — only the FORWARD consults this (#524).
-    #
-    # Head-only, mirroring `expand_wire`'s own split and #519's rule: in the head a `$`
-    # starts a reference, in an edited body it is a byte, and a whole-request check would
-    # refuse a forward whose held body is binary.
-    def unresolved_env : Array(String)
-      return [] of String unless @loaded_id && @editor_dirty
-      return [] of String if @loaded_ws # a WS payload expands nothing, so nothing can be unresolved
-      Env.unresolved_wire(@editor.text)
     end
 
     # The method + target to DISPLAY for a held item — the EDITED values when this is

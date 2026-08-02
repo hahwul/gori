@@ -127,22 +127,13 @@ module Gori::Repeater
     # DRAFT it expanded itself (MCP's `RequestBuilder`, the TUI editor's byte modes).
     property? evidence : Bool
 
-    # Whether an unresolved `$VAR` left in the request is a refusal. ON everywhere by
-    # default — a typo'd `$KEY` that ships literally is almost always a mistake, and this is
-    # the last look before a socket. A surface turns it OFF only when the operator has said
-    # the bytes ARE the message (`--verbatim`, MCP `verbatim:true`), because then a literal
-    # `$user.name` / `$IFS` / `$PATH` is the payload: those are Velocity/OGNL SSTI and shell
-    # probes, and refusing them made `verbatim` unable to send its own advertised content.
-    # (The refusal was already inconsistent — `${jndi:…}` and `$(id)` passed it.)
-    property? refuse_unresolved_env : Bool
-
     # h2 ONLY: put field names on the wire with the case the operator typed. Off by default
     # because the h1 head text is both a wire format and the paste buffer — a request copied
     # from Burp or curl is conventionally title-cased and h2 requires lowercase (RFC 9113
     # §8.2.1), so verbatim case would kill the stream of every ordinary `--http2` send. A
-    # surface turns it on exactly where `refuse_unresolved_env?` goes off, and for the same
-    # reason: under `--verbatim` / MCP `verbatim:true` the bytes ARE the message, and an
-    # uppercase name is then the §8.2.1 conformance probe rather than a paste artifact.
+    # surface turns it on under `--verbatim` / MCP `verbatim:true`, where the bytes ARE the
+    # message and an uppercase name is the §8.2.1 conformance probe rather than a paste
+    # artifact.
     # Ignored on the h1 path, which has always been byte-exact.
     property? preserve_field_case : Bool
 
@@ -163,7 +154,6 @@ module Gori::Repeater
                    @auto_content_length : Bool = true,
                    @resync_cl_after_expansion : Bool = false,
                    @evidence : Bool = false,
-                   @refuse_unresolved_env : Bool = true,
                    @preserve_field_case : Bool = false,
                    @h2_fields : Array({String, String})? = nil,
                    @h2_body : Bytes? = nil,
@@ -217,8 +207,8 @@ module Gori::Repeater
     # The field-native request (see `PlanOptions#h2_fields`), or nil for the ordinary byte
     # path. When present, `send` encodes THESE fields rather than `bytes`, and the surfaces
     # that REPORT the wire render the faithful `H2Engine.field_dump` off them rather than the
-    # lossy h1 projection. `requests` still holds one synthetic scope line so `refusal`, the
-    # scope gate and `unbound_refusal?` work unchanged.
+    # lossy h1 projection. `requests` still holds one synthetic scope line so `refusal` and
+    # the scope gate work unchanged.
     getter h2_fields : Array({String, String})?
     getter h2_body : Bytes?
 
@@ -238,12 +228,6 @@ module Gori::Repeater
     # rather than sending a partial, misleading sequence.
     def refusal : String?
       @sender.group_refusal(@requests)
-    end
-
-    # Whether `refusal` is the unbound-binding rule rather than Sandbox — see
-    # `Sender#unbound_refusal?`. Only a surface that must NAME the remedy asks this.
-    def unbound_refusal? : Bool
-      @sender.unbound_refusal?(@requests)
     end
 
     def send : Result
@@ -296,14 +280,16 @@ module Gori::Repeater
       scheme, host, port = resolve_origin(options)
 
       raise PlanError.new(PlanError::Reason::NoRequest, "no request to send") if options.requests.empty?
-      # The DRAFT-TIME policies — unresolved-`$KEY` refusal, head CRLF normalization, and
-      # `$KEY` substitution itself — all off for evidence. See `PlanOptions#evidence?`.
+      # The DRAFT-TIME policies — head CRLF normalization and `$KEY` substitution itself —
+      # are off for evidence. See `PlanOptions#evidence?`.
+      #
+      # A third used to live here: a refusal when a `$KEY` in the HEAD resolved to nothing
+      # (#519). It is gone, and with it `PlanOptions#refuse_unresolved_env?`, which existed
+      # only to switch it off for `--verbatim`. A `$NAME` with no value is a literal string
+      # on the wire at every seam now (see `Env::Escape`) — which is what `verbatim` always
+      # wanted, and what a GraphQL `?query=…$id…`, a Mongo `$where` header and a JSON Schema
+      # `$ref` need in order to be sendable at all.
       draft = !options.evidence?
-      # Checked on `options.requests` REGARDLESS of `expand_request?`, and that is the
-      # point: when it is false the surface expanded already (MCP's `RequestBuilder`, the
-      # TUI editor's byte modes), so an unresolved token is sitting in the bytes it handed
-      # over and this is still the last place anyone looks before they reach a socket.
-      refuse_unresolved(options.requests.flat_map { |b| Env.unresolved_wire(String.new(b)) }.uniq!) if draft && options.refuse_unresolved_env?
       wires = expand_requests(options, draft)
 
       # Detect the upgrade on the FINAL wire, not the stored text: the bytes that decide
@@ -347,8 +333,8 @@ module Gori::Repeater
       end
 
       # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.unbound` +
-      # `expand_bindings` later; this value is read ONCE, frozen into the plan, and never
+      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
+      # later; this value is read ONCE, frozen into the plan, and never
       # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
       # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
       # would move the dial target out from under a scope decision. Deferring bought nothing
@@ -393,8 +379,8 @@ module Gori::Repeater
 
     # A field-native h2 send: dial origin + SNI resolution, then a `Sender` whose `send` will
     # encode the fields verbatim. `requests` carries ONE synthetic scope line
-    # (`H2Engine.field_scope_line`) so `refusal`/`unbound_refusal?`/the scope gate — all of
-    # which key off a request line — work with no special case. The scheme check and the SNI
+    # (`H2Engine.field_scope_line`) so `refusal` and the scope gate — both of which key off a
+    # request line — work with no special case. The scheme check and the SNI
     # expansion mirror the byte path; everything the byte path does to the WIRE bytes (env
     # expansion, Content-Length, version-line, field-case) is deliberately absent, because a
     # field list is already the exact message.
@@ -444,13 +430,16 @@ module Gori::Repeater
       {normalize_scheme(scheme), host, port}
     end
 
-    # Refuse a send whose request, target or SNI still carries a token that resolves to
-    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for a
-    # display path, wrong here, because the seven characters `$SESSION` then go out as a
-    # header value, the origin answers 401, and the operator reads that as the target
-    # rejecting a token rather than as a variable they never set (#519). This builder is
-    # the surface-independent chokepoint every repeater surface goes through, so the check
-    # lives here once instead of in each of the five paths that used to drift.
+    # Refuse a send whose TARGET, host override or SNI still carries a token that resolves
+    # to nothing.
+    #
+    # The REQUEST half of this is gone — a `$NAME` with no value is a literal string on the
+    # wire now, everywhere, which is what makes a GraphQL query string sendable. A DIAL TUPLE
+    # is the exception the `deferred: nil` note above argues: `$` is not a legal byte in a
+    # hostname, so there is no operator test case to protect, and a literal `$SESSION` there
+    # makes `Outbound.scope_url` ask about `https://$SESSION/a` — a URL no rule can match —
+    # so the send comes back refused as OUT-OF-SCOPE, naming a gate that was never the
+    # problem. Refusing here names the real one.
     private def self.refuse_unresolved(names : Array(String)) : Nil
       return if names.empty?
       detail = Env.token_list(names)

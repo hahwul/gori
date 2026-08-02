@@ -13,6 +13,48 @@ module Gori
     KEY_HEAD         = /[A-Za-z_]/
     KEY_TAIL         = /[A-Za-z0-9_]/
 
+    # What a scan does with `$$`, the ONE escape and the only way to put a literal `$NAME`
+    # on the wire.
+    #
+    # `$NAME`'s grammar (`$` + `[A-Za-z_]` + `[A-Za-z0-9_]*`) is byte-identical to a GraphQL
+    # variable reference, a MongoDB operator and a JSON Schema keyword, and the scan runs over
+    # the whole message including the body. Those are not chance collisions — a parameterised
+    # GraphQL document is MADE of `$id` / `$input` / `$userId`, and `id` / `ref` / `token` are
+    # the most obvious names an operator gives an env var or an extract rule. So the operator
+    # needs a way to say "this `$` is mine". `Rules#substitute` has had one since #501; this
+    # brings the same spelling to every other seam.
+    #
+    # TWO modes because a request is expanded TWICE — the ENV-VAR layer at plan-build
+    # (`expand_wire`, #356) and the BINDING layer at send (`expand_bindings`, #501) — and a
+    # String is the only channel between them. Consuming the escape in the first pass would
+    # hand the second pass a bare `$id` it would then resolve, so `$$id` would still not
+    # survive. The layer that runs LAST is therefore the one that consumes:
+    #
+    #   * `Preserve` — the env-var pass. `$$` is copied through as `$$` and the token behind
+    #     it is NOT read, so an env var named `id` cannot resolve into `$$id`.
+    #   * `Consume` — `expand_bindings`, the send seam every wire path passes through
+    #     (`Repeater::Sender`, `Fuzz::Sender`, `Discover::Engine`). `$$` → one literal `$`,
+    #     the token behind it left alone.
+    #
+    # A surface whose env pass IS the last pass (the TUI intercept editor forwards straight to
+    # the origin) asks for `Consume` explicitly. An EVIDENCE path expands nothing at all and
+    # so unescapes nothing: a `$$` in captured bytes is two bytes the origin sent, not an
+    # escape the operator typed.
+    #
+    # One place deliberately keeps `$$` as two bytes: a DIAL TUPLE (a `--target`, a URL, an
+    # SNI). Those run `Env.expand` once and are never re-scanned by a send seam, so nothing
+    # consumes the escape — and there is nothing to escape FROM, because `$` is not a legal
+    # byte in a hostname. `unresolved` still walks the escape correctly, so a
+    # `$$` there cannot be mis-reported as an unresolved name; it simply fails to resolve as a
+    # host, visibly, which is the honest outcome.
+    #
+    # Escapes pair left to right, one `$` out per `$$` in: `$$id` → `$id`, `$$$$` → `$$`,
+    # `$$$id` → `$` followed by an INTERPRETED `$id`.
+    enum Escape
+      Preserve
+      Consume
+    end
+
     @@highlight_rev : UInt32 = 0
 
     def self.highlight_rev : UInt32
@@ -132,9 +174,9 @@ module Gori
     #
     # Scans the whole message, head and body: injecting a token into a body is a designed
     # case (a `Replace` rule with `part: Body`, an operator's Repeater template). That is
-    # safe here in a way `unresolved_wire`'s head-only rule was not, because this matches a
-    # SPECIFIC declared name rather than the `$`+`[A-Za-z_]` shape — a random collision with
-    # `$SESSION` in a binary body is a 2^-56 event, not the ~3-per-4KB one #525 measured.
+    # safe in a way a head-only rule was not, because this matches a SPECIFIC declared name
+    # rather than the `$`+`[A-Za-z_]` shape — and in any case nothing here refuses: a name
+    # that does not resolve simply stays literal.
     # A value carrying CR/LF/NUL is withheld from the HEAD half and substituted freely in the
     # BODY. A binding value is the ORIGIN'S — see `Bindings.boundary_forging?` — and in a head
     # `abc\r\nX-Admin: true` becomes two header lines while `abc\r\n\r\nGET /...` forges a whole
@@ -152,18 +194,21 @@ module Gori
     # target's access log. `Fuzz::Generator#emit` already computes each payload's span in
     # order to splice it, so the template resolves and the payload does not.
     def self.expand_bindings(bytes : Bytes, verbatim : Array({Int32, Int32})? = nil) : Bytes
-      vals = binding_values
-      return bytes if vals.empty?
       prefix = Settings.env_prefix
       return bytes if prefix.empty? || !contains_prefix?(bytes, prefix)
+      vals = binding_values
+      # With nothing to resolve this pass would be a no-op — except that it is also the seam
+      # that CONSUMES `$$` (see `Escape`), and a project with no extract rule is exactly where
+      # an operator escaping a GraphQL `$id` is likeliest to be.
+      return bytes if vals.empty? && !contains_escape?(bytes, prefix)
       safe = boundary_safe(vals)
       boundary = head_body_boundary(bytes)
       head = expand(String.new(bytes[0...boundary]), safe, prefix,
-        clip_spans(verbatim, 0, boundary)).to_slice
+        clip_spans(verbatim, 0, boundary), Escape::Consume).to_slice
       return head if boundary >= bytes.size
       raw_body = bytes[boundary..]
       body = expand(String.new(raw_body), vals, prefix,
-        clip_spans(verbatim, boundary, bytes.size)).to_slice
+        clip_spans(verbatim, boundary, bytes.size), Escape::Consume).to_slice
       unless body.size == raw_body.size
         shifted = shift_content_length(head, body.size - raw_body.size)
         warn_unshiftable_framing if shifted.same?(head)
@@ -330,9 +375,11 @@ module Gori
     # multi-line values this feature allows: a PEM block, a SAML assertion, a formatted JSON
     # sub-document.
     def self.expand_bindings(text : String, guard_boundary : Bool = true) : String
+      prefix = Settings.env_prefix
+      return text if prefix.empty? || !text.byte_index(prefix)
       vals = binding_values
-      return text if vals.empty?
-      expand(text, guard_boundary ? boundary_safe(vals) : vals, Settings.env_prefix)
+      return text if vals.empty? && !contains_escape?(text.to_slice, prefix) # see the Bytes form
+      expand(text, guard_boundary ? boundary_safe(vals) : vals, prefix, escape: Escape::Consume)
     end
 
     # `spans` restricted to `[from, to)` and rebased so 0 is `from` — what a half of a
@@ -361,12 +408,21 @@ module Gori
     end
 
     # Declared binding names in `bytes` that have no value yet, first-appearance order.
-    # A send seam asks this BEFORE `expand_bindings` and refuses, naming what it wants —
-    # the same shape #525 gave plan-build, one stage later.
-    # `verbatim` is `expand_bindings`' argument, and it has to be the SAME list: a payload
-    # this seam refuses to expand must not be the reason it refuses the send either. With
-    # the name unbound the refusal's own advice ("replay the flow that mints the token
-    # first") produces exactly the substitution the exclusion exists to stop.
+    #
+    # A REPORT, never a gate. `$NAME` without a value is a literal string on the wire — the
+    # same answer `expand` has always given an unknown key, now given to a DECLARED-but-unbound
+    # name too. The send seams used to refuse here (#491/#525's shape) and no longer do: the
+    # token grammar collides structurally with GraphQL `$id`, Mongo `$ne` and JSON Schema
+    # `$ref`, so a name an operator declared for one request silently killed every OTHER
+    # request whose captured body happened to contain it — a probe scan losing 7 of 9 active
+    # checks on a flow, reported as scanned. An operator who wants a value on the wire binds
+    # it; an operator who wrote `$ne` gets `$ne`, and `$$ne` if they need the escape.
+    #
+    # The one remaining caller is `Rules#report_refused`, which explains a rewrite rule that
+    # did not apply — a rule-scoped SKIP that blocks no traffic, not a send refusal.
+    #
+    # `verbatim` is `expand_bindings`' argument and has to be the SAME list, so the two agree
+    # about which bytes are the operator's payload rather than a reference.
     def self.unbound(bytes : Bytes, verbatim : Array({Int32, Int32})? = nil) : Array(String)
       unbound(String.new(bytes), verbatim)
     end
@@ -417,9 +473,14 @@ module Gori
     # afterward). `head_body_boundary` locates the blank-line separator first;
     # only the head (through and including that separator) is normalized, and the
     # body is copied through byte-for-byte untouched.
+    #
+    # `escape` defaults to `Preserve`: this is the plan-build pass and `expand_bindings` runs
+    # over the same bytes at the send seam. A surface where THIS is the last pass before the
+    # socket (the TUI intercept editor) passes `Escape::Consume`.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
-                         prefix : String = Settings.env_prefix) : Bytes
-      bytes = expand(text, vars, prefix).to_slice
+                         prefix : String = Settings.env_prefix,
+                         escape : Escape = Escape::Preserve) : Bytes
+      bytes = expand(text, vars, prefix, escape: escape).to_slice
       boundary = head_body_boundary(bytes)
       head = normalize_crlf(bytes[0...boundary])
       return head if boundary >= bytes.size
@@ -475,9 +536,13 @@ module Gori
     # differs from the rest of the message (today, a fuzz payload spliced into a template),
     # so a `$NAME` inside one is the operator's test case rather than a reference. nil — the
     # overwhelmingly common call — keeps the loop exactly as it was.
+    #
+    # `escape` says what `$$` means here — see `Escape`. The default is `Preserve` because
+    # this method IS the env-var layer, and the binding layer scans the same bytes afterwards.
     def self.expand(text : String, vars : Hash(String, String) = effective_vars,
                     prefix : String = Settings.env_prefix,
-                    verbatim : Array({Int32, Int32})? = nil) : String
+                    verbatim : Array({Int32, Int32})? = nil,
+                    escape : Escape = Escape::Preserve) : String
       return text if prefix.empty?
       return text unless text.byte_index(prefix) # fast, lossless no-op when the prefix never occurs
 
@@ -502,7 +567,14 @@ module Gori
           end
         end
         if i + plen <= n && prefix_bytes.each_with_index.all? { |b, j| bytes[i + j] == b }
-          if parsed = read_key_bytes(bytes, i + plen, n)
+          if prefix_at?(bytes, prefix_bytes, i + plen)
+            # `$$` — one escaped literal `$`. Both prefixes are consumed and the token behind
+            # them is never read, which is what makes the escape mean the same thing whether
+            # or not the name after it happens to resolve.
+            buf << prefix
+            buf << prefix if escape.preserve?
+            i += 2 * plen
+          elsif parsed = read_key_bytes(bytes, i + plen, n)
             key, consumed = parsed
             if val = vars[key]?
               buf << val
@@ -521,6 +593,27 @@ module Gori
         end
       end
       String.new(buf.to_slice)
+    end
+
+    private def self.prefix_at?(bytes : Bytes, prefix_bytes : Bytes, at : Int32) : Bool
+      return false if prefix_bytes.empty? || at + prefix_bytes.size > bytes.size
+      prefix_bytes.each_with_index.all? { |b, j| bytes[at + j] == b }
+    end
+
+    # Whether `bytes` holds a `$$` anywhere. Only asked on the send seam's "there are no
+    # bindings" fast path: with nothing to resolve the pass would be a no-op, EXCEPT that the
+    # send seam is also the one that consumes the escape, and skipping it there would ship
+    # `$$id` to the origin.
+    private def self.contains_escape?(bytes : Bytes, prefix : String) : Bool
+      pb = prefix.to_slice
+      return false if pb.empty?
+      i = 0
+      last = bytes.size - 2 * pb.size
+      while i <= last
+        return true if prefix_at?(bytes, pb, i) && prefix_at?(bytes, pb, i + pb.size)
+        i += 1
+      end
+      false
     end
 
     # The KEYs in `text` that `expand` would NOT substitute — every `prefix+KEY`
@@ -557,52 +650,12 @@ module Gori
       scan_unresolved(text.to_slice, vars, prefix, deferred)
     end
 
-    # `unresolved` over the HEAD of wire-form text ALONE — the request line and
-    # headers, through the blank-line separator — never the body.
-    #
-    # Same split, and the same reason, as `expand_wire`'s CRLF normalization: in the
-    # head a `$` starts a reference, in the body it is just a byte. The body is where
-    # that distinction bites, because a body is often not text at all. A `$` followed
-    # by `[A-Za-z_]` occurs by chance roughly once per 1.2KB of high-entropy bytes, so
-    # a whole-request check would refuse essentially EVERY replay carrying a
-    # compressed, encrypted, or otherwise binary body — measured on random bodies:
-    # ~3 token-shaped hits per 4KB, hit in 20 of 20 samples; ~51 per 64KB. Refusing a
-    # captured multipart upload because its JPEG happened to contain `$A` would be a
-    # far worse failure than the one this check exists to stop.
-    #
-    # The boundary is taken on the text as AUTHORED (pre-expansion), because the
-    # question is which tokens the author wrote in the head — not where the head ends
-    # after some var's value has been spliced in.
-    def self.unresolved_wire(text : String, vars : Hash(String, String) = effective_vars,
-                             prefix : String = Settings.env_prefix,
-                             deferred : Array(String)? = declared_bindings) : Array(String)
-      return [] of String if prefix.empty?
-      return [] of String unless text.byte_index(prefix)
-      bytes = text.to_slice
-      scan_unresolved(bytes[0...head_body_boundary(bytes)], vars, prefix, deferred)
-    end
-
     # Render token names back into the spelling the operator typed (`["A"]` → `"$A"`),
     # comma-joined. Every surface quotes the same list, so the prefix is applied here
     # rather than in five builders that could each drift on whether to include it.
     def self.token_list(names : Array(String), prefix : String = Settings.env_prefix) : String
       names.join(", ") { |n| "#{prefix}#{n}" }
     end
-
-    # The one spelling of a send refused because a declared binding has no value. Every
-    # send seam returns this same sentence so the Fuzzer's result rows, a `gori run` abort
-    # and an MCP error cannot drift about what happened — and it NAMES the binding, which
-    # is the whole lesson of #491: a refusal that does not name its gate is barely better
-    # than silence. Each surface prefixes its own prescription (#525's shape).
-    def self.unbound_error(names : Array(String)) : String
-      "#{UNBOUND_PREFIX} #{token_list(names)} — nothing has extracted it yet"
-    end
-
-    # The opening words of `unbound_error`, so a surface can recognise its OWN sentence coming
-    # back to it as an engine's `blocked_reason` string and add the prescription it owns
-    # (`gori run` cannot bind at all without a replay step — see CLI::Run.seed_bindings).
-    # A named constant rather than a substring literal at the far end: the two must not drift.
-    UNBOUND_PREFIX = "unbound session binding"
 
     private def self.scan_unresolved(bytes : Bytes, vars : Hash(String, String),
                                      prefix : String, deferred : Array(String)?,
@@ -626,7 +679,11 @@ module Gori
           end
         end
         if i + plen <= n && prefix_bytes.each_with_index.all? { |b, j| bytes[i + j] == b }
-          if parsed = read_key_bytes(bytes, i + plen, n)
+          if prefix_at?(bytes, prefix_bytes, i + plen)
+            # `$$` — an escape, not a reference. Same advance as `expand`'s escape branch, so
+            # the two agree about where the NEXT token starts.
+            i += 2 * plen
+          elsif parsed = read_key_bytes(bytes, i + plen, n)
             key, consumed = parsed
             if vars.has_key?(key)
               i += plen + consumed
@@ -772,7 +829,11 @@ module Gori
       i = 0
       while i < n
         if i + plen <= n && prefix_chars.each_with_index.all? { |c, j| chars[i + j] == c }
-          if parsed = read_key(chars, i + plen, n)
+          if i + 2 * plen <= n && prefix_chars.each_with_index.all? { |c, j| chars[i + plen + j] == c }
+            # `$$` — an escape. Painting the `$id` inside `$$id` as a resolvable token would
+            # tell the operator the opposite of what the wire will carry.
+            i += 2 * plen
+          elsif parsed = read_key(chars, i + plen, n)
             key, consumed = parsed
             regions << {i, i + plen + consumed, vars.has_key?(key)}
             i += plen + consumed

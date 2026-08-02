@@ -53,31 +53,27 @@ module Gori
                      @preserve_field_case : Bool = false, @evidence : Bool = false)
       end
 
-      # The reason this request may not go out, or nil to proceed. Two rules stop a
-      # deliberate single send: Sandbox mode (see `Outbound#send_block`), and a `$NAME` that
-      # an extract rule declares but nothing has bound yet (#501).
+      # The reason this request may not go out, or nil to proceed. ONE rule stops a deliberate
+      # single send: Sandbox mode (see `Outbound#send_block`).
       #
-      # The binding check comes FIRST and lives here rather than only in `send`, so every
-      # caller that already asks `refusal` in order to report a block in its own idiom — a
-      # TUI status line, a CLI abort, an MCP error — reports this one the same way, with no
-      # per-surface change. `send_group` and `send_ws` inherit it through `refusal` too.
+      # There used to be a second — a `$NAME` an extract rule declares but nothing has bound
+      # yet (#501) — and it is gone. `$NAME` without a value is a literal string on the wire
+      # now, at every seam that interprets it, because the token grammar is byte-identical to
+      # GraphQL's `$id`, Mongo's `$ne` and JSON Schema's `$ref`: declaring an extract rule
+      # named `id` made every captured GraphQL body in the project unsendable. See
+      # `Env.unbound`. `$$id` is the escape when the name DOES resolve and the operator wants
+      # the literal anyway.
       #
-      # Both halves are off for EVIDENCE (see `evidence?`): a `$filter` in a stored request
-      # line is neither a reference to resolve nor a name to refuse over — it is a byte the
-      # origin saw. The scope gate still runs, on the bytes that will actually go out.
+      # Still off for EVIDENCE (see `evidence?`): a `$filter` in a stored request line is not
+      # a reference to resolve — it is a byte the origin saw. The scope gate runs either way,
+      # on the bytes that will actually go out.
       def refusal(bytes : Bytes) : String?
         return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(bytes)) if @evidence
-        if (unbound = Gori::Env.unbound(bytes)).present?
-          return Gori::Env.unbound_error(unbound)
-        end
         @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(bytes)))
       end
 
       def refusal(text : String) : String?
         return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(text)) if @evidence
-        if (unbound = Gori::Env.unbound(text)).present?
-          return Gori::Env.unbound_error(unbound)
-        end
         @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(text)))
       end
 
@@ -88,18 +84,6 @@ module Gori
       def group_refusal(requests : Array(Bytes)) : String?
         requests.each { |b| (r = refusal(b)) && (return r) }
         nil
-      end
-
-      # Whether a refusal, if there is one, comes from the UNBOUND-BINDING rule rather than
-      # from Sandbox. `refusal` folds both into one String because the TUI and CLI only ever
-      # print it — but the two have OPPOSITE remedies, and MCP labelled every refusal a
-      # Sandbox block, so an agent told "turn Sandbox off or add a scope include rule" for an
-      # unbound `$SESSION` would keep widening the scope of a project whose scope was never
-      # the problem. Asked separately rather than by re-typing `refusal`, so the surfaces that
-      # correctly treat it as one string stay untouched.
-      def unbound_refusal?(requests : Array(Bytes)) : Bool
-        return false if @evidence
-        requests.any? { |b| Gori::Env.unbound(b).present? }
       end
 
       def send(bytes : Bytes) : Result
@@ -124,8 +108,8 @@ module Gori
       # no h1-text carrier in between (see `H2Engine.send_fields`). Gated identically to `send`
       # — Sandbox / exclude on a request line synthesized from `:method`/`:path`, so a
       # field-native send can no more reach a blocked host than a byte-authored one. The
-      # unbound-`$NAME` half of `refusal` is harmless here: it scans only that synthetic line,
-      # which carries no operator token, so a field-native path is never expanded or injected.
+      # `refusal` scans only that synthetic line, which carries no operator token, so a
+      # field-native path is never expanded or injected.
       def send_fields(fields : Array({String, String}), body : Bytes?) : Result
         scope = H2Engine.field_scope_line(fields)
         if reason = refusal(scope)
@@ -162,29 +146,11 @@ module Gori
         # `$NAME` as readily as the handshake does, the proxy's own WS path already resolves it
         # (`Rules` `RulePart::Ws`), and every surface that builds these frames runs `Env.expand`
         # over them — which by design covers env vars and NOT bindings. So a `$SESSION` in a
-        # frame went out as those seven characters with the name bound, and with it unbound
-        # there was no refusal either: exactly the failure #519/#525 exist to stop, on the one
-        # send path that had neither half.
-        if reason = ws_message_refusal(messages)
-          return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
-        end
+        # frame went out as those seven characters with the name bound; `expand_messages` below
+        # is what fixed that. Unbound it stays literal, the same rule `refusal` now follows.
         WsEngine.send(Gori::Env.expand_bindings(upgrade), expand_messages(messages),
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
           idle: idle, overrides: @overrides, keep_key: keep_key)
-      end
-
-      # The first declared-but-unbound name across the outgoing frames, as a refusal.
-      #
-      # A CAPTURED frame is skipped, the same rule `refusal` applies to a captured request:
-      # its `$where` / `$filter` is a byte the origin saw, so there is nothing to resolve and
-      # nothing to refuse. See `WsEngine::OutMsg#evidence`.
-      private def ws_message_refusal(messages : Array(WsEngine::OutMsg)) : String?
-        messages.each do |m|
-          next if m.evidence
-          unbound = Gori::Env.unbound(m.payload)
-          return Gori::Env.unbound_error(unbound) if unbound.present?
-        end
-        nil
       end
 
       # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,

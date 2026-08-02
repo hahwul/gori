@@ -124,9 +124,9 @@ module Gori
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run sequence")
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
-          # invocation, so it either replays one here or refuses before the run.
+          # invocation, so `--bind-from` replays one here. Without it a `$NAME` simply ships
+          # literally (see `Env.unbound`); there is nothing left to refuse before the run.
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run sequence")
-          preflight_bindings(String.new(bytes), bind_from, "gori run sequence")
           run_sequence_stream(plan.engine, origin.scheme, origin.host, origin.port, token_loc, plan.goal, format)
         ensure
           outbound.close

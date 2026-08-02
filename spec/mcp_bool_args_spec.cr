@@ -370,7 +370,12 @@ end
 # --- R2-F6: minimize on a session that holds evidence ---------------------------
 
 describe "MCP minimize_repeater verbatim" do
-  it "no longer refuses a CAPTURED $KEY in the request head, while a draft minimize still does" do
+  # INVERTED for the owner's round-7 policy. `verbatim` used to be the ONLY way past the
+  # unresolved-`$KEY` refusal on a minimize, and this pinned that asymmetry. The refusal is
+  # gone from the request head entirely, so the DRAFT reaches the search too — `verbatim`
+  # now differs only in what it does to expansion and framing, which the rest of this
+  # example still covers.
+  it "reaches the search for a CAPTURED $KEY with or without verbatim" do
     with_store do |store|
       # `$top` is stored OData, not an unresolved template variable.
       req = "GET /api?$filter=name&$top=10 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
@@ -378,12 +383,10 @@ describe "MCP minimize_repeater verbatim" do
       tools = bool_tools(store)
 
       draft = tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true})))
-      draft.is_error.should be_true
-      draft.text.should contain("$top")
+      draft.text.should_not contain("unresolved env")
 
-      # verbatim: the token is evidence, so the refusal must not fire. The search then runs
-      # and aborts on an unreachable baseline (the dead port) — which is the proof that it got
-      # PAST the draft-time gate and actually tried to send.
+      # The search then runs and aborts on an unreachable baseline (the dead port) — which is
+      # the proof that it got PAST the draft-time gate and actually tried to send.
       verbatim = tools.call("minimize_repeater",
         JSON.parse(%({"repeater_id":#{id},"verbatim":true,"allow_unscoped":true})))
       verbatim.is_error.should be_false

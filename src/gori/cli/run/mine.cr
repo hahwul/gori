@@ -112,9 +112,9 @@ module Gori
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run mine")
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
-          # invocation, so it either replays one here or refuses before the sweep.
+          # invocation, so `--bind-from` replays one here. An unseeded `$NAME` ships literally
+          # rather than refusing the sweep (see `Env.unbound`).
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run mine")
-          preflight_bindings(text, bind_from, "gori run mine")
           run_mine_stream(plan.engine, origin.scheme, origin.host, origin.port, plan.config, format)
         ensure
           outbound.close
@@ -229,7 +229,6 @@ module Gori
         reason = engine.first_error
         return false unless reason
         blocked = engine.blocked
-        reason = blocked_reason_line(reason, "gori run mine") || reason
         STDERR.puts "mine: every request failed — #{reason}#{blocked > 0 ? " (#{blocked} refused before the socket)" : ""}"
         true
       end

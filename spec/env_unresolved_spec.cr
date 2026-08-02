@@ -65,37 +65,42 @@ describe Gori::Env do
     end
   end
 
-  describe ".unresolved_wire" do
-    it "checks the head and never the body" do
-      with_vars([] of {String, String}) do
-        wire = "POST /p HTTP/1.1\r\nX-A: $HEADTOKEN\r\n\r\n{\"q\":\"$BODYTOKEN\"}"
-        Gori::Env.unresolved_wire(wire).should eq(["HEADTOKEN"])
-        # The whole-text form still sees both — the narrowing is `_wire`'s alone.
-        Gori::Env.unresolved(wire).should eq(["HEADTOKEN", "BODYTOKEN"])
+  # `.unresolved_wire` is GONE. It existed for exactly one caller — the plan builders'
+  # head-only refusal (#519) — and the owner retired that: a `$NAME` with no value is a
+  # literal string on the wire, head and body alike. `.unresolved` survives because the DIAL
+  # TUPLE still refuses (a `$` is not a legal byte in a hostname), and these pin that a
+  # request head is now left alone by everything.
+  describe "the head is no longer refused" do
+    it "expands a head whose token resolves and leaves an unset one literal" do
+      with_vars([{"HEADTOKEN", "HV"}]) do
+        wire = "POST /p HTTP/1.1\r\nX-A: $HEADTOKEN\r\nX-B: $NOPE\r\n\r\n{\"q\":\"$BODYTOKEN\"}"
+        String.new(Gori::Env.expand_wire(wire))
+          .should eq("POST /p HTTP/1.1\r\nX-A: HV\r\nX-B: $NOPE\r\n\r\n{\"q\":\"$BODYTOKEN\"}")
       end
     end
 
-    it "does not refuse a request whose BODY is binary" do
+    it "leaves a binary body untouched, and no longer needs a head/body split to do it" do
       with_vars([] of {String, String}) do
-        # The concrete reason the check is head-only: `$` followed by [A-Za-z_] occurs by
-        # chance about once per 1.2KB of high-entropy bytes, so a whole-request check
-        # would refuse essentially every replay of a compressed or encrypted upload.
-        # Modelled here as binary filler carrying a few such byte pairs outright, so the
-        # test states the case rather than relying on a lucky sample.
+        # The reason the check USED to be head-only: `$` followed by [A-Za-z_] occurs by
+        # chance about once per 1.2KB of high-entropy bytes, so a whole-request refusal
+        # would have blocked essentially every replay of a compressed or encrypted upload.
+        # Nothing refuses now, so the hazard is gone rather than narrowed — pinned because a
+        # future check that forgets the reasoning would resurrect it.
         body = Bytes.new(4096) { |i| (i * 31 + 7).to_u8! }
         body[100] = 0x24_u8 # '$'
         body[101] = 0x41_u8 # 'A'
         body[900] = 0x24_u8
         body[901] = 0x5F_u8 # '_'
         wire = String.new("POST /u HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice + body)
-        Gori::Env.unresolved(wire).should_not be_empty # the body alone trips the naive check
-        Gori::Env.unresolved_wire(wire).should be_empty
+        Gori::Env.unresolved(wire).should_not be_empty # a REPORT, not a gate
+        String.new(Gori::Env.expand_wire(wire)).should eq(wire)
       end
     end
 
-    it "treats a head-only buffer (no blank line) as all head" do
+    it "leaves a head-only buffer (no blank line) literal too" do
       with_vars([] of {String, String}) do
-        Gori::Env.unresolved_wire("GET /$MISSING HTTP/1.1\r\nHost: t.test").should eq(["MISSING"])
+        head = "GET /$MISSING HTTP/1.1\r\nHost: t.test"
+        String.new(Gori::Env.expand_wire(head)).should eq(head)
       end
     end
   end
@@ -124,43 +129,60 @@ describe Gori::Env do
   end
 end
 
-# The point of the issue: it is not enough for ONE builder to refuse. All five expand at
-# plan-build time and all five send, so all five are asserted here together — a builder
-# that loses the check fails this block rather than quietly shipping the token.
-describe "plan builders refuse an unresolved env token (#519)" do
-  it "Fuzz::Plan.build refuses and names the token" do
+# ROUND 7, OWNER POLICY — this block is INVERTED, deliberately.
+#
+# #519 made all five plan builders REFUSE an unresolved `$NAME` in the request head, and
+# this block existed to stop any one of them losing that check. The owner retired the rule:
+# a `$NAME` with a value is followed, and without one it is a literal string on the wire.
+# The token grammar is byte-identical to GraphQL's `$id`, Mongo's `$ne` and JSON Schema's
+# `$ref`, so the refusal made a parameterised GraphQL query, a Mongo filter and an OpenAPI
+# document unsendable from every engine.
+#
+# So all five are asserted together again, for the opposite fact: a builder that RE-ADDS the
+# check fails this block. What each builder still refuses is its DIAL TUPLE — see the target
+# examples further down; `$` is not a legal byte in a hostname, so no operator test case is
+# lost there, and a literal one comes back as an out-of-scope block naming the wrong gate.
+describe "plan builders no longer refuse an unresolved env token in the head" do
+  it "Fuzz::Plan.build sends the token literally" do
     with_vars([] of {String, String}) do
       options = Gori::Fuzz::PlanOptions.new(
         "GET /a?q=§x§ HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n",
         target: "http://t.test",
         sources: [Gori::Fuzz::InlineList.new(["p"])] of Gori::Fuzz::PayloadSource)
-      ex = expect_raises(Gori::Fuzz::PlanError) { Gori::Fuzz::Plan.build(options, ungated) }
-      ex.reason.should eq(Gori::Fuzz::PlanError::Reason::UnresolvedEnv)
-      ex.detail.should eq("$SESSION")
+      Gori::Fuzz::Plan.build(options, ungated).template.to_s.should contain("Bearer $SESSION")
     end
   end
 
-  it "Miner::Plan.build refuses and names the token" do
+  it "Miner::Plan.build sends the token literally" do
     with_vars([] of {String, String}) do
       options = Gori::Miner::PlanOptions.new(
         "GET /a HTTP/1.1\r\nHost: t.test\r\nCookie: s=$SESSION\r\n\r\n",
         target: "http://t.test")
-      ex = expect_raises(Gori::Miner::PlanError) { Gori::Miner::Plan.build(options, ungated) }
-      ex.reason.should eq(Gori::Miner::PlanError::Reason::UnresolvedEnv)
-      ex.detail.should eq("$SESSION")
+      String.new(Gori::Miner::Plan.build(options, ungated).request).should contain("s=$SESSION")
     end
   end
 
-  it "Sequencer::Plan.build refuses and names the token" do
+  it "Sequencer::Plan.build sends the token literally" do
     with_vars([] of {String, String}) do
       loc = Gori::Sequencer::TokenLoc.new(kind: Gori::Sequencer::ExtractKind::Cookie, selector: "sid")
       config = Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay, token_loc: loc, goal: 10)
       options = Gori::Sequencer::PlanOptions.new(
         "GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: $SESSION\r\n\r\n".to_slice,
         target: "http://t.test", config: config)
-      ex = expect_raises(Gori::Sequencer::PlanError) { Gori::Sequencer::Plan.build(options, ungated) }
-      ex.reason.should eq(Gori::Sequencer::PlanError::Reason::UnresolvedEnv)
-      ex.detail.should eq("$SESSION")
+      String.new(Gori::Sequencer::Plan.build(options, ungated).request).should contain("Auth: $SESSION")
+    end
+  end
+
+  # The COMPLEMENT for all three: a token that HAS a value still resolves. The policy is
+  # "follow the value if there is one", not "stop expanding".
+  it "still expands a head token that HAS a value" do
+    with_vars([{"SESSION", "s3cr3t"}]) do
+      options = Gori::Miner::PlanOptions.new(
+        "GET /a HTTP/1.1\r\nHost: t.test\r\nCookie: s=$SESSION\r\n\r\n",
+        target: "http://t.test")
+      wire = String.new(Gori::Miner::Plan.build(options, ungated).request)
+      wire.should contain("s=s3cr3t")
+      wire.should_not contain("$SESSION")
     end
   end
 
@@ -212,42 +234,38 @@ describe "plan builders refuse an unresolved env token (#519)" do
     end
   end
 
-  # Discover expands TWICE inside its builder — the seed and the custom header values —
-  # and the header call is the one a "check the target" fix would miss. An unresolved
-  # token there rides every probe the crawl sends.
-  it "Discover::Plan.build refuses an unresolved custom HEADER and names the token" do
+  # Discover expands TWICE inside its builder — the seed and the custom header values. The
+  # SEED keeps its refusal (it is the dial tuple); the HEADERS lost theirs, and that is the
+  # example the owner named: `--header 'X-Mongo: $ne'` must reach the wire as written.
+  it "Discover::Plan.build sends an unresolved custom HEADER literally" do
     with_vars([] of {String, String}) do
       config = Gori::Discover::Config.new
-      config.headers = [{"Authorization", "Bearer $SESSION"}]
+      config.headers = [{"X-Mongo", "$ne"}, {"Authorization", "Bearer $SESSION"}]
       options = Gori::Discover::PlanOptions.new("https://t.test/", config: config)
-      ex = expect_raises(Gori::Discover::PlanError) { Gori::Discover::Plan.build(options, ungated) }
-      ex.reason.should eq(Gori::Discover::PlanError::Reason::UnresolvedEnv)
-      ex.detail.should eq("$SESSION")
+      Gori::Discover::Plan.build(options, ungated).config.headers
+        .should eq([{"X-Mongo", "$ne"}, {"Authorization", "Bearer $SESSION"}])
     end
   end
 
-  it "Repeater::Plan.build refuses and names the token" do
+  it "Repeater::Plan.build sends the token literally" do
     with_vars([] of {String, String}) do
       options = Gori::Repeater::PlanOptions.new(
         ["GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n".to_slice],
         target: "http://t.test")
-      ex = expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(options, ungated) }
-      ex.reason.should eq(Gori::Repeater::PlanError::Reason::UnresolvedEnv)
-      ex.detail.should eq("$SESSION")
+      String.new(Gori::Repeater::Plan.build(options, ungated).bytes).should contain("Bearer $SESSION")
     end
   end
 
   # `expand_request: false` means the SURFACE already expanded (MCP's RequestBuilder, the
-  # TUI editor's byte modes). The token is then already sitting in the bytes handed over,
-  # so the builder must still refuse — this is the path a check guarded by
-  # `if options.expand_request?` would let straight through.
-  it "Repeater::Plan.build refuses pre-expanded bytes too (expand_request: false)" do
+  # TUI editor's byte modes). This used to be the path a check guarded by
+  # `if options.expand_request?` would let through, so the builder refused regardless. It
+  # now ships those bytes as handed over, which is what `verbatim` always meant.
+  it "Repeater::Plan.build sends pre-expanded bytes literally too (expand_request: false)" do
     with_vars([] of {String, String}) do
       options = Gori::Repeater::PlanOptions.new(
         ["GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n".to_slice],
         expand_request: false, target: "http://t.test")
-      ex = expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(options, ungated) }
-      ex.reason.should eq(Gori::Repeater::PlanError::Reason::UnresolvedEnv)
+      String.new(Gori::Repeater::Plan.build(options, ungated).bytes).should contain("Bearer $SESSION")
     end
   end
 
@@ -278,15 +296,41 @@ describe "plan builders refuse an unresolved env token (#519)" do
     end
   end
 
-  # A body token is deliberately NOT a refusal (see `Env.unresolved_wire`): the body is
-  # where a `$` is a byte rather than a reference, and refusing there would block every
-  # binary upload replay. Pinned so the narrowing is a stated decision, not an accident.
+  # No token is a refusal any more, in the body or the head. Kept as the body half of that
+  # pair; the head half is the example below it.
   it "does not refuse a token in the BODY" do
     with_vars([] of {String, String}) do
       plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
         ["POST /a HTTP/1.1\r\nHost: t.test\r\n\r\n{\"q\":\"$NOTATOKEN\"}".to_slice],
         target: "http://t.test"), ungated)
       String.new(plan.bytes).should contain("$NOTATOKEN")
+    end
+  end
+
+  # INVERTED for the owner's round-7 policy. This used to assert `Plan.build` RAISED
+  # `UnresolvedEnv` for a head token, which made a GraphQL `?query=…$id…`, a Mongo `$where`
+  # header and a JSON Schema `$ref` header unsendable from every repeater surface.
+  it "does not refuse a token in the HEAD either, and ships it literally" do
+    with_vars([] of {String, String}) do
+      plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
+        ["GET /graphql?query=q($id)&f=$ne HTTP/1.1\r\nHost: t.test\r\nX-Ref: $ref\r\n\r\n".to_slice],
+        target: "http://t.test"), ungated)
+      wire = String.new(plan.bytes)
+      wire.should contain("/graphql?query=q($id)&f=$ne")
+      wire.should contain("X-Ref: $ref")
+    end
+  end
+
+  # The DIAL TUPLE keeps its refusal, and that is the deliberate exception: `$` is not a
+  # legal byte in a hostname, so there is no operator test case to protect, and a literal
+  # `$HOST` there comes back as an out-of-scope block naming a gate that was never involved.
+  it "still refuses an unresolved token in the TARGET" do
+    with_vars([] of {String, String}) do
+      expect_raises(Gori::Repeater::PlanError) do
+        Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
+          ["GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice],
+          target: "http://$NOHOST.test"), ungated)
+      end
     end
   end
 end

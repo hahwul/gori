@@ -119,7 +119,6 @@ module Gori::Discover
       # fetch skips the binding path entirely and reuses the constructed block verbatim.
       @header_tokens = !Settings.env_prefix.empty? && !@header_block.byte_index(Settings.env_prefix).nil?
       @header_resolved = nil.as(String?)
-      @header_unbound = [] of String
       @header_rev = 0_u64
       # h2 is excluded for the reason Fuzz::Sender excludes it: H2Engine frames its own
       # connection per send, and multiplexing it is a separate change with its own
@@ -162,11 +161,7 @@ module Gori::Discover
       unless Proxy::Codec::Http1.request_token_safe?(target) && Proxy::Codec::Http1.request_token_safe?(host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
       end
-      headers = binding_headers
-      if headers.nil?
-        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Env.unbound_error(@header_unbound))
-      end
-      req = build_get(scheme, host, port, target, headers)
+      req = build_get(scheme, host, port, target, binding_headers)
       if @http2
         Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
@@ -224,15 +219,19 @@ module Gori::Discover
     #
     # Recomputed only when the binding table moves: a brute-force pass is ~278 sends per
     # directory, and the block is identical for every one of them.
-    private def binding_headers : String?
+    private def binding_headers : String
       return @header_block unless @header_tokens
       rev = Gori::Env.binding_rev
-      if rev != @header_rev || (@header_resolved.nil? && @header_unbound.empty?)
+      cached = @header_resolved
+      if cached.nil? || rev != @header_rev
         @header_rev = rev
-        @header_unbound = Gori::Env.unbound(@header_block)
-        @header_resolved = @header_unbound.empty? ? Gori::Env.expand_bindings(@header_block) : nil
+        # A declared-but-unbound `$NAME` used to make this nil and refuse the fetch. It now
+        # resolves to the literal token, `Env.unbound`'s policy everywhere: a `--header`
+        # block is operator-authored text and `$` is a legal byte in one.
+        cached = Gori::Env.expand_bindings(@header_block)
+        @header_resolved = cached
       end
-      @header_resolved
+      cached
     end
 
     private def build_get(scheme : String, host : String, port : Int32, target : String,

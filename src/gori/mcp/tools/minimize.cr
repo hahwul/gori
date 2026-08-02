@@ -42,7 +42,7 @@ module Gori
         # already spent, so an unintelligible value would refuse a run that had put up to 250
         # real requests on the wire.
         apply = bool_arg(h, "apply", false)
-        target = minimize_target(id, rec, text, ob, verbatim)
+        target = minimize_target(id, rec, text, ob)
         return target if target.is_a?(Result)
         scheme, host, port = target
 
@@ -117,7 +117,7 @@ module Gori
       # The validated {scheme, host, port} to minimize against, or a refusal Result. Split out
       # of minimize_repeater to keep it under the cyclomatic-complexity bar.
       private def minimize_target(id : Int64, rec : Store::RepeaterRecord, text : String,
-                                  ob : Outbound, verbatim : Bool = false) : {String, String, Int32} | Result
+                                  ob : Outbound) : {String, String, Int32} | Result
         if Repeater::WsEngine.upgrade_request?(text)
           return err("repeater #{id} is a WebSocket upgrade — minimize works on plain HTTP requests",
             "INVALID_ARGUMENT", field: "repeater_id")
@@ -131,21 +131,18 @@ module Gori
             "INVALID_ARGUMENT", field: "repeater_id")
         end
         # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
-        # design, so the builder's unresolved-token refusal (#519) never runs for it and this
-        # is the only place that check can happen (#524). Checked BEFORE the target parse: an
-        # unresolved `$HOST` survives `Env.expand` as the literal host, which would otherwise
-        # surface as an unparseable-target error naming no variable at all.
+        # design, so the builder's dial-tuple refusal never runs for it and this is the only
+        # place that check can happen (#524). Checked BEFORE the target parse: an unresolved
+        # `$HOST` survives `Env.expand` as the literal host, which would otherwise surface as
+        # an unparseable-target error naming no variable at all.
         #
-        # Head-only on the REQUEST (`unresolved_wire`) for #519's reason — a `$` in a captured
-        # body is a byte, and a whole-request check refuses nearly every binary-body session —
-        # but whole-string on the target and SNI, which are short operator-typed fields with no
-        # body to exclude. The CLI and TUI minimize paths carry the same three checks.
-        #
-        # `verbatim` drops the REQUEST half of that check, on the provenance axis: those bytes
-        # are evidence the operator did not author (a captured `$filter`/`$top`/`$where`), and
-        # nothing will expand them, so there is no unresolved token to refuse. The target and
-        # SNI checks stay — those ARE operator-typed and they ARE still expanded below.
-        names = (verbatim ? [] of String : Env.unresolved_wire(text)) | Env.unresolved(rec.target) |
+        # The REQUEST is no longer checked at all. A `$NAME` with no value is a literal string
+        # on the wire everywhere now (see `Env::Escape`), so a captured OData `$filter`, a
+        # Mongo `$where` or a GraphQL `$id` in a query string minimizes as authored. Only the
+        # TARGET and SNI are refused — `$` is not a legal byte in a hostname, and a literal one
+        # there comes back as an unparseable target or an out-of-scope block, naming the wrong
+        # gate. The CLI and TUI minimize paths carry the same two checks.
+        names = Env.unresolved(rec.target) |
                 (rec.sni.try { |s| Env.unresolved(s) } || [] of String)
         unless names.empty?
           return err(env_unresolved_error(Env.token_list(names)), "INVALID_ARGUMENT", field: "repeater_id")
