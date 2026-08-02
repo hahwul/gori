@@ -140,7 +140,11 @@ module Gori
           upstream.write(handshake)
           upstream.flush
           head = Proxy::Codec::Http1.read_head(upstream)
-          return err("no response from #{host}:#{port}", started) unless head
+          # `Engine.no_response_error`, not a local copy of the sentence: a plain `ws://` target
+          # behind a proxy that answers the CONNECT and then closes without relaying anything is
+          # the same shape as the h1 repeater's clean-EOF case, and a hand-duplicated string here
+          # would silently miss the proxy-tunnel clause that builder now carries.
+          return err(Engine.no_response_error(host, port), started) unless head
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           unless resp.status == 101
