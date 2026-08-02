@@ -187,6 +187,14 @@ module Gori
         j.field "head_only", true if row.head_only?
         row.head_only_note.try { |n| j.field "head_only_note", text(n) }
         row.edit_refusal.try { |r| j.field "edit_refusal", text(r) }
+        # A WebSocket BINARY frame (opcode 2): `raw` (a JSON string) cannot carry it byte-exact
+        # — any byte above 0x7F re-encodes to multiple UTF-8 bytes on the way back out — so
+        # `intercept_forward_edit` refuses `raw` for this item and `raw_base64` is the only
+        # edit channel. Said here, before the agent writes one, same reasoning as `head_only`.
+        if row.ws? && row.binary?
+          j.field "binary", true
+          j.field "binary_note", "this is a WebSocket BINARY message — 'raw' cannot edit it byte-exact (a JSON string re-encodes any byte over 0x7F); use 'raw_base64'"
+        end
       end
 
       # Detail projection: full redacted head + body size. The FULL raw message base64 (for

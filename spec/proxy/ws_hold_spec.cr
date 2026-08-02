@@ -380,6 +380,13 @@ describe Gori::Proxy::WS::MessageGate do
   # actually holding may not sit on the peer's PONG — that is the liveness argument
   # `MessageGate`'s header is built on — so the control frame overtakes it, exactly once, and
   # the message's own frames follow on release with the control frame NOT duplicated.
+  #
+  # R9: this reordering is deliberate and the STORE stays honest (the PING's own capture row,
+  # written at arrival by `Relay.capture_control`, keeps the TRUE order — this test's `first`
+  # arrived before `ping` and `data_rows` below still shows the PING's row after nothing else
+  # changed there) — but the LIVE wire genuinely reorders it ahead of the data it interleaved,
+  # and that used to happen with no signal at all. `MessageGate#submit` now writes the same
+  # `[gori] …` notice every other routine edge case in this class gets.
   it "lets an interleaved PING overtake a message that is really held, and only then" do
     first = masked(WS::OP_TEXT, "hold".to_slice, fin: false)
     ping = masked(WS::OP_PING, "pi".to_slice)
@@ -404,7 +411,12 @@ describe Gori::Proxy::WS::MessageGate do
       released = Bytes.new(first.size + second.size)
       r.ts_r.read_fully(released)
       released.should eq(first + second) # the peer's own frames, and the PING not sent twice
-      sink.messages.should eq([{"out", 9, "pi"}, {"out", 1, "hold-me"}])
+      data_rows(sink).should eq([{"out", 9, "pi"}, {"out", 1, "hold-me"}])
+      notice_rows(sink).map(&.[](2)).should eq(
+        ["[gori] client→server: a control frame interleaved with this message was sent ahead " \
+         "of it, because the message itself has to wait (held, or queued behind an earlier " \
+         "hold) and a control frame cannot wait with it. The true arrival order is preserved " \
+         "in History; only the live wire is reordered"])
     end
     r.shutdown
   end

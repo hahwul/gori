@@ -137,15 +137,22 @@ module Gori
       # forward toast name the message the operator is actually about to send — the one
       # reason a surface ever needs different values here.
       #
+      # `size` defaults to the HELD byte count, but a caller settling a `forward_edit` must
+      # pass the size of the bytes it is ACTUALLY about to put on the wire: an edit that
+      # legitimately changes a WS message's length (or used to, silently, before the CRLF
+      # normalization bug this size param was added alongside) made the ack lie about what it
+      # had just sent — "client->server 17B" for a message that left as 19 bytes. The ack is
+      # the caller's only receipt for an irreversible action, so it has to describe the ACT.
+      #
       # `Gori::Url.origin_path` is the shared spelling of the absolute-form rule; it used to
       # be copied into this file because `Interceptor` is core and the only other copy was
       # `Tui::Url`'s.
-      def label(m : String = method, t : String = target) : String
+      def label(m : String = method, t : String = target, size : Int32 = raw.size) : String
         case kind
         in .request?  then "#{m} #{host}#{Gori::Url.origin_path(t)}"
         in .response? then "#{m} #{host} -> #{t}"
-        in .ws_out?   then "#{host}#{Gori::Url.origin_path(t)} client->server #{raw.size}B"
-        in .ws_in?    then "#{host}#{Gori::Url.origin_path(t)} server->client #{raw.size}B"
+        in .ws_out?   then "#{host}#{Gori::Url.origin_path(t)} client->server #{size}B"
+        in .ws_in?    then "#{host}#{Gori::Url.origin_path(t)} server->client #{size}B"
         end
       end
     end

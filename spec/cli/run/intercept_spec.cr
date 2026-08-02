@@ -65,6 +65,78 @@ describe "Gori::CLI::Run.intercept_edit_bytes" do
   end
 end
 
+# R9/F1 — a held WebSocket message has NO head/body split at all (no start line, no headers),
+# so `intercept_edit_bytes`'s HTTP-shaped CRLF rule has no boundary to bound itself by: with no
+# blank line found, `normalize_head_crlf` (called via `intercept_edit_bytes`) treated the WHOLE
+# message as "header" and promoted every bare LF to CRLF. `cmd_intercept_edit` now branches on
+# the held row's `kind` BEFORE picking a rule (`ws_edit_bytes` for `row.ws?`, the function above
+# for everything else) — this describes that new function directly, at the 838f55a3 control run
+# `Gori::CLI::Run.intercept_edit_bytes("line1\nline2\nline3", true)` would have produced
+# `"line1\r\nline2\r\nline3"` (19 bytes) for the identical input this spec pins at 17.
+describe "Gori::CLI::Run.ws_edit_bytes" do
+  it "takes a WS text edit LITERALLY — no CRLF promotion, no boundary search at all" do
+    content = "line1\nline2\nline3"
+    result = Gori::CLI::Run.ws_edit_bytes(content, 1_i64, false, used_raw_file: false)
+    result.should be_a(Bytes)
+    String.new(result.as(Bytes)).should eq(content) # bare LF preserved — NOT "\r\n"
+  end
+
+  it "is unchanged when there is no LF at all (the complement)" do
+    content = "no-newlines-here"
+    result = Gori::CLI::Run.ws_edit_bytes(content, 1_i64, false, used_raw_file: false)
+    String.new(result.as(Bytes)).should eq(content)
+  end
+
+  it "never resyncs a Content-Length header even when the payload LOOKS like an HTTP head" do
+    # A boundary DOES exist in this payload (a literal blank line) — proof the WS path never
+    # even runs the HTTP boundary search, rather than running it and happening to no-op.
+    content = "part1\n\npart2"
+    result = Gori::CLI::Run.ws_edit_bytes(content, 1_i64, false, used_raw_file: false)
+    String.new(result.as(Bytes)).should eq(content)
+  end
+
+  it "refuses a BINARY frame through --raw (used_raw_file: false) with an actionable message" do
+    result = Gori::CLI::Run.ws_edit_bytes("\xFF\xFE", 5_i64, true, used_raw_file: false)
+    result.should be_a(String)
+    result.as(String).should contain("item 5")
+    result.as(String).should contain("--raw-file")
+  end
+
+  it "allows a BINARY frame through --raw-file (used_raw_file: true) — the byte-exact channel" do
+    body = Bytes[0xFF, 0xFE, 0x01, 0x02]
+    content = String.new(body) # what File.read of the exact bytes hands back
+    result = Gori::CLI::Run.ws_edit_bytes(content, 5_i64, true, used_raw_file: true)
+    result.should be_a(Bytes)
+    result.as(Bytes).to_a.should eq(body.to_a)
+  end
+
+  it "never refuses a TEXT WS item regardless of which channel carried it" do
+    Gori::CLI::Run.ws_edit_bytes("hello", 1_i64, false, used_raw_file: false).should be_a(Bytes)
+    Gori::CLI::Run.ws_edit_bytes("hello", 1_i64, false, used_raw_file: true).should be_a(Bytes)
+  end
+end
+
+private def ws_held(kind : String = "wsout", binary : Bool = false) : Gori::Store::HeldRow
+  Gori::Store::HeldRow.new(
+    session_token: "t", item_id: 7_i64, kind: kind, method: "GET", host: "127.0.0.1",
+    port: 20602, scheme: "http", target: "http://127.0.0.1:20602/chat",
+    raw: "line1\nline2".to_slice, held_at_ms: 0_i64, binary: binary)
+end
+
+describe "Gori::Store::HeldRow#ws?/#binary?" do
+  it "is true for both WS directions, false for request/response" do
+    ws_held("wsout").ws?.should be_true
+    ws_held("wsin").ws?.should be_true
+    held("request", "/a").ws?.should be_false
+    held("response", "200 OK").ws?.should be_false
+  end
+
+  it "carries the binary flag across the bridge row" do
+    ws_held(binary: false).binary?.should be_false
+    ws_held(binary: true).binary?.should be_true
+  end
+end
+
 # `HeldRow#target` carries TWO different things depending on `kind`: a request's target, or a
 # RESPONSE's status reason. The row builder never branched on it, so a held response rendered
 # as `http://127.0.0.1200 OK` — a string that looks like a URL, is not one, drops the port,

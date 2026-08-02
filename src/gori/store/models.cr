@@ -959,10 +959,23 @@ module Gori
       # every later message on that stream is in it.
       getter edit_refusal : String?
       getter? head_only : Bool
+      # Mirrors `Interceptor::Item#binary?` (opcode == OP_BIN) across the bridge — the same
+      # fact the TUI's editor already gates `read_only_selection?` on. Without it here, MCP
+      # `intercept_forward_edit`/CLI `intercept edit` had no way to tell a text WS message from
+      # a binary one before choosing whether the `raw` (JSON-string / argv-string) channel can
+      # carry it byte-exact at all.
+      getter? binary : Bool
 
       def initialize(@session_token, @item_id, @kind, @method, @host, @port, @scheme,
                      @target, @raw, @held_at_ms, @flow_id = nil, @edited = false, @viewed_ms = 0_i64,
-                     @edit_refusal = nil, @head_only = false)
+                     @edit_refusal = nil, @head_only = false, @binary = false)
+      end
+
+      # This row is a WebSocket message (either direction) — no start line, no headers, no
+      # head/body split. The kind-check `intercept_forward_edit`/`cmd_intercept_edit` need
+      # before deciding whether an HTTP-head-shaped CRLF-normalize even applies.
+      def ws? : Bool
+        kind == "wsout" || kind == "wsin"
       end
 
       # The head-only CAVEAT, and deliberately NOT folded into `edit_refusal`.

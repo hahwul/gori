@@ -713,7 +713,20 @@ module Gori
         "ALTER TABLE intercept_held ADD COLUMN head_only INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8]
+      # `intercept_held.binary` mirrors `Interceptor::Item#binary?` (opcode == OP_BIN) across
+      # the #123 bridge — a fact known at hold time that neither `intercept_edit_bytes` (MCP)
+      # nor `cmd_intercept_edit` (CLI) could see before this column existed, so a WebSocket
+      # BINARY frame edited through the TEXT `raw` channel (a JSON string / an argv string,
+      # both of which force-reencode any byte above 0x7F) was silently rewritten rather than
+      # refused the way the TUI's editor already refuses it (read-only there, `binary?`
+      # gating `read_only_selection?`). Same 0-default rationale as `head_only`: a per-session
+      # snapshot mirror that `clear_intercept_state!` wipes at the next capture start, so no
+      # existing row needs a real answer back-filled.
+      V9 = [
+        "ALTER TABLE intercept_held ADD COLUMN binary INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|
