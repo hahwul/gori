@@ -195,6 +195,13 @@ module Gori::Tui
       # contextually — no mode. On an EVIDENCE tab they are inert until declared, see
       # `@markers_declared` / `markers_live?`.
       @markers_declared = false
+      # The `%%%` twin of `@markers_declared`, and deliberately NOT the same flag: `§` and
+      # `%%%` are different syntaxes an operator types independently, so sharing one would
+      # both over-declare (mark a word → the capture's own `%%%` starts splitting the send)
+      # and under-declare. This one counts instead of latching because `%%%` has no marking
+      # verb to latch on — see `pipeline_live?`. Baseline = the separators the CAPTURE
+      # arrived with; 0 on a draft, where every `%%%` is the operator's by definition.
+      @evidence_pipeline_seps = 0
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
       # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)
@@ -529,6 +536,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_form_text(detail))
+      seed_pipeline_baseline
       @original_lines = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
 
       @result = nil
@@ -569,6 +577,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(String.new(detail.request_head))
+      seed_pipeline_baseline
       seed_ws_out(out_messages)
       @original_lines = [] of String
       @result = nil
@@ -896,6 +905,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_head_text(detail))
+      seed_pipeline_baseline
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
@@ -956,6 +966,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_form_text(detail))
+      seed_pipeline_baseline
       @decoded.set_text(payload)
       @req_pane = :envelope
       @decoded_dirty = false
@@ -1215,12 +1226,56 @@ module Gori::Tui
       end
     end
 
+    # PROVENANCE, the `%%%` half of `markers_live?` — and the reason that one is not enough.
+    # `%%%` is draft syntax too: it means "split here" only because the OPERATOR typed it.
+    # A capture whose body happens to hold a lone `%%%` line (a diff hunk, a delimiter, a
+    # template fragment) is not two requests, and treating it as two produced the same three
+    # faces the `§` defect did — the visible `Content-Length` covering only the pre-`%%%`
+    # bytes while `^R` sent the whole 17, `^X` snapshotting that head into a byte-exact send,
+    # and `space ▸ g` manufacturing a second request whose request LINE was the capture's own
+    # `line2`. Nobody authored that request.
+    #
+    # Unlike `§` there is no marking VERB to declare with, so the declaration is the count:
+    # a separator the buffer holds beyond the ones the capture arrived with is one the
+    # operator typed. Same question as `markers_live?` ("did the operator author this
+    # token?"), answered with the strongest signal this seam has. Once they add one the whole
+    # buffer is a group draft, captured separators included — the honest reading, and visible
+    # in the per-chunk Content-Lengths the reflection immediately writes.
+    #
+    # A draft is unaffected: `@evidence` is false, so every `%%%` in it splits as it always
+    # has. A restore lands with the baseline set from the restored text, for the same reason
+    # `@markers_declared` lands false — the row says nothing about who typed which line, and
+    # when gori cannot know, evidence wins.
+    private def pipeline_live?(wl : Array({String, String})) : Bool
+      !@evidence || pipeline_sep_count(wl) > @evidence_pipeline_seps
+    end
+
+    private def pipeline_sep_count(wl : Array({String, String})) : Int32
+      wl.count { |(l, _)| l.strip == PIPELINE_SEP }
+    end
+
+    # Record how many `%%%` lines the just-seeded buffer arrived with. Called from every
+    # loader AFTER the editor is set, so the baseline is always the bytes gori was handed
+    # rather than anything typed since. On a draft it is 0 either way (`pipeline_live?`
+    # short-circuits on `@evidence`); recording it anyway keeps a later `duplicate_from`
+    # or an evidence flip from inheriting a stale number.
+    private def seed_pipeline_baseline : Nil
+      @evidence_pipeline_seps = pipeline_sep_count_in(@editor.wire_text)
+    end
+
+    # The same count over raw text, for seeding the baseline at load/restore.
+    private def pipeline_sep_count_in(text : String) : Int32
+      text.split('\n').count { |l| l.strip(" \t\r") == PIPELINE_SEP }
+    end
+
     # EDITOR line ranges of each `%%%` chunk, blank edges trimmed. The one place the group
     # split is decided, so the bytes `pipeline_requests` sends and the Content-Length
     # `reflect_content_length_in_editor` shows are derived from the SAME chunking — they used
     # to disagree, and the visible header was the one that was wrong. No separator ⇒ one span
-    # covering the whole buffer, which is the ordinary single-request case.
+    # covering the whole buffer, which is the ordinary single-request case, and so does a
+    # separator that is the CAPTURE's rather than the operator's (see `pipeline_live?`).
     private def chunk_line_spans(wl : Array({String, String})) : Array(Range(Int32, Int32))
+      return [0...wl.size] unless pipeline_live?(wl)
       spans = [] of Range(Int32, Int32)
       push = ->(a : Int32, b : Int32) do
         while a < b && wl[a][0].strip.empty? # drop blank lines around the separator
@@ -1417,6 +1472,7 @@ module Gori::Tui
       end
 
       @auto_content_length = auto_cl
+      seed_pipeline_baseline
       @loaded = true
       @dirty = false
     end
@@ -1450,6 +1506,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(BLANK_REQUEST)
+      @evidence_pipeline_seps = 0 # a draft: every `%%%` in it is the operator's
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
@@ -1470,8 +1527,9 @@ module Gori::Tui
     # chip name (+ " copy"). Drops source flow linkage, inflight state, and scroll/cursor.
     def duplicate_from(src : RepeaterView) : Nil
       @flow = nil
-      @evidence = src.evidence?                 # the same bytes carry the same provenance
-      @markers_declared = src.@markers_declared # …and the same reading of their §
+      @evidence = src.evidence?                             # the same bytes carry the same provenance
+      @markers_declared = src.@markers_declared             # …and the same reading of their §
+      @evidence_pipeline_seps = src.@evidence_pipeline_seps # …and of their `%%%`
       @http2 = src.@http2
       @target = src.@target
       @tcx = @target.size
@@ -2044,7 +2102,10 @@ module Gori::Tui
       return if @decode_kind && @req_pane == :decoded
 
       wl = @editor.wire_lines
-      if wl.none? { |(l, _)| l.strip == PIPELINE_SEP }
+      # `pipeline_live?`, not "is there a `%%%` anywhere": a separator the CAPTURE brought
+      # does not chunk the send, so reflecting through it would put chunk 1's length in the
+      # visible head while ^R frames the whole buffer — and `^X` snapshots that head.
+      if !pipeline_live?(wl) || pipeline_sep_count(wl).zero?
         reflect_chunk_content_length(@editor.wire_text, wl, 0...wl.size)
       else
         chunk_line_spans(wl).each { |sp| reflect_chunk_content_length(chunk_text(wl, sp), wl, sp) }
