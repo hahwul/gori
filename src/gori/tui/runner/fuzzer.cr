@@ -22,10 +22,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # CROSS-TAB: turn the current Repeater request into a Fuzzer template.
+  #
+  # `fuzz_seed_text`, NOT `request_text`: the receiving tab reads `§…§` as TEMPLATE SYNTAX,
+  # and a `§` the Repeater is holding as captured DATA (see `RepeaterView#markers_live?`)
+  # must not arrive as an injection position the operator never marked. It differs from
+  # `request_text` only for such a capture, where it escapes those `§` to the `§§` literal
+  # `Fuzz::Template` already defines.
   def fuzz_from_repeater : Nil
     return unless v = repeater_controller.current_view
     v.flush_decoded_edits # a split-decode tab: fold a pending payload edit into the envelope first
-    fuzzer_controller.fuzz_from_request(v.target, v.request_text, v.http2?, v.sni_override)
+    fuzzer_controller.fuzz_from_request(v.target, v.fuzz_seed_text, v.http2?, v.sni_override)
   end
 
   def fuzz_run : Nil
