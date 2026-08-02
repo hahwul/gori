@@ -1080,6 +1080,20 @@ module Gori::Tui
       @host.status(@fuzzers.empty? ? "closed — none open (^N new · ⇧I from History)" : "closed (#{@fuzzers.size} open)")
     end
 
+    # Halt EVERY running sweep, not just the current tab's — the project-level exits
+    # (leave project / quit) close the whole Runner, so they need per-tab close's
+    # `request_stop` + `jobs.finish` pair applied to all of them. Without it the run
+    # fibers keep their own sockets and keep hitting the target after the operator is
+    # back at the picker. Same order as close_tab: stop first, then finish the job, since
+    # once the Runner unwinds `drain_events` never runs again to see the Done event.
+    def stop_all : Nil
+      @fuzzers.each do |tab|
+        next unless tab.view.running?
+        tab.view.request_stop
+        @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
+      end
+    end
+
     # --- persistence ---
     def save_current : Nil
       return unless tab = current_tab_obj

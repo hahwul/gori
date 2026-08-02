@@ -81,6 +81,22 @@ module Gori::Tui
       @jobs.any?(&.running?)
     end
 
+    # A one-line inventory of the live jobs for an EXIT confirm — "2 jobs still running
+    # (discovering 1 · mining 1)". nil when nothing is active, so a caller can keep its
+    # no-jobs wording byte-identical rather than growing a "0 jobs" clause. Shares
+    # KIND_LABELS with activity_label so the confirm names the work exactly as the
+    # status-bar chip already does.
+    #
+    # Unlike activity_label this never collapses to "jobs:N": an exit prompt is the one
+    # place the operator has to decide with, and "leaving stops them" is only actionable
+    # if it says WHAT it is stopping.
+    def active_summary : String?
+      a = active
+      return nil if a.empty?
+      parts = a.group_by(&.kind).map { |kind, js| "#{KIND_LABELS.fetch(kind, "jobs")} #{js.size}" }
+      "#{a.size} job#{a.size == 1 ? "" : "s"} still running (#{parts.join(" · ")})"
+    end
+
     # The status-bar chip text (the Runner prepends a spinner glyph). nil → no chip.
     # One active kind → "mining 2"; mixed kinds → "jobs:3".
     def activity_label : String?

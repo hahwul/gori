@@ -603,6 +603,17 @@ module Gori::Tui
       @host.status(@sessions.empty? ? "closed — none open" : "closed (#{@sessions.size} open)")
     end
 
+    # Halt EVERY running collection on a project-level exit (leave project / quit) — the
+    # same `request_stop` + `jobs.finish` pair close_tab applies to the current tab,
+    # applied to all of them. See FuzzerController#stop_all.
+    def stop_all : Nil
+      @sessions.each do |tab|
+        next unless tab.view.running?
+        tab.view.request_stop
+        @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
+      end
+    end
+
     def save_current : Nil
       return unless tab = current_tab_obj
       return unless (id = tab.db_id) && tab.view.dirty?

@@ -14,6 +14,7 @@ require "../../repeater/ws_engine"
 require "../../repeater/minimize"
 require "../../repeater/plan"
 require "../../fuzz/engine"
+require "../../fuzz/template" # Template.marker_regions — the §…§ probe repeater_send_group refuses on
 
 module Gori::Tui
   # One open repeater session (a "sub-tab" under the top-level Repeater tab). Each carries
@@ -1231,6 +1232,18 @@ module Gori::Tui
       @host.status(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)")
     end
 
+    # Finish the one running minimize on a project-level exit (leave project / quit), for
+    # the same reason close_repeater_tab does it per tab: the Runner is about to unwind, so
+    # `drain_results` never runs again to see the terminal Report and the job would stay
+    # :running forever in a Jobs registry the next open no longer shares. Minimize has no
+    # `request_stop` seam (it is a capped, bounded probe run — see repeater_minimize), so
+    # finishing the job is the whole treatment here, exactly as at :1222.
+    def stop_all : Nil
+      return unless mj = @minimize_job
+      @host.jobs.finish(mj[1], :stopped, "project closed")
+      @minimize_job = nil
+    end
+
     def repeater_send : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
       view.commit_chain_pane                        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
@@ -1421,6 +1434,10 @@ module Gori::Tui
         @host.status(view.http2? ? "send group is HTTP/1.1 only — ^V to switch off h2" : "send group needs plain text mode (not hex/gRPC/WS/decode)")
         return
       end
+      if reason = RepeaterController.group_marker_refusal(view.request_text)
+        @host.status(reason)
+        return
+      end
       view.downgrade_h2_request_lines(group: true) # every chunk rides the same h1 connection
       reqs = view.pipeline_requests
       labels = reqs.map(&.[0])
@@ -1500,6 +1517,33 @@ module Gori::Tui
       prefix = Gori::Settings.env_prefix
       return [] of String if prefix.empty?
       Env.binding_values.keys.select { |n| text.includes?("#{prefix}#{n}") }.sort!
+    end
+
+    # Why a `%%%` group send refuses while §…§ markers are present, or nil to proceed.
+    #
+    # `RepeaterView#pipeline_requests` goes straight to
+    # `finalize_wire(expanded_text_to_bytes(…))` and never reaches `marked_request_bytes` →
+    # `render_marked`, so without this the markers left as their OWN literal bytes:
+    # `§PAYLOAD-A¦base64-encode§` on the wire under `Content-Length: 28` while the editor
+    # showed the rendered `12`, reported as a clean "2/2 ok". The same divergence took the
+    # `¦chain` refusal (`RepeaterView#refuse_bad_chains`, reachable only through
+    # `render_marked(refuse: true)`) off this path entirely, so `%%%` shipped an unrunnable
+    # chain that `^R` refuses two keystrokes earlier — one of the two send buttons on the
+    # pane protected and the other not.
+    #
+    # The condition's home is `RepeaterView#group_sendable?`, whose own comment already
+    # names MARK alongside hex / gRPC / WS / decode; it simply never grew the term its
+    # sibling `minimizable?` has. It sits here for now, at the ONE call site of
+    # `pipeline_requests`, over the same public `Fuzz::Template.marker_regions` probe MCP
+    # `minimize.cr:129` and CLI `repeater_minimize.cr:187` use to refuse the same shape from
+    # outside the view.
+    #
+    # `self.` and pure for the reason `.literal_bindings` above is: what the operator is
+    # told instead of a send is the whole behaviour, and a Host double is not the thing
+    # worth building to pin it.
+    def self.group_marker_refusal(text : String) : String?
+      return nil if Fuzz::Template.marker_regions(text).empty?
+      "send group does not render §…§ markers — remove them, or ^R to send one request with the chains applied"
     end
 
     # The scope decision Repeater's direct sends (^R, send-group, WS, minimize) dial through.
