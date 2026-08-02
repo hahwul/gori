@@ -297,6 +297,41 @@ describe Gori::Probe::Active do
     end
   end
 
+  # `canary_pairs`/`canary_json` rebuild the BODY THE PROBE SENDS, only ever generating a
+  # FRESH value for the param they canary — every other byte in the body (a bare flag with no
+  # `=`, another param's NAME, an untouched JSON field) is carried through from the captured
+  # request. A `.scrub` before that rebuild corrupted invalid UTF-8 anywhere in it, so a probe
+  # for an unrelated field sent the origin `U+FFFD` where the capture had a raw byte. Raw
+  # fixture, searched byte-wise.
+  it "sends a form-body probe with an untouched non-UTF-8 field byte-exact" do
+    with_store do |store|
+      buf = IO::Memory.new
+      buf.write(Bytes[0x66_u8, 0x6c_u8, 0xff_u8, 0x67_u8]) # "fl" 0xFF "g" — no '=', never touched
+      buf << "&a=1"
+      req_body = String.new(buf.to_slice)
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/submit", method: "POST",
+        req_headers: "Content-Type: application/x-www-form-urlencoded\r\n", req_body: req_body,
+        content_type: nil)
+      plan = Gori::Probe::Active::ReflectedParam.new.plan(detail, Gori::Probe::Active::Options.new(allow_unsafe: true)).not_nil!
+      plan.request.hexstring.should contain(Bytes[0x66_u8, 0x6c_u8, 0xff_u8, 0x67_u8].hexstring)
+    end
+  end
+
+  it "sends a JSON-body probe with an untouched non-UTF-8 nested string byte-exact" do
+    with_store do |store|
+      buf = IO::Memory.new
+      buf << %({"a":"s","b":{"x":")
+      buf.write_byte(0xff_u8)
+      buf << %("}})
+      req_body = String.new(buf.to_slice)
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/j", method: "POST",
+        req_headers: "Content-Type: application/json\r\n", req_body: req_body, content_type: nil)
+      plan = Gori::Probe::Active::ReflectedParam.new.plan(detail, Gori::Probe::Active::Options.new(allow_unsafe: true)).not_nil!
+      # `"x":"<0xFF>"` must survive as one raw byte, not the three-byte U+FFFD `efbfbd`.
+      plan.request.hexstring.should contain(Bytes[0x22_u8, 0xff_u8, 0x22_u8].hexstring)
+    end
+  end
+
   it "has no probe for a request without parameters" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/app.js", content_type: nil)

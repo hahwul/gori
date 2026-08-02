@@ -687,7 +687,12 @@ module Gori::Tui
       end
       target = Env.expand(v.target)
       ws_messages = if v.ws_mode?
-                      v.ws_out_messages.map { |message| String.new(message.payload).scrub }
+                      # Not `.scrub`: `CopyMenu.wscat_command` writes each message through
+                      # `shell_quote`, which is already byte-safe (see its comment) — scrubbing
+                      # here first corrupted a binary out-frame into a `wscat -x` command that
+                      # does not reproduce what gori actually sent, the same defect a round-7
+                      # fixer closed for "Copy as cURL"'s `--data-raw`.
+                      v.ws_out_messages.map { |message| String.new(message.payload) }
                     end
       CopyMenu.request_options(wire, target, websocket_messages: ws_messages)
     end

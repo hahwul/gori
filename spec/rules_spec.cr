@@ -103,6 +103,21 @@ describe Gori::Rules do
     end
   end
 
+  it "leaves invalid UTF-8 elsewhere in the body untouched by a 1-byte literal pattern" do
+    # `String#gsub(String, String)` delegates to the `Char` overload for a 1-byte needle,
+    # which (for a multi-byte replacement) rewrites the WHOLE string with `each_char` —
+    # turning every invalid UTF-8 byte into U+FFFD, matched or not. A captured body is
+    # exactly the case: raw fixture, searched byte-wise, matching what a round-8 fixer
+    # measured for the sibling defect in `escape_backrefs`.
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "X", "YY")
+      body_bytes = Bytes[0x41_u8, 0xff_u8, 0x58_u8, 0x42_u8] # A <invalid> X B
+      got = rules.rewrite_request_body(String.new(body_bytes).to_slice, "")
+      got.should eq(Bytes[0x41_u8, 0xff_u8, 0x59_u8, 0x59_u8, 0x42_u8]) # A <invalid, untouched> Y Y B
+    end
+  end
+
   it "reports no body rewrite when only head rules exist" do
     with_store do |store|
       rules = Gori::Rules.load(store)

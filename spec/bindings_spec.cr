@@ -819,6 +819,17 @@ describe "Gori::Rules — replacement resolution (#501)" do
       Gori::Rules.escape_backrefs(plain).should be(plain)
     end
 
+    it "doubles a backslash byte-wise, leaving invalid UTF-8 around it untouched" do
+      # `String#gsub("\\", "\\\\")` delegates to the Char overload (1-byte needle) and walks
+      # the value with `each_char`, so an invalid byte on either side of the backslash used
+      # to come back as three-byte U+FFFD each. Raw fixture, searched byte-wise, matching the
+      # bytes a round-7 fixer actually measured on the wire: 0xFF 0xFE 0x5C 0x78.
+      bytes = Bytes[0xff_u8, 0xfe_u8, 0x5c_u8, 0x78_u8]
+      value = String.new(bytes)
+      escaped = Gori::Rules.escape_backrefs(value)
+      escaped.to_slice.should eq(Bytes[0xff_u8, 0xfe_u8, 0x5c_u8, 0x5c_u8, 0x78_u8])
+    end
+
     it "does not let a server-controlled \\1 in a token become a capture group" do
       with_store do |store|
         b = Gori::Bindings.load(store)
@@ -853,6 +864,36 @@ describe "Gori::Rules — replacement resolution (#501)" do
             Gori::Store::MatchKind::Regex)
           head = "GET / HTTP/1.1\r\nCookie: sid=x\r\n\r\n".to_slice
           String.new(rules.rewrite_request(head, "a")).should contain("Cookie: sid=\\k<oops>")
+        end
+      end
+    end
+
+    it "sends a Position-bound value with invalid UTF-8 through a regex rule byte-exact" do
+      # `TokenExtract.position` hands its slice to `String.new` unscrubbed by design (see the
+      # comment on it), so a Position binding can carry bytes no `String` literal in this file
+      # can spell. Build the fixture at the byte level and drive it through the real path:
+      # extract → bind → regex Match&Replace → wire.
+      body_bytes = Bytes[0x41_u8, 0xff_u8, 0xfe_u8, 0x5c_u8, 0x78_u8, 0x42_u8] # A <inval> <inval> \ x B
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("TOK", "", Gori::ExtractKind::Position, "", 1, 5)
+        b.observe(response_result("HTTP/1.1 200 OK\r\n\r\n", String.new(body_bytes)), subject)
+        b.values["TOK"].to_slice.should eq(body_bytes[1...5])
+        with_layer(b) do
+          rules = Gori::Rules.load(store)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "MARKER", "$TOK", Gori::Store::RuleOp::Replace, Gori::Store::MatchKind::Regex)
+          head = "GET /MARKER HTTP/1.1\r\nHost: a\r\n\r\n".to_slice
+          got = rules.rewrite_request(head, "a")
+          # Byte-exact round trip: `escape_backrefs` doubles the backslash so the SECOND
+          # `gsub` (the one splicing `$TOK`'s resolved text into the wire) reads the pair as
+          # its own "\\" escape and collapses it back to one — the net wire bytes must equal
+          # the ORIGINAL captured value, invalid bytes included, not `ef bf bd` triples.
+          exp_buf = IO::Memory.new
+          exp_buf.write("GET /".to_slice)
+          exp_buf.write(body_bytes[1...5])
+          exp_buf.write(" HTTP/1.1\r\nHost: a\r\n\r\n".to_slice)
+          got.should eq(exp_buf.to_slice)
         end
       end
     end
