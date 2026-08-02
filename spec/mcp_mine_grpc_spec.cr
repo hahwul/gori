@@ -93,15 +93,17 @@ describe "MCP mine_results over gRPC" do
         # `bucket` deliberately LARGE (not forced small): `wordlist` is MERGED with the
         # built-in ~400-name list (the same merge `mine_status{skipped}` above pins), so a
         # small bucket here would fan out into a couple hundred real TCP round trips through
-        # this Python origin — still correct, but needlessly slow/flaky under a busy test
-        # run. A big bucket keeps clean buckets at ONE request each; only the bucket holding
-        # `secret` bisects, which is all this spec needs to exercise.
+        # this origin — still correct, but needlessly slow under a busy full-suite run. A
+        # big bucket keeps clean buckets at ONE request each; only the bucket holding
+        # `secret` bisects, which is all this spec needs to exercise. `concurrency` 1: the
+        # single-threaded fiber scheduler serializes everything anyway, and a busy 6000+
+        # example run can starve a concurrent job's dispatcher fiber past a short deadline.
         start = call_json(tools, "mine_start",
           {"template" => "GET /pkg.Svc/Method HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
            "url" => "http://127.0.0.1:#{port}", "locations" => "query",
-           "wordlist" => wl, "bucket" => 128, "concurrency" => 2,
+           "wordlist" => wl, "bucket" => 128, "concurrency" => 1,
            "allow_unscoped" => true}.to_json)
-        poll_until_done(tools, start["job_id"].as_s, 40)
+        poll_until_done(tools, start["job_id"].as_s, 90)
         res = call_json(tools, "mine_results", %({"job_id":#{start["job_id"].as_s.to_json}}))
         findings = res["findings"].as_a
         secret = findings.find { |f| f["name"].as_s == "secret" }
