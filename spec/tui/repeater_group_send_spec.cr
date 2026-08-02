@@ -128,11 +128,87 @@ describe "Gori::Tui::RepeaterView#pipeline_requests with live markers" do
     # through `render_marked` and the send does not. The two disagree, which is exactly
     # what `render_marked`'s own comment says the shared render exists to prevent.
     view.request_text.should contain("Content-Length: 12")
+  end
 
-    # And the same text through the SINGLE send is rendered, as it always was.
+  # `^R` renders the chain, as it always has — asserted on a marked request with NO `%%%`,
+  # because a buffer that HAS one no longer reaches the render at all (next example).
+  it "still renders the chain on the single send" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1",
+      "POST /one HTTP/1.1\r\nHost: h\r\nContent-Length: 9\r\n\r\n§PAYLOAD-A¦base64-encode§", false, true)
     single = String.new(view.request_bytes)
     single.should contain("UEFZTE9BRC1B")
     single.should_not contain("¦base64-encode")
+  end
+
+  # Where the two round-7 repeater fixes meet. On a MARKED `%%%` buffer both send buttons
+  # now refuse, for different and independent reasons, so neither can put marker bytes on
+  # the wire:
+  #   * `space ▸ g` — `group_marker_refusal`: `pipeline_requests` does not render.
+  #   * `^R`        — `RepeaterView#group_framing_refusal` (Fuzz::ChainError): the pane's
+  #     Content-Length is chunk 1's, and a whole-buffer send would read it as the whole
+  #     body's. `repeater_send`'s existing `rescue Fuzz::ChainError` surfaces it, which is
+  #     the same rescue round 6's chain refusal already used.
+  # Pinned because the two land from different branches and nothing else would notice if a
+  # later change re-opened either one.
+  it "refuses BOTH send buttons on a marked group buffer" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", MARKED_GROUP, false, true)
+
+    RepeaterController.group_marker_refusal(view.markers_active?).should_not be_nil
+
+    ex = expect_raises(Gori::Fuzz::ChainError) { view.request_bytes }
+    ex.message.not_nil!.should contain("%%%")
+  end
+end
+
+# `space ▸ M` is the third reader of the chunk-scoped pane, and the one the `^R` refusal did
+# not reach: `minimizable?` has no `%%%` clause, and minimize's own `resolve` re-syncs
+# Content-Length over the WHOLE buffer — the two-request-document-read-as-one framing `^R`
+# now refuses, applied once per probe send instead of once. `repeater_minimize` therefore
+# asks the view the same question through the same public route, and these pin that it
+# refuses exactly where `^R` does and nowhere else.
+describe "minimize on a live %%% group buffer" do
+  group = "POST /g1 HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nAAA\r\n" \
+          "%%%\r\nPOST /g2 HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nBB\r\n"
+
+  it "is refused, because it is the same whole-buffer framing ^R is refused" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", group, false, true)
+    # `minimizable?` alone does NOT stop it — this is why the gate is needed at all.
+    view.minimizable?.should be_true
+    view.request_text.should contain("Content-Length: 3")
+    # What repeater_minimize's `resolve` would hand Repeater::Minimize.run for EVERY probe
+    # send: the two-request document reframed as one.
+    resolved = String.new(Gori::Repeater::FlowRequest.resync_content_length(Gori::Env.expand_wire(view.request_text)))
+    resolved.should contain("Content-Length: 63")
+
+    reason = RepeaterController.whole_buffer_refusal(view)
+    reason.should_not be_nil
+    reason.not_nil!.should contain("%%%")
+  end
+
+  # The complements: the gate must not refuse a minimize that was never wrong. Each is a
+  # state in which nothing chunk-scoped is in the visible head.
+  it "is allowed with auto-CL off — the numbers are the operator's" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", group, false, false)
+    view.request_text.should contain("Content-Length: 99")
+    RepeaterController.whole_buffer_refusal(view).should be_nil
+  end
+
+  it "is allowed on h2 — the pane is never chunked there" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", group, false, true)
+    view.toggle_http2
+    view.request_text.should contain("Content-Length: 63") # whole buffer, not chunk 1
+    RepeaterController.whole_buffer_refusal(view).should be_nil
+  end
+
+  it "is allowed for an ordinary request with no %%%" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nAAA", false, true)
+    RepeaterController.whole_buffer_refusal(view).should be_nil
   end
 
   it "is untouched for a group with no markers" do
