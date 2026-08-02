@@ -162,53 +162,81 @@ describe "Gori::Tui::RepeaterView#pipeline_requests with live markers" do
   end
 end
 
-# `space ▸ M` is the third reader of the chunk-scoped pane, and the one the `^R` refusal did
-# not reach: `minimizable?` has no `%%%` clause, and minimize's own `resolve` re-syncs
-# Content-Length over the WHOLE buffer — the two-request-document-read-as-one framing `^R`
-# now refuses, applied once per probe send instead of once. `repeater_minimize` therefore
-# asks the view the same question through the same public route, and these pin that it
-# refuses exactly where `^R` does and nowhere else.
-describe "minimize on a live %%% group buffer" do
+# `space ▸ M` is the third whole-buffer reader, and the one the `^R` refusal did not reach:
+# `repeater_minimize` never calls `request_bytes`, and `minimizable?` had no `%%%` clause.
+#
+# `Minimize.run` reads its base text STRUCTURALLY as ONE request — head/body split, then
+# header / cookie / param candidates — so on a group buffer it strips lines out of the
+# operator's SECOND request and reports them as removals from the first. Measured against a
+# recording backend on a two-request buffer, and it is worse than "reads several as one":
+#
+#   auto-CL OFF  removed ["Cookie:sess", "Cookie:tracker", "Query:keep", "Query:junkA"]
+#                → request 2 left dangling inside the "minimized request", 7 probe sends
+#   auto-CL ON   removed [… , "Param:%%%\nGET /g2?other"]
+#                → the operator's ENTIRE second request deleted and reported as a removed
+#                  body PARAMETER; the result is request 1 alone
+#
+# The second is what `--apply` (and the TUI's write-back) would store over the session. So
+# the refusal is STRUCTURAL and must not be scoped to auto-CL — the peer's `group_document?`
+# — which is where minimize legitimately parts company with `^R`: with `^L` off a
+# whole-buffer `^R` is a byte-exact send and stays allowed, while minimize is meaningless
+# either way. The controller now reads the view's own `minimize_refusal`, which owns both
+# the predicate and the sentence, so what stops the run and what the operator is told cannot
+# drift.
+describe "minimize on a %%% group buffer" do
   group = "POST /g1 HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nAAA\r\n" \
           "%%%\r\nPOST /g2 HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nBB\r\n"
 
-  it "is refused, because it is the same whole-buffer framing ^R is refused" do
+  it "is refused, and the reason names the separator and the way out" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", group, false, true)
-    # `minimizable?` alone does NOT stop it — this is why the gate is needed at all.
-    view.minimizable?.should be_true
-    view.request_text.should contain("Content-Length: 3")
-    # What repeater_minimize's `resolve` would hand Repeater::Minimize.run for EVERY probe
-    # send: the two-request document reframed as one.
-    resolved = String.new(Gori::Repeater::FlowRequest.resync_content_length(Gori::Env.expand_wire(view.request_text)))
-    resolved.should contain("Content-Length: 63")
-
-    reason = RepeaterController.whole_buffer_refusal(view)
+    reason = view.minimize_refusal
     reason.should_not be_nil
     reason.not_nil!.should contain("%%%")
+    view.minimizable?.should be_false
   end
 
-  # The complements: the gate must not refuse a minimize that was never wrong. Each is a
-  # state in which nothing chunk-scoped is in the visible head.
-  it "is allowed with auto-CL off — the numbers are the operator's" do
+  # The correction to my first pass, which allowed this on the grounds that the visible
+  # numbers are the operator's. They are — and it is still meaningless, because the damage
+  # is structural, not arithmetic. Keep this example: it is the one that regresses if the
+  # refusal is ever re-scoped to auto-CL.
+  it "is refused with auto-CL OFF too — the damage is structural, not arithmetic" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", group, false, false)
-    view.request_text.should contain("Content-Length: 99")
-    RepeaterController.whole_buffer_refusal(view).should be_nil
+    view.request_text.should contain("Content-Length: 99") # the operator's own numbers…
+    view.minimize_refusal.should_not be_nil                # …and still refused
   end
 
-  it "is allowed on h2 — the pane is never chunked there" do
+  # The complements: the refusal must not stop a minimize that was never wrong.
+  it "is allowed on h2 — a lone %%% is not a separator there" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", group, false, true)
     view.toggle_http2
-    view.request_text.should contain("Content-Length: 63") # whole buffer, not chunk 1
-    RepeaterController.whole_buffer_refusal(view).should be_nil
+    view.request_text.should contain("Content-Length: 63") # whole buffer, never chunked
+    view.minimize_refusal.should be_nil
   end
 
   it "is allowed for an ordinary request with no %%%" do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nAAA", false, true)
-    RepeaterController.whole_buffer_refusal(view).should be_nil
+    view.minimize_refusal.should be_nil
+  end
+
+  # PROVENANCE, once more: a `%%%` the CAPTURE brought is body data, not a separator, so a
+  # minimize of that flow was never wrong and must still run.
+  it "is allowed for a capture whose body merely contains %%%" do
+    group_tmp_store do |store|
+      body = "line1\r\n%%%\r\nline2".to_slice
+      head = ("POST /p HTTP/1.1\r\nHost: h.test\r\nContent-Type: text/plain\r\n" \
+              "Content-Length: #{body.size}\r\n\r\n").to_slice
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/p", http_version: "HTTP/1.1", head: head, body: body))
+      view = RepeaterView.new
+      view.load(store.get_flow(id).not_nil!)
+      view.evidence?.should be_true
+      view.minimize_refusal.should be_nil
+    end
   end
 
   it "is untouched for a group with no markers" do

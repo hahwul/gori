@@ -187,6 +187,14 @@ module Gori
         unless Fuzz::Template.marker_regions(text).empty?
           abort "gori run repeater minimize: session ##{id} contains §fuzz§ markers — remove them first, or use `gori run fuzz` to sweep them"
         end
+        # The TUI refuses this too (repeater_view.cr#minimize_refusal). A saved request
+        # holding a lone `%%%` line is SEVERAL requests: minimize reads it as one, strips
+        # lines out of the operator's second request and reports them as removals from the
+        # first — and --apply then stores the remnant over the session. Reproduced: an
+        # 8-send run reporting `[param] %%%\nGET /g2?other` and saving request 1 alone.
+        if Repeater::Minimize.group_document?(text)
+          abort "gori run repeater minimize: session ##{id} holds a %%% separator — it is several requests, and minimize would read them as one (--apply would store the remnant); split them into one session each"
+        end
         # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
         # design, so the builder's unresolved-token refusal (#519) never runs for it and this
         # is the only place that check can happen (#524). Checked BEFORE the target parse: an
