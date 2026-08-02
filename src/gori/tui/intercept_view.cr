@@ -426,7 +426,11 @@ module Gori::Tui
       # case, which is most intercept edits, and it shipped different bytes to a live target.
       # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
       # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
-      raw = Env.expand_wire(@editor.wire_text)
+      #
+      # `Escape::Consume`: a forward goes STRAIGHT to the origin — there is no send-seam
+      # `expand_bindings` after this the way there is on every Repeater/Fuzzer path — so this
+      # pass is the last one and therefore the one that owes the operator `$$` → `$`.
+      raw = Env.expand_wire(@editor.wire_text, escape: Env::Escape::Consume)
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
@@ -487,8 +491,8 @@ module Gori::Tui
     # head shifts the line count, and the index would then overwrite an unrelated header.
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
-      return if @loaded_ws # no head to update — see pending_edit
-      raw = Env.expand_wire(@editor.wire_text)
+      return if @loaded_ws                                                   # no head to update — see pending_edit
+      raw = Env.expand_wire(@editor.wire_text, escape: Env::Escape::Consume) # see pending_edit
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first

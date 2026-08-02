@@ -273,8 +273,8 @@ module Gori::Fuzz
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
       # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.unbound` +
-      # `expand_bindings` later; this value is read ONCE, frozen into the plan, and never
+      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
+      # later; this value is read ONCE, frozen into the plan, and never
       # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
       # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
       # would move the dial target out from under a scope decision. Deferring bought nothing

@@ -149,10 +149,10 @@ module Gori
         # Calibration SENDS, so it belongs inside the block that releases the read
         # connection — a raise in there would otherwise leak it.
         begin
-          # Session bindings: seed the in-memory table, or refuse before the sweep rather
-          # than after every row of it. See CLI::Run.seed_bindings.
+          # Session bindings: seed the in-memory table before the sweep rather than after
+          # every row of it. See CLI::Run.seed_bindings. An unseeded `$NAME` is not refused —
+          # it ships literally (see `Env.unbound`).
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run fuzz")
-          preflight_bindings(text, bind_from, "gori run fuzz")
           plan.engine.calibrate_baseline if auto_cal
           run_fuzz_stream(plan.engine, mode, origin.scheme, origin.host, origin.port, format, force,
             fail_if_no_matches, plan.pool, max_requests)
@@ -309,11 +309,11 @@ module Gori
         extra = p.requests > p.sent ? " · #{p.requests} requests on the wire" : ""
         STDERR.puts "done · #{p.sent} sent#{extra} · #{emitted} shown · #{p.errors} errors#{ev.stopped ? " (stopped)" : ""}"
         warn_fuzz_budget(p, max_requests)
-        # Sends stopped BEFORE the socket (Sandbox, an exclude rule, an unbound binding). They
-        # already appear as per-row errors, but a run that is 100% refused reads as "the
-        # target is down" unless the gate is named once, with its remedy.
+        # Sends stopped BEFORE the socket (Sandbox, an exclude rule). They already appear as
+        # per-row errors, but a run that is 100% refused reads as "the target is down" unless
+        # the gate is named once.
         if (blocked = ev.progress.blocked) > 0
-          note = blocked_reason_line(ev.progress.blocked_reason, "gori run fuzz")
+          note = ev.progress.blocked_reason
           STDERR.puts "blocked · #{blocked} refused before the socket#{note ? " — #{note}" : ""}"
         end
         # Handshakes actually paid for. Worth a line: it is how an operator sees whether the

@@ -1494,7 +1494,7 @@ module Gori::Tui
     # split exists for. And these are exactly the bytes `expand_bindings` would have
     # rewritten, so the two cannot disagree about what was withheld. An UNBOUND declared
     # name is deliberately not reported: nothing would have been substituted for it on any
-    # surface, so there is no divergence to name (`Sender#refusal` owns that case).
+    # surface — evidence or draft — so there is no divergence to name.
     def self.literal_bindings(evidence : Bool, text : String) : Array(String)
       return [] of String unless evidence
       prefix = Gori::Settings.env_prefix

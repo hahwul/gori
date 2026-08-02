@@ -566,6 +566,25 @@ module Gori
         if parsed = Env.read_key_bytes?(bytes, i + plen, n)
           key, consumed = parsed
           # Declared by an extract rule but not bound yet → the rule must not apply.
+          #
+          # The send seams stopped refusing on this (see `Env.unbound`): everywhere else a
+          # `$NAME` with no value is a literal on the wire. This one stays, and it is not the
+          # same disposition wearing a different hat:
+          #
+          #   * It is a rule-scoped SKIP, not a send refusal. Nothing is blocked — the message
+          #     reaches the origin, just unrewritten. The policy that changed was about gori
+          #     refusing to send bytes the operator authored; here it sends them.
+          #   * A `replacement` is a REFERENCE by construction. It is the one field in the
+          #     product whose only purpose is to inject a value, so there is no captured-body
+          #     collision to protect: nobody's GraphQL document lands in this column by
+          #     accident. Emitting the seven characters `$SESSION` into an `Authorization`
+          #     header instead would put a known-wrong credential on EVERY proxied request,
+          #     silently, for as long as the rule is enabled.
+          #   * The two halves of the policy that actually matter against a collision are
+          #     already here and predate it: `$$` is the escape (below), and a name that is
+          #     neither a var nor declared stays LITERAL (`emit_key`).
+          #
+          # `report_refused` writes one warn event per (rule, binding revision) naming it.
           return Refused.new(Refusal::Unbound, key) if !vars.has_key?(key) && declared.includes?(key)
           return Refused.new(Refusal::Boundary, key) if head && forges_boundary?(vars, declared, key)
           i += emit_key(buf, bytes, vars, key, consumed, prefix, plen, regex)

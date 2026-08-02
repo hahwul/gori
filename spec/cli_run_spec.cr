@@ -676,49 +676,86 @@ describe "Gori::CLI::Run.open_store per-project network overrides" do
   end
 end
 
-# ── headless session bindings (F5) ────────────────────────────────────────────────────
+# ── headless session bindings (F5, revised round 7) ───────────────────────────────────
 #
 # A binding lives in the memory of the gori that observed it and is never persisted, and only
 # `Repeater::Sender` / the proxy write the table. `gori run` is one-shot per process, so a
-# `$SESSION` in a headless template could never acquire a value: every request was refused,
-# 100% of them, and the refusal ("nothing has extracted it yet") read as "wait and retry".
-# These pin the two halves of the answer — the pre-flight abort, and the prescription that
-# names the way out.
-module Gori::CLI::Run
-  def self.bindings_hint_for_spec(cmd : String) : String
-    bindings_headless_hint(cmd)
+# `$SESSION` in a headless template could never acquire a value — and gori used to REFUSE
+# every such send, with a pre-flight abort and a prescription naming `--bind-from`.
+#
+# That refusal is GONE. These three specs are inverted deliberately: the owner's policy is
+# that `$NAME` with a value follows the value and `$NAME` without one is a literal string on
+# the wire, never a refusal. The refusal's collateral was the reason — the token grammar is
+# byte-identical to GraphQL's `$id`, Mongo's `$ne` and JSON Schema's `$ref`, so one extract
+# rule named `id` made every captured GraphQL body in the project unsendable.
+#
+# `--bind-from` still exists and is still the way to give the name a value; it is simply no
+# longer the difference between a run and an abort.
+# A minimal `Env::Layer` for the two policy halves: `declared` names an extract rule holds,
+# `values` the subset that has actually bound.
+private class SpecBindingLayer < Gori::Env::Layer
+  def initialize(@declared : Array(String), @values : Hash(String, String))
   end
 
-  def self.blocked_reason_for_spec(reason : String?, cmd : String) : String?
-    blocked_reason_line(reason, cmd)
+  def declared : Array(String)
+    @declared
+  end
+
+  def values : Hash(String, String)
+    @values
+  end
+
+  def rev : UInt64
+    1_u64
   end
 end
 
-describe "Gori::CLI::Run — the headless binding refusal" do
-  it "names the one-process limitation and the flag that resolves it" do
-    hint = Gori::CLI::Run.bindings_hint_for_spec("gori run fuzz")
-    hint.should contain("ONE process")
-    hint.should contain("--bind-from")
-    hint.should contain("gori mcp") # the other way out, which already worked
+private def with_env_layer(layer : Gori::Env::Layer, &)
+  prev_layer = Gori::Env.layer
+  prev_prefix = Gori::Settings.env_prefix
+  prev_global = Gori::Settings.env_vars
+  prev_project = Gori::Settings.project_env_vars
+  Gori::Settings.env_prefix = "$"
+  Gori::Settings.env_vars = [] of {String, String}
+  Gori::Settings.project_env_vars = [] of {String, String}
+  Gori::Env.layer = layer
+  begin
+    yield
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.env_prefix = prev_prefix
+    Gori::Settings.env_vars = prev_global
+    Gori::Settings.project_env_vars = prev_project
+  end
+end
+
+describe "Gori::CLI::Run — a headless unbound binding" do
+  it "reports the name without refusing anything" do
+    layer = SpecBindingLayer.new(declared: ["SESS"], values: {} of String => String)
+    with_env_layer(layer) do
+      # Still a REPORT — `Rules#report_refused` is its one remaining consumer.
+      Gori::Env.unbound("Cookie: sid=$SESS").should eq(["SESS"])
+      # …and the bytes are unchanged, so the token reaches the wire literally.
+      wire = "GET /a HTTP/1.1\r\nCookie: sid=$SESS\r\n\r\n"
+      String.new(Gori::Env.expand_bindings(wire.to_slice)).should eq(wire)
+    end
   end
 
-  # Only the unbound-binding refusal gets the prescription. A Sandbox / exclude block has its
-  # own remedy (Outbound.remedy) and must not collect a second, wrong one.
-  it "attaches the prescription to an unbound-binding reason and nothing else" do
-    unbound = Gori::Env.unbound_error(["SESS"])
-    line = Gori::CLI::Run.blocked_reason_for_spec(unbound, "gori run mine").to_s
-    line.should contain("$SESS")
-    line.should contain("--bind-from")
-
-    sandbox = "blocked by sandbox mode"
-    Gori::CLI::Run.blocked_reason_for_spec(sandbox, "gori run mine").should eq(sandbox)
-    Gori::CLI::Run.blocked_reason_for_spec(nil, "gori run mine").should be_nil
+  it "expands the same name once it HAS a value (the other half of the policy)" do
+    layer = SpecBindingLayer.new(declared: ["SESS"], values: {"SESS" => "TOKENVALUE"})
+    with_env_layer(layer) do
+      wire = "GET /a HTTP/1.1\r\nCookie: sid=$SESS\r\n\r\n"
+      String.new(Gori::Env.expand_bindings(wire.to_slice))
+        .should eq("GET /a HTTP/1.1\r\nCookie: sid=TOKENVALUE\r\n\r\n")
+    end
   end
 
-  # The recogniser is a shared constant, not a substring literal repeated at the far end —
-  # the two spellings must not be able to drift apart.
-  it "recognises its own sentence through Env::UNBOUND_PREFIX" do
-    Gori::Env.unbound_error(["A"]).starts_with?(Gori::Env::UNBOUND_PREFIX).should be_true
+  it "gives the operator $$ as the escape when the name DOES resolve" do
+    layer = SpecBindingLayer.new(declared: ["SESS"], values: {"SESS" => "TOKENVALUE"})
+    with_env_layer(layer) do
+      wire = "POST /g HTTP/1.1\r\nContent-Length: 9\r\n\r\n{\"q\":\"$$SESS\"}"
+      String.new(Gori::Env.expand_bindings(wire.to_slice)).should contain("{\"q\":\"$SESS\"}")
+    end
   end
 end
 

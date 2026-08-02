@@ -249,7 +249,7 @@ describe Gori::Repeater::Plan do
       String.new(plan.h2_body.not_nil!).should eq("payload")
     end
 
-    # `refusal`, the scope gate and `unbound_refusal?` all key off a request LINE, and a
+    # `refusal` and the scope gate both key off a request LINE, and a
     # field-native send has no head text — so `requests` holds ONE synthetic scope line built
     # from the FIRST :method/:path (the pair a receiver routes on). This pins that derivation
     # so the scope decision cannot silently start reading `/` for every field-native send.

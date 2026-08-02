@@ -217,8 +217,8 @@ module Gori::Repeater
     # The field-native request (see `PlanOptions#h2_fields`), or nil for the ordinary byte
     # path. When present, `send` encodes THESE fields rather than `bytes`, and the surfaces
     # that REPORT the wire render the faithful `H2Engine.field_dump` off them rather than the
-    # lossy h1 projection. `requests` still holds one synthetic scope line so `refusal`, the
-    # scope gate and `unbound_refusal?` work unchanged.
+    # lossy h1 projection. `requests` still holds one synthetic scope line so `refusal` and
+    # the scope gate work unchanged.
     getter h2_fields : Array({String, String})?
     getter h2_body : Bytes?
 
@@ -238,12 +238,6 @@ module Gori::Repeater
     # rather than sending a partial, misleading sequence.
     def refusal : String?
       @sender.group_refusal(@requests)
-    end
-
-    # Whether `refusal` is the unbound-binding rule rather than Sandbox — see
-    # `Sender#unbound_refusal?`. Only a surface that must NAME the remedy asks this.
-    def unbound_refusal? : Bool
-      @sender.unbound_refusal?(@requests)
     end
 
     def send : Result
@@ -347,8 +341,8 @@ module Gori::Repeater
       end
 
       # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.unbound` +
-      # `expand_bindings` later; this value is read ONCE, frozen into the plan, and never
+      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
+      # later; this value is read ONCE, frozen into the plan, and never
       # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
       # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
       # would move the dial target out from under a scope decision. Deferring bought nothing
@@ -393,8 +387,8 @@ module Gori::Repeater
 
     # A field-native h2 send: dial origin + SNI resolution, then a `Sender` whose `send` will
     # encode the fields verbatim. `requests` carries ONE synthetic scope line
-    # (`H2Engine.field_scope_line`) so `refusal`/`unbound_refusal?`/the scope gate — all of
-    # which key off a request line — work with no special case. The scheme check and the SNI
+    # (`H2Engine.field_scope_line`) so `refusal` and the scope gate — both of which key off a
+    # request line — work with no special case. The scheme check and the SNI
     # expansion mirror the byte path; everything the byte path does to the WIRE bytes (env
     # expansion, Content-Length, version-line, field-case) is deliberately absent, because a
     # field list is already the exact message.
