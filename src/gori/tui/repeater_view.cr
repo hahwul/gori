@@ -409,37 +409,25 @@ module Gori::Tui
     # genuinely invalid UTF-8 (round 4's T1), and every String rebuild that walks chars
     # rewrites those bytes to U+FFFD — measured, on this very fixture, turning
     # `ff fe 01 02` into `ef bf bd ef bf bd 01 02` and inflating Content-Length with it.
+    # The escape itself is `Fuzz::Template.escape_literal_markers`, not a second copy of the
+    # loop: the OTHER road into a fuzz template — `FuzzerView#load`, ⇧I from History — escapes
+    # at its own seam with that helper, and two spellings of one rule is the drift this branch
+    # spent three round-trips removing for the `%%%` separator. Only the PROVENANCE question
+    # (`markers_live?`) is ours; the byte rule belongs to the template.
+    #
+    # Each road escapes exactly once: `space ▸ f` goes runner/fuzzer.cr → here →
+    # `FuzzerView#load_request`, which sets the text unescaped, so a captured `§` is never
+    # doubled.
+    # The `marker_bytes_in?` guard is LOAD-BEARING, not a redundant pre-check.
+    # `escape_literal_markers` returns `raw` itself when there is no `§`, but `String.new(Bytes)`
+    # always copies — so collapsing this to one line would copy the whole request buffer on
+    # every marker-free `space ▸ f`, which is the overwhelmingly common seed and exactly the
+    # allocation the helper's own comment says it avoids.
     def fuzz_seed_text : String
       text = request_text
       src = text.to_slice
-      return text if markers_live? || !RepeaterView.marker_bytes_in?(src)
-      io = IO::Memory.new(src.size + 8)
-      i = 0
-      while i < src.size
-        if marker_byte_pair?(src, i)
-          io.write(Fuzz::Template::MARKER_BYTES) # §§ — one literal § after `parse`
-          io.write(Fuzz::Template::MARKER_BYTES)
-          i += 2
-        else
-          io.write_byte(src[i])
-          i += 1
-        end
-      end
-      String.new(io.to_slice)
-    end
-
-    # `§` is U+00A7 = C2 A7. Byte-level so an invalid-UTF-8 capture is never walked as chars.
-    def self.marker_bytes_in?(b : Bytes) : Bool
-      i = 0
-      while i < b.size - 1
-        return true if b[i] == 0xC2_u8 && b[i + 1] == 0xA7_u8
-        i += 1
-      end
-      false
-    end
-
-    private def marker_byte_pair?(b : Bytes, i : Int32) : Bool
-      b[i] == 0xC2_u8 && i + 1 < b.size && b[i + 1] == 0xA7_u8
+      return text if markers_live? || !Fuzz::Template.marker_bytes_in?(src)
+      String.new(Fuzz::Template.escape_literal_markers(src))
     end
 
     # The buffer the external editor (^E) round-trips: the ACTIVE request sub-pane — the
@@ -2108,7 +2096,7 @@ module Gori::Tui
     # only state the REQUEST border needs a chip for (a marker-free request renders exactly
     # as before).
     def literal_markers? : Bool
-      !markers_live? && RepeaterView.marker_bytes_in?(@editor.text.to_slice)
+      !markers_live? && Fuzz::Template.marker_bytes_in?(@editor.text.to_slice)
     end
 
     private def declare_markers : Nil
