@@ -53,9 +53,10 @@ module Gori::Repeater
     # The Repeater's group separator: a lone line of exactly this splits a request buffer
     # into the requests `space ▸ g` pipelines over one connection.
     #
-    # Duplicated from `Tui::RepeaterView::PIPELINE_SEP` on purpose — nothing in `cli/` or
-    # `mcp/` reaches into `tui/`, and these two surfaces need the same answer. The TUI's
-    # copy should collapse onto this one; until it does, the two must be changed together.
+    # THE definition, for every surface. It was briefly duplicated in
+    # `Tui::RepeaterView::PIPELINE_SEP` because nothing in `cli/` or `mcp/` may reach into
+    # `tui/`; the dependency runs the other way, so that copy is now an alias of this one and
+    # there is a single spelling again. Change it here.
     GROUP_SEP = "%%%"
 
     # True when `text` is SEVERAL requests rather than one — it holds a lone `%%%` line.

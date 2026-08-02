@@ -1162,7 +1162,16 @@ module Gori::Tui
 
     # A lone line of exactly this (trimmed) splits the editor into the requests a "send
     # group" pipelines on one connection.
-    PIPELINE_SEP = "%%%"
+    #
+    # Aliased to the ENGINE's constant rather than spelling `"%%%"` again. It was duplicated
+    # for a real reason — nothing in `cli/` or `mcp/` may reach into `tui/`, so the headless
+    # minimize surfaces could not have taken it from here — but the dependency runs the other
+    # way and the TUI can take it from them. Four surfaces now refuse or split on this
+    # separator; two spellings of it was the last drift left in that set, and a separator the
+    # TUI and the engine disagreed about is precisely the "two places decide the split"
+    # failure this whole seam exists to prevent. The local name stays: the comments here are
+    # about pipelining, not about minimize.
+    PIPELINE_SEP = Repeater::Minimize::GROUP_SEP
 
     # A group send is meaningful only in plain HTTP text mode (hex / gRPC / WS / decode /
     # MARK have their own byte semantics), over HTTP/1.1 (send_pipeline is an h1 primitive).
