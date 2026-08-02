@@ -138,6 +138,15 @@ module Gori
           return err("repeater #{id} contains §fuzz§ markers — remove them first, or use fuzz_start to sweep them",
             "INVALID_ARGUMENT", field: "repeater_id")
         end
+        # The TUI refuses this too (repeater_view.cr#minimize_refusal). A saved request
+        # holding a lone `%%%` line is SEVERAL requests: minimize reads it as one, strips
+        # lines out of the operator's second request and reports them as removals from the
+        # first — and apply:true then stores the remnant over the session. An agent calling
+        # this would destroy the operator's group and be told it optimised it.
+        if Repeater::Minimize.group_document?(text)
+          return err("repeater #{id} holds a %%% separator — it is several requests, and minimize would read them as one (apply:true would store the remnant); split them into one session each",
+            "INVALID_ARGUMENT", field: "repeater_id")
+        end
         # Minimize dials `Fuzz::Sender` directly rather than through `Repeater::Plan`, by
         # design, so the builder's dial-tuple refusal never runs for it and this is the only
         # place that check can happen (#524). Checked BEFORE the target parse: an unresolved

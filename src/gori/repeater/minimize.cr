@@ -50,6 +50,40 @@ module Gori::Repeater
     # near-static page still gets a non-zero tolerance band. Mirrors Miner's stability_rounds.
     CALIBRATION_ROUNDS = 3
 
+    # The Repeater's group separator: a lone line of exactly this splits a request buffer
+    # into the requests `space ▸ g` pipelines over one connection.
+    #
+    # Duplicated from `Tui::RepeaterView::PIPELINE_SEP` on purpose — nothing in `cli/` or
+    # `mcp/` reaches into `tui/`, and these two surfaces need the same answer. The TUI's
+    # copy should collapse onto this one; until it does, the two must be changed together.
+    GROUP_SEP = "%%%"
+
+    # True when `text` is SEVERAL requests rather than one — it holds a lone `%%%` line.
+    #
+    # `run` below reads its base text structurally as ONE request (head/body split, then
+    # header / cookie / param candidates), so on a group buffer it strips lines out of the
+    # operator's SECOND request and reports them as removals from the first. Measured on a
+    # saved two-request session through `gori run repeater minimize --apply`:
+    #
+    #     minimized: removed 2 cookies, 3 params (8 sends)
+    #       - [param] %%%\nGET /g2?other      ← the entire second request, as a body PARAM
+    #     saved back to session #1
+    #     GET /g1 HTTP/1.1 …                  ← request 2 gone from the store, exit 0
+    #
+    # i.e. operator material destroyed irreversibly and reported as a clean optimisation.
+    # The TUI refuses it via `RepeaterView#minimize_refusal`; this is the predicate its two
+    # headless siblings refuse on, and it lives here so all three cannot drift about what
+    # "several requests" means.
+    #
+    # Deliberately NOT provenance-aware, unlike the TUI's `group_document?`: a stored row
+    # carries no record of how many separators it was seeded with, so a CAPTURED body whose
+    # own bytes contain a lone `%%%` line is refused here too. That is the same exposure the
+    # `§fuzz§` guard beside each call site already accepts, and a named refusal of a run that
+    # would otherwise destroy the session is the cheaper error by a wide margin.
+    def self.group_document?(text : String) : Bool
+      text.split('\n').any? { |l| l.strip(" \t\r") == GROUP_SEP }
+    end
+
     enum Kind
       Header
       Cookie

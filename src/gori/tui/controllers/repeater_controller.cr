@@ -1304,11 +1304,10 @@ module Gori::Tui
     # request back into the editor when done. One minimize at a time, per project.
     def repeater_minimize : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      # `minimize_refusal` rather than `minimizable?`: the view now distinguishes three
-      # different reasons a buffer cannot be minimized (a non-text mode, live §markers, and a
-      # `%%%` group document), and the one sentence that used to cover them answers none of
-      # them for the third. Predicate and sentence come from the same method so they cannot
-      # drift — `minimizable?` is defined as `minimize_refusal.nil?`.
+      # `minimize_refusal`, not `minimizable?` + a sentence of our own: the view now owns
+      # BOTH the predicate and the wording (`minimizable?` is defined as this being nil), so
+      # the two cannot drift. The old sentence here named hex/gRPC/WS/decode and §markers,
+      # and answered none of the three problems for a `%%%` group document.
       if reason = view.minimize_refusal
         @host.status("minimize: #{reason}")
         return
