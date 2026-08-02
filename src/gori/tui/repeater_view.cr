@@ -19,6 +19,7 @@ require "../repeater/h2_engine"
 require "../repeater/ws_engine"
 require "../repeater/diff"
 require "../repeater/flow_request"
+require "../repeater/minimize" # PIPELINE_SEP aliases Minimize::GROUP_SEP
 require "../repeater/subtab_filter"
 require "../fuzz"
 require "../decoder"
