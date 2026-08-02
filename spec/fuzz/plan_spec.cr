@@ -325,3 +325,115 @@ describe Gori::Fuzz::Plan do
     end
   end
 end
+
+# PROVENANCE, on the `--mark` step of `Plan.build`.
+#
+# `--flow` / MCP `flow_id` seed the template with a capture's own bytes, and `--mark TOKEN`
+# is then applied to them. The wrap used `String#gsub(String, String)`, and Crystal delegates
+# that to the CHAR overload as soon as the needle is ONE BYTE long — char iteration
+# substitutes the three bytes of U+FFFD for every byte that is not valid UTF-8. So the SIZE
+# of the token decided whether the request survived: `--mark v` rewrote the bytes AROUND the
+# token it was asked to wrap, `--mark v=` did not.
+#
+# Measured through `gori run fuzz --request` against a recording origin, body
+# `v=1&bin=<ff fe 01 02>&w=2`:
+#   --mark v   →  50 3d 31 26 62 69 6e 3d ef bf bd ef bf bd 01 02 26 77 3d 32   CL 16 → 20
+#   --mark v=  →  50 31 26 62 69 6e 3d ff fe 01 02 26 77 3d 32                  intact
+# …and on the corrupt run gori printed "the template's Content-Length disagrees with its own
+# body", a disagreement it had just manufactured itself.
+describe "Gori::Fuzz::Plan --mark over bytes" do
+  # A latin-1/binary form field beside the token the operator marks. Deliberately NOT valid
+  # UTF-8, so it must be searched for BYTE-wise — no `String#includes?` may be used on it.
+  bin = Bytes[0xFF, 0xFE, 0x01, 0x02]
+  raw = String.build do |io|
+    io << "POST /f HTTP/1.1\r\nHost: t.test\r\n"
+    io << "Content-Type: application/x-www-form-urlencoded\r\n"
+    io << "Content-Length: 16\r\nConnection: close\r\n\r\n"
+    io << "v=1&bin="
+    io.write(bin)
+    io << "&w=2"
+  end
+  wire = raw.to_slice.to_a
+
+  keeps_bin = ->(b : Bytes) do
+    b.size >= bin.size && (0..(b.size - bin.size)).any? { |i| b[i, bin.size] == bin }
+  end
+
+  # `evidence: true` so `Env.expand_wire` is out of the way and the mark step is the only
+  # thing under test — which is also the provenance the defect matters on.
+  plan_for = ->(marks : Array(String)) do
+    F::Plan.build(F::PlanOptions.new(raw, evidence: true, target: "http://t.test",
+      marks: marks, sources: [F::InlineList.new(["P"])] of F::PayloadSource,
+      config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+  end
+
+  it "a SINGLE-character --mark leaves every byte it was not asked to wrap alone" do
+    plan = plan_for.call(["v"])
+    plan.mark_matches.should eq([{"v", 1}])
+    plan.template.position_count.should eq(1)
+    plan.template.positions[0].default.should eq("v")
+    # The template renders straight back to the capture — the marking added `§…§` and
+    # nothing else, so `render(defaults)` is the wire again.
+    plan.template.render(plan.template.default_payloads).to_a.should eq(wire)
+    keeps_bin.call(plan.generator.baseline_raw).should be_true
+    # …and gori therefore has no Content-Length disagreement to report, because it did not
+    # manufacture one.
+    plan.rewrites_content_length?.should be_false
+  end
+
+  it "sends the marked candidate with the capture's bytes intact" do
+    sent = [] of Bytes
+    plan_for.call(["v"]).generator.each { |j| sent << j.bytes }
+    sent.size.should eq(1)
+    keeps_bin.call(sent[0]).should be_true
+    # `v` → `P`: same length, so the body is the capture with that one byte swapped.
+    expected = wire.dup
+    expected[expected.index(0x76_u8).not_nil!] = 0x50_u8
+    sent[0].to_a.should eq(expected)
+  end
+
+  it "counts occurrences byte-wise, so the count and the wrapping agree" do
+    plan = plan_for.call(["="])
+    plan.mark_matches.should eq([{"=", 3}]) # `v=`, `bin=`, `w=` — the head carries none
+    plan.template.position_count.should eq(3)
+    keeps_bin.call(plan.generator.baseline_raw).should be_true
+  end
+
+  # COMPLEMENT: a MULTI-character token was already byte-safe and must stay byte-identical.
+  it "is unchanged for a multi-character token" do
+    plan = plan_for.call(["v="])
+    plan.mark_matches.should eq([{"v=", 1}])
+    plan.template.positions[0].default.should eq("v=")
+    plan.template.render(plan.template.default_payloads).to_a.should eq(wire)
+    keeps_bin.call(plan.generator.baseline_raw).should be_true
+  end
+
+  # COMPLEMENT: a token that does not occur is a no-op, and the ones next to it still apply.
+  it "is unchanged for a token that does not occur in the template" do
+    plan = plan_for.call(["ZZZ", "v="])
+    plan.mark_matches.should eq([{"ZZZ", 0}, {"v=", 1}])
+    plan.template.position_count.should eq(1)
+    plan.template.render(plan.template.default_payloads).to_a.should eq(wire)
+  end
+
+  # COMPLEMENT: valid UTF-8, including multibyte, behaves exactly as before — both when the
+  # SUBJECT is multibyte and when the TOKEN is (`§` is two BYTES but one CHAR, and it is the
+  # byte count that decides which `gsub` overload runs).
+  it "is unchanged on valid multibyte text" do
+    utf8_body = "v=1&name=관리자🐿️&w=2"
+    utf8 = "POST /f HTTP/1.1\r\nHost: t.test\r\n" \
+           "Content-Length: #{utf8_body.bytesize}\r\n\r\n#{utf8_body}"
+    plan = F::Plan.build(F::PlanOptions.new(utf8, evidence: true, target: "http://t.test",
+      marks: ["v"], sources: [F::InlineList.new(["P"])] of F::PayloadSource,
+      config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+    plan.template.render(plan.template.default_payloads).to_a.should eq(utf8.to_slice.to_a)
+    String.new(plan.generator.baseline_raw).should contain("name=관리자🐿️")
+
+    korean = "GET /?q=관리자 HTTP/1.1\r\nHost: t.test\r\n\r\n"
+    kplan = F::Plan.build(F::PlanOptions.new(korean, evidence: true, target: "http://t.test",
+      marks: ["관"], sources: [F::InlineList.new(["P"])] of F::PayloadSource,
+      config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+    kplan.mark_matches.should eq([{"관", 1}])
+    String.new(kplan.template.render(["P"])).should contain("q=P리자")
+  end
+end

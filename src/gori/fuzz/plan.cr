@@ -216,11 +216,9 @@ module Gori::Fuzz
                String.new(Env.expand_wire(options.template))
              end
       text = Template.auto_mark(text) if options.auto_mark?
-      marker = Template::MARKER
       mark_matches = options.marks.map do |tok|
-        occ = {tok, occurrences(text, tok)}
-        text = text.gsub(tok, "#{marker}#{tok}#{marker}")
-        occ
+        text, count = wrap_token(text, tok)
+        {tok, count}
       end
       template = Template.parse(text, options.http2?)
       raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if template.position_count == 0
@@ -348,17 +346,54 @@ module Gori::Fuzz
                            "(list the converters with `gori run decoder list`)")
     end
 
-    # Non-overlapping occurrences of a literal token (mirrors what `String#gsub` will
-    # replace), so a surface can warn about a short token matching far more than intended.
-    private def self.occurrences(text : String, token : String) : Int32
-      return 0 if token.empty?
+    # Wrap every non-overlapping occurrence of a literal `--mark` / MCP `marks` token in
+    # `§…§`, returning {new text, occurrence count} — one pass, so the count a surface warns
+    # with is by construction the number of positions that were actually made.
+    #
+    # BYTE SAFETY — read before reaching for `String#gsub` here. `text` can be a CAPTURE's
+    # own bytes (`--flow`, MCP `flow_id`), which may legitimately not be valid UTF-8: a
+    # protobuf/gRPC frame, a gzip'd POST, a latin-1 form field. `String#gsub(String, String)`
+    # delegates to the CHAR overload as soon as the needle is ONE BYTE long, and Crystal's
+    # char iteration substitutes the three bytes of U+FFFD for every byte that is not valid
+    # UTF-8 — so the LENGTH of the operator's token silently decided whether the request
+    # survived. Measured through `gori run fuzz --request` against a recording origin, on a
+    # body `v=1&bin=<ff fe 01 02>&w=2`:
+    #
+    #   --mark v   →  50 3d 31 26 62 69 6e 3d ef bf bd ef bf bd 01 02 26 77 3d 32   CL 16 → 20
+    #   --mark v=  →  50 31 26 62 69 6e 3d ff fe 01 02 26 77 3d 32                  intact
+    #
+    # …and on the corrupt run gori then printed "the template's Content-Length disagrees with
+    # its own body", about a disagreement it had just manufactured. This is the headless twin
+    # of the ^K marking defect; the rule is the same one written down under
+    # `Fuzz::Template.split_raw_interior` — bytes in, bytes out, never a char walk.
+    #
+    # Returns `text` ITSELF when the token does not occur, so the common case is
+    # byte-identical and allocation-free.
+    private def self.wrap_token(text : String, token : String) : {String, Int32}
+      return {text, 0} if token.empty?
+      hay = text.to_slice
+      needle = token.to_slice
+      return {text, 0} if needle.size > hay.size
+      marker = Template::MARKER_BYTES
+      io = IO::Memory.new(hay.size + 8)
       count = 0
-      idx = 0
-      while found = text.index(token, idx)
-        count += 1
-        idx = found + token.size
+      i = 0
+      last = hay.size - needle.size
+      while i <= last
+        if hay[i, needle.size] == needle
+          io.write(marker)
+          io.write(needle)
+          io.write(marker)
+          count += 1
+          i += needle.size
+        else
+          io.write_byte(hay[i])
+          i += 1
+        end
       end
-      count
+      return {text, 0} if count.zero?
+      io.write(hay[i..]) if i < hay.size
+      {String.new(io.to_slice), count}
     end
   end
 end

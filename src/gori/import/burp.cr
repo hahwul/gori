@@ -23,11 +23,26 @@ module Gori
       # `<mimetype>`, `<comment>`, …) is a projection of the raw messages we already store,
       # so it is ignored rather than trusted — the wire bytes are the truth (P7).
       def self.parse_file(path : String) : ParseResult
+        # NOT scrubbed. A `base64="false"` item carries its message INLINE, so a scrub of the
+        # file is a scrub of the wire bytes — and this importer's whole reason to exist is
+        # that those bytes survive. It used to `raw = raw.scrub unless raw.valid_encoding?`
+        # on the theory that scrubbing "keeps the scanner's ASCII needles working"; the
+        # scanner never needed it. `String#index` and `String#[]` agree on char boundaries
+        # even over invalid UTF-8, and `String#[](a, n)` COPIES the bytes of those chars
+        # rather than re-encoding them, so every needle below still lands where it did.
+        #
+        # What the scrub actually did, measured through `gori run import --burp` into a real
+        # store on a source body `a=1&bin=<ff fe 01 02>&b=2`:
+        #
+        #   stored request_body  61 3d 31 26 62 69 6e 3d ef bf bd ef bf bd 01 02 26 62 3d 32
+        #
+        # — 20 bytes under a stored head still declaring `Content-Length: 16`, reported as
+        # `count: 1, skipped: 0`. The store IS the evidence, so that loss was permanent.
+        #
+        # Text elements (`<url>`, `<host>`, `<time>`) are scrubbed where they are READ, in
+        # `text_of`: those really are text, and a byte that cannot be one has no meaning
+        # there. `bytes_of` is the path that must stay exact, and it never calls `text_of`.
         raw = File.read(path)
-        # A non-base64 `<request>`/`<response>` may carry raw bytes that are not valid UTF-8.
-        # Burp writes base64="true" for both by default, so this only guards the odd export;
-        # scrubbing keeps the scanner's ASCII needles working instead of raising mid-file.
-        raw = raw.scrub unless raw.valid_encoding?
         raise Gori::Error.new("not a Burp item export (no <items> root): #{path}") unless raw.includes?("<items")
 
         now = Time.utc.to_unix * 1_000_000
@@ -148,11 +163,16 @@ module Gori
         nil
       end
 
+      # The TEXT elements — `<url>`, `<host>`, `<protocol>`, `<port>`, `<time>`. These become
+      # a URL, a hostname and a timestamp, so a byte that is not valid UTF-8 has no meaning
+      # in them and scrubbing is the right answer; this is the only place the file is
+      # scrubbed at all, and `bytes_of` deliberately does not come through here.
       private def self.text_of(src : String, name : String) : String
         el = element(src, name)
         return "" unless el
         _, inner = el
-        cdata?(inner) ? uncdata(inner) : unescape(inner)
+        text = cdata?(inner) ? uncdata(inner) : unescape(inner)
+        text.valid_encoding? ? text : text.scrub
       end
 
       # `<request base64="true">` is the default; `base64="false"` means the message sits
@@ -181,28 +201,81 @@ module Gori
         s
       end
 
-      ENTITY = /&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/
+      AMP       = 0x26_u8 # '&'
+      HASH      = 0x23_u8 # '#'
+      LOWER_X   = 0x78_u8 # 'x'
+      SEMICOLON = 0x3B_u8 # ';'
 
+      # `&name;` / `&#123;` / `&#x1f;` decoding, done BYTE-wise.
+      #
+      # This was `text.gsub(ENTITY) { … }` over `/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/`, and a
+      # Regexp gsub walks its subject as chars — `bytes_of` calls this for a non-base64
+      # `<request>` that is not CDATA-wrapped, i.e. on wire bytes (see `parse_file`). The
+      # grammar is entirely ASCII, so a byte scan reads exactly what that pattern did and
+      # copies everything else through untouched.
       private def self.unescape(text : String) : String
-        return text unless text.includes?('&')
-        text.gsub(ENTITY) do |full, m|
-          e = m[1]
-          case e
-          when "amp"  then "&"
-          when "lt"   then "<"
-          when "gt"   then ">"
-          when "quot" then "\""
-          when "apos" then "'"
+        raw = text.to_slice
+        return text unless raw.includes?(AMP)
+        io = IO::Memory.new(raw.size)
+        i = 0
+        while i < raw.size
+          if raw[i] == AMP && (hit = entity_at(raw, i))
+            replacement, width = hit
+            io << replacement
+            i += width
           else
-            if e.starts_with?("#x") || e.starts_with?("#X")
-              e[2..].to_i?(16).try { |cp| safe_chr(cp) } || full
-            elsif e.starts_with?('#')
-              e[1..].to_i?.try { |cp| safe_chr(cp) } || full
-            else
-              full # an unknown named entity stays verbatim rather than vanishing
-            end
+            io.write_byte(raw[i])
+            i += 1
           end
         end
+        String.new(io.to_slice)
+      end
+
+      # {replacement text, bytes consumed} for the entity starting at `raw[at] == '&'`, or
+      # nil when what follows is not one — in which case the caller copies the `&` through,
+      # which is what the old pattern's "no match" did. Deliberately as strict as that
+      # pattern was, uppercase `&#X41;` included: it never matched `#x[0-9a-fA-F]+`, so it
+      # stayed verbatim then and stays verbatim now.
+      private def self.entity_at(raw : Bytes, at : Int32) : {String, Int32}?
+        j = at + 1
+        return nil if j >= raw.size
+        numeric = raw[j] == HASH
+        j += 1 if numeric
+        hex = numeric && j < raw.size && raw[j] == LOWER_X
+        j += 1 if hex
+        stop = entity_body_end(raw, j, numeric, hex)
+        return nil unless stop
+        name = String.new(raw[j, stop - j])
+        text = numeric ? numeric_entity(name, hex) : NAMED_ENTITIES[name]?
+        text ? {text, stop + 1 - at} : nil
+      end
+
+      # Index of the `;` closing an entity body that starts at `from`, or nil when what sits
+      # there is not one: an empty body, a byte outside the branch's class, or no `;` at all.
+      private def self.entity_body_end(raw : Bytes, from : Int32, numeric : Bool, hex : Bool) : Int32?
+        j = from
+        while j < raw.size && entity_body_byte?(raw[j], numeric, hex)
+          j += 1
+        end
+        return nil if j == from || j >= raw.size || raw[j] != SEMICOLON
+        j
+      end
+
+      # An unknown named entity resolves to nil, i.e. stays verbatim rather than vanishing.
+      NAMED_ENTITIES = {"amp" => "&", "lt" => "<", "gt" => ">", "quot" => "\"", "apos" => "'"}
+
+      # `&#123;` / `&#x1f;`. nil for a codepoint that is not a `Char` (out of range, or a
+      # lone surrogate) and for one too large to parse — both stay verbatim, as they did.
+      private def self.numeric_entity(digits : String, hex : Bool) : String?
+        (hex ? digits.to_i?(16) : digits.to_i?).try { |cp| safe_chr(cp) }
+      end
+
+      # `[0-9a-fA-F]` / `[0-9]` / `[a-zA-Z]`, per the branch the `&` opened.
+      private def self.entity_body_byte?(b : UInt8, numeric : Bool, hex : Bool) : Bool
+        digit = 0x30_u8 <= b <= 0x39_u8
+        return digit || (0x61_u8 <= b <= 0x66_u8) || (0x41_u8 <= b <= 0x46_u8) if hex
+        return digit if numeric
+        (0x61_u8 <= b <= 0x7A_u8) || (0x41_u8 <= b <= 0x5A_u8)
       end
 
       private def self.safe_chr(codepoint : Int32) : String?
