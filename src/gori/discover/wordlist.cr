@@ -20,13 +20,30 @@ module Gori::Discover
       names = builtin.dup
       if path = user_path.try(&.strip)
         unless path.empty?
-          File.each_line(path) do |line|
-            stripped = line.strip
-            names << stripped unless stripped.empty? || stripped.starts_with?('#')
-          end
+          merge_user_file(path) { |line| names << line }
         end
       end
       dedup(names)
+    end
+
+    # The user merge file is operator MATERIAL, not a curated gori asset: a leading or
+    # trailing space/tab in a path SEGMENT is a real test (the classic IIS/ASP.NET
+    # trailing-space / trailing-dot access-control bypass pair), and the rest of the
+    # pipeline already carries it to the wire byte-exact once it survives the loader —
+    # only the loader was destroying it. So this reads with `chomp: true` (line-ending
+    # only, same fidelity as `Fuzz::WordlistFile#next_value`, payload.cr) and keeps the
+    # BLANK-LINE and `#`-COMMENT conventions (both standard for a line-oriented wordlist
+    # file, and neither is expressible any other way in the format) — but classifies
+    # blank/comment on the TRIMMED copy, never on the entry it yields, so
+    # `"zzadmin "` / `" zzadmin"` / `"zzTRAILTAB\t"` each survive as distinct, unstripped
+    # entries instead of being silently trimmed and then DEDUPED away against the
+    # trimmed twin (round 7, h1-seams.md FINDING 4).
+    private def self.merge_user_file(path : String, & : String ->) : Nil
+      File.each_line(path, chomp: true) do |line|
+        trimmed = line.strip
+        next if trimmed.empty? || trimmed.starts_with?('#')
+        yield line
+      end
     end
 
     private def self.parse(raw : String) : Array(String)

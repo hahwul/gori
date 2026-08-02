@@ -178,6 +178,55 @@ describe Gori::Proxy::H2::HeadCodec do
       marked.should end_with("X-Gori-Trailers: grpc-status\r\n\r\n")
     end
 
+    # Round 7 F3 / round 8 item 3 (axis 5: a diagnostic is not traffic — and the converse,
+    # traffic must not impersonate a diagnostic). gori does not enforce RFC 9113 §8.2.1
+    # lowercase field names on receive (an `X-Upper` field survives verbatim, right for a
+    # test tool), so a PEER can send a REAL field literally named `X-Gori-Trailers` with an
+    # ordinary response — no real trailer block required. Reproduced against
+    # `grpcorigin.py --scenario forgemarker` (round7/h2grpc): before this fix the peer's
+    # forged line and gori's own synthesized marker were byte-for-byte identical in the
+    # projected head, with the real trailers sandwiched in between.
+    it "renames an incoming field that collides with the trailer marker" do
+      fields = tuples([f(":status", "200"), f("X-Gori-Trailers", "grpc-status, grpc-message"),
+                        f("grpc-status", "0"), f("grpc-message", "all good")])
+      head = String.new(HeadCodec.synth_response(fields, ["grpc-status", "grpc-message"]))
+      # The peer's bytes are not thrown away (P7)…
+      head.should contain("X-Peer-X-Gori-Trailers: grpc-status, grpc-message")
+      # …but the UNPREFIXED marker name now names gori's diagnostic, and only that, exactly
+      # once — the forged line can no longer be read as gori's own.
+      head.should end_with("X-Gori-Trailers: grpc-status, grpc-message\r\n\r\n")
+      head.should_not contain("\nX-Gori-Trailers: grpc-status, grpc-message\r\nX-Gori-Trailers:")
+    end
+
+    # The wire's actual, RFC-compliant case (a real origin would send this, not the exact
+    # mixed-case marker) still collides on the marker STRING and must still be renamed.
+    it "renames the marker collision case-insensitively (the RFC-compliant lowercase form)" do
+      fields = tuples([f(":status", "200"), f("x-gori-trailers", "forged"), f("grpc-status", "0")])
+      head = String.new(HeadCodec.synth_response(fields, ["grpc-status"]))
+      head.should contain("X-Peer-x-gori-trailers: forged")
+      head.should_not contain("\nx-gori-trailers: forged")
+      head.should contain("X-Gori-Trailers: grpc-status") # gori's real marker, unambiguous
+    end
+
+    # Complement: an ordinary field name must never be touched.
+    it "does not rename a field with no marker collision" do
+      fields = tuples([f(":status", "200"), f("x-request-id", "abc")])
+      head = String.new(HeadCodec.synth_response(fields))
+      head.should contain("x-request-id: abc")
+      head.should_not contain("X-Peer-")
+    end
+
+    # Same guard on the request side, where a peer field could collide with the PUSH or
+    # protocol markers instead (`synth_request` shares `regular` with `synth_response`).
+    it "renames an incoming field colliding with the push/protocol markers (request side)" do
+      fields = req_fields + [f("X-Gori-Pushed", "forged"), f("X-Gori-Protocol", "forged")]
+      head = String.new(HeadCodec.synth_request(tuples(fields), "api.example.com", nil, 3_u32, "websocket"))
+      head.should contain("X-Peer-X-Gori-Pushed: forged")
+      head.should contain("X-Peer-X-Gori-Protocol: forged")
+      head.should contain("X-Gori-Pushed: server push promised on stream 3")
+      head.should contain("X-Gori-Protocol: websocket")
+    end
+
     # The marker is a CAPTURE-projection field. The rewrite path re-synthesizes from the LIVE
     # decoded fields and passes no trailer list, so this fabricated line can never be encoded
     # back onto an h2 wire — this pins that the round trip HeadRewrite drives stays clean.

@@ -140,13 +140,30 @@ module Gori
         end
       end
 
-      # A location the operator named with --locations that this request cannot carry (no
-      # matching existing body). Kept in the run rather than dropped, so say so instead of
-      # letting the name count quietly come up short.
+      # A location the operator named with --locations that this request cannot carry. Kept
+      # in the run rather than dropped, so say so instead of letting the name count quietly
+      # come up short.
       private def self.warn_mine_locations(plan : Miner::Plan) : Nil
         plan.inapplicable.each do |loc|
-          STDERR.puts "gori run mine: #{loc.label}: not applicable to this request (no matching existing body), skipping"
+          STDERR.puts "gori run mine: #{loc.label}: #{mine_inapplicable_reason(loc, plan.request)}, skipping"
         end
+      end
+
+      # "No matching existing body" is the right sentence for query/form/multipart/json when
+      # there truly is no such body — but wrong for `json` on a body that EXISTS and simply
+      # is not valid UTF-8: `Detect`/`Inject` correctly refuse to OFFER Json there (round 7 —
+      # `Miner::Inject#json_object_node_count` reports 0 rather than mining a `.scrub`-corrupted
+      # copy, since a non-UTF-8 body cannot round-trip through `JSON::Any`), but naming that
+      # refusal "no matching existing body" tells the operator the wrong thing about a request
+      # that plainly has a body. Give that one case its own accurate sentence.
+      private def self.mine_inapplicable_reason(loc : Miner::Location, request : Bytes) : String
+        if loc.json?
+          _, body, _ = Miner::Inject.split(request)
+          if !body.empty? && !String.new(body).valid_encoding?
+            return "the body is not valid UTF-8 and cannot round-trip through JSON"
+          end
+        end
+        "not applicable to this request (no matching existing body)"
       end
 
       # {raw request text (byte-exact, BEFORE Env expansion — Miner::Plan owns that),

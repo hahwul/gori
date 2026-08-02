@@ -496,8 +496,35 @@ module Gori::Proxy::H2
       fields.any? { |(n, _)| host_field?(n) }
     end
 
+    # Axis 5 (round 7 F3): a diagnostic is not traffic, and the converse — traffic must not
+    # be able to impersonate a diagnostic. `synth_request`/`synth_response` append
+    # `TRAILER_MARKER`/`PUSHED_MARKER`/`PROTOCOL_MARKER` into the SAME text namespace an
+    # incoming field occupies, and gori deliberately does not enforce RFC 9113 §8.2.1
+    # lowercase field names on receive (an `X-Upper` field survives verbatim — right for a
+    # test tool), so a hostile origin/CDN/WAF can send a REAL field literally named
+    # `X-Gori-Trailers` (gori's exact capitalisation) with an ordinary response — no real
+    # trailer block required. Reproduced: `grpcorigin.py --scenario forgemarker` puts
+    # `X-Gori-Trailers: grpc-status, grpc-message` in the INITIAL HEADERS, then sends real
+    # trailers; the projected head carried the peer's line and gori's own diagnostic back to
+    # back, byte-for-byte identical, with nothing distinguishing which is which.
+    #
+    # So an incoming field whose name collides with a marker (case-insensitively — the
+    # marker string comparison, not the wire's lowercase requirement) is renamed BEFORE it
+    # reaches the text, the same "stay injective, let the operator SEE the anomaly" discipline
+    # `line_safe` already applies to a CRLF in a value (#517): the peer's bytes are still
+    # shown, just under a name that cannot collide with gori's own.
+    private def peer_field_name(n : String) : String
+      reserved_marker?(n) ? "X-Peer-#{n}" : n
+    end
+
+    private def reserved_marker?(name : String) : Bool
+      name.compare(TRAILER_MARKER, case_insensitive: true) == 0 ||
+        name.compare(PUSHED_MARKER, case_insensitive: true) == 0 ||
+        name.compare(PROTOCOL_MARKER, case_insensitive: true) == 0
+    end
+
     private def regular(fields : Array({String, String}), &) : Nil
-      fields.each { |(n, v)| yield n, v unless pseudo?(n) }
+      fields.each { |(n, v)| yield peer_field_name(n), v unless pseudo?(n) }
     end
 
     # Regular fields in the rewritten head's order, LOWERCASED: an uppercase field name is
