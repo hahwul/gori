@@ -360,12 +360,34 @@ describe "Fuzz::Engine#follow_redirects — the collapsed Result's fields" do
   end
 
   it "does not invent a timed_out from a retried send" do
-    # `Fuzz::Result` has no `timed_out` field to leak it to a surface today, so this asserts
-    # on the Repeater::Result the follower builds, through the field that DOES reach a row.
-    r = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, nil, false, retried: true)
-    r.retried?.should be_true
-    r.timed_out?.should be_false
-    r.delivered?.should be_false
+    # `Fuzz::Result` now HAS a `timed_out` field (B1), so assert on the ROW a surface reads, not
+    # only on the Repeater::Result underneath: a keep-alive re-send must reach the row as
+    # `retried?` and must NOT show up there as `timed_out?`. (The defect was that `retried` once
+    # sat in the constructor slot `timed_out` had taken, so a re-send silently set `timed_out`.)
+    res, _ = follow([reply(302, "/next", retried: true), reply(200)])
+    res.retried?.should be_true
+    res.timed_out?.should be_false
+  end
+
+  # B3: a hop the gate refuses must NOT destroy the payload's real answer — the 302 an
+  # open-redirect probe is hunting. The row keeps status 302; the hop failure rides as a NOTE.
+  it "keeps the payload's 302 when the redirect hop is scope-refused, and notes the refusal" do
+    refused = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
+      Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+    res, backend = follow([reply(302, "/offsite"), refused])
+    backend.sent.size.should eq(2)          # the hop WAS attempted
+    res.status.should eq(302)               # …but the 302 survives the collapse
+    res.error.should_not be_nil
+    res.error.not_nil!.should contain("redirect hop refused")
+  end
+
+  # The complement: a hop that FAILS on the wire is treated the same — keep the 3xx, note it.
+  it "keeps the 302 when a redirect hop errors on the wire" do
+    dead = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "connection refused")
+    res, _ = follow([reply(302, "/next"), dead])
+    res.status.should eq(302)
+    res.error.not_nil!.should contain("redirect hop refused")
+    res.error.not_nil!.should contain("connection refused")
   end
 
   it "preserves a genuine timed_out on the last hop" do

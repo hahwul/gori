@@ -359,6 +359,23 @@ describe "gori run fuzz — errored result visibility (#410)" do
     buf.size.should eq(2) # the errored row + the match; the bare no-match was not buffered
     buf.any? { |r| r.error == "connect failed" }.should be_true
   end
+
+  # B1/B2: the retention gate must also keep a row whose only distinction is that its response
+  # was TRUNCATED (incomplete) or that `--retries` RE-SENT it — each a fact the run observed
+  # that a matched-only gate would drop, leaving the surface reading a clean short body / a
+  # single clean send. Both were added to the `emit_fuzz_result` predicate alongside `retried?`.
+  it "keeps an unmatched row that was re-sent by --retries, or whose response was incomplete" do
+    buf = [] of Gori::Fuzz::Result
+    resent = Gori::Fuzz::Result.new(index: 0_i64, payloads: ["p"], position: 0, status: 200,
+      length: 0_i64, words: 0, lines: 0, duration_us: 1_i64, error: nil, matched: false,
+      incomplete: false, extracted: nil, resent_count: 2)
+    incomplete = Gori::Fuzz::Result.new(index: 1_i64, payloads: ["p"], position: 0, status: 200,
+      length: 2_i64, words: 0, lines: 0, duration_us: 1_i64, error: nil, matched: false,
+      incomplete: true, extracted: nil)
+    Gori::CLI::Run.emit_fuzz_result_for_spec(resent, buf).should be_true
+    Gori::CLI::Run.emit_fuzz_result_for_spec(incomplete, buf).should be_true
+    buf.size.should eq(2)
+  end
 end
 
 # `gori run repeater send`'s session-replay resolution used to live in a private CLI helper

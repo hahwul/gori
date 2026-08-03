@@ -384,8 +384,11 @@ module Gori
         # the run whose request reached the origin twice, and dropping it here would put the
         # duplicate back where it was — invisible outside the connections summary. A row whose
         # `¦chain` did not run is shown for the same reason: its payload went out untransformed,
-        # and hiding it would return it to `0 errors` invisibility.
-        return false unless r.matched? || r.error || r.retried? || r.chain_error
+        # and hiding it would return it to `0 errors` invisibility. `incomplete?` (the captured
+        # response was truncated — a real finding that must not read as a clean short body) and
+        # `resent?` (a `--retries` config re-send) join for the same argument: each is a fact the
+        # run OBSERVED that vanishes if a matched-only gate drops the unmatched row carrying it.
+        return false unless r.matched? || r.error || r.retried? || r.resent? || r.incomplete? || r.chain_error
         case format
         when :jsonl then puts CLI::Output.fuzz_row_json(r)
         when :json  then buffer << r

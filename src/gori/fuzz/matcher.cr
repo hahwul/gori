@@ -276,7 +276,12 @@ module Gori::Fuzz
       Metrics.new(raw.response.try(&.status), body.size.to_i64, words, lines, raw.duration_us)
     end
 
-    def build(job : Job, raw : Repeater::Result) : Result
+    # `resent_count` is the number of CONFIG-retry re-sends `Engine#run_one` made after a
+    # network error (0 unless `--retries` fired); it is passed in because the retry loop lives
+    # in the engine, not here — this is the one build site for every Fuzz::Result, so the count
+    # has to arrive as an argument. `timed_out` rides straight off the Repeater result, the twin
+    # of the already-carried `incomplete?`: the engine observed both and, until now, dropped one.
+    def build(job : Job, raw : Repeater::Result, resent_count : Int32 = 0) : Result
       # The OUTGOING request, before anything is said about the response: a payload that
       # changed the gRPC message length leaves the 5-byte prefix declaring the old one.
       note_grpc_framing(job.bytes) if @grpc_template
@@ -302,7 +307,8 @@ module Gori::Fuzz
         head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil,
         request: keep ? present(job.bytes) : nil, retried: raw.retried?,
         chain_error: job.chain_error,
-        grpc_status: grpc_status, grpc_message: grpc_message)
+        grpc_status: grpc_status, grpc_message: grpc_message,
+        timed_out: raw.timed_out?, resent_count: resent_count)
     end
 
     # Count a rendered request whose gRPC framing a payload broke. Only reached while

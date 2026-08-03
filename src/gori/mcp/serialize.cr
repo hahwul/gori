@@ -268,6 +268,27 @@ module Gori
           # not. This is where an agent reads it; before, a re-send appeared nowhere but the
           # CLI's own connections summary.
           j.field "retried", true if r.retried?
+          # The `--retries` config re-sent this variation after a network error — DISTINCT from
+          # `retried` above (a keep-alive pool re-send). Emitted only when it happened, with the
+          # count, so an agent can tell a POST that finally stuck on try 3 from a clean single send.
+          if r.resent?
+            j.field "resent", true
+            j.field "resent_count", r.resent_count
+          end
+          # The captured response is SHORT — the origin closed early, the read deadline fired, or
+          # gori hit its capture ceiling — so `length`/`words`/`lines` above describe a fragment,
+          # not the whole response. Emitted only when it happened (like `chain_error`), with the
+          # SAME three-way sentence `CLI::Run.incomplete_reason` gives the Repeater, so an agent
+          # never reads one flow's truncation worded two different ways. That classifier keys off
+          # the raw captured body, which a metrics-only fuzz row keeps only under keep_bodies: an
+          # unmatched, body-dropped row still names the closed/timeout cause correctly, just not
+          # the ceiling one — the body itself is the only evidence for the ceiling, per the
+          # classifier's own doc. A synthetic Repeater::Result carries the body + timing across.
+          if r.incomplete?
+            j.field "incomplete", true
+            j.field "incomplete_reason",
+              CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
+          end
           # Present when record_history recorded this result as a History flow —
           # fetch its full request/response with get_flow (headers redacted).
           j.field "flow_id", flow_id if flow_id

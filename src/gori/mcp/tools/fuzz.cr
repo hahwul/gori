@@ -147,8 +147,11 @@ module Gori
       private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result, flow_id : Int64?) : Nil
         # A RE-SENT row is stored even when it did not match: its request reached the origin
         # twice, and "stored results are matched-only" would put the duplicate back out of an
-        # agent's reach entirely (the CLI at least printed a connections summary).
-        return unless r.matched? || r.retried?
+        # agent's reach entirely (the CLI at least printed a connections summary). `resent?` (a
+        # `--retries` config re-send) and `incomplete?` (the captured response was truncated) join
+        # for the same reason — each is a fact the run OBSERVED, and a matched-only gate would
+        # drop the unmatched row that carries it, so an agent reads `stored_results` as clean.
+        return unless r.matched? || r.retried? || r.resent? || r.incomplete?
         if fjob.results.size < FUZZ_MAX_STORED
           fjob.results << r
           fjob.result_flow_ids << flow_id

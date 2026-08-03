@@ -204,6 +204,23 @@ module Gori
           # Only when true. This is an exception rather than a per-row property, and a `false`
           # on every row of every clean run would bury the one row that matters.
           j.field "retried", true if r.retried?
+          # `--retries` re-sent this variation after a network error — DISTINCT from `retried`
+          # (a keep-alive pool re-send). Only when it happened, with the count.
+          if r.resent?
+            j.field "resent", true
+            j.field "resent_count", r.resent_count
+          end
+          # The captured response is SHORT (origin closed early / read deadline / capture
+          # ceiling), so `length`/`words`/`lines` describe a fragment. Only when it happened, with
+          # the SAME three-way sentence `CLI::Run.incomplete_reason` gives the Repeater and MCP so
+          # a truncation is never worded two ways. The classifier keys off the raw body, kept only
+          # under keep_bodies — an unmatched body-dropped row still names closed/timeout, just not
+          # the ceiling cause. A synthetic Repeater::Result forwards the body + timing.
+          if r.incomplete?
+            j.field "incomplete", true
+            j.field "incomplete_reason",
+              CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
+          end
         end
       end
 
@@ -421,9 +438,19 @@ module Gori
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).
           io << "  re-sent" if r.retried?
+          # A CONFIG-retry re-send (`--retries`), with its count — DISTINCT from the keep-alive
+          # `re-sent` above. Beside it because both qualify the SEND, not the response.
+          io << "  re-sent (" << r.resent_count << "×)" if r.resent?
           io << "  " << r.error if r.error
           # The transform declared for this payload did not run; the payload went out raw.
           io << "  ⚠ " << r.chain_error if r.chain_error
+          # A trailing clause when the captured response was cut short, with the SAME three-way
+          # sentence the Repeater appends (`Run.incomplete_reason`) so `length`/`words` above are
+          # not read as the whole response. Body-keyed ceiling detection is exact only when the
+          # body was kept (keep_bodies); a body-dropped row still names closed vs. timeout.
+          if r.incomplete?
+            io << "  " << Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
+          end
         end
       end
 

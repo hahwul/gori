@@ -116,11 +116,40 @@ module Gori
       # non-gRPC run's output is unchanged.
       getter grpc_status : Int32?
       getter grpc_message : String?
+      # The read that captured this response ended on an IDLE TIMEOUT — the origin held the
+      # socket open and simply stopped sending — rather than on a close or a completed body.
+      # `incomplete?` already says the captured body is SHORT; this says WHICH of the two events
+      # cut it, the twin of `Repeater::Result#timed_out?` (engine.cr:37). Until now `Fuzz::Result`
+      # had no such field at all: the engine observed both `incomplete?` and `timed_out?` and
+      # forwarded only the first, so `incomplete?` reached no consumer and a truncated body was
+      # reported as the whole response on every fuzz surface. Paired with `incomplete?` in the
+      # three-way `CLI::Run.incomplete_reason` classifier the Repeater already uses, so the two
+      # surfaces cannot come to word one flow's truncation differently. false for a completed
+      # send and for any failure that was not a read-deadline stall.
+      getter? timed_out : Bool
+      # How many times this variation was RE-SENT after a network error because `--retries` is on
+      # (a CONFIG retry). DISTINCT from `retried?` above, which is a keep-alive pool re-send on a
+      # parked socket the pool found closed — a caller must be able to tell "the pool redialed a
+      # dead socket" from "the request errored and `--retries` sent it again". `run_one` keeps
+      # re-sending every method on `--retries` by policy; the bug was never the re-send, it was
+      # that the row said nothing about it, so a POST that went out three times before it stuck
+      # read as a single clean send. It is also the count the run's `errors` adds per row: every
+      # superseded attempt is a failed send, and counting only the last one hid the rest inside
+      # `0 errors`. 0 = sent once, no config retry fired (the common path).
+      getter resent_count : Int32
+
+      # A CONFIG retry fired for this variation (see `resent_count`). Derived, not a second
+      # stored field: `resent_count > 0` IS "was it re-sent", and one field carries both the
+      # marker and the count. Deliberately separate from `retried?` (the keep-alive re-send).
+      def resent? : Bool
+        @resent_count > 0
+      end
 
       def initialize(@index, @payloads, @position, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @incomplete, @extracted,
                      @head = nil, @body = nil, @request = nil, @retried = false,
-                     @chain_error = nil, @grpc_status = nil, @grpc_message = nil)
+                     @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
+                     @timed_out = false, @resent_count = 0)
       end
     end
 

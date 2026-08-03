@@ -2211,6 +2211,12 @@ module Gori::Tui
         screen.text(x, y, "⚠ ¦chain not applied", Theme.yellow, bg, width: {inner.right - x, 0}.max)
       else
         line = "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}"
+        # Compact per-row markers — the detail panes carry the full story; here they flag a SHORT
+        # capture (so the size/words to the left aren't read as the whole response) and a
+        # `--retries` re-send, so a scan of the list catches both. Built from the row's own flags,
+        # not the CLI classifier: the TUI has no CLI dependency.
+        line += "  ⚠ incomplete" if r.incomplete?
+        line += "  ⟳ ×#{r.resent_count}" if r.resent?
         # For a gRPC target the h2 `:status` to the left is 200 by definition; THIS is the
         # call's real outcome. Only rendered when the response carried it, so a non-gRPC row
         # is unchanged — same fields `cli/output.cr:fuzz_row_text` already renders.
@@ -2602,6 +2608,12 @@ module Gori::Tui
       if ce = r.chain_error
         lines.unshift("(¦chain not applied: #{ce})")
       end
+      # The `--retries` config re-sent this request after a network error (DISTINCT from a
+      # keep-alive re-send) — a note here because it qualifies the REQUEST that went out, and
+      # the raw bytes above give no hint that they were sent more than once.
+      if r.resent?
+        lines.unshift("(re-sent #{r.resent_count}× after a network error — --retries)")
+      end
       lines
     end
 
@@ -2620,6 +2632,13 @@ module Gori::Tui
       if body && !body.empty?
         lines << ""
         lines.concat(String.new(body).scrub.split('\n').map(&.rstrip('\r')))
+      end
+      # The captured response was cut short (origin closed early, a read deadline fired, or the
+      # capture ceiling stopped the read), so what is shown above is a FRAGMENT. Flagged from the
+      # row's own flags, not the CLI classifier — the TUI has no CLI dependency — keeping the
+      # timeout distinction the operator needs to tell "raise the deadline" from "origin closed".
+      if r.incomplete?
+        lines.unshift(r.timed_out? ? "(incomplete — the read deadline expired; the response is truncated)" : "(incomplete — the response is truncated)")
       end
       lines
     end
