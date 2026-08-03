@@ -80,6 +80,14 @@ module Gori::Tui
       # {view, Jobs id, start-of-run request snapshot} of a running minimize. The snapshot
       # guards the writeback: if the user edited the request mid-run we must not overwrite it.
       @minimize_job = nil.as({RepeaterView, Int32, String}?)
+      # The running minimize's cancel token, held beside @minimize_job rather than inside it so
+      # the tuple keeps meaning exactly what its comment says. Set together with @minimize_job,
+      # cleared together with it; `stop` on it is what makes the background fiber stop reaching
+      # the origin (see Repeater::Minimize::Stop).
+      @minimize_stop = nil.as(Repeater::Minimize::Stop?)
+      # A refusal was applied to a view inline since the last drain (see #apply_refusal) — the
+      # next drain_results reports it so the shell still recomputes ^F hits and re-renders.
+      @refusal_applied = false
     end
 
     def tab : Symbol
@@ -826,7 +834,10 @@ module Gori::Tui
     # a background fiber; view state is mutated HERE, on the UI fiber that owns it).
     # Returns true if anything was applied (→ the shell re-runs search + marks dirty).
     def drain_results : Bool
-      applied = false
+      # Seeded from the inline-refusal flag, not false: a refusal never rides a channel (see
+      # #apply_refusal), so this is how the shell learns a response pane changed under it.
+      applied = @refusal_applied
+      @refusal_applied = false
       while pair = nonblocking_repeater_result
         view, result = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it would
@@ -893,6 +904,7 @@ module Gori::Tui
         job = mj[1]
         snapshot = mj[2]
         @minimize_job = nil
+        @minimize_stop = nil # the run is over; the token has nothing left to stop
       else
         job = nil
         snapshot = nil
@@ -1223,10 +1235,17 @@ module Gori::Tui
       closing = @repeaters[@current_repeater_idx].view
       # Finish a running minimize job NOW: once the view leaves @repeaters the drain drops
       # its remaining events (incl. the terminal Report), so jobs.finish would never run and
-      # the bottom-bar spinner would animate forever. The background fiber unwinds on its own.
+      # the bottom-bar spinner would animate forever.
+      #
+      # STOP the run as well as the job. Finishing the job alone only took the spinner off the
+      # bar: the fiber kept probing the origin up to Minimize::SEND_CAP times against a tab the
+      # operator had just closed, which is a live pentest tool talking to a target its operator
+      # believes it is disconnected from. `stop` is observed before the run's next send.
       if (mj = @minimize_job) && mj[0].same?(closing)
+        @minimize_stop.try(&.stop)
         @host.jobs.finish(mj[1], :stopped, "closed")
         @minimize_job = nil
+        @minimize_stop = nil
       end
       if id = @repeaters[@current_repeater_idx].db_id
         @host.session.store.delete_repeater(id) # also propagates the close to peer sessions
@@ -1236,16 +1255,55 @@ module Gori::Tui
       @host.status(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)")
     end
 
-    # Finish the one running minimize on a project-level exit (leave project / quit), for
-    # the same reason close_repeater_tab does it per tab: the Runner is about to unwind, so
-    # `drain_results` never runs again to see the terminal Report and the job would stay
-    # :running forever in a Jobs registry the next open no longer shares. Minimize has no
-    # `request_stop` seam (it is a capped, bounded probe run — see repeater_minimize), so
-    # finishing the job is the whole treatment here, exactly as at :1222.
+    # Stop the one running minimize on a project-level exit (leave project / quit), for the
+    # same reasons close_repeater_tab does it per tab. Two distinct halves:
+    #
+    #   * finish the JOB, because the Runner is about to unwind: `drain_results` never runs
+    #     again to see the terminal Report, so the job would stay :running forever in a Jobs
+    #     registry the next open no longer shares.
+    #   * stop the RUN, because a bounded probe run is not a stopped one. This used to read
+    #     "Minimize has no `request_stop` seam … so finishing the job is the whole treatment
+    #     here" — and that was the bug: the operator left the project, the spinner and the run
+    #     row vanished, the leave-confirm reported the job stopped, and the fiber kept sending
+    #     to the origin up to Minimize::SEND_CAP times. It has a seam now
+    #     (Repeater::Minimize::Stop), on the shape of DiscoverRun#request_stop.
     def stop_all : Nil
       return unless mj = @minimize_job
+      @minimize_stop.try(&.stop)
       @host.jobs.finish(mj[1], :stopped, "project closed")
       @minimize_job = nil
+      @minimize_stop = nil
+    end
+
+    # Apply a REFUSED send's result to its view here and now, on the UI fiber, instead of
+    # handing it to @repeater_results / @ws_results / @group_results.
+    #
+    # Those channels exist to carry a result from a BACKGROUND send fiber to the fiber that owns
+    # view state. A refusal never left the UI fiber — and that fiber is also the channels' only
+    # CONSUMER: `drain_results` runs only AFTER `drain_burst`, which handles up to
+    # `Runner::CHAR_DRAIN_CAP` (65_536) coalesceable events before returning, and Enter IS
+    # coalesceable (it carries `char: '\r'`). A bare `send` into an 8-slot buffer therefore
+    # parks the ONLY consumer inside `Channel#send` the moment a ninth refusal lands in one
+    # input burst: no input, no render, no drain, terminal left in raw/alt mode — while the
+    # proxy keeps capturing on other fibers, so the process still looks alive. A repeater tab
+    # whose target is refused (Sandbox on, or an EXCLUDE rule) plus a ten-line paste is enough;
+    # `PasteNewline` drops only the LF of each CR-LF pair, so ten lines deliver ten Enters.
+    #
+    # `select/when…/else` — what the three BACKGROUND sends beside these use — would unblock it
+    # by DROPPING, and that is the wrong trade for this message: a late result is redundant,
+    # whereas the refusal is the operator's only proof the send did not happen, and dropping it
+    # leaves the pane showing the previous response as if nothing had been attempted. Applying
+    # inline can neither block nor drop, and it lands a tick sooner. Safe because this is
+    # verbatim what the drain would have done on the same fiber (`view.apply` and friends are
+    # pure view state; the drain's store write + probe scan are gated on `result.ok?`, and a
+    # refusal never is).
+    #
+    # The flag is the one thing the hand-off still owed the shell: a true `drain_results` is
+    # what makes the Runner re-run `search_recompute` over the changed response pane and mark
+    # the frame dirty.
+    private def apply_refusal(& : -> Nil) : Nil
+      yield
+      @refusal_applied = true
     end
 
     def repeater_send : Nil
@@ -1274,7 +1332,7 @@ module Gori::Tui
       return unless plan = repeater_plan(view, [wire], http2: view.http2?)
       save_current_repeater # persist the request we're about to send (before it goes inflight)
       if reason = plan.refusal
-        results.send({view, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)})
+        apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)) }
         @host.status("repeater: #{reason}")
         return
       end
@@ -1378,10 +1436,13 @@ module Gori::Tui
         Repeater::Minimize::SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
+      # Captured as a local for the fiber (which must never read a controller ivar) AND kept on
+      # the controller, so close_repeater_tab / stop_all can reach the run they just ended.
+      stop = @minimize_stop = Repeater::Minimize::Stop.new
       events = @minimize_events
       @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
       spawn(name: "gori-minimize") do
-        report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) do |progress|
+        report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend, stop: stop) do |progress|
           select # progress pings are droppable — the terminal Report is not
           when events.send({view, progress})
           else
@@ -1401,7 +1462,8 @@ module Gori::Tui
       results = @ws_results
       return unless plan = repeater_plan(view, [view.ws_upgrade_bytes])
       if reason = plan.refusal
-        results.send({view, Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)})
+        # Inline, not through @ws_results — see the invariant on #apply_refusal.
+        apply_refusal { view.apply_ws(Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)) }
         @host.status("ws repeater: #{reason}")
         return
       end
@@ -1449,7 +1511,8 @@ module Gori::Tui
       # one connection, so partially sending would still reach the blocked path's origin.
       if reason = plan.refusal
         labeled = labels.map { |l| {l, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)} }
-        results.send({view, labeled})
+        # Inline, not through @group_results — see the invariant on #apply_refusal.
+        apply_refusal { view.apply_group(labeled) }
         @host.status("send group: #{reason}")
         return
       end

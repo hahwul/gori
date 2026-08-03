@@ -85,6 +85,35 @@ module Gori::Repeater
       text.split('\n').any? { |l| l.strip(" \t\r") == GROUP_SEP }
     end
 
+    # Cooperative cancel token for one `run`. The caller keeps it, hands a copy to `run`, and
+    # calls `#stop` from another fiber; `run` reads `stopped?` immediately before every network
+    # send and returns a partial Report instead of issuing it.
+    #
+    # A cap is not a stop. `SEND_CAP` bounds a run, but "bounded" is not "over": an operator who
+    # closes the repeater tab or leaves the project believes they disconnected from the target,
+    # and up to SEND_CAP further probes against that origin is the one thing a pentest tool must
+    # not do behind their back. The shape is `DiscoverRun#request_stop` → `Engine#stop`, one
+    # layer down because the minimizer is a module function rather than an engine object.
+    #
+    # WHAT IT CANNOT DO: interrupt a send already on the socket. `Fuzz::Sender` owns that
+    # timeout, so the guarantee is "at most one more request completes", not "zero" — which is
+    # still the difference between 1 and SEND_CAP. A plain Bool matches `DiscoverRun`'s
+    # `@stop_requested` and `Discover::Engine#stop`: fibers here are cooperative and the flag is
+    # only ever written by the stopper and read by the run.
+    class Stop
+      def initialize
+        @stopped = false
+      end
+
+      def stop : Nil
+        @stopped = true
+      end
+
+      def stopped? : Bool
+        @stopped
+      end
+    end
+
     enum Kind
       Header
       Cookie
@@ -128,10 +157,15 @@ module Gori::Repeater
     # Fuzz::CappedBackend so a pathological request can't blast the origin). `auto_cl` gates
     # body-param removal: only when Auto-Content-Length is on can we safely re-length the
     # body. Yields Progress as it goes.
+    #
+    # `stop` (optional — a caller with no way to cancel passes nothing) is checked immediately
+    # before EVERY send, so a run the operator abandoned stops reaching the origin instead of
+    # riding SEND_CAP out. See `Stop`.
     def self.run(base_text : String, *,
                  auto_cl : Bool,
                  resolve : Proc(String, Bytes),
                  backend : Fuzz::Backend,
+                 stop : Stop? = nil,
                  & : Progress ->) : Report
       # Every text helper below documents itself as operating on the LF editor form, and the
       # TUI does feed LF (`TextArea#set_text` strips CR). The CLI and MCP feed the STORED
@@ -159,12 +193,21 @@ module Gori::Repeater
       metrics = [] of Fuzz::Metrics
       sigs = [] of Hash(String, String)
       CALIBRATION_ROUNDS.times do
+        # Before the send, not after: a stop arriving mid-calibration must cost the origin
+        # nothing further, and there is no partial result worth one more round-trip.
+        break if stop.try(&.stopped?)
         r = backend.send(resolve.call(base_text))
         sends += 1
         if r.error.nil? && !r.incomplete?
           metrics << Miner::Fingerprint.probe(r).metrics
           sigs << behavior_signature(r.head)
         end
+      end
+      # Stopped before a baseline existed → nothing was verified, so the request is untouched
+      # and `aborted` says so (same shape as an unreachable baseline, different sentence).
+      if stop.try(&.stopped?)
+        return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true,
+          "stopped before the baseline was calibrated — request left unchanged")
       end
       return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true, "baseline unreachable — request left unchanged") if metrics.empty?
       statuses = metrics.compact_map(&.status).uniq!
@@ -183,6 +226,10 @@ module Gori::Repeater
         yield Progress.new(i, total)
         variant = cand.remove.call(working)
         next if variant.nil? || variant == working # already gone under an earlier removal
+        # Exactly the cap's early exit, for exactly the cap's reason — the run ends here with
+        # what it has. Every removal in `removed` was individually verified against the frozen
+        # baseline, so keeping them (aborted: false) is as sound as the capped partial.
+        return Report.new(restore_eol(working, crlf), removed, sends, false, stop_note(removed, sends)) if stop.try(&.stopped?)
         r = backend.send(resolve.call(variant))
         sends += 1
         return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed)) if r.error == Fuzz::CappedBackend::CAP_ERROR
@@ -504,6 +551,13 @@ module Gori::Repeater
 
     private def self.cap_note(removed : Array(Removed)) : String
       "send cap reached — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} so far (partial)"
+    end
+
+    # A stop reports the SENDS as well as the removals, unlike `cap_note`: the cap's count is
+    # already known (it is the cap), while "how many requests did the origin actually get
+    # before it stopped" is the whole question the operator pressed stop to ask.
+    private def self.stop_note(removed : Array(Removed), sends : Int32) : String
+      "stopped — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} (#{sends} sends)"
     end
   end
 end
