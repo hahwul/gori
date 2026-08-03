@@ -610,6 +610,43 @@ module Gori::Tui
       out
     end
 
+    # The styled `[a, b)` CHARACTER slice of a line, keeping every surviving character's
+    # exact styling — the soft-wrap counterpart of `conceal`, and the same 1:1 invariant:
+    # the result's span texts concatenate to `line`'s text over that range, no more and no
+    # less. One visual row of a wrapped logical line is exactly this slice.
+    #
+    # Char offsets, not display columns, and that is deliberate: `Wrap::Layout` decides
+    # where the break falls by walking CLUSTERS and hands back char indices, so slicing by
+    # column here would re-derive the break with a second measure — the drift this codebase
+    # keeps paying for. Because the break is always a cluster boundary, no span can be cut
+    # mid-cluster and no straddling-glyph padding is needed (unlike `slice_left`, which cuts
+    # at an arbitrary caller-supplied column).
+    def self.slice_chars(line : Line, a : Int32, b : Int32) : Line
+      # Identity when the slice covers the whole line — the common case for every
+      # unwrapped line, and it must not allocate a copy per row per frame. O(spans), and
+      # deliberately NOT "materialise the plain text and compare lengths": that would
+      # rebuild a multi-MB body line on the hot render path.
+      total = line.sum { |span| span.text.size }
+      return line if a <= 0 && b >= total
+      sliced = Line.new
+      return sliced if a >= b
+      off = 0 # char offset of the current span's first char within the whole line
+      line.each do |span|
+        t = span.text
+        len = t.size
+        if off + len <= a # span entirely before the slice
+          off += len
+          next
+        end
+        break if off >= b # span entirely after it — spans are ordered, so we're done
+        la = {a - off, 0}.max
+        lb = {b - off, len}.min
+        sliced << Span.new(la == 0 && lb == len ? t : t[la...lb], span.fg, span.attr) if la < lb
+        off += len
+      end
+      sliced
+    end
+
     # Total drawn column span of a styled line (sum of its spans) — used to clamp a
     # horizontal scroll offset against the widest currently-visible row. Uses draw_width,
     # which is what `draw` below actually advances by: ≥1 per cluster so an embedded tab

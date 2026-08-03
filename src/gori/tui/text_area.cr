@@ -2,9 +2,11 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./highlight"
+require "./wrap"
 require "../env"
 require "../settings"
 require "./gutter"
+require "./read_cursor"
 require "./search_hi"
 require "./reveal"
 require "./env_complete"
@@ -29,6 +31,15 @@ module Gori::Tui
     # knows where the head ends — a break typed into a BODY is a body byte and must stay one.
     DEFAULT_EOL = "\n"
 
+    # One DRAWN row — see `Wrap::Row`. Aliased rather than redeclared so this editor and
+    # the Repeater's response pane cannot grow two slightly different ideas of a row.
+    alias VRow = Wrap::Row
+
+    # Ceiling on the per-line wrap memo. A visible window is tens of rows, so this covers
+    # many screens of local scroll while capping memory; on overflow the whole memo is
+    # dropped and the next frame re-wraps just the visible window (cheap — see `layout_of`).
+    WRAP_CACHE_CAP = 512
+
     def initialize(text : String = "")
       @lines = [""]
       @eols = [""]
@@ -37,7 +48,29 @@ module Gori::Tui
       @scroll = 0
       @xscroll = 0      # leftmost visible display COLUMN (horizontal scroll); only moves when @follow_x is on
       @last_h = 0       # viewport height from the last render — lets scroll_view (wheel) clamp
+      @last_cw = 0      # content width from the last render — the wrap mappings outside render need it
       @follow_x = false # follow the cursor horizontally (long lines scroll into view); off ⇒ legacy right-clip
+      # --- soft wrap (opt-in; see `wrap=`) -------------------------------------
+      # Off by default, so every editor that does NOT ask for it keeps @xscroll/@follow_x
+      # and renders byte-for-byte as before. On, a logical line spills onto as many visual
+      # rows as it needs and @xscroll is pinned at 0 — the two are mutually exclusive by
+      # construction, not by convention.
+      @wrap = false
+      # THE scroll anchor when wrapping: the top visible row is row @scroll_sub of logical
+      # line @scroll. A (line, sub-row) pair IS a visual-row coordinate — it is Vim's
+      # topline+skipcol and VS Code's line-map — and it is deliberately not a FLAT visual
+      # row index, because a flat index can only be produced by wrapping every line from the
+      # top of the buffer. That is an O(whole document) pass on every width change and every
+      # edit, over bodies that reach multiple MB; with the anchor, scrolling, ensure_visible
+      # and hit-testing are all O(viewport height). Always 0 when @wrap is off, so @scroll
+      # keeps its old meaning for the seven owners that read it.
+      @scroll_sub = 0
+      @wrap_cache = {} of Int32 => Wrap::Layout
+      @wrap_rev = -1 # @edits the memo was built for
+      @wrap_w = -1   # content width the memo was built for
+      @line_offs = [] of Int32
+      @line_off_rev = -1
+      @last_rows = [] of VRow
       @preedit = ""
       # Cached syntax-highlight overlay (1:1 with @lines), rebuilt only when the
       # buffer content changes — not on every render frame. @styled_kind tracks
@@ -64,6 +97,21 @@ module Gori::Tui
       # the ^Y overlay). All column math (caret, click, h-scroll, marker band) is remapped
       # to the concealed line; when empty the widget is byte-for-byte unchanged.
       @conceal_spans = [] of {Int32, Int32}
+      # The FIXED end of an INSERT-mode selection ({cy, cx}), or nil when nothing is
+      # selected; the moving end is the caret itself, so there is exactly one copy of each
+      # coordinate. nil for every editor that never calls `move(..., selecting: true)`, and
+      # every path this adds is one nil check behind that — an editor without a selection
+      # renders and edits byte-for-byte as before.
+      #
+      # This layer, not the owner's `ReadCursor`, is where an INS selection belongs, for
+      # three reasons that all point the same way: deleting or replacing one is a BUFFER
+      # mutation and undo/@edits/@styled/@conceal live here; painting one needs the wrap
+      # layout (`layout_of`, `Wrap.row_col`), which only this file has; and the READ-mode
+      # over-painter that draws the NOR selection is called with `focused && !insert`, so in
+      # INS nothing outside this editor paints at all. The read-mode model stays exactly
+      # where it is — the two never coexist (see `render`, which draws this one only when
+      # the block caret is on, i.e. only in INS).
+      @sel_anchor = nil.as({Int32, Int32}?)
       @undo_stack = [] of UndoState
       # Opt-in `$ENV` autocomplete popup (nil = disabled). Enabled only on the outbound
       # request editors (Repeater request, Fuzzer template) where env tokens are expanded on
@@ -85,15 +133,47 @@ module Gori::Tui
     setter search_hl : String
     setter reveal : Bool
     setter bg_regions : Array({Int32, Int32, Color})
-    setter conceal_spans : Array({Int32, Int32})
     # Enable horizontal cursor-following (the Project description); off everywhere
     # else, so those editors keep @xscroll == 0 and their hot render path unchanged.
+    # Ignored while @wrap is on — a wrapped line has nothing off to the side.
     setter follow_x : Bool
     getter edits : Int32
     getter cy : Int32
     getter cx : Int32
     getter scroll : Int32
     getter? gutter : Bool
+    getter? wrap : Bool
+    # The rows this editor drew on its LAST frame, in screen order (index == row offset
+    # from `rect.y`). Published so an owner that over-paints on top of the editor — the
+    # Repeater's READ-mode selection tint and caret — inverts exactly the layout that was
+    # drawn instead of re-deriving it and drifting. Empty before the first render.
+    getter last_rows : Array(VRow)
+
+    # Turn soft wrap on for THIS editor. Long lines spill onto continuation rows instead of
+    # being clipped (or side-scrolled) at the right edge; the line number stays on the first
+    # visual row only. Enabled for the Repeater request/decoded editors, where the whole
+    # point of the pane is that a long header or a minified body is readable at a glance;
+    # every other editor leaves it off and is unaffected.
+    #
+    # Turning it on pins @xscroll at 0 for good: with wrap there is nothing to the side of
+    # the viewport, and leaving a stale offset behind would shift every row left by it.
+    def wrap=(on : Bool) : Nil
+      return if @wrap == on
+      @wrap = on
+      @xscroll = 0
+      @scroll_sub = 0
+      @wrap_cache.clear
+    end
+
+    # Conceal ranges arrive fresh from the owner every frame and are derived from the
+    # buffer, but NOT always via an edit: toggling ^K (markers live ⇄ inert) swaps them
+    # wholesale without touching @edits. The wrap memo is keyed on @edits, so it has to be
+    # dropped here too — a stale layout would keep reserving cells for a chain that is no
+    # longer hidden (or hiding one that is).
+    def conceal_spans=(spans : Array({Int32, Int32})) : Nil
+      @wrap_cache.clear if @wrap && spans != @conceal_spans
+      @conceal_spans = spans
+    end
 
     # The exact LF form `set_text` would store for `text` — the single source of truth for
     # "does this incoming string already match what the buffer holds?" **as a document**.
@@ -144,10 +224,12 @@ module Gori::Tui
       @cy = 0
       @cx = 0
       @scroll = 0
+      @scroll_sub = 0
       @xscroll = 0
       @preedit = ""
       @styled = nil
       @edits += 1
+      @sel_anchor = nil # the anchor indexes the OLD buffer — it names nothing in this one
       @undo_stack.clear
       # Drop stale conceal offsets — they index the OLD buffer; the owner re-feeds fresh
       # ones next render. Guards any move/place between now and that render.
@@ -254,6 +336,17 @@ module Gori::Tui
 
     def insert(ch : Char) : Nil
       push_undo
+      # Replace-on-type: a printable typed over a selection REPLACES it. The cut runs after
+      # push_undo and before the splice, so the pair is ONE undo step — ⌃Z brings back both
+      # the deleted run and the character that displaced it, which is what "replace" means.
+      #
+      # One caveat, and it is the owner's to close, not this file's: `RepeaterView#edit_insert`
+      # asks `Fuzz::Template.insert_breaks_marker?` about the caret BEFORE calling here, so
+      # for a selection the answer describes the pre-cut buffer. It only bites when the typed
+      # char is `§` or `¦` — the predicate returns false for everything else — so an ordinary
+      # keystroke over a selection is exact and only a literal marker delimiter typed over a
+      # selection can be escaped on a stale offset.
+      cut_selection
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{ch}#{line[cx..]}"
@@ -272,6 +365,7 @@ module Gori::Tui
     def insert_string(str : String) : Nil
       return if str.empty?
       push_undo
+      cut_selection # replace-on-paste, one undo step — see `insert`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{str}#{line[cx..]}"
@@ -287,6 +381,7 @@ module Gori::Tui
     # Caret ends past both, so the literal sits behind it like a normal keystroke.
     def insert_pair(ch : Char) : Nil
       push_undo
+      cut_selection # replace-on-type, one undo step — see `insert`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{ch}#{ch}#{line[cx..]}"
@@ -312,6 +407,7 @@ module Gori::Tui
 
     def insert_newline : Nil
       push_undo
+      cut_selection # ↵ over a selection replaces it with the break — see `insert`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = line[0, cx]
@@ -330,6 +426,10 @@ module Gori::Tui
     end
 
     def backspace : Nil
+      # A selection outranks the character: ⌫ with text selected removes the SELECTION, at
+      # the buffer start as much as anywhere else — so the early return below (which exists
+      # for "there is no character before the caret") must not fire first.
+      return if delete_selection
       return if @cx == 0 && @cy == 0 # buffer start — nothing to delete, don't dirty (mirrors delete)
       if @cx > 0
         push_undo
@@ -373,17 +473,20 @@ module Gori::Tui
     # (no buffer change), so @styled/@edits are untouched — mirrors `move`.
     def home : Nil
       @cx = 0
+      @sel_anchor = nil # an unmodified jump collapses the selection, like a plain arrow
       env_complete_close
     end
 
     def end_of_line : Nil
       @cx = @lines[@cy].size
+      @sel_anchor = nil
       env_complete_close
     end
 
     # Forward delete: remove the char under the cursor, or join the next line when at EOL.
     # A buffer mutation, so it invalidates the highlight cache and bumps @edits (like backspace).
     def delete : Nil
+      return if delete_selection # a selection outranks the char under the caret — see `backspace`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       if cx < line.size
@@ -410,11 +513,35 @@ module Gori::Tui
       refresh_env_complete
     end
 
-    def move(dr : Int32, dc : Int32) : Nil
+    # `selecting` (shift held) pins the far end of a selection at wherever the caret is
+    # standing and then moves the caret; without it the arrow COLLAPSES any selection, which
+    # is what every editor does and what makes ⇧→→ a reliable way to lose a selection.
+    #
+    # The motion itself is this method's own, deliberately NOT `ReadCursor#move`: that one
+    # steps LOGICAL lines and snaps ⇧↑/⇧↓ to end-of-line (whole-line selection, right for a
+    # read-only pane), while an INS caret steps one VISUAL row under soft wrap and keeps its
+    # display column. Selecting has to move the caret exactly where an unmodified arrow would
+    # — over wrapped rows, grapheme clusters and concealed `¦chain` runs alike — or the
+    # selection covers text the user never crossed. So the ANCHOR is shared with the read
+    # model's shape and the MOTION is not.
+    def move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      if selecting
+        @sel_anchor ||= {@cy, @cx}
+      else
+        @sel_anchor = nil
+      end
       if dr != 0
-        @cy = (@cy + dr).clamp(0, @lines.size - 1)
-        @cx = @cx.clamp(0, @lines[@cy].size)
-        snap_cx_to_cluster(0) # the column carried across rows can land mid-cluster
+        if wrapping?
+          # ↑/↓ step one VISUAL row, not one logical line. On an unwrapped line the two are
+          # the same thing; on a wrapped one, stepping by logical line would jump the caret
+          # over everything the pane is showing between here and the next line number,
+          # which is exactly the confusion soft wrap exists to remove.
+          move_visual(dr)
+        else
+          @cy = (@cy + dr).clamp(0, @lines.size - 1)
+          @cx = @cx.clamp(0, @lines[@cy].size)
+          snap_cx_to_cluster(0) # the column carried across rows can land mid-cluster
+        end
       end
       if dc != 0
         @cx += dc
@@ -443,17 +570,119 @@ module Gori::Tui
       refresh_env_complete
     end
 
+    # --- INSERT-mode selection (opt-in: nothing here fires until `move(…, selecting: true)`) ---
+
+    # Whether a NON-EMPTY selection is held. Emptiness matters and is not pedantry: ⇧→ then
+    # ⇧← puts the caret back on the anchor, and if that still counted as a selection the next
+    # ⌫ would delete zero characters instead of one — a dead key the operator cannot explain.
+    def selection? : Bool
+      !selection_range.nil?
+    end
+
+    def clear_selection : Nil
+      @sel_anchor = nil
+    end
+
+    # The selected text, or nil when nothing is selected.
+    #
+    # The multi-line slice is `ReadCursor`'s rather than a second copy of it: that method
+    # already assigns the boundary columns to the lines they belong to in DOCUMENT order and
+    # clamps each to its own line's length — the fix for an upward selection copying the
+    # wrong text and raising `IndexError` on a short top line. Duplicating it here is exactly
+    # how that bug would come back on the INS side only.
+    #
+    # The anchor is planted through `move(0, 0, selecting: true)`, whose `@anchor ||= {cy, cx}`
+    # runs while both motion branches are guarded off by the zero deltas, and the caret is
+    # then placed with `sync`, which documents itself as moving the caret WITHOUT disturbing
+    # the selection. That dance exists because `ReadCursor` exposes no anchor setter and
+    # read_cursor.cr is owned elsewhere this round; an `anchor=` there would replace it.
+    def selection_text : String?
+      r = selection_range
+      return nil unless r
+      y0, x0, y1, x1 = r
+      rc = ReadCursor.new
+      rc.sync(y0, x0)
+      rc.move(0, 0, @lines, selecting: true)
+      rc.sync(y1, x1)
+      rc.selection_text(@lines)
+    end
+
+    # Remove the selection as one undoable edit, leaving the caret where it started.
+    # Returns false (and touches nothing, not even @edits) when there is no selection, so a
+    # caller can use it as the first line of ⌫/Del without a second predicate call.
+    def delete_selection : Bool
+      return false unless selection_range
+      push_undo
+      cut_selection
+      refresh_env_complete
+      true
+    end
+
+    # The selection as a DOCUMENT-ORDERED {y0, x0, y1, x1}, or nil when there is none (or it
+    # is empty). Both ends are clamped to the buffer as it stands now: the anchor was planted
+    # against an earlier revision and an external `replace_line` / `resync Content-Length`
+    # can have shortened its line since.
+    private def selection_range : {Int32, Int32, Int32, Int32}?
+      anc = @sel_anchor
+      return nil unless anc
+      ay = anc[0].clamp(0, @lines.size - 1)
+      ax = anc[1].clamp(0, @lines[ay].size)
+      cy = @cy.clamp(0, @lines.size - 1)
+      cx = @cx.clamp(0, @lines[cy].size)
+      return nil if ay == cy && ax == cx # collapsed — see `selection?`
+      (ay < cy || (ay == cy && ax < cx)) ? {ay, ax, cy, cx} : {cy, cx, ay, ax}
+    end
+
+    # Splice the selection out of the buffer WITHOUT pushing undo — the caller owns the undo
+    # unit, which is what lets replace-on-type be one ⌃Z instead of two. No-op (false) when
+    # nothing is selected, so every insert path can call it unconditionally.
+    #
+    # The line ENDINGS follow `backspace`'s join rule exactly: joining lines y0…y1 into one
+    # drops the terminators that separated them and keeps `@eols[y1]`, the ending of the last
+    # line consumed. A cut that kept `@eols[y0]` instead would put the FIRST line's CRLF on a
+    # body line that was LF-terminated (or the reverse), changing bytes on the wire that the
+    # operator never touched.
+    private def cut_selection : Bool
+      r = selection_range
+      @sel_anchor = nil
+      return false unless r
+      y0, x0, y1, x1 = r
+      @lines[y0] = "#{@lines[y0][0, x0]}#{@lines[y1][x1..]}"
+      (y1 - y0).times do
+        @lines.delete_at(y0 + 1)
+        @eols.delete_at(y0)
+      end
+      @cy = y0
+      @cx = x0
+      # The splice re-clusters across the seam the same way a backspace-join does: if the
+      # kept tail opens with a combining mark it has just fused onto the head's last glyph,
+      # so the seam is now cluster interior. Snap forward, past the fused glyph — see the
+      # long note in `backspace`.
+      snap_cx_to_cluster(1)
+      @styled = nil
+      @edits += 1
+      true
+    end
+
     # Cursor is on the first line — the Runner pops focus to the tab bar when ↑
     # is pressed here (natural upward flow, matching the body lists).
+    #
+    # Under wrap it is the first VISUAL row that pops focus, not the first logical line:
+    # the caret on row 3 of a wrapped line 1 still has three rows above it inside this
+    # pane, and stealing that ↑ would make those rows unreachable from the keyboard.
     def at_top? : Bool
-      @cy == 0
+      return @cy == 0 unless wrapping?
+      @cy == 0 && layout_of(0, @last_cw).row_of(@cx) == 0
     end
 
     # Cursor is on the last line — used to cross out of the editor on ↓ (e.g. the
     # Decoder INPUT editor descends to the CHAIN field) without swallowing normal
-    # downward cursor movement.
+    # downward cursor movement. Last VISUAL row under wrap — see `at_top?`.
     def at_bottom? : Bool
-      @cy == @lines.size - 1
+      last = @lines.size - 1
+      return @cy == last unless wrapping?
+      lay = layout_of(last, @last_cw)
+      @cy == last && lay.row_of(@cx) == lay.rows - 1
     end
 
     # Cursor at the very start (first line, first column) — used to pop focus out of
@@ -472,20 +701,31 @@ module Gori::Tui
       return if rect.empty? || @lines.empty?
       row = my - rect.y
       return if row < 0
-      @cy = {@scroll + row, @lines.size - 1}.min
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0
+      cw = {rect.w - gw, 0}.max
+      # Rebuild the SAME row list render lays down (same rect, same anchor, same wrap
+      # function) rather than reading @last_rows: the mapping then holds for a click that
+      # arrives before the first frame, and there is exactly one definition of where a row
+      # begins. Without wrap this is one row per line and `@scroll + row` falls straight out.
+      rows = visible_rows(cw, rect.h)
+      return if rows.empty?
+      vr = rows[row]? || rows[rows.size - 1]
+      @cy = vr.li
       # + @xscroll: the click lands at display column (mx - content_x) WITHIN the
-      # visible window, which is @xscroll columns into the full line.
+      # visible window, which is @xscroll columns into the full line (always 0 under wrap).
       target = mx - (rect.x + gw) + @xscroll
       line = @lines[@cy]
       cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
-      # On a concealed line the click column is in concealed space; map it back through
-      # the hidden runs so a click never lands the caret on an unseen ¦chain char.
-      # No cluster snap needed: BOTH inverses already return a cluster start by construction
-      # (Screen.column_for walks clusters; concealed_col_to_raw does too, and its conceal
-      # edges `¦`/`§` always begin a cluster — see snap_cx_out_of_conceal).
-      @cx = (cr && !cr.empty?) ? concealed_col_to_raw(line, cr, target) : Screen.column_for(line, target)
+      # `Wrap.row_index` is the exact inverse of `Wrap.row_col`, which is what the caret,
+      # the selection tint and the search overdraw all measure with — so a click lands on
+      # the cell the caret would paint, on a continuation row as much as on a first row. It
+      # steps by CLUSTER and hops whole concealed runs, so the result is always a cluster
+      # start and never an unseen `¦chain` char; it clamps to the row's own end, so a click
+      # past the text of a wrapped row stops at the break instead of running into the next
+      # row's characters.
+      @cx = Wrap.row_index(line, cr, vr.a, vr.b, target)
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
+      @sel_anchor = nil         # a plain click collapses the selection (no shift-click here yet)
       env_complete_close
     end
 
@@ -495,19 +735,58 @@ module Gori::Tui
     # immediately (no "wheel until the cursor reaches the edge" lag). No-op before the
     # first render (height unknown) or when the buffer already fits.
     def scroll_view(step : Int32) : Nil
-      return if @last_h <= 0 || @lines.size <= @last_h
-      max = @lines.size - @last_h
-      @scroll = (@scroll + step).clamp(0, max)
-      @cy = @cy.clamp(@scroll, {@scroll + @last_h - 1, @lines.size - 1}.min)
+      return if @last_h <= 0
+      before = {@cy, @cx}
+      if wrapping?
+        scroll_view_wrapped(step)
+      elsif @lines.size > @last_h
+        max = @lines.size - @last_h
+        @scroll = (@scroll + step).clamp(0, max)
+        @cy = @cy.clamp(@scroll, {@scroll + @last_h - 1, @lines.size - 1}.min)
+        @cx = @cx.clamp(0, @lines[@cy].size)
+        snap_cx_to_cluster(0) # the row changed under the caret; its column may re-cluster
+        env_complete_close
+      end
+      # The caret is DRAGGED (not steered) when the window would otherwise leave it behind.
+      # A drag is not a selecting move, so it must not silently grow a selection: the wheel
+      # would then extend it to wherever the operator scrolled, and the next keystroke — a
+      # replace-on-type — would eat everything in between. Dropped only when the drag really
+      # happened; scrolling with the caret still on screen leaves the selection alone.
+      @sel_anchor = nil if @sel_anchor && {@cy, @cx} != before
+    end
+
+    # Wheel under soft wrap: `step` is VISUAL rows, so one notch moves one drawn row even
+    # when that row is the middle of a wrapped line. The anchor walks; nothing counts the
+    # buffer's total rows (see @scroll_sub), and the bottom stop is found by walking BACK
+    # one viewport from the last row — O(viewport), not O(document).
+    private def scroll_view_wrapped(step : Int32) : Nil
+      cw = @last_cw
+      return if cw <= 0
+      advance_anchor(step, cw)
+      mli, msub = Wrap.max_anchor(@lines.size, @last_h, layout_fn(cw))
+      if @scroll > mli || (@scroll == mli && @scroll_sub > msub)
+        @scroll = mli
+        @scroll_sub = msub
+      end
+      # Pull the caret into the window so render's ensure_visible doesn't snap the view
+      # straight back to where it was (mirrors the unwrapped branch). The comparison has to
+      # be in VISUAL rows: a caret on line 0 is "inside" a window that starts at row 3 of
+      # line 0 only by logical-line arithmetic, and that arithmetic is exactly what made
+      # the wheel fight ensure_visible to a standstill.
+      rows = visible_rows(cw, @last_h)
+      return if rows.empty?
+      first = rows[0]
+      last = rows[rows.size - 1]
+      if @cy < first.li || (@cy == first.li && @cx < first.a)
+        @cy = first.li
+        @cx = first.a
+      elsif @cy > last.li || (@cy == last.li && layout_of(last.li, cw).row_of(@cx) > last.sub)
+        @cy = last.li
+        @cx = last.a
+      end
       @cx = @cx.clamp(0, @lines[@cy].size)
       snap_cx_to_cluster(0) # the row changed under the caret; its column may re-cluster
       env_complete_close
-    end
-
-    # Horizontal viewport nudge (shift+←/→ in READ panes). No-op unless @follow_x.
-    def hscroll_view(step : Int32) : Nil
-      return unless @follow_x
-      @xscroll = {@xscroll + step * 4, 0}.max
     end
 
     # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
@@ -515,6 +794,7 @@ module Gori::Tui
     def goto_line(n : Int32) : Nil
       @cy = (n - 1).clamp(0, @lines.size - 1)
       @cx = 0
+      @sel_anchor = nil
       env_complete_close
     end
 
@@ -523,6 +803,10 @@ module Gori::Tui
       @cy = cy.clamp(0, @lines.size - 1)
       @cx = cx.clamp(0, @lines[@cy].size)
       snap_cx_to_cluster(0) # caller-supplied index — unconstrained, may land mid-cluster
+      # This is how the READ-mode cursor writes itself back (TextReadState#apply), so it is
+      # also where an INS selection left behind by `esc` is retired: navigating in NOR must
+      # not leave a stale INS selection waiting to reappear the next time `i` is pressed.
+      @sel_anchor = nil
       env_complete_close
     end
 
@@ -566,6 +850,7 @@ module Gori::Tui
       @cy = cy
       @cx = off.clamp(0, @lines[cy].size)
       snap_cx_to_cluster(0) # a flat buffer offset carries no cluster guarantee
+      @sel_anchor = nil
       env_complete_close
     end
 
@@ -653,39 +938,83 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil, peek : Bool = false,
                gauge : Bool = false, gauge_focused : Bool = false) : Nil
       return if rect.empty?
-      @last_h = rect.h # remembered for scroll_view (wheel) clamping
-      ensure_visible(rect.h)
+      @last_h = rect.h                                           # remembered for scroll_view (wheel) clamping
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0 # never exceed the pane
       cx0 = rect.x + gw                                          # content start x (after the optional gutter)
       cw = {rect.w - gw, 0}.max                                  # content width
-      ensure_visible_x(cw)                                       # slide @xscroll so the caret stays on screen (no-op unless @follow_x)
+      # The gutter is sized from the LOGICAL line count and must stay that way: wrapping
+      # multiplies the drawn rows, and letting the numbers widen to match would shift the
+      # text column every time a line spilled — the gutter names logical lines, and there
+      # are exactly as many of those as there ever were.
+      @last_cw = cw # the wrap mappings that run outside render (move / click / at_top?) need it
+      if wrapping?
+        ensure_visible_wrapped(cw, rect.h)
+      else
+        ensure_visible(rect.h)
+        ensure_visible_x(cw) # slide @xscroll so the caret stays on screen (no-op unless @follow_x)
+      end
       styled = highlight ? highlighted(highlight) : nil
+      rows = visible_rows(cw, rect.h)
+      @last_rows = rows
+      # The visual row the caret lives on, decided ONCE by Wrap::Layout#row_of — the same
+      # function the click inverse and the goal-column move consult, so the three cannot
+      # disagree about which row owns a caret sitting exactly on a wrap break.
+      caret_sub = wrapping? ? layout_of(@cy, cw).row_of(caret_index(@cy)) : 0
       # Buffer char-offset of the first visible line — advanced per row so each line
       # knows its start for the bg-region overlay without an O(n²) rescan. Only the
       # opt-in bg_regions consumer (the Fuzzer template) pays the O(@scroll) prefix sum;
       # Repeater/Notes (no regions) skip it so their hot path is unchanged.
       line_off = 0
       (0...@scroll).each { |k| line_off += @lines[k].size + 1 } unless @bg_regions.empty? && @conceal_spans.empty? # +1 for '\n'
-      caret_cell = nil.as({Int32, Int32}?)                                                                         # the drawn caret's screen cell — anchors the env-complete popup
-      (0...rect.h).each do |i|
-        li = @scroll + i
-        break if li >= @lines.size
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: li == @cy) if @gutter
-        line = @lines[li]
+      cur_li = @scroll
+      caret_cell = nil.as({Int32, Int32}?) # the drawn caret's screen cell — anchors the env-complete popup
+      rows.each_with_index do |vr, i|
+        li = vr.li
+        # Walk `line_off` up to this row's logical line. Rows arrive in document order, so
+        # the whole loop is still one pass over the visible lines (continuation rows of the
+        # same line don't advance it — they share their line's start offset).
+        while cur_li < li
+          line_off += @lines[cur_li].size + 1
+          cur_li += 1
+        end
+        # The line number rides the FIRST visual row of a logical line and nothing else
+        # (Burp style). A continuation row gets a blank of the same width rather than no
+        # write at all, so the text column stays put and no stale digits survive there.
+        if @gutter
+          if vr.sub == 0
+            Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: li == @cy)
+          else
+            screen.text(rect.x, rect.y + i, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
+          end
+        end
+        composing = li == @cy && !@preedit.empty?
+        # `drawn_line` folds the IME preedit into the caret line: under wrap the composing
+        # text is what shifts the break, so layout, draw, caret and click must all measure
+        # the SAME string or the row the caret sits on isn't the row it was laid out on.
+        line = drawn_line(li)
+        a, b = vr.a, vr.b
+        whole = a == 0 && b == line.size
+        seg = whole ? line : line[a...b]
         # Concealed lines (a §…§ marker with a hidden ¦chain) go through a dedicated draw:
-        # delete the concealed chars from the styled line, then h-scroll-slice + draw. The
+        # delete the concealed chars from the styled line, then slice + draw. The
         # IME-preedit caret line is left raw (its columns shift with the composing text).
-        cr = (@conceal_spans.empty? || (li == @cy && !@preedit.empty?)) ? nil : line_conceal(line_off, line.size)
+        cr = (@conceal_spans.empty? || composing) ? nil : line_conceal(line_off, line.size)
         if cr && !cr.empty? && !@reveal
-          draw_concealed_line(screen, cx0, rect.y + i, li, line, styled, cr, cw)
-        elsif @xscroll > 0
+          draw_concealed_line(screen, cx0, rect.y + i, li, line, styled, cr, cw, a, b)
+        elsif @xscroll > 0 # unwrapped editors only — `wrap=` pins @xscroll at 0
           draw_scrolled(screen, cx0, rect.y + i, li, line, styled, cw)
         elsif @reveal
-          Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(line, false, cw), width: cw)
+          Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(seg, false, cw), width: cw)
+        elsif composing && wrapping?
+          # The styled overlay is built from the BUFFER and so cannot describe the
+          # composing text; under wrap it is part of the laid-out line, so it is drawn
+          # from spans instead. (Unwrapped editors keep the legacy order below, where a
+          # highlighted line wins and the preedit shows only through the caret glyph.)
+          Highlight.draw(screen, cx0, rect.y + i, preedit_spans(line, a, b), width: cw)
         elsif styled && (sl = styled[li]?)
-          Highlight.draw(screen, cx0, rect.y + i, sl, width: cw)
+          Highlight.draw(screen, cx0, rect.y + i, Highlight.slice_chars(sl, a, b), width: cw)
         else
-          if li == @cy && !@preedit.empty?
+          if composing
             prefix = line[0, @cx]
             suffix = line[@cx..]
             px = cx0
@@ -706,31 +1035,47 @@ module Gori::Tui
               screen.text(px, rect.y + i, suffix, Theme.text, width: cw - (px - cx0))
             end
           else
-            screen.text(cx0, rect.y + i, line, Theme.text, width: cw)
+            screen.text(cx0, rect.y + i, seg, Theme.text, width: cw)
           end
         end
         # Marker tint UNDER search/cursor — skip the IME-preedit line (its columns are
-        # shifted by the composing text, which isn't in `line`). paint_bg_regions itself
-        # no-ops when there are no regions or in reveal mode.
-        paint_bg_regions(screen, cx0, rect.y + i, line_off, line, cw, cr) unless li == @cy && !@preedit.empty?
-        line_off += line.size + 1 # advance BEFORE the cursor `next` so it can't desync
+        # shifted by the composing text, which isn't in the buffer line). paint_bg_regions
+        # itself no-ops when there are no regions or in reveal mode.
+        paint_bg_regions(screen, cx0, rect.y + i, line_off, @lines[li], cw, cr, a, b) unless composing
         unless @search_hl.empty?
-          # Mark on the visible (left-sliced) text so the highlight columns line up
-          # with the cells we actually drew once horizontally scrolled.
-          st = @xscroll > 0 ? slice_left(line, @xscroll) : line
-          SearchHi.mark(screen, cx0, rect.y + i, st, @search_hl, cx0 + cw)
+          if wrapping?
+            # Scan the WHOLE logical line and clip each hit to this row, so a match that
+            # straddles a wrap break lights up on both rows instead of on neither — see
+            # Wrap.mark_search.
+            Wrap.mark_search(screen, cx0, rect.y + i, line, a, b, @search_hl, cx0 + cw, cr)
+          else
+            # Mark on the visible (left-sliced) text so the highlight columns line up
+            # with the cells we actually drew once horizontally scrolled.
+            st = @xscroll > 0 ? Highlight.slice_left_text(line, @xscroll) : line
+            SearchHi.mark(screen, cx0, rect.y + i, st, @search_hl, cx0 + cw)
+          end
         end
+        # The INS selection tint, over the text and the search marks, under the caret —
+        # the same stacking (and the same `Theme.accent_bg`) the READ-mode over-painter
+        # uses, so the band does not change appearance when `i` is pressed. `cursor` is the
+        # gate: it is on only in INSERT, which is exactly when the owner's read-mode painter
+        # stands down, so the two selections can never be drawn at once.
+        paint_selection(screen, cx0, rect.y + i, li, line, cr, a, b, cw) if cursor
         # The caret cell is captured for the caret line whether or not the block cursor
         # is drawn (cursor=false in NORMAL) — the value peek anchors to it in read mode too.
         # The block-cursor GLYPH itself still paints only when `cursor` (insert mode).
-        next unless li == @cy
+        next unless li == @cy && vr.sub == caret_sub
+        ci = caret_index(li)
         # draw_width (not display_width): a raw control char in the prefix occupies a cell
         # and click-to-cursor counts it, so the caret must too — else it sits one column
         # left of the real position and paints over a glyph. Per CLUSTER, matching the draw
         # exactly: `@cx` rests only on cluster boundaries (snap_cx_to_cluster), so this is
-        # single-valued and Screen.column_for inverts it.
-        prefix_w = (cr && !cr.empty?) ? concealed_col(line, cr, @cx) : Screen.draw_width(line[0, @cx])
-        preedit_w = Screen.draw_width(@preedit)
+        # single-valued and Wrap.row_index inverts it. Measured from the ROW's first char,
+        # which is char 0 of the line whenever nothing wrapped.
+        prefix_w = Wrap.row_col(line, cr, a, ci)
+        # Unwrapped editors draw the preedit AFTER the buffer text without it being part of
+        # `line`, so its width is added here; under wrap `drawn_line` already spliced it in.
+        preedit_w = wrapping? ? 0 : Screen.draw_width(@preedit)
         cxs = cx0 + prefix_w + preedit_w - @xscroll
         if cxs >= cx0 && cxs < cx0 + cw
           caret_cell = {cxs, rect.y + i}
@@ -740,7 +1085,7 @@ module Gori::Tui
             # concealed line the raw char there may be a hidden `¦chain` byte, so skip past
             # any concealed run to the glyph the user actually sees (the closing §).
             r = @cx
-            cr.each { |(a, b)| r = b if r >= a && r < b } if cr && !cr.empty?
+            cr.each { |(ra, rb)| r = rb if r >= ra && r < rb } if cr && !cr.empty?
             # The whole CLUSTER at `r`, not `line[r]`: parking on `é` (e + U+0301) or a ZWJ
             # family has to invert the glyph the user sees, not its leading codepoint.
             ch = @preedit.empty? ? Screen.caret_glyph(line, r) : Screen.caret_glyph(@preedit, 0)
@@ -767,10 +1112,174 @@ module Gori::Tui
           end
         end
       end
+      # The gauge stays in LOGICAL lines under wrap — a deliberate approximation, not an
+      # oversight. Sizing it in visual rows means knowing how many the whole buffer has,
+      # which is the one O(document) question this design exists to never ask (see
+      # @scroll_sub). The thumb therefore tracks the anchor LINE and can step unevenly on a
+      # heavily wrapped buffer; it is a proportion indicator, not a coordinate.
       Frame.scroll_gauge(screen, rect, @lines.size, @scroll, gauge_focused) if gauge
       # The env-complete dropdown + value peek paint LAST (over the text, anchored at the
       # caret) so they never render when the caret is off-screen.
       render_env_popups(screen, caret_cell, rect, cursor, peek)
+    end
+
+    # --- soft-wrap layout ------------------------------------------------------
+    # Everything below is inert (or trivially one-row-per-line) while @wrap is off.
+
+    # Wrap is only meaningful once a render has told us how wide the content column is —
+    # every mapping outside render (move / click / at_top? / wheel) needs that width, and
+    # guessing one would put the caret on a different row than the draw did.
+    private def wrapping? : Bool
+      @wrap && @last_cw > 0
+    end
+
+    # Logical line `li` AS DRAWN: the buffer line, with any IME preedit spliced in at the
+    # caret. One string for layout, draw, caret and click, so the composing text cannot
+    # move the wrap break out from under the caret that produced it.
+    private def drawn_line(li : Int32) : String
+      line = @lines[li]
+      return line unless wrapping? && li == @cy && !@preedit.empty?
+      cx = @cx.clamp(0, line.size)
+      "#{line[0, cx]}#{@preedit}#{line[cx..]}"
+    end
+
+    # The caret's index into `drawn_line(li)` — past the composing text, which is where an
+    # insertion point belongs.
+    private def caret_index(li : Int32) : Int32
+      return @cx unless wrapping? && li == @cy && !@preedit.empty?
+      @cx.clamp(0, @lines[li].size) + @preedit.size
+    end
+
+    # The wrap of line `li` at content width `cw`, memoized on (@edits, cw).
+    #
+    # The memo is what keeps a keystroke cheap: without it every frame re-wraps every
+    # visible line, and with a multi-MB minified body that is a grapheme walk over
+    # megabytes per frame. The memo alone would not be enough either — which is why
+    # `Wrap::Layout` stores no per-row table for an ASCII line — but together they make the
+    # common case (a big ASCII body, scrolled) O(1) per row with no allocation at all.
+    private def layout_of(li : Int32, cw : Int32) : Wrap::Layout
+      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(li), @lines[li].size)
+      # The caret line while an IME is composing changes with every jamo WITHOUT bumping
+      # @edits, so it must never enter the memo — a stale layout there desyncs the caret
+      # from the row it is drawn on.
+      return Wrap.layout(drawn_line(li), cw, cr) if li == @cy && !@preedit.empty?
+      if @wrap_rev != @edits || @wrap_w != cw
+        @wrap_cache.clear
+        @wrap_rev = @edits
+        @wrap_w = cw
+      end
+      if hit = @wrap_cache[li]?
+        return hit
+      end
+      @wrap_cache.clear if @wrap_cache.size >= WRAP_CACHE_CAP
+      @wrap_cache[li] = Wrap.layout(@lines[li], cw, cr)
+    end
+
+    # A `Wrap` layout provider bound to this buffer at content width `cw`.
+    private def layout_fn(cw : Int32) : Int32 -> Wrap::Layout
+      ->(i : Int32) { layout_of(i, cw) }
+    end
+
+    # The rows the pane shows, top to bottom, starting at the (line, sub-row) anchor.
+    # Without wrap this is the identity it always was: one row per logical line from
+    # @scroll, `sub` 0, the whole line.
+    private def visible_rows(cw : Int32, h : Int32) : Array(VRow)
+      unless wrapping?
+        rows = Array(VRow).new({h, 0}.max)
+        return rows if h <= 0
+        (0...h).each do |i|
+          li = @scroll + i
+          break if li >= @lines.size
+          rows << VRow.new(li, 0, 0, @lines[li].size)
+        end
+        return rows
+      end
+      @scroll = @scroll.clamp(0, @lines.size - 1)
+      Wrap.rows(@scroll, @scroll_sub, h, @lines.size, layout_fn(cw))
+    end
+
+    # Wrapped companion to `ensure_visible`: keep the caret's VISUAL row inside the pane.
+    # The walk itself is `Wrap.ensure_visible` (shared with the Repeater response pane).
+    private def ensure_visible_wrapped(cw : Int32, h : Int32) : Nil
+      return if h <= 0 || cw <= 0
+      @scroll = @scroll.clamp(0, @lines.size - 1)
+      csub = layout_of(@cy, cw).row_of(caret_index(@cy))
+      @scroll, @scroll_sub = Wrap.ensure_visible(@scroll, @scroll_sub, @cy, csub, h, layout_fn(cw))
+    end
+
+    # Place the anchor `back` visual rows above (li, sub).
+    private def anchor_back_from(li : Int32, sub : Int32, back : Int32, cw : Int32) : Nil
+      @scroll, @scroll_sub = Wrap.step_back(li, sub, back, layout_fn(cw))
+    end
+
+    # Move the anchor `step` visual rows (negative = up), stopping at the buffer's ends.
+    private def advance_anchor(step : Int32, cw : Int32) : Nil
+      @scroll, @scroll_sub = if step < 0
+                               Wrap.step_back(@scroll, @scroll_sub, -step, layout_fn(cw))
+                             else
+                               Wrap.step_forward(@scroll, @scroll_sub, step, @lines.size, layout_fn(cw))
+                             end
+    end
+
+    # ↑/↓ across wrapped rows: step `dr` VISUAL rows, keeping the caret's display column.
+    # The column is measured from the row's first char and mapped back through
+    # `Wrap.row_index`, the same inverse pair the caret and the click use — so a run of ↓
+    # then ↑ lands back where it started at every cluster boundary.
+    private def move_visual(dr : Int32) : Nil
+      cw = @last_cw
+      line = @lines[@cy]
+      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
+      lay = layout_of(@cy, cw)
+      sub = lay.row_of(@cx)
+      goal = Wrap.row_col(line, cr, lay.start_of(sub), @cx)
+      li = @cy
+      n = dr.abs
+      while n > 0
+        if dr > 0
+          if sub + 1 < lay.rows
+            sub += 1
+          elsif li < @lines.size - 1
+            li += 1
+            lay = layout_of(li, cw)
+            sub = 0
+          else
+            break
+          end
+        else
+          if sub > 0
+            sub -= 1
+          elsif li > 0
+            li -= 1
+            lay = layout_of(li, cw)
+            sub = lay.rows - 1
+          else
+            break
+          end
+        end
+        n -= 1
+      end
+      @cy = li
+      tline = @lines[li]
+      tcr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(li), tline.size)
+      @cx = Wrap.row_index(tline, tcr, lay.start_of(sub), lay.end_of(sub), goal)
+      snap_cx_to_cluster(0) # row_index already lands on a boundary; cheap guard for the empty-row case
+    end
+
+    # The composing caret line as spans: buffer text, the preedit underlined, buffer text —
+    # sliced to the visual row `[a, b)`. Only reached under wrap (see the draw dispatch).
+    private def preedit_spans(line : String, a : Int32, b : Int32) : Highlight::Line
+      cx = @cx.clamp(0, @lines[@cy].size)
+      pe = cx + @preedit.size
+      spans = Highlight::Line.new
+      add = ->(lo : Int32, hi : Int32, attr : Attribute) do
+        s = {lo, a}.max
+        e = {hi, b}.min
+        spans << Highlight::Span.new(line[s...e], Theme.text, attr) if s < e
+      end
+      add.call(0, cx, Attribute::None)
+      add.call(cx, pe, Attribute::Underline)
+      add.call(pe, line.size, Attribute::None)
+      spans
     end
 
     # The caret-anchored `$ENV` overlays, drawn after the text. The autocomplete dropdown
@@ -819,6 +1328,70 @@ module Gori::Tui
       false
     end
 
+    # Band the INS selection over ONE visual row `[a, b)` of logical line `li`.
+    #
+    # The span is clipped to the row rather than to the line, which is the whole reason this
+    # is per-row: a selection running off the right edge of a wrapped row must tint that row
+    # to its end AND continue on the next one. Clipping to the line instead paints the band
+    # once, at the columns of the first row, and leaves the rest of the selection looking
+    # unselected — the exact failure the wrap layer introduced for every over-painter.
+    #
+    # Derived from `selection_range` in O(1) per row instead of asking `ReadCursor` for the
+    # whole span list: that walk is O(the selection), and a selection here can cover a
+    # multi-MB response body pasted into the request. It mirrors ReadCursor#highlight_spans'
+    # rule exactly — first line from its column to EOL, last line to its column, everything
+    # between whole — with the columns already put in document order by `selection_range`.
+    private def paint_selection(screen : Screen, cx0 : Int32, y : Int32, li : Int32, line : String,
+                                cr : Array({Int32, Int32})?, a : Int32, b : Int32, cw : Int32) : Nil
+      return if @sel_anchor.nil?
+      return if @reveal                       # reveal rewrites the glyphs — see paint_bg_regions
+      return if li == @cy && !@preedit.empty? # composing: `line` holds text the buffer offsets don't index
+      return unless r = selection_range
+      y0, x0, y1, x1 = r
+      return if li < y0 || li > y1
+      lo = {li == y0 ? x0 : 0, a}.max
+      hi = {li == y1 ? x1 : line.size, b}.min
+      return if lo >= hi
+      if cr.nil? || cr.empty?
+        paint_sel_chunk(screen, cx0, y, line, cr, a, lo, hi, cw)
+        return
+      end
+      # A concealed `¦chain` occupies no cells, so the band is laid down as the VISIBLE runs
+      # between the hidden ones; painting straight through would tint cells the chain's
+      # neighbours are standing in and shift the rest of the row's tint right by its length.
+      chunk = lo
+      i = lo
+      while i < hi
+        if run = cr.find { |(ra, rb)| i >= ra && i < rb }
+          paint_sel_chunk(screen, cx0, y, line, cr, a, chunk, i, cw)
+          i = {run[1], hi}.min
+          chunk = i
+        else
+          i += 1
+        end
+      end
+      paint_sel_chunk(screen, cx0, y, line, cr, a, chunk, hi, cw)
+    end
+
+    # One contiguous, fully-visible `[s, e)` of the row that starts at `row_start`, re-drawn
+    # on the selection background. Columns come from `Wrap.row_col` — the measure the base
+    # draw, the caret and the click all use — so the band covers exactly the cells the text
+    # was put in, wide glyphs and tabs included.
+    private def paint_sel_chunk(screen : Screen, cx0 : Int32, y : Int32, line : String,
+                                cr : Array({Int32, Int32})?, row_start : Int32,
+                                s : Int32, e : Int32, cw : Int32) : Nil
+      return if s >= e
+      from = Wrap.row_col(line, cr, row_start, s) - @xscroll
+      to = {Wrap.row_col(line, cr, row_start, e) - @xscroll, cw}.min
+      seg = line[s...e]
+      if from < 0 # h-scrolled off the left edge (unwrapped follow_x editors only)
+        seg = Highlight.slice_left_text(seg, -from)
+        from = 0
+      end
+      return if from >= to || seg.empty?
+      screen.text(cx0 + from, y, seg, Theme.text, Theme.accent_bg, width: to - from)
+    end
+
     # Overlay the bg_regions intersecting THIS line. `off0` is the line's start offset
     # in the full LF-joined buffer. Column math mirrors the base draw + caret
     # (Screen.draw_width / grapheme_cols ≥1 per cluster, so a tab in a marker band can't
@@ -828,22 +1401,28 @@ module Gori::Tui
     # shifted left by @xscroll and clipped to the visible window — a no-op when
     # @xscroll == 0 (the common case, since only the Fuzzer template sets bg_regions and
     # it doesn't enable follow_x).
+    #
+    # `rs`/`re` bound the VISUAL ROW being painted: the whole line without wrap, one wrapped
+    # slice of it with. A region is clipped to the row, so a marker that spans a wrap break
+    # is banded on every row it covers rather than once, in the wrong cells.
     private def paint_bg_regions(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
-                                 line : String, cw : Int32, cr : Array({Int32, Int32})? = nil) : Nil
+                                 line : String, cw : Int32, cr : Array({Int32, Int32})? = nil,
+                                 rs : Int32 = 0, re : Int32 = -1) : Nil
       return if @bg_regions.empty? || @reveal # opt-in; reveal rewrites the glyphs
-      return paint_bg_regions_concealed(screen, cx0, y, off0, line, cw, cr) if cr && !cr.empty?
+      re = line.size if re < 0
+      return paint_bg_regions_concealed(screen, cx0, y, off0, line, cw, cr, rs, re) if cr && !cr.empty?
       line_end = off0 + line.size
       @bg_regions.each do |(a, b, color)|
         next if b <= off0 || a >= line_end # region doesn't touch this line
-        la = (a - off0).clamp(0, line.size)
-        lb = (b - off0).clamp(0, line.size)
+        la = (a - off0).clamp(rs, re)
+        lb = (b - off0).clamp(rs, re)
         next if la >= lb
-        start_col = Screen.draw_width(line[0, la]) - @xscroll
-        end_col = Screen.draw_width(line[0, lb]) - @xscroll
+        start_col = Wrap.row_col(line, nil, rs, la) - @xscroll
+        end_col = Wrap.row_col(line, nil, rs, lb) - @xscroll
         draw_from = {start_col, 0}.max
         draw_to = {end_col, cw}.min
         next if draw_from >= draw_to
-        seg = slice_left(line[la, lb - la], draw_from - start_col)
+        seg = Highlight.slice_left_text(line[la, lb - la], draw_from - start_col)
         screen.text(cx0 + draw_from, y, seg, Theme.marker_fg, color, width: draw_to - draw_from)
       end
     end
@@ -854,14 +1433,16 @@ module Gori::Tui
     # each concealed run — the closing § — is accented so a chained marker reads distinctly
     # from a plain one; the rest keep Theme.marker_fg.
     private def paint_bg_regions_concealed(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
-                                           line : String, cw : Int32, cr : Array({Int32, Int32})) : Nil
+                                           line : String, cw : Int32, cr : Array({Int32, Int32}),
+                                           rs : Int32 = 0, re : Int32 = -1) : Nil
+      re = line.size if re < 0
       line_end = off0 + line.size
       @bg_regions.each do |(a, b, color)|
         next if b <= off0 || a >= line_end
-        la = (a - off0).clamp(0, line.size)
-        lb = (b - off0).clamp(0, line.size)
+        la = (a - off0).clamp(rs, re)
+        lb = (b - off0).clamp(rs, re)
         next if la >= lb
-        col = concealed_display_prefix(line, cr, la) # display columns before the first drawn char
+        col = Wrap.row_col(line, cr, rs, la) # display columns before the first drawn char, within this row
         i = la
         while i < lb
           hit = cr.find { |(ra, rb)| i >= ra && i < rb }
@@ -900,70 +1481,34 @@ module Gori::Tui
       out
     end
 
-    # Full-buffer char offset of line `cy`'s first char (only walked when concealing).
+    # Full-buffer char offset of line `cy`'s first char (only reached when concealing),
+    # memoized on @edits.
+    #
+    # It used to walk the buffer per call, which was tolerable when `snap_cx_out_of_conceal`
+    # was the only caller — once per caret move. Soft wrap needs the conceal ranges of every
+    # VISIBLE line to lay it out, so a linear walk per line turns one frame into
+    # O(lines × rows). The table is built once per edit and read h times instead.
     private def line_start_offset(cy : Int32) : Int32
-      off = 0
-      (0...cy).each { |i| off += @lines[i].size + 1 } # +1 for the joining '\n'
-      off
-    end
-
-    # Display column (draw_width semantics, matching the caret) of raw caret index `cx`
-    # on a concealed line: the width of the surviving chars in [0, cx). A cx inside a
-    # concealed run collapses to that run's start column (both edges share the cell).
-    private def concealed_col(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
-      cx = cx.clamp(0, line.size)
-      w = 0
-      pos = 0
-      ranges.each do |(a, b)|
-        break if a >= cx
-        w += Screen.draw_width(line[pos...a]) if a > pos
-        return w if b >= cx # cx lands inside/at this run → column at the run's start
-        pos = b
-      end
-      w + Screen.draw_width(line[pos...cx])
-    end
-
-    # As `concealed_col` — draw_width / grapheme_cols semantics matching Highlight.draw's
-    # ≥1 floor, used by the band over-paint so tint columns line up with drawn cells.
-    private def concealed_display_prefix(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
-      w = 0
-      pos = 0
-      ranges.each do |(a, b)|
-        break if a >= cx
-        w += Screen.draw_width(line[pos...a]) if a > pos
-        return w if b >= cx
-        pos = b
-      end
-      w + Screen.draw_width(line[pos...cx])
-    end
-
-    # Inverse of `concealed_col` for click-to-cursor: the raw char index whose concealed
-    # display cell holds column `target`. Never returns an index inside a concealed run
-    # (those cells aren't drawn), so a click can't land the caret on a hidden char.
-    private def concealed_col_to_raw(line : String, ranges : Array({Int32, Int32}), target : Int32) : Int32
-      return 0 if target <= 0
-      col = 0
-      i = 0
-      n = line.size
-      while i < n
-        hit = ranges.find { |(a, b)| i >= a && i < b }
-        if hit
-          i = hit[1]
-          next
+      if @line_off_rev != @edits
+        @line_off_rev = @edits
+        offs = Array(Int32).new(@lines.size + 1)
+        acc = 0
+        @lines.each do |l|
+          offs << acc
+          acc += l.size + 1 # +1 for the joining '\n'
         end
-        # Step by CLUSTER, matching `concealed_col`'s draw_width and the cells actually
-        # drawn, so this stays that function's exact inverse and a click lands where the
-        # caret paints. A conceal run opens on a `¦` and closes before a `§`: neither is
-        # ASCII, but both are Grapheme_Cluster_Break=Other and so always BEGIN a cluster,
-        # which is what guarantees no cluster straddles a run boundary.
-        e = Screen.cluster_end(line, i + 1)
-        w = Screen.draw_width(line[i...e])
-        return i if target < col + w
-        col += w
-        i = e
+        offs << acc
+        @line_offs = offs
       end
-      n
+      @line_offs[cy.clamp(0, @lines.size)]
     end
+
+    # NOTE: the three concealed-column helpers that used to live here — `concealed_col`,
+    # `concealed_display_prefix` (a verbatim duplicate of it) and `concealed_col_to_raw` —
+    # are gone. `Wrap.row_col` / `Wrap.row_index` are the same measure and the same inverse,
+    # generalised over a row's starting offset (which is 0 for an unwrapped line, so the
+    # behaviour is identical), and folding them together is the point: this file's standing
+    # hazard is a second nearly-identical width measure drifting from the one the draw uses.
 
     # Pull @cx onto a grapheme-CLUSTER boundary. `@cx` stays a CHARACTER index — conceal
     # ranges, bg_regions, marker spans and the search / find-replace offsets are all char-
@@ -1074,27 +1619,38 @@ module Gori::Tui
       # (snap_cx_to_cluster) and every measure here, in `cxs`/`prefix_w`, and in
       # Highlight.slice_left is draw_width, so the window, the slice and the caret finally
       # agree — that reconciliation was the caret-model change this comment used to defer.
-      full = concealed ? concealed_col(line, cr.not_nil!, line.size) : Screen.draw_width(line)
+      full = concealed ? Wrap.row_col(line, cr, 0, line.size) : Screen.draw_width(line)
       if full + pw <= cw
         @xscroll = 0
         return
       end
       cx = @cx.clamp(0, line.size)
-      curx = (concealed ? concealed_col(line, cr.not_nil!, cx) : Screen.draw_width(line[0, cx])) + pw
+      curx = (concealed ? Wrap.row_col(line, cr, 0, cx) : Screen.draw_width(line[0, cx])) + pw
       @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
       @xscroll = 0 if @xscroll < 0
     end
 
-    # Draw a line whose §…§ markers hide a ¦chain: delete the concealed chars from the
-    # styled line (a single plain span when highlighting is off), then h-scroll-slice and
-    # draw. The marker band + accented closing § are over-painted afterwards by
-    # paint_bg_regions (concealment-aware). Only reached when the line has conceal ranges.
+    # Draw one visual row `[a, b)` of a line whose §…§ markers hide a ¦chain: cut the row
+    # out of the styled line, delete the concealed chars from it (a single plain span when
+    # highlighting is off), then h-scroll-slice and draw. The marker band + accented closing
+    # § are over-painted afterwards by paint_bg_regions (concealment-aware). Only reached
+    # when the line has conceal ranges; `[0, line.size)` — the whole line — without wrap.
+    #
+    # The conceal ranges are re-based onto the row before `Highlight.conceal` sees them:
+    # that function indexes the LINE it is given, and the line it is given here is the row.
     private def draw_concealed_line(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
                                     line : String, styled : Array(Highlight::Line)?,
-                                    cr : Array({Int32, Int32}), cw : Int32) : Nil
-      base = (styled && styled[li]?) || [Highlight::Span.new(line, Theme.text)]
-      cl = Highlight.conceal(base, cr)
+                                    cr : Array({Int32, Int32}), cw : Int32,
+                                    a : Int32 = 0, b : Int32 = -1) : Nil
+      b = line.size if b < 0
+      base = Highlight.slice_chars((styled && styled[li]?) || [Highlight::Span.new(line, Theme.text)], a, b)
+      local = a == 0 ? cr : cr.compact_map do |(ra, rb)|
+        lo = {ra, a}.max - a
+        hi = {rb, b}.min - a
+        lo < hi ? {lo, hi} : nil
+      end
+      cl = Highlight.conceal(base, local)
       cl = Highlight.slice_left(cl, @xscroll) if @xscroll > 0
       Highlight.draw(screen, cx0, y, cl, width: cw)
     end
@@ -1117,15 +1673,8 @@ module Gori::Tui
         spans << Highlight::Span.new(suffix, Theme.text) unless suffix.empty?
         Highlight.draw(screen, cx0, y, Highlight.slice_left(spans, @xscroll), width: cw)
       else
-        screen.text(cx0, y, slice_left(line, @xscroll), Theme.text, width: cw)
+        screen.text(cx0, y, Highlight.slice_left_text(line, @xscroll), Theme.text, width: cw)
       end
-    end
-
-    # Drop the first `start_col` display columns of `s`. A wide glyph straddling the
-    # cut becomes leading spaces for its still-visible cells, so the remaining glyphs
-    # keep their columns. Identity when start_col <= 0.
-    private def slice_left(s : String, start_col : Int32) : String
-      Highlight.slice_left_text(s, start_col)
     end
 
     private def push_undo : Nil
@@ -1145,6 +1694,7 @@ module Gori::Tui
       @cy = state.cy.clamp(0, @lines.size - 1)
       @cx = state.cx.clamp(0, @lines[@cy].size)
       snap_cx_to_cluster(0) # the snapshot's line may differ from the one we clamp against
+      @sel_anchor = nil     # the anchor names offsets in the buffer the undo just replaced
       @styled = nil
       @edits += 1
       refresh_env_complete
