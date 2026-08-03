@@ -84,8 +84,17 @@ jobs:
       - name: Run tests
         run: |
           set +e
-          crystal spec
+          crystal spec --verbose > /tmp/spec.log 2>&1
           rc=$?
+          echo "=== link command ==="
+          grep -o "cc .*" /tmp/spec.log | tail -1 | tr ' ' '\n' | grep -E "^-l|^-Wl|rdynamic|^-L" | tr '\n' ' '
+          echo
+          echo "=== objects on the link line ==="
+          grep -o "cc .*" /tmp/spec.log | tail -1 | tr ' ' '\n' | grep -c "\.o$"
+          echo "=== link line length ==="
+          grep -o "cc .*" /tmp/spec.log | tail -1 | wc -c
+          echo "=== tail of spec log ==="
+          tail -5 /tmp/spec.log
           set -e
           echo "SPEC_RC=$rc"
           if [ $rc -ne 0 ]; then
