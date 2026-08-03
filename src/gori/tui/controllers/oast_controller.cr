@@ -24,6 +24,23 @@ module Gori::Tui
     DRAIN_CAP     = 512
     POLL_INTERVAL = 5.seconds
 
+    # Ring cap on the in-memory callback window. A per-project result buffer fed by a NETWORK
+    # PEER must have a cap or an eviction policy: unlike every other result list in this layer,
+    # growth here is paced by the PROVIDER, not the operator. An interact.sh-class domain
+    # attracts unsolicited third-party scanner traffic, the poller ingests it every
+    # POLL_INTERVAL for as long as the listener lives, and each interaction costs one CbRow
+    # holding the FULL raw_request and raw_response. Unbounded, that is the only buffer in the
+    # TUI a third party can grow (Notifications::CAP 100, Jobs::CAP 50, FuzzerView::RESULT_CAP
+    # 5000 are all bounded).
+    #
+    # This is a VIEW WINDOW, not a destructive trim: every evicted row is still in the
+    # `oast_callbacks` table, and `reload` re-forms the window over the newest CALLBACK_CAP of
+    # them. Lower than FuzzerView's 5000 because a fuzz row keeps bodies only for matches while
+    # every OAST row carries both raw sides in full — 2000 is ~2-4 MiB of live interactions and
+    # is two orders of magnitude past the few dozen callbacks a real assessment produces, so
+    # the operator's own evidence never reaches it; only a flood does.
+    CALLBACK_CAP = 2000
+
     # A live listening session: the engine Session + its provider + poll fiber.
     # `provider_key` is the scope-qualified Oast::ProviderConfig#key (stable across both
     # scopes; a global provider has no project-DB row id to key off).
@@ -63,7 +80,10 @@ module Gori::Tui
       @providers = [] of Oast::ProviderConfig
       @listeners = [] of Listener
       @callbacks = [] of CbRow
-      @seen = Hash(Int64, Set(String)).new     # session_id → seen provider_uids (dedup)
+      @seen = Hash(Int64, Set(String)).new     # session_id → seen provider_uids, WINDOWED (dedup)
+      @hits = Hash(Int64, Int32).new           # session_id → TOTAL callbacks folded (survives eviction)
+      @evicted = 0                             # rows dropped off the old end of the window (still in the DB)
+      @evict_announced = false                 # the one-time "the pane is a window now" note has fired
       @session_label = Hash(Int64, String).new # session_id → provider label for the table
       @active_sub = 0
       @cb_sel = 0
@@ -158,11 +178,16 @@ module Gori::Tui
     # Authoritative full rebuild (init + on_enter): re-read providers/sessions, then fold the
     # whole callback table in one rowid-ordered query (id order == chronological, so no sort).
     # Also reflects any peer-process deletions. Live/soft-sync updates go through reconcile.
+    # The fold is windowed by trim_callbacks, so the REBUILT state is the newest CALLBACK_CAP
+    # rows and the eviction counter is recomputed from scratch rather than carried across —
+    # the window is a function of the table, so a revisit must not inflate it.
     def reload : Nil
       store = @host.session.store
       @providers = Oast.provider_configs(store)
       @callbacks.clear
       @seen.clear
+      @hits.clear
+      @evicted = 0
       @session_label.clear
       @max_cb_id = 0_i64
       store.oast_sessions.each do |s|
@@ -195,13 +220,43 @@ module Gori::Tui
     # if it was new (not a dedup hit). Rows arrive id-ascending, so the watermark only grows;
     # a callback the live drain already appended is read once here, skipped, and its id clears
     # the watermark so it is never re-read again (bounds reconcile to new-since-last rows).
+    # That same id-ascending order is what makes the windowing below keep the NEWEST rows.
     private def fold_callback(cb : Store::OastCallbackRecord) : Bool
       @max_cb_id = cb.id if cb.id > @max_cb_id
       seen = (@seen[cb.session_id] ||= Set(String).new)
       return false if seen.includes?(cb.provider_uid)
       seen << cb.provider_uid
+      @hits[cb.session_id] = (@hits[cb.session_id]? || 0) + 1
       @callbacks << cb_row(cb, @session_label[cb.session_id]? || "oast")
+      trim_callbacks
       true
+    end
+
+    # Hold @callbacks to CALLBACK_CAP by dropping its OLDEST rows, and drop their uids from
+    # @seen with them — @seen grew one interned uid per row in lockstep, so capping the rows
+    # alone would only slow the same unbounded growth down.
+    #
+    # Evicting the OLD end is what keeps dedup sound. The one re-announcement that must never
+    # double-append is `reconcile` re-reading a row the live drain already appended, and those
+    # rows are always NEWER than @max_cb_id — never the ones dropped here. Both callers fold
+    # id-ascending (`oast_callbacks_since` is ORDER BY id; the live drain is chronological), so
+    # the surviving window is the newest CALLBACK_CAP rows, not an arbitrary slice. The residual
+    # trade is a provider re-announcing an interaction OLDER than the window: the table stays
+    # single-copy (UNIQUE(session_id, provider_uid) + INSERT OR IGNORE) but the pane would show
+    # that row a second time, and @hits would over-count it until the next reload.
+    #
+    # @cb_sel indexes the REVERSED (newest-first) display, so dropping the old end leaves every
+    # newer row's index untouched — the least disruptive end to evict. The one case it moves
+    # under is a selection parked at the very bottom of a FULL window during a flood:
+    # reanchor_callback_selection cannot find the evicted row and the render clamp lands @cb_sel
+    # on its neighbour. Accepted rather than given machinery — that row is leaving either way.
+    private def trim_callbacks : Nil
+      return if @callbacks.size <= CALLBACK_CAP
+      while @callbacks.size > CALLBACK_CAP
+        old = @callbacks.shift
+        @seen[old.session_id]?.try(&.delete(old.uid))
+        @evicted += 1
+      end
     end
 
     def on_enter : Nil
@@ -525,12 +580,28 @@ module Gori::Tui
     private def render_callback_table(screen : Screen, rect : Rect, focused : Bool) : Nil
       ordered = ordered_callbacks
       filtering = !@filter.value.strip.empty?
-      title = filtering ? "CALLBACKS (#{ordered.size}/#{@callbacks.size})" : "CALLBACKS (#{@callbacks.size})"
+      # A capped pane must SAY it is capped. Once the window has evicted, a bare count is the
+      # worst of both: `2000` stands still while callbacks keep arriving, reading as "nothing
+      # new" in the one tab whose whole job is evidence. Name the window, the total behind it,
+      # and where the rest went.
+      held = @evicted > 0 ? "#{@callbacks.size} of #{@callbacks.size + @evicted}" : @callbacks.size.to_s
+      title = filtering ? "CALLBACKS (#{ordered.size}/#{held})" : "CALLBACKS (#{held})"
+      title += " · #{@evicted} older kept in the project DB" if @evicted > 0
       Frame.card(screen, rect, title, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
       if ordered.empty?
         msg = filtering ? "no callbacks match “#{@filter.value.strip}” — esc to clear" : "no callbacks yet — get a payload (g), use it in a target, watch here"
         screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg, width: inner.w - 2)
+        # A no-match over a WINDOW is not a no-match over the evidence. Unqualified, the
+        # operator filters for the source IP they care about, reads "no match", and concludes
+        # it never hit — when the row is sitting in the table the filter never saw. Its OWN row
+        # (not appended to the message) so it survives the width clamp on an 80-column terminal,
+        # where a tacked-on clause is exactly the part that gets cut.
+        if filtering && @evicted > 0 && inner.h > 1
+          screen.text(inner.x + 1, inner.y + 1,
+            "filter covers the newest #{@callbacks.size} only — #{@evicted} older are in the project DB",
+            Theme.yellow, Theme.bg, width: inner.w - 2)
+        end
         return
       end
       header_y = inner.y
@@ -1029,6 +1100,7 @@ module Gori::Tui
         i = ev.interaction
         return if seen.includes?(i.unique_id)
         seen << i.unique_id
+        @hits[sid] = (@hits[sid]? || 0) + 1
         label = @session_label[sid]? || "oast"
         store = @host.session.store
         # Persist the interaction's OWN time (not now) so a callback shows the same timestamp
@@ -1037,6 +1109,8 @@ module Gori::Tui
           i.full_id, i.raw_request.to_slice, i.raw_response.try(&.to_slice), i.at.to_unix_ms * 1000)
         @callbacks << CbRow.new(sid, i.unique_id, i.protocol, i.method, i.source_ip, i.full_id,
           label, i.at, i.raw_request, i.raw_response)
+        trim_callbacks
+        announce_window_cap
         @cb_version += 1
         n = @listeners.find { |l| l.session.id == sid }
         @host.jobs.progress(n.job_id, nil, nil, "#{callbacks_for(sid)} hits") if n
@@ -1045,10 +1119,29 @@ module Gori::Tui
       end
     end
 
-    # @seen[sid] holds exactly the distinct provider_uids folded in for that session (one per
-    # CbRow), so its size is the hit count — O(1), vs. an O(n) scan of the whole list per hit.
+    # Say it ONCE, the first time a LIVE callback pushes a row off the window. The standing
+    # marker in the CALLBACKS title only reaches an operator who is looking at the tab, and
+    # the callbacks that get evicted are precisely the ones that arrived while they were
+    # somewhere else — a cap the operator can only discover by noticing an absence is a silent
+    # cap. Live path only, and not because reload's trim is less real — a cold open of a
+    # project whose table already holds more than CALLBACK_CAP evicts too — but because that
+    # operator is LOOKING at the pane and its title already carries the marker, while pushing a
+    # note from `reload` would mean touching @host.notifications during construction. The flag
+    # is sticky across reloads so a tab revisit cannot re-fire it.
+    private def announce_window_cap : Nil
+      return if @evict_announced || @evicted == 0
+      @evict_announced = true
+      @host.notifications.push(:warn,
+        "OAST callbacks pane now shows the newest #{CALLBACK_CAP} — older ones stay in the project DB",
+        Jobs::Goto.new(:oast), source: "oast")
+    end
+
+    # The hit count in the job note is the session's TOTAL, so it is counted separately rather
+    # than read off @seen#size: @seen is now windowed (trim_callbacks drops evicted uids), and
+    # a listener whose counter walked BACKWARDS as it kept receiving would be worse than no
+    # counter. One Int32 per session, so it costs nothing the labels don't already cost.
     private def callbacks_for(sid : Int64) : Int32
-      @seen[sid]?.try(&.size) || 0
+      @hits[sid]? || 0
     end
 
     private def poll_http : Oast::Http
