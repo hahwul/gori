@@ -726,7 +726,119 @@ module Gori
         "ALTER TABLE intercept_held ADD COLUMN binary INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9]
+      # Make rowid reuse impossible on the two tables an `entity_links` row can point at, so
+      # a stranded link can never re-point at material nobody attached.
+      #
+      # `entity_links.ref_id` is a plain integer selected by `ref_kind` — the ref is
+      # polymorphic, so no foreign key can express it and no `ON DELETE CASCADE` is available.
+      # Until #574 neither `delete_fuzz_session` nor `delete_miner_session` deleted the link
+      # rows, and both tables are `INTEGER PRIMARY KEY` WITHOUT AUTOINCREMENT — so SQLite
+      # reassigns `max(rowid)+1`, while closing a sub-tab (^W) deletes at the TOP of the id
+      # space. The next `^N` was handed the id that had just gone, and a surviving link
+      # silently re-bound (`stale: false`) to a session against a DIFFERENT target: an issue's
+      # evidence confidently naming traffic the operator never linked. #574 closed the delete
+      # path; this closes the property that made a stranded link DANGEROUS rather than merely
+      # dead, and it is the half that reaches databases already carrying strays.
+      #
+      # Deliberately NOT a sweep of those strays. Deleting them is irreversible and discards a
+      # fact the operator put there, and it is unnecessary: `Links.resolve_fuzz` already
+      # renders an absent row as `fuzz #N (gone)` with `stale: true` (pinned by
+      # spec/links_spec.cr), which is strictly more informative than no row at all. Seeding
+      # `sqlite_sequence` past the highest id ANY surviving link references makes every stray
+      # permanently safe instead of permanently deleted — including the case that defeats
+      # AUTOINCREMENT on its own, where the table is EMPTY at migration time so the copy
+      # creates no `sqlite_sequence` row and ids would otherwise restart at 1 under a stray
+      # pointing at 1.
+      #
+      # Two ordering facts this depends on, both verified rather than assumed: the seed reads
+      # the live table by its FINAL name, so it must run AFTER the rename; and a
+      # `sqlite_sequence` row FOLLOWS `ALTER TABLE … RENAME TO`, so the DELETE below targets
+      # the row the copy just created and cannot leave a stale duplicate under the old name.
+      #
+      # Columns are enumerated rather than `SELECT *` — leaning on column order is how a
+      # rebuild migration silently corrupts data. The shapes are V1's, still current (no
+      # V2..V9 statement touches these tables). A fresh database runs V1's plain-PK CREATE and
+      # then rebuilds it here in the same transaction: microseconds on an empty table, and it
+      # keeps every database, new or migrated, on exactly one definition.
+      #
+      # `sequencer_sessions` is NOT rebuilt. `LinkRefKind.parse` accepts only
+      # flow|repeater|fuzz|miner, so nothing can reference a sequencer session and there is no
+      # id to protect today — `delete_sequencer_session` takes the cascade pre-emptively, and
+      # its comment says that whoever adds a `Sequencer` variant needs this rebuild too.
+      # `flows` is not swept either, and must not be: the prune paths delete from the BOTTOM
+      # (`id <= cutoff`), so `MAX(id)` survives and a pruned flow's id never returns — its
+      # links are already safely `(gone)`.
+      V10 = [
+        <<-SQL,
+        CREATE TABLE fuzz_sessions_v10 (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          target     TEXT    NOT NULL,
+          template   TEXT    NOT NULL,
+          http2      INTEGER NOT NULL DEFAULT 0,
+          sni        TEXT,
+          config     TEXT    NOT NULL DEFAULT '',
+          flow_id    INTEGER,
+          position   INTEGER NOT NULL DEFAULT 0,
+          name       TEXT
+        )
+        SQL
+        <<-SQL,
+        INSERT INTO fuzz_sessions_v10
+          (id, created_at, updated_at, target, template, http2, sni, config, flow_id, position, name)
+          SELECT id, created_at, updated_at, target, template, http2, sni, config, flow_id, position, name
+          FROM fuzz_sessions
+        SQL
+        "DROP TABLE fuzz_sessions",
+        "ALTER TABLE fuzz_sessions_v10 RENAME TO fuzz_sessions",
+        "CREATE INDEX idx_fuzz_sessions_position ON fuzz_sessions (position, id)",
+        "DELETE FROM sqlite_sequence WHERE name = 'fuzz_sessions'",
+        <<-SQL,
+        INSERT INTO sqlite_sequence (name, seq)
+          SELECT 'fuzz_sessions', COALESCE(MAX(v), 0) FROM (
+            SELECT MAX(id) AS v FROM fuzz_sessions
+            UNION ALL
+            SELECT MAX(ref_id) FROM entity_links WHERE ref_kind = 'fuzz'
+          )
+        SQL
+
+        <<-SQL,
+        CREATE TABLE miner_sessions_v10 (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          target     TEXT    NOT NULL,
+          request    BLOB    NOT NULL,
+          http2      INTEGER NOT NULL DEFAULT 0,
+          sni        TEXT,
+          config     TEXT    NOT NULL DEFAULT '',
+          flow_id    INTEGER,
+          position   INTEGER NOT NULL DEFAULT 0,
+          name       TEXT
+        )
+        SQL
+        <<-SQL,
+        INSERT INTO miner_sessions_v10
+          (id, created_at, updated_at, target, request, http2, sni, config, flow_id, position, name)
+          SELECT id, created_at, updated_at, target, request, http2, sni, config, flow_id, position, name
+          FROM miner_sessions
+        SQL
+        "DROP TABLE miner_sessions",
+        "ALTER TABLE miner_sessions_v10 RENAME TO miner_sessions",
+        "CREATE INDEX idx_miner_sessions_position ON miner_sessions (position, id)",
+        "DELETE FROM sqlite_sequence WHERE name = 'miner_sessions'",
+        <<-SQL,
+        INSERT INTO sqlite_sequence (name, seq)
+          SELECT 'miner_sessions', COALESCE(MAX(v), 0) FROM (
+            SELECT MAX(id) AS v FROM miner_sessions
+            UNION ALL
+            SELECT MAX(ref_id) FROM entity_links WHERE ref_kind = 'miner'
+          )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

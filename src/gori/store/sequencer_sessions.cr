@@ -55,8 +55,26 @@ module Gori
       }
     end
 
+    # Cascades `entity_links` PRE-EMPTIVELY. Unlike the fuzz/miner siblings this fixes nothing
+    # today: `LinkRefKind` has no `Sequencer` variant, so `parse` accepts only
+    # flow|repeater|fuzz|miner and no link can name a sequencer session — the DELETE below
+    # matches zero rows by construction. It is here because this delete was the last one in the
+    # family written the way fuzz's and miner's were, and those two shipped a real bug (#574):
+    # an uncascaded link outlives its session, and because `id` is `INTEGER PRIMARY KEY`
+    # without AUTOINCREMENT the next insert reuses the id and the stray link silently re-binds
+    # to a different target.
+    #
+    # So, for whoever adds a `Sequencer` variant to `LinkRefKind`: this line already covers the
+    # delete path, but the OTHER half is missing. `sequencer_sessions` was deliberately left
+    # out of the V10 rebuild that gave fuzz/miner `AUTOINCREMENT` (there was no id to protect),
+    # and it needs its own migration on that day — otherwise reuse makes a stray dangerous
+    # rather than merely dead. See the V10 comment in schema.cr for the shape.
     def delete_sequencer_session(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM sequencer_sessions WHERE id = ?", id); nil }
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM entity_links WHERE ref_kind = 'sequencer' AND ref_id = ?", id)
+        c.exec("DELETE FROM sequencer_sessions WHERE id = ?", id)
+        nil
+      }
     end
   end
 end

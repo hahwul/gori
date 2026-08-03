@@ -15,11 +15,20 @@ private def with_store(&)
 end
 
 # Closing a Fuzzer/Miner sub-tab must take that session's `entity_links` rows with it, for the
-# reason `delete_repeater` states: `fuzz_sessions.id` / `miner_sessions.id` are plain
-# `INTEGER PRIMARY KEY` (no AUTOINCREMENT), and a tab close deletes at the TOP of the id space,
-# so the next `^N` is handed the id that just went. A surviving link then resolves — `stale:
-# false`, no `(gone)` — to an UNRELATED session, and an issue's evidence names a target the
-# operator never linked.
+# reason `delete_repeater` states: a link that outlives its session is a pointer with nothing
+# to check it.
+#
+# Historically that was acute — `fuzz_sessions.id` / `miner_sessions.id` were plain
+# `INTEGER PRIMARY KEY`, a tab close deletes at the TOP of the id space, so the next `^N` was
+# handed the id that just went and a surviving link re-bound (`stale: false`, no `(gone)`) to
+# an UNRELATED session, naming a target the operator never linked. Schema V10 gave both tables
+# AUTOINCREMENT and seeded `sqlite_sequence` past every referenced id, so that reuse can no
+# longer happen and a stray is now merely dead.
+#
+# The cascade is still the primary guarantee and is what these examples pin: V10 is the
+# backstop for a stray created some way this cascade does not cover (an out-of-band delete, a
+# future delete path written without it), not a replacement for it. See
+# spec/store/link_ref_id_reuse_migration_spec.cr for the backstop's own coverage.
 describe "workbench session deletes cascade entity_links" do
   it "drops a fuzz session's links so a reused rowid cannot re-point an issue's evidence" do
     with_store do |store|
@@ -33,10 +42,17 @@ describe "workbench session deletes cascade entity_links" do
       store.get_fuzz_session(sid).should be_nil
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).should be_empty
 
-      # The emptied table hands the same rowid to the next session, against a different target.
+      # The next session against a different target. Before V10 the emptied table handed it
+      # back the SAME rowid, and this example asserted that — the reuse was the whole reason
+      # the cascade above mattered. V10 (AUTOINCREMENT + a seeded sqlite_sequence) removed that
+      # premise, so the assertion is now its inverse. Both layers are kept and tested
+      # separately on purpose: the cascade means no stray link survives a tab close, and V10
+      # means a stray that survives some OTHER way — an out-of-band sqlite3 delete, a future
+      # delete path written without the cascade — is merely dead rather than dangerous.
+      # spec/store/link_ref_id_reuse_migration_spec.cr pins that second layer.
       reused = store.insert_fuzz_session("https://unrelated.test", "GET /b HTTP/1.1\r\nHost: unrelated.test\r\n\r\n",
         false, nil, "{}", nil, 0, "other target")
-      reused.should eq(sid) # the reuse this spec exists for — not an incidental id
+      reused.should_not eq(sid)
 
       resolved = Gori::Links.resolve_all(store,
         store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id))
@@ -58,9 +74,11 @@ describe "workbench session deletes cascade entity_links" do
       store.get_miner_session(sid).should be_nil
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).should be_empty
 
+      # Was `eq(sid)` until V10 stopped rowid reuse — see the fuzz example above for why the
+      # assertion inverted and why both layers are still worth keeping.
       reused = store.insert_miner_session("https://unrelated.test",
         "GET /b HTTP/1.1\r\nHost: unrelated.test\r\n\r\n".to_slice, false, nil, "{}", nil, 0, "other target")
-      reused.should eq(sid)
+      reused.should_not eq(sid)
 
       resolved = Gori::Links.resolve_all(store,
         store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id))
@@ -109,6 +127,33 @@ describe "workbench session deletes cascade entity_links" do
       store.delete_fuzz_session(sid)
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).should be_empty
       store.list_links(Gori::Store::LinkOwnerKind::Note, note_id).should be_empty
+    end
+  end
+end
+
+# The sequencer delete takes the same cascade PRE-EMPTIVELY. Nothing can exercise it today —
+# `LinkRefKind` has no `Sequencer` variant, so no link can name a sequencer session and the
+# DELETE matches zero rows. What this example actually pins is that the delete still works and
+# is harmless with the extra statement in it, so the line does not rot before the day it
+# matters. If a `Sequencer` variant is ever added, replace this with the real fuzz/miner shape
+# above — and give sequencer_sessions the V10 AUTOINCREMENT rebuild it was left out of.
+describe "delete_sequencer_session" do
+  it "deletes the session and is a no-op on entity_links, which cannot reference it" do
+    with_store do |store|
+      issue_id = store.insert_issue("tokens", Gori::Store::Severity::Low, "victim.test", nil)
+      sid = store.insert_sequencer_session("https://victim.test",
+        "GET /a HTTP/1.1\r\nHost: victim.test\r\n\r\n".to_slice, false, nil, "{}", nil, 0, "token run")
+      # A link on the SAME numeric id but a kind that does exist — the cascade must not take
+      # it, which is what makes the ref_kind predicate load-bearing rather than decorative.
+      fuzz_sid = store.insert_fuzz_session("https://victim.test", "GET /a HTTP/1.1\r\n\r\n",
+        false, nil, "{}", nil, 0, "sweep")
+      fuzz_sid.should eq(sid) # both tables start at 1, so the ids collide by construction
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Fuzz, fuzz_sid).should_not be_nil
+
+      store.delete_sequencer_session(sid)
+      store.get_sequencer_session(sid).should be_nil
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).size.should eq(1)
     end
   end
 end
