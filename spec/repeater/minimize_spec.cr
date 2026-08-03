@@ -78,6 +78,26 @@ private class JsonOrigin < F::Backend
   end
 end
 
+# A JSON API where every authored key EXCEPT `drop` is load-bearing — its response shrinks
+# unless the body still carries `keep`, BOTH `dup` occurrences, the `\/`-escaped `path`, and
+# the `1.50` number. So the minimizer keeps them and we can assert they survived byte-for-byte,
+# while `drop` (which the response ignores) is removed. If the candidate splice re-encoded the
+# JSON, the probe body would read `a/b`/`1.5`/one `dup` and `drop` would look load-bearing.
+private class JsonByteOrigin < F::Backend
+  getter origin : F::Origin = F::Origin.new("http", "h", 80)
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    req = String.new(bytes)
+    body = req.includes?("\r\n\r\n") ? req.split("\r\n\r\n", 2)[1] : ""
+    full = body.includes?(%("keep")) && body.includes?(%("dup")) &&
+           body.includes?("a\\/b") && body.includes?("1.50")
+    payload = full ? "the full record body goes here" : "short"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{payload.bytesize}\r\n\r\n".to_slice
+    r = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, payload.to_slice, r, 1000_i64)
+  end
+end
+
 # Every send errors (unreachable origin).
 private class DeadOrigin < F::Backend
   getter origin : F::Origin = F::Origin.new("http", "h", 80)
@@ -198,6 +218,37 @@ describe Gori::Repeater::Minimize do
     report.minimized_text.should contain(%("keep":1))
     report.minimized_text.should_not contain("drop")
     report.removed.map(&.label).should contain("drop")
+  end
+
+  it "byte-splices a JSON key without re-encoding: dup keys, `\\/`, and `1.50` survive verbatim" do
+    # The old `JSON.parse(body).to_json` candidate canonicalized the operator's authored bytes
+    # (collapsed the duplicate `dup`, unescaped `\/`→`/`, reformatted `1.50`→`1.5`) in BOTH the
+    # probe requests and `--apply`'s stored `minimized_text` — corrupting the very framing/
+    # encoding a smuggling or WAF-bypass probe tests. The splice must preserve every OTHER byte.
+    body = %({"keep":1,"drop":2,"dup":3,"dup":4,"path":"a\\/b","num":1.50})
+    text = [
+      "POST /j HTTP/1.1",
+      "Host: h",
+      "Content-Type: application/json",
+      "Content-Length: #{body.bytesize}",
+      "",
+      body,
+    ].join("\n")
+
+    report = minimize(JsonByteOrigin.new, text, auto_cl: true)
+    report.aborted.should be_false
+    # `drop` is removed — which, since the origin only reports "full" when the probe body still
+    # reads `a\/b`/`1.50`/both `dup`s, also proves the PROBE candidate kept those bytes verbatim.
+    report.removed.map(&.label).should contain("drop")
+    report.minimized_text.should_not contain("drop")
+    # Everything load-bearing survived, byte-for-byte, in the STORED text.
+    report.minimized_text.should contain(%("keep":1))
+    report.minimized_text.should contain(%("dup":3))   # the duplicate key is NOT collapsed…
+    report.minimized_text.should contain(%("dup":4))   # …both occurrences remain
+    report.minimized_text.should contain("a\\/b")       # `\/` is NOT unescaped to `/`
+    report.minimized_text.should contain("1.50")        # `1.50` is NOT reformatted to `1.5`
+    # And the drop splice took its trailing comma with it, leaving valid JSON.
+    report.minimized_text.should contain(%({"keep":1,"dup":3))
   end
 
   it "leaves body params alone when Auto-Content-Length is off (can't safely re-length)" do

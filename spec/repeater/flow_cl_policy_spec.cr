@@ -57,6 +57,13 @@ describe "Gori::Env.head_body_boundary" do
     Gori::Env.head_body_boundary("GET / HTTP/1.1\r\nHost: h\r\n\r\nbody".to_slice).should eq(27)
   end
 
+  it "accepts a `\\n\\r\\n` terminator (bare-LF header end + CRLF blank line)" do
+    # The 4th spelling: a header line ended by a lone LF, then a CRLF blank line. Missed by
+    # both neighbors (LFLF needs a second LF; CRLFCRLF starts on CR), so the whole message
+    # used to read as head and the body's bare LFs were promoted to CRLF. Body starts at 25.
+    Gori::Env.head_body_boundary("GET / HTTP/1.1\nHost: h\n\r\nbody".to_slice).should eq(25)
+  end
+
   it "takes whichever spelling comes FIRST, not a fixed preference" do
     # A body that itself contains a CRLFCRLF must not move the boundary past the real one.
     bytes = "GET / HTTP/1.1\nHost: h\n\nA\r\n\r\nB".to_slice
@@ -66,6 +73,26 @@ describe "Gori::Env.head_body_boundary" do
   it "returns the full size when there is no terminator at all" do
     bytes = "GET /no-terminator HTTP/1.1".to_slice
     Gori::Env.head_body_boundary(bytes).should eq(bytes.size)
+  end
+end
+
+# End-to-end proof that the `\n\r\n` boundary fix reaches the wire through the shared
+# plan builder. A draft whose Content-Length line is bare-LF-terminated and whose blank
+# line is CRLF used to read as all-head: `expand_wire` then promoted the BODY's bare LF to
+# CRLF (`a\nb` → `a\r\nb`) and the auto-CL resync re-framed it to `Content-Length: 4` — a
+# silently corrupted request. With the boundary recognized, the head is normalized and the
+# 3-byte body `a\nb` is spliced through verbatim.
+describe "Gori::Repeater::Plan.build with a `\\n\\r\\n` head boundary" do
+  it "sends the body `a\\nb` (3 bytes) unchanged, not reframed to `a\\r\\nb`/CL:4" do
+    wire = "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: 3\n\r\na\nb"
+    options = Gori::Repeater::PlanOptions.new([wire.to_slice], target: "http://h")
+    ungated = Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
+    out = String.new(Gori::Repeater::Plan.build(options, ungated).bytes)
+
+    out.should end_with("\r\n\r\na\nb")     # body verbatim, head terminated with a real blank line
+    out.should_not contain("a\r\nb")        # the body's bare LF was NOT promoted to CRLF
+    out.should contain("Content-Length: 3") # framed over the real 3-byte body
+    out.should_not contain("Content-Length: 4")
   end
 end
 

@@ -716,8 +716,8 @@ module Gori
     # buffer (no body), which `expand_wire` then normalizes in full, matching the
     # pre-existing behavior for header-only text.
     # The end of the head (index of the first byte of the body) in wire-form bytes:
-    # the FIRST of `\n\n` or `\r\n\r\n`, whichever occurs earlier — never a fixed
-    # preference for one spelling, which is how a body containing a CRLFCRLF has
+    # the FIRST of `\n\n`, `\n\r\n`, or `\r\n\r\n`, whichever occurs earlier — never a
+    # fixed preference for one spelling, which is how a body containing a CRLFCRLF has
     # repeatedly moved this boundary in this codebase. Returns `bytes.size` when the
     # message has no terminator at all (a hand-authored head is still a head).
     #
@@ -731,6 +731,14 @@ module Gori
       while i < n
         if bytes[i] == 0x0A_u8 && i + 1 < n && bytes[i + 1] == 0x0A_u8
           return i + 2
+        end
+        # `\n\r\n` (0x0A 0x0D 0x0A): a bare-LF header terminator followed by a CRLF blank
+        # line. The two neighboring checks both miss it — LFLF needs `bytes[i+1]==0x0A`
+        # and CRLFCRLF starts on `0x0D` — so without this branch the message reads as
+        # all-head and the body's bare LFs get promoted to CRLF. Body starts at i+3.
+        if bytes[i] == 0x0A_u8 && i + 2 < n &&
+           bytes[i + 1] == 0x0D_u8 && bytes[i + 2] == 0x0A_u8
+          return i + 3
         end
         if bytes[i] == 0x0D_u8 && i + 3 < n &&
            bytes[i + 1] == 0x0A_u8 && bytes[i + 2] == 0x0D_u8 && bytes[i + 3] == 0x0A_u8
