@@ -390,6 +390,16 @@ describe Gori::Outbound do
       Gori::Outbound.request_target("POST\t/a/b\tHTTP/1.1\r\n").should eq("/a/b")
     end
 
+    # A LEADING BLANK LINE before the request-line must not blind the gate: reading the empty
+    # first line and `split[1]?`-ing it to nil would gate "/" while the REAL target (a later
+    # line) goes on the wire — a Sandbox bypass. Scan to the first non-blank line instead.
+    it "recovers the target past leading blank line(s) before the request line" do
+      Gori::Outbound.request_target("\r\nGET /admin/x HTTP/1.1\r\nHost: h\r\n\r\n").should eq("/admin/x")
+      Gori::Outbound.request_target("\nGET /admin/x HTTP/1.1\r\n".to_slice).should eq("/admin/x")
+      Gori::Outbound.request_target("\r\n\r\nGET /admin/x HTTP/1.1\r\n").should eq("/admin/x") # doubled leading blank
+      Gori::Outbound.request_target("\r\nPOST  /a/b\tHTTP/1.1\r\n").should eq("/a/b")           # blank line + irregular ws
+    end
+
     it "keeps the scope gate honest against a doubled-space request line" do
       with_scope do |scope, _store|
         scope.add("include", "host", "acme.test")
@@ -402,6 +412,9 @@ describe Gori::Outbound do
         # …and a doubled space must NOT slip past it.
         ob.send_block("https", "acme.test", Gori::Outbound.request_target(
           "GET  /admin/x HTTP/1.1\r\nHost: acme.test\r\n\r\n")).should eq(Gori::Outbound::SANDBOX_ERROR)
+        # …nor a leading blank line before the request-line (the same target-read bypass).
+        ob.send_block("https", "acme.test", Gori::Outbound.request_target(
+          "\r\nGET /admin/x HTTP/1.1\r\nHost: acme.test\r\n\r\n")).should eq(Gori::Outbound::SANDBOX_ERROR)
       end
     end
   end

@@ -437,16 +437,35 @@ module Gori::Proxy::Codec
           end
           return true # terminating chunk reached
         end
-        return false unless copy_n(src, dst, tee, size, cbuf) # truncated mid-chunk
-        if crlf = read_exact(src, 2)                          # the CRLF terminating the chunk data
-          emit(dst, tee, crlf)
-        end
+        return false unless copy_n(src, dst, tee, size, cbuf)             # truncated mid-chunk
+        return false unless copy_chunk_terminator(src, dst, tee, line_buf) # bad/absent chunk-data terminator → desync
       end
     end
 
     private def self.emit(dst : IO, tee : IO, bytes : Bytes) : Nil
       dst.write(bytes)
       tee.write(bytes)
+    end
+
+    # Consume + forward the terminator after a chunk's DATA: an OPTIONAL CR then the
+    # REQUIRED LF. The old blind read_exact(src, 2) assumed a 2-byte CRLF, so on a bare-LF
+    # terminator (1 byte — non-conformant but seen on the wire) it swallowed the LF PLUS the
+    # first byte of the NEXT chunk-size line: every later chunk misframes, the forward
+    # truncates, and read_complete reports a false "upstream closed". read_crlf_line reads
+    # up-to-and-including the LF, so it takes exactly "\r\n" (conformant — byte-identical to
+    # the old read) or "\n" (bare-LF), mirroring scan_chunks' "optional CR then LF"
+    # (content_decode.cr:218-224) in streaming form. But read_crlf_line reads to the NEXT LF,
+    # so reject anything that is not JUST the terminator (>2 bytes, LF-less, or a 2-byte form
+    # that is not CR+LF): an EOF/cap-truncated read or junk before the LF is a framing error
+    # → false (abort/close), exactly like a bad size line (:412) or an unterminated trailer
+    # (:432). Emit only after the check, so a truncated terminator never reaches the wire.
+    private def self.copy_chunk_terminator(src : IO, dst : IO, tee : IO, line_buf : IO::Memory) : Bool
+      term = read_crlf_line(src, line_buf)
+      return false if term.nil?
+      return false unless term.size <= 2 && term[term.size - 1] == 0x0a_u8 &&
+                          (term.size == 1 || term[0] == 0x0d_u8)
+      emit(dst, tee, term)
+      true
     end
 
     # Reads up to and including the next LF. Returns nil on EOF before any byte.
@@ -469,12 +488,6 @@ module Gori::Proxy::Codec
       end
       return nil if buf.bytesize == 0
       scratch ? buf.to_slice : buf.to_slice.dup
-    end
-
-    private def self.read_exact(io : IO, n : Int32) : Bytes?
-      buf = Bytes.new(n)
-      read = io.read_fully?(buf)
-      read ? buf : nil
     end
 
     # Parse a chunk-size line: hex digits before any ';' chunk-extension. Returns

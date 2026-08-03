@@ -92,6 +92,16 @@ describe "Gori::Proxy::Codec::Body.read_complete" do
     complete.should be_false
   end
 
+  it "reports COMPLETE for a chunked body with a bare-LF chunk-data terminator" do
+    # The capture path (Repeater/Fuzz/Miner) dispatches through copy_chunked too, so the
+    # bare-LF terminator fix reaches it: a lone-LF terminator must not truncate the capture
+    # or read as "upstream closed". The captured bytes are the wire form, framing included.
+    src = IO::Memory.new("5\r\nhello\n0\r\n\r\n")
+    bytes, complete = Body.read_complete(src, BodyFraming::Chunked, 0_i64)
+    complete.should be_true
+    String.new(bytes.not_nil!).should eq("5\r\nhello\n0\r\n\r\n")
+  end
+
   it "reports complete for a close-delimited body (EOF is the framing)" do
     src = IO::Memory.new("whatever")
     _, complete = Body.read_complete(src, BodyFraming::CloseDelimited, 0_i64)
@@ -396,6 +406,36 @@ describe Gori::Proxy::Codec::Body do
       Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_true
       dst.to_s.should eq("0\r\nA\n\r\n") # forwarded through the genuine blank line
       src.gets_to_end.should eq("NEXT")  # next message starts clean — no orphaned CRLF
+    end
+
+    it "reads a bare-LF chunk-data terminator without eating the next size line (no desync)" do
+      # Non-conformant lone-LF terminators after the chunk DATA. The old blind read_exact(src, 2)
+      # assumed a 2-byte CRLF, so on a bare LF it swallowed the LF PLUS the first byte of the
+      # NEXT chunk-size line ("\n6" here) → the next read parsed "\n" as a size line, failed, and
+      # returned false: a truncated forward + a false "upstream closed". CRLF size lines isolate
+      # the fix to the data terminator (:441). The body must forward byte-exact and complete.
+      wire = "5\r\nHELLO\n6\r\n WORLD\n0\r\n\r\nNEXT"
+      src = IO::Memory.new(wire)
+      dst = IO::Memory.new
+      tee = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, tee).should be_true
+      expected = "5\r\nHELLO\n6\r\n WORLD\n0\r\n\r\n"
+      dst.to_s.should eq(expected) # forwarded byte-exact through the bare-LF terminators
+      tee.to_s.should eq(expected)
+      src.gets_to_end.should eq("NEXT") # next keep-alive message left intact — the desync proof
+    end
+
+    it "forwards a fully bare-LF chunked body byte-exact and complete" do
+      # Every delimiter is a lone LF (both size lines and data terminators). parse_chunk_size
+      # strips the size line's LF and read_crlf_line reads each 1-byte data terminator, so the
+      # whole body streams through unchanged and completes — matching the random-access
+      # de-chunker's bare-LF case (content_decode.cr scan_chunks).
+      wire = "5\nHELLO\n6\n WORLD\n0\n\nNEXT"
+      src = IO::Memory.new(wire)
+      dst = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_true
+      dst.to_s.should eq("5\nHELLO\n6\n WORLD\n0\n\n")
+      src.gets_to_end.should eq("NEXT")
     end
 
     it "aborts a chunked body whose trailer section overruns the cap (memory/CPU DoS guard)" do

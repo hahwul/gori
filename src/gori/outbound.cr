@@ -291,15 +291,31 @@ module Gori
     # with a URL-keyed include it inverts and fails closed. Do not read this comment as
     # covering the proxy gate.
     def self.request_target(bytes : Bytes) : String
-      request_target_line(String.new(bytes).each_line.first? || "")
+      request_target_line(String.new(bytes))
     end
 
     def self.request_target(text : String) : String
-      request_target_line(text.each_line.first? || "")
+      request_target_line(text)
     end
 
-    private def self.request_target_line(line : String) : String
-      line.split[1]? || "/"
+    # Read the request-TARGET off the request line — but from the first NON-BLANK line,
+    # not blindly the first line. A raw request may arrive with LEADING BLANK LINE(S)
+    # (an operator's authored bytes, or a peer that emits an empty line before the
+    # request-line); `each_line.first?` would then read an empty ("" / bare "\r") first
+    # line, `split[1]?` it to nil, and gate the innocuous "/" while the REAL target sits
+    # on a later line and goes on the wire — a scope/Sandbox bypass, the same failure mode
+    # as the doubled-space case below. So skip leading blank / whitespace-only lines, then
+    # split. The no-arg `split` still collapses whitespace runs (doubled space / tab) and
+    # drops empty parts, and tolerates a stray trailing "\r", so the malformed-first-line
+    # recovery is unchanged; a line with no target (or an all-blank input) still degrades
+    # to "/". The bytes themselves reach the wire byte-exact (P7) — only what the gate
+    # READS changes. (Still `Outbound`-only; see the proxy-gate caveat above.)
+    private def self.request_target_line(text : String) : String
+      text.each_line do |line|
+        next if line.strip.empty? # skip a leading blank / whitespace-only line (incl. a bare "\r")
+        return line.split[1]? || "/"
+      end
+      "/"
     end
 
     # The URL the gate evaluates, ALWAYS anchored on the DIAL target (the scheme/host the
