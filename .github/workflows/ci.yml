@@ -84,42 +84,12 @@ jobs:
       - name: Run tests
         run: |
           set +e
-          crystal spec --verbose > /tmp/spec.log 2>&1
-          rc=$?
-          echo "=== link command ==="
-          grep -o "cc .*" /tmp/spec.log | tail -1 | tr ' ' '\n' | grep -E "^-l|^-Wl|rdynamic|^-L" | tr '\n' ' '
-          echo
-          echo "=== objects on the link line ==="
-          grep -o "cc .*" /tmp/spec.log | tail -1 | tr ' ' '\n' | grep -c "\.o$"
-          echo "=== link line length ==="
-          grep -o "cc .*" /tmp/spec.log | tail -1 | wc -c
-          echo "=== tail of spec log ==="
-          tail -5 /tmp/spec.log
-          set -e
-          echo "SPEC_RC=$rc"
-          if [ $rc -ne 0 ]; then
-            echo "=== disk ==="; df -h / /home/runner
-            echo "=== mem ==="; free -m
-            BIN=$HOME/.cache/crystal/crystal-run-spec.tmp
-            echo "=== binary ==="; ls -la "$BIN" || true
-            echo "=== file ==="; file "$BIN" || true
-            echo "=== readelf -d ==="; readelf -d "$BIN" 2>&1 | head -30 || true
-            echo "=== readelf -V (version tables) ==="; readelf -V "$BIN" 2>&1 | head -60 || true
-            echo "=== dynsym count ==="; readelf --dyn-syms "$BIN" 2>&1 | wc -l || true
-            echo "=== ldd ==="; ldd "$BIN" 2>&1 | head -20 || true
-          fi
-          exit $rc
-# No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
-# arm64 on every PR, and those two builds — each compiling a static Crystal
-# binary from source, the arm64 one on a native runner because QEMU is far too
-# slow for it — dominated PR wall-clock while catching almost nothing: the
-# Dockerfile changes far less often than the code it packages.
-#
-# It is not gated to `main` pushes either, because on a `main` push it would be
-# pure duplicate work: `publish-ghcr.yml` already builds the same Dockerfile,
-# for the same two platforms, on the same runners, on every push to `main` — it
-# just pushes the result instead of throwing it away. A Dockerfile break is
-# caught there, one merge late, before anything is released. If you ever want
-# the image validated *before* a merge again, add `pull_request` to
-# publish-ghcr.yml's build job with `push: false` rather than reviving a second
-# copy of the build here.
+          echo "=== A: plain (expected to fail) ==="
+          crystal spec -e "zzz-no-such-example" 2>&1 | tail -3; echo "A_RC=${PIPESTATUS[0]}"
+          echo "=== B: --no-debug ==="
+          crystal spec --no-debug -e "zzz-no-such-example" 2>&1 | tail -3; echo "B_RC=${PIPESTATUS[0]}"
+          echo "=== C: --link-flags -Wl,--no-export-dynamic ==="
+          crystal spec --link-flags "-Wl,--no-export-dynamic" -e "zzz-no-such-example" 2>&1 | tail -3; echo "C_RC=${PIPESTATUS[0]}"
+          echo "=== D: -Dstrict_multi_assign off / plain full run for reference ==="
+          crystal spec 2>&1 | tail -3; echo "D_RC=${PIPESTATUS[0]}"
+          exit 0
