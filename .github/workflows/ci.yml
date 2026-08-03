@@ -82,7 +82,24 @@ jobs:
       - name: Install dependencies
         run: shards install
       - name: Run tests
-        run: crystal spec
+        run: |
+          set +e
+          crystal spec
+          rc=$?
+          set -e
+          echo "SPEC_RC=$rc"
+          if [ $rc -ne 0 ]; then
+            echo "=== disk ==="; df -h / /home/runner
+            echo "=== mem ==="; free -m
+            BIN=$HOME/.cache/crystal/crystal-run-spec.tmp
+            echo "=== binary ==="; ls -la "$BIN" || true
+            echo "=== file ==="; file "$BIN" || true
+            echo "=== readelf -d ==="; readelf -d "$BIN" 2>&1 | head -30 || true
+            echo "=== readelf -V (version tables) ==="; readelf -V "$BIN" 2>&1 | head -60 || true
+            echo "=== dynsym count ==="; readelf --dyn-syms "$BIN" 2>&1 | wc -l || true
+            echo "=== ldd ==="; ldd "$BIN" 2>&1 | head -20 || true
+          fi
+          exit $rc
 # No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
 # arm64 on every PR, and those two builds — each compiling a static Crystal
 # binary from source, the arm64 one on a native runner because QEMU is far too
