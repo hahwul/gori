@@ -148,9 +148,23 @@ module Gori::Tui
 
     # A click outside dismisses (esc); a row click selects it (add/edit/delete stay
     # keyboard-driven).
+    #
+    # "dismisses (esc)" is meant LITERALLY: click-away goes through the same guard the esc
+    # key does, so while the add/edit row is open it cancels the ROW and leaves the modal up
+    # — a stray click can't silently drop what was typed AND take the editor down with it.
+    # The second click, now on the plain list, closes. Mirrors PreferencesOverlay#handle_click;
+    # the keyboard path already read this way and only the mouse diverged.
+    #
+    # An UNDRAWN card (nil box — the "needs a larger window" path) is exempt: there is no
+    # card on screen to click a second time, so that click must always dismiss.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return :cancel if box.nil?
+      unless box.contains?(mx, my)
+        return :cancel unless @adding
+        cancel_add
+        return :stay
+      end
       if idx = row_at(box, mx, my)
         set_selected(idx)
       end
