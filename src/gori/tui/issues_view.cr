@@ -655,6 +655,11 @@ module Gori::Tui
         render_detail(screen, rect, focused)
       else
         list_rect, preview_rect = list_split(rect)
+        # No preview pane at this size (or after a resize down) ⇒ snap focus back to the list,
+        # or move()/scroll would route arrows to an invisible pane and freeze list navigation.
+        # IssuesController#preview_scroll_focused? gates on the PREF alone, so the geometry has
+        # no other place to be heard (mirrors ProbeView#render).
+        @preview_focus = :list if preview_rect.nil?
         render_list(screen, list_rect, focused && @preview_focus == :list)
         render_preview_pane(screen, preview_rect, focused) if preview_rect
       end
@@ -695,10 +700,16 @@ module Gori::Tui
         screen.text(rect.x + 1, y, severity_badge(f.severity), severity_color(f.severity), bg, Attribute::Bold)
         screen.text(rect.x + 6, y, status_tag(f.status), status_color(f.status), bg)
         # Right-aligned host; the title fills the gap up to it (ellipsized).
+        # Both the alignment origin AND the title budget must be measured in COLUMNS, not
+        # characters: this is the flow's raw wire `Host` and nothing on the path applies
+        # punycode/IDNA, so `日本語.test` (8 chars / 11 columns) would start 3 columns too far
+        # right — over the card's border — and hand the title 3 columns it doesn't have,
+        # sliding it underneath the host so the two garble each other.
         right = rect.right - 1
         if (host = f.host) && !host.empty?
-          screen.text(rect.right - host.size - 1, y, host, Theme.muted, bg)
-          right = rect.right - host.size - 2
+          hw = Screen.display_width(host)
+          screen.text(rect.right - hw - 1, y, host, Theme.muted, bg, width: hw)
+          right = rect.right - hw - 2
         end
         title_fg = selected || marked ? Theme.text_bright : Theme.text
         tw = {right - title_x, 0}.max
@@ -1045,7 +1056,13 @@ module Gori::Tui
       return if h <= 0
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = 0 if @scroll < 0
+      # Never scroll past what fits: apply_filter re-clamps @selected when the list SHRINKS
+      # (a batch delete, a `/` query) but never touches @scroll, and neither rule above fires
+      # while the clamped cursor is still inside the stale window. The draw loop then breaks
+      # at the (now shorter) end and leaves dead space below — and IssuesView paints no scroll
+      # gauge, so 44 results silently read as the 3 that happen to be under the old window.
+      # Pull the window back to the last full page (mirrors HistoryView#ensure_visible).
+      @scroll = @scroll.clamp(0, {@issues.size - h, 0}.max)
     end
   end
 end

@@ -381,10 +381,18 @@ module Gori::Tui
           # Inserts arrive increasing-id (FIFO). Prepend for newest-first (id DESC),
           # append for oldest-first (id ASC) so binary search stays valid.
           if newest_first?
+            # An EMPTY list has no row under the cursor: @selected/@scroll are the 0
+            # placeholder, not an anchor on anything. Shifting them for the prepend below
+            # would put the cursor one past the end on every insert (selected_id nil ⇒
+            # ↵/r/t/d/copy all silent no-ops) — and off-tab nothing re-clamps it, so the
+            # reload on_enter runs loses the id anchor too and parks the cursor on the
+            # OLDEST flow of a newest-first list. Reachable after `Clear history` (or `f`
+            # on an already-empty list), which leaves @follow off with @selected at 0.
+            anchored = !@rows.empty?
             @rows.unshift(row)
             if @follow
               @selected = 0
-            else
+            elsif anchored
               # Keep the highlight + viewport on the same flows the user is looking at.
               @selected += 1
               @scroll += 1
@@ -1415,6 +1423,12 @@ module Gori::Tui
                     listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       list_rect, preview_rect = list_split(rect)
+      # No preview pane at this size (or after a resize down — list_split collapses it below
+      # rect.h 12, i.e. any terminal under 20 rows) ⇒ snap focus back to the list, or
+      # move()/scroll would route arrows to an invisible pane and freeze list navigation.
+      # HistoryController#refresh_preview re-homes focus when the preview PREF goes off; the
+      # SIZE removing the pane has no other place to be heard (mirrors ProbeView#render).
+      @preview_focus = :list if preview_rect.nil?
       render_list_body(screen, list_rect, focused, listen: listen, capturing: capturing)
       render_preview_pane(screen, preview_rect, focused) if preview_rect
     end
@@ -1524,7 +1538,17 @@ module Gori::Tui
           screen.cell(rect.x, y, marked ? '▌' : '▎', Theme.accent, bg)
         end
         screen.text(time_x, y, fmt_time(row.created_at), Theme.muted, bg)
-        screen.text(method_x, y, row.method, Theme.method_color(row.method), bg)
+        # METHOD is a FIXED 8-column cell (method_x .. proto_x), so it needs its own clamp —
+        # without a `width:` the limit is the whole SCREEN. RFC 9110 permits any token here and
+        # the parser caps nothing, so a long method (`VERSION-CONTROL`, a smuggled
+        # `X-CUSTOM-METHOD`) ran straight through PROTO/HOST/PATH.
+        #
+        # 8, not the 7-in-8 the neighbouring cells use. PROTO is drawn at its own absolute
+        # `proto_x`, so a full 8 cannot bleed into it — the only thing 7 buys is a blank gap,
+        # and it costs `PROPFIND` and `CHECKOUT`, both exactly 8 and both methods this tool is
+        # pointed at (WebDAV, DeltaV). Truncating a real method the unclamped code rendered
+        # correctly would be a regression introduced by the clamp; a tight column is not.
+        screen.text(method_x, y, row.method, Theme.method_color(row.method), bg, width: 8)
         # PROTO: surface WS/GRPC/SSE (accented so they pop out of the HTTP stream), each
         # carrying the plaintext-vs-TLS signal the HTTP/HTTPS pair has always carried —
         # `Proto::Kind#label` owns that spelling, because a bare WS tag REPLACED the scheme
