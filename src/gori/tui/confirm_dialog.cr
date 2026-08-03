@@ -45,11 +45,30 @@ module Gori::Tui
     # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the
     # selection (which defaults to cancel). EVERY other key is swallowed so nothing leaks
     # to the view behind the card.
+    #
+    # `y` is guarded on ctrl/alt because `key.y?` is termisu's CASE-INSENSITIVE macro: it
+    # compares the key enum alone and knows nothing about modifiers, so an unguarded branch
+    # reads every `^Y` as the destructive answer to a card whose hint only ever advertises a
+    # bare `y`. `^Y` is a live chord (repeater.attach-chain), fired in the very pane the
+    # marker-removal confirm pops up in. Shift is deliberately NOT guarded — `key.y?` matches
+    # UpperY on purpose, and a shifted/caps-locked `Y` is the advertised mnemonic. `n`/esc
+    # stay unguarded too: a modified key that CANCELS costs one keystroke, one that COMMITS
+    # destroys data, so the strictness is spent only where the harm is.
+    #
+    # Extracted as a class method because ProjectPicker drives this card as a plain state
+    # object through its own key ladder (`handle_confirm`) and never reaches `handle_key` —
+    # so the rule lived in two places and only one of them got the guard, leaving `^Y` wired
+    # to `rm_rf` on a project. One predicate, both call sites: the next answer key that needs
+    # a rule cannot land in one ladder and miss the other.
+    def self.affirmative?(ev : Termisu::Event::Key) : Bool
+      ev.key.y? && !ev.ctrl? && !ev.alt?
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
-      when key.escape?, key.n? then :cancel
-      when key.y?              then :commit
+      when key.escape?, key.n?            then :cancel
+      when ConfirmDialog.affirmative?(ev) then :commit
       when key.left?, key.right?, key.tab?, key.back_tab?
         move
         :stay

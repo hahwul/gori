@@ -459,13 +459,20 @@ module Gori::Tui
 
     # Delete confirmation: ←/→ or Tab choose, `y` delete, `n`/esc cancel, ↵ acts
     # on the selection (which defaults to cancel). Other keys are swallowed.
+    #
+    # This is the picker's OWN key ladder — it drives ConfirmDialog as a plain state object
+    # and never reaches `ConfirmDialog#handle_key`, so the answer rule comes from the shared
+    # `ConfirmDialog.affirmative?` rather than being spelled out a second time here. It has to
+    # be shared: the two ladders drifted once already, and the arm that missed the ctrl/alt
+    # guard was this one — where "yes" means `rm_rf` on the project directory or a VACUUM,
+    # neither of which can be taken back.
     private def handle_confirm(ev : Termisu::Event::Key) : Project | Symbol | Nil
       @preedit = ""
       dlg = @confirm
       key = ev.key
       case
       when key.escape?, key.n?, ev.ctrl_c?                then cancel_confirm
-      when key.y?                                         then commit_confirmed
+      when ConfirmDialog.affirmative?(ev)                 then commit_confirmed
       when key.left?, key.right?, key.tab?, key.back_tab? then dlg.try(&.move)
       when key.enter?
         (dlg.try(&.confirm_selected?)) ? commit_confirmed : cancel_confirm
