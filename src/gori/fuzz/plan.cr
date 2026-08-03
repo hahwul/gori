@@ -121,6 +121,15 @@ module Gori::Fuzz
     # The project's hostname overrides, or nil when the surface has no project to load
     # them from. Only a surface can reach a Store, so this is passed in rather than loaded.
     property overrides : Gori::HostOverrides?
+    # The `$KEY` table an EVIDENCE template may substitute from, or nil for "none" — the
+    # historical evidence behaviour and still the default for every surface that cannot tell
+    # a captured token from a typed one (`gori run fuzz --evidence`, MCP).
+    #
+    # A surface WITH an editor can tell: `FuzzerView` records the names its capture arrived
+    # with and passes everything else, so a `$TOKEN` the operator adds to a seeded template
+    # substitutes while the capture's own `$filter` stays the origin byte it is. Ignored
+    # unless `evidence?` — a draft expands the full table and always has.
+    property env_vars : Hash(String, String)?
 
     def initialize(@template : String = "",
                    *,
@@ -136,7 +145,8 @@ module Gori::Fuzz
                    @matcher : Matcher = Matcher.new,
                    @verify : Bool = true,
                    @sni : String? = nil,
-                   @overrides : Gori::HostOverrides? = nil)
+                   @overrides : Gori::HostOverrides? = nil,
+                   @env_vars : Hash(String, String)? = nil)
     end
   end
 
@@ -214,7 +224,17 @@ module Gori::Fuzz
       # marking, template parse and payload splice below are unchanged either way — a
       # position is a position whether the operator marked it in an editor or `--auto`
       # found it in a capture.
-      text = options.evidence? ? options.template : String.new(Env.expand_wire(options.template))
+      #
+      # `env_vars` narrows the first step rather than cancelling it: a surface that knows
+      # WHICH names the capture brought (the TUI template editor) hands over the rest, so an
+      # operator-typed `$TOKEN` in a seeded template expands and the capture's `$filter` does
+      # not. nil — every other evidence caller — keeps the blanket skip.
+      text =
+        if options.evidence?
+          (vars = options.env_vars) ? String.new(Env.expand_wire(options.template, vars)) : options.template
+        else
+          String.new(Env.expand_wire(options.template))
+        end
       text = Template.auto_mark(text) if options.auto_mark?
       mark_matches = options.marks.map do |tok|
         text, count = wrap_token(text, tok)

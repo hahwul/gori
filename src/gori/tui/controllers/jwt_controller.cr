@@ -287,18 +287,18 @@ module Gori::Tui
       return handle_input_read(ev, c) unless s.input_mode == InputMode::Insert
       key = ev.key
       case
-      when ev.ctrl_z?     then s.input.undo; recompute_decode(s)
-      when key.enter?     then s.input.insert_newline; recompute_decode(s)
-      when key.backspace? then s.input.backspace; recompute_decode(s)
+      when ev.ctrl_z? then s.input.undo; recompute_decode(s)
+      when key.enter? then s.input.insert_newline; recompute_decode(s)
+      # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when s.input.word_delete_key?(ev) then editor_motion(ev, s.input) { recompute_decode(s) }
+      when key.backspace?               then s.input.backspace; recompute_decode(s)
       when key.up?
-        s.input.at_top? ? cross_pane(s, -1) : s.input.move(-1, 0)
+        (s.input.at_top? && !ev.shift?) ? cross_pane(s, -1) : editor_motion(ev, s.input) { recompute_decode(s) }
       when key.down?
-        s.input.at_bottom? ? cross_pane(s, 1) : s.input.move(1, 0)
-      when key.left?   then s.input.move(0, -1)
-      when key.right?  then s.input.move(0, 1)
-      when key.home?   then s.input.home
-      when key.end?    then s.input.end_of_line
-      when key.delete? then s.input.delete; recompute_decode(s)
+        (s.input.at_bottom? && !ev.shift?) ? cross_pane(s, 1) : editor_motion(ev, s.input) { recompute_decode(s) }
+        # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word — TextArea#handle_motion_key.
+      when editor_motion(ev, s.input) { recompute_decode(s) } then nil
+      when key.delete?                                        then s.input.delete; recompute_decode(s)
       else
         if c && !ev.ctrl? && !ev.alt?
           s.input.insert(c)
@@ -330,21 +330,30 @@ module Gori::Tui
       true
     end
 
+    # The shared editor keymap over `ed`, re-running the caller's recompute only when the key
+    # actually CHANGED the buffer (⌥⌫ is the one mutation in the set; every other member is
+    # pure motion and must not re-encode).
+    private def editor_motion(ev : Termisu::Event::Key, ed : TextArea, & : -> _) : Bool
+      before = ed.edits
+      return false unless ed.handle_motion_key(ev)
+      yield if ed.edits != before
+      true
+    end
+
     # ---- HEADER / PAYLOAD JSON editors (always-insert; edits re-encode live) ----
     private def edit_json(ev : Termisu::Event::Key, c : Char?, ed : TextArea) : Nil
       s = cur
       key = ev.key
       case
-      when ev.ctrl_z?     then ed.undo; recompute_encode(s)
-      when key.enter?     then ed.insert_newline; recompute_encode(s)
-      when key.backspace? then ed.backspace; recompute_encode(s)
-      when key.up?        then ed.at_top? ? cross_pane(s, -1) : ed.move(-1, 0)
-      when key.down?      then ed.at_bottom? ? cross_pane(s, 1) : ed.move(1, 0)
-      when key.left?      then ed.move(0, -1)
-      when key.right?     then ed.move(0, 1)
-      when key.home?      then ed.home
-      when key.end?       then ed.end_of_line
-      when key.delete?    then ed.delete; recompute_encode(s)
+      when ev.ctrl_z?              then ed.undo; recompute_encode(s)
+      when key.enter?              then ed.insert_newline; recompute_encode(s)
+      when ed.word_delete_key?(ev) then editor_motion(ev, ed) { recompute_encode(s) }
+      when key.backspace?          then ed.backspace; recompute_encode(s)
+      when key.up?                 then (ed.at_top? && !ev.shift?) ? cross_pane(s, -1) : editor_motion(ev, ed) { recompute_encode(s) }
+      when key.down?               then (ed.at_bottom? && !ev.shift?) ? cross_pane(s, 1) : editor_motion(ev, ed) { recompute_encode(s) }
+      when key.delete? then ed.delete; recompute_encode(s)
+      # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word — TextArea#handle_motion_key.
+      when editor_motion(ev, ed) { recompute_encode(s) } then nil
       else
         if c && !ev.ctrl? && !ev.alt?
           ed.insert(c)
@@ -463,6 +472,41 @@ module Gori::Tui
     end
 
     # --- mouse ---
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # Whichever text editor the pointer is over: INPUT in decode mode, HEADER / PAYLOAD in
+    # encode mode. The read-only panes (decoded, attacks, output) have no caret to drag.
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      each_editor_at(rect, mx, my) { |ed, area| ed.click_to_cursor(area, mx, my, selecting: true) }
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      each_editor_at(rect, mx, my) { |ed, area| ed.select_word_at(area, mx, my) } || false
+    end
+
+    # Yield the editor under (mx, my) with its content rect, or nil when the pointer is not
+    # over one. One derivation for both gestures, matching `handle_click`'s layout call.
+    private def each_editor_at(rect : Rect, mx : Int32, my : Int32, & : TextArea, Rect -> _)
+      body = body_rect_below_filter(rect)
+      s = cur
+      if s.mode == :decode
+        input_c, _, _ = s.view.decode_layout(body)
+        return nil unless input_c.contains?(mx, my)
+        return nil unless s.input_mode == InputMode::Insert
+        yield s.input, input_c.inset(1, 1)
+      else
+        hdr_c, pay_c, _, _ = s.view.encode_layout(body)
+        if hdr_c.contains?(mx, my)
+          yield s.header, hdr_c.inset(1, 1)
+        elsif pay_c.contains?(mx, my)
+          yield s.payload, pay_c.inset(1, 1)
+        end
+      end
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
       body = body_rect_below_filter(rect)

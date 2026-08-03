@@ -40,6 +40,16 @@ private def render_req_tab(text : String, cx : Int32, cursor : Bool = true) : Me
   b
 end
 
+# A key event for the shared-keymap examples: `Termisu::Event::Key` takes a modifier SET,
+# so the flags are assembled here rather than at every call site.
+private def motion_key(k : Termisu::Input::Key, *, shift = false, alt = false, ctrl = false, char : Char? = nil)
+  mods = Termisu::Input::Modifier::None
+  mods |= Termisu::Input::Modifier::Shift if shift
+  mods |= Termisu::Input::Modifier::Alt if alt
+  mods |= Termisu::Input::Modifier::Ctrl if ctrl
+  Termisu::Event::Key.new(k, mods, char: char)
+end
+
 describe Gori::Tui::TextArea do
   # Issue #278: syntax-highlighted editors (Repeater request) used to collapse `\t` to
   # zero columns in Highlight.draw while the caret advanced by column_width (≥1), so
@@ -495,15 +505,65 @@ describe Gori::Tui::TextArea do
       ta = TextArea.new("a\nb\nc")
       ta.end_of_line
       ta.insert('X') # "aX\nb\nc"
+      ta.end_of_line # a caret move ends the typing run, so Y is its own undo step
       ta.insert('Y') # "aXY\nb\nc"
       ta.undo        # back to "aX\nb\nc"
       ta.text.should eq("aX\nb\nc")
+      ta.end_of_line
       ta.insert('Z') # edit the restored buffer -> "aXZ\nb\nc"
       ta.text.should eq("aXZ\nb\nc")
       ta.undo # the Z edit
       ta.text.should eq("aX\nb\nc")
       ta.undo # the X edit -> original
       ta.text.should eq("a\nb\nc")
+    end
+
+    # Typing is grouped, the way every GUI editor groups it: one ⌃Z takes back the run, not
+    # one character of it. The old per-keystroke stack also meant the 100-entry cap held only
+    # 100 CHARACTERS of history — two lines of typing and the state worth returning to had
+    # already been shifted off the bottom.
+    describe "typing-run coalescing" do
+      it "takes back a typed word in one ⌃Z, and stops at a word break" do
+        ta = TextArea.new("")
+        "hello world".each_char { |c| ta.insert(c) }
+        ta.text.should eq("hello world")
+        ta.undo
+        ta.text.should eq("hello ") # the second word, not the last letter
+        ta.undo
+        ta.text.should eq("")
+      end
+
+      it "opens a new step at a caret move, a newline and a delete" do
+        ta = TextArea.new("")
+        "ab".each_char { |c| ta.insert(c) }
+        ta.insert_newline
+        "cd".each_char { |c| ta.insert(c) }
+        ta.text.should eq("ab\ncd")
+        ta.undo
+        ta.text.should eq("ab\n") # the run after the break
+        ta.undo
+        ta.text.should eq("ab") # the break itself
+        ta.undo
+        ta.text.should eq("")
+      end
+
+      it "does not fold a character typed after ⌃Z into the step it restored" do
+        ta = TextArea.new("")
+        "abc".each_char { |c| ta.insert(c) }
+        ta.undo
+        ta.text.should eq("")
+        ta.insert('z')
+        ta.undo # takes back only the 'z'
+        ta.text.should eq("")
+      end
+
+      it "caps a run so one ⌃Z cannot swallow an arbitrarily long line" do
+        ta = TextArea.new("")
+        200.times { ta.insert('a') }
+        ta.undo
+        ta.text.size.should be < 200 # the run was closed at the cap…
+        ta.text.size.should be > 0   # …and not the whole line
+      end
     end
   end
 
@@ -726,6 +786,246 @@ describe Gori::Tui::TextArea do
       ta = TextArea.new("x\n")
       ta.replace_all("h1\r\nh2\r\n\r\nbo\r\ndy", 0)
       ta.wire_text.should eq("h1\r\nh2\r\n\r\nbo\r\ndy")
+    end
+  end
+
+  # GUI-standard motion the editors had no key for at all: a page was one row at a time, a
+  # word step did not exist, and ⇧Home/⇧End DROPPED a selection instead of extending it.
+  describe "page / word / buffer motion" do
+    private_text = "GET /api/v2/users?id=7 HTTP/1.1\r\nX-Request-Id: a.b.c\r\n\r\nbody"
+
+    it "⇧Home and ⇧End extend the selection instead of collapsing it" do
+      ta = TextArea.new("hello world\n")
+      ta.place_cursor(0, 5)
+      ta.end_of_line(true)
+      ta.selection?.should be_true
+      ta.selection_text.should eq(" world")
+
+      ta.place_cursor(0, 5) # place_cursor clears, like a plain click
+      ta.home(true)
+      ta.selection_text.should eq("hello")
+
+      ta.home # unshifted → collapses
+      ta.selection?.should be_false
+    end
+
+    it "steps by word over a URL and keeps a hyphenated header name whole" do
+      ta = TextArea.new(private_text)
+      ta.place_cursor(0, 0)
+      cols = [] of Int32
+      6.times { ta.word_right; cols << ta.cx }
+      # GET | / | api | / | v2 | / …  — every separator is its own stop, which is the point
+      # for a URL, and the caret never runs past the line.
+      cols.first.should eq(4) # past "GET" + the space
+      cols.should eq(cols.sort)
+      ta.cx.should be <= private_text.split("\r\n")[0].size
+
+      # `X-Request-Id` is ONE word (the hyphen is inside a key), `a.b.c` is three.
+      hdr = TextArea.new("X-Request-Id: a.b.c")
+      hdr.place_cursor(0, 0)
+      hdr.word_right
+      hdr.cx.should eq(12) # the whole header name, not "X"
+    end
+
+    it "⌥⌫ removes the word behind the caret as one undo step" do
+      ta = TextArea.new("Authorization: Bearer abc123")
+      ta.end_of_line
+      ta.delete_word_left.should be_true
+      ta.text.should eq("Authorization: Bearer ")
+      ta.undo
+      ta.text.should eq("Authorization: Bearer abc123")
+      # …and it is a no-op at the buffer start, so a caller can gate on the return.
+      start = TextArea.new("x")
+      start.place_cursor(0, 0)
+      start.delete_word_left.should be_false
+    end
+
+    it "pages by whole screenfuls and clamps at both ends" do
+      ta = TextArea.new((0...50).map { |i| "line #{i}" }.join("\n"))
+      b = MemoryBackend.new(40, 10)
+      ta.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 40, 10), cursor: true)
+      rows = ta.page_rows
+      rows.should eq(8) # viewport minus the overlap
+
+      ta.page(rows)
+      ta.cy.should eq(8)
+      ta.page(-rows)
+      ta.cy.should eq(0)
+      ta.page(-rows) # already at the top — clamps, no wrap, no raise
+      ta.cy.should eq(0)
+      ta.page(rows * 100)
+      ta.cy.should eq(49)
+    end
+
+    it "⌃Home / ⌃End reach the buffer ends and can select on the way" do
+      ta = TextArea.new("a\nb\nc")
+      ta.to_buffer_end
+      ta.cy.should eq(2)
+      ta.cx.should eq(1)
+      ta.to_buffer_start(true)
+      ta.selection_text.should eq("a\nb\nc")
+    end
+  end
+
+  # A bracketed paste used to arrive as N keystrokes, each paying a full edit cycle (undo
+  # snapshot, highlight rebuild, the owner's Content-Length resync, a frame). This is the
+  # bulk form the Runner now hands the editor instead.
+  describe "#insert_text (bulk paste)" do
+    it "splices multi-line text at the caret and keeps the tail on the last line" do
+      ta = TextArea.new("GET / HTTP/1.1\r\nHost: h\r\n")
+      ta.place_cursor(0, 0)
+      ta.insert_text("POST /a HTTP/1.1\nHost: x\n\nbody")
+      ta.text.should eq("POST /a HTTP/1.1\nHost: x\n\nbodyGET / HTTP/1.1\nHost: h\n")
+      ta.cy.should eq(3)
+      ta.cx.should eq(4) # caret sits after "body", before the tail it pushed along
+    end
+
+    it "keeps the split line's terminator on the TAIL and gives every new break an LF" do
+      ta = TextArea.new("a\r\nb\r\n")
+      ta.place_cursor(0, 1) # end of "a", which is CRLF-terminated
+      ta.insert_text("X\nY")
+      # "a" now ends at a break the paste introduced (LF); the CRLF still terminates the line
+      # that always carried it — the one holding the tail.
+      ta.wire_text.should eq("aX\nY\r\nb\r\n")
+    end
+
+    it "is ONE undo step for the whole paste" do
+      ta = TextArea.new("x")
+      ta.end_of_line
+      ta.insert_text("one\ntwo\nthree")
+      ta.line_count.should eq(3)
+      ta.undo
+      ta.text.should eq("x")
+    end
+
+    it "replaces a selection, as typing over one does" do
+      ta = TextArea.new("hello world")
+      ta.place_cursor(0, 0)
+      5.times { ta.move(0, 1, selecting: true) }
+      ta.insert_text("bye")
+      ta.text.should eq("bye world")
+      ta.undo # the cut and the splice are one step
+      ta.text.should eq("hello world")
+    end
+
+    it "single-line content behaves exactly like insert_string" do
+      a = TextArea.new("ab")
+      a.place_cursor(0, 1)
+      a.insert_text("XY")
+      b = TextArea.new("ab")
+      b.place_cursor(0, 1)
+      b.insert_string("XY")
+      a.text.should eq(b.text)
+      a.cx.should eq(b.cx)
+    end
+  end
+
+  # The mouse half of selection. `handle_mouse` used to drop motion and release outright, so
+  # a drag selected nothing and a double-click was two independent caret placements — with
+  # the terminal's own drag-select taken over by mouse mode, there was no way to select text
+  # with the pointer at all.
+  describe "mouse selection" do
+    rect = Gori::Tui::Rect.new(0, 0, 40, 6)
+
+    it "a drag extends the selection from where the press landed" do
+      ta = TextArea.new("hello world\nsecond line")
+      ta.click_to_cursor(rect, 0, 0) # press on 'h'
+      ta.selection?.should be_false
+      ta.click_to_cursor(rect, 5, 0, selecting: true) # …drag to just past "hello"
+      ta.selection_text.should eq("hello")
+      ta.click_to_cursor(rect, 6, 1, selecting: true) # …and on into the next line
+      ta.selection_text.should eq("hello world\nsecond")
+    end
+
+    it "a plain click collapses a selection a drag built" do
+      ta = TextArea.new("hello world")
+      ta.click_to_cursor(rect, 0, 0)
+      ta.click_to_cursor(rect, 5, 0, selecting: true)
+      ta.selection?.should be_true
+      ta.click_to_cursor(rect, 2, 0)
+      ta.selection?.should be_false
+    end
+
+    it "a drag above the pane pins to the first visible row instead of being dropped" do
+      ta = TextArea.new("a\nb\nc")
+      ta.place_cursor(2, 1)
+      ta.click_to_cursor(rect, 1, -3, selecting: true) # pointer left the top edge, button held
+      ta.selection?.should be_true
+      ta.cy.should eq(0)
+    end
+
+    it "double-click selects the word under the pointer" do
+      ta = TextArea.new("GET /api/v2?id=7 HTTP/1.1")
+      ta.select_word_at(rect, 5, 0).should be_true # inside "api"
+      ta.selection_text.should eq("api")
+      ta.select_word_at(rect, 0, 0).should be_true # the method
+      ta.selection_text.should eq("GET")
+    end
+
+    it "double-click on whitespace or past end-of-line selects nothing" do
+      ta = TextArea.new("GET /x")
+      ta.select_word_at(rect, 3, 0).should be_false  # the space
+      ta.select_word_at(rect, 30, 0).should be_false # past the text
+      ta.selection?.should be_false
+    end
+
+    it "double-click agrees with ⌥←/→ about where a word ends" do
+      ta = TextArea.new("X-Request-Id: a.b.c")
+      ta.select_word_at(rect, 3, 0).should be_true
+      ta.selection_text.should eq("X-Request-Id") # the hyphen is inside a key, as word_left/right have it
+    end
+  end
+
+  # ONE definition of "what do the arrow keys do in a text box", shared by every editor in
+  # the app. It replaced eight divergent copies: the Repeater had ⇧arrows and the Fuzzer did
+  # not, Notes had them in READ but not INSERT, the Intercept editor had no selection at all,
+  # and nothing anywhere paged or stepped by word.
+  describe "#handle_motion_key (the shared editor keymap)" do
+    it "moves the caret and reports the key consumed" do
+      ta = TextArea.new("hello world")
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Right)).should be_true
+      ta.cx.should eq(1)
+    end
+
+    it "⇧arrow extends, plain arrow collapses" do
+      ta = TextArea.new("hello world")
+      3.times { ta.handle_motion_key(motion_key(Termisu::Input::Key::Right, shift: true)) }
+      ta.selection_text.should eq("hel")
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Right))
+      ta.selection?.should be_false
+    end
+
+    it "⌥←/→ and ⌃←/→ both step a word" do
+      ta = TextArea.new("alpha beta gamma")
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Right, alt: true))
+      alt_cx = ta.cx
+      ta.place_cursor(0, 0)
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Right, ctrl: true))
+      ta.cx.should eq(alt_cx)
+      alt_cx.should eq(6) # past "alpha" and its space
+    end
+
+    it "⌥⌫ deletes a word, and is recognised as ESC+DEL (Key::Unknown + Alt)" do
+      ta = TextArea.new("alpha beta")
+      ta.end_of_line
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Unknown, alt: true, char: '\u{7F}')).should be_true
+      ta.text.should eq("alpha ")
+    end
+
+    it "⇧Home/⇧End extend and Page keys move a screenful" do
+      ta = TextArea.new((0...50).map { |i| "line #{i}" }.join("\n"))
+      b = MemoryBackend.new(40, 10)
+      ta.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 40, 10), cursor: true)
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::PageDown))
+      ta.cy.should eq(8)
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::End, shift: true))
+      ta.selection_text.should eq("line 8")
+    end
+
+    it "returns false for a key it does not own, so the caller can keep handling it" do
+      ta = TextArea.new("x")
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Enter)).should be_false
+      ta.handle_motion_key(motion_key(Termisu::Input::Key::Delete)).should be_false
     end
   end
 end

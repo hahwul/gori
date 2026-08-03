@@ -979,13 +979,30 @@ module Gori::Tui
       @detail_read.sync(cy, @detail_read.cx.clamp(0, line_len))
     end
 
-    def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, focused : Bool) : Nil
+    # `selecting` is the DRAG half: the anchor stays where the press left it and the caret
+    # follows the pointer, so a drag over the request/response text selects it — the mouse
+    # spelling of the ⇧arrows this pane already had.
+    def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, focused : Bool,
+                               selecting : Bool = false) : Nil
       return unless focused && detail_navigable?
       size, line_at = detail_line_source
       return if rect.empty? || size <= 0
       gw = detail_gutter_w(rect, size)
-      @detail_read.click_to_cursor(rect, mx, my, @detail_scroll, size, line_at, gw, @detail_xscroll)
+      @detail_read.click_to_cursor(rect, mx, my, @detail_scroll, size, line_at, gw, @detail_xscroll, selecting)
       ensure_detail_visible(rect.h)
+    end
+
+    # Double-click: select the word under the pointer. False when the pane is not navigable
+    # (the hex dump) or the pointer is on whitespace — the caller then leaves the plain
+    # click's caret placement standing.
+    def detail_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless detail_navigable?
+      size, line_at = detail_line_source
+      return false if rect.empty? || size <= 0
+      gw = detail_gutter_w(rect, size)
+      hit = @detail_read.select_word_at(rect, mx, my, @detail_scroll, size, line_at, gw, @detail_xscroll)
+      ensure_detail_visible(rect.h)
+      hit
     end
 
     def detail_copy_text : String

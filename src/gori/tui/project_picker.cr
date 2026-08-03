@@ -413,7 +413,13 @@ module Gori::Tui
         # by the in-app save seam, so toggling it here used to persist and do nothing —
         # not even after opening a project — leaving native text selection broken for the
         # rest of the session with no hint that a restart was needed.
-        Settings.mouse ? @term.enable_mouse : @term.disable_mouse
+        if Settings.mouse
+          @term.enable_mouse
+          MouseDrag.enable # mode 1002 rides the same toggle — see MouseDrag
+        else
+          MouseDrag.disable
+          @term.disable_mouse
+        end
       when :open
         if outcome.section == :theme
           @theme_card.reload(:theme)

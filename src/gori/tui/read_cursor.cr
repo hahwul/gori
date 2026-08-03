@@ -126,20 +126,78 @@ module Gori::Tui
     end
 
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
-                        lines : Array(String), gutter_w : Int32 = 0, xscroll : Int32 = 0) : Nil
-      click_to_cursor(rect, mx, my, scroll, lines.size, ->(i : Int32) { lines[i] }, gutter_w, xscroll)
+                        lines : Array(String), gutter_w : Int32 = 0, xscroll : Int32 = 0,
+                        selecting : Bool = false) : Nil
+      click_to_cursor(rect, mx, my, scroll, lines.size, ->(i : Int32) { lines[i] }, gutter_w, xscroll, selecting)
     end
 
+    # `selecting` is the DRAG half: keep (or plant) the anchor and move the caret, so the
+    # selection follows the pointer — the mouse spelling of ⇧arrows.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
                         size : Int32, line_at : Int32 -> String,
-                        gutter_w : Int32 = 0, xscroll : Int32 = 0) : Nil
+                        gutter_w : Int32 = 0, xscroll : Int32 = 0,
+                        selecting : Bool = false) : Nil
       return if rect.empty? || size <= 0
       row = my - rect.y
-      return if row < 0
+      # A drag above the pane pins to its first visible row (the pointer left the top edge
+      # with the button down); a plain click there belongs to whatever is drawn above.
+      if row < 0
+        return unless selecting
+        row = 0
+      end
+      selecting ? (@anchor ||= {@cy, @cx}) : (@anchor = nil)
       @cy = {scroll + row, size - 1}.min
       cx0 = rect.x + gutter_w
       @cx = Screen.column_for(line_at.call(@cy), mx - cx0 + xscroll)
-      @anchor = nil
+    end
+
+    # Select the WORD under the pointer (double-click). Same boundary rule as
+    # `TextArea#select_word_at` — a word is a run of key-ish chars (letters, digits, `_`,
+    # `-`) or a run of punctuation, so a URL breaks at every `/`, `?` and `=` while
+    # `Content-Type` stays whole. Whitespace (or past end-of-line) selects nothing.
+    def select_word_at(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
+                       lines : Array(String), gutter_w : Int32 = 0, xscroll : Int32 = 0) : Bool
+      select_word_at(rect, mx, my, scroll, lines.size, ->(i : Int32) { lines[i] }, gutter_w, xscroll)
+    end
+
+    def select_word_at(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
+                       size : Int32, line_at : Int32 -> String,
+                       gutter_w : Int32 = 0, xscroll : Int32 = 0) : Bool
+      click_to_cursor(rect, mx, my, scroll, size, line_at, gutter_w, xscroll)
+      select_word_at_cursor(size, line_at)
+    end
+
+    # The word half of `select_word_at`, without the hit test — for a caller that has already
+    # placed the caret through a layout only IT can invert (a soft-wrapped editor pane).
+    def select_word_at_cursor(lines : Array(String)) : Bool
+      select_word_at_cursor(lines.size, ->(i : Int32) { lines[i] })
+    end
+
+    def select_word_at_cursor(size : Int32, line_at : Int32 -> String) : Bool
+      return false if size <= 0
+      @cy = @cy.clamp(0, size - 1)
+      line = line_at.call(@cy)
+      cx = @cx.clamp(0, line.size)
+      return false if cx >= line.size || line[cx].whitespace?
+      word = word_char?(line[cx])
+      a = cx
+      while a > 0 && !line[a - 1].whitespace? && word_char?(line[a - 1]) == word
+        a -= 1
+      end
+      b = cx
+      while b < line.size && !line[b].whitespace? && word_char?(line[b]) == word
+        b += 1
+      end
+      return false if a == b
+      @anchor = {@cy, a}
+      @cx = b
+      true
+    end
+
+    # See `TextArea#word_char?` — the two must agree, or double-click and ⌥←/→ would
+    # disagree about where a word ends in the same buffer.
+    private def word_char?(c : Char) : Bool
+      c.alphanumeric? || c == '_' || c == '-'
     end
 
     # 0-based line indices spanned by a line-oriented selection (inclusive).

@@ -73,6 +73,38 @@ module Gori::Tui
     # (claimed early by the shell) are special, so handle_body_key stays the default
     # (false → fall through to the verb keymap).
 
+    # --- mouse drag + double-click over the DETAIL text (see TabController#supports_drag?) ---
+    # Only while the detail overlay is up: the History LIST underneath selects rows, where a
+    # drag is a fast repeated select and a double-click is just two opens.
+    def supports_drag? : Bool
+      @host.overlay == :detail
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @host.overlay == :detail
+      body = detail_text_rect(rect) || return
+      @history.detail_click_to_cursor(body, mx, my, focused: true, selecting: true)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless @host.overlay == :detail
+      body = detail_text_rect(rect) || return false
+      @history.detail_select_word(body, mx, my)
+    end
+
+    # The detail overlay's TEXT rect inside `rect` — the derivation `handle_click` walks for a
+    # body click, factored out so click, drag and double-click cannot land on three slightly
+    # different rects. nil when the terminal is too short to leave any text rows under the
+    # pane strip + mode row. A drag that strays ONTO those rows is not clamped away here: the
+    # read cursor pins it to the first text row, which is what an upward drag means.
+    private def detail_text_rect(rect : Rect) : Rect?
+      inner = rect.inset(1, 1)
+      top = inner.y + 2 # pane strip + mode row
+      h = inner.bottom - top
+      return nil if h <= 0
+      Rect.new(inner.x + 1, top, {inner.w - 2, 0}.max, h)
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1) # framed insets 1,1
       if @host.overlay == :detail

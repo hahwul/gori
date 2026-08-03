@@ -132,7 +132,10 @@ module Gori::Tui
         end
       when :template
         if v.template_insert?
-          "type · #{mark} params · ^K word · ^T point · ^O config · #{run} run · esc read · ↹ pane"
+          # `↹ text` and not `↹ pane`: Tab types a TAB here (a header value may hold one), the
+          # same thing it does in the Repeater's request editor. The old wording promised a
+          # focus move Tab has never made from an editor in INSERT.
+          "type · ⇧arrows select · ^Z undo · #{mark} params · ^K word · ^O config · #{run} run · esc read · ↹ text"
         else
           "i/↵ edit · #{read_common} · #{mark} params · ^O config · #{run} run · ↹ pane · esc tabs"
         end
@@ -185,11 +188,52 @@ module Gori::Tui
       end
       c = ev.char || ev.key.to_char
       return true if dispatch_chord(chord_action(ev, c), v, c)
+      # ⌥/⌃ + ←/→/Home/End/⌫ are EDITOR motion (word step, buffer jump, word delete), not
+      # command chords — see `RepeaterController#handle_body_key` for why routing them past
+      # the defer cannot shadow a binding (no bindable chord is an arrow).
+      return handle_pane_key(ev, v) if editing_motion?(ev) && v.focus == :template
       # An unconsumed ctrl/alt chord (^R run, ^X stop, ^A automark, …) defers to the
       # central keymap so it's rebindable.
       return false if (ev.ctrl? || ev.alt?) && !ev.key.escape?
       return true.tap { handle_escape(v) } if ev.key.escape?
       handle_pane_key(ev, v)
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    def supports_drag? : Bool
+      !current_view.nil?
+    end
+
+    # Motion with the button held — TEMPLATE only (the RESULTS list selects rows, and a drag
+    # across rows would just be a fast repeated select). No save/focus side effects: the
+    # press that began the drag already did those.
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless v = current_view
+      return unless v.focus == :template
+      v.template_drag_to_cursor(body_rect_below_filter(rect), mx, my)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless v = current_view
+      return false unless v.focus == :template
+      body = body_rect_below_filter(rect)
+      return false if v.template_chrome_hit(body, mx, my) # a border badge is a button, not text
+      v.template_select_word(body, mx, my)
+    end
+
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The TEMPLATE editor in INSERT mode only; the content-level refusal (a `§`/`¦` in the
+    # clipboard, whose per-character marker guard a bulk splice cannot express) is
+    # `FuzzerView#template_paste`'s, and the Runner replays the paste when it fires.
+    def accepts_bulk_paste? : Bool
+      v = current_view
+      return false unless v
+      v.template_text_editing? && !v.chain_pane_active?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless accepts_bulk_paste?
+      current_view.try(&.template_paste(text)) || false
     end
 
     # Run the action a chord mapped to; false when it was not a chord (fall through).
@@ -199,9 +243,14 @@ module Gori::Tui
       when :close     then request_close
       when :markword  then @host.status(v.mark_word)
       when :markpoint then @host.status(v.insert_marker)
-      when :config    then v.focus_config
-      when :switch    then switch_subtab(c)
-      else                 return false
+      when :undo
+        # Only the TEMPLATE pane has a text buffer; anywhere else ^Z is not ours, so it falls
+        # through to the keymap rather than being silently swallowed.
+        return false unless v.focus == :template
+        v.template_undo
+      when :config then v.focus_config
+      when :switch then switch_subtab(c)
+      else              return false
       end
       true
     end
@@ -217,6 +266,7 @@ module Gori::Tui
       when key.lower_k?         then :markword
       when key.lower_t?         then :markpoint
       when key.lower_o?         then :config
+      when key.lower_z?         then :undo
       when c && '1' <= c <= '9' then :switch
       end
     end
@@ -400,20 +450,76 @@ module Gori::Tui
       end
       return handle_template_read(ev, v) unless v.template_insert?
       key = ev.key
+      # ⇧arrow extends the INSERT selection, a plain arrow collapses it — parity with the
+      # Repeater's request editor, which routes the identical `selecting:` flag into the same
+      # `TextArea#move`. ⇧↑ deliberately skips the `template_at_top?` pane-pop for the reason
+      # the Repeater's does: leaving the pane mid-extend abandons a selection still being built.
       case
-      when key.enter?     then v.template_newline
-      when key.backspace? then v.template_backspace unless guard_marker_delete(v, v.marker_break_on_backspace)
-      when key.up?        then template_up(v)
-      when key.down?      then v.template_move(1, 0)
-      when key.left?      then v.template_move(0, -1)
-      when key.right?     then v.template_move(0, 1)
-      when key.home?      then v.template_home
-      when key.end?       then v.template_end
-      when key.delete?    then v.template_delete unless guard_marker_delete(v, v.marker_break_on_delete)
+      when key.enter?       then v.template_newline
+      when word_delete?(ev) then template_word_delete(v)
+      when key.backspace?   then template_delete_key(v, backward: true)
+      when word_step?(ev)   then v.template_word_move(key.left? ? -1 : 1, selecting: ev.shift?)
+      when key.up?          then ev.shift? ? v.template_move(-1, 0, selecting: true) : template_up(v)
+      when key.down?        then v.template_move(1, 0, selecting: ev.shift?)
+      when key.left?        then v.template_move(0, -1, selecting: ev.shift?)
+      when key.right?       then v.template_move(0, 1, selecting: ev.shift?)
+      when key.page_up?     then v.template_page(-1, selecting: ev.shift?)
+      when key.page_down?   then v.template_page(1, selecting: ev.shift?)
+      when key.home?        then buffer_jump?(ev) ? v.template_buffer_start(ev.shift?) : v.template_home(ev.shift?)
+      when key.end?         then buffer_jump?(ev) ? v.template_buffer_end(ev.shift?) : v.template_end(ev.shift?)
+      when key.delete?      then template_delete_key(v, backward: false)
       else
         printable(ev).try { |ch| v.template_insert(ch) }
       end
       true
+    end
+
+    # ⌫ / Del in the TEMPLATE editor. A SELECTION outranks the marker-delimiter confirm, the
+    # order `RepeaterController#edit_repeater_delete` argues at length: the guard inspects the
+    # ONE character beside the caret, so a caret parked past a closing `§` raises "remove
+    # marker §N" for a marker the selection need not touch — and the confirm SKIPS the delete,
+    # leaving the selected text in place while an unrelated marker is stripped on accept.
+    private def template_delete_key(v : FuzzerView, backward : Bool) : Nil
+      unless v.template_insert_selection?
+        span = backward ? v.marker_break_on_backspace : v.marker_break_on_delete
+        return if guard_marker_delete(v, span)
+      end
+      backward ? v.template_backspace : v.template_delete
+    end
+
+    # ⌥⌫ / ⌃⌫ — delete the word behind the caret. Mirrors the Repeater's, marker guard and
+    # all (a word delete can swallow a `§` delimiter just as a single ⌫ can).
+    private def template_word_delete(v : FuzzerView) : Nil
+      unless v.template_insert_selection?
+        return if guard_marker_delete(v, v.marker_break_on_backspace)
+      end
+      v.template_delete_word
+    end
+
+    # A modified ←/→ is a WORD step; a modified Home/End jumps the BUFFER. ⌥ is the macOS
+    # spelling and ⌃ the one everywhere else — accept both, as the Repeater does.
+    private def word_step?(ev : Termisu::Event::Key) : Bool
+      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
+    end
+
+    private def buffer_jump?(ev : Termisu::Event::Key) : Bool
+      ev.ctrl? || ev.alt?
+    end
+
+    # A modified ⌫ — delete a WORD. See `RepeaterController#word_delete?` for why the `char`
+    # half is load-bearing (⌥⌫ arrives as ESC + 0x7F, i.e. `Key::Unknown` + Alt).
+    private def word_delete?(ev : Termisu::Event::Key) : Bool
+      return false unless ev.ctrl? || ev.alt?
+      return true if ev.key.backspace?
+      c = ev.char
+      !!c && (c == '\u{7F}' || c == '\b')
+    end
+
+    # Every modified key the TEMPLATE editor owns rather than the keymap — see `handle_body_key`.
+    private def editing_motion?(ev : Termisu::Event::Key) : Bool
+      return false unless ev.ctrl? || ev.alt?
+      key = ev.key
+      key.left? || key.right? || key.home? || key.end? || word_delete?(ev)
     end
 
     # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker and
@@ -437,14 +543,16 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter? then v.enter_template_insert!
-      when c == 'i'   then v.enter_template_insert!
-      when key.up?    then template_up(v, selecting)
-      when key.down?  then v.template_read_move(1, 0, selecting: selecting)
-      when key.left?  then v.template_read_move(0, -1, selecting: selecting)
-      when key.right? then v.template_read_move(0, 1, selecting: selecting)
-      when key.home?  then v.template_home
-      when key.end?   then v.template_end
+      when key.enter?     then v.enter_template_insert!
+      when c == 'i'       then v.enter_template_insert!
+      when key.up?        then template_up(v, selecting)
+      when key.down?      then v.template_read_move(1, 0, selecting: selecting)
+      when key.left?      then v.template_read_move(0, -1, selecting: selecting)
+      when key.right?     then v.template_read_move(0, 1, selecting: selecting)
+      when key.page_up?   then v.template_read_page(-1, selecting: selecting)
+      when key.page_down? then v.template_read_page(1, selecting: selecting)
+      when key.home?      then v.template_home(selecting)
+      when key.end?       then v.template_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # x/y + Global breath → keymap
       end

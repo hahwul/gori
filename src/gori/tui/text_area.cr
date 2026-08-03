@@ -112,10 +112,19 @@ module Gori::Tui
       # where it is — the two never coexist (see `render`, which draws this one only when
       # the block caret is on, i.e. only in INS).
       @sel_anchor = nil.as({Int32, Int32}?)
+      # The caret position the next typed character must land on to JOIN the undo step
+      # already on the stack, or nil when no typing run is open — see `push_undo`.
+      @coalesce = nil.as({Int32, Int32}?)
+      @coalesce_len = 0
       @undo_stack = [] of UndoState
       # Opt-in `$ENV` autocomplete popup (nil = disabled). Enabled only on the outbound
       # request editors (Repeater request, Fuzzer template) where env tokens are expanded on
       # send; every other editor keeps it nil so its edit path is byte-for-byte unchanged.
+      # `$NAME`s this editor's OWNER will NOT substitute on send (empty for every editor that
+      # substitutes them all). The peek and the syntax colour both consult it, so a token the
+      # wire will carry literally is not painted — or tooltipped — as a resolved variable.
+      # Fed by the Repeater's evidence baseline; see `RepeaterView#operator_env_vars`.
+      @env_literal_names = Set(String).new
       @env_complete = nil.as(EnvComplete?)
       # Opt-in `$ENV` value peek (nil = disabled). Paired with @env_complete — the same
       # request editors get it. Shows the resolved value of a COMPLETE `$KEY` token under
@@ -234,6 +243,7 @@ module Gori::Tui
       # Drop stale conceal offsets — they index the OLD buffer; the owner re-feeds fresh
       # ones next render. Guards any move/place between now and that render.
       @conceal_spans = [] of {Int32, Int32} unless @conceal_spans.empty?
+      break_run # a caret move ends the typing run — see push_undo
       env_complete_close
     end
 
@@ -335,7 +345,9 @@ module Gori::Tui
     end
 
     def insert(ch : Char) : Nil
-      push_undo
+      # The ONE call that may join the step before it — see `push_undo`. A selection makes
+      # this a replace, which is a step of its own however it was typed.
+      push_undo(force: !@sel_anchor.nil?)
       # Replace-on-type: a printable typed over a selection REPLACES it. The cut runs after
       # push_undo and before the splice, so the pair is ONE undo step — ⌃Z brings back both
       # the deleted run and the character that displaced it, which is what "replace" means.
@@ -354,22 +366,59 @@ module Gori::Tui
       # lone U+0301 makes one `é` cluster), which would leave the caret inside it.
       @cx = cx + 1
       snap_cx_to_cluster(1)
+      continue_run(ch) # the next character may join this step — see push_undo
       @styled = nil
       @edits += 1
       refresh_env_complete
     end
 
     # Insert a whole string at the caret as ONE undo unit (cross-tab "insert OAST payload").
-    # Assumes single-line content (URLs have no newline); a per-char loop would create N undo
-    # steps and refresh env-complete N times.
+    # Single-line content by name; `insert_text` is the same operation without that promise,
+    # and this is a call into it so the two cannot drift on caret placement or undo shape.
     def insert_string(str : String) : Nil
-      return if str.empty?
+      insert_text(str)
+    end
+
+    # Splice MULTI-LINE `text` in at the caret as ONE undo unit, one `@edits` bump and one
+    # highlight invalidation — the bulk form of typing it, and the reason a paste no longer
+    # costs a full edit cycle (undo snapshot, syntax rebuild, owner's Content-Length resync,
+    # frame) per character. A 244 KB request took minutes that way; the work is now
+    # proportional to the paste, not to its square.
+    #
+    # `text` must already use `\n` for every line break: the Runner builds it from the key
+    # events a bracketed paste produced, where `PasteNewline` has ALREADY collapsed each
+    # CRLF into one Enter — so what arrives here is line breaks, not the wire's CR bytes, and
+    # normalizing again here would be a second opinion about the same question.
+    #
+    # Line ENDINGS follow `insert_newline`'s rule exactly: every break the paste introduces is
+    # new and gets `DEFAULT_EOL`, while the terminator that ended the split line rides down to
+    # the TAIL, which is still the same line it always terminated. (`Env.expand_wire` promotes
+    # a head's LF back to CRLF on send, so a pasted header is CRLF on the wire and a pasted
+    # body byte stays exactly what it was — identical to typing the same paste in.)
+    def insert_text(text : String) : Nil
+      return if text.empty?
       push_undo
       cut_selection # replace-on-paste, one undo step — see `insert`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
-      @lines[@cy] = "#{line[0, cx]}#{str}#{line[cx..]}"
-      @cx = cx + str.size
+      head = line[0, cx]
+      tail = line[cx..]
+      tail_eol = eol_at(@cy)
+      parts = text.split('\n')
+      if parts.size == 1
+        @lines[@cy] = "#{head}#{parts[0]}#{tail}"
+        @cx = cx + parts[0].size
+      else
+        @lines[@cy] = "#{head}#{parts[0]}"
+        @eols[@cy] = DEFAULT_EOL
+        last = parts.size - 1
+        (1..last).each do |i|
+          @lines.insert(@cy + i, i == last ? "#{parts[i]}#{tail}" : parts[i])
+          @eols.insert(@cy + i, i == last ? tail_eol : DEFAULT_EOL)
+        end
+        @cy += last
+        @cx = parts[last].size
+      end
       snap_cx_to_cluster(1) # the paste's last char can merge with the text it landed before
       @styled = nil
       @edits += 1
@@ -471,16 +520,155 @@ module Gori::Tui
 
     # Home / End: jump the cursor to the start / end of the current line. Pure navigation
     # (no buffer change), so @styled/@edits are untouched — mirrors `move`.
-    def home : Nil
+    #
+    # `selecting` is the Shift half, and it is the same anchor rule the arrows use: ⇧Home
+    # extends to the line start, plain Home collapses. Without it ⇧Home/⇧End did not merely
+    # fail to extend — they DROPPED a selection the operator had already built with ⇧arrows,
+    # which is the one thing a shifted key must never do.
+    def home(selecting : Bool = false) : Nil
+      anchor_for(selecting)
       @cx = 0
-      @sel_anchor = nil # an unmodified jump collapses the selection, like a plain arrow
+      snap_cx_out_of_conceal(-1) unless @conceal_spans.empty?
+      break_run # a caret move ends the typing run — see push_undo
       env_complete_close
     end
 
-    def end_of_line : Nil
+    def end_of_line(selecting : Bool = false) : Nil
+      anchor_for(selecting)
       @cx = @lines[@cy].size
-      @sel_anchor = nil
+      snap_cx_out_of_conceal(1) unless @conceal_spans.empty?
+      break_run # a caret move ends the typing run — see push_undo
       env_complete_close
+    end
+
+    # Plant (or keep) the selection anchor for a shifted motion, or drop it for a plain one.
+    # The one place that decision is made, so every motion added later inherits it.
+    private def anchor_for(selecting : Bool) : Nil
+      selecting ? (@sel_anchor ||= {@cy, @cx}) : (@sel_anchor = nil)
+    end
+
+    # PageUp / PageDown: move the caret `rows` VISUAL rows and carry the view with it. The
+    # editors ignored both keys entirely, so a long body could only be crossed one row at a
+    # time (or with ^G, which needs a line number the operator has to already know).
+    #
+    # Visual rows, not logical lines, for the reason `move`'s ↑/↓ branch gives: under soft
+    # wrap a logical-line page skips over everything the pane is showing. `rows` is the
+    # caller's viewport height minus an overlap row or two — the same figure the list views
+    # page by (`Runner#page_nav_delta`), so paging feels identical everywhere.
+    def page(rows : Int32, selecting : Bool = false) : Nil
+      return if rows == 0
+      anchor_for(selecting)
+      if wrapping?
+        rows.abs.times { move_visual(rows > 0 ? 1 : -1) }
+      else
+        @cy = (@cy + rows).clamp(0, @lines.size - 1)
+        @cx = @cx.clamp(0, @lines[@cy].size)
+        snap_cx_to_cluster(0)
+      end
+      snap_cx_out_of_conceal(0) unless @conceal_spans.empty?
+      break_run # a caret move ends the typing run — see push_undo
+      env_complete_close
+    end
+
+    # Buffer start / end (⌃Home / ⌃End, and what a `page` past the edge lands on).
+    def to_buffer_start(selecting : Bool = false) : Nil
+      anchor_for(selecting)
+      @cy = 0
+      @cx = 0
+      break_run # a caret move ends the typing run — see push_undo
+      env_complete_close
+    end
+
+    def to_buffer_end(selecting : Bool = false) : Nil
+      anchor_for(selecting)
+      @cy = @lines.size - 1
+      @cx = @lines[@cy].size
+      break_run # a caret move ends the typing run — see push_undo
+      env_complete_close
+    end
+
+    # --- word motion (⌥/⌃ + ←/→, ⌥⌫) ----------------------------------------
+    #
+    # WORD = a run of key-ish characters (letters, digits, `_`, `-`) OR a run of punctuation,
+    # with whitespace skipped on the way. Deliberately NOT Vim's WORD and not "everything up
+    # to the next space": the text in these editors is a URL, a header value, a JSON body, so
+    # `/api/v2/users?id=7` has to break at every `/`, `?` and `=` for the motion to be worth
+    # having, while `Content-Type` must not fragment at the hyphen (it is one header name).
+    #
+    # `-` is inside the run and `.`/`/`/`?`/`=`/`&`/`:` are not, which is the split that makes
+    # `X-Request-Id: a.b.c` walk as `X-Request-Id`, `:`, `a`, `.`, `b`… — one press per token
+    # an operator would actually retype.
+    def word_left(selecting : Bool = false) : Nil
+      anchor_for(selecting)
+      if @cx == 0
+        move(0, -1, selecting: selecting) # at column 0 a word step is just "up a line"
+        return
+      end
+      line = @lines[@cy]
+      i = @cx.clamp(0, line.size)
+      while i > 0 && line[i - 1].whitespace?
+        i -= 1
+      end
+      if i > 0
+        word = word_char?(line[i - 1])
+        while i > 0 && !line[i - 1].whitespace? && word_char?(line[i - 1]) == word
+          i -= 1
+        end
+      end
+      @cx = i
+      snap_cx_to_cluster(-1)
+      snap_cx_out_of_conceal(-1) unless @conceal_spans.empty?
+      break_run # a caret move ends the typing run — see push_undo
+      env_complete_close
+    end
+
+    def word_right(selecting : Bool = false) : Nil
+      anchor_for(selecting)
+      line = @lines[@cy]
+      if @cx >= line.size
+        move(0, 1, selecting: selecting) # at EOL a word step is "down a line"
+        return
+      end
+      i = @cx.clamp(0, line.size)
+      if i < line.size && !line[i].whitespace?
+        word = word_char?(line[i])
+        while i < line.size && !line[i].whitespace? && word_char?(line[i]) == word
+          i += 1
+        end
+      end
+      while i < line.size && line[i].whitespace?
+        i += 1
+      end
+      @cx = i
+      snap_cx_to_cluster(1)
+      snap_cx_out_of_conceal(1) unless @conceal_spans.empty?
+      break_run # a caret move ends the typing run — see push_undo
+      env_complete_close
+    end
+
+    # ⌥⌫ — delete back to the previous word boundary, as ONE undo step. A no-op (false, and
+    # not even a dirty flag) at the buffer start, so callers can gate on the return like they
+    # do for `backspace`.
+    def delete_word_left : Bool
+      return true if delete_selection # a selection outranks the word, as it does for ⌫
+      return false if @cx == 0 && @cy == 0
+      if @cx == 0
+        backspace # at column 0 there is no word behind the caret, only the line break
+        return true
+      end
+      from = @cx
+      push_undo
+      word_left
+      line = @lines[@cy]
+      @lines[@cy] = "#{line[0, @cx]}#{line[from.clamp(0, line.size)..]}"
+      @styled = nil
+      @edits += 1
+      refresh_env_complete
+      true
+    end
+
+    private def word_char?(c : Char) : Bool
+      c.alphanumeric? || c == '_' || c == '-'
     end
 
     # Forward delete: remove the char under the cursor, or join the next line when at EOL.
@@ -697,10 +885,20 @@ module Gori::Tui
     # rect render gets.
     # Coords are 0-based; a click below the text lands on the last line, left of the
     # text on column 0. render's ensure_visible reconciles @scroll next frame.
-    def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    # `selecting` is the DRAG half (and what a future shift-click would pass): the anchor is
+    # kept (or planted where the caret stands) and the caret moves to the pointer, so the
+    # selection grows to wherever the pointer went — the same anchor rule ⇧arrows use, driven
+    # from the mouse instead of the keyboard.
+    def click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       return if rect.empty? || @lines.empty?
       row = my - rect.y
-      return if row < 0
+      # A drag ABOVE the pane still means something — the pointer left the top edge while the
+      # button was held — so it pins to the first visible row instead of being dropped. A
+      # plain click there is not this editor's (the chrome above it owns that cell).
+      if row < 0
+        return unless selecting
+        row = 0
+      end
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
       # Rebuild the SAME row list render lays down (same rect, same anchor, same wrap
@@ -709,6 +907,8 @@ module Gori::Tui
       # begins. Without wrap this is one row per line and `@scroll + row` falls straight out.
       rows = visible_rows(cw, rect.h)
       return if rows.empty?
+      # Planted BEFORE the caret moves, so the anchor is where the press left it.
+      anchor_for(selecting)
       vr = rows[row]? || rows[rows.size - 1]
       @cy = vr.li
       # + @xscroll: the click lands at display column (mx - content_x) WITHIN the
@@ -725,8 +925,37 @@ module Gori::Tui
       # row's characters.
       @cx = Wrap.row_index(line, cr, vr.a, vr.b, target)
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
-      @sel_anchor = nil         # a plain click collapses the selection (no shift-click here yet)
+      break_run                 # a caret move ends the typing run — see push_undo
       env_complete_close
+    end
+
+    # Select the WORD under (mx, my) — the double-click gesture. Places the caret at the
+    # pointer first (so the pane scrolls and focuses exactly as a click does), then spreads
+    # to the word boundaries `word_left`/`word_right` would stop at, which is what keeps
+    # double-click and ⌥←/→ agreeing about where a word ends.
+    #
+    # A double-click on whitespace or past the end of a line selects nothing rather than
+    # grabbing the run of spaces: the gesture means "give me this token", and there is none.
+    def select_word_at(rect : Rect, mx : Int32, my : Int32) : Bool
+      click_to_cursor(rect, mx, my)
+      line = @lines[@cy]
+      cx = @cx.clamp(0, line.size)
+      return false if cx >= line.size || line[cx].whitespace?
+      word = word_char?(line[cx])
+      a = cx
+      while a > 0 && !line[a - 1].whitespace? && word_char?(line[a - 1]) == word
+        a -= 1
+      end
+      b = cx
+      while b < line.size && !line[b].whitespace? && word_char?(line[b]) == word
+        b += 1
+      end
+      return false if a == b
+      @sel_anchor = {@cy, a}
+      @cx = b
+      snap_cx_to_cluster(1)
+      env_complete_close
+      true
     end
 
     # Viewport scroll by `step` lines (the mouse wheel), INDEPENDENT of the cursor:
@@ -745,6 +974,7 @@ module Gori::Tui
         @cy = @cy.clamp(@scroll, {@scroll + @last_h - 1, @lines.size - 1}.min)
         @cx = @cx.clamp(0, @lines[@cy].size)
         snap_cx_to_cluster(0) # the row changed under the caret; its column may re-cluster
+        break_run             # a caret move ends the typing run — see push_undo
         env_complete_close
       end
       # The caret is DRAGGED (not steered) when the window would otherwise leave it behind.
@@ -786,6 +1016,7 @@ module Gori::Tui
       end
       @cx = @cx.clamp(0, @lines[@cy].size)
       snap_cx_to_cluster(0) # the row changed under the caret; its column may re-cluster
+      break_run             # a caret move ends the typing run — see push_undo
       env_complete_close
     end
 
@@ -795,6 +1026,7 @@ module Gori::Tui
       @cy = (n - 1).clamp(0, @lines.size - 1)
       @cx = 0
       @sel_anchor = nil
+      break_run # a caret move ends the typing run — see push_undo
       env_complete_close
     end
 
@@ -807,11 +1039,68 @@ module Gori::Tui
       # also where an INS selection left behind by `esc` is retired: navigating in NOR must
       # not leave a stale INS selection waiting to reappear the next time `i` is pressed.
       @sel_anchor = nil
+      break_run # a caret move ends the typing run — see push_undo
       env_complete_close
     end
 
     def line_count : Int32
       @lines.size
+    end
+
+    # THE motion keymap every text editor shares — ⇧arrows to select, PageUp/PageDown,
+    # ⇧Home/⇧End, ⌃/⌥+←→ by word, ⌃/⌥+Home/End to the buffer ends, ⌥⌫ to delete a word.
+    # Returns true when it consumed the key.
+    #
+    # Here, and not copied into each controller, because "what do the arrow keys do in a text
+    # box" is one answer and gori had eight: the Repeater grew ⇧arrows while the Fuzzer did
+    # not, Notes had them in READ mode and not in INSERT, the Intercept editor had none at
+    # all, and nothing anywhere paged or stepped by word. An owner with pane-crossing rules
+    # (the Repeater's ↑-at-top pop, a marker-delimiter confirm) still handles those keys
+    # itself and calls this for the rest; an owner without them can route everything here.
+    #
+    # `word_delete` is the one MUTATION in the set. It is included because ⌥⌫ is a motion in
+    # the user's head — the mirror of ⌥← — and splitting it out would put half the chord pair
+    # in a different file. Owners that must mark themselves dirty check `edits` around the
+    # call, exactly as they already do for `backspace`.
+    def handle_motion_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      shift = ev.shift?
+      mod = ev.ctrl? || ev.alt? # ⌥ is the macOS spelling, ⌃ everywhere else — accept both
+      case
+      when mod && key.left?     then word_left(shift)
+      when mod && key.right?    then word_right(shift)
+      when mod && key.home?     then to_buffer_start(shift)
+      when mod && key.end?      then to_buffer_end(shift)
+      when word_delete_key?(ev) then delete_word_left
+      when key.left?            then move(0, -1, selecting: shift)
+      when key.right?           then move(0, 1, selecting: shift)
+      when key.up?              then move(-1, 0, selecting: shift)
+      when key.down?            then move(1, 0, selecting: shift)
+      when key.home?            then home(shift)
+      when key.end?             then end_of_line(shift)
+      when key.page_up?         then page(-page_rows, selecting: shift)
+      when key.page_down?       then page(page_rows, selecting: shift)
+      else                           return false
+      end
+      true
+    end
+
+    # A modified ⌫. The `char` half is load-bearing: a terminal sends ⌥⌫ as ESC + 0x7F, and
+    # termisu's Alt-prefix branch maps the payload through `Key.from_char`, which has no name
+    # for DEL — so it arrives as `Key::Unknown` + Alt carrying that char, not as Backspace.
+    def word_delete_key?(ev : Termisu::Event::Key) : Bool
+      return false unless ev.ctrl? || ev.alt?
+      return true if ev.key.backspace?
+      c = ev.char
+      !!c && (c == '\u{7F}' || c == '\b')
+    end
+
+    # One screenful for `page`, taken from the LAST RENDERED viewport height so the step
+    # always matches the pane on screen (a split pane pages by its half). Two rows of overlap,
+    # the same courtesy `Runner#page_nav_delta` gives the list views, so the operator keeps a
+    # line of context across the jump. Floors at 1 so a page still moves before the first frame.
+    def page_rows : Int32
+      {@last_h - 2, 1}.max
     end
 
     # Replace one line in-place (cursor clamped when on that row). Used by Repeater to
@@ -851,6 +1140,7 @@ module Gori::Tui
       @cx = off.clamp(0, @lines[cy].size)
       snap_cx_to_cluster(0) # a flat buffer offset carries no cluster guarantee
       @sel_anchor = nil
+      break_run # a caret move ends the typing run — see push_undo
       env_complete_close
     end
 
@@ -1560,7 +1850,7 @@ module Gori::Tui
       @styled_kind = kind
       @styled_rev = Theme.revision
       @styled_env_rev = env_rev
-      @styled = kind == :markdown ? Highlight.markdown(@lines) : Highlight.from_lines(@lines, kind == :request)
+      @styled = kind == :markdown ? Highlight.markdown(@lines) : Highlight.from_lines(@lines, kind == :request, literal: @env_literal_names)
     end
 
     private def ensure_visible(h : Int32) : Nil
@@ -1663,9 +1953,49 @@ module Gori::Tui
       end
     end
 
-    private def push_undo : Nil
+    # Snapshot for undo, COALESCING a run of typing into one step.
+    #
+    # One snapshot per keystroke made ⌃Z a per-character rewind — five presses to take back
+    # `HELLO` — and, worse, spent the whole 100-slot history on 100 characters: type two lines
+    # and the state you actually wanted back had already been shifted off the bottom, silently
+    # and with no way to reach it. Every GUI editor groups a typing run instead, and that is
+    # what makes a bounded history usable rather than a rewind of the last two seconds.
+    #
+    # A run is consecutive `insert`s (a single printable character each) with the caret
+    # advancing along ONE line: `@coalesce` names the {cy, cx} the next such insert must land
+    # on. Anything else — a newline, a delete, a paste, an undo, an external edit, a caret
+    # move, a run that reaches WORD_RUN characters — clears it and so opens a new step. The
+    # boundary at a word break is deliberate: it keeps a long line from collapsing into one
+    # all-or-nothing step, which is the other way this goes wrong.
+    #
+    # `force` is the caller's way of saying "this is a step of its own whatever came before"
+    # — every edit path except `insert` passes it, since only typing coalesces.
+    private def push_undo(force : Bool = true) : Nil
+      if !force && (co = @coalesce) && co == {@cy, @cx} && @coalesce_len < WORD_RUN
+        @coalesce_len += 1
+        return # inside the current run — the step already on the stack covers it
+      end
       @undo_stack << UndoState.new(@lines.dup, @eols.dup, @cy, @cx) # shallow: shares the immutable Strings
       @undo_stack.shift if @undo_stack.size > 100
+      @coalesce_len = force ? 0 : 1
+      @coalesce = nil
+    end
+
+    # Longest run of typing folded into one undo step. Roughly a long word: past this a step
+    # is big enough that taking it back wholesale is its own surprise.
+    WORD_RUN = 40
+
+    # Called by `insert` AFTER the character has landed: the run continues only if the very
+    # next insert arrives at the caret this one left behind. A word break ends the run, so
+    # `hello world` is two steps and not one.
+    private def continue_run(ch : Char) : Nil
+      @coalesce = ch.whitespace? ? nil : {@cy, @cx}
+    end
+
+    # Break the current typing run — the next `insert` starts a fresh undo step. Called from
+    # every caret move and every non-typing edit; a no-op when no run is open.
+    private def break_run : Nil
+      @coalesce = nil
     end
 
     def undo : Nil
@@ -1681,6 +2011,10 @@ module Gori::Tui
       @cx = state.cx.clamp(0, @lines[@cy].size)
       snap_cx_to_cluster(0) # the snapshot's line may differ from the one we clamp against
       @sel_anchor = nil     # the anchor names offsets in the buffer the undo just replaced
+      # Whatever run was open belonged to the state just discarded: typing after a ⌃Z must
+      # start a NEW step, or the next character would fold itself into the step it restored
+      # and a second ⌃Z would take back more than the operator typed.
+      break_run
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -1693,6 +2027,15 @@ module Gori::Tui
     def env_complete=(on : Bool) : Nil
       @env_complete = on ? (@env_complete || EnvComplete.new) : nil
       @env_peek = on ? (@env_peek || EnvPeek.new) : nil # the value peek rides the same opt-in
+    end
+
+    # The `$NAME`s that will NOT be substituted on send — see the ivar. Drops the styled
+    # cache: the overlay it holds was built against the old answer, and nothing else in the
+    # cache key (@edits, theme, Env.highlight_rev) moves when an owner re-seeds this.
+    def env_literal_names=(names : Set(String)) : Nil
+      return if names == @env_literal_names
+      @env_literal_names = names
+      @styled = nil
     end
 
     # Enable the chain tooltip (paired with @conceal_spans on the request editors).
@@ -1776,6 +2119,7 @@ module Gori::Tui
       end
       pl = partial.downcase
       matches = vars.keys
+        .select { |k| !@env_literal_names.includes?(k) } # offering one would promise a substitution this buffer won't make
         .select { |k| pl.empty? || k.downcase.starts_with?(pl) }
         .sort!
         .first(40)
@@ -1838,6 +2182,11 @@ module Gori::Tui
       # what?" in the editor where they are writing the token — Repeater, Fuzzer, Intercept —
       # with no new surface at all. A declared-but-UNBOUND name has no value and so gets no
       # peek, which is the same answer `token_regions` paints (it stays `env_unknown`).
+      # A name the OWNER will ship literally gets no peek, for the same reason an unregistered
+      # one doesn't: on this buffer it is not a variable reference. An evidence tab used to
+      # tooltip the resolved secret under a `$TOKEN` the send path then wrote to the socket
+      # as six literal bytes.
+      return nil if @env_literal_names.includes?(key)
       val = Env.display_vars[key]?
       return nil unless val # unregistered → just a literal string, not an env reference
       {key, env_value_preview(val, Env.declared_bindings.includes?(key))}

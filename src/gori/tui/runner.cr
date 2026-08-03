@@ -935,11 +935,25 @@ module Gori::Tui
     # Collapses a pasted CRLF into one newline — see `PasteNewline`. Filtered here, at the
     # single funnel every terminal event passes through, so every editor gets it.
     @paste_newline = PasteNewline.new
+    # The bracketed paste being accumulated for a BULK insert, or nil when the paste (if any)
+    # is being delivered keystroke by keystroke — see `begin_bulk_paste?`.
+    @paste_buf = nil.as(String::Builder?)
 
     private def handle(ev : Termisu::Event::Any) : Nil
-      return if @paste_newline.swallow?(ev)
+      was_pasting = @paste_newline.pasting?
+      swallowed = @paste_newline.swallow?(ev)
+      # PasteStart/PasteEnd are swallowed by the filter, so the transitions are the only
+      # signal that a paste began or ended. Both are read here, at the same funnel, rather
+      # than by a view that would have to guess from the shape of the keystrokes.
+      if !was_pasting && @paste_newline.pasting?
+        @paste_buf = String::Builder.new if begin_bulk_paste?
+      elsif was_pasting && !@paste_newline.pasting?
+        flush_bulk_paste
+      end
+      return if swallowed
       case ev
       when Termisu::Event::Key
+        return if buffer_bulk_paste(ev)
         handle_key(ev)
       when Termisu::Event::Mouse
         handle_mouse(ev)
@@ -951,6 +965,79 @@ module Gori::Tui
         @resized = true
       when Termisu::Event::Preedit
         apply_preedit(ev.text)
+      end
+    end
+
+    # --- bracketed paste, in bulk -------------------------------------------
+    #
+    # A paste used to arrive as N ordinary keystrokes, and every one of them paid a full edit
+    # cycle: an undo snapshot, a highlight invalidation, the Repeater's Content-Length
+    # reflection over the whole buffer, a frame. Measured on this build: 8 KB took 3.2s and a
+    # 244 KB request several MINUTES, slowing as it went — quadratic in the paste, on the
+    # single commonest way a request gets into the tool. Buffered here and inserted once, the
+    # cost is proportional to the paste.
+    #
+    # Only the BODY editor of a tab that says it can take one is eligible: everything else
+    # (bottom prompts, pickers, overlays, single-line fields, hex edit) keeps the old
+    # per-keystroke path, which is exactly what those surfaces already handle correctly.
+    private def begin_bulk_paste? : Bool
+      return false unless @focus == :body && @overlay.none? && !modal_overlay?
+      return false if @space_menu_open || copy_as_shown? || send_to_shown?
+      return false if @goto_open || @search_open || @rename_open || @tag_edit_open
+      @tabs[@active_tab]?.try(&.accepts_bulk_paste?) || false
+    end
+
+    # Accumulate one pasted keystroke, or false when this event is not part of a bulk paste
+    # (the caller then delivers it normally).
+    #
+    # TEXT only — printable characters, the Enter the CRLF filter left behind, and Tab, which
+    # is a legal byte in a header value and which the request editors type literally anyway.
+    # An arrow or a function key inside a paste is a terminal handing us bytes the clipboard
+    # never had as text; the per-keystroke path would have MOVED THE CARET mid-paste and
+    # scattered the rest of the clipboard around the buffer, so dropping it is both cheaper
+    # and closer to what the operator asked for.
+    private def buffer_bulk_paste(ev : Termisu::Event::Key) : Bool
+      buf = @paste_buf
+      return false unless buf
+      key = ev.key
+      if key.enter?
+        buf << '\n'
+      elsif key.tab?
+        buf << '\t'
+      elsif (c = ev.char) && !ev.ctrl? && !ev.alt? && !c.control?
+        buf << c
+      end
+      true
+    end
+
+    # Hand the accumulated paste to the focused tab as ONE edit — or, if the tab refuses,
+    # REPLAY it keystroke by keystroke exactly as it would have arrived without buffering.
+    #
+    # The replay is what makes the fast path safe to attempt: a tab can decline on something
+    # only it can see (a `§` in the clipboard, whose per-character marker guard cannot be
+    # expressed as one splice) and lose nothing but the speed-up. Without it, "the tab said
+    # no" would mean "the paste vanished".
+    private def flush_bulk_paste : Nil
+      buf = @paste_buf
+      @paste_buf = nil
+      return unless buf
+      text = buf.to_s
+      return if text.empty?
+      return if @tabs[@active_tab]?.try(&.paste_text(text))
+      replay_paste(text)
+    end
+
+    # Deliver `text` through the ordinary key path, one synthesized keystroke per character —
+    # the same events the terminal would have produced, so every guard, confirm and escape
+    # the editors apply while typing applies here too.
+    private def replay_paste(text : String) : Nil
+      text.each_char do |c|
+        ev = case c
+             when '\n' then Termisu::Event::Key.new(Termisu::Input::Key::Enter, char: '\r')
+             when '\t' then Termisu::Event::Key.new(Termisu::Input::Key::Tab)
+             else           Termisu::Event::Key.new(Termisu::Input::Key::Unknown, char: c)
+             end
+        handle_key(ev)
       end
     end
 
@@ -1261,21 +1348,85 @@ module Gori::Tui
     # terminal's alternate-scroll (which used to arrive as ↑/↓ key bursts), so wheel
     # MUST be handled here or list scrolling silently dies.
     private def handle_mouse(ev : Termisu::Event::Mouse) : Nil
-      return unless ev.press? || ev.wheel? # ignore motion + button-release (nav-only scope)
+      return unless ev.press? || ev.wheel? || ev.motion? || ev.button.release?
       w, h = @backend.size
       return unless Layout.usable?(w, h)
       layout = Layout.compute(w, h, statusline_active?)
       mx, my = ev.x - 1, ev.y - 1
-      @quit_armed = false
-      @toast = nil
       if ev.wheel?
+        @quit_armed = false
+        @toast = nil
         return unless ev.button.wheel_up? || ev.button.wheel_down?
         handle_wheel(layout, mx, my, ev.button.wheel_up? ? -1 : 1)
+      elsif ev.motion?
+        dispatch_drag(layout, mx, my) # button held + pointer moved → extend a selection
+      elsif ev.button.release?
+        @dragging = false
       elsif ev.button.right?
+        @quit_armed = false
+        @toast = nil
         handle_right_click(layout, mx, my)
       else
-        dispatch_click(layout, mx, my) # left (middle treated as left)
+        @quit_armed = false
+        @toast = nil
+        press_left(layout, mx, my) # left (middle treated as left)
       end
+    end
+
+    # --- press / drag / double-click ----------------------------------------
+    #
+    # A second press in the SAME cell within this window is a double-click. Time-based like
+    # every other UI's, because a terminal reports two independent presses and nothing that
+    # says they belong together — the cell test is what keeps a fast click on one word and
+    # then another from reading as a double.
+    DOUBLE_CLICK_WINDOW = 400.milliseconds
+
+    @last_press = nil.as({Int32, Int32, Time::Instant}?)
+    # A drag is in flight: the press landed on a body pane that took it, so motion extends a
+    # selection instead of being ignored. Cleared on release, and on any press that did not
+    # land somewhere draggable — otherwise a click on the tab bar would leave the flag set and
+    # the next stray motion would extend a selection the operator had moved on from.
+    @dragging = false
+
+    private def press_left(layout : Layout, mx : Int32, my : Int32) : Nil
+      now = Time.instant
+      prev = @last_press
+      double = prev && (now - prev[2]) <= DOUBLE_CLICK_WINDOW && prev[0] == mx && prev[1] == my
+      # A double-click consumes the pair: a THIRD press in the same cell starts a new pair
+      # rather than reading as another double (and, on the way, as a triple nobody asked for).
+      @last_press = double ? nil : {mx, my, now}
+      if double && dispatch_double_click(layout, mx, my)
+        @dragging = false
+        return
+      end
+      dispatch_click(layout, mx, my)
+      @dragging = body_click_target?(layout, mx, my)
+    end
+
+    # Whether a press at these coords landed on a body pane that can extend a selection —
+    # i.e. whether the motion that follows means anything. Nothing else (tab bar, sub-tab
+    # strip, overlays, the bottom prompts) drags.
+    # `!modal_overlay?` and NOT `@overlay.none?`, mirroring `dispatch_click`'s own precedence:
+    # `:detail` is a History body drill-in rather than a capturing modal, so a press inside it
+    # reaches the tab — and so must the drag and the double-click that follow, or the
+    # request/response text is the one place selection works by keyboard and not by mouse.
+    private def body_click_target?(layout : Layout, mx : Int32, my : Int32) : Bool
+      return false unless @focus == :body && !modal_overlay?
+      return false if @space_menu_open || copy_as_shown? || send_to_shown?
+      return false if @goto_open || @search_open || @rename_open || @tag_edit_open
+      layout.body.contains?(mx, my) && (@tabs[@active_tab]?.try(&.supports_drag?) || false)
+    end
+
+    private def dispatch_drag(layout : Layout, mx : Int32, my : Int32) : Nil
+      return unless @dragging
+      @tabs[@active_tab]?.try(&.handle_drag(layout.body, mx, my))
+    end
+
+    private def dispatch_double_click(layout : Layout, mx : Int32, my : Int32) : Bool
+      return false unless body_click_target?(layout, mx, my)
+      # The first press of the pair already placed the caret and focused the pane, so the
+      # word selection lands where the operator is looking.
+      @tabs[@active_tab]?.try(&.handle_double_click(layout.body, mx, my)) || false
     end
 
     # Right-click: rename a Repeater/Fuzzer/Decoder/Miner sub-tab chip (the one context menu we have).
@@ -1487,7 +1638,13 @@ module Gori::Tui
     # idempotent — they guard on the current state), so toggling Mouse off in
     # settings restores native text selection without a restart.
     private def reconcile_mouse : Nil
-      Settings.mouse ? @term.enable_mouse : @term.disable_mouse
+      if Settings.mouse
+        @term.enable_mouse
+        MouseDrag.enable # motion reports (drag-to-select) — see MouseDrag; ordered AFTER 1000
+      else
+        MouseDrag.disable # cleared FIRST, so no motion report outlives the tracking mode
+        @term.disable_mouse
+      end
     end
 
     # --- scroll wheel --------------------------------------------------------
@@ -5459,12 +5616,21 @@ module Gori::Tui
     # leaves the tty as it found it rather than mute to the mouse for the rest of the session.
     # `term` is deliberately unrestricted: the Runner needs a live tty and cannot be
     # instantiated in a spec, so this is the seam a recorder double drives to pin the ordering.
-    def self.suspend_without_mouse(term, *, mouse : Bool, &)
+    # `io` is where the mode-1002 sequences go — STDOUT in the app, an IO::Memory in the spec
+    # that pins this ordering (a spec must not write escape codes to the test runner's tty).
+    def self.suspend_without_mouse(term, *, mouse : Bool, io : IO = STDOUT, &)
+      MouseDrag.disable(io) # our mode 1002 rides along: the child would get motion reports too
       term.disable_mouse
       begin
         term.suspend { yield }
       ensure
-        term.enable_mouse if mouse
+        if mouse
+          term.enable_mouse
+          # The child owned this tty and may have reset it, so what we recorded about mode
+          # 1002 says nothing about what the terminal is doing now — write it again.
+          MouseDrag.forget
+          MouseDrag.enable(io)
+        end
       end
     end
 

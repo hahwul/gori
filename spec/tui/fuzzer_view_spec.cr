@@ -958,6 +958,47 @@ describe Gori::Tui::PathComplete do
   end
 end
 
+# The TEMPLATE editor and the Repeater's request editor are the same `TextArea` holding the
+# same captured request, and only one of them could undo or select. An accidental keystroke
+# over a seeded template was permanent, and ⇧arrows moved the caret while selecting nothing.
+describe "FuzzerView TEMPLATE editor parity with the Repeater request editor" do
+  it "⌃Z undoes a typed character (and is a no-op on an empty stack)" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.focus_pane(:template)
+    view.enter_template_insert!
+    view.template_end
+    view.template_insert('X')
+    view.template_text.split("\r\n")[0].should eq("GET /?x=1 HTTP/1.1X")
+
+    view.template_undo
+    view.template_text.split("\r\n")[0].should eq("GET /?x=1 HTTP/1.1")
+
+    before = view.template_text
+    10.times { view.template_undo } # empty stack — no crash, no change
+    view.template_text.should eq(before)
+  end
+
+  it "⇧arrows extend a selection that ⌫ then removes in one step" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.focus_pane(:template)
+    view.enter_template_insert!
+    view.template_home
+    view.template_insert_selection?.should be_false
+    4.times { view.template_move(0, 1, selecting: true) }
+    view.template_insert_selection?.should be_true
+
+    view.template_backspace # removes the SELECTION ("GET "), not one character
+    view.template_text.split("\r\n")[0].should eq("/?x=1 HTTP/1.1")
+
+    # …and a plain arrow collapses a selection instead of extending it.
+    2.times { view.template_move(0, 1, selecting: true) }
+    view.template_move(0, 1)
+    view.template_insert_selection?.should be_false
+  end
+end
+
 describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
   it "places the template caret at the clicked row/column (a later insert lands there)" do
     view = FuzzerView.new
@@ -1276,6 +1317,40 @@ describe "Gori::Tui::FuzzerView ⇧I capture seeding" do
       view = FuzzerView.new
       view.load_request("https://h.test", "GET /?x=§1§ HTTP/1.1\r\nHost: h.test\r\n\r\n", false, "")
       Gori::Fuzz::Template.parse(view.template_text).position_count.should eq(1)
+    end
+
+    # The `$` half of the same provenance question, and the half evidence used to answer per
+    # TAB: an `Authorization: $TOKEN` the operator adds to a seeded template shipped as six
+    # literal bytes on every variation of the sweep. Per NAME — the capture's `$TOKEN` above
+    # stays literal in the very same template, because that one IS an origin byte.
+    it "substitutes a $KEY the operator added to a seeded template, keeping the capture's own literal" do
+      Gori::Settings.env_vars = [{"TOKEN", "captured-name"}, {"SESSION", "s3cr3t"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      with_fuzz_store do |store|
+        scope = Gori::Scope.load(store)
+        view = FuzzerView.new
+        view.load(seed.call(store, body, head))
+        view.focus_pane(:template)
+        view.mark_word # the METHOD token — a plan needs one position
+        view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "POST,GET"))
+        # The operator adds a header of their own, at the end of the `Host:` line.
+        view.template_move(1, 0)
+        view.template_end
+        view.template_newline
+        "Authorization: $SESSION".each_char { |c| view.template_insert(c) }
+
+        engine, err = view.build_engine(false, scope, nil)
+        err.should be_nil
+        engine.should_not be_nil
+        view.begin_run(3_i64)
+        view.append_result(unretained_result(0, ["POST"]))
+        wire_out = String.new(view.result_request(view.selected_result.not_nil!).bytes)
+        wire_out.should contain("Authorization: s3cr3t") # theirs → expanded
+        wire_out.should contain(%("env":"$TOKEN"))       # the capture's → still literal
+        wire_out.should_not contain("captured-name")
+      end
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
     end
   end
 end

@@ -78,6 +78,23 @@ module Gori::Tui
       BodyChrome.framed(screen, rect, focused) { |inner| @issues.render(screen, inner, focused: focused) }
     end
 
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # The NOTES pane of an open issue only: the issue LIST selects rows. No focus/save side
+    # effects — the press that began the gesture already ran them.
+    def supports_drag? : Bool
+      @issues.detail_open?
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @issues.detail_open?
+      @issues.notes_drag_to_cursor(rect.inset(1, 1), mx, my)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless @issues.detail_open?
+      @issues.notes_select_word(rect.inset(1, 1), mx, my)
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1)
       if @issues.detail_open?
@@ -168,7 +185,6 @@ module Gori::Tui
         @host.open_space_menu
         return true
       end
-      return true if handle_notes_hscroll(ev)
       if @issues.notes_focused?
         return handle_notes_read_key(ev, key, c)
       end
@@ -182,14 +198,13 @@ module Gori::Tui
         @issues.focus_links!
       when key.enter?, c == 'i'
         @issues.enter_notes_insert!
-      when key.up?                  then @issues.notes_read_move(-1, 0, selecting: selecting)
-      when key.down?                then @issues.notes_read_move(1, 0, selecting: selecting)
-      when key.left? && selecting   then @issues.notes_read_move(0, -1, selecting: true)
-      when key.right? && selecting  then @issues.notes_read_move(0, 1, selecting: true)
-      when key.left? && !selecting  then @issues.notes_read_move(0, -1)
-      when key.right? && !selecting then @issues.notes_read_move(0, 1)
-      when c == 'x'                 then @issues.notes_select_line
-      when c == 'y'                 then issues_copy
+      when key.up?                           then @issues.notes_read_move(-1, 0, selecting: selecting)
+      when key.down?                         then @issues.notes_read_move(1, 0, selecting: selecting)
+      when key.left?                         then @issues.notes_read_move(0, -1, selecting: selecting)
+      when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
+      when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
+      when c == 'x'                          then @issues.notes_select_line
+      when c == 'y'                          then issues_copy
       else
         return false
       end
@@ -202,11 +217,11 @@ module Gori::Tui
       when ev.ctrl_z?               then @issues.notes_undo
       when key.escape?              then @issues.save_notes(@host.session.store)
       when key.enter?               then @issues.notes_newline
-      when key.backspace?           then @issues.notes_backspace
-      when key.up?                  then @issues.notes_move(-1, 0)
-      when key.down?                then @issues.notes_move(1, 0)
-      when key.left?                then @issues.notes_move(0, -1)
-      when key.right?               then @issues.notes_move(0, 1)
+        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when @issues.notes_word_delete_key?(ev) then @issues.notes_motion_key(ev)
+      when key.backspace?                     then @issues.notes_backspace
+        # ⇧arrows select, Page keys, ⌥←/→ by word — TextArea#handle_motion_key.
+      when @issues.notes_motion_key(ev) then nil
       else
         if c && !ev.ctrl? && !ev.alt?
           @issues.notes_insert(c)
@@ -216,18 +231,10 @@ module Gori::Tui
       true
     end
 
-    private def handle_notes_hscroll(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      if key.left? && ev.shift?
-        @issues.hscroll_notes(-1)
-        true
-      elsif key.right? && ev.shift?
-        @issues.hscroll_notes(1)
-        true
-      else
-        false
-      end
-    end
+    # ⇧←/→ used to h-scroll the notes pane, which shadowed the character selection every
+    # other text pane gives them. The pane has a caret and `follow_x`, so moving the caret
+    # sideways scrolls the view anyway — the selection is what the chord is for, and
+    # `hscroll_notes` stays for the wheel/other callers.
 
     def set_preedit(text : String) : Bool
       if @issues.querying?

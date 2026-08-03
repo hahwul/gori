@@ -225,6 +225,13 @@ module Gori::Tui
       # verb to latch on — see `pipeline_live?`. Baseline = the separators the CAPTURE
       # arrived with; 0 on a draft, where every `%%%` is the operator's by definition.
       @evidence_pipeline_seps = 0
+      # The `$NAME` twin of the two above, and a SET rather than a latch or a count because
+      # `$` is the one draft syntax whose tokens carry their own identity: `$filter` in a
+      # captured OData query and `$TOKEN` an operator types into the same buffer are
+      # different tokens, so the question "did the operator author this?" is answerable per
+      # NAME instead of per buffer. Baseline = the names the CAPTURE arrived with; empty on a
+      # draft, where every `$` is the operator's by definition. See `operator_env_vars`.
+      @evidence_env_names = Set(String).new
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
       # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)
@@ -552,7 +559,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_form_text(detail))
-      seed_pipeline_baseline
+      seed_draft_baselines
       @original_lines = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
 
       @result = nil
@@ -593,7 +600,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(String.new(detail.request_head))
-      seed_pipeline_baseline
+      seed_draft_baselines
       seed_ws_out(out_messages)
       @original_lines = [] of String
       @result = nil
@@ -894,7 +901,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_head_text(detail))
-      seed_pipeline_baseline
+      seed_draft_baselines
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
@@ -955,7 +962,7 @@ module Gori::Tui
       @scx = 0
       @target_field = :url
       @editor.set_text(origin_form_text(detail))
-      seed_pipeline_baseline
+      seed_draft_baselines
       @decoded.set_text(payload)
       @req_pane = :envelope
       @decoded_dirty = false
@@ -1349,13 +1356,21 @@ module Gori::Tui
       group_framing_applies? && pipeline_live?(wl) && pipeline_sep_count(wl) > 0
     end
 
-    # Record how many `%%%` lines the just-seeded buffer arrived with. Called from every
-    # loader AFTER the editor is set, so the baseline is always the bytes gori was handed
-    # rather than anything typed since. On a draft it is 0 either way (`pipeline_live?`
-    # short-circuits on `@evidence`); recording it anyway keeps a later `duplicate_from`
-    # or an evidence flip from inheriting a stale number.
-    private def seed_pipeline_baseline : Nil
-      @evidence_pipeline_seps = pipeline_sep_count_in(@editor.wire_text)
+    # Record what DRAFT SYNTAX the just-seeded buffer arrived with — the `%%%` separators it
+    # already had, and the `$NAME` tokens it already referenced. Called from every loader
+    # AFTER the editor is set, so both baselines describe the bytes gori was handed rather
+    # than anything typed since. On a draft they are empty either way (`pipeline_live?` and
+    # `operator_env_vars` short-circuit on `@evidence`); recording them anyway keeps a later
+    # `duplicate_from` or an evidence flip from inheriting a stale baseline.
+    private def seed_draft_baselines : Nil
+      wire = @editor.wire_text
+      @evidence_pipeline_seps = pipeline_sep_count_in(wire)
+      @evidence_env_names = Env.token_names(wire).to_set
+      # Assigned unconditionally, including the empty set a draft gets: a loader can turn a
+      # tab that WAS evidence into one that isn't (load_blank after a ^R, a duplicate), and a
+      # stale literal set would keep painting resolvable tokens as unknown on a buffer that
+      # substitutes every one of them.
+      @editor.env_literal_names = @evidence ? @evidence_env_names : Set(String).new
     end
 
     # The same count over raw text, for seeding the baseline at load/restore.
@@ -1567,7 +1582,7 @@ module Gori::Tui
       end
 
       @auto_content_length = auto_cl
-      seed_pipeline_baseline
+      seed_draft_baselines
       @loaded = true
       @dirty = false
     end
@@ -1625,6 +1640,7 @@ module Gori::Tui
       @evidence = src.evidence?                             # the same bytes carry the same provenance
       @markers_declared = src.@markers_declared             # …and the same reading of their §
       @evidence_pipeline_seps = src.@evidence_pipeline_seps # …and of their `%%%`
+      @evidence_env_names = src.@evidence_env_names.dup     # …and of their `$NAME`
       @http2 = src.@http2
       @target = src.@target
       @tcx = @target.size
@@ -1783,8 +1799,31 @@ module Gori::Tui
     # names `expand_wire` as what promotes it — shipping one inside a head is itself a
     # front-end/back-end desync primitive, i.e. a different test than the one on screen.
     private def expanded_text_to_bytes(text : String) : Bytes
-      wire = @evidence ? Env.normalize_wire(text) : Env.expand_wire(text)
+      wire = @evidence ? Env.expand_wire(text, operator_env_vars) : Env.expand_wire(text)
       Repeater::FlowRequest.normalize_multipart_body(wire)
+    end
+
+    # The env vars an EVIDENCE tab may substitute: every registered name EXCEPT the ones the
+    # CAPTURE itself brought in (`@evidence_env_names`).
+    #
+    # The blanket "evidence expands no `$` at all" this replaces was right about the capture
+    # and wrong about the operator. A tab opened with ^R off History is the commonest place
+    # there is to add an `Authorization: $TOKEN` — and that header went out to the origin as
+    # the six literal bytes `$TOKEN`, while the editor's own value peek sat under the caret
+    # showing the resolved secret. Display promising a substitution the wire does not make is
+    # the worst way round for a tool whose job is telling the operator what it sent.
+    #
+    # Per NAME, not per keystroke or per tab. A capture's `$filter`/`$top`/`$where`/`$IFS`
+    # stays literal for the life of the tab even if the project happens to define `filter` —
+    # that is the whole point of `Repeater::PlanOptions#evidence?` and it is untouched here.
+    # A name the capture never mentioned cannot be an origin byte, so it is the operator's.
+    #
+    # Deliberately conservative where the two collide: type `$filter` into a tab whose capture
+    # already had one and it stays literal, because gori cannot tell the two occurrences apart
+    # and evidence wins when it cannot. `$$` escapes to a literal `$` on every path already,
+    # so the operator has a spelling for either intent.
+    private def operator_env_vars : Hash(String, String)
+      Env.vars_without(@evidence_env_names)
     end
 
     # §…§ marker send: parse the CRLF wire form as a Fuzz template and render each marked
@@ -2246,8 +2285,34 @@ module Gori::Tui
       idx = (sp.begin...head_end).find { |i| wl[i][0].lstrip.downcase.starts_with?("content-length:") }
       return unless idx
       return if wl[idx][0] == new_line
+      return unless plain_numeric_header?(wl[idx][0])
 
       @editor.replace_line(idx, new_line)
+    end
+
+    # Whether a `Content-Length:` line carries a plain decimal value and nothing else — the
+    # ONLY shape the reflection is allowed to rewrite, because the rewrite replaces the WHOLE
+    # line and anything else on it would be destroyed.
+    #
+    # Two failures, one guard. The first is mid-edit clobber: the reflection runs on every
+    # keystroke, so the transient line a paste or a typed header produces —
+    # `Content-Length: 4GET / HTTP/1.1`, the pasted header with the buffer's next line still
+    # glued to its tail — matched the prefix and was replaced by `Content-Length: 53`, taking
+    # `GET / HTTP/1.1` with it. Silently, and `Ctrl-Z` could not bring it back (see
+    # `edit_undo`). Typing the header by hand in front of an existing one did the same to
+    # whatever followed the caret.
+    #
+    # The second is that gori is a tool for sending requests an origin should not accept. A
+    # `Content-Length: 0abc`, a `Content-Length: +5`, a duplicated or space-padded value are
+    # request-smuggling and desync primitives an operator types ON PURPOSE, and auto-CL
+    # quietly correcting them means the test on screen is not the test on the wire. Auto-CL's
+    # job is keeping an ordinary length honest while the body is edited; a value that is not a
+    # bare number is a deliberate one, so it is left exactly as typed.
+    private def plain_numeric_header?(line : String) : Bool
+      value = line.split(':', 2)[1]?
+      return false unless value
+      digits = value.strip
+      !digits.empty? && digits.each_char.all?(&.ascii_number?)
     end
 
     # See @link_host_to_target: on the FIRST target edit of a fresh ^N tab, mirror the new
@@ -2286,7 +2351,20 @@ module Gori::Tui
       return unless host_idx
       new_line = "Host: #{authority}"
       return if head_lines[host_idx] == new_line
+      # Single-token value only — the `Content-Length` guard's rule for the same reason (this
+      # rewrite replaces the WHOLE line, so anything else riding on it would be destroyed) and
+      # for the same second reason: an authority carrying a space is either mid-edit text or a
+      # deliberately malformed Host, and neither is gori's to silently correct.
+      return unless single_token_header?(head_lines[host_idx])
       @editor.replace_line(host_idx, new_line)
+    end
+
+    # Whether a header line's value is one whitespace-free token — see the call site.
+    private def single_token_header?(line : String) : Bool
+      value = line.split(':', 2)[1]?
+      return false unless value
+      token = value.strip
+      !token.empty? && !token.each_char.any?(&.whitespace?)
     end
 
     # {scheme, host, port} parsed from the target field.
@@ -2472,9 +2550,45 @@ module Gori::Tui
       inner = col.inset(1, 1)
       if h = @req_hex_edit
         h.click_to_nibble(inner, mx, my, @scroll_req) # hex mode: place the nibble cursor
-      else
+      elsif request_insert?
         @editor.click_to_cursor(inner, mx, my)
+      else
+        @req_read.click(@editor, inner, mx, my) # READ mode paints the read cursor's selection
       end
+    end
+
+    # Mouse DRAG in the request pane — extend the selection to the pointer. The two modes keep
+    # their own selection models (INS: the editor's own anchor, painted by `TextArea#render`;
+    # READ: `@req_read`, painted by the owner), and each is extended through the model that
+    # owns it. Hex and the split-decode panes are excluded: a nibble cursor has no selection
+    # and a drag across two buffers has no meaning.
+    def request_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @loaded && !@req_hex_edit && @decode_kind.nil? && !@ws_mode
+      inner = request_editor_rect(rect) || return
+      if request_insert?
+        @editor.click_to_cursor(inner, mx, my, selecting: true)
+      else
+        @req_read.click(@editor, inner, mx, my, selecting: true)
+      end
+    end
+
+    # Mouse DOUBLE-CLICK in the request pane — select the word under the pointer.
+    def request_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless @loaded && !@req_hex_edit && @decode_kind.nil? && !@ws_mode
+      inner = request_editor_rect(rect) || return false
+      request_insert? ? @editor.select_word_at(inner, mx, my) : @req_read.select_word(@editor, inner, mx, my)
+    end
+
+    # The plain-text request editor's content rect inside `rect` (the body render() gets), or
+    # nil when the pane is too small to hold one. The same derivation
+    # `request_click_to_cursor` walks, factored out so the click, the drag and the
+    # double-click cannot land on three slightly different rects.
+    private def request_editor_rect(rect : Rect) : Rect?
+      target_h = {rect.h, target_card_h}.min
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return nil if content.h <= 0
+      half = {(content.w - 1) // 2, 1}.max
+      Rect.new(content.x, content.y, half, content.h).inset(1, 1)
     end
 
     # Vertical split of the request column into {envelope, decoded} rects for a decode
@@ -2559,13 +2673,20 @@ module Gori::Tui
     # Input/cursor target the active sub-pane (envelope or decoded); a content edit
     # dirties the right buffer — the envelope (persist/sync) or the decoded payload
     # (→ re-encode on send). Pure navigation dirties neither.
-    private def mark_req_edit : Nil
+    # `reflect: false` marks the buffer edited WITHOUT re-deriving Content-Length. Exactly one
+    # caller passes it — `edit_undo` — and it has to: reflection is itself an edit, so running
+    # it on the state ⌃Z just restored re-applies the change being undone. An auto-CL rewrite
+    # was therefore unreachable by undo at ANY depth: each press restored the line and the
+    # reflection put it straight back (and pushed another undo state doing so). Nothing is lost
+    # by skipping it — an undo snapshot is a state the buffer really held, Content-Length line
+    # included, so what comes back is already self-consistent.
+    private def mark_req_edit(reflect : Bool = true) : Nil
       if (@decode_kind || @ws_mode) && @req_pane == :decoded
         @decoded_dirty = true
         @ws_out_edited = true
       else
         @dirty = true
-        reflect_content_length_in_editor
+        reflect_content_length_in_editor if reflect
       end
     end
 
@@ -2582,7 +2703,7 @@ module Gori::Tui
       ed = req_editor
       before = ed.edits
       ed.undo
-      mark_req_edit if ed.edits != before
+      mark_req_edit(reflect: false) if ed.edits != before # see mark_req_edit
     end
 
     def edit_insert(ch : Char) : Nil
@@ -2602,6 +2723,27 @@ module Gori::Tui
       return unless @focus == :request
       req_editor.insert_newline
       mark_req_edit
+    end
+
+    # Splice a whole bracketed paste in as ONE edit — one undo step, one Content-Length
+    # reflection, one frame — instead of the N keystrokes it used to arrive as. Returns false
+    # when this buffer must take the paste the slow way, and the Runner then replays it
+    # keystroke by keystroke (see `Runner#flush_bulk_paste`), so a refusal costs speed and
+    # nothing else.
+    #
+    # The one refusal: a `§`/`¦` in the pasted text while this buffer's markers are editable.
+    # `edit_insert` escapes a typed delimiter that would nest inside (or flush against) a
+    # closed marker, character by character against the buffer as it stands at that moment —
+    # a question a bulk splice cannot ask, and one whose wrong answer silently changes what
+    # the template sends. Clipboards with a `§` in them are rare; correctness there is not.
+    def edit_paste(text : String) : Bool
+      return false unless @focus == :request && request_insert? && !request_hex?
+      if req_marker_editable? && (text.includes?(Fuzz::Template::MARKER) || text.includes?(Fuzz::Template::CHAIN_SEP))
+        return false
+      end
+      req_editor.insert_text(text)
+      mark_req_edit
+      true
     end
 
     def edit_backspace : Nil
@@ -2642,12 +2784,66 @@ module Gori::Tui
     end
 
     # Home/End: pure navigation (caret to line start/end) → does NOT dirty, like edit_move.
-    def edit_home : Nil
-      req_editor.home if @focus == :request
+    def edit_home(selecting : Bool = false) : Nil
+      req_editor.home(selecting) if @focus == :request
     end
 
-    def edit_end : Nil
-      req_editor.end_of_line if @focus == :request
+    def edit_end(selecting : Bool = false) : Nil
+      req_editor.end_of_line(selecting) if @focus == :request
+    end
+
+    # PageUp / PageDown in the request editor: `dir` is -1/+1, sized from the editor's OWN
+    # last rendered height so the step matches the pane the operator is looking at (a split
+    # decode tab pages by its half, not by the window).
+    def edit_page(dir : Int32, selecting : Bool = false) : Nil
+      return unless @focus == :request
+      ed = req_editor
+      ed.page(dir * ed.page_rows, selecting: selecting)
+    end
+
+    # THE shared editor keymap over the request editor — see `TextArea#handle_motion_key`.
+    # Dirties only on a real buffer change (⌥⌫ is the one mutation in the set).
+    #
+    # Split-decode tabs keep their own ↑/↓, which cross between the ENVELOPE and DECODED
+    # sub-panes; the shared set would clamp inside one buffer instead, so those two keys are
+    # routed through `edit_move` there and everything else still comes here.
+    def edit_motion_key(ev : Termisu::Event::Key) : Bool
+      return false unless @focus == :request
+      if (@decode_kind || @ws_mode) && (ev.key.up? || ev.key.down?)
+        edit_move(ev.key.up? ? -1 : 1, 0, selecting: ev.shift?)
+        return true
+      end
+      ed = req_editor
+      before = ed.edits
+      return false unless ed.handle_motion_key(ev)
+      mark_req_edit if ed.edits != before
+      true
+    end
+
+    # ⌃/⌥ + ←/→ — one word instead of one character. Pure motion: nothing dirties, matching
+    # `edit_move`.
+    def edit_word_move(dir : Int32, selecting : Bool = false) : Nil
+      return unless @focus == :request
+      ed = req_editor
+      dir < 0 ? ed.word_left(selecting) : ed.word_right(selecting)
+    end
+
+    # ⌃/⌥ + Home/End — the buffer's start/end, not the line's.
+    def edit_buffer_start(selecting : Bool = false) : Nil
+      req_editor.to_buffer_start(selecting) if @focus == :request
+    end
+
+    def edit_buffer_end(selecting : Bool = false) : Nil
+      req_editor.to_buffer_end(selecting) if @focus == :request
+    end
+
+    # ⌥⌫ — delete back to the previous word boundary as one undo step.
+    def edit_delete_word : Nil
+      return unless @focus == :request
+      ed = req_editor
+      before = ed.edits
+      ed.delete_word_left
+      mark_req_edit if ed.edits != before # no-op at buffer start — see edit_undo
     end
 
     # Forward-delete: a content edit → dirties (matches edit_backspace).
@@ -2985,7 +3181,30 @@ module Gori::Tui
       @resp_cursor.sync(cy, {cx - off, 0}.max.clamp(0, line_at.call(cy).size))
     end
 
-    def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    # Mouse DRAG in the response pane — extend the read selection to the pointer.
+    def resp_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      resp_click_to_cursor(rect, mx, my, selecting: true)
+    end
+
+    # Mouse DOUBLE-CLICK in the response pane — select the word under the pointer. The hit
+    # test is `resp_click_to_cursor`'s (the response's own wrap + BodyLines source), so this
+    # only has to supply the word spread.
+    def resp_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless resp_navigable? && @loaded
+      before = {@resp_cursor.cy, @resp_cursor.cx}
+      resp_click_to_cursor(rect, mx, my)
+      return false if {@resp_cursor.cy, @resp_cursor.cx} == before && !@resp_click_hit
+      size, line_at = resp_line_source
+      @resp_cursor.select_word_at_cursor(size, line_at)
+    end
+
+    # Whether the last `resp_click_to_cursor` actually landed on the pane (as opposed to
+    # returning early on a click outside it) — the double-click needs to tell "the caret did
+    # not move because the pointer was already there" from "the click missed entirely".
+    @resp_click_hit = false
+
+    def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      @resp_click_hit = false
       return unless resp_navigable? && @loaded
       target_h = {rect.h, target_card_h}.min
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
@@ -3002,9 +3221,15 @@ module Gori::Tui
       _, line_at = resp_line_source
       return if size <= 0
       row = my - body.y
-      return if row < 0
+      # A drag above the pane pins to its first visible row — the pointer left the top edge
+      # with the button held, which is an upward selection, not a miss.
+      if row < 0
+        return unless selecting
+        row = 0
+      end
       rows = resp_rows(cw, body.h, size, drawn_at)
       return if rows.empty?
+      @resp_click_hit = true
       # The wrap inverse, not `@scroll + row`: a screen row is a VISUAL row now, and the
       # continuation rows between it and the anchor are exactly what the old arithmetic
       # skipped. `Wrap.row_index` clamps to the row it was given, so a click past the end of
@@ -3012,8 +3237,13 @@ module Gori::Tui
       vr = rows[row]? || rows[rows.size - 1]
       drawn = drawn_at.call(vr.li)
       hit = Wrap.row_index(drawn, nil, vr.a, vr.b, mx - (body.x + gw))
-      @resp_cursor.clear_selection
-      @resp_cursor.sync(vr.li, {hit - off, 0}.max.clamp(0, line_at.call(vr.li).size))
+      cx = {hit - off, 0}.max.clamp(0, line_at.call(vr.li).size)
+      if selecting
+        @resp_cursor.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor
+      else
+        @resp_cursor.clear_selection
+        @resp_cursor.sync(vr.li, cx)
+      end
       ensure_resp_visible(body.h)
     end
 
@@ -3022,6 +3252,14 @@ module Gori::Tui
       lines = request_read_lines
       return if lines.empty?
       @req_read.move(req_editor, dr, dc, selecting: selecting)
+    end
+
+    # PageUp / PageDown with the request pane in READ mode: the read cursor steps a screenful,
+    # sized from the editor that draws the same pane. `ReadCursor#move` clamps the row itself,
+    # so a page past the last line lands on it rather than doing nothing.
+    def request_read_page(dir : Int32, selecting : Bool = false) : Nil
+      return if request_insert? || request_hex?
+      request_read_move(dir * req_editor.page_rows, 0, selecting: selecting)
     end
 
     def target_read_move(dc : Int32, selecting : Bool = false) : Nil

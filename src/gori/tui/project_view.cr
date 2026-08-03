@@ -222,6 +222,51 @@ module Gori::Tui
       @desc_read.move(@desc_area, 0, delta * 4)
     end
 
+    # INSERT-mode motion: the shared editor keymap (⇧arrows select, Page keys, ⌥←/→ by word,
+    # ⌥⌫ deletes one) — see `TextArea#handle_motion_key`. Dirties only on a real buffer
+    # change, which in this set is ⌥⌫ alone.
+    def desc_motion_key(ev : Termisu::Event::Key) : Bool
+      before = @desc_area.edits
+      return false unless @desc_area.handle_motion_key(ev)
+      @desc_dirty = true if @desc_area.edits != before
+      true
+    end
+
+    # READ-mode Home/End/Page. The caret + selection this mode paints are `@desc_read`'s, so
+    # Home/End go through the editor and are then mirrored back onto the read cursor.
+    def desc_read_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if desc_insert_mode?
+      key = ev.key
+      shift = ev.shift?
+      case
+      when key.home?      then @desc_area.home(shift)
+      when key.end?       then @desc_area.end_of_line(shift)
+      when key.page_up?   then desc_read_move(-@desc_area.page_rows, 0, selecting: shift)
+      when key.page_down? then desc_read_move(@desc_area.page_rows, 0, selecting: shift)
+      else                     return false
+      end
+      @desc_read.sync_to(@desc_area, selecting: shift) if key.home? || key.end?
+      true
+    end
+
+    def desc_word_delete_key?(ev : Termisu::Event::Key) : Bool
+      @desc_area.word_delete_key?(ev)
+    end
+
+    # Mouse DRAG / DOUBLE-CLICK over the description — the click already forced INSERT, so
+    # both work on the editor's own selection.
+    def desc_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless desc_insert_mode?
+      return unless card = card_rect(rect, :desc)
+      @desc_area.click_to_cursor(card.inset(1, 1), mx, my, selecting: true)
+    end
+
+    def desc_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless card = card_rect(rect, :desc)
+      enter_desc_insert!
+      @desc_area.select_word_at(card.inset(1, 1), mx, my)
+    end
+
     # Sub-tab order, left to right. DESCRIPTION leads: it's the one card you WRITE rather
     # than configure, so it's both the most-visited chip and the natural landing spot when
     # the tab opens; the four configuration cards follow.

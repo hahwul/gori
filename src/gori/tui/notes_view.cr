@@ -246,6 +246,43 @@ module Gori::Tui
       current.area.move(dr, dc)
     end
 
+    # Whether `ev` is the ⌥⌫ word delete — see `TextArea#word_delete_key?`. Exposed so the
+    # controller can test it BEFORE plain ⌫, which would otherwise swallow the chord.
+    def word_delete_key?(ev : Termisu::Event::Key) : Bool
+      current.area.word_delete_key?(ev)
+    end
+
+    # INSERT-mode motion: the shared editor keymap (⇧arrows select, Page keys, ⌥←/→ by word,
+    # ⌥⌫ deletes one) — see `TextArea#handle_motion_key`. Dirties only on a real buffer
+    # change, which in this set is ⌥⌫ alone.
+    def motion_key(ev : Termisu::Event::Key) : Bool
+      ed = current.area
+      before = ed.edits
+      return false unless ed.handle_motion_key(ev)
+      @dirty = true if ed.edits != before
+      true
+    end
+
+    # READ-mode motion. The caret + selection live in `@read` (that is what this mode
+    # paints), so the shared keymap is applied to the READ cursor rather than the editor's.
+    def read_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if insert_mode?
+      key = ev.key
+      shift = ev.shift?
+      ed = current.area
+      case
+      when key.home?      then ed.home(shift)
+      when key.end?       then ed.end_of_line(shift)
+      when key.page_up?   then read_move(-ed.page_rows, 0, selecting: shift)
+      when key.page_down? then read_move(ed.page_rows, 0, selecting: shift)
+      else                     return false
+      end
+      # Home/End moved the EDITOR's caret; mirror it into the read cursor, extending or
+      # collapsing the read selection to match what the key promised.
+      @read.sync_to(ed, selecting: shift) if key.home? || key.end?
+      true
+    end
+
     def scroll_view(step : Int32) : Nil
       current.area.scroll_view(step)
     end
@@ -268,9 +305,26 @@ module Gori::Tui
     # Mouse: place the cursor at a click. `rect` is the framed interior the runner
     # passes to render; re-apply render's 1-col side inset so the editor geometry matches.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
       enter_insert!
-      current.area.click_to_cursor(area, mx, my)
+      current.area.click_to_cursor(editor_rect(rect), mx, my)
+    end
+
+    # Mouse DRAG — extend the selection to the pointer. The click already put this pane in
+    # INSERT, so the selection is the editor's own (the band `TextArea#render` paints).
+    def drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless insert_mode?
+      current.area.click_to_cursor(editor_rect(rect), mx, my, selecting: true)
+    end
+
+    # Mouse DOUBLE-CLICK — select the word under the pointer.
+    def select_word_at(rect : Rect, mx : Int32, my : Int32) : Bool
+      enter_insert!
+      current.area.select_word_at(editor_rect(rect), mx, my)
+    end
+
+    # render's 1-col side inset, applied once so click, drag and double-click share it.
+    private def editor_rect(rect : Rect) : Rect
+      Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
     end
 
     def goto_line(n : Int32) : Nil

@@ -31,7 +31,11 @@ module Gori
     # Tui::Keybind.dealias all derive from these, so they stay in sync.
     #   • Runner global guards: ^G goto, ^F find, ^B reveal, ^E external editor, ^, prefs.
     #   • Controllers + Runner: ^P palette, ^N new, ^W close, ^1-9 sub-tab.
-    CLAIMED_CTRL_LETTERS = %w(g f b e p n w)
+    #   • Every text editor: ^Z undo (Repeater, Fuzzer, Notes, Issues, Intercept, Decoder,
+    #     JWT, Rewriter, Project — nine controllers consume it before the keymap is read).
+    #     Listed late: the guards predate the list, so the hotkey editor was offering ^Z as
+    #     bindable and the binding was shadowed wherever an editor had focus.
+    CLAIMED_CTRL_LETTERS = %w(g f b e p n w z)
     CLAIMED_CTRL_DIGITS  = ('1'..'9').map(&.to_s)
     CLAIMED_CTRL_PUNCT   = %w(,)
 

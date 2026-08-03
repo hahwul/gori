@@ -43,7 +43,7 @@ end
 describe "Runner.suspend_without_mouse" do
   it "disables the mouse BEFORE the child owns the tty and restores it after" do
     spy = TermSpy.new
-    Runner.suspend_without_mouse(spy, mouse: true) { spy.log << :editor }
+    Runner.suspend_without_mouse(spy, mouse: true, io: IO::Memory.new) { spy.log << :editor }
     # Ordering is the whole contract: :disable must precede :suspend_in, or the child still
     # sees SGR reports for the first frames, and :enable must follow :suspend_out.
     spy.log.should eq([:disable, :suspend_in, :editor, :suspend_out, :enable])
@@ -51,14 +51,14 @@ describe "Runner.suspend_without_mouse" do
 
   it "honours Mouse=off — it restores what the operator set, it does not force it on" do
     spy = TermSpy.new
-    Runner.suspend_without_mouse(spy, mouse: false) { spy.log << :editor }
+    Runner.suspend_without_mouse(spy, mouse: false, io: IO::Memory.new) { spy.log << :editor }
     spy.log.should eq([:disable, :suspend_in, :editor, :suspend_out])
   end
 
   it "restores through a RAISING editor, so a bad $EDITOR can't cost the session its mouse" do
     spy = TermSpy.new
     expect_raises(Exception, "no such editor") do
-      Runner.suspend_without_mouse(spy, mouse: true) { raise "no such editor" }
+      Runner.suspend_without_mouse(spy, mouse: true, io: IO::Memory.new) { raise "no such editor" }
     end
     spy.log.should eq([:disable, :suspend_in, :enable]) # the ensure ran; :suspend_out never did
   end

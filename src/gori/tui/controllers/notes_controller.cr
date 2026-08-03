@@ -114,8 +114,7 @@ module Gori::Tui
       when key.down?  then @notes.read_move(1, 0, selecting: selecting)
       when key.left?  then @notes.read_move(0, -1, selecting: selecting)
       when key.right? then @notes.read_move(0, 1, selecting: selecting)
-      when key.home?  then @notes.home
-      when key.end?   then @notes.end_of_line
+      when @notes.read_motion_key(ev) then nil # Page keys + ⇧Home/⇧End — the shared editor set
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false
       end
@@ -125,22 +124,25 @@ module Gori::Tui
     private def edit_insert(ev : Termisu::Event::Key, c : Char?) : Nil
       key = ev.key
       case
-      when key.enter?     then @notes.newline
-      when ev.ctrl_z?     then @notes.undo
-      when key.backspace? then @notes.backspace
+      when key.enter? then @notes.newline
+      when ev.ctrl_z? then @notes.undo
+      # Tested BEFORE plain ⌫, which would otherwise swallow the modified form as a
+      # one-character delete on a terminal that reports ⌥⌫ as Backspace+Alt.
+      when @notes.word_delete_key?(ev) then @notes.motion_key(ev)
+      when key.backspace?              then @notes.backspace
       when key.up?
-        if @notes.at_top?
+        # ⇧↑ stays inside the pane: leaving it mid-extend would abandon a selection the
+        # operator is still building (the Repeater's request editor draws the same line).
+        if @notes.at_top? && !ev.shift?
           save_notes
           @host.request_focus(:subtabs)
         else
-          @notes.move(-1, 0)
+          @notes.motion_key(ev)
         end
-      when key.down?   then @notes.move(1, 0)
-      when key.left?   then @notes.move(0, -1)
-      when key.right?  then @notes.move(0, 1)
-      when key.home?   then @notes.home
-      when key.end?    then @notes.end_of_line
       when key.delete? then @notes.delete
+      # ⇧arrows select, Page keys, ⌥←/→ by word — the same set every other editor has
+      # (TextArea#handle_motion_key).
+      when @notes.motion_key(ev) then nil
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
@@ -151,8 +153,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = body_rect_below_filter(rect)
-      body = carve_links_row(body)[1] unless @notes.link_preview.empty?
+      body = notes_body_rect(rect)
       # NOR/INS chip on the editor top border toggles insert (same as ↵ / esc).
       if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
         if @notes.insert_mode?
@@ -164,6 +165,31 @@ module Gori::Tui
       end
       @notes.click_to_cursor(body, mx, my)
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # No focus/save side effects here: the press that started the gesture already did those,
+    # and re-running them per motion event would churn while the pointer moves.
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      @notes.drag_to_cursor(notes_body_rect(rect), mx, my)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      body = notes_body_rect(rect)
+      # The NOR/INS chip is a button, not text — a double-click there is two toggles.
+      return false if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
+      @notes.select_word_at(body, mx, my)
+    end
+
+    # The editor's rect inside the tab body — the derivation `handle_click` walks, factored
+    # out so click, drag and double-click cannot land on three slightly different rects.
+    private def notes_body_rect(rect : Rect) : Rect
+      body = body_rect_below_filter(rect)
+      @notes.link_preview.empty? ? body : carve_links_row(body)[1]
     end
 
     def handle_wheel(step : Int32) : Bool

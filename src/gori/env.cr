@@ -650,6 +650,35 @@ module Gori
       scan_unresolved(text.to_slice, vars, prefix, deferred)
     end
 
+    # EVERY `$NAME` the text references, set or not, in first-appearance order.
+    #
+    # `unresolved` with an empty var table: nothing resolves, so every name is reported —
+    # and reported through the SAME byte-level scan `expand` walks, `$$` escapes included.
+    # A second hand-rolled scanner is how two answers to "what tokens are in here?" come to
+    # disagree; there is exactly one, and this is a call into it.
+    def self.token_names(text : String, prefix : String = Settings.env_prefix) : Array(String)
+      unresolved(text, {} of String => String, prefix, deferred: nil)
+    end
+
+    # `vars` minus `names` — the substitution table for a surface where some names must stay
+    # LITERAL on the wire.
+    #
+    # Subtracting from the TABLE rather than special-casing the scan is what keeps this one
+    # rule instead of two: an excluded name is simply a name gori does not have a value for,
+    # which is the already-defined "unset `$KEY` ships literally, never refused" behaviour
+    # every send path shares. Nothing downstream needs to learn a new state.
+    #
+    # The caller with a reason to use it is an EVIDENCE buffer (see
+    # `RepeaterView#operator_env_vars`): a `$filter` the capture arrived with is an origin
+    # byte, while a `$TOKEN` the operator typed into the same buffer is a variable reference.
+    # Provenance is per NAME there, not per buffer.
+    def self.vars_without(names : Enumerable(String),
+                          vars : Hash(String, String) = effective_vars) : Hash(String, String)
+      excluded = names.is_a?(Set) ? names : names.to_set
+      return vars if excluded.empty?
+      vars.reject { |k, _| excluded.includes?(k) }
+    end
+
     # Render token names back into the spelling the operator typed (`["A"]` → `"$A"`),
     # comma-joined. Every surface quotes the same list, so the prefix is applied here
     # rather than in five builders that could each drift on whether to include it.

@@ -213,6 +213,25 @@ module Gori::Tui
       true
     end
 
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # DESCRIPTION only: the other four panes are row lists and inline fields, where a drag is
+    # a fast repeated select and a double-click is two activations. No focus/save side
+    # effects — the press that began the gesture already ran them.
+    def supports_drag? : Bool
+      @project_view.pane == :desc
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @project_view.pane == :desc
+      @project_view.desc_drag_to_cursor(rect, mx, my)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless @project_view.pane == :desc
+      return false if @project_view.strip_chip_at(rect, mx, my) # a chip is a button, not text
+      @project_view.desc_select_word(rect, mx, my)
+    end
+
     # A wheel notch scrolls the card UNDER the pointer without focusing it first, so a long
     # DESCRIPTION scrolls into view on a plain wheel-over. The DESCRIPTION viewport-scrolls
     # (cursor follows) instead of spilling past the card; the lists move their selection
@@ -346,41 +365,39 @@ module Gori::Tui
       end
     end
 
+    # ⇧←/→ SELECT here, they no longer h-scroll. The description is a navigable pane with a
+    # caret and `follow_x`, so moving the caret sideways scrolls the view anyway — the
+    # dedicated h-scroll chord was shadowing the selection every other text pane gives
+    # ⇧arrows (and the `key.left? && selecting` branches below it were already dead code).
     private def handle_desc_read(ev : Termisu::Event::Key, key, c : Char?) : Nil
       return @host.open_space_menu if key.space? && !ev.ctrl? && !ev.alt?
-      if key.left? && ev.shift?
-        @project_view.desc_hscroll(-1)
-        return
-      elsif key.right? && ev.shift?
-        @project_view.desc_hscroll(1)
-        return
-      end
       selecting = ev.shift?
       case
       when key.enter?, c == 'i'
         @project_view.enter_desc_insert!
       when key.up?
-        @project_view.at_top? ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
-      when key.down?               then @project_view.desc_read_move(1, 0, selecting: selecting)
-      when key.left? && selecting  then @project_view.desc_read_move(0, -1, selecting: true)
-      when key.right? && selecting then @project_view.desc_read_move(0, 1, selecting: true)
-      when key.left?               then @project_view.desc_read_move(0, -1)
-      when key.right?              then @project_view.desc_read_move(0, 1)
-      when c == 'x'                then @project_view.desc_select_line
-      when c == 'y'                then project_copy
+        # ⇧↑ stays in the pane: leaving mid-extend abandons a selection being built.
+        (@project_view.at_top? && !selecting) ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
+      when key.down?                              then @project_view.desc_read_move(1, 0, selecting: selecting)
+      when key.left?                              then @project_view.desc_read_move(0, -1, selecting: selecting)
+      when key.right?                             then @project_view.desc_read_move(0, 1, selecting: selecting)
+      when @project_view.desc_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
+      when c == 'x'                               then @project_view.desc_select_line
+      when c == 'y'                               then project_copy
       end
     end
 
     private def edit_desc_insert(ev : Termisu::Event::Key, key, c : Char?) : Nil
       case
-      when key.enter?     then @project_view.newline
-      when ev.ctrl_z?     then @project_view.undo
-      when key.backspace? then @project_view.backspace
+      when key.enter? then @project_view.newline
+      when ev.ctrl_z? then @project_view.undo
+        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when @project_view.desc_word_delete_key?(ev) then @project_view.desc_motion_key(ev)
+      when key.backspace?                          then @project_view.backspace
       when key.up?
-        @project_view.at_top? ? leave_to_strip : @project_view.move(-1, 0)
-      when key.down?  then @project_view.move(1, 0)
-      when key.left?  then @project_view.move(0, -1)
-      when key.right? then @project_view.move(0, 1)
+        (@project_view.at_top? && !ev.shift?) ? leave_to_strip : @project_view.desc_motion_key(ev)
+        # ⇧arrows select, Page keys, ⌥←/→ by word — TextArea#handle_motion_key.
+      when @project_view.desc_motion_key(ev) then nil
       else
         if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)

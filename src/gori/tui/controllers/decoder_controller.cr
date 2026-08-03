@@ -614,6 +614,8 @@ module Gori::Tui
         s.input.undo; touch
       when key.enter?
         s.input.insert_newline; touch
+      when s.input.word_delete_key?(ev)
+        input_motion_key(ev, s) # before plain ⌫, which would swallow the modified form
       when key.backspace?
         s.input.backspace; touch
       when key.up?
@@ -649,8 +651,13 @@ module Gori::Tui
       when key.down?  then s.input.at_bottom? ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
-      when key.home?  then s.input.home
-      when key.end?   then s.input.end_of_line
+        # Home/End/Page over the READ caret: they move the EDITOR caret, so the read cursor —
+        # which is what this mode paints — is mirrored back onto it.
+      when key.home?, key.end?
+        key.home? ? s.input.home(selecting) : s.input.end_of_line(selecting)
+        s.input_read.sync_to(s.input, selecting: selecting)
+      when key.page_up?   then s.input_read.move(s.input, -s.input.page_rows, 0, selecting: selecting)
+      when key.page_down? then s.input_read.move(s.input, s.input.page_rows, 0, selecting: selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # x/y + Global breath → keymap
       end
@@ -662,11 +669,11 @@ module Gori::Tui
     private def edit_input_caret(ev : Termisu::Event::Key, s, c : Char?) : Nil
       key = ev.key
       case
-      when key.left?   then s.input.move(0, -1)
-      when key.right?  then s.input.move(0, 1)
-      when key.home?   then s.input.home
-      when key.end?    then s.input.end_of_line
       when key.delete? then s.input.delete; touch
+      # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word, ⌥⌫ deletes one — the shared
+      # editor keymap (TextArea#handle_motion_key). ↑/↓ are handled by the caller, which
+      # crosses panes at the buffer edges.
+      when input_motion_key(ev, s) then nil
       else
         if c && !ev.ctrl? && !ev.alt?
           s.input.insert(c)
@@ -674,6 +681,15 @@ module Gori::Tui
           touch
         end
       end
+    end
+
+    # The shared motion keymap over the INPUT editor, marking the session touched only on a
+    # real buffer change (⌥⌫ is the one mutation in the set).
+    private def input_motion_key(ev : Termisu::Event::Key, s) : Bool
+      before = s.input.edits
+      return false unless s.input.handle_motion_key(ev)
+      touch if s.input.edits != before
+      true
     end
 
     # ---- CHAIN spec line ----
@@ -763,10 +779,45 @@ module Gori::Tui
       when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
       when key.left?               then out_nav_step(s, 0, -1, selecting)
       when key.right?              then out_nav_step(s, 0, 1, selecting)
+        # Home/End/Page. ⇧←/→ stay H-SCROLL here, as they are on every read-only pane that
+        # scrolls sideways (the Repeater's RESPONSE draws the same line): an editable pane
+        # follows its caret, so there selection is strictly better — a read-only one has no
+        # caret-driven scroll to piggyback on.
+      when s.view.output_motion_key(ev, s.result) then nil
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false
       end
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      s = cur
+      regions = s.view.layout(body_rect_below_filter(rect))
+      case s.pane
+      when :input
+        s.input.click_to_cursor(regions.input.inset(1, 1), mx, my, selecting: true)
+        s.input_read.sync_to(s.input, selecting: true) unless s.input_mode == InputMode::Insert
+      when :output
+        s.view.output_click_to_cursor(regions.output.inset(1, 1), mx, my, s.result, selecting: true)
+      end
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      s = cur
+      regions = s.view.layout(body_rect_below_filter(rect))
+      if regions.input.contains?(mx, my)
+        return s.input.select_word_at(regions.input.inset(1, 1), mx, my) if s.input_mode == InputMode::Insert
+        s.input_read.select_word(s.input, regions.input.inset(1, 1), mx, my)
+      elsif regions.output.contains?(mx, my)
+        s.view.output_select_word(regions.output.inset(1, 1), mx, my, s.result)
+      else
+        false
+      end
     end
 
     private def handle_output_hscroll(ev : Termisu::Event::Key) : Bool

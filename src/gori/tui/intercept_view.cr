@@ -583,6 +583,40 @@ module Gori::Tui
       @editor.move(dr, dc) if @editing
     end
 
+    # The shared editor keymap — ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word, ⌥⌫
+    # deletes one (`TextArea#handle_motion_key`). This editor had NO selection of any kind
+    # before: the one pane where the operator edits bytes already on the wire was also the
+    # one where a mistyped header could not be selected and replaced.
+    #
+    # `mark_editor_edit` only on a real buffer change (⌥⌫), and for the reason spelled out at
+    # `edit_undo`: once dirty, `forward_bytes` recomputes Content-Length and normalizes line
+    # endings, so a held message the operator only NAVIGATED must not be marked edited or it
+    # forwards as different bytes (P7).
+    def edit_motion_key(ev : Termisu::Event::Key) : Bool
+      return false unless @editing
+      before = @editor.edits
+      return false unless @editor.handle_motion_key(ev)
+      mark_editor_edit if @editor.edits != before
+      true
+    end
+
+    def edit_word_delete_key?(ev : Termisu::Event::Key) : Bool
+      @editor.word_delete_key?(ev)
+    end
+
+    # Mouse DRAG / DOUBLE-CLICK over the held-bytes editor.
+    def editor_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @editing
+      _, right = split_panes(body_rect(rect))
+      @editor.click_to_cursor(right.inset(1, 1), mx, my, selecting: true)
+    end
+
+    def editor_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless @editing
+      _, right = split_panes(body_rect(rect))
+      @editor.select_word_at(right.inset(1, 1), mx, my)
+    end
+
     # Home/End: caret to line start/end — pure navigation, doesn't change the bytes.
     def edit_home : Nil
       @editor.home if @editing

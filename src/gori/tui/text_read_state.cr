@@ -52,6 +52,39 @@ module Gori::Tui
       @cursor.sync(editor.cy, editor.cx)
     end
 
+    # Adopt the EDITOR's caret as this mode's, extending the read selection to it when
+    # `selecting` (⇧Home/⇧End, which move the editor caret directly) and collapsing it
+    # otherwise. `sync_from`'s counterpart for a key that went through the editor first.
+    def sync_to(editor : TextArea, selecting : Bool = false) : Nil
+      @cursor.move_to(editor.cy, editor.cx, selecting: selecting)
+    end
+
+    # Mouse press / drag. The HIT TEST is the editor's (it owns the wrap layout, the gutter
+    # and the concealed `¦chain` runs — a second inverse here would drift from the caret the
+    # click lands on); the SELECTION is the read cursor's, which is what this mode paints.
+    # `selecting` is the drag half: the anchor stays where the press left it.
+    def click(editor : TextArea, rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      lines = editor.lines_snapshot
+      return if lines.empty?
+      @cursor.sync(editor.cy, editor.cx) # the press position — the anchor a drag extends from
+      editor.click_to_cursor(rect, mx, my)
+      @cursor.move_to(editor.cy, editor.cx, selecting: selecting)
+      apply(editor, lines)
+    end
+
+    # Double-click: place the caret through the editor's hit test, then spread to the word
+    # boundaries. False when the pointer is on whitespace or past the end of the line (there
+    # is no token to take), so the caller can leave the plain click's result standing.
+    def select_word(editor : TextArea, rect : Rect, mx : Int32, my : Int32) : Bool
+      lines = editor.lines_snapshot
+      return false if lines.empty?
+      editor.click_to_cursor(rect, mx, my)
+      @cursor.sync(editor.cy, editor.cx)
+      return false unless @cursor.select_word_at_cursor(lines)
+      apply(editor, lines)
+      true
+    end
+
     def apply(editor : TextArea, lines : Array(String)? = nil) : Nil
       lines ||= editor.lines_snapshot
       return if lines.empty?

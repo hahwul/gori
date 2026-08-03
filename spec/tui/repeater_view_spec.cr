@@ -482,6 +482,89 @@ describe Gori::Tui::RepeaterView do
     Gori::Settings.env_vars = [] of {String, String}
   end
 
+  # The complement of the spec above, and the half that was missing: evidence used to switch
+  # `$KEY` substitution off for the whole TAB, so an `Authorization: $TOKEN` the OPERATOR
+  # typed into a ^R-from-History tab went to the origin as six literal bytes — while the
+  # editor's own value peek showed the resolved secret under the caret. Provenance is per
+  # NAME: a name the capture never mentioned cannot be an origin byte.
+  it "substitutes a $KEY the operator typed into an evidence tab, keeping the capture's own literal" do
+    Gori::Settings.env_vars = [{"TOKEN", "secret"}, {"filter", "PWNED"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    repeater_tmp_store do |store|
+      head = "GET /api?$filter=name HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/api?$filter=name", http_version: "HTTP/1.1",
+        head: head.to_slice, body: nil))
+      view = RepeaterView.new
+      view.load(store.get_flow(id).not_nil!)
+
+      # The operator adds a header referencing a name the CAPTURE never carried.
+      view.replace_request("GET /api?$filter=name HTTP/1.1\r\nHost: h.test\r\nAuthorization: $TOKEN\r\n\r\n")
+      sent = String.new(view.request_bytes)
+      sent.includes?("Authorization: secret").should be_true # theirs → expanded
+      sent.includes?("$filter=name").should be_true          # the capture's → still literal
+      sent.includes?("PWNED").should be_false
+    end
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
+
+  # Display has to agree with the wire, or the peek/colour is a promise the send breaks.
+  it "marks the capture's own $KEYs literal for the editor's peek and colouring" do
+    Gori::Settings.env_vars = [{"TOKEN", "secret"}, {"filter", "PWNED"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    repeater_tmp_store do |store|
+      head = "GET /api?$filter=name HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/api?$filter=name", http_version: "HTTP/1.1",
+        head: head.to_slice, body: nil))
+      view = RepeaterView.new
+      view.load(store.get_flow(id).not_nil!)
+
+      literal = Gori::Tui::Highlight.from_lines(["GET /api?$filter=x HTTP/1.1"], true, literal: Set{"filter"})
+      known = Gori::Tui::Highlight.from_lines(["GET /api?$filter=x HTTP/1.1"], true)
+      tok = literal[0].find { |s| s.text == "$filter" }.not_nil!
+      tok.fg.should eq(Gori::Tui::Theme.env_unknown)
+      known[0].find { |s| s.text == "$filter" }.not_nil!.fg.should eq(Gori::Tui::Theme.env_known)
+    end
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
+
+  # A pasted request is spliced in as ONE edit; the marker guard is the one thing that sends
+  # it back to the keystroke path, because `edit_insert` escapes a `§`/`¦` that would nest
+  # inside a closed marker and a bulk splice cannot ask that per character.
+  describe "#edit_paste (bulk bracketed paste)" do
+    it "splices a whole pasted request in as one edit and reflects Content-Length once" do
+      view = RepeaterView.new
+      view.load_blank
+      view.focus_pane(:request)
+      view.enter_request_insert!
+      view.edit_paste("POST /a HTTP/1.1\nHost: h.test\nContent-Length: 4\n\nbody").should be_true
+      view.request_text.should contain("POST /a HTTP/1.1")
+      view.request_text.should contain("body")
+      view.dirty?.should be_true
+    end
+
+    it "refuses a clipboard carrying a § so the per-character marker guard still runs" do
+      view = RepeaterView.new
+      view.load_blank
+      view.focus_pane(:request)
+      view.enter_request_insert!
+      view.edit_paste("q=§payload§").should be_false
+      view.request_text.should_not contain("§") # nothing was inserted — the Runner replays it
+    end
+
+    it "refuses when the request pane is not an open text editor" do
+      view = RepeaterView.new
+      view.load_blank
+      view.focus_pane(:request) # READ mode — no caret to paste at
+      view.edit_paste("x").should be_false
+    end
+  end
+
   it "reflects auto Content-Length in the visible REQUEST editor (^L on)" do
     view = RepeaterView.new
     view.restore("https://h.test",
@@ -502,6 +585,56 @@ describe Gori::Tui::RepeaterView do
     String.new(view.request_bytes).includes?("Content-Length: 4").should be_true # what ^R sends
     view.request_text.includes?("Content-Length: 4").should be_true              # editor matches (was 8)
     view.request_text.includes?("Content-Length: 8").should be_false
+  end
+
+  # The reflection replaces the WHOLE Content-Length line, and it runs on every keystroke —
+  # so the transient line a paste (or a typed header) makes, with the buffer's next line still
+  # glued to its tail, used to be swallowed by the rewrite. Typing `Content-Length: 5` in front
+  # of `User-Agent: gori` destroyed the User-Agent, silently and unrecoverably (see the undo
+  # spec below). A value that is not a bare number means "mid-edit or deliberate" — leave it.
+  it "does not rewrite a Content-Length line whose value is not a plain number" do
+    view = RepeaterView.new
+    view.restore("https://h.test",
+      "POST /x HTTP/1.1\nHost: h.test\nUser-Agent: gori\n\nhi", false, true)
+    view.pane_advance(1) # :target → :request
+    view.goto_request_line(3)
+    "Content-Length: 5".each_char { |c| view.edit_insert(c) }
+
+    # Every character typed survives, and so does the line it was typed in front of.
+    view.request_text.includes?("Content-Length: 5User-Agent: gori").should be_true
+    view.request_text.includes?("User-Agent: gori").should be_true
+  end
+
+  # A `Content-Length: 0abc` / `+5` / `5 ` is a smuggling or desync primitive an operator types
+  # ON PURPOSE. Auto-CL's job is keeping an ordinary length honest while the body is edited,
+  # not correcting a deliberately malformed one — the test on screen must be the test on the
+  # wire (P7).
+  it "leaves a deliberately malformed Content-Length value alone" do
+    view = RepeaterView.new
+    view.restore("https://h.test",
+      "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 0abc\n\nhi", false, true)
+    view.pane_advance(1)
+    view.goto_request_line(5) # body line
+    view.edit_insert('!')
+    view.request_text.includes?("Content-Length: 0abc").should be_true
+  end
+
+  # The reflection is itself an edit, so running it on the state ⌃Z just restored re-applies
+  # the change being undone: an auto-CL rewrite was unreachable by undo at any depth.
+  it "⌃Z restores a line the auto-Content-Length reflection rewrote" do
+    view = RepeaterView.new
+    view.restore("https://h.test",
+      "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhi", false, true)
+    view.pane_advance(1)
+    view.goto_request_line(5)
+    view.request_text.includes?("Content-Length: 2").should be_true # restore already reflected
+    view.edit_insert('!')
+    view.request_text.includes?("Content-Length: 3").should be_true # …and so did the keystroke
+
+    view.edit_undo # the reflection…
+    view.edit_undo # …then the keystroke
+    view.request_text.includes?("Content-Length: 2").should be_true
+    view.request_text.includes?("hi!").should be_false
   end
 
   it "keeps the REQUEST editor's Content-Length in sync while editing the body" do

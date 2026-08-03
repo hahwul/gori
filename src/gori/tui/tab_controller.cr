@@ -212,6 +212,40 @@ module Gori::Tui
       false
     end
 
+    # Whether a press in this tab's body can start a DRAG — pointer motion with the button
+    # held, which extends a selection from where the press landed. False by default: a tab
+    # opts in only for a pane that has a text selection to extend.
+    def supports_drag? : Bool
+      false
+    end
+
+    # Pointer moved with the button held. Extends the selection to (mx, my).
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+    end
+
+    # Two presses in the same cell inside the double-click window. Selects the word under the
+    # pointer; return false to fall back to the ordinary single-click behaviour.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      false
+    end
+
+    # Whether a bracketed paste should be collected and delivered to this tab as ONE bulk
+    # insert (`paste_text`) instead of as N keystrokes. False by default: a tab opts in only
+    # for a focused MULTI-LINE text editor, since that is the only surface where the two
+    # paths produce the same buffer — and the only one where the per-keystroke cost matters.
+    # See `Runner#begin_bulk_paste?`.
+    def accepts_bulk_paste? : Bool
+      false
+    end
+
+    # Insert a whole pasted string at the caret as one undoable edit. Line breaks arrive as
+    # `\n` (the CRLF filter already collapsed the wire's pairs). Returns false when the tab
+    # could not take it after all, so the Runner can report the paste as dropped rather than
+    # silently swallowing it.
+    def paste_text(text : String) : Bool
+      false
+    end
+
     # A scroll-wheel notch over the body (already ±3-scaled).
     def handle_wheel(step : Int32) : Bool
       false

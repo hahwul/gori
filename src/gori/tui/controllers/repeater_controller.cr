@@ -255,7 +255,11 @@ module Gori::Tui
         "#{nav} · #{read_common} · #{diff} diff · ⇧←/→ h-scroll · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
       when :request
         if v.request_insert?
-          "type to edit · ^G goto · ^F find · #{hex} hex · esc read · ↹ pane"
+          # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
+          # → `request_tab_insert`) — a header value is allowed to hold one, and this is the
+          # only editor that can type it. The pane ring is Tab's job only in READ mode, and
+          # the footer said otherwise for both.
+          "type to edit · ⇧arrows select · ^Z undo · ^G goto · ^F find · #{hex} hex · esc read · ↹ text"
         else
           "i/↵ edit · #{read_common} · ^G goto · ^F find · #{hex} hex · ↹ pane · esc tabs"
         end
@@ -334,6 +338,12 @@ module Gori::Tui
         else
           @host.request_focus(:subtabs)
         end
+      elsif editing_motion?(ev) && (view = current_view) && view.focus == :request
+        # ⌥/⌃ + ←/→/Home/End/⌫ are EDITOR motion (word step, buffer jump, word delete), not
+        # command chords, so they reach the request pane instead of deferring. Safe against
+        # the keymap by construction: a bindable chord is a LETTER/DIGIT/PUNCT (`Verb::Chord`
+        # parses nothing else), and none of these are.
+        return edit_repeater_request(ev, view)
       elsif ev.ctrl? || ev.alt?
         # Any OTHER modified chord (^R send, ^X hex, ^S SNI, ^L auto-CL, …) defers to the
         # central keymap so it's rebindable. Editors never insert ctrl/alt chars, so the
@@ -736,6 +746,58 @@ module Gori::Tui
 
     def commit : Nil
       save_current_repeater
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    def supports_drag? : Bool
+      !current_view.nil?
+    end
+
+    # Motion with the button held. No focus/save side effects: the press that started the
+    # drag already did those, and re-running them per motion event would save the tab dozens
+    # of times while the pointer moves.
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless v = current_view
+      body = body_rect_below_filter(rect)
+      case v.focus
+      when :request  then v.request_drag_to_cursor(body, mx, my)
+      when :response then v.resp_drag_to_cursor(body, mx, my)
+      end
+    end
+
+    # Double-click selects the word under the pointer. Answers false on whitespace / a chip /
+    # a pane with no word there, leaving the first click's caret placement standing.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless v = current_view
+      body = body_rect_below_filter(rect)
+      return false if v.chrome_hit(body, mx, my) # a border badge is a button, not text
+      case v.focus
+      when :request  then v.request_select_word(body, mx, my)
+      when :response then v.resp_select_word(body, mx, my)
+      else                false
+      end
+    end
+
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The plain-text request editor in INSERT mode only. Hex edit frames its own bytes, the
+    # TARGET/SNI rows are single-line fields with their own insert path, and READ mode has no
+    # caret to paste at — all three keep the per-keystroke delivery they already handle.
+    #
+    # The CHAIN pane is excluded for the same reason. A clipboard carrying a `§`/`¦` is
+    # excluded too, but that decision belongs to `RepeaterView#edit_paste` (it can see the
+    # text): `edit_insert` asks `Fuzz::Template.insert_breaks_marker?` about every typed
+    # delimiter and escapes it so a paste cannot silently nest one marker inside another, and
+    # a bulk splice cannot ask that per character. Refusing there sends the paste back to the
+    # keystroke path with its guards intact — see `Runner#flush_bulk_paste`.
+    def accepts_bulk_paste? : Bool
+      v = current_view
+      return false unless v
+      v.request_text_editing? && !v.chain_pane_active?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless accepts_bulk_paste?
+      current_view.try(&.edit_paste(text)) || false
     end
 
     # --- editor $ENV autocomplete + tab-as-text (request pane in insert mode) ---
@@ -1760,17 +1822,25 @@ module Gori::Tui
       # plain ↑ leaves the editor for the target field above, and doing that mid-extend would
       # abandon a selection the operator is still building. Extending stays inside the editor,
       # where `move` clamps at line 0.
+      # Everything below the pane-specific keys is `TextArea#handle_motion_key` — the ONE
+      # definition of what the arrows, Page keys, ⇧selection and ⌥word chords do in a text
+      # box, shared with Notes, Issues, Intercept, Decoder, JWT and the Fuzzer template. Only
+      # the keys this pane answers differently are spelled out here:
+      #
+      #   * ⌫ / Del, because a marker delimiter raises a confirm first;
+      #   * ↑ at the top of the buffer, because it leaves for the TARGET field above — but
+      #     NOT while ⇧ is held: popping out mid-extend abandons a selection being built;
+      #   * ⌥⌫, which is a motion in the shared set but has to pass the same marker guard,
+      #     and is tested before plain ⌫ (a terminal may report it as Backspace+Alt).
       case
-      when ev.ctrl_z?     then view.edit_undo
-      when key.enter?     then view.edit_newline
-      when key.backspace? then edit_repeater_delete(view, backward: true)
-      when key.up?        then (view.at_top? && !ev.shift?) ? view.focus_first : view.edit_move(-1, 0, selecting: ev.shift?)
-      when key.down?      then view.edit_move(1, 0, selecting: ev.shift?)
-      when key.left?      then view.edit_move(0, -1, selecting: ev.shift?)
-      when key.right?     then view.edit_move(0, 1, selecting: ev.shift?)
-      when key.home?      then view.edit_home
-      when key.end?       then view.edit_end
-      when key.delete?    then edit_repeater_delete(view, backward: false)
+      when ev.ctrl_z?       then view.edit_undo
+      when key.enter?       then view.edit_newline
+      when word_delete?(ev) then edit_repeater_word_delete(view)
+      when key.backspace?   then edit_repeater_delete(view, backward: true)
+      when key.delete?      then edit_repeater_delete(view, backward: false)
+      when key.up? && (view.at_top? && !ev.shift?)
+        view.focus_first
+      when view.edit_motion_key(ev) then nil
       else
         if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
@@ -1796,6 +1866,50 @@ module Gori::Tui
         return if guard_marker_delete(view, span)
       end
       backward ? view.edit_backspace : view.edit_delete
+    end
+
+    # ⌥⌫ / ⌃⌫ — delete the word behind the caret. The marker guard is asked exactly as a
+    # single ⌫ asks it: a word delete can swallow a `§` delimiter just as easily, and it is
+    # the same question ("this removes a marker — strip the whole thing?") over a wider span.
+    private def edit_repeater_word_delete(view : RepeaterView) : Nil
+      unless view.pane_selection?
+        return if guard_marker_delete(view, view.marker_break_on_backspace)
+      end
+      view.edit_delete_word
+    end
+
+    # A modified ←/→ — one WORD, not one character. Either modifier: ⌥ is the macOS spelling,
+    # ⌃ the one every other platform uses, and which of the two a terminal actually forwards
+    # is not something the operator should have to know.
+    private def word_step?(ev : Termisu::Event::Key) : Bool
+      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
+    end
+
+    # A modified ⌫ — delete a WORD. The `char` half is not defensive padding: a terminal sends
+    # ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch maps the payload byte through
+    # `Key.from_char`, which has no name for DEL — so the event arrives as `Key::Unknown` +
+    # Alt carrying DEL rather than as `Key::Backspace`. Reading the char is what makes
+    # the chord work on a real terminal; the `backspace?` half covers a terminal (or a
+    # keyboard-protocol mode) that does report it as the named key.
+    private def word_delete?(ev : Termisu::Event::Key) : Bool
+      return false unless ev.ctrl? || ev.alt?
+      return true if ev.key.backspace?
+      c = ev.char
+      !!c && (c == '\u{7F}' || c == '\b')
+    end
+
+    # Every modified key the EDITOR owns rather than the keymap — see the `handle_body_key`
+    # branch. Shared with the Fuzzer's controller in spirit, not in code: the two dispatchers
+    # have different shapes, and one predicate each is cheaper than a mixin nobody else wants.
+    private def editing_motion?(ev : Termisu::Event::Key) : Bool
+      return false unless ev.ctrl? || ev.alt?
+      key = ev.key
+      key.left? || key.right? || key.home? || key.end? || word_delete?(ev)
+    end
+
+    # A modified Home/End — the BUFFER's start/end rather than the line's.
+    private def buffer_jump?(ev : Termisu::Event::Key) : Bool
+      ev.ctrl? || ev.alt?
     end
 
     # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker
@@ -1857,15 +1971,18 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter? then view.enter_request_insert!
-      when c == 'i'   then view.enter_request_insert!
-      when key.up?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
-      when key.down?  then view.request_read_move(1, 0, selecting: selecting)
-      when key.left?  then view.request_read_move(0, -1, selecting: selecting)
-      when key.right? then view.request_read_move(0, 1, selecting: selecting)
-      when key.home?  then view.edit_home
-      when key.end?   then view.edit_end
-      when c == 'x'   then view.pane_select_line
+      when key.enter?     then view.enter_request_insert!
+      when c == 'i'       then view.enter_request_insert!
+      when word_step?(ev) then view.request_read_move(0, key.left? ? -1 : 1, selecting: selecting)
+      when key.up?        then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
+      when key.down?      then view.request_read_move(1, 0, selecting: selecting)
+      when key.left?      then view.request_read_move(0, -1, selecting: selecting)
+      when key.right?     then view.request_read_move(0, 1, selecting: selecting)
+      when key.page_up?   then view.request_read_page(-1, selecting: selecting)
+      when key.page_down? then view.request_read_page(1, selecting: selecting)
+      when key.home?      then view.edit_home(selecting)
+      when key.end?       then view.edit_end(selecting)
+      when c == 'x'       then view.pane_select_line
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # y copy, Global c/i/s, …
       end

@@ -113,22 +113,15 @@ module Gori::Tui
         # something the operator can turn off; the badge on the REQUEST (held) border shows
         # which way it is set.
         @intercept.toggle_content_length_sync
+      elsif @intercept.edit_word_delete_key?(ev)
+        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+        @intercept.edit_motion_key(ev)
       elsif key.backspace?
         @intercept.edit_backspace
-      elsif key.up?
-        @intercept.edit_move(-1, 0)
-      elsif key.down?
-        @intercept.edit_move(1, 0)
-      elsif key.left?
-        @intercept.edit_move(0, -1)
-      elsif key.right?
-        @intercept.edit_move(0, 1)
-      elsif key.home?
-        @intercept.edit_home
-      elsif key.end?
-        @intercept.edit_end
       elsif key.delete?
         @intercept.edit_delete
+      elsif @intercept.edit_motion_key(ev)
+        # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word — TextArea#handle_motion_key.
       elsif c && !ev.ctrl? && !ev.alt?
         @intercept.edit_insert(c)
       end
@@ -262,6 +255,19 @@ module Gori::Tui
       return false unless @intercept.querying?
       @intercept.set_preedit(text)
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    def supports_drag? : Bool
+      @intercept.editing?
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      @intercept.editor_drag_to_cursor(rect, mx, my)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      @intercept.editor_select_word(rect, mx, my)
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

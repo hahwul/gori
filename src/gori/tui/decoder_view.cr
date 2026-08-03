@@ -245,12 +245,43 @@ module Gori::Tui
         @out_read.cx.clamp(0, lines[@out_read.cy].size))
     end
 
-    def output_click_to_cursor(rect : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult) : Nil
+    # `selecting` is the DRAG half — the anchor stays where the press landed.
+    def output_click_to_cursor(rect : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult,
+                               selecting : Bool = false) : Nil
       lines = output_lines(result)
       return if rect.empty? || lines.empty?
       gw = {Gutter.width(lines.size), rect.w}.min
-      @out_read.click_to_cursor(rect, mx, my, @out_scroll, lines, gw, @out_xscroll)
+      @out_read.click_to_cursor(rect, mx, my, @out_scroll, lines, gw, @out_xscroll, selecting)
       ensure_out_visible(rect.h)
+    end
+
+    # Double-click: select the word under the pointer.
+    def output_select_word(rect : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult) : Bool
+      lines = output_lines(result)
+      return false if rect.empty? || lines.empty?
+      gw = {Gutter.width(lines.size), rect.w}.min
+      hit = @out_read.select_word_at(rect, mx, my, @out_scroll, lines, gw, @out_xscroll)
+      ensure_out_visible(rect.h)
+      hit
+    end
+
+    # READ-mode Home/End/Page over the OUTPUT pane, with ⇧ extending the selection. The page
+    # step comes from the pane's LAST RENDERED height, so it matches what is on screen.
+    def output_motion_key(ev : Termisu::Event::Key, result : Decoder::ChainResult) : Bool
+      lines = output_lines(result)
+      return false if lines.empty?
+      key = ev.key
+      shift = ev.shift?
+      page = {@out_last_h - 2, 1}.max
+      case
+      when key.home?      then @out_read.move_to(@out_read.cy, 0, selecting: shift)
+      when key.end?       then @out_read.move_to(@out_read.cy, lines[@out_read.cy.clamp(0, lines.size - 1)].size, selecting: shift)
+      when key.page_up?   then @out_read.move(-page, 0, lines, selecting: shift)
+      when key.page_down? then @out_read.move(page, 0, lines, selecting: shift)
+      else                     return false
+      end
+      ensure_out_visible(@out_last_h) if @out_last_h > 0
+      true
     end
 
     def output_copy_text(result : Decoder::ChainResult) : String

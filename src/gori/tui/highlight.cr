@@ -175,7 +175,9 @@ module Gori::Tui
     # first blank line and stays strictly 1:1 with `text.split('\n')`, so it can
     # back an editable buffer where each styled line must line up with the
     # cursor's line.
-    def self.from_lines(all : Array(String), request : Bool) : Array(Line)
+    # `literal` names the `$KEY`s the CALLER will not substitute (an evidence buffer's
+    # captured tokens); they paint as unknown, because on this buffer that is what they are.
+    def self.from_lines(all : Array(String), request : Bool, literal : Set(String)? = nil) : Array(Line)
       sep = all.index("")
       kind = body_kind(content_type_in(all))
       lines = all.map_with_index do |raw, i|
@@ -191,7 +193,7 @@ module Gori::Tui
           body_line(raw, kind)
         end
       end
-      request ? lines.map { |line| with_env_tokens(line) } : lines
+      request ? lines.map { |line| with_env_tokens(line, literal) } : lines
     end
 
     # Per-character colours for a filter/QL query, so its boolean structure reads apart
@@ -227,13 +229,14 @@ module Gori::Tui
       with_env_tokens([Span.new(raw, base_fg, attr)])
     end
 
-    def self.with_env_tokens(line : Line) : Line
+    def self.with_env_tokens(line : Line, literal : Set(String)? = nil) : Line
       out = [] of Span
-      line.each { |span| env_spans_in(span.text, span.fg, span.attr).each { |s| out << s } }
+      line.each { |span| env_spans_in(span.text, span.fg, span.attr, literal).each { |s| out << s } }
       out
     end
 
-    private def self.env_spans_in(text : String, base_fg : Color, attr : Attribute = Attribute::None) : Line
+    private def self.env_spans_in(text : String, base_fg : Color, attr : Attribute = Attribute::None,
+                                  literal : Set(String)? = nil) : Line
       # Fast path: no prefix configured, or the line has no prefix char at all (most
       # URLs/values carry no $TOKEN). token_regions returns [] in that case anyway, but
       # its default `vars = Env.effective_vars` rebuilds a merged Hash on EVERY call
@@ -244,8 +247,12 @@ module Gori::Tui
       return [Span.new(text, base_fg, attr)] if regions.empty?
       spans = [] of Span
       pos = 0
+      plen = prefix.size
       regions.each do |(a, b, known)|
         spans << Span.new(text[pos...a], base_fg, attr) if a > pos
+        # A name the caller ships literally is not resolvable ON THIS BUFFER, whatever the
+        # global var table says — paint what the wire will carry, not what it could have.
+        known = false if known && literal && literal.includes?(text[(a + plen)...b])
         spans << Span.new(text[a...b], known ? Theme.env_known : Theme.env_unknown, known ? attr : (attr | Attribute::Italic))
         pos = b
       end

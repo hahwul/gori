@@ -83,6 +83,10 @@ module Gori::Tui
       @target_field = :url # which field the TARGET pane edits: :url | :sni
       @http2 = false
       @evidence = false
+      # The `$NAME`s the SEEDED template arrived with — see `operator_env_vars`, and
+      # `RepeaterView#seed_draft_baselines` for the model. Empty on a draft, where every `$`
+      # is the operator's by definition.
+      @evidence_env_names = Set(String).new
       @editor = TextArea.new
       @editor.gutter = true
       @editor.follow_x = true     # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
@@ -243,6 +247,7 @@ module Gori::Tui
       @target_field = :url
       @editor.set_text(String.new(Fuzz::Template.escape_literal_markers(built.bytes)))
       @evidence = true
+      seed_env_baseline
       @focus = :template
       @loaded = true
       @dirty = false
@@ -259,6 +264,7 @@ module Gori::Tui
       # A Repeater/reconstruction seed and ^N are DRAFTS: the operator authored (or gori
       # rebuilt) those bytes, so a `$KEY` in them is a variable reference they meant.
       @evidence = false
+      seed_env_baseline
       @focus = :template
       @loaded = true
       @dirty = false
@@ -286,6 +292,7 @@ module Gori::Tui
       # path and nothing else sets it — the same one-line test the CLI's `fuzz_source`
       # makes on `--flow`.
       @evidence = !rec.flow_id.nil?
+      seed_env_baseline
       @name = rec.name
       apply_config_json(rec.config)
       @last_synced_config = rec.config
@@ -311,6 +318,7 @@ module Gori::Tui
       # is a real edit on a message — while an exact one is never falsely unequal.
       @editor.set_text(rec.template) if @editor.wire_text != rec.template
       @evidence = !rec.flow_id.nil? # see restore
+      seed_env_baseline
       @name = rec.name
       apply_config_json(rec.config)
       @last_synced_config = rec.config
@@ -339,6 +347,7 @@ module Gori::Tui
       # will read it back as a draft after a restart — that is the store's linkage, not
       # a claim about these bytes, and erring toward "draft" for a copy is the safe way.)
       @evidence = src.evidence?
+      seed_env_baseline
       apply_config_json(src.config_json)
       @name = SubtabClone.copy_name(src.name)
       @dirty = true
@@ -1096,7 +1105,7 @@ module Gori::Tui
       options = Fuzz::PlanOptions.new(evidence_template, evidence: @evidence,
         target: @target, http2: @http2,
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
-        verify: verify, sni: sni_override, overrides: overrides)
+        verify: verify, sni: sni_override, overrides: overrides, env_vars: operator_env_vars)
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
       @pending_template = plan.template # committed to @run_template in begin_run (see result_request)
       # Freeze the CL knobs + retention policy the same way: the reconstruction in
@@ -1148,6 +1157,28 @@ module Gori::Tui
     # here rather than replayed. gori's proxy refuses to capture such a head at all (P7), so
     # it is not reachable through the proxy; `gori run repeater --verbatim` is the byte-exact
     # route for one.
+    # Record the `$NAME`s the just-seeded template arrived with, and tell the editor which of
+    # them it must not paint (or tooltip) as resolvable. Called from every loader AFTER both
+    # the text and `@evidence` are set — the baseline has to describe the bytes gori was
+    # handed, and the editor's answer has to match the provenance those bytes carry.
+    private def seed_env_baseline : Nil
+      @evidence_env_names = Env.token_names(@editor.wire_text).to_set
+      @editor.env_literal_names = @evidence ? @evidence_env_names : Set(String).new
+    end
+
+    # The `$KEY` table THIS template may substitute from, or nil to substitute nothing.
+    #
+    # nil only for a draft, where `Plan.build` expands the full table itself. For an evidence
+    # session it is every registered name EXCEPT the ones the seed arrived with: a `$TOKEN`
+    # the operator adds to a captured template is a variable reference they typed, while the
+    # capture's own `$filter`/`$top`/`$where` are origin bytes and stay literal for the life
+    # of the session. Same rule, same wording as `RepeaterView#operator_env_vars` — the two
+    # tabs hold the same bytes for the same flow and must not answer this differently.
+    private def operator_env_vars : Hash(String, String)?
+      return nil unless @evidence
+      Env.vars_without(@evidence_env_names)
+    end
+
     private def evidence_template : String
       text = @editor.wire_text
       return text unless @evidence
@@ -1547,22 +1578,101 @@ module Gori::Tui
       @dirty = true
     end
 
-    def template_backspace : Nil
-      @editor.backspace
+    # Splice a whole bracketed paste in as ONE edit instead of N keystrokes — the Repeater's
+    # `edit_paste`, same refusal and same reason (a pasted `§`/`¦` needs the per-character
+    # marker guard, so it goes back to the keystroke path; the Runner replays it).
+    def template_paste(text : String) : Bool
+      return false unless template_text_editing?
+      return false if text.includes?(Fuzz::Template::MARKER) || text.includes?(Fuzz::Template::CHAIN_SEP)
+      @editor.insert_text(text)
       @dirty = true
+      true
     end
 
-    def template_move(dr : Int32, dc : Int32) : Nil
-      @editor.move(dr, dc)
+    def template_backspace : Nil
+      before = @editor.edits
+      @editor.backspace
+      @dirty = true if @editor.edits != before # no-op at buffer start — don't dirty the tab
     end
 
-    # Home/End: caret to line start/end — pure navigation, no dirty.
-    def template_home : Nil
-      @editor.home
+    # ⌃Z in the TEMPLATE editor. The Repeater's request pane has had this since it grew an
+    # editor and the Fuzzer's — the same `TextArea`, holding the same captured request — did
+    # not, so an accidental keystroke over a seeded template was permanent. Gated on a real
+    # edit for the reason `RepeaterView#edit_undo` spells out: an empty undo stack must not
+    # mark a tab dirty (which here would re-persist a template nobody changed).
+    def template_undo : Nil
+      before = @editor.edits
+      @editor.undo
+      @dirty = true if @editor.edits != before
     end
 
-    def template_end : Nil
-      @editor.end_of_line
+    # `selecting` is the Shift half of ⇧←/→/↑/↓ — it extends the INSERT-mode selection from
+    # its anchor instead of collapsing it. `TextArea#move` implements both ends (the band, the
+    # ⌫/Del that removes a selection, replace-on-type); this pane only had the plain motion,
+    # so ⇧arrows moved the caret and quietly selected nothing while the READ pane's footer
+    # advertised "⇧arrows select" one keypress away.
+    def template_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      @editor.move(dr, dc, selecting: selecting)
+    end
+
+    # Whether the TEMPLATE editor holds a non-empty INSERT-mode selection (the READ pane's
+    # selection is `@template_read`'s — see `pane_selection?`).
+    def template_insert_selection? : Bool
+      @editor.selection?
+    end
+
+    # Home/End: caret to line start/end — pure navigation, no dirty. `selecting` is the Shift
+    # half (extends instead of collapsing), like the arrows.
+    def template_home(selecting : Bool = false) : Nil
+      @editor.home(selecting)
+    end
+
+    def template_end(selecting : Bool = false) : Nil
+      @editor.end_of_line(selecting)
+    end
+
+    # ⌃/⌥ + Home/End — the buffer's start/end rather than the line's.
+    def template_buffer_start(selecting : Bool = false) : Nil
+      @editor.to_buffer_start(selecting)
+    end
+
+    def template_buffer_end(selecting : Bool = false) : Nil
+      @editor.to_buffer_end(selecting)
+    end
+
+    # PageUp / PageDown, sized from the editor's own last rendered height.
+    def template_page(dir : Int32, selecting : Bool = false) : Nil
+      @editor.page(dir * @editor.page_rows, selecting: selecting)
+    end
+
+    # THE shared editor keymap over the template — see `TextArea#handle_motion_key`. Dirties
+    # only on a real buffer change (⌥⌫ is the one mutation in the set).
+    def template_motion_key(ev : Termisu::Event::Key) : Bool
+      before = @editor.edits
+      return false unless @editor.handle_motion_key(ev)
+      @dirty = true if @editor.edits != before
+      true
+    end
+
+    # THE shared editor keymap over the template — see `TextArea#handle_motion_key`. Dirties
+    # only on a real buffer change (⌥⌫ is the one mutation in the set).
+    def template_motion_key(ev : Termisu::Event::Key) : Bool
+      before = @editor.edits
+      return false unless @editor.handle_motion_key(ev)
+      @dirty = true if @editor.edits != before
+      true
+    end
+
+    # ⌃/⌥ + ←/→ — one word instead of one character. Pure motion.
+    def template_word_move(dir : Int32, selecting : Bool = false) : Nil
+      dir < 0 ? @editor.word_left(selecting) : @editor.word_right(selecting)
+    end
+
+    # ⌥⌫ — delete back to the previous word boundary as one undo step.
+    def template_delete_word : Nil
+      before = @editor.edits
+      @editor.delete_word_left
+      @dirty = true if @editor.edits != before
     end
 
     # Forward-delete the char under the caret — a content edit.
@@ -1574,6 +1684,11 @@ module Gori::Tui
     def template_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return if template_insert? || chain_pane_active?
       @template_read.move(@editor, dr, dc, selecting: selecting)
+    end
+
+    # PageUp / PageDown with the pane in READ mode — a screenful of the editor that draws it.
+    def template_read_page(dir : Int32, selecting : Bool = false) : Nil
+      template_read_move(dir * @editor.page_rows, 0, selecting: selecting)
     end
 
     def template_scroll_view(step : Int32) : Nil
@@ -2716,7 +2831,40 @@ module Gori::Tui
       half = {(rest.w - 1) // 2, 1}.max
       left = Rect.new(rest.x, rest.y, half, top_h)
       commit_chain_pane if @chain_focused # a click outside the ^Y modal commits + dismisses it
-      @editor.click_to_cursor(left.inset(1, 1), mx, my)
+      inner = left.inset(1, 1)
+      template_insert? ? @editor.click_to_cursor(inner, mx, my) : @template_read.click(@editor, inner, mx, my)
+    end
+
+    # Mouse DRAG in the TEMPLATE pane — extend the selection to the pointer. Each mode is
+    # extended through the selection model that owns it (INS: the editor's own anchor; READ:
+    # `@template_read`), the same split the Repeater's request pane draws.
+    def template_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      inner = template_editor_rect(rect) || return
+      if template_insert?
+        @editor.click_to_cursor(inner, mx, my, selecting: true)
+      else
+        @template_read.click(@editor, inner, mx, my, selecting: true)
+      end
+    end
+
+    # Mouse DOUBLE-CLICK in the TEMPLATE pane — select the word under the pointer.
+    def template_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      inner = template_editor_rect(rect) || return false
+      template_insert? ? @editor.select_word_at(inner, mx, my) : @template_read.select_word(@editor, inner, mx, my)
+    end
+
+    # The template editor's content rect inside `rect` — the derivation
+    # `template_click_to_cursor` walks, factored out so click, drag and double-click cannot
+    # land on three slightly different rects.
+    private def template_editor_rect(rect : Rect) : Rect?
+      return nil unless @loaded
+      target_h = {rect.h, target_card_h}.min
+      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return nil if rest.h <= 0
+      top_h = {rest.h * 45 // 100, 5}.max
+      top_h = rest.h if rest.h < 6
+      half = {(rest.w - 1) // 2, 1}.max
+      Rect.new(rest.x, rest.y, half, top_h).inset(1, 1)
     end
 
     # Mouse: the sorted-view result index under a click in the RESULTS pane, or nil
