@@ -174,6 +174,15 @@ module Gori::Tui
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
+    # Rows the card can actually draw. The last two interior lines are spoken for — the hint
+    # on box.bottom-2, the border on box.bottom-1 — so the list ends at box.bottom-3. ONE
+    # definition, read by both render and handle_click, which is the shape every sibling
+    # form uses (NotificationsOverlay, HotkeysOverlay, TabsOverlay …): a hit-test that does
+    # not invert its own render selects rows the cursor was never over.
+    private def list_capacity(box : Rect) : Int32
+      {(box.bottom - 2) - (box.y + 1), 1}.max
+    end
+
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
@@ -182,7 +191,7 @@ module Gori::Tui
       end
       Frame.card(screen, box, "ADVANCED", bg: Theme.bg, border: Theme.border_focus)
       top = box.y + 1
-      visible = {(box.bottom - 2) - top, 1}.max # last interior row reserved for the hint
+      visible = list_capacity(box)
       @scroll = @sel if @sel < @scroll
       @scroll = @sel - visible + 1 if @sel >= @scroll + visible
       @scroll = @scroll.clamp(0, {ROWS.size - visible, 0}.max)
@@ -217,12 +226,19 @@ module Gori::Tui
 
     # Focus the row under a click; a click outside the card APPLIES (esc semantics), the
     # same dismissal the shell used to run through apply_close_fuzz_advanced.
+    #
+    # The `i < list_capacity` bound is the half that was missing: without it a click on the
+    # hint row or the bottom border — both INSIDE the box, neither a drawn row — resolved to
+    # @scroll + visible (+1) and focused a field the cursor was nowhere near, after which
+    # render scrolled the list to follow. Reachable only when the card clips (production's
+    # `layout.body` draws 11 of the 17 rows), which is why the 80x24 specs never saw it.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
       return :commit if box.nil? || !box.contains?(mx, my)
       i = my - (box.y + 1)
+      return :stay if i < 0 || i >= list_capacity(box)
       ri = @scroll + i
-      @sel = ri if 0 <= i && 0 <= ri < ROWS.size
+      @sel = ri if ri < ROWS.size
       :stay
     end
   end

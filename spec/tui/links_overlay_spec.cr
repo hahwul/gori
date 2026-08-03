@@ -177,6 +177,54 @@ describe Gori::Tui::LinksOverlay do
     end
   end
 
+  it "a row click while ADDING must not open that row — the armed add is the target" do
+    # `handle_key` dispatches to handle_add_key while adding; `handle_click` was left to
+    # PickerOverlay, which knows nothing about the mode. So from Issues → space → l → a,
+    # with the card reading "add: f flow · r repeater · z fuzz · m miner", clicking any row
+    # returned :commit: the shell recorded it as `opening`, on_close found pending_add nil
+    # and ran navigate_link_ref, teleporting the operator into an unrelated flow while the
+    # armed add was silently dropped. `row_at` already subtracts the adding footer row, so
+    # the geometry was mode-aware while the outcome was not.
+    with_store do |store|
+      id = store.insert_issue("t", Gori::Store::Severity::High, "app.test", nil)
+      3.times { |i| store.add_link(Gori::Store::LinkOwnerKind::Issue, id, Gori::Store::LinkRefKind::Repeater, (i + 1).to_i64) }
+      lo = links_for(store, id)
+      h = OverlayHarness.new(lo)
+      opened = [] of Int64
+      h.on_commit do
+        opened << lo.selected_link.not_nil!.link.ref_id
+        true
+      end
+
+      h.press(Termisu::Input::Key::LowerA, 'a')
+      lo.adding?.should be_true
+      h.click_in_box(3, 4).should eq(:open) # list starts at box.y + 3; this is the 2nd row
+      opened.should be_empty                # NOT a navigation
+      h.commits.should eq(0)
+      lo.adding?.should be_true # …and the arm survives the stray click
+      lo.pending_add.should be_nil
+
+      # The source key still lands exactly where it always did.
+      h.press(Termisu::Input::Key::LowerR, 'r').should eq(:closed)
+      lo.pending_add.should eq('r')
+    end
+  end
+
+  it "a click OUTSIDE while adding still drops the whole card, unlike esc" do
+    # DELIBERATE ASYMMETRY, pinned so it reads as a decision rather than an oversight: esc
+    # pops one level (back to browse) and a click-away drops the card. That is the house
+    # idiom for a modal with a sub-mode — HotkeysOverlay#handle_click cancels outright while
+    # capturing, where handle_capture_key's esc only leaves capture. Making LinksOverlay the
+    # one modal whose outside click does not dismiss would cost more consistency than the
+    # two depths do, and nothing is lost: pending_add stays nil, so on_close runs inert.
+    lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 1_i64)
+    h = OverlayHarness.new(lo)
+    h.press(Termisu::Input::Key::LowerA, 'a')
+    h.click(0, 0).should eq(:closed)
+    h.commits.should eq(0)
+    lo.pending_add.should be_nil
+  end
+
   it "can be rebuilt on a chosen row, for the add path that never left the list" do
     # Runner#open_link_add_picker uses this when a source has nothing to link ("no fuzz
     # sessions to link"): the user never left the card, so it is rebuilt on the row they

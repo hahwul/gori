@@ -109,6 +109,64 @@ describe Gori::Tui::DiscoverHeadersOverlay do
     h.rendered?("headers editor").should be_true
   end
 
+  it "does not hold the operator behind a refusal the card has no room to draw" do
+    # THE TRAP. `try_commit` is this sub-editor's ONLY exit, and it refuses while any line
+    # is unusable — but the refusal is drawn on the render branch that needs a card, and
+    # `overlay_box` bails below w 34 / h 8. `Layout.usable?` admits 40x8, so the whole
+    # 8–17-row band is live-but-unrenderable: esc → :stay, click-away → :stay, and the one
+    # line that DOES draw advertises "esc to close", a key that never fires. Only ^C/^D
+    # (quitting gori outright) or a resize got out. A refusal nobody can read is a lock,
+    # not a guard, so it may only hold while the card that explains it is on screen.
+    band = Gori::Tui::Rect.new(0, 0, 40, 10)
+    ov = DiscoverHeadersOverlay.new([] of {String, String})
+    ov.overlay_box(band).should be_nil
+    h = OverlayHarness.new(ov, area: band)
+    h.type("Authorization Bearer abc") # no colon → parse_lines refuses the line (sep.empty?)
+    ov.rejected_lines.size.should eq(1)
+    # The shell draws a frame before it reads a key, and THAT frame is what tells the
+    # overlay the card did not fit — `handle_key` never sees `area`. Asserted rather than
+    # commented, so the render below cannot be mistaken for spec noise and deleted: before
+    # a frame has said otherwise the guard still holds, which is the safe default.
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:stay)
+    h.render
+    h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    h.commits.should eq(1)
+
+    # Click-away is handed `area` directly, so it needs no remembered frame at all.
+    clicked = DiscoverHeadersOverlay.new([] of {String, String})
+    ch = OverlayHarness.new(clicked, area: band)
+    ch.type("Authorization Bearer abc")
+    clicked.handle_click(band, 5, 3).should eq(:commit) # the raw vocabulary, not :stay
+    ch.click(5, 3).should eq(:closed)
+    ch.commits.should eq(1)
+
+    # …and the line that replaces the card names a key that actually fires, plus the count
+    # of lines the save will drop — the whole overlay exists so that drop is never silent.
+    # Both facts LEAD the sentence: 40 columns clip it right after "widen the wi…".
+    msg = OverlayHarness.new(DiscoverHeadersOverlay.new([] of {String, String}), area: band)
+    msg.type("Authorization Bearer abc")
+    msg.rendered?("esc saves & closes · 1 line dropped").should be_true
+  end
+
+  it "still refuses an exit while the card IS on screen to explain it" do
+    # The other half of the same invariant: where the refusal renders, it keeps its teeth.
+    # An authenticated sweep that runs unauthenticated and reports "found nothing" is the
+    # worst way this can fail, so a visible refusal must still block the save.
+    ov = DiscoverHeadersOverlay.new([] of {String, String})
+    h = OverlayHarness.new(ov)
+    h.type("Authorization Bearer abc")
+    h.render
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
+    h.commits.should eq(0)
+    h.rendered?("will not be sent").should be_true
+
+    # …and fixing the line resolves it, which is the claim the file's header comment makes.
+    24.times { h.press(Termisu::Input::Key::Backspace) } # "Authorization Bearer abc".size
+    h.type("Authorization: Bearer abc")
+    h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    ov.headers.should eq([{"Authorization", "Bearer abc"}])
+  end
+
   it "hit-tests against the rect the shell passes, not the whole screen" do
     # Production hands `layout.body` — 6 rows shorter and offset — so the card is 14 rows
     # here against 16 under OverlayHarness::DEFAULT_AREA, and its top edge sits lower. A

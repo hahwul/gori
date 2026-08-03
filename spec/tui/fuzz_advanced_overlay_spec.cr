@@ -141,6 +141,39 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     ov.snapshot.update_cl.should be_true
   end
 
+  it "never focuses a row it did not draw — the hint row and the bottom border are not rows" do
+    # `render` reserves the last two interior lines (the hint on box.bottom-2, the border on
+    # box.bottom-1), but handle_click computed `i = my - (box.y + 1)` with no upper bound
+    # beyond `ri < ROWS.size`, so a click on either selected @scroll + visible (+1) — an
+    # index that was never under the cursor — and the next render scrolled to follow it.
+    # Focus-only (no commit-on-row-click here), so nothing fired; still the wrong row.
+    #
+    # Production hands `layout.body`, which is what makes this reachable: the card clips to
+    # 14 rows there, so only 11 of the 17 ROWS are drawn. Under the harness's 80x24 default
+    # every row fits and `visible == ROWS.size` hides the whole bug.
+    body = Gori::Tui::Rect.new(2, 4, 76, 18)
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    h = OverlayHarness.new(ov, area: body)
+    box = h.box.not_nil!
+    box.y.should eq(6) # rows run box.y+1 (7) .. 17; hint on 18, border on 19
+
+    h.click_in_box(2, 12).should eq(:open) # the hint row
+    h.click_in_box(2, 13).should eq(:open) # the bottom border
+    h.type("9")
+    ov.snapshot.conc.should eq("209")  # focus never left row 0…
+    ov.snapshot.m_words.should eq("")  # …and did not land on an undrawn row (hint → +11)
+    ov.snapshot.m_regex.should eq("")  # …nor on the one past it (border → +12)
+    ov.snapshot.m_status.should eq("") # …nor anywhere else in the match block
+
+    # Positive control: the LAST drawn row is still a live click target.
+    edge = FuzzAdvancedOverlay.new(blank_snapshot)
+    eh = OverlayHarness.new(edge, area: body)
+    eh.click_in_box(2, 11).should eq(:open)
+    eh.type("7")
+    edge.snapshot.m_size.should eq("7")
+    edge.snapshot.conc.should eq("20")
+  end
+
   it "offsets a click by the scroll position once the list has scrolled" do
     # Production hands an overlay `layout.body` — 6 rows shorter and offset from the screen —
     # so this 18-row card renders clipped to 14 and the row list must scroll to reach the

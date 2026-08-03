@@ -149,10 +149,28 @@ module Gori::Tui
         cycle_profile(1)
       elsif key.backspace?
         unbind_selected
-      elsif c = ev.char
+      elsif c = bare_char(ev)
         handle_char(c)
       end
       :stay
+    end
+
+    # The printable char of an UNMODIFIED key — nil for a Ctrl/Alt chord. Load-bearing, not
+    # defensive noise: `Event::Key#char` falls back to `key.to_char`, so the plain
+    # `c = ev.char` this replaces read every Ctrl+letter as the bare letter. ^X ran
+    # unbind_selected, setting the highlighted verb to an explicit unbind that ↵ then
+    # persisted — and ^X is stop/hex in six scopes, pure muscle memory. Same leak on ^R
+    # (reset), ^E (arm capture) and ^J/^K (move). Every sibling dispatcher already guards
+    # this — Runner#handle_palette_key, #handle_space_menu_key,
+    # TabController#handle_subtab_filter_key — with the inline `&& !ev.ctrl? && !ev.alt?`;
+    # it is a method here only to keep handle_browse_key under the complexity bar.
+    #
+    # It cannot reach CAPTURE mode, where a Ctrl chord is legitimate input being recorded:
+    # handle_key forks on capturing? first, so this runs only in :browse. ^P is claimed by
+    # an earlier branch, and Shift is untouched, so ⇧R (reset all) still lands.
+    private def bare_char(ev : Termisu::Event::Key) : Char?
+      return nil if ev.ctrl? || ev.alt?
+      ev.char
     end
 
     private def handle_char(c : Char) : Nil

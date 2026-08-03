@@ -121,6 +121,27 @@ module Gori::Tui
       :stay
     end
 
+    # Adding is a MODE, and the mouse has to respect it. `handle_key` forks to
+    # handle_add_key while armed, but the click path was left to PickerOverlay, which knows
+    # nothing about the mode: a row click answered :commit, the shell recorded that row as
+    # `opening`, and on_close — pending_add still nil — ran navigate_link_ref, teleporting
+    # the operator into an unrelated flow/repeater/fuzz while the armed add was silently
+    # abandoned. While adding, the only meaningful input is f/r/z/m, so a click inside the
+    # card is swallowed exactly as handle_add_key swallows a stray key.
+    #
+    # A click OUTSIDE still drops the whole card, deliberately NOT the one-level pop esc
+    # does here. Click-away is the shell-wide dismiss gesture (Overlay#handle_click), and
+    # HotkeysOverlay — the other modal with a sub-mode — makes the same split: its click
+    # handler cancels outright while capturing, where handle_capture_key's esc only leaves
+    # capture. Making this the one modal whose outside click does not dismiss would cost
+    # more consistency than the two depths do, and nothing leaks: pending_add stays nil, so
+    # on_close runs inert.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return super unless adding?
+      box = overlay_box(area)
+      (box.nil? || !box.contains?(mx, my)) ? :cancel : :stay
+    end
+
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 88}.min
       h = area.h - 2
@@ -130,6 +151,10 @@ module Gori::Tui
       Rect.new(x, y, w, h)
     end
 
+    # Still mode-aware even though `handle_click` no longer reaches it while adding: this is
+    # the geometry statement (render reserves the same footer row), and the mode gate above
+    # is a policy that could move. Dropping the subtraction would silently mis-map the last
+    # row the moment either one changes.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top - (@adding ? 1 : 0)

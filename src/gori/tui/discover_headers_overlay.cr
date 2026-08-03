@@ -22,14 +22,28 @@ module Gori::Tui
   # said `custom headers: 1 set`, 284 probes went out with ZERO carrying `Authorization`,
   # and the run reported `1 endpoint`. An authenticated sweep that runs unauthenticated
   # and reports "found nothing" over the whole authenticated surface is the worst way this
-  # can fail, so esc now REFUSES to close while a line is unusable and names it. There is
-  # no trap: deleting or fixing the line always resolves it, and a blank line is not a
-  # header anyone asked for (parse_lines skips those without reporting them).
+  # can fail, so esc now REFUSES to close while a line is unusable and names it. Deleting
+  # or fixing the line always resolves it, and a blank line is not a header anyone asked
+  # for (parse_lines skips those without reporting them).
+  #
+  # The refusal holds ONLY while the card that explains it is on screen. It used to hold
+  # unconditionally, and that was a trap with no keyboard exit: `overlay_box` bails below
+  # w 34 / h 8 while `Layout.usable?` admits 40x8, so the whole 8–17-row band is
+  # live-but-unrenderable — the refusal was drawn on a branch that never ran, esc and
+  # click-away both answered :stay, and the one line that DID draw advertised a dead key.
+  # Only ^C/^D (quitting gori) or a resize got out. A refusal nobody can read is a lock,
+  # not a guard: where the editor cannot show the line, esc saves and the degraded line
+  # says how many lines that drops, so the save is still never silent.
   class DiscoverHeadersOverlay < Overlay
     def initialize(headers : Array({String, String}))
       text = headers.map { |name, value| "#{name}: #{value}" }.join("\n")
       @editor = TextArea.new(text)
       @refused = nil.as(String?)
+      # Did the LAST frame have room for the card? `handle_key` gets no `area`, so this is
+      # the only channel by which the key path can know whether a refusal is readable.
+      # Defaults true so the guard keeps its teeth before the first frame — the shell draws
+      # before it reads a key, so production always answers from a real frame.
+      @card_drawn = true
     end
 
     # Current headers parsed from the editor buffer.
@@ -73,9 +87,18 @@ module Gori::Tui
 
     # There is nothing to cancel INTO — the user is still inside the Discover popup — so a
     # click outside the card saves exactly like esc, which is what the shell did before.
+    #
+    # This path is handed `area`, so it settles the "is the card on screen" question from
+    # live geometry and tells the key path too — then defers to the one policy in
+    # try_commit rather than restating it. No card means no refusal to read, so the click
+    # saves; `on_commit` here re-opens the Discover popup and reports false
+    # (Runner#open_discover_headers), and going through try_commit is what keeps @refused
+    # consistent with the geometry on the off chance the card survives that.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      (box.nil? || !box.contains?(mx, my)) ? try_commit : :stay
+      @card_drawn = !box.nil?
+      return try_commit unless box
+      box.contains?(mx, my) ? :stay : try_commit
     end
 
     # esc = save & close (:commit); every other key edits the buffer (:stay).
@@ -92,9 +115,14 @@ module Gori::Tui
 
     # Close only when every non-blank line is a header gori will actually put on the wire;
     # otherwise stay open with the refusal on the hint row.
+    #
+    # …unless the last frame had no room for the card. The refusal lives on the hint row of
+    # a card that was never drawn, and the editor the user would fix the line in is not on
+    # screen either, so holding here is an inescapable modal rather than a correction the
+    # operator can act on. Save instead; the degraded render line names the dropped lines.
     private def try_commit : Symbol
       @refused = refusal
-      @refused ? :stay : :commit
+      (@refused && @card_drawn) ? :stay : :commit
     end
 
     # ⏎ inserts a new header line; the rest are the usual TextArea editing/caret keys.
@@ -130,8 +158,9 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
+      @card_drawn = !box.nil? # what try_commit reads on the next key (see there)
       unless box
-        screen.text(area.x + 1, area.y, "headers editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        render_degraded(screen, area) unless area.empty?
         return
       end
       # bg: Theme.bg (not the card default panel) so the embedded editor, which paints
@@ -150,6 +179,23 @@ module Gori::Tui
         screen.text(box.x + 2, hintline, refused, Theme.red, Theme.bg, width: box.w - 4)
       else
         screen.text(box.x + 2, hintline, "one per line · Host/Connection ignored · esc saves & closes", Theme.muted, Theme.bg, width: box.w - 4)
+      end
+    end
+
+    # The one line the card collapses to when there is no room for it. esc LEADS the
+    # sentence on purpose: at 40 columns this clips, and the fact the operator needs is
+    # which key gets them out. When lines will be dropped it says how many, so the save is
+    # reported even here — a silent drop of an Authorization header is the failure this
+    # whole overlay exists to prevent.
+    private def render_degraded(screen : Screen, area : Rect) : Nil
+      n = rejected_lines.size
+      if n.zero?
+        screen.text(area.x + 1, area.y, "headers editor needs a larger window · esc saves & closes", Theme.muted, Theme.bg)
+      else
+        plural = n == 1 ? "" : "s"
+        screen.text(area.x + 1, area.y,
+          "esc saves & closes · #{n} line#{plural} dropped · widen the window to fix",
+          Theme.red, Theme.bg)
       end
     end
   end
