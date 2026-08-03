@@ -408,14 +408,27 @@ module Gori::Tui
     end
 
     # --- rendering ---
-    def render(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return render_detail(screen, rect, focused) if @focus == :detail
+    # The {summary, results} rects for `rect`, TILING it exactly. ONE derivation, shared by
+    # `render` and `pane_at`, so the hit-test cannot drift from the drawn geometry.
+    #
+    # Both heights were floored at 1 with no ceiling at the container, so on a 1-row body
+    # the results card was placed at `rect.y + 1` — a whole row outside the rect this view
+    # was handed, which nothing repaints. The floor is now capped at what the container
+    # granted and a zero-row pane is declined instead of being given a row it doesn't have.
+    private def pane_rects(rect : Rect) : {Rect, Rect}
       sum_h = {rect.h // 3, 8}.min
       sum_h = rect.h - 3 if sum_h > rect.h - 3
-      sum_rect = Rect.new(rect.x, rect.y, rect.w, {sum_h, 1}.max)
-      res_rect = Rect.new(rect.x, rect.y + sum_rect.h, rect.w, {rect.h - sum_rect.h, 1}.max)
+      sum_h = { {sum_h, 1}.max, rect.h }.min
+      {Rect.new(rect.x, rect.y, rect.w, sum_h),
+       Rect.new(rect.x, rect.y + sum_h, rect.w, {rect.h - sum_h, 0}.max)}
+    end
+
+    def render(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.empty?
+      return render_detail(screen, rect, focused) if @focus == :detail
+      sum_rect, res_rect = pane_rects(rect)
       render_summary(screen, sum_rect, focused && @focus == :summary)
-      render_results(screen, res_rect, focused && @focus == :results)
+      render_results(screen, res_rect, focused && @focus == :results) unless res_rect.empty?
     end
 
     private def render_summary(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -427,7 +440,9 @@ module Gori::Tui
       Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + "MINER".size + 4, chord, name, @running)
       x = rect.x + 2
       y = rect.y + 1
-      screen.text(x, y, summary(rect.w - 4), Theme.text_bright, Theme.bg, Attribute::Bold)
+      # Guarded like every line below it: on a 1-2 row card `rect.y + 1` is the bottom
+      # border row or past the card entirely, and this line alone was unconditional.
+      screen.text(x, y, summary(rect.w - 4), Theme.text_bright, Theme.bg, Attribute::Bold) if y < rect.bottom - 1
       y += 1
       screen.text(x, y, target_origin, Theme.muted, Theme.bg, width: rect.w - 4) if y < rect.bottom - 1
       y += 1
@@ -463,6 +478,9 @@ module Gori::Tui
     private def render_results(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "FINDINGS (#{@results.size})", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
+      # A card under 3 rows has no interior — `inset` floors the height at 0 but keeps
+      # `inner.y` one row down, so an unguarded placeholder lands OUTSIDE the pane.
+      return if inner.h <= 0 || inner.w <= 0
       if @results.empty?
         # Distinguish never-run from a completed run that found nothing, using the
         # same signal the status line does (names_total > 0 ⇒ a run happened).
@@ -527,6 +545,7 @@ module Gori::Tui
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "FINDING", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(2, 1)
+      return if inner.h <= 0 || inner.w <= 0 # see render_results: no interior to draw into
       f = selected_finding
       unless f
         screen.text(inner.x, inner.y, "no finding selected", Theme.muted, Theme.bg)
@@ -555,12 +574,15 @@ module Gori::Tui
     end
 
     # --- click hit-test ---
+    # Derived from `pane_rects`, the same tiling `render` draws into, so the two cannot
+    # drift; it also used to skip the ceiling `render` skipped, agreeing with a results
+    # card placed outside the container.
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return :detail if @focus == :detail && rect.contains?(mx, my)
-      sum_h = {rect.h // 3, 8}.min
-      sum_h = rect.h - 3 if sum_h > rect.h - 3
-      return :summary if my < rect.y + sum_h
-      rect.contains?(mx, my) ? :results : nil
+      return nil unless rect.contains?(mx, my)
+      return :detail if @focus == :detail
+      sum_rect, res_rect = pane_rects(rect)
+      return :results if res_rect.contains?(mx, my)
+      sum_rect.contains?(mx, my) ? :summary : nil
     end
   end
 end

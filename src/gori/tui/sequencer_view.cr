@@ -440,29 +440,48 @@ module Gori::Tui
     end
 
     # --- rendering ---
-    def render(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return render_detail(screen, rect, focused) if @focus == :detail
+    # The {config, samples, analysis} rects for `rect`, TILING it exactly: the three cover
+    # `rect` and nothing outside it. ONE derivation, shared by `render` and `pane_at`, so a
+    # click can never be resolved against a geometry the renderer did not use.
+    #
+    # Each height is FLOORED for legibility (a config card under 3 rows says nothing worth
+    # framing), and a floor with no matching CEILING is exactly what let this view paint
+    # outside its container: on a 2-row body `cfg_h` floored back up to 3 and the lower pane
+    # to 2, so five rows were drawn into two — over the status row and into the bottom
+    # margin, which no later pass repaints. Every floor is therefore capped at what the
+    # container actually granted, and a pane that comes out zero rows tall is declined by
+    # `render` rather than handed a minimum the container cannot pay for.
+    #
+    # `sw` needs no cap: it is gated behind `lower.w >= 84`, far above its floor of 30.
+    private def pane_rects(rect : Rect) : {Rect, Rect, Rect}
       cfg_h = {rect.h // 3, 7}.min
       cfg_h = rect.h - 4 if cfg_h > rect.h - 4
-      cfg_h = {cfg_h, 3}.max
+      cfg_h = { {cfg_h, 3}.max, rect.h }.min
       cfg_rect = Rect.new(rect.x, rect.y, rect.w, cfg_h)
-      lower = Rect.new(rect.x, rect.y + cfg_h, rect.w, {rect.h - cfg_h, 2}.max)
-      render_config(screen, cfg_rect, focused && @focus == :config)
-
-      @side_by_side = lower.w >= 84
-      if @side_by_side
+      lower = Rect.new(rect.x, rect.y + cfg_h, rect.w, {rect.h - cfg_h, 0}.max)
+      if lower.w >= 84
         sw = {lower.w * 42 // 100, 30}.max
-        s_rect = Rect.new(lower.x, lower.y, sw, lower.h)
-        a_rect = Rect.new(lower.x + sw, lower.y, lower.w - sw, lower.h)
-        render_samples(screen, s_rect, focused && @focus == :samples)
-        render_analysis(screen, a_rect, focused && @focus == :analysis)
+        {cfg_rect,
+         Rect.new(lower.x, lower.y, sw, lower.h),
+         Rect.new(lower.x + sw, lower.y, lower.w - sw, lower.h)}
       else
-        sh = {lower.h * 45 // 100, 4}.max
-        s_rect = Rect.new(lower.x, lower.y, lower.w, sh)
-        a_rect = Rect.new(lower.x, lower.y + sh, lower.w, {lower.h - sh, 3}.max)
-        render_samples(screen, s_rect, focused && @focus == :samples)
-        render_analysis(screen, a_rect, focused && @focus == :analysis)
+        sh = { {lower.h * 45 // 100, 4}.max, lower.h }.min
+        {cfg_rect,
+         Rect.new(lower.x, lower.y, lower.w, sh),
+         Rect.new(lower.x, lower.y + sh, lower.w, lower.h - sh)}
       end
+    end
+
+    def render(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.empty?
+      return render_detail(screen, rect, focused) if @focus == :detail
+      cfg_rect, s_rect, a_rect = pane_rects(rect)
+      # The layout flag the CONTROLLER reads for ↑/↓ pane traversal, so it is written here
+      # and never by `pane_at` — a hit-test must not move focus state as a side effect.
+      @side_by_side = rect.w >= 84
+      render_config(screen, cfg_rect, focused && @focus == :config)
+      render_samples(screen, s_rect, focused && @focus == :samples) unless s_rect.empty?
+      render_analysis(screen, a_rect, focused && @focus == :analysis) unless a_rect.empty?
     end
 
     private def render_config(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -471,7 +490,9 @@ module Gori::Tui
       Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + "SEQUENCER".size + 4, chord, name, @running)
       x = rect.x + 2
       y = rect.y + 1
-      screen.text(x, y, summary(rect.w - 4), Theme.text_bright, Theme.bg, Attribute::Bold)
+      # Guarded like every line below it: on a 1-2 row card `rect.y + 1` is the bottom
+      # border row or past the card entirely, and this line alone was unconditional.
+      screen.text(x, y, summary(rect.w - 4), Theme.text_bright, Theme.bg, Attribute::Bold) if y < rect.bottom - 1
       y += 1
       if y < rect.bottom - 1
         mode = @config.mode.live_replay? ? "live replay · #{target_origin}" : "manual paste"
@@ -508,6 +529,9 @@ module Gori::Tui
     private def render_samples(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "SAMPLES (#{@samples.size})", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
+      # A card under 3 rows has no interior — `inset` floors the height at 0 but keeps
+      # `inner.y` one row down, so an unguarded placeholder lands OUTSIDE the pane.
+      return if inner.h <= 0 || inner.w <= 0
       if @samples.empty?
         msg = if @running
                 "collecting…"
@@ -671,6 +695,7 @@ module Gori::Tui
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "TOKEN", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(2, 1)
+      return if inner.h <= 0 || inner.w <= 0 # see render_samples: no interior to draw into
       s = selected_sample
       unless s
         screen.text(inner.x, inner.y, "no sample selected", Theme.muted, Theme.bg)
@@ -697,21 +722,16 @@ module Gori::Tui
     end
 
     # --- click hit-test ---
+    # Derived from `pane_rects`, the same tiling `render` draws into — the two used to
+    # re-compute the geometry independently, so the hit-test faithfully agreed with the
+    # INFLATED rects rather than with the pane the operator could see.
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return :detail if @focus == :detail && rect.contains?(mx, my)
-      cfg_h = {rect.h // 3, 7}.min
-      cfg_h = rect.h - 4 if cfg_h > rect.h - 4
-      cfg_h = {cfg_h, 3}.max
-      return :config if my < rect.y + cfg_h
       return nil unless rect.contains?(mx, my)
-      lower = Rect.new(rect.x, rect.y + cfg_h, rect.w, rect.h - cfg_h)
-      if lower.w >= 84
-        sw = {lower.w * 42 // 100, 30}.max
-        mx < lower.x + sw ? :samples : :analysis
-      else
-        sh = {lower.h * 45 // 100, 4}.max
-        my < lower.y + sh ? :samples : :analysis
-      end
+      return :detail if @focus == :detail
+      cfg_rect, s_rect, a_rect = pane_rects(rect)
+      return :samples if s_rect.contains?(mx, my)
+      return :analysis if a_rect.contains?(mx, my)
+      cfg_rect.contains?(mx, my) ? :config : nil
     end
   end
 end

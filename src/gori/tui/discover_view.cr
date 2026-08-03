@@ -236,10 +236,22 @@ module Gori::Tui
 
     # --- rendering ---
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
-      runs_rect = Rect.new(rect.x, rect.y, rect.w, runs_pane_height(rect))
-      res_rect = Rect.new(rect.x, rect.y + runs_rect.h, rect.w, {rect.h - runs_rect.h, 1}.max)
+      return if rect.empty?
+      runs_rect, res_rect = pane_rects(rect)
       render_runs(screen, runs_rect, focused && @focus == :runs)
-      render_findings(screen, res_rect, focused && @focus == :findings)
+      render_findings(screen, res_rect, focused && @focus == :findings) unless res_rect.empty?
+    end
+
+    # The {runs, findings} rects for `rect`, TILING it exactly: the two cover `rect` and
+    # nothing outside it. Shared with `pane_at`/`click` via `runs_pane_height`.
+    #
+    # The findings height was floored at 1 with no ceiling, so on a 1-row body the card was
+    # placed at `rect.y + 1` — a whole row outside the rect this view was handed, which
+    # nothing repaints. A pane the container cannot pay for is now declined outright.
+    private def pane_rects(rect : Rect) : {Rect, Rect}
+      runs_h = runs_pane_height(rect)
+      {Rect.new(rect.x, rect.y, rect.w, runs_h),
+       Rect.new(rect.x, rect.y + runs_h, rect.w, {rect.h - runs_h, 0}.max)}
     end
 
     # The RUNS card grows a row per run so a second and third crawl are VISIBLE rather than
@@ -250,7 +262,9 @@ module Gori::Tui
       # borders(2) + column header(1) + one row per run + divider(1) + detail(2)
       h = {@runs.size + 6, {rect.h - 6, 7}.max}.min
       h = rect.h - 3 if h > rect.h - 3
-      {h, 1}.max
+      # Floored at 1 so the card never vanishes, then capped at what the container actually
+      # granted — a floor with no ceiling is what puts a pane outside its own rect.
+      { {h, 1}.max, rect.h }.min
     end
 
     # {rows_y, rows_cap, detail_y} for the RUNS card's interior — the row band and the
@@ -402,6 +416,10 @@ module Gori::Tui
       n = r ? r.findings.size : 0
       Frame.card(screen, rect, "FINDINGS (#{n})", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
+      # A card under 3 rows has no interior — `inset` floors the height at 0 but keeps
+      # `inner.y` one row down, so an unguarded placeholder lands OUTSIDE the pane.
+      # (`render_runs` has carried this guard all along; this pane did not.)
+      return if inner.h <= 0 || inner.w <= 0
       return unless r
       if r.findings.empty?
         # "no endpoints found" over a crawl that stopped on its budget is the claim this
@@ -468,7 +486,9 @@ module Gori::Tui
     # --- click hit-test ---
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless rect.contains?(mx, my)
-      my < rect.y + runs_pane_height(rect) ? :runs : :findings
+      runs_rect, res_rect = pane_rects(rect) # the tiling render draws into, not a re-derivation
+      return :runs if runs_rect.contains?(mx, my)
+      res_rect.contains?(mx, my) ? :findings : nil
     end
 
     # Focus the clicked pane, and on a RUNS row select that run — clicking a row is the
@@ -477,7 +497,7 @@ module Gori::Tui
       return unless pane = pane_at(rect, mx, my)
       focus_pane(pane)
       return unless pane == :runs
-      card = Rect.new(rect.x, rect.y, rect.w, runs_pane_height(rect))
+      card, _ = pane_rects(rect) # the same rect render framed, so a row click can't miss it
       rows_y, rows_cap, _ = run_bands(card)
       row = my - rows_y
       return unless 0 <= row < rows_cap

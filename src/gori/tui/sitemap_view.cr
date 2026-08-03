@@ -893,9 +893,23 @@ module Gori::Tui
       avail = tag_right - tag_col_left(rect) + 1
       return if avail < 5 # not worth a stub
       text = " # #{tag}"
-      text = "#{text[0, avail - 1]}…" if text.size > avail
-      x = tag_right - text.size + 1
-      screen.text(x, y, text, Theme.accent, bg) if x >= label_end + 1
+      # Budget, right-alignment origin AND clip all in display COLUMNS. A memo of Hangul
+      # syllables is one char but TWO columns each, so `text.size > avail` read false at
+      # twice the budget (nothing truncated) and `tag_right - text.size + 1` started the run
+      # columns too far right — through the mandated gap, over the METHODS chips and the
+      # card's right border. `column_for` is the exact inverse of `draw_width` at cluster
+      # boundaries, so the cut can never split a wide glyph. `comparer_view.cr#slot_short`
+      # solves the same problem the same way.
+      w = Screen.draw_width(text)
+      if w > avail
+        text = "#{text[0, Screen.column_for(text, avail - 1)]}…"
+        w = Screen.draw_width(text)
+      end
+      x = tag_right - w + 1
+      # `width:` as well as a column-derived origin: a hard ceiling at `tag_right`, so any
+      # future drift between the measure and the draw clips instead of overwriting the
+      # column to its right.
+      screen.text(x, y, text, Theme.accent, bg, width: {tag_right - x + 1, 0}.max) if x >= label_end + 1
     end
 
     # Screen-x where the right cluster (methods/aside) begins; nil when the row has none.

@@ -52,6 +52,9 @@ module Gori::Tui
     DIST_MIN_TOTAL  = 60 # narrowest bottom width that still earns a sidebar
     DIST_MIN_VW     = 22 # min / max sidebar width
     DIST_MAX_VW     = 34
+    # Results-table payload column, in display COLUMNS (see `payload_cell`). The header
+    # string in `render_results` reserves exactly this much between `#` and `status`.
+    PAYLOAD_COL_W = 22
 
     getter focus : Symbol # :target | :template | :config | :results | :detail
     getter target : String
@@ -2182,33 +2185,58 @@ module Gori::Tui
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if selected
       screen.cell(inner.x, y, selected ? '▎' : (r.matched? ? '✓' : ' '), r.matched? ? Theme.accent : Theme.muted, bg)
       payload = r.payloads.join(", ")
-      line = "#{r.index.to_s.ljust(4)} #{payload.size > 22 ? "#{payload[0, 21]}…" : payload.ljust(22)}"
-      x = screen.text(inner.x + 2, y, line, selected ? Theme.text_bright : Theme.text, bg)
+      line = "#{r.index.to_s.ljust(4)} #{payload_cell(payload)}"
+      # `width:` on BOTH of these: they used to draw unclamped, so a payload cell that
+      # measured short (see payload_cell) pushed the status cell past `inner.right`, over
+      # the card's right border and across the gap into the DIST sidebar.
+      x = screen.text(inner.x + 2, y, line, selected ? Theme.text_bright : Theme.text, bg,
+        width: {inner.right - (inner.x + 2), 0}.max)
       sc = r.status.try(&.to_s) || (r.error ? "ERR" : "—")
-      x = screen.text(x + 1, y, sc.ljust(7), status_color(r), bg)
+      x = screen.text(x + 1, y, sc.ljust(7), status_color(r), bg, width: {inner.right - (x + 1), 0}.max)
       # A send that never got a response has no length/words/duration worth showing — the
       # reason does. `cli/output.cr:fuzz_row_text` already appends `r.error` per row; the
       # TUI used to drop it entirely, so a scope/sandbox refusal read as a bare "ERR".
+      #
+      # Every remaining-width clamp below is floored at 0, NOT 1: once `x` reaches
+      # `inner.right` there are no columns left to spend, and a floor of 1 kept painting one
+      # cell per call PAST the card's border — which is how an over-wide payload leaked into
+      # the DIST sidebar. `Screen#text` returns immediately on a width of 0, so 0 is a clean
+      # no-draw and the gRPC `x2` chain no-ops instead of cascading.
       if err = r.error
-        screen.text(x, y, err, Theme.red, bg, width: {inner.right - x, 1}.max)
+        screen.text(x, y, err, Theme.red, bg, width: {inner.right - x, 0}.max)
       elsif r.chain_error
         # The send succeeded, but this row's `¦chain` did not run — its payload went out raw.
         # Flag it in the list (the detail request pane names the reason) so a swallowed chain
         # isn't invisible among clean rows. #567/H3 Finding 1.
-        screen.text(x, y, "⚠ ¦chain not applied", Theme.yellow, bg, width: {inner.right - x, 1}.max)
+        screen.text(x, y, "⚠ ¦chain not applied", Theme.yellow, bg, width: {inner.right - x, 0}.max)
       else
         line = "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}"
         # For a gRPC target the h2 `:status` to the left is 200 by definition; THIS is the
         # call's real outcome. Only rendered when the response carried it, so a non-gRPC row
         # is unchanged — same fields `cli/output.cr:fuzz_row_text` already renders.
         if gs = r.grpc_status
-          x2 = screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+          x2 = screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 0}.max)
           gline = " grpc #{gs} #{Proxy::H2::Grpc.status_name(gs)}#{r.grpc_message ? " · #{r.grpc_message}" : ""}"
-          screen.text(x2, y, gline, gs == 0 ? Theme.green : Theme.red, bg, width: {inner.right - x2, 1}.max)
+          screen.text(x2, y, gline, gs == 0 ? Theme.green : Theme.red, bg, width: {inner.right - x2, 0}.max)
         else
-          screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 1}.max)
+          screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 0}.max)
         end
       end
+    end
+
+    # The payload cell, exactly PAYLOAD_COL_W display COLUMNS wide — never `String#size`.
+    # A Hangul payload is one char but TWO columns per char, so `payload.size > 22` read
+    # false at 44 columns and `ljust(22)` then padded a cell already at double its budget:
+    # the row ran 22 columns long, pushing every cell to its right over the RESULTS border
+    # and into the DIST sidebar. `column_for` is the exact inverse of `draw_width` at
+    # cluster boundaries, so the cut lands on a boundary and no wide glyph is split; the
+    # pad is the COLUMN shortfall, which is why the ellipsis branch pads too (a cut that
+    # stops short of a wide glyph leaves one column to make up).
+    private def payload_cell(payload : String) : String
+      w = Screen.draw_width(payload)
+      return "#{payload}#{" " * (PAYLOAD_COL_W - w)}" if w <= PAYLOAD_COL_W
+      cut = payload[0, Screen.column_for(payload, PAYLOAD_COL_W - 1)]
+      "#{cut}…#{" " * (PAYLOAD_COL_W - 1 - Screen.draw_width(cut))}"
     end
 
     private def status_color(r : Fuzz::Result) : Color
