@@ -22,24 +22,34 @@ dependencies:
   termisu:
     github: hahwul/termisu
     branch: main
-    # Temporarily on the fork again. Synced to upstream v0.6.0; the fork carries
-    # two patches on top, both queued for upstream. Go back to `omarluq/termisu`
+    # Temporarily on the fork again. Synced to upstream v0.6.1; the fork carries
+    # three patches on top, all three open upstream. Go back to `omarluq/termisu`
     # once they land in a release.
     #
-    # 1. input/parser: a Ctrl/Alt/Meta CSI-u report must not arm the one-shot dup
-    #    guard, or the chord eats the next plain key (^P then "pet" produced "et").
-    # 2. termios: `set_mode` passed its `LibC::Termios` (a STRUCT — by value) to
-    #    apply_input_flags/apply_output_flags, so every c_iflag/c_oflag write was
-    #    discarded and raw mode kept ICRNL/IXON/OPOST set. With ICRNL on, the line
-    #    discipline turns CR into NL before gori sees it, so a pasted CRLF is two
-    #    newlines and `Tui::PasteNewline` cannot collapse it (and ^S froze the TUI).
-    #    Ships with `Event::Key#char` reporting which byte produced an Enter.
+    # 1. input/parser: `Event::Key#char` reports WHICH byte produced an Enter
+    #    ('\r' for 0x0D, '\n' for 0x0A). Without it a pasted CRLF is two
+    #    indistinguishable Enters and `Tui::PasteNewline` cannot collapse the pair.
+    #    omarluq/termisu#166.
+    # 2. terminal: `with_mode` turns mouse reporting OFF before it yields the tty,
+    #    so an $EDITOR shell-out does not take SGR reports (`\e[<0;40;12M`) into
+    #    its own stdin. This is what `Runner.suspend_without_mouse` works around
+    #    caller-side; that helper goes away when we are back on upstream with this
+    #    merged. omarluq/termisu#167.
+    # 3. input/terminal: bracketed paste (DEC private mode 2004), surfaced as
+    #    `Key::PasteStart` / `Key::PasteEnd`. `char` alone is not enough — some
+    #    terminals map the LF of a pasted CRLF to a SECOND CR, and CR CR is by
+    #    definition what pressing Enter twice looks like, so only boundary markers
+    #    close it. `Tui::PasteNewline` keeps handling the pair for terminals that
+    #    ignore 2004. omarluq/termisu#168.
     #
-    # Earlier fork carries, both upstream now and included via the synced main:
+    # Earlier fork carries, upstream now and included via the synced main:
     # input/preedit (double-English + jamo-separation: protocol_active dup-guard +
-    # Preedit for key=0 text events) as of v0.5.0, and the Crystal 1.21
+    # Preedit for key=0 text events) as of v0.5.0; the Crystal 1.21
     # `crystal/thread_local_value` removal (thread-keyed Hash in
-    # Termisu::FFI::ErrorState) as of v0.6.0.
+    # Termisu::FFI::ErrorState) as of v0.6.0; the Ctrl/Alt CSI-u dup-guard fix (^P
+    # then "pet" produced "et") and the termios by-value bug (raw mode never
+    # cleared ICRNL/IXON/OPOST, so CR arrived as NL and ^S froze the TUI), both as
+    # of v0.6.1.
 
   db:
     github: crystal-lang/crystal-db

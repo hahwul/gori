@@ -5439,17 +5439,21 @@ module Gori::Tui
 
     # Suspend the terminal for a shell-out with MOUSE TRACKING OFF, restoring it after.
     #
-    # WORKAROUND for the vendored termisu fork. `Terminal#suspend` runs through
-    # `Terminal#with_mode` (lib/termisu/src/termisu/terminal.cr:505-541), which correctly
-    # exits the alternate screen for the child but never calls `disable_mouse` — measured on
-    # a real `$EDITOR` session via tmux pane flags: `alternate_on=0` while `mouse_any_flag=1`
-    # and `mouse_sgr_flag=1`. The child inherits this tty (`Process::Redirect::Inherit`), so
-    # a click or a scroll wheel arrives in ITS stdin as an SGR report — `\e[<0;40;12M`. For
-    # `ExternalEditor::WIRE_KINDS` (:request, :intercept) whatever the editor saves becomes
-    # the operator's WIRE BYTES, so a stray mouse report is a byte-exactness violation: gori
-    # would send bytes nobody typed. DELETE THIS once the fork's `with_mode` disables the
-    # mouse itself; the two calls are idempotent (`enable_mouse`/`disable_mouse` both guard
-    # on `@mouse_enabled`), so it is harmless in the meantime.
+    # WORKAROUND for termisu's `Terminal#with_mode`, which `Terminal#suspend` runs through.
+    # It exited the alternate screen for the child but never turned mouse reporting off —
+    # measured on a real `$EDITOR` session via tmux pane flags: `alternate_on=0` while
+    # `mouse_any_flag=1` and `mouse_sgr_flag=1`. The child inherits this tty
+    # (`Process::Redirect::Inherit`), so a click or a scroll wheel arrives in ITS stdin as an
+    # SGR report — `\e[<0;40;12M`. For `ExternalEditor::WIRE_KINDS` (:request, :intercept)
+    # whatever the editor saves becomes the operator's WIRE BYTES, so a stray mouse report is
+    # a byte-exactness violation: gori would send bytes nobody typed.
+    #
+    # The fork we pin now fixes this itself (`suspend_mouse` in `with_mode`), so this helper
+    # is currently redundant — but omarluq/termisu#167 is still open, and shard.yml plans to
+    # go back to upstream once the fork's patches land. Deleting it before that merges would
+    # regress silently the moment we switch. DELETE THIS (and its spec) then, not now. It
+    # costs nothing meanwhile: both calls guard on `@mouse_enabled`, so the doubled disable
+    # is one no-op.
     #
     # `ensure`, so an editor that RAISES — a bad `$EDITOR`, a `Process.run` failure — still
     # leaves the tty as it found it rather than mute to the mouse for the rest of the session.

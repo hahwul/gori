@@ -14,5 +14,5 @@ shards:
 
   termisu:
     git: https://github.com/hahwul/termisu.git
-    version: 0.6.0+git.commit.bb83fd6f261838f03ecff1c27832e25aec5d0668
+    version: 0.6.1+git.commit.7d3771251cbe47e621b24d68d65454449fc26e18
 
