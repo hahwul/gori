@@ -243,7 +243,13 @@ module Gori::Tui
       # placement also writes to it, so the two are resolved by recency rather than by a
       # fixed precedence — see #pet_notice for why a fixed one is wrong.
       @toast_at = nil.as(Time::Instant?)
-      @outcome = :running           # :running | :quit | :back
+      @outcome = :running # :running | :quit | :back
+      # {configured port, port we actually got} when the bind fell back at startup because the
+      # configured one was taken; nil when the proxy got what it asked for. A RUNTIME note the
+      # shell keeps to itself — it is never written to settings.json or to the project DB (that
+      # was the bug; see `Runner.port_fallback`) — read only by `apply_settings`, to tell "the
+      # operator moved the pin" apart from "the environment moved us".
+      @bind_fallback = nil.as(Tuple(Int32, Int32)?)
       @quit_armed = false           # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @resized = false              # set on a Resize event → next frame full-repaints
       @body_h = 24                  # last body rect height (captured at render); drives PageUp/Down step size
@@ -380,19 +386,25 @@ module Gori::Tui
             # View-only: another live instance owns this project's capture.
             "view-only — #{err}. History/Repeater work; press c to take over if it closed"
           end
-      elsif requested > 0 && @session.proxy.port != requested
-        # Reflect the fallback port in whichever layer is effective so the settings UIs show the
-        # live port AND apply_settings won't see a phantom mismatch. Only the runtime layer — a
-        # transient environmental fallback must not be persisted into the project's pinned config.
-        if Settings.project_bind_port
-          Settings.project_bind_port = @session.proxy.port
-        else
-          Settings.bind_port = @session.proxy.port
-        end
+      elsif fallback = Runner.port_fallback(requested, @session.proxy.port)
+        # RECORDED, never written back into a config layer. This used to assign the fallback
+        # into `Settings.project_bind_port` (a project override, which `apply_project_network`
+        # then persists into the project DB) or into `Settings.bind_port` (the GLOBAL
+        # class_property, which any later `Settings.save` — the pet toggle, tabs, hotkeys, env
+        # — flushes into settings.json for the NEXT project to inherit). Either way a
+        # transient environmental accident overwrote the port the operator deliberately
+        # pinned. See `Runner.port_fallback` for the full invariant.
+        @bind_fallback = fallback
         @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
       end
-      # Reload AFTER the fallback sync above so the Project SETTINGS pane's snapshot (and its
-      # dirty baseline) reflect the ACTUAL bound port, not the requested one that was taken.
+      # The Project SETTINGS pane is an editor for the PINNED config, so its snapshot (and the
+      # dirty baseline `load_settings_values` takes from it) must read the pin, not the port
+      # the environment forced us onto. `commit_project_network` writes all six fields
+      # whenever ANY one of them is dirty, so a baseline seeded from the fallback turns an edit
+      # to the idle timeout into a silent re-pin of the wrong port. The LIVE port is shown by
+      # every surface that answers "where am I listening": the top-bar chip
+      # (#listen_chip_label), the status line, the listeners overlay, the traffic empty states
+      # — all of which read `@session.proxy.port` directly — plus the toast above.
       project_controller.reload
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
@@ -989,13 +1001,14 @@ module Gori::Tui
       # Deliberate quit: ^D (or ^C) must be pressed twice in a row — the first press
       # arms and hints in the status bar; any other key disarms. (Q no longer quits;
       # `q` still returns to the project picker.) Handled before everything else so
-      # it works uniformly across tabs, editors and overlays.
-      # In hotkey CAPTURE mode ^C/^D are capturable chords (reserved.cr rejects them inline
-      # with "Ctrl-C/D quits gori" while staying in capture) — exclude them from the global
-      # quit-arm so a stray ^D during a rebind can't silently arm an app quit. The modal
-      # answers for itself (Overlay#raw_key_capture?); no other overlay claims these.
-      raw_capture = active_overlay.try(&.raw_key_capture?) || false
-      if (ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)) && !raw_capture
+      # it works uniformly across tabs and editors — but NOT over a modal; see
+      # `Runner.quit_chord_claimed?` for why the arm yields there and what still guarantees
+      # an exit. `raw_capture` (hotkey CAPTURE mode) is now subsumed by that yield — an
+      # overlay recording a chord is a modal — and survives only for the raw-dispatch branch
+      # below, which still has to run before the ^G/^F/^B guards.
+      ov = active_overlay
+      raw_capture = ov.try(&.raw_key_capture?) || false
+      if Runner.quit_chord_claimed?(ev, modal: !ov.nil?)
         if Settings.confirm_quit?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
@@ -1014,7 +1027,7 @@ module Gori::Tui
       @toast = nil # clear last action's feedback; a new action may set it again
       # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the
       # ^G/^F/^B guards (and everything else) so those chords can be recorded.
-      if raw_capture && (ov = active_overlay)
+      if raw_capture && ov
         dispatch_overlay_key(ov, ev)
         return
       end
@@ -3251,6 +3264,35 @@ module Gori::Tui
       "#{count} job#{count == 1 ? "" : "s"}"
     end
 
+    # Does the shell's pre-filter claim ^C/^D for the global quit arm, or does it YIELD them
+    # to the modal that is up?
+    #
+    # It used to claim them unconditionally, ahead of overlay dispatch, which made every
+    # modal's own use of the chord unreachable. The Fuzzer's payload-set editor advertises
+    # "^D favorite" on its wordlist row and handles `ev.ctrl_d?` on the Path field
+    # (fuzz_set_overlay.cr), but ^D armed a quit and a second ^D EXITED gori — discarding a
+    # half-composed set that `commit_pending_edits` does not cover — while the status bar and
+    # the card showed two contradictory hints at once.
+    #
+    # WHAT STILL GUARANTEES AN EXIT, which is the reason this yield is safe: every one of the
+    # `Overlay` subclasses handles `escape?`, and the base `Overlay#handle_click` dismisses on
+    # any click outside the card. So the chord is yielded only into states that are themselves
+    # always closable, and the arm is one `esc` away — an operator can never be held inside a
+    # modal by this. The invariant is worth keeping true: an overlay added later that swallows
+    # esc would, for the first time, be able to hold the quit chord hostage.
+    #
+    # SCOPE — deliberately the `active_overlay` seam and nothing else. The Palette, the ⋯
+    # dropdown (MODAL_OVERLAYS, no Overlay object) and the prompt-tier strips (space menu,
+    # copy-as, send-to, ^G goto, ^F find, rename, tag-edit) keep the old behaviour: none of
+    # them has anything that could answer for the chord, so yielding there would only make ^D
+    # a dead key. This is the seam `Overlay#raw_key_capture?` is read from, generalized rather
+    # than paralleled — a raw-capturing overlay is a modal, so it needs no separate exemption
+    # here any more.
+    def self.quit_chord_claimed?(ev : Termisu::Event::Key, modal : Bool) : Bool
+      return false if modal
+      ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)
+    end
+
     # Flush any in-progress editor before leaving/quitting (quit is now centralized,
     # so the per-handler ctrl-c saves moved here). save_notes/save_project_desc are
     # dirty-guarded; issues notes only persist when actively being edited.
@@ -4911,6 +4953,44 @@ module Gori::Tui
 
     # --- settings (config control) ---
 
+    # Did the startup bind fall back to a port nobody configured? Returns {configured, actual}
+    # when it did, nil otherwise. `requested == 0` is "any free port" — asking for it and
+    # getting one is not a fallback, so it never reports one.
+    #
+    # THE INVARIANT this function exists to state: a fallback is an environmental accident —
+    # some other process held the configured port at the moment gori started — and it must
+    # NEVER be written into a configuration layer. Not `Settings.bind_port`, the persisted
+    # global that any later `Settings.save` flushes to settings.json and every future project
+    # then inherits; and not `Settings.project_bind_port`, which `apply_project_network`
+    # persists into THIS project's DB and which `ProjectView#load_settings_values` seeds its
+    # dirty baseline from, so that a subsequent edit to ANY of the six network fields re-pins
+    # the port along with it (`commit_project_network` passes all six). Config records what the
+    # operator asked for; the proxy object records what the OS gave us. Keeping the two
+    # separate is the whole point — see `Runner#run` and `.port_fallback_stands?`.
+    def self.port_fallback(requested : Int32, actual : Int32) : Tuple(Int32, Int32)?
+      requested > 0 && actual != requested ? {requested, actual} : nil
+    end
+
+    # Is the gap between the CONFIGURED bind and the LIVE one still just the startup port
+    # fallback in `fallback`, rather than an edit the operator made?
+    #
+    # `apply_settings` rebinds on any config-vs-live difference, and after `port_fallback` the
+    # two legitimately differ for the whole session. Without this, saving an unrelated network
+    # field (upstream proxy, http2, a listeners edit) would drag the accept socket back to the
+    # pinned port — either failing loudly every time it is still taken, or, worse, succeeding
+    # and silently moving the listener out from under a client the startup toast told the
+    # operator to point at the fallback.
+    #
+    # SELF-CLEARING, so it needs no explicit invalidation: it also requires the proxy to still
+    # be ON the fallback port, so the first rebind that actually moves the socket makes the
+    # memo permanently inert. An operator who edits the port to something else fails the
+    # `eff_port == fallback[0]` arm and rebinds normally.
+    def self.port_fallback_stands?(fallback : Tuple(Int32, Int32)?, eff_host : String, eff_port : Int32,
+                                   live_host : String, live_port : Int32) : Bool
+      return false unless fallback
+      eff_host == live_host && eff_port == fallback[0] && live_port == fallback[1]
+    end
+
     # After a settings save: the upstream proxy is already live (Upstream reads it
     # per dial); rebind the running proxy immediately if the listen address changed
     # (existing connections are kept — only the accept socket moves). A failed
@@ -4930,6 +5010,13 @@ module Gori::Tui
       eff_host = Settings.effective_bind_host
       eff_port = Settings.effective_bind_port
       return save_msg if eff_host == proxy.host && eff_port == proxy.port
+      # …but config and live also differ, for the whole session, after a startup port fallback.
+      # That gap is not drift to correct, so say where we actually are instead of yanking the
+      # accept socket back: this save is the one screen the operator edits bind config on, so
+      # silence here would leave the pin looking applied.
+      if Runner.port_fallback_stands?(@bind_fallback, eff_host, eff_port, proxy.host, proxy.port)
+        return "#{save_msg} — still on fallback port #{proxy.port} (#{eff_port} was in use at startup)"
+      end
       begin
         proxy.rebind(eff_host, eff_port)
         @session.sync_capture_status!
@@ -5220,6 +5307,33 @@ module Gori::Tui
       @theme_restore = nil
     end
 
+    # Suspend the terminal for a shell-out with MOUSE TRACKING OFF, restoring it after.
+    #
+    # WORKAROUND for the vendored termisu fork. `Terminal#suspend` runs through
+    # `Terminal#with_mode` (lib/termisu/src/termisu/terminal.cr:505-541), which correctly
+    # exits the alternate screen for the child but never calls `disable_mouse` — measured on
+    # a real `$EDITOR` session via tmux pane flags: `alternate_on=0` while `mouse_any_flag=1`
+    # and `mouse_sgr_flag=1`. The child inherits this tty (`Process::Redirect::Inherit`), so
+    # a click or a scroll wheel arrives in ITS stdin as an SGR report — `\e[<0;40;12M`. For
+    # `ExternalEditor::WIRE_KINDS` (:request, :intercept) whatever the editor saves becomes
+    # the operator's WIRE BYTES, so a stray mouse report is a byte-exactness violation: gori
+    # would send bytes nobody typed. DELETE THIS once the fork's `with_mode` disables the
+    # mouse itself; the two calls are idempotent (`enable_mouse`/`disable_mouse` both guard
+    # on `@mouse_enabled`), so it is harmless in the meantime.
+    #
+    # `ensure`, so an editor that RAISES — a bad `$EDITOR`, a `Process.run` failure — still
+    # leaves the tty as it found it rather than mute to the mouse for the rest of the session.
+    # `term` is deliberately unrestricted: the Runner needs a live tty and cannot be
+    # instantiated in a spec, so this is the seam a recorder double drives to pin the ordering.
+    def self.suspend_without_mouse(term, *, mouse : Bool, &)
+      term.disable_mouse
+      begin
+        term.suspend { yield }
+      ensure
+        term.enable_mouse if mouse
+      end
+    end
+
     # Hand the focused field's text to the external editor; on a clean change write
     # it back via the block. Failure/unchanged toast and never mutate the field. The
     # Process::Status is captured in a local inside the suspend block (don't rely on
@@ -5227,7 +5341,9 @@ module Gori::Tui
     private def run_external_editor(text : String, kind : Symbol, & : String -> _) : Nil
       result = ExternalEditor.edit(text, kind) do |program, args|
         status = nil.as(Process::Status?)
-        @term.suspend do
+        # `Settings.mouse` is read HERE, at the seam, so the restore honours the same pref
+        # `reconcile_mouse` does rather than burying it in the helper.
+        Runner.suspend_without_mouse(@term, mouse: Settings.mouse) do
           status = Process.run(program, args,
             input: Process::Redirect::Inherit,
             output: Process::Redirect::Inherit,

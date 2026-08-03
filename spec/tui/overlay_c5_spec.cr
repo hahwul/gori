@@ -16,7 +16,10 @@ include Gori::Tui
 #   * the ADD/PREFIX sub-modes of the hostnames + env editors folded into their parent
 #     overlay, so esc there must cancel the SUB-MODE and leave the modal up;
 #   * the hotkey rebinder's capture mode, which the shell routes to ahead of its own
-#     ^C/^D quit-arm — the overlay answers for that through `raw_key_capture?`;
+#     ^C/^D quit-arm — the overlay answers for that by BEING a modal, not through
+#     `raw_key_capture?`: `Runner.quit_chord_claimed?` yields both chords whenever an
+#     Overlay is up (that is what stopped ^D in the Fuzzer payload-set editor from
+#     quitting gori), so `raw_key_capture?` now only governs the raw-dispatch branch;
 #   * the nested lifecycle, which was a shell-wide `@prefs_return` flag and is now
 #     `Overlay#on_close`, running on a cancel AND on a commit that closed.
 #
