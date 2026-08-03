@@ -46,8 +46,22 @@ module Gori
       # rule — any FOLLOW-UP requests. The analyzer sends `request` first, then each entry of
       # `followups` in order, and hands every response to `detections_all` (primary first). Single-
       # probe rules leave `followups` empty, so exactly one request is sent (the historic behaviour).
+      #
+      # `pipeline` is a SAME-CONNECTION request GROUP: the analyzer sends it AFTER `request` +
+      # `followups` on ONE dedicated socket, back-to-back and in order, via `Fuzz::Backend#send_pipeline`
+      # (`Repeater::Engine.send_pipeline` underneath), and appends its results in order — so
+      # `detections_all` sees `[primary, followups…, pipeline…]`. This is the ONE thing a fresh
+      # connection per send can never reveal: a desync induced by pipeline member N surfaces only as a
+      # corrupted/misaligned response to member N+1 on the same socket. The active request-smuggling /
+      # desync rule is the only one that uses it (a CL.TE/TE.CL/TE.TE probe sequence); `probe_timeout`
+      # bounds those sends tighter than the analyzer's ACTIVE_TIMEOUT so an INCOMPLETE timing probe
+      # returns (via a read timeout) well inside the per-probe budget. An EMPTY `pipeline` (every other
+      # rule) is a strict no-op — the branch is skipped and behaviour is byte-for-byte unchanged. Both
+      # tail-default so all existing `Plan.new` sites (≤4 positional args) keep compiling untouched.
       record Plan, request : Bytes, params : Array(Param), dedup_key : String,
-        followups : Array(Bytes) = [] of Bytes
+        followups : Array(Bytes) = [] of Bytes,
+        pipeline : Array(Bytes) = [] of Bytes,
+        probe_timeout : Time::Span? = nil
 
       # Strip a scheme://authority prefix so an absolute-form (forward-proxy) target becomes
       # origin-form; an already-origin-form target passes through unchanged. The authority

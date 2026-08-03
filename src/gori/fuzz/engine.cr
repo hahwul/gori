@@ -113,6 +113,25 @@ module Gori::Fuzz
     def extra_requests : Int64
       0_i64
     end
+
+    # Send a GROUP of requests as ONE same-connection sequence, capturing each response in
+    # order — the primitive the active request-smuggling / desync rule needs (see
+    # `Repeater::Engine.send_pipeline`): a desync induced by member N surfaces only in the
+    # response to member N+1 on the SAME socket, which fresh-connection-per-send `send` can
+    # never reveal. `timeout` bounds the group's per-operation reads (nil = the backend's own).
+    #
+    # A CONCRETE DEFAULT, not a second abstract, and it deliberately delegates to per-member
+    # `send`: every wrapper backend (`GatedBackend`/`CappedBackend`) then inherits its gating /
+    # capping through the `send` overrides it already has, and every spec double stays a
+    # three-line class with no group logic to write. Only `Sender` — the production transport —
+    # overrides this to reach a REAL dedicated socket (the default's per-member sends are each a
+    # fresh connection, so it does not prove a same-socket desync; a caller that needs the true
+    # single socket is on `Sender`, and a spec that only asserts routing/gating does not need it).
+    # Whole-buffer `verbatim` per member, matching how the probe path marks every send: a crafted
+    # smuggling probe carries no operator `$NAME` to expand.
+    def send_pipeline(requests : Array(Bytes), timeout : Time::Span? = nil) : Array(Repeater::Result)
+      requests.map { |b| send(b, Backend.all_verbatim(b)) }
+    end
   end
 
   # Production backend over the Repeater engines (fresh connection per send — there is
@@ -250,6 +269,40 @@ module Gori::Fuzz
 
     def extra_requests : Int64
       @pool.try(&.stale_retries) || 0_i64
+    end
+
+    # Same-connection group send for the active smuggling/desync probe. Unlike `send`, the whole
+    # group MUST ride ONE dedicated socket (a desync induced by member N shows up only in member
+    # N+1's response), so this routes to `Repeater::Engine.send_pipeline`, which dials one socket
+    # and retires it on the first error/incomplete exchange. That deliberately BYPASSES the
+    # keep-alive `ConnPool` (`reusable_request?` refuses CL+TE / obfuscated payloads by design —
+    # exactly the bytes this carries) and never touches `Fuzz::ContentLength.sync`: the caller owns
+    # the framing (a deliberately wrong Content-Length is the whole point), so nothing rewrites it.
+    def send_pipeline(requests : Array(Bytes), timeout : Time::Span? = nil) : Array(Repeater::Result)
+      return [] of Repeater::Result if requests.empty?
+      # send_pipeline frames HTTP/1.1 only (`Repeater::Engine.send_pipeline` is h1). h2 multiplexes
+      # its own connection per send with separate stream-state rules, so a "same socket" group is
+      # meaningless there — DEGRADE to the per-member default (each on its own h2 connection via
+      # `send`, still gated, still one Result per request in order). The rule pre-filters to
+      # HTTP/1.1 anyway, so this is a belt-and-braces guard, not a hot path.
+      return super if @http2
+      # GROUP-GATE up front, sweep-side, mirroring `Repeater::Sender#group_refusal`: one blocked
+      # member refuses the WHOLE batch and returns all-error Results — a group is one connection
+      # carrying a deliberate sequence, so a partial send would be a misleading half-probe. The
+      # target is read off each member AFTER the same binding expansion `send` applies, so the
+      # scope decision is identical to the lone-send path (BEFORE the socket, per `ClientConn`).
+      requests.each do |req|
+        target = Gori::Outbound.request_target(@evidence ? req : Gori::Env.expand_bindings(req))
+        if err = @outbound.sweep_block(@origin.scheme, @origin.host, target)
+          @blocked += requests.size
+          @blocked_reason ||= err
+          return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
+        end
+      end
+      reqs = @evidence ? requests : requests.map { |b| Gori::Env.expand_bindings(b) }
+      Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
+        port: @origin.port, verify_upstream: @verify, sni: @sni,
+        timeout: timeout || @timeout, overrides: @overrides)
     end
   end
 

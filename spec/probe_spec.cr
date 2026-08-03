@@ -2930,7 +2930,11 @@ describe "Gori::Probe::Active (manual run estimate)" do
       r = rule.requests_per_flow
       r.begin.should be >= 1
       r.end.should be >= r.begin
-      r.end.should be <= 8 # nothing floods a single flow with probes
+      # Nothing floods a single flow with probes. The ONE exception is the OFF-BY-DEFAULT,
+      # opt-in request-smuggling detector: it legitimately spends more (2 baselines + 3 variants
+      # × 2 timing probes + a 2-member differential group) because it runs only when the operator
+      # explicitly enables it AND opts into unsafe/aggressive — see Probe::DEFAULT_DISABLED_RULES.
+      r.end.should be <= (rule.info.id == "request_smuggling" ? 10 : 8)
     end
     by_id = Gori::Probe::Active::RULES.to_h { |rule| {rule.info.id, rule.requests_per_flow} }
     # BackslashPowered: TWO baselines (the second proves the endpoint is stable enough to diff
@@ -2942,6 +2946,9 @@ describe "Gori::Probe::Active (manual run estimate)" do
     by_id["forbidden_bypass"].should eq(2..2)
     by_id["url_rewrite_bypass"].should eq(3..3)
     by_id["path_normalization_bypass"].should eq(6..7)
+    # The off-by-default request-smuggling detector: 2 baselines + 3 variants × 2 timing probes
+    # (8), plus the 2-member differential group under aggressive+unsafe (10).
+    by_id["request_smuggling"].should eq(8..10)
     ["reflected_param", "cors_reflection"].each { |id| by_id[id].should eq(1..1) }
   end
 

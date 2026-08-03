@@ -427,7 +427,10 @@ module Gori::Tui
       case row.kind
       when :builtin
         dis = store.probe_disabled_rules
-        row.enabled? ? dis.add(row.rule_id) : dis.delete(row.rule_id)
+        # Toggle to the OPPOSITE of the displayed state via `set_rule_enabled` (not a bare
+        # add/delete): a DEFAULT-OFF rule inverts the stored-set membership — see
+        # Gori::Probe::DEFAULT_DISABLED_RULES.
+        Gori::Probe.set_rule_enabled(dis, row.rule_id, !row.enabled?)
         store.set_probe_disabled_rules(dis)
         @host.status(row.enabled? ? "disabled rule \"#{row.title}\"" : "enabled rule \"#{row.title}\"")
       when :custom

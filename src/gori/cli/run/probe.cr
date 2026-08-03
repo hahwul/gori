@@ -435,7 +435,9 @@ module Gori
             store.set_probe_custom_rule_enabled(row_id, enabled)
           else
             disabled = store.probe_disabled_rules
-            enabled ? disabled.delete(id) : disabled.add(id)
+            # `set_rule_enabled` (not a bare delete/add) so a DEFAULT-OFF rule toggles correctly:
+            # for those ids the stored-set membership is INVERTED — see Probe::DEFAULT_DISABLED_RULES.
+            Probe.set_rule_enabled(disabled, id, enabled)
             store.set_probe_disabled_rules(disabled)
           end
           puts "Rule '#{id}' is now #{enabled ? "enabled" : "disabled"}."

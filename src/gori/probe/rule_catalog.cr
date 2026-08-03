@@ -52,8 +52,10 @@ module Gori
       # one the enable/disable surfaces take.
       private def builtin(info : RuleInfo, kind : String, disabled : Set(String),
                           estimate : String? = nil) : Entry
+        # `rule_enabled?` (not a bare `!disabled.includes?`) so a DEFAULT-OFF rule shows off on a
+        # fresh project even though its id is absent from the set — see `DEFAULT_DISABLED_RULES`.
         Entry.new(id: info.id, name: info.name, description: info.description,
-          category: info.category, kind: kind, enabled: !disabled.includes?(info.id),
+          category: info.category, kind: kind, enabled: Probe.rule_enabled?(info.id, disabled),
           estimate: estimate)
       end
 

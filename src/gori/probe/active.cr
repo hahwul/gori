@@ -13,6 +13,7 @@ require "./active/path_normalization_bypass"
 require "./active/url_rewrite_bypass"
 require "./active/ssti"
 require "./active/nextjs_action_no_auth"
+require "./active/request_smuggling"
 require "../outbound"
 require "../scope"
 require "../fuzz/engine"
@@ -37,7 +38,7 @@ module Gori
                OpenRedirect.new, HostHeaderInjection.new,
                CrlfInjection.new, PathNormalizationBypass.new,
                UrlRewriteBypass.new, Ssti.new,
-               NextjsActionNoAuth.new] of Rule
+               NextjsActionNoAuth.new, RequestSmuggling.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
@@ -149,7 +150,9 @@ module Gori
         # Send-refusal reasons already reported for THIS flow (see the `result.ok?` branch).
         refusals = Set(String).new
         RULES.each do |rule|
-          next if disabled.includes?(rule.info.id)
+          # `rule_disabled?` (not a bare `disabled.includes?`) so a DEFAULT-OFF rule is skipped
+          # on a fresh project even though its id is absent from the set — see DEFAULT_DISABLED_RULES.
+          next if Probe.rule_disabled?(rule.info.id, disabled)
           # ISOLATE each rule. Without this, one rule raising in plan/detections_all took down
           # the whole scan — every rule after it AND (via Scan.scan_flows) every remaining flow,
           # discarding findings already collected. The TUI path has always had this: the analyzer
@@ -184,6 +187,13 @@ module Gori
             # rule from the same captured request, so a differential whose baseline resolved
             # `$id` and whose followup did not would be measuring the substitution.
             plan.followups.each { |req| results << sender.send(req, Fuzz::Backend.all_verbatim(req)) }
+            # THEN the pipeline group (if any): a same-connection sequence sent on ONE dedicated
+            # socket via `send_pipeline`, results appended in order so `detections_all` sees
+            # `[primary, followups…, pipeline…]`. Only the request-smuggling / desync rule ships
+            # one; empty for every other rule = a strict no-op. Kept BYTE-IDENTICAL to the
+            # analyzer's twin loop (`execute_active`) — `active_binding_provenance_spec` exists so
+            # the two cannot drift, the reason the followup marking sits on both.
+            results.concat(sender.send_pipeline(plan.pipeline, plan.probe_timeout)) unless plan.pipeline.empty?
             dets = rule.detections_all(plan, results, detail)
             out.concat(dets)
           rescue ex

@@ -198,7 +198,7 @@ module Gori
                           opts : Active::Options = Active::Options::DEFAULT) : Array(ActiveEstimate)
         return [] of ActiveEstimate if active_degraded?
         Active::RULES.compact_map do |rule|
-          next if @disabled.includes?(rule.info.id)
+          next if Probe.rule_disabled?(rule.info.id, @disabled)
           next unless rule.dedup_key(detail, opts)
           ActiveEstimate.new(rule.info, rule.requests_per_flow)
         end
@@ -226,7 +226,7 @@ module Gori
           errored = false
           Active::RULES.each do |rule|
             break if @stopped
-            next if @disabled.includes?(rule.info.id)
+            next if Probe.rule_disabled?(rule.info.id, @disabled)
             plan = rule.plan(detail, opts)
             next unless plan
             if wrote = execute_active(rule, plan, detail, repeater_id: repeater_id, notify: notify)
@@ -394,7 +394,7 @@ module Gori
         # permissive when the ⇧S display lens is off. AGGRESSIVE never widens this.
         return unless @outbound.allows?(url, row.host)
         opts = active_opts
-        Active::RULES.each { |rule| enqueue_probe(rule, detail, opts) unless @disabled.includes?(rule.info.id) }
+        Active::RULES.each { |rule| enqueue_probe(rule, detail, opts) unless Probe.rule_disabled?(rule.info.id, @disabled) }
       rescue Channel::ClosedError
       end
 
@@ -509,6 +509,12 @@ module Gori
         # Verbatim here too — a differential whose baseline resolved `$id` and whose followup
         # did not would be measuring the substitution rather than the target.
         plan.followups.each { |req| results << sender.send(req, Fuzz::Backend.all_verbatim(req)) }
+        # THEN the pipeline group (if any): the request-smuggling / desync rule's same-connection
+        # probe sequence, sent on ONE dedicated socket via `send_pipeline`, results appended in
+        # order → `detections_all` sees `[primary, followups…, pipeline…]`. Empty for every other
+        # rule = a strict no-op. Kept BYTE-IDENTICAL to the twin loop in `Active.analyze` — the
+        # two look interchangeable, so they share one spelling and cannot drift again.
+        results.concat(sender.send_pipeline(plan.pipeline, plan.probe_timeout)) unless plan.pipeline.empty?
         detections = rule.detections_all(plan, results, detail)
         return 0 if detections.empty?
         wrote = 0

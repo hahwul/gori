@@ -247,7 +247,9 @@ describe "MCP probe rules + mode tools" do
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       res = call_json(tools, "list_probe_rules", "{}")
       res["mode"].as_s.should eq("passive") # the fresh-project default
-      res["disabled_count"].as_i.should eq(0)
+      # One built-in ships OFF by default (the opt-in request-smuggling detector), so a fresh
+      # project already reports it disabled — see Probe::DEFAULT_DISABLED_RULES.
+      res["disabled_count"].as_i.should eq(1)
       rules = res["rules"].as_a
       rules.size.should be > 0
       kinds = rules.map { |r| r["kind"].as_s }.uniq
@@ -278,7 +280,8 @@ describe "MCP probe rules + mode tools" do
       before.should contain("secret_in_url")
 
       call_json(tools, "set_probe_rule_enabled", %({"id":"secret_in_url","enabled":false}))["enabled"].as_bool.should be_false
-      call_json(tools, "list_probe_rules", "{}")["disabled_count"].as_i.should eq(1)
+      # 2 = secret_in_url (just disabled) + request_smuggling (off by default).
+      call_json(tools, "list_probe_rules", "{}")["disabled_count"].as_i.should eq(2)
 
       after = call_json(tools, "probe_scan", "{}")["issues"].as_a.map { |g| g["code"].as_s }
       after.should_not contain("secret_in_url")

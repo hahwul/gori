@@ -24,6 +24,40 @@ module Gori
     # value would leave those findings unfilterable.
     FILTER_CATEGORIES = SCAN_CATEGORIES + [Category::CUSTOM]
 
+    # Built-in rules that ship DISABLED and must be explicitly enabled in the Rules sub-tab
+    # before they run. Today only the active request-smuggling / desync detector: it sends
+    # synthetic POST bodies, and under AGGRESSIVE mode its differential-confirm leg puts a
+    # COMPLETE smuggled prefix on the wire (which, against a shared back-end pool, could affect
+    # another user) — so the user-decided posture is off-by-default, opt-in only.
+    #
+    # The per-project `probe_disabled_rules` store records the operator's DEVIATION FROM DEFAULT,
+    # so membership FLIPS meaning for these ids: for an ordinary (default-ON) rule, being in the
+    # set means "turned off"; for a default-OFF rule, being in the set means "turned on". One
+    # stored set still captures the whole config, and a fresh project (empty set) has every
+    # ordinary rule on and every default-off rule off. Read AND write BOTH go through the three
+    # helpers below, so the flip lives in exactly ONE place and no surface (catalog, analyzer,
+    # headless scan, the toggle commands) can drift on what "disabled" means.
+    DEFAULT_DISABLED_RULES = Set{"request_smuggling"}
+
+    # Whether the analyzer/scan must SKIP rule `id`, given the project's stored disabled-id set.
+    def self.rule_disabled?(id : String, stored : Set(String)) : Bool
+      DEFAULT_DISABLED_RULES.includes?(id) ? !stored.includes?(id) : stored.includes?(id)
+    end
+
+    # The Rules-sub-tab "enabled" flag — the strict inverse, spelled once so the two agree.
+    def self.rule_enabled?(id : String, stored : Set(String)) : Bool
+      !rule_disabled?(id, stored)
+    end
+
+    # Apply a Rules sub-tab toggle to `stored` (mutated in place); callers then persist it via
+    # `Store#set_probe_disabled_rules`. Honours the flip: for a default-OFF rule, enabling means
+    # PRESENT and disabling means ABSENT — the mirror of an ordinary rule, so the historic
+    # `enabled ? delete : add` shorthand cannot be used directly on these ids.
+    def self.set_rule_enabled(stored : Set(String), id : String, enabled : Bool) : Nil
+      want_present = DEFAULT_DISABLED_RULES.includes?(id) ? enabled : !enabled
+      want_present ? stored.add(id) : stored.delete(id)
+    end
+
     # Static, display-only metadata for one built-in check — the identity the Rules
     # sub-tab lists and toggles by. `id` is a stable slug (one per Rule class, even when
     # the class emits several codes, e.g. Cookies → cookie_*); disabling a rule keys off it.
@@ -104,6 +138,9 @@ module Gori
       "url_rewrite_bypass"             => "A probe reached a denied resource by requesting / with an X-Original-URL / X-Rewrite-URL header naming the gated path, and got different (served) content than the plain root. Don't let application URL-rewrite headers override the routed path for authorization; strip X-Original-URL / X-Rewrite-URL at the edge and enforce access control on the actual request path. Single-shot; confirm manually.",
       "ssti"                           => "A probe injected template expressions in this parameter and the server returned their evaluated results (7*7→49 and 7*8→56), indicating server-side template injection — frequently a path to remote code execution. Never build templates from user input; pass user data as template variables/context, use a sandboxed or logic-less engine, and validate input. Confirm the engine and impact manually.",
       "nextjs_action_no_auth"          => "A probe re-sent this Next.js server action (Next-Action) with the session Cookie / Authorization removed and still received a comparable 2xx response. Next.js does not authenticate or authorize server actions for you — enforce authentication and per-user authorization INSIDE every 'use server' function (and treat each action as a public, unauthenticated endpoint until it does). Single-shot; confirm the unauthenticated response actually contains privileged data.",
+      "request_smuggling_clte"         => "A timing probe hung on a CL.TE framing conflict: the front-end framed this request by Content-Length while the back-end honoured Transfer-Encoding, so one tier blocked on a body the other had already ended — a request-smuggling / desync primitive. The front-end and back-end MUST agree on framing: reject any request carrying BOTH Content-Length and Transfer-Encoding (RFC 7230 §3.3.3), normalize/strip conflicting framing at the edge, and prefer HTTP/2 end-to-end (its length-prefixed framing removes the ambiguity). Confirm manually with the Repeater 'send group' (a complete smuggled prefix + a benign follow-up on one connection).",
+      "request_smuggling_tecl"         => "A timing probe hung on a TE.CL framing conflict: the front-end honoured Transfer-Encoding (the request ended at the terminating chunk) while the back-end waited for Content-Length bytes that never arrived — a request-smuggling / desync primitive. The front-end and back-end MUST agree on framing: reject requests carrying BOTH Content-Length and Transfer-Encoding, have the edge re-chunk or strip conflicting framing, and prefer HTTP/2 end-to-end. Confirm manually with the Repeater 'send group'.",
+      "request_smuggling_tete"         => "A timing probe hung on a TE.TE framing conflict: an OBFUSCATED Transfer-Encoding header (whitespace before the colon / duplicated TE) was honoured by one tier and ignored by the other, desyncing where the body ends — a request-smuggling primitive. Normalize or REJECT obfuscated Transfer-Encoding at the edge (whitespace-before-colon, obs-fold, duplicated/hidden TE), reject Content-Length + Transfer-Encoding together, and prefer HTTP/2 end-to-end. Confirm manually with the Repeater 'send group'.",
       "jwt_alg_none"                   => "A token in use declares alg:none, i.e. it carries no signature. Pin the accepted algorithm server-side (never trust the token's own header), reject 'none' outright, and verify every token before reading its claims. Confirm whether the server actually accepts it with the JWT workbench / `gori run jwt --attacks`.",
       "jwt_weak_alg"                   => "The token's alg is outside the standard JWS set, so how the verifier handles it is unpredictable. Use a registered algorithm (EdDSA / ES256 / RS256, or HS256 with a high-entropy secret) and validate it against a server-side allowlist.",
       "jwt_no_expiry"                  => "The token carries no exp claim, so it stays valid until the signing key changes. Issue short-lived access tokens with exp (and refresh tokens for longevity), and reject tokens without one.",
