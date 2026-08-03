@@ -109,9 +109,36 @@ describe "Runner exit prompts" do
     end
   end
 
-  it "keeps both quit prompts byte-identical when nothing is running" do
+  # The confirm is still byte-identical to what shipped. THE ARM HINT'S ASSERTION CHANGED,
+  # deliberately: it used to end "· q: back to projects" unconditionally, but `app.back-key`
+  # is registered in Verb::Scope::Sidebar ONLY (verbs/core.cr — as a Global chord it dumped
+  # you to the picker from mid-browse), while the arm is raised by `handle_key`, which is
+  # focus-blind. So the toast advertised a key that is dead in a list body, types a literal
+  # `q` in an editor, and CLOSES THE DETAIL in the History drill-in (detail.close binds q
+  # too). The clause now has to be asked for — see the scope example below.
+  it "keeps the quit confirm byte-identical when nothing is running, and offers q only on request" do
     Runner.quit_confirm_message(nil, 0).should eq("Quit gori? (pending edits are committed first)")
-    Runner.quit_arm_hint(nil, 0).should eq("press ^D (or ^C) again to quit · q: back to projects")
+    Runner.quit_arm_hint(nil, 0).should eq("press ^D (or ^C) again to quit")
+    Runner.quit_arm_hint(nil, 0, back_key: true)
+      .should eq("press ^D (or ^C) again to quit · q: back to projects")
+  end
+
+  # What `back_key` has to be told, resolved through the real registry + keymap — the same
+  # lookup `Runner#back_key_live?` performs. If `q` ever becomes Global (or a scope gains its
+  # own binding) this example is what says whether the hint may name it.
+  it "offers q exactly where app.back-key resolves, and nowhere else" do
+    keymap = Gori::Verb::Keymap.build(Gori::Verbs.registry)
+    q = Gori::Verb::Chord.new("q")
+    {
+      Gori::Verb::Scope::Sidebar       => "app.back-key", # the tab bar — where "q projects" is hinted
+      Gori::Verb::Scope::HistoryDetail => "detail.close", # q is BOUND here, to something else
+      Gori::Verb::Scope::Body          => nil,            # a list body: q does nothing at all
+      Gori::Verb::Scope::Repeater      => nil,            # an editor: q is a literal char
+    }.each do |scope, id|
+      keymap.lookup(q, scope).should eq(id)
+      live = id == "app.back-key"
+      Runner.quit_arm_hint(nil, 0, back_key: live).includes?("q: back to projects").should eq(live)
+    end
   end
 
   it "names the live jobs in both quit prompts" do
@@ -123,6 +150,41 @@ describe "Runner exit prompts" do
       "mining 1")
     Runner.quit_arm_hint(jobs.active_summary, jobs.active.size).should eq(
       "1 job running (mining 1) — press ^D (or ^C) again to quit and stop it")
+  end
+end
+
+# The quit POLICY both entry points consume — `handle_key`'s ^C/^D (chord: true) and
+# `Runner#quit!` (chord: false), which is the intent the palette's "Quit gori" verb
+# dispatches. They used to answer this question in two places and disagree: the chord
+# honoured settings:general "Confirm before quit" and the palette went straight to the
+# teardown — stop_all_jobs / commit_pending_edits / outcome — with no modal, on the ONLY
+# discoverable quit in the app (Hotkeys::FIXED_IDS keeps the chord off the rebind list
+# because "single-key quit is a footgun"). A live Discover crawl or Fuzz run died unnamed
+# and unasked, while `leave_project` — one row above it in the same palette, and less
+# destructive — always confirms and names the jobs.
+describe "Runner.quit_decision" do
+  it "confirms a palette quit when 'Confirm before quit' is on — the bug this pins" do
+    Runner.quit_decision(true, chord: false, armed: false).should eq(Runner::QuitAction::Confirm)
+  end
+
+  # The setting's text is unconditional ("require a confirm modal to quit") and
+  # quit_confirm_message(nil, 0) is written for the idle case: a guarantee that only holds
+  # while a job happens to be running is not one, and quitting idle still commits pending
+  # edits and drops the session.
+  it "confirms with the setting on from either path, armed or not, jobs or not" do
+    [true, false].each do |armed|
+      Runner.quit_decision(true, chord: true, armed: armed).should eq(Runner::QuitAction::Confirm)
+      Runner.quit_decision(true, chord: false, armed: armed).should eq(Runner::QuitAction::Confirm)
+    end
+  end
+
+  # Only a keystroke can arm. The arm is a typo guard for a chord under the fingers, and its
+  # toast reads "press ^D (or ^C) again" — a chord the palette operator never pressed; ^P,
+  # a filter and ↵ on a row that reads "Quit gori" is already that second deliberate act.
+  it "keeps the chord's double press when the setting is off, and does not arm the palette" do
+    Runner.quit_decision(false, chord: true, armed: false).should eq(Runner::QuitAction::Arm)
+    Runner.quit_decision(false, chord: true, armed: true).should eq(Runner::QuitAction::Quit)
+    Runner.quit_decision(false, chord: false, armed: false).should eq(Runner::QuitAction::Quit)
   end
 end
 
@@ -162,8 +224,22 @@ private class ExitShell
     end
   end
 
-  # Mirror of Runner#quit! (no confirm on the default double-press path).
+  # Mirror of Runner#quit! — the GUARDED entry, which is the whole point of it: the palette's
+  # "Quit gori" verb dispatches this same intent (verbs/core.cr → ctx.quit!), so whatever
+  # guard lives here is the guard the only discoverable quit gets. The teardown is
+  # `finish_quit`, and the confirm's accept block calls THAT — routing it back through `quit!`
+  # would re-raise the confirm forever. The policy call is the real `Runner.quit_decision`,
+  # not a re-decision, so this double cannot drift from the shell on the question that matters.
   def quit! : Nil
+    if Runner.quit_decision(Gori::Settings.confirm_quit?, chord: false, armed: false).confirm?
+      @message = Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size)
+      confirm(@message, danger: true, title: "QUIT GORI", label: "quit") { finish_quit }
+    else
+      finish_quit
+    end
+  end
+
+  private def finish_quit : Nil
     stop_all_jobs
     commit_pending_edits
     @outcome = :quit
@@ -171,9 +247,10 @@ private class ExitShell
 
   getter? danger = false
 
-  private def confirm(message : String, *, danger : Bool, &action : -> Nil) : Nil
+  private def confirm(message : String, *, danger : Bool, title : String = "LEAVE PROJECT",
+                      label : String = "leave", &action : -> Nil) : Nil
     @danger = danger
-    ov = ConfirmDialog.new("LEAVE PROJECT", message, confirm_label: "leave",
+    ov = ConfirmDialog.new(title, message, confirm_label: label,
       danger: danger)
     accepted = false
     ov.on_commit = -> { accepted = true; true }
@@ -244,17 +321,102 @@ describe "leave project with live jobs" do
   end
 end
 
+# `Settings.confirm_quit` is a process-global class_property?: flipping it without putting
+# it back leaks into every later example in the same `crystal spec` run. Same capture/restore
+# idiom as settings_view_spec.cr:465.
+private def with_confirm_quit(on : Bool, &)
+  prev = Gori::Settings.confirm_quit?
+  Gori::Settings.confirm_quit = on
+  begin
+    yield
+  ensure
+    Gori::Settings.confirm_quit = prev
+  end
+end
+
 describe "quit with live jobs" do
   # ^D ^D kills the process, so the engine fibers die with it — but the Jobs registry and
   # every engine's own `request_stop` are what make that an orderly stop rather than a
   # truncation, and `quit!` shares the leave path's helper so the two exits cannot drift.
+  # Pinned to the DEFAULT setting (confirm_quit off) now that `quit!` is confirm-gated:
+  # this example is about the teardown, and the gate has its own block below.
   it "stops every job-owning controller" do
-    shell = ExitShell.new
-    shell.jobs.start(:miner, "GET /api")
-    shell.quit!
-    shell.outcome.should eq(:quit)
-    shell.stopped.should eq([:discover, :fuzzer, :miner, :sequencer, :repeater, :oast])
-    shell.jobs.any_active?.should be_false
-    shell.committed?.should be_true
+    with_confirm_quit(false) do
+      shell = ExitShell.new
+      shell.jobs.start(:miner, "GET /api")
+      shell.quit!
+      shell.outcome.should eq(:quit)
+      shell.stopped.should eq([:discover, :fuzzer, :miner, :sequencer, :repeater, :oast])
+      shell.jobs.any_active?.should be_false
+      shell.committed?.should be_true
+    end
+  end
+end
+
+# The palette's "Quit gori" reaches the shell as ctx.quit! (spec/verbs/core_spec.cr pins that
+# dispatch), so THIS is that path: with "Confirm before quit" on it must raise the same modal
+# the ^C/^D chord raises, name the same jobs, and — like leave_project — change nothing until
+# the operator accepts. It used to tear down on the spot.
+describe "quit through the guarded entry (the palette's Quit gori)" do
+  it "raises the QUIT GORI confirm with the setting on, and names the live jobs" do
+    with_confirm_quit(true) do
+      shell = ExitShell.new
+      shell.jobs.start(:discover, "http://127.0.0.1:19703/")
+      shell.quit!
+
+      shell.outcome.should eq(:running) # nothing torn down yet — the modal is up
+      shell.stopped.should be_empty
+      shell.committed?.should be_false
+      shell.danger?.should be_true
+      shell.message.should eq(
+        "Quit gori? (pending edits are committed first)\n" \
+        "1 job still running — quitting stops it.\n" \
+        "discovering 1")
+
+      shell.press(Termisu::Input::Key::LowerY)
+      shell.outcome.should eq(:quit)
+      shell.stopped.should eq([:discover, :fuzzer, :miner, :sequencer, :repeater, :oast])
+      shell.jobs.any_active?.should be_false
+      shell.committed?.should be_true
+    end
+  end
+
+  it "leaves the jobs running when the confirm is cancelled" do
+    with_confirm_quit(true) do
+      shell = ExitShell.new
+      shell.jobs.start(:fuzz, "GET /a")
+      shell.quit!
+
+      shell.press(Termisu::Input::Key::Escape)
+      shell.outcome.should eq(:running) # still in gori
+      shell.stopped.should be_empty     # NOTHING was stopped
+      shell.jobs.any_active?.should be_true
+      shell.committed?.should be_false
+    end
+  end
+
+  # Nothing running is still a quit worth confirming (it commits pending edits and drops the
+  # session), and the modal keeps the original one-line wording.
+  it "still confirms with the setting on when nothing is running" do
+    with_confirm_quit(true) do
+      shell = ExitShell.new
+      shell.quit!
+      shell.outcome.should eq(:running)
+      shell.message.should eq("Quit gori? (pending edits are committed first)")
+      shell.press(Termisu::Input::Key::LowerY)
+      shell.outcome.should eq(:quit)
+    end
+  end
+
+  # With the setting OFF the palette quits immediately — today's behaviour, kept on purpose:
+  # arming here would toast "press ^D (or ^C) again", a chord this operator never pressed.
+  it "quits outright with the setting off (the default)" do
+    with_confirm_quit(false) do
+      shell = ExitShell.new
+      shell.jobs.start(:miner, "GET /api")
+      shell.quit!
+      shell.outcome.should eq(:quit)
+      shell.committed?.should be_true
+    end
   end
 end

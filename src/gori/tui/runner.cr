@@ -1009,14 +1009,16 @@ module Gori::Tui
       ov = active_overlay
       raw_capture = ov.try(&.raw_key_capture?) || false
       if Runner.quit_chord_claimed?(ev, modal: !ov.nil?)
-        if Settings.confirm_quit?
+        # The policy is `Runner.quit_decision`, shared with `quit!` (the palette's Quit) so
+        # the two entry points cannot answer "does this need a confirm?" differently again.
+        case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed)
+        in .confirm?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
-          confirm("QUIT GORI", quit_message,
-            confirm_label: "quit", danger: true) { quit! } unless @overlay.confirm?
-        elsif @quit_armed
-          quit!
-        else
+          raise_quit_confirm unless @overlay.confirm?
+        in .quit?
+          finish_quit # the second press IS the confirmation
+        in .arm?
           @quit_armed = true
           @toast = quit_arm_hint
         end
@@ -3074,8 +3076,21 @@ module Gori::Tui
 
     # Body hints come from the active tab's controller (it knows its focused pane);
     # falls back to the bare ring reminder if no controller is registered.
+    #
+    # The `q projects` clause is conditional for the same reason `quit_arm_hint`'s is:
+    # `app.back-key` lives in Verb::Scope::Sidebar ONLY (deliberately — see verbs/core.cr,
+    # where a Global `q` used to dump you to the picker mid-browse), so advertising it from a
+    # focus-agnostic emitter names a key that does nothing in a list and types a literal `q`
+    # in an editor. This is the fallback path — reached only when the active tab has no
+    # registered controller — but a hint that lies is worse in the place the operator has
+    # least to go on.
     private def body_hints : String
-      @tabs[@active_tab]?.try(&.body_hint(@focus)) || "↹/esc tabs · ^P cmds · q projects · ^D quit"
+      fallback = String.build do |s|
+        s << "↹/esc tabs · ^P cmds · "
+        s << "q projects · " if back_key_live?
+        s << "^D quit"
+      end
+      @tabs[@active_tab]?.try(&.body_hint(@focus)) || fallback
     end
 
     private def render_body(screen : Screen, rect : Rect) : Nil
@@ -3176,10 +3191,48 @@ module Gori::Tui
 
     # --- ExecContext (verbs drive the UI through these) ----------------------
 
+    # The operator ASKED to quit — the ExecContext intent the palette's "Quit gori" verb
+    # dispatches (verbs/core.cr), and the same decision the ^C/^D chord makes in handle_key.
+    #
+    # It is the GUARDED entry, not the teardown, and that is the whole point: `Settings.
+    # confirm_quit?` ("Confirm before quit — require a confirm modal to quit") is an opt-in
+    # promise about EVERY quit, and the palette entry is the only discoverable one
+    # (`Hotkeys::FIXED_IDS` keeps the chord off the rebind list because "single-key quit is a
+    # footgun"). This method used to be the teardown itself, so the one exposed entry point was
+    # the one that skipped the setting: ^P → "Quit gori" → ↵ killed a live Discover crawl with
+    # no modal and without naming a single running job, while `leave_project` — the LESS
+    # destructive sibling one row above it in the same palette — always confirms.
+    #
+    # The teardown is `finish_quit`; the confirm's accept block calls THAT, or accepting would
+    # re-enter here and raise a second confirm forever.
+    #
+    # With the setting OFF this still quits immediately rather than arming. The arm exists
+    # because ^C/^D is one mistyped keystroke, and its toast says "press ^D (or ^C) again" — a
+    # chord the palette operator never pressed; ^P, typing a filter, and ↵ on a row that reads
+    # "Quit gori" is already the deliberate act the arm asks for.
     def quit! : Nil
+      # chord: false — a palette dispatch can never arm, so this is Confirm or Quit.
+      if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false).confirm?
+        raise_quit_confirm
+      else
+        finish_quit
+      end
+    end
+
+    # The teardown, past every guard. Private so a new caller has to come through `quit!` (and
+    # therefore through the confirm) to reach it; the only direct callers are the second ^C/^D
+    # press — where the first press already served as the confirmation — and the accept block
+    # of the QUIT GORI modal.
+    private def finish_quit : Nil
       stop_all_jobs
       commit_pending_edits
       @outcome = :quit
+    end
+
+    # The one QUIT GORI modal, raised from both quit paths so the chord and the palette cannot
+    # show different prompts — the same anti-drift reason the message helpers below are shared.
+    private def raise_quit_confirm : Nil
+      confirm("QUIT GORI", quit_message, confirm_label: "quit", danger: true) { finish_quit }
     end
 
     # `q` from the TABS row. When jobs are live the confirm NAMES them and says what
@@ -3224,7 +3277,22 @@ module Gori::Tui
     end
 
     private def quit_arm_hint : String
-      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size)
+      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size, back_key: back_key_live?)
+    end
+
+    # Does `q` actually go back to the project picker from where the operator is standing?
+    # `app.back-key` is registered in `Verb::Scope::Sidebar` ONLY (verbs/core.cr: as a Global
+    # chord it also dumped you to the picker from the verb-driven Sitemap/Issues bodies), but
+    # the quit arm fires from `handle_key`, which is focus-blind — so the hint used to advertise
+    # `q` from a History list (dead), the History detail (`detail.close` binds q — it closes the
+    # detail, it does not leave the project) or the Notes editor (types a literal q).
+    #
+    # Resolved through the SAME lookup the dispatcher uses (`resolve_verb_id`/`current_scope`)
+    # rather than a hardcoded `@focus == :menu`, and compared against the verb ID rather than
+    # merely "is q bound?", so neither a settings:hotkeys rebind nor a scope with its own `q`
+    # can leave the hint pointing at a key that does something else.
+    private def back_key_live? : Bool
+      resolve_verb_id(Verb::Chord.new("q"), current_scope) == "app.back-key"
     end
 
     # The three EXIT prompts, as pure functions of `Jobs#active_summary` + the active
@@ -3254,14 +3322,53 @@ module Gori::Tui
     end
 
     # A status toast, not a card, so this one stays on a single line.
-    def self.quit_arm_hint(active : String?, count : Int32) : String
-      base = "press ^D (or ^C) again to quit · q: back to projects"
-      return base unless active
-      "#{job_count(count)} running (#{active}) — press ^D (or ^C) again to quit and stop #{count == 1 ? "it" : "them"}"
+    #
+    # `back_key` is the caller's answer to "is `q` → back to projects live where this hint will
+    # be read?" (see `Runner#back_key_live?`). It defaults to NOT advertising, because the
+    # failure this argument exists to prevent is a hint naming a key that is dead in the focus
+    # it is shown from — and a hint that says less is recoverable, one that lies is not.
+    # The running-jobs sentence never offered `q` and is byte-identical to what shipped.
+    def self.quit_arm_hint(active : String?, count : Int32, *, back_key : Bool = false) : String
+      base = "press ^D (or ^C) again to quit"
+      return "#{job_count(count)} running (#{active}) — #{base} and stop #{count == 1 ? "it" : "them"}" if active
+      back_key ? "#{base} · q: back to projects" : base
     end
 
     private def self.job_count(count : Int32) : String
       "#{count} job#{count == 1 ? "" : "s"}"
+    end
+
+    # What an operator-initiated quit request does right now.
+    enum QuitAction
+      Confirm # raise the QUIT GORI modal (settings:general "Confirm before quit")
+      Arm     # first ^C/^D: hint in the status bar and wait for the second press
+      Quit    # tear down now (finish_quit)
+    end
+
+    # The quit POLICY — ONE function, consumed by BOTH entry points (`handle_key`'s ^C/^D and
+    # `quit!`, which the palette's "Quit gori" verb dispatches). They diverged once, and that
+    # was the bug: the chord honoured `Settings.confirm_quit?` while the palette — the only
+    # discoverable Quit in the app — went straight to the teardown, so the opt-in "require a
+    # confirm modal to quit" was silently ignored on the one path an operator can find.
+    #
+    # `chord` is "this request was a single keystroke". Only a keystroke can Arm: the arm is a
+    # typo guard for a chord that sits under the fingers, and its toast names ^D/^C — which a
+    # palette operator never pressed. ^P → filter → ↵ on a row reading "Quit gori" is already
+    # the deliberate second act the arm is asking for, so a non-chord request quits outright.
+    #
+    # With the setting ON the answer is Confirm regardless of `armed` and regardless of whether
+    # any job is live: the setting's own text is unconditional, `quit_confirm_message(nil, 0)`
+    # is written for the idle case, and a guarantee that only holds while a job happens to be
+    # running is not a guarantee. (Quitting idle still commits pending edits and drops the
+    # session, so there is something to be asked about.)
+    #
+    # Pure + class-level for the same reason the exit prompts above are: the Runner needs a
+    # live tty. `@overlay.confirm?` deliberately stays at the chord's call site — "don't stack a
+    # second modal on the one already asking this question" is dispatch, not policy.
+    def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool) : QuitAction
+      return QuitAction::Confirm if confirm_setting
+      return QuitAction::Quit if !chord || armed
+      QuitAction::Arm
     end
 
     # Does the shell's pre-filter claim ^C/^D for the global quit arm, or does it YIELD them

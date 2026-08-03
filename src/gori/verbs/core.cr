@@ -21,6 +21,13 @@ module Gori
 
       # Quit is palette-only here; the keyboard path is a deliberate double ^D/^C
       # handled in the Runner (single Q quitting was too easy to hit by accident).
+      #
+      # `quit!` is the Runner's GUARDED entry, not its teardown: it goes through
+      # Runner.quit_decision, the same policy the chord uses, so this entry honours
+      # settings:general "Confirm before quit". That matters here specifically —
+      # Hotkeys::FIXED_IDS makes this palette row the ONLY discoverable way to quit, and
+      # it used to reach the teardown directly, killing a live Discover/Fuzz run with no
+      # modal and no naming of the jobs while `app.back` above it always confirms.
       r.register Verb::Definition.new(
         "app.quit", "Quit gori", "Exit gori entirely", Verb::Scope::Global,
         [] of Verb::Chord, category: Verb::Category::System) { |ctx| ctx.quit!; nil }
