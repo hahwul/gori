@@ -48,6 +48,80 @@ module Gori
     # poller's interval scale.
     RELOAD_POLL_INTERVAL = 2.seconds
 
+    # Signals headless `gori run capture` winds down on, rather than dying from.
+    CAPTURE_SIGNALS = [Signal::INT, Signal::TERM]
+
+    # Signals the interactive TUI must not be killed by outright. A superset of
+    # CAPTURE_SIGNALS by construction — every signal headless capture handles is handled
+    # here too, and HUP is the one the TUI adds. HUP is TUI-only because only this path
+    # leaves a terminal's line discipline altered: an SSH drop delivers HUP to a gori whose
+    # tmux/screen session OUTLIVES it, so the pane is handed back in raw mode with the
+    # alternate screen and SGR-1006 mouse reporting still on and only `reset` recovers it.
+    # `gori run capture` never touched the tty, so its exit-on-HUP costs at most a partial
+    # line — and trapping it there would silently turn a documented 129 into a 0.
+    TUI_SIGNALS = CAPTURE_SIGNALS + [Signal::HUP]
+
+    # Restores the terminal when a DELIVERED signal would otherwise kill the TUI outright.
+    #
+    # Why NOT run_capture's orderly `@shutdown` channel: that works there because capture's
+    # MAIN fiber is already parked on `@shutdown.receive`, so the send wakes the very fiber
+    # that owns the teardown. The TUI's main fiber is inside Runner's event loop, which App
+    # holds no channel into, and a `Signal.trap` body runs on its OWN fiber — it cannot
+    # unwind someone else's stack, so it can never reach `run_tui`'s `ensure term.close`.
+    # An orderly handler here would therefore restore nothing AND not exit. So the handler
+    # does the teardown itself and then dies FROM the signal under the default disposition,
+    # which keeps the exit status the conventional 128+signo (143 TERM / 130 INT / 129 HUP)
+    # that `pkill`, a wrapper script or a supervisor reads.
+    #
+    # Nothing else is torn down, deliberately. The store is SQLite in WAL mode (crash-safe —
+    # the next open recovers) and the capture lock is a BSD flock the kernel frees when the
+    # process dies (capture_lock.cr: "freed by the kernel on close / exit"), so neither needs
+    # a store call from the signal fiber while the main fiber may be mid-write. A hang here
+    # would be strictly worse than the bug: it turns "killed with a wrecked terminal" into
+    # "not killed at all".
+    #
+    # `arm` and `die` are injected because both are process-global and unspeccable for real:
+    # a trap installed by an example leaks into every later one, and the real `die` takes the
+    # suite down with it. Production `arm` installs a ONE-SHOT trap — it resets the signal to
+    # its default disposition BEFORE running the handler, so if `restore` ever hangs a second
+    # `pkill` still kills us instead of finding gori unkillable short of SIGKILL.
+    class SignalGuard
+      REAL_ARM = ->(sig : Signal, handler : Proc(Nil)) do
+        sig.trap do
+          sig.reset
+          handler.call
+        end
+      end
+
+      # Never returns: a signal sent to self under the default disposition terminates the
+      # process inside the `kill` syscall, before any further fiber can be scheduled.
+      REAL_DIE = ->(sig : Signal) { Process.signal(sig, Process.pid) }
+
+      def initialize(@restore : Proc(Nil),
+                     @signals : Array(Signal) = TUI_SIGNALS,
+                     @arm : Proc(Signal, Proc(Nil), Nil) = REAL_ARM,
+                     @die : Proc(Signal, Nil) = REAL_DIE)
+      end
+
+      def install : Nil
+        # One handler per signal, each closing over its OWN `sig`, so the process dies from
+        # the signal it actually received and the exit status matches.
+        @signals.each { |sig| @arm.call(sig, -> { fire(sig) }) }
+      end
+
+      private def fire(sig : Signal) : Nil
+        begin
+          @restore.call
+        rescue
+          # Best effort. The tty is already in the state this exists to prevent and there is
+          # nowhere on a half-torn-down screen to report the failure — but exiting with the
+          # right status still matters, so fall through to `die` rather than propagating
+          # into the signal fiber.
+        end
+        @die.call(sig)
+      end
+    end
+
     def initialize(@config : Config)
       Paths.ensure_dirs
       @ca = Proxy::Tls::CertAuthority.load_or_create(@config.ca_dir)
@@ -84,6 +158,15 @@ module Gori
       setup_logging(log_io)
 
       begin
+        # Armed FIRST, before anything else in this block: `open_terminal` above has ALREADY
+        # switched the tty into raw mode and entered the alternate screen, so from here on the
+        # terminal is only recoverable through `term.close` — and a DELIVERED signal never
+        # reaches the `ensure` below, because the default disposition kills the process with
+        # no stack unwind. Without this, `pkill gori` (or an SSH drop's SIGHUP) handed the
+        # operator's pane back with ECHO/ICANON/ISIG/OPOST off, the alternate screen up and
+        # mouse reporting on; only `reset` recovered it. See SignalGuard for why this restores
+        # and re-raises instead of nudging a shutdown channel the way run_capture does.
+        SignalGuard.new(-> { term.close; nil }).install
         # enable_* run INSIDE the begin so `ensure term.close` restores the tty if either
         # raises after open_terminal already switched it into raw mode (else the user's shell
         # is left in raw/no-echo).
@@ -119,6 +202,13 @@ module Gori
         end
       ensure
         term.close # restore the terminal even on error
+        # Disarm AFTER the close, not before: until `term.close` has actually run, the guard is
+        # still the only thing standing between a delivered signal and a wrecked tty. Ordered
+        # the other way there'd be a window where a signal mid-teardown left the terminal half
+        # restored. What this closes is the window on the far side — the traps outliving the
+        # terminal they capture, so a signal arriving during process teardown would re-close an
+        # already-closed Termisu (harmless, the guard swallows it) and exit 143 instead of 0.
+        TUI_SIGNALS.each(&.reset)
       end
     end
 
@@ -308,9 +398,12 @@ module Gori
       STDERR.puts "  press Ctrl-C to stop"
     end
 
+    # Headless capture's orderly stop: the main fiber is parked on `@shutdown.receive`, so a
+    # buffered send from the signal fiber wakes it and the normal teardown (reload fiber stop,
+    # then session.close) runs on the real stack. The interactive TUI cannot use this shape —
+    # see SignalGuard.
     private def install_signal_traps : Nil
-      Signal::INT.trap { @shutdown.send(nil) rescue nil }
-      Signal::TERM.trap { @shutdown.send(nil) rescue nil }
+      CAPTURE_SIGNALS.each { |sig| sig.trap { @shutdown.send(nil) rescue nil } }
     end
 
     private def setup_logging(io : IO) : Nil
