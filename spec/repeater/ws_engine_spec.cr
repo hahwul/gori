@@ -285,6 +285,12 @@ describe Gori::Repeater::WsEngine do
     String.new(inbound[0].payload).should eq("UNTERMINATED")
     inbound[0].shape.fin.should be_false
     result.close_code.should eq(1000)
+    # This `fin: false` row is the ORIGIN's §5.4 violation, not gori truncating at a cap: no
+    # cap fired (12 bytes, well under every limit), so it must carry NO gori marker and leave
+    # `truncated` unset. Marking it would put a fresh misreport where B4 removed one — the very
+    # thing the cap gate exists to keep separate.
+    result.truncated.should be_nil
+    result.messages.none? { |m| WS.notice?(m.payload) }.should be_true
   end
 
   # Same buffer, no CLOSE: the origin just goes away mid-message. Every exit from the drain
@@ -318,6 +324,63 @@ describe Gori::Repeater::WsEngine do
     inbound[0].shape.fin.should be_true
     inbound[0].shape.rsv.should eq(4) # §5.2 puts an extension's flags on the FIRST frame
     inbound[0].shape.frames.should eq(3)
+  end
+
+  # --- B4 (#10 L8-F1): a drain that hits a cap must SAY so, not report a clean transcript ---
+  #
+  # Before this, every cap was a bare `break` returning only the close code, so a truncated
+  # drain was byte-identical to a complete one. Each test drives a real cap over a scripted
+  # origin and asserts BOTH signals the fix adds: a `NOTICE_PREFIX` marker row in `messages`
+  # (which `WS.notice?` recognises and a repeater seed refuses to replay) and the Result-level
+  # `truncated` sentence naming the cap.
+
+  it "marks the transcript truncated past the control-frame cap" do
+    # 65 PINGs = one past MAX_CONTROL_MESSAGES (64), then a CLOSE. The CLOSE is what makes this
+    # deterministic: it proves the engine consumed the WHOLE script, so the 65th ping really
+    # was seen and dropped rather than the socket being torn down early.
+    script = IO::Memory.new
+    (WsEngine::MAX_CONTROL_MESSAGES + 1).times { script.write(WS.encode(WS::OP_PING, "p".to_slice, mask: false)) }
+    script.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false))
+    port = start_scripted_ws_origin(script.to_slice)
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, idle: 500.milliseconds)
+
+    result.close_code.should eq(1000)                                     # whole script consumed
+    result.truncated.not_nil!.should contain("control-frame cap")
+    result.messages.any? { |m| WS.notice?(m.payload) }.should be_true     # the marker row
+    # Only the cap's worth of ping rows survive (plus the CLOSE and the one marker), never all 65.
+    result.messages.count { |m| m.opcode == WS::OP_PING.to_i }.should eq(WsEngine::MAX_CONTROL_MESSAGES)
+  end
+
+  it "marks the transcript truncated past the message cap" do
+    # One completed TEXT message past MAX_RECV_MESSAGES (1000); the drain breaks at the cap.
+    script = IO::Memory.new
+    (WsEngine::MAX_RECV_MESSAGES + 1).times { script.write(WS.encode(WS::OP_TEXT, "x".to_slice, mask: false)) }
+    port = start_scripted_ws_origin(script.to_slice)
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, idle: 500.milliseconds)
+
+    result.truncated.not_nil!.should contain("message capture cap")
+    result.messages.any? { |m| WS.notice?(m.payload) }.should be_true
+    # The cap fired at exactly MAX_RECV_MESSAGES data rows — never the full 1001.
+    result.messages.count { |m| m.direction == "in" && m.opcode == 1 && !WS.notice?(m.payload) }
+      .should eq(WsEngine::MAX_RECV_MESSAGES)
+  end
+
+  it "marks an oversized fragment's fin:false row as gori-truncated, not a §5.4 violation" do
+    # A single unterminated fragment one byte past MAX_RECV_BYTES (and under the 16 MiB read
+    # cap, so `read_frame` still buffers it). gori — not the origin — stops accumulating, so the
+    # flushed `fin: false` row is OUR truncation; the adjacent marker + `truncated` say which.
+    big = Bytes.new((WsEngine::MAX_RECV_BYTES + 1).to_i, 0x41_u8)
+    port = start_scripted_ws_origin(WS.encode(WS::OP_TEXT, big, mask: false, fin: false))
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, idle: 500.milliseconds)
+
+    inbound = result.messages.select { |m| m.direction == "in" }
+    inbound[0].shape.fin.should be_false                                  # the truncated fragment
+    inbound[0].payload.size.should eq(big.size)
+    result.truncated.not_nil!.should contain("server-payload cap")
+    inbound.any? { |m| WS.notice?(m.payload) }.should be_true             # the marker sits adjacent
   end
 end
 

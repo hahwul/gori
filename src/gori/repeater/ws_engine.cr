@@ -100,9 +100,17 @@ module Gori
         getter note : String?  # a non-fatal advisory (e.g. handshake accept mismatch)
         getter close_code : Int32?
         getter? upgraded : Bool
+        # A cap-driven truncation of the inbound transcript, as the operator-facing sentence
+        # (nil when the drain ran to a clean CLOSE/EOF/idle). DISTINCT from `note`: `note` is a
+        # delivery/handshake advisory about a run that is otherwise complete, whereas this says
+        # the captured `messages` are SHORT of what the server sent — messages/bytes/frames/
+        # deadline/control cap. `drain` also appends ONE synthetic NOTICE_PREFIX `Message` row
+        # carrying the same sentence, so the truncation is visible in the transcript on every
+        # surface without each serializer having to special-case it; this field is the summary.
+        getter truncated : String?
 
         def initialize(@handshake_head, @messages, @duration_us, @error = nil,
-                       @note = nil, @close_code = nil, @upgraded = false)
+                       @note = nil, @close_code = nil, @upgraded = false, @truncated = nil)
         end
 
         def ok? : Bool
@@ -171,7 +179,10 @@ module Gori
           # The FIRST inbound read keeps the generous handshake bound (a slow first
           # reply isn't a dead server); drain narrows to `idle` once frames flow.
           sent_count = messages.size
-          close_code = drain(upstream, messages, idle)
+          # `drain` now reports its OWN truncation: a bare `break` at a cap was indistinguishable
+          # from a clean end, so it returns the cap sentence (nil when it ran to CLOSE/EOF/idle)
+          # alongside the close code — and has already pushed the matching NOTICE_PREFIX marker row.
+          close_code, truncated = drain(upstream, messages, idle)
           # Only when the operator did not send one themselves. §5.5.1 allows exactly one
           # CLOSE per direction, so appending gori's after theirs would put a second one on
           # the wire that they did not ask for — and the second frame, not the first, is what
@@ -187,7 +198,7 @@ module Gori
           # delivery is unconfirmed.
           note = with_delivery_note(note, sent_count, messages.size, close_code)
           Result.new(head, messages, elapsed(started), note: note,
-            close_code: close_code, upgraded: true)
+            close_code: close_code, upgraded: true, truncated: truncated)
         rescue ex
           # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
           # mid-exchange IO errors itself, so reaching here means the handshake failed.
@@ -208,7 +219,18 @@ module Gori
 
       # Read inbound frames until the server sends Close, goes idle (read timeout),
       # or a cap trips. Reassembles fragmented data messages; answers Ping with a
-      # Pong. Returns the close status code if the server framed one.
+      # Pong. Returns `{close status code, truncation sentence}` — the second is nil on a
+      # clean end and the reason when ANY cap fired (messages/bytes/frames/deadline/control).
+      #
+      # Truncating at a cap and reporting a CLEAN result is the bug this pair returns fix
+      # (#10 L8-F1): a bare `break` returned only the close code, so a drain that stopped
+      # short of the server's frames was indistinguishable from one that ran to the end. The
+      # sibling `Relay.capture_control` (proxy/ws/relay.cr:465) already does the honest thing —
+      # ONE synthetic NOTICE_PREFIX row so the truncation shows in the transcript and can never
+      # be replayed (`Store::WsMessage#notice?` refuses it). `drain` does the same at EVERY cap
+      # and surfaces the reason to the summary as well. The break-site caps set the reason
+      # UNCONDITIONALLY (the cap that ended the loop is the salient one); the control cap, which
+      # does not break, only fills it in if nothing else has (`||=`).
       #
       # Reassembly has THREE moments, not one, and this method used to have only the last:
       #
@@ -224,7 +246,7 @@ module Gori
       # correctly, so the two surfaces disagreed about the same protocol. `emit_pending` is
       # 1 and 3, `Proxy::WS::MessageShape` is the accumulator both now share, and the flushed
       # fragment carries `fin: false` — gori reports the violation rather than repairing it.
-      private def self.drain(io : IO, messages : Array(Message), idle : Time::Span) : Int32?
+      private def self.drain(io : IO, messages : Array(Message), idle : Time::Span) : {Int32?, String?}
         assembling = IO::Memory.new
         msg_opcode = Proxy::WS::OP_TEXT
         shape = Proxy::WS::MessageShape.new
@@ -233,6 +255,7 @@ module Gori
         recv_count = 0
         frames = 0
         close_code = nil.as(Int32?)
+        truncated = nil.as(String?) # the cap sentence, once any cap has fired
         started = Time.instant
         loop do
           # Count EVERY frame, not just completed messages: an origin flooding pings or
@@ -240,7 +263,10 @@ module Gori
           # the read timeout, so this frame ceiling is what guarantees termination.
           # A wall-clock deadline also caps total drain time: a steady sub-idle ping cadence
           # stays under MAX_DRAIN_FRAMES yet could otherwise pin the tab "inflight" for hours.
-          break if Time.instant - started > DRAIN_DEADLINE
+          if Time.instant - started > DRAIN_DEADLINE
+            truncated = "the #{DRAIN_DEADLINE.total_seconds.to_i}s drain deadline was reached; later server frames were not captured"
+            break
+          end
           frame = begin
             Proxy::WS.read_frame(io)
           rescue IO::Error
@@ -248,7 +274,10 @@ module Gori
           end
           break if frame.nil? # EOF / truncated
           frames += 1
-          break if frames > MAX_DRAIN_FRAMES
+          if frames > MAX_DRAIN_FRAMES
+            truncated = "the #{MAX_DRAIN_FRAMES}-frame drain ceiling was reached; later server frames were not captured"
+            break
+          end
           # After the first frame, narrow the per-read bound to `idle` so a silent gap
           # ends the drain promptly (the first read kept the generous handshake bound).
           narrow_read_timeout(io, idle) if frames == 1
@@ -264,13 +293,23 @@ module Gori
                 recv_count += 1
                 recv_bytes += assembling.bytesize
                 assembling = emit_pending(messages, assembling, msg_opcode, shape)
-                break if recv_caps_hit?(recv_count, recv_bytes)
+                if reason = recv_caps_reason(recv_count, recv_bytes)
+                  truncated = reason
+                  break
+                end
               end
               msg_opcode = frame.opcode
             end
             shape.note(frame)
             assembling.write(frame.payload)
-            break if assembling.bytesize > MAX_RECV_BYTES # runaway fragmented message
+            if assembling.bytesize > MAX_RECV_BYTES # runaway fragmented message
+              # gori — not the origin — stops accumulating here, so the fragment the post-loop
+              # `emit_pending` flushes with `fin: false` is OUR truncation, not the origin's
+              # §5.4 violation. Marking it (the adjacent marker row + this sentence) is what
+              # keeps that row from being MISread as a server that never sent a FIN.
+              truncated = bytes_cap_sentence
+              break
+            end
             if frame.fin?
               payload = assembling.to_slice.dup
               recv_bytes += payload.size
@@ -280,7 +319,10 @@ module Gori
               # so the two agree about identical bytes.
               messages << Message.new("in", msg_opcode.to_i, payload, shape.take)
               assembling = IO::Memory.new
-              break if recv_caps_hit?(recv_count, recv_bytes)
+              if reason = recv_caps_reason(recv_count, recv_bytes)
+                truncated = reason
+                break
+              end
             end
           elsif frame.close?
             # The CLOSE frame itself joins the transcript, not just its status code. The code
@@ -305,6 +347,12 @@ module Gori
             if ctl_count < MAX_CONTROL_MESSAGES
               ctl_count += 1
               messages << Message.new("in", frame.opcode.to_i, frame.payload.dup, frame.shape)
+            else
+              # Past the cap the ping/pong is still ANSWERED (see send_pong below) but no longer
+              # recorded — a drop that otherwise looks exactly like an origin that stopped
+              # pinging. `||=`, not `=`: this does not end the drain, so a hard cap that DOES end
+              # it later should own the summary; control only fills in when nothing else fired.
+              truncated ||= "the #{MAX_CONTROL_MESSAGES}-control-frame cap was reached; later ping/pong frames were not recorded"
             end
             send_pong(io, frame.payload) if frame.opcode == Proxy::WS::OP_PING
           end
@@ -313,7 +361,21 @@ module Gori
         # EOF, on a truncated frame, on a cap and on the CLOSE path alike — the same reason
         # `Relay.pump` puts its own flush in an `ensure` rather than at the tail.
         emit_pending(messages, assembling, msg_opcode, shape)
-        close_code
+        # The one truncation marker, AFTER the flush so it sits adjacent to (just after) any
+        # `fin: false` fragment the runaway-byte cap left behind — the row that says WHY that
+        # fragment ends unterminated. NOTICE_PREFIX + an "in" TEXT frame mirrors the relay
+        # sibling exactly: it renders in the inbound transcript like the rows it caps, yet a
+        # WS repeater seed can never put gori's own sentence back on the wire.
+        messages << truncation_marker(truncated) if truncated
+        {close_code, truncated}
+      end
+
+      # The synthetic row a capped drain leaves behind. Built from `NOTICE_PREFIX` (what
+      # `Store::WsMessage#notice?` reads to refuse a replay) so it is a diagnostic and not
+      # traffic, and carrying the SAME sentence the Result's `truncated` field does so the row
+      # and the summary can never disagree. Direction "in"/OP_TEXT matches `Relay`'s notices.
+      private def self.truncation_marker(reason : String) : Message
+        Message.new("in", Proxy::WS::OP_TEXT.to_i, "#{Proxy::WS::NOTICE_PREFIX}#{reason}".to_slice)
       end
 
       # Whatever fragments are buffered, as ONE message, and a fresh buffer. A no-op when
@@ -328,8 +390,23 @@ module Gori
         IO::Memory.new
       end
 
-      private def self.recv_caps_hit?(count : Int32, bytes : Int64) : Bool
-        count >= MAX_RECV_MESSAGES || bytes >= MAX_RECV_BYTES
+      # The recv-cap sentence when a DATA cap has tripped, else nil — so the caller both learns
+      # it must stop AND which cap to name, in one check. Message count is tested first because
+      # a flood of tiny messages and one giant payload are different findings.
+      private def self.recv_caps_reason(count : Int32, bytes : Int64) : String?
+        if count >= MAX_RECV_MESSAGES
+          "the #{MAX_RECV_MESSAGES}-message capture cap was reached; later server messages were not captured"
+        elsif bytes >= MAX_RECV_BYTES
+          bytes_cap_sentence
+        end
+      end
+
+      # The byte-cap sentence, in ONE place: the accumulated-recv path (`recv_caps_reason`) and
+      # the single-fragment runaway path both hit the same 8 MiB limit and must word it
+      # identically. A byte-identical literal in two spots is precisely the "two copies and one
+      # omission" the sibling relay's header warns produced its merged-row/dropped-bytes bugs.
+      private def self.bytes_cap_sentence : String
+        "the #{MAX_RECV_BYTES // (1024 * 1024)} MiB server-payload cap was reached; the transcript is truncated"
       end
 
       # Both socket types respond; responds_to? keeps the union's IO type happy.

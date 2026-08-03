@@ -810,10 +810,13 @@ module Gori::Tui
               j.field "upgraded", wr.upgraded?
               j.field "error", wr.error
               j.field "note", wr.note
+              j.field "truncated", wr.truncated # a cap cut the inbound transcript short
               j.field "close_code", wr.close_code
               j.field "duration_us", wr.duration_us
               j.field "messages_sent", wr.messages.count(&.direction.==("out"))
-              j.field "messages_received", wr.messages.count(&.direction.==("in"))
+              # Exclude the synthetic truncation marker: it is an inbound-direction diagnostic,
+              # not a frame the peer sent (see `ws_transcript_lines`).
+              j.field "messages_received", wr.messages.count { |m| m.direction == "in" && !Proxy::WS.notice?(m.payload) }
             end
           end
         end
@@ -3767,7 +3770,9 @@ module Gori::Tui
             rows << {"✗ #{err}", Theme.red}
           else
             sent = r.messages.count(&.direction.==("out"))
-            recv = r.messages.count(&.direction.==("in"))
+            # A synthetic truncation marker is an inbound-direction row but NOT a frame the peer
+            # sent, so it must not inflate "N received" — a diagnostic is not traffic (frame.cr).
+            recv = r.messages.count { |m| m.direction == "in" && !Proxy::WS.notice?(m.payload) }
             foot = String.build do |io|
               io << "✓ upgraded"
               io << " · closed #{r.close_code}" if r.close_code
@@ -3776,6 +3781,12 @@ module Gori::Tui
             rows << {foot, Theme.muted}
             if note = r.note
               rows << {"⚠ #{note}", Theme.yellow}
+            end
+            # The cap-truncation summary. A `← [gori] …` marker row already sits above in the
+            # transcript; this footer line is the same fact where the operator reads the run's
+            # outcome, next to the note it is deliberately kept separate from.
+            if trunc = r.truncated
+              rows << {"⚠ #{trunc}", Theme.yellow}
             end
           end
         end

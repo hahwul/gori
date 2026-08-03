@@ -753,6 +753,11 @@ module Gori
             j.field "duration_us", result.duration_us
             j.field "close_code", result.close_code if result.close_code
             j.field "note", Env.mask_secrets(result.note.not_nil!) if result.note
+            # A cap truncated the inbound transcript: the `messages` array below also carries a
+            # synthetic NOTICE_PREFIX row, but an agent reading only the envelope needs the fact
+            # too. The sentence is gori-authored (no operator bytes), but mask it anyway for the
+            # same one-rule reason the payloads are masked — this surface never emits raw.
+            j.field "truncated", Env.mask_secrets(result.truncated.not_nil!) if result.truncated
             # Only when it FIRED: the session's stored list held gori's own advisory rows and
             # this send is one frame per row short of the capture. See `CLI::Run.ws_seed_rows`.
             if notice_dropped > 0

@@ -737,6 +737,10 @@ module Gori
               j.field "close_code", result.close_code
               j.field "error", result.error
               j.field "note", result.note
+              # The inbound transcript stopped SHORT of the server at a cap. A synthetic row
+              # already sits in `messages` below; this is the summary half so a script reading
+              # the envelope (not walking the array) still sees the transcript is incomplete.
+              j.field "truncated", result.truncated
               j.field "messages" do
                 j.array do
                   result.messages.each do |m|
@@ -765,6 +769,7 @@ module Gori
         elsif result.ok?
           STDERR.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
           STDERR.puts "note: #{result.note}" if result.note
+          STDERR.puts "truncated: #{result.truncated}" if result.truncated
           result.messages.each { |m| puts ws_transcript_line(m) }
         else
           STDERR.puts "repeater failed: #{result.error}"
