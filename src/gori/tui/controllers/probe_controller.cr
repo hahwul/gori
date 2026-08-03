@@ -351,20 +351,63 @@ module Gori::Tui
 
     # Space-menu bulk actions: mute every OPEN issue sharing the targeted issue's code / host
     # (a confirm guards the mass mutation; it's reversible via show-closed + c).
+    #
+    # The code/host is captured NOW, before the confirm is raised, for the reason probe_delete
+    # spells out one screen up — and these two mass-mutate, so getting it wrong is worse here.
+    # The modal answers on a LATER tick (its action runs from on_close), and the Runner's
+    # per-tick probe_generation poll is NOT gated on the overlay: a peer writer on the same
+    # project (MCP probe_dismiss/probe_delete, a second gori instance, `gori run probe`) can
+    # make the cursor issue leave the open-only list in between, at which point ProbeView's
+    # apply_filter loses its prev_id anchor and clamps onto a DIFFERENT issue. Re-deriving the
+    # group from the cursor at answer time then dismissed every open issue sharing the OTHER
+    # issue's code — and the toast took its count from the re-resolved issue and its code from
+    # the prompt, so one sentence reported two different groups.
     def probe_dismiss_code : Nil
       return unless i = @probe.target_issue
-      @host.confirm("DISMISS GROUP", "Dismiss all open \"#{i.code}\" issues?", confirm_label: "dismiss", danger: false) do
-        n = @probe.dismiss_by_code(@host.session.store)
-        @host.status("dismissed #{n} \"#{i.code}\" issue#{n == 1 ? "" : "s"}")
+      code = i.code
+      @host.confirm("DISMISS GROUP", "Dismiss all open \"#{code}\" issues?", confirm_label: "dismiss", danger: false) do
+        n = ProbeController.dismiss_open_by_code(@host.session.store, @host.session.scope, code)
+        @probe.reload(@host.session.store)
+        @host.status("dismissed #{n} \"#{code}\" issue#{n == 1 ? "" : "s"}")
       end
     end
 
     def probe_dismiss_host : Nil
       return unless i = @probe.target_issue
-      @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{i.host}?", confirm_label: "dismiss", danger: false) do
-        n = @probe.dismiss_by_host(@host.session.store)
-        @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{i.host}")
+      host = i.host
+      @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{host}?", confirm_label: "dismiss", danger: false) do
+        n = ProbeController.dismiss_open_by_host(@host.session.store, host)
+        @probe.reload(@host.session.store)
+        @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{host}")
       end
+    end
+
+    # Mute every OPEN issue carrying `code`, honouring the ⇧S scope lens exactly as the
+    # visible list does: dismissing "all with this code" from a scoped view must not silently
+    # mute issues on out-of-scope hosts the operator cannot see, and the returned count must
+    # equal what was actually muted.
+    #
+    # Class-level and store-only on purpose. It takes the code the confirm was RAISED with, so
+    # there is no cursor left for a late answer to re-read — the property this fix turns on —
+    # and a spec can drive it without standing up a Runner. Counts the writes that COMMITTED
+    # (update_probe_issue_status answers that, and store/probe_issues.cr is explicit that
+    # callers must not drop the answer), so a busy or rolled-back store reports "dismissed 0"
+    # rather than a number of rows it merely attempted.
+    def self.dismiss_open_by_code(store : Store, scope : Scope?, code : String) : Int32
+      lens = scope.try(&.active?) == true ? scope : nil
+      targets = store.probe_issues.select do |i|
+        i.code == code && i.status.open? && (lens.nil? || lens.host_in_scope?(i.host))
+      end
+      targets.count { |i| store.update_probe_issue_status(i.id, Store::Status::FalsePositive) }
+    end
+
+    # Mute every OPEN issue on `host`. One bulk UPDATE rather than a per-id loop: the host is
+    # a single visible row, so the scope lens — which filters BY host — already admits every
+    # row this touches, and there is no cross-scope leak to guard against. Returns how many
+    # were open beforehand, or 0 when the batch did not commit.
+    def self.dismiss_open_by_host(store : Store, host : String) : Int32
+      n = store.probe_issues.count { |i| i.host == host && i.status.open? }
+      store.dismiss_probe_by_host(host) ? n : 0
     end
 
     # --- Rules sub-tab actions (ProbeRules verbs + clicks) ---
