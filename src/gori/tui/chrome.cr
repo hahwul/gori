@@ -415,7 +415,11 @@ module Gori::Tui
                                  intercept_count : Int32) : {Array({Symbol, String, Rect}), Int32}
       segs = [] of {Symbol, String, Rect}
       labels = tabs.map { |(sym, label)| "#{label}#{menu_badge(sym, intercept_count)}" }
-      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
+      # Columns, like strip_layout's sibling line. The catalog TABS are fixed ASCII, where
+      # display_width takes its bytesize fast path and this is a no-op — but `tabs` comes from
+      # the caller, and the two layout helpers share scroll_start, so they must not measure a
+      # label two different ways.
+      widths = labels.map { |l| Screen.display_width(l) + 2 } # one space of padding each side
       active_idx = tabs.index { |(sym, _)| sym == active_tab } || 0
       # Window the strip so the active segment is ALWAYS visible: on a narrow row
       # advance the start until segments [start..active] fit, so the menu scrolls
@@ -463,25 +467,31 @@ module Gori::Tui
       active = active.clamp(0, labels.size - 1)
       segs, start, last, vis_last = strip_layout(rect, labels, active, prev_start, hidden)
       segs.each do |(i, label, seg)|
+        # Every draw is clipped to the chip's own interior. With widths in columns the label
+        # fits exactly, so nothing truncates today — but an unclipped `screen.text` is bounded
+        # by the SCREEN, not the pill, which is what let a mismeasured label bleed into its
+        # neighbour silently. Binding the ink to `seg` makes render structurally unable to
+        # paint outside the rect the hit-test hands back.
+        ink_end = seg.right - 1 # exclusive: the trailing pad column, which ink never reaches
         if i == active
           if focused
             bg = Theme.focus_gold
             screen.fill(seg, bg)
-            screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold)
+            screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold, width: ink_end - (seg.x + 1))
           else
             # Unfocused: a calmer, receded gold (FOCUS_GOLD 70% over the canvas) — still
             # unmistakably a gold chip, a step below the bright focus pill, never the
             # near-invisible ACCENT_BG grey band.
             bg = Theme.blend(Theme.focus_gold, Theme.bg, SUBTAB_DIM_GOLD)
             screen.fill(seg, bg)
-            screen.text(seg.x + 1, seg.y, label, Theme.text_bright, bg, Attribute::Bold)
+            screen.text(seg.x + 1, seg.y, label, Theme.text_bright, bg, Attribute::Bold, width: ink_end - (seg.x + 1))
           end
         else
           num_end, tag_start = chip_zones(label)
           x = seg.x + 1
-          x = screen.text(x, seg.y, label[0, num_end], Theme.muted, Theme.bg) if num_end > 0
-          x = screen.text(x, seg.y, label[num_end...tag_start], Theme.text, Theme.bg)
-          screen.text(x, seg.y, label[tag_start..], Theme.syn_header, Theme.bg) if tag_start < label.size
+          x = screen.text(x, seg.y, label[0, num_end], Theme.muted, Theme.bg, width: ink_end - x) if num_end > 0
+          x = screen.text(x, seg.y, label[num_end...tag_start], Theme.text, Theme.bg, width: ink_end - x)
+          screen.text(x, seg.y, label[tag_start..], Theme.syn_header, Theme.bg, width: ink_end - x) if tag_start < label.size
         end
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
@@ -530,7 +540,14 @@ module Gori::Tui
       # The absolute indices actually shown, in order (filtered chips skipped).
       vis = (0...labels.size).select { |i| hidden.nil? || !hidden.includes?(i) }
       return {segs, 0, -1, -1} if vis.empty?
-      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
+      # DISPLAY width, not `String#size` — the same reason chips_width states below. A chip
+      # label is user data (a Repeater session name or CJK path, a Notes first line), and
+      # `screen.text` advances by COLUMNS: measuring in characters makes every wide-glyph chip
+      # narrower than the cells it paints. Render and the hit-test both read this layout, so
+      # they would agree with each other and disagree with the screen — a click on the visible
+      # tail of one chip landing on the next. `x`, `rect.right` and scroll_start's `avail` were
+      # always columns; they were merely being fed character counts.
+      widths = labels.map { |l| Screen.display_width(l) + 2 } # one space of padding each side
       # Window over the VISIBLE positions so the active chip stays on-screen; reserve a
       # column on each edge for the ‹ / › overflow markers.
       apos = vis.index(active) || 0
