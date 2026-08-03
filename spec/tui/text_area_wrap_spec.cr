@@ -159,6 +159,82 @@ describe "Gori::Tui::TextArea soft wrap" do
     end
   end
 
+  # NORMAL mode drives the caret through `TextReadState`, not `TextArea#move` — and NORMAL is
+  # the mode the request pane opens in, so it is the ↓ the operator actually presses. It
+  # stepped logical LINES while INSERT stepped visual rows: on a long header or a minified
+  # body that jumped the caret over every continuation row the pane was drawing, and the two
+  # modes disagreed about what "down" meant in the one pane that wraps.
+  describe "READ-mode caret movement (NORMAL)" do
+    it "steps ↓ onto the continuation row of the SAME logical line" do
+      ed, _ = wrap_render("#{"0123456789" * 4}\nnext", 20, 6, gutter: false)
+      read = TextReadState.new
+      ed.place_cursor(0, 5)
+      read.move(ed, 1, 0)
+      ed.cy.should eq(0)  # still logical line 1 …
+      ed.cx.should eq(25) # … one visual row down at the same column, exactly as INSERT does
+      read.move(ed, 1, 0)
+      ed.cy.should eq(1) # only now onto the next logical line
+      ed.cx.should eq(4) # clamped to its length
+    end
+
+    it "steps ↑ back over the boundary to the column it came from" do
+      ed, _ = wrap_render("0123456789" * 4, 20, 6, gutter: false)
+      read = TextReadState.new
+      ed.place_cursor(0, 27)
+      read.move(ed, -1, 0)
+      ed.cx.should eq(7)
+      read.move(ed, -1, 0)
+      ed.cx.should eq(7) # first row already — nowhere further up
+    end
+
+    # ⇧↓ has to end where a plain ↓ would or the selection covers rows the operator never
+    # crossed. Under wrap that lands mid-line, which the char rectangle already models — the
+    # end-of-line snap was only ever what stepping whole lines happened to produce.
+    it "extends a selection by one visual row, not to the end of the logical line" do
+      line = "0123456789" * 4
+      ed, _ = wrap_render(line, 20, 6, gutter: false)
+      read = TextReadState.new
+      ed.place_cursor(0, 5)
+      read.move(ed, 1, 0, selecting: true)
+      ed.cx.should eq(25)
+      read.copy_text(ed).should eq(line[5...25])
+    end
+
+    # A `§value¦chain§` marker's chain segment is concealed: it occupies no cells, so a ↓ that
+    # measured the raw text would park the caret on a character that is not on screen — where
+    # the operator sees the caret in one place and the next keystroke acts somewhere else.
+    # `Wrap.row_index` steps over a run rather than into it; this is the read path proving it.
+    it "lands outside a concealed run when it steps onto the row holding one" do
+      # Row 0 is the 20 x's; row 1 draws "§v§yyyy", the "¦b64" between them being hidden.
+      text = "#{"x" * 20}§v¦b64§yyyy"
+      run = {22, 26} # the "¦b64" chars
+      ed = TextArea.new(text)
+      ed.conceal_spans = [run]
+      ed, _ = wrap_render(text, 20, 6, gutter: false, ta: ed)
+      read = TextReadState.new
+      ed.place_cursor(0, 2)
+      read.move(ed, 1, 0)
+      ed.cy.should eq(0)
+      # Display column 2 of row 1 is the CLOSING §: the hidden run drew nothing, so the two
+      # columns before it are "§v". Measuring the raw text instead would stop on the "¦".
+      ed.cx.should eq(26)
+      (run[0]...run[1]).should_not contain(ed.cx)
+    end
+
+    # Every non-wrapping owner — Notes, the project description, the Fuzzer template — keeps
+    # the logical step it always had; there are no continuation rows for it to visit.
+    it "still steps logical lines when the editor does not wrap" do
+      ed = TextArea.new("#{"0123456789" * 4}\nnext")
+      ed.gutter = false
+      ed.render(Screen.new(MemoryBackend.new(20, 6)), Rect.new(0, 0, 20, 6), cursor: false)
+      read = TextReadState.new
+      ed.place_cursor(0, 5)
+      read.move(ed, 1, 0)
+      ed.cy.should eq(1)
+      ed.cx.should eq(4)
+    end
+  end
+
   describe "vertical scrolling in visual rows" do
     # @scroll indexes LOGICAL lines and would drift the moment anything wrapped; the anchor
     # is (line, sub-row) and the wheel moves it one DRAWN row at a time.

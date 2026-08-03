@@ -221,6 +221,64 @@ module Gori::Tui
       step_back(cy, csub, h - 1, layout_at)
     end
 
+    # --- the caret's own vertical step ---------------------------------------
+    # ↑/↓ move the caret one VISUAL row, keeping its display column — the motion every
+    # editor performs and the one soft wrap makes non-trivial, because a logical step
+    # would jump the caret over every continuation row the pane is showing between here
+    # and the next line number. Which is exactly the confusion soft wrap exists to remove.
+    #
+    # It lives HERE, next to `row_col` and `row_index`, rather than in each pane, because
+    # it is those two composed: measure the column within the row the caret is on, walk
+    # rows, then invert the measure on the row it landed on. A pane that re-derived the
+    # walk would also re-derive the measure, which is this module's standing hazard (see
+    # the header). One implementation serves the request editor (INSERT via
+    # `TextArea#move_visual`, NORMAL via `TextReadState`) and the response pane alike.
+    #
+    # `line_at`/`layout_at` must describe the SAME text the pane draws — for the response
+    # in diff mode that is the `"+ "`-prefixed line, so the caller converts its column
+    # into those coordinates and back out again (see `RepeaterView#resp_visual_target`).
+    #
+    # Returns the destination `{line, char index}`, stopping at either end of the buffer.
+    # The column is a display column, so a step onto a shorter row lands at that row's end
+    # — and, `row_index` being cluster-wise, never inside a glyph or a concealed run.
+    def self.step_caret(li : Int32, cx : Int32, dr : Int32, size : Int32,
+                        line_at : Int32 -> String,
+                        layout_at : Int32 -> Layout,
+                        conceal_at : (Int32 -> Array({Int32, Int32})?)? = nil) : {Int32, Int32}
+      return {li, cx} if dr == 0 || size <= 0
+      li = li.clamp(0, size - 1)
+      lay = layout_at.call(li)
+      sub = lay.row_of(cx)
+      goal = row_col(line_at.call(li), conceal_at.try &.call(li), lay.start_of(sub), cx)
+      n = dr.abs
+      while n > 0
+        if dr > 0
+          if sub + 1 < lay.rows
+            sub += 1
+          elsif li < size - 1
+            li += 1
+            lay = layout_at.call(li)
+            sub = 0
+          else
+            break
+          end
+        else
+          if sub > 0
+            sub -= 1
+          elsif li > 0
+            li -= 1
+            lay = layout_at.call(li)
+            sub = lay.rows - 1
+          else
+            break
+          end
+        end
+        n -= 1
+      end
+      target = line_at.call(li)
+      {li, row_index(target, conceal_at.try &.call(li), lay.start_of(sub), lay.end_of(sub), goal)}
+    end
+
     # Whether char index `i` falls inside a concealed run. Linear in the run count, which is
     # the marker count on one line — single digits in every real request.
     private def self.hidden?(conceal : Array({Int32, Int32})?, i : Int32) : Bool

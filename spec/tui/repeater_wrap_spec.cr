@@ -59,18 +59,114 @@ describe "Gori::Tui::RepeaterView soft wrap" do
     view.resp_cursor.cx.should eq(cw + 2) # … one wrapped row in, plus two columns
   end
 
-  it "moves the response caret down without the pane losing it (visual ensure_visible)" do
+  # ↓ steps one VISUAL row. It used to step a logical LINE, which on a wrapped line jumped
+  # the caret over every continuation row the pane was showing — from the first row of a
+  # 400-char body line straight to SENTINEL, skipping the eleven rows in between. Those rows
+  # are drawn; nothing but this arrow could reach them.
+  it "moves the response caret down one visual row at a time, then onto the next line" do
     view = loaded_view("#{"z" * 400}\nSENTINEL")
     rect = Rect.new(0, 0, 80, 14)
     b = MemoryBackend.new(80, 14)
     view.render(Screen.new(b), rect)
+    body = resp_body_rect(rect)
+    gw = Gori::Settings.show_gutter ? Gutter.width(5) : 0 # status, header, blank, body ×2
+    cw = body.w - gw
     view.resp_move(1, 0) # header
     view.resp_move(1, 0) # blank
-    view.resp_move(1, 0) # the 400-char body line
-    view.resp_move(1, 0) # SENTINEL, many wrapped rows below the fold
+    view.resp_move(1, 0) # the 400-char body line, first visual row
+    view.resp_cursor.cy.should eq(3)
+    view.resp_cursor.cx.should eq(0)
+    view.resp_move(1, 0)
+    view.resp_cursor.cy.should eq(3)  # still the same LINE …
+    view.resp_cursor.cx.should eq(cw) # … one wrapped row into it, at the same column
+    # Every remaining continuation row is its own press; only the last one leaves the line.
+    rows = (400 + cw - 1) // cw
+    (rows - 2).times { view.resp_move(1, 0) }
+    view.resp_cursor.cy.should eq(3)
+    view.resp_cursor.cx.should eq((rows - 1) * cw)
+    view.resp_move(1, 0)
+    view.resp_cursor.cy.should eq(4) # SENTINEL, many wrapped rows below the fold
+    # …and the pane scrolled along with it (ensure_visible counts visual rows too).
     b2 = MemoryBackend.new(80, 14)
     view.render(Screen.new(b2), rect)
     b2.contains?("SENTINEL").should be_true
+  end
+
+  # Diff mode prefixes every row with a 2-column "+ "/"- ", so the DECORATED line is two
+  # columns longer than the text and can need one more row than the bare text would. The
+  # caret must be walked in those decorated coordinates — the grid the pane was laid out and
+  # drawn on — and handed back in the bare ones the cursor holds.
+  #
+  # A body of exactly 2×cw is the case that tells the two apart: bare it is 2 rows, decorated
+  # it is 3, and that third row IS drawn. Wrapping the bare text would leave the line one
+  # press early and make the row unreachable — the same class of bug as skipping wrapped rows
+  # entirely, just one row wide.
+  it "steps the response caret by visual rows in diff mode, across the +/- decoration" do
+    rect = Rect.new(0, 0, 80, 14)
+    body = resp_body_rect(rect)
+    gw = Gori::Settings.show_gutter ? Gutter.width(7) : 0
+    cw = body.w - gw
+    payload = "#{"z" * (cw * 2)}\nTAIL"
+    view = loaded_view(payload)
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+    # A second send gives diff a baseline (the first response) to compare against.
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, payload.to_slice, nil, 1000_i64))
+    view.toggle_resp_mode # response → diff
+    view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    # The diff's own line list: status, header, its blank separators, then the two body lines.
+    body_li = 5
+    body_li.times { view.resp_move(1, 0) }
+    view.resp_cursor.cy.should eq(body_li)
+    view.resp_cursor.cx.should eq(0)
+    view.resp_move(1, 0)
+    view.resp_cursor.cy.should eq(body_li) # the SAME diff line, one row down …
+    view.resp_cursor.cx.should eq(cw)      # … directly under the column it held
+    view.resp_move(1, 0)
+    # The third row: the two chars the decoration pushed past the second break. Bare-text
+    # wrapping has no such row and would already have moved on to TAIL.
+    view.resp_cursor.cy.should eq(body_li)
+    view.resp_cursor.cx.should eq(cw * 2)
+    view.resp_move(1, 0)
+    view.resp_cursor.cy.should eq(body_li + 1) # only now onto TAIL
+  end
+
+  # The two grids disagree about the last DIFF_PREFIX_COLS columns of a diff row: text index
+  # cw-2 is the start of the decorated line's second row, but would still be on the first row
+  # of a bare-text wrap. A click resolves it the decorated way (that is the row it was drawn
+  # on), so an arrow that measured the bare text would think the caret was one row higher
+  # than it is — and ↑ from there leaves the line entirely instead of moving within it.
+  it "agrees with the click about which diff row the caret is on" do
+    rect = Rect.new(0, 0, 80, 14)
+    body = resp_body_rect(rect)
+    gw = Gori::Settings.show_gutter ? Gutter.width(7) : 0
+    cw = body.w - gw
+    payload = "#{"z" * (cw * 2)}\nTAIL"
+    view = loaded_view(payload)
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, payload.to_slice, nil, 1000_i64))
+    view.toggle_resp_mode
+    view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    body_li = 5
+    # Column 0 of that line's SECOND drawn row — the five short lines above it take one row
+    # each, so it is the sixth row of the pane.
+    view.resp_click_to_cursor(rect, body.x + gw, body.y + body_li + 1)
+    view.resp_cursor.cy.should eq(body_li)
+    view.resp_cursor.cx.should eq(cw - 2) # the decoration ate two columns of this row
+    view.resp_move(-1, 0)
+    view.resp_cursor.cy.should eq(body_li) # back to the line's FIRST row, still the same line
+    view.resp_cursor.cx.should eq(0)
+  end
+
+  # ↑ is the exact inverse: a run of ↓ then the same number of ↑ lands back where it began.
+  it "moves the response caret back up through the wrapped rows it came down" do
+    view = loaded_view("#{"z" * 400}\nSENTINEL")
+    rect = Rect.new(0, 0, 80, 14)
+    view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    6.times { view.resp_move(1, 0) }
+    view.resp_cursor.cy.should eq(3) # inside the wrapped line, not past it
+    6.times { view.resp_move(-1, 0) }
+    view.resp_cursor.cy.should eq(0)
+    view.resp_cursor.cx.should eq(0)
   end
 
   # The wheel steps DRAWN rows. With a line-indexed offset one notch jumped the whole

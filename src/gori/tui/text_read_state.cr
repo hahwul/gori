@@ -26,11 +26,25 @@ module Gori::Tui
       apply(editor, lines)
     end
 
+    # ↑/↓ step one VISUAL row whenever the editor soft-wraps, matching what the same arrow
+    # does in INSERT mode. Stepping logical lines here jumped the caret over every
+    # continuation row of a long header or a minified body — past everything the pane was
+    # showing between one line number and the next — so the two modes disagreed about what
+    # "down" means in the one pane that wraps.
+    #
+    # The destination comes from the editor because the editor owns the wrap layout;
+    # `visual_row_target` is nil for every non-wrapping owner (Notes, the project
+    # description, the Fuzzer template), which then keeps the plain logical step it always
+    # had. Horizontal moves are unaffected: a wrapped row has no sideways.
     def move(editor : TextArea, dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       lines = editor.lines_snapshot
       return if lines.empty?
       @cursor.sync(editor.cy, editor.cx)
-      @cursor.move(dr, dc, lines, selecting: selecting)
+      if dr != 0 && (target = editor.visual_row_target(dr))
+        @cursor.move_to(target[0], target[1], selecting: selecting)
+      else
+        @cursor.move(dr, dc, lines, selecting: selecting)
+      end
       apply(editor, lines)
     end
 

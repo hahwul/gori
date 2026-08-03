@@ -103,6 +103,28 @@ module Gori::Tui
       end
     end
 
+    # Put the caret on an ALREADY-RESOLVED position, applying `move`'s anchor rules: shift
+    # pins the far end where the caret stands now, an unmodified move collapses the
+    # selection. For a destination only the owner can compute — the visual row a soft-wrapped
+    # ↑/↓ lands on, which needs a layout this class deliberately does not have (see
+    # `Wrap.step_caret`, and `RepeaterView#paint_request_read_chrome` on why it has none).
+    #
+    # Vertical steps through `move` snap to end-of-line; this does NOT, and that difference
+    # is the point rather than an oversight. Under wrap the caret stops mid-line at the
+    # display column it kept, and ⇧↓ has to end exactly where a plain ↓ would or the
+    # selection covers rows the operator never crossed. Both the span painter and
+    # `selection_text` handle a mid-line boundary already — the char rectangle is the model,
+    # the EOL snap was only ever what stepping whole lines happened to produce.
+    def move_to(cy : Int32, cx : Int32, selecting : Bool = false) : Nil
+      if selecting
+        @anchor ||= {@cy, @cx}
+      else
+        @anchor = nil
+      end
+      @cy = cy
+      @cx = cx
+    end
+
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
                         lines : Array(String), gutter_w : Int32 = 0, xscroll : Int32 = 0) : Nil
       click_to_cursor(rect, mx, my, scroll, lines.size, ->(i : Int32) { lines[i] }, gutter_w, xscroll)

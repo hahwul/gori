@@ -1222,47 +1222,33 @@ module Gori::Tui
     end
 
     # ↑/↓ across wrapped rows: step `dr` VISUAL rows, keeping the caret's display column.
-    # The column is measured from the row's first char and mapped back through
-    # `Wrap.row_index`, the same inverse pair the caret and the click use — so a run of ↓
-    # then ↑ lands back where it started at every cluster boundary.
     private def move_visual(dr : Int32) : Nil
-      cw = @last_cw
-      line = @lines[@cy]
-      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
-      lay = layout_of(@cy, cw)
-      sub = lay.row_of(@cx)
-      goal = Wrap.row_col(line, cr, lay.start_of(sub), @cx)
-      li = @cy
-      n = dr.abs
-      while n > 0
-        if dr > 0
-          if sub + 1 < lay.rows
-            sub += 1
-          elsif li < @lines.size - 1
-            li += 1
-            lay = layout_of(li, cw)
-            sub = 0
-          else
-            break
-          end
-        else
-          if sub > 0
-            sub -= 1
-          elsif li > 0
-            li -= 1
-            lay = layout_of(li, cw)
-            sub = lay.rows - 1
-          else
-            break
-          end
-        end
-        n -= 1
-      end
-      @cy = li
-      tline = @lines[li]
-      tcr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(li), tline.size)
-      @cx = Wrap.row_index(tline, tcr, lay.start_of(sub), lay.end_of(sub), goal)
+      @cy, @cx = visual_row_target(dr) || return
       snap_cx_to_cluster(0) # row_index already lands on a boundary; cheap guard for the empty-row case
+    end
+
+    # Where the caret would land `dr` VISUAL rows away, or nil when this editor has nothing
+    # to wrap (soft wrap off, or no render has measured the content width yet) — in which
+    # case a visual row IS a logical line and the caller's plain step is already right.
+    #
+    # Public because NORMAL mode's caret is driven from outside, by `TextReadState`, and it
+    # has to move exactly where an INSERT-mode arrow would: this editor owns the wrap memo
+    # and the conceal spans, so the alternative is a second layout somewhere that cannot
+    # see either. Reports only the destination and touches no state — the read model plants
+    # its own anchor and writes back through `place_cursor`.
+    def visual_row_target(dr : Int32) : {Int32, Int32}?
+      return nil unless wrapping?
+      return nil if dr == 0
+      cw = @last_cw
+      conceal_at = if @conceal_spans.empty?
+                     nil
+                   else
+                     ->(i : Int32) : Array({Int32, Int32})? { line_conceal(line_start_offset(i), @lines[i].size) }
+                   end
+      Wrap.step_caret(@cy, @cx, dr, @lines.size,
+        ->(i : Int32) { @lines[i] },
+        ->(i : Int32) { layout_of(i, cw) },
+        conceal_at)
     end
 
     # The composing caret line as spans: buffer text, the preedit underlined, buffer text —

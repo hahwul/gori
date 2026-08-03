@@ -2889,12 +2889,38 @@ module Gori::Tui
 
     # Response READ: move caret (and optional selection). Scroll follows the caret.
     # Lazy line source — vertical steps only materialise the destination line.
+    #
+    # ↑/↓ step one VISUAL row (see `resp_visual_target`), like the request editor's.
     def resp_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless resp_navigable?
       size, line_at = resp_line_source
       return if size <= 0
-      @resp_cursor.move(dr, dc, size, line_at, selecting)
+      if target = resp_visual_target(dr)
+        @resp_cursor.move_to(target[0], target[1], selecting: selecting)
+      else
+        @resp_cursor.move(dr, dc, size, line_at, selecting)
+      end
       ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
+    end
+
+    # The caret `dr` visual rows away, in the BARE line coordinates `@resp_cursor` holds, or
+    # nil when this pane has no wrap to walk — hex draws its own fixed rows, and before the
+    # first frame there is no content width to have laid anything out at (`scroll` guards on
+    # the same pair). The caller then steps logical lines, which is what a row is there.
+    #
+    # The walk runs on the DRAWN line, because that is what the wrap was computed on: in
+    # diff mode every row carries a `"+ "`/`"- "` decoration whose columns shift each break.
+    # So the column goes in as `cx + off` and the result comes back out through the same
+    # `{cx - off, 0}.max.clamp(…)` the click and the wheel already use — a caret that lands
+    # on the decoration belongs at column 0 of the text, the only place it can be drawn.
+    private def resp_visual_target(dr : Int32) : {Int32, Int32}?
+      return nil if dr == 0 || @resp_hex || @resp_last_cw <= 0
+      size, drawn_at, off = resp_drawn_source
+      return nil if size <= 0
+      _, line_at = resp_line_source
+      li, dcx = Wrap.step_caret(@resp_cursor.cy, @resp_cursor.cx + off, dr, size,
+        drawn_at, resp_layout_fn(@resp_last_cw, drawn_at))
+      {li, {dcx - off, 0}.max.clamp(0, line_at.call(li).size)}
     end
 
     # The INS half of the guard is gone: the wheel scrolls the request editor in insert
