@@ -172,6 +172,15 @@ module Gori
         # is left in raw/no-echo).
         term.enable_enhanced_keyboard       # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
         term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav; one enable covers both the picker and the runner (same term). Runner reconciles live on settings save; term.close disables on exit.
+        # DEC 2004. Unconditional and not a setting: without it a paste is indistinguishable
+        # from typing, and on a terminal that maps the LF of a pasted CRLF to a second CR one
+        # pasted line break arrives as CR CR — two Enters, a blank line after every pasted
+        # line, and in the Repeater editor a head that ends right after the request line (no
+        # Host → the origin answers 400). With it the terminal sends the clipboard bytes
+        # verbatim between \e[200~ and \e[201~, which `Tui::PasteNewline` swallows. Terminals
+        # that don't implement 2004 ignore the sequence and fall back to PasteNewline's pair
+        # rule, so enabling it can only help. term.close disables it on exit.
+        term.enable_bracketed_paste
         # First-run onboarding: no settings.json yet → walk the user through bind /
         # theme setup once. Inside `begin` so the `ensure term.close` restores
         # the terminal if it raises. The wizard persists settings.json (even on skip),

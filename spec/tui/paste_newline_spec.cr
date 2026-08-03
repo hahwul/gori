@@ -69,3 +69,53 @@ describe Gori::Tui::PasteNewline do
     filter.swallow?(ctrl_enter).should be_false
   end
 end
+
+# Bracketed paste (termisu#3, gori enables DEC 2004 in app.cr). The markers are not
+# keystrokes and must never reach a view; between them `pasting?` is true.
+#
+# This is the half that fixes the reported bug. The pair rule below could never collapse
+# CR CR — that is byte-for-byte two deliberate Enters — so on a terminal that maps the LF of
+# a pasted CRLF to a second CR, a Burp-copied request gained a blank line per line. Mode 2004
+# stops the translation at the source; there is nothing left here to be clever about.
+private def pkey(k : Termisu::Input::Key, char : Char? = nil)
+  Termisu::Event::Key.new(k, Termisu::Input::Modifier::None, char)
+end
+
+describe "PasteNewline bracketed paste" do
+  it "swallows both markers and reports pasting? in between" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.pasting?.should be_false
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart)).should be_true
+    pn.pasting?.should be_true
+    pn.swallow?(pkey(Termisu::Input::Key::PasteEnd)).should be_true
+    pn.pasting?.should be_false
+  end
+
+  it "still collapses a CRLF delivered inside a paste" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart))
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\r')).should be_false # the newline
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\n')).should be_true  # its LF half, dropped
+    pn.swallow?(pkey(Termisu::Input::Key::PasteEnd))
+  end
+
+  # A blank line inside the pasted body is CR LF CR LF: one Enter survives per pair, so the
+  # blank line is preserved rather than eaten.
+  it "keeps a blank line that was really in the clipboard" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart))
+    kept = [{'\r', false}, {'\n', true}, {'\r', false}, {'\n', true}].count do |(c, _)|
+      !pn.swallow?(pkey(Termisu::Input::Key::Enter, c))
+    end
+    kept.should eq(2) # two newlines => one blank line
+  end
+
+  # The marker resets the pair state: a CR typed immediately before a paste must not pair
+  # with the paste's first LF and swallow a real line break.
+  it "does not let a keystroke before the paste pair with the paste's first byte" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\r')).should be_false
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart))
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\n')).should be_false
+  end
+end
