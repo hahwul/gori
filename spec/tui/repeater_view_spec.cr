@@ -193,11 +193,19 @@ describe Gori::Tui::RepeaterView do
   end
 
   # The memo reuses the SAME styled Line object across frames — safe only because every
-  # downstream consumer (Highlight.draw / slice_left / line_width_upto) is read-only. Guard
-  # that: style a wide line (frame 1), scroll it sideways so slice_left runs on the cached
-  # Line (frame 2), then scroll back — the head must be intact (a slice_left that mutated
-  # its input in place would have corrupted the cached Line).
-  it "styled-line memo survives a horizontal-scroll round-trip without corrupting the cached line" do
+  # downstream consumer (Highlight.draw / slice_chars / line_width_upto) is read-only.
+  #
+  # ASSERTION INVERTED BY SOFT WRAP. This used to prove the guard by scrolling the pane
+  # sideways so `slice_left` ran on the cached Line and checking the head disappeared. The
+  # response pane no longer scrolls sideways — a long body line WRAPS — so "head off the
+  # left edge" is not a state the pane can reach, and `view.hscroll` is now a no-op stub.
+  # What still needs guarding is the same thing: the per-row slicer (`Highlight.slice_chars`
+  # now, driving the continuation rows) must not mutate the memoized Line. So the exercise
+  # is the SLICE rather than the scroll — render a body wide enough to wrap (so every row
+  # after the first is a slice of the cached Line), scroll DOWN through it and back, and
+  # require the first row to be intact. A slicer that mutated in place would have eaten the
+  # head exactly as before.
+  it "styled-line memo survives a wrap-slice round-trip without corrupting the cached line" do
     view = RepeaterView.new
     view.load_blank
     view.focus_pane(:response)
@@ -207,48 +215,53 @@ describe Gori::Tui::RepeaterView do
 
     at0 = MemoryBackend.new(50, 12)
     view.render(Screen.new(at0), Rect.new(0, 0, 50, 12))
-    at0.contains?("ALPHATOKEN").should be_true # left edge visible, memo populated
+    at0.contains?("ALPHATOKEN").should be_true  # first row of the body, memo populated
+    at0.contains?("OMEGATOKEN").should be_false # its tail is further down, on a later row
 
-    view.hscroll(10) # slide the pane right → slice_left runs on the cached Line
+    view.scroll(6) # drop the head off the TOP → the visible rows are all slices of the memo
     scrolled = MemoryBackend.new(50, 12)
     view.render(Screen.new(scrolled), Rect.new(0, 0, 50, 12))
-    scrolled.contains?("ALPHATOKEN").should be_false # scrolled past the head (proves the slice took effect)
+    scrolled.contains?("ALPHATOKEN").should be_false
+    scrolled.contains?("OMEGATOKEN").should be_true # the tail IS reachable — by wrapping, not by panning
 
-    view.hscroll(-10) # back to the left edge
+    view.scroll(-6) # back to the top
     back = MemoryBackend.new(50, 12)
     view.render(Screen.new(back), Rect.new(0, 0, 50, 12))
-    back.contains?("ALPHATOKEN").should be_true # cached Line uncorrupted by the intervening slice
+    back.contains?("ALPHATOKEN").should be_true # cached Line uncorrupted by the intervening slices
   end
 
   # Reveal mode is the surface built to inspect whitespace, and it was the one surface a
   # tabbed line could not be scrolled across. Reveal.styled gives every control char a
   # 1-column marker (tab → '→'), so the row DRAWS one cell per tab, but the h-scroll clamp
   # measured the raw string with display_width, where a tab is 0 columns. On a tab-heavy
-  # line the clamp's ceiling collapsed to 0 and @xscroll was pinned there every frame, so
+  # line the clamp's ceiling collapsed to 0 and the offset was pinned there every frame, so
   # the tail of the line was permanently unreachable no matter how far right you scrolled.
-  it "scrolls a tab-filled line all the way to its end in reveal mode" do
+  #
+  # ASSERTION INVERTED BY SOFT WRAP. The bug's root cause — a width measure that scores a
+  # tab 0 while the draw gives it a cell — is unchanged and still the thing under test, but
+  # it now shows up in the WRAP rather than in a scroll ceiling: `Wrap` must break this line
+  # on `grapheme_cols` (tab = 1), so the 74 drawn columns land on two rows and the tail is
+  # visible WITHOUT scrolling at all. Measured under display_width the line is 14 columns,
+  # would not wrap, and ENDTOK would be off the right edge again — so the assertion flips
+  # from "invisible until scrolled" to "visible on the continuation row", and the old
+  # failure mode is still caught.
+  it "wraps a tab-filled line by its DRAWN width in reveal mode, tail and all" do
     view = RepeaterView.new
     view.load_blank
     view.focus_pane(:response)
     hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
     line = "STARTTOK#{"\t" * 60}ENDTOK"
-    # The two measures disagree by the tab count — that gap IS the unreachable tail.
+    # The two measures disagree by the tab count — that gap IS the tail that used to vanish.
     Screen.display_width(line).should eq(14)
     Screen.draw_width(line).should eq(74)
     view.apply(Gori::Repeater::Result.new(hdr.to_slice, line.to_slice, nil, 1000_i64))
     view.reveal = true
 
-    at0 = MemoryBackend.new(120, 20)
-    view.render(Screen.new(at0), Rect.new(0, 0, 120, 20))
-    at0.contains?("STARTTOK").should be_true # left edge
-    at0.contains?("ENDTOK").should be_false  # tail is off to the right
+    at0 = MemoryBackend.new(60, 20)
+    view.render(Screen.new(at0), Rect.new(0, 0, 60, 20))
+    at0.contains?("STARTTOK").should be_true # first row of the line
+    at0.contains?("ENDTOK").should be_true   # …and its tail, on a continuation row
     at0.contains?("→").should be_true        # reveal really is drawing tab markers
-
-    30.times { view.hscroll(4) } # slide right, well past the line's drawn width
-    scrolled = MemoryBackend.new(120, 20)
-    view.render(Screen.new(scrolled), Rect.new(0, 0, 120, 20))
-    scrolled.contains?("ENDTOK").should be_true    # the tail is reachable
-    scrolled.contains?("STARTTOK").should be_false # …and the head has genuinely scrolled off
   end
 
   it "duplicate_from copies request content, flags, and last response (no source flow)" do
@@ -1762,24 +1775,33 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
-  it "hscroll scrolls a long response body line sideways into view (shift+←/→)" do
+  # ASSERTION INVERTED BY SOFT WRAP. This pinned the old behaviour exactly: a body line
+  # wider than the pane was CLIPPED ("TAIL" absent) until ⇧→ scrolled it in, at which point
+  # the head disappeared. Both halves of that are now wrong on purpose — the response pane
+  # wraps, so the head and the tail of one logical line are on screen together and there is
+  # no state in which either is unreachable. `hscroll` survives only as a no-op stub for the
+  # still-registered chord, so calling it must change nothing.
+  it "wraps a long response body line instead of clipping it (no horizontal scroll)" do
     view = RepeaterView.new
     view.load_blank
     long_line = "HEAD" + ("." * 60) + "TAIL"
     ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, long_line.to_slice, nil, 1000_i64)
     view.apply(ok)
 
-    rect = Rect.new(0, 0, 100, 20)
-    backend = MemoryBackend.new(100, 20)
+    rect = Rect.new(0, 0, 40, 20)
+    backend = MemoryBackend.new(40, 20)
     view.render(Screen.new(backend), rect)
     backend.contains?("HEAD").should be_true
-    backend.contains?("TAIL").should be_false # off the right edge, clipped
+    backend.contains?("TAIL").should be_true # on a continuation row, not off the right edge
 
-    20.times { view.hscroll(1) } # scroll well past the line's width
-    backend2 = MemoryBackend.new(100, 20)
-    view.render(Screen.new(backend2), rect)
-    backend2.contains?("TAIL").should be_true
-    backend2.contains?("HEAD").should be_false # scrolled off the left edge
+    # `hscroll` and its ⇧←/→ binding are GONE, not stubbed. Leaving the no-op in place was
+    # worse than dead code: `handle_repeater_response_hscroll` ran BEFORE the response pane's
+    # key ladder and returned true for ⇧←/→, so it swallowed the chord that the ladder maps to
+    # `resp_nav_step(..., selecting: true)`. Horizontal selection in the response pane was
+    # silently inert for as long as the stub existed. Removing both restores it; the wrap
+    # assertion above no longer needs a scroll call to be meaningful, because there is no
+    # state in which the tail is off-screen.
+    view.responds_to?(:hscroll).should be_false
   end
 
   it "defaults request and target to READ mode" do

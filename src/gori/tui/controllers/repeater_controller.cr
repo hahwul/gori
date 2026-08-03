@@ -621,7 +621,14 @@ module Gori::Tui
       when :response
         v.resp_navigable? ? v.resp_scroll_view(step) : v.scroll(step)
       when :request
-        v.request_scroll_view(step) unless v.request_insert?
+        # INS scrolls like NOR. It is the same pane showing the same text and the wheel is
+        # not an editing gesture — the operator who presses `i` has not asked to give up
+        # scrolling, and every other TextArea-backed pane in the tree (Notes, the Decoder
+        # input) already wheels while in insert mode. The `unless v.request_insert?` that
+        # stood here was one of TWO guards on this path; the other is inside
+        # `RepeaterView#request_scroll_view`, so neither is sufficient on its own and
+        # dropping this one is half the fix (see the report / that method).
+        v.request_scroll_view(step)
       end
       true
     end
@@ -1745,17 +1752,25 @@ module Gori::Tui
       return handle_repeater_request_read(ev, view) unless view.request_insert?
       key = ev.key
       c = ev.char || key.to_char
+      # ⇧arrow extends the INS selection, a plain arrow collapses it — `TextArea#move`
+      # implements both, along with the ⌫/Del that removes the selection, replace-on-type,
+      # and the wrap-aware band that paints it.
+      #
+      # ⇧↑ is deliberately NOT routed through the `at_top?` pop: at the top of the buffer a
+      # plain ↑ leaves the editor for the target field above, and doing that mid-extend would
+      # abandon a selection the operator is still building. Extending stays inside the editor,
+      # where `move` clamps at line 0.
       case
       when ev.ctrl_z?     then view.edit_undo
       when key.enter?     then view.edit_newline
-      when key.backspace? then view.edit_backspace unless guard_marker_delete(view, view.marker_break_on_backspace)
-      when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above
-      when key.down?      then view.edit_move(1, 0)
-      when key.left?      then view.edit_move(0, -1)
-      when key.right?     then view.edit_move(0, 1)
+      when key.backspace? then edit_repeater_delete(view, backward: true)
+      when key.up?        then (view.at_top? && !ev.shift?) ? view.focus_first : view.edit_move(-1, 0, selecting: ev.shift?)
+      when key.down?      then view.edit_move(1, 0, selecting: ev.shift?)
+      when key.left?      then view.edit_move(0, -1, selecting: ev.shift?)
+      when key.right?     then view.edit_move(0, 1, selecting: ev.shift?)
       when key.home?      then view.edit_home
       when key.end?       then view.edit_end
-      when key.delete?    then view.edit_delete unless guard_marker_delete(view, view.marker_break_on_delete)
+      when key.delete?    then edit_repeater_delete(view, backward: false)
       else
         if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
@@ -1763,6 +1778,24 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # ⌫ / Del in INS. A SELECTION outranks the marker-delimiter confirm, and the order is
+    # not cosmetic: `marker_break_on_backspace` inspects the ONE character beside the caret,
+    # so a caret parked just past a closing `§` raises "remove marker §N" for a marker the
+    # selection need not even touch — and the confirm SKIPS the delete, so the selected text
+    # survives while an unrelated marker is stripped on accept. Ask about the selection
+    # first; the confirm still owns the no-selection case, which is the one it was written
+    # for. (`pane_selection?` reports false while the request pane is in INS today, so this
+    # is behaviour-identical until that view-side gate learns about the editor's own
+    # selection — see the report; it is written this way so the order is already right when
+    # it does.)
+    private def edit_repeater_delete(view : RepeaterView, backward : Bool) : Nil
+      unless view.pane_selection?
+        span = backward ? view.marker_break_on_backspace : view.marker_break_on_delete
+        return if guard_marker_delete(view, span)
+      end
+      backward ? view.edit_backspace : view.edit_delete
     end
 
     # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker
@@ -1896,7 +1929,6 @@ module Gori::Tui
     # bare letters defer to the keymap (rebindable verbs + Global breath).
     private def handle_repeater_response(ev : Termisu::Event::Key, view : RepeaterView) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      return true if handle_repeater_response_hscroll(ev, view)
       key = ev.key
       selecting = ev.shift?
       transcript = view.ws_mode? || view.grpc_mode? || view.group_mode?
@@ -1923,23 +1955,6 @@ module Gori::Tui
 
     private def resp_nav_step(view : RepeaterView, dr : Int32, dc : Int32, selecting : Bool, nav : Bool) : Nil
       nav ? view.resp_move(dr, dc, selecting: selecting) : view.scroll(dr)
-    end
-
-    # Shift+←/→ horizontal scroll, split out of handle_repeater_response to keep its
-    # cyclomatic complexity under ameba's threshold (this repo's dispatch-methods
-    # habitually tip over the limit one branch at a time). Works even in WS/gRPC
-    # transcript mode, so it's checked before that gate.
-    private def handle_repeater_response_hscroll(ev : Termisu::Event::Key, view : RepeaterView) : Bool
-      key = ev.key
-      if key.left? && ev.shift?
-        view.hscroll(-1)
-        true
-      elsif key.right? && ev.shift?
-        view.hscroll(1)
-        true
-      else
-        false
-      end
     end
   end
 end

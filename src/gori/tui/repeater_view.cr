@@ -8,6 +8,7 @@ require "../env"
 require "./hex_view"
 require "./hex_edit"
 require "./text_area"
+require "./wrap"
 require "./gutter"
 require "./search_hi"
 require "./reveal"
@@ -85,8 +86,12 @@ module Gori::Tui
       @scx = 0             # SNI cursor
       @target_field = :url # which field the TARGET pane edits: :url | :sni
       @editor = TextArea.new
-      @editor.gutter = true       # line numbers in the request body (pairs with ^G)
-      @editor.follow_x = true     # long lines (headers, URLs, base64 params) scroll horizontally to keep the cursor visible
+      @editor.gutter = true # line numbers in the request body (pairs with ^G)
+      # Soft wrap, Burp-style: a long header / URL / minified body spills onto continuation
+      # rows instead of running off the right edge, and the line number stays on the first
+      # of them. Replaces the old ⇧←/→ horizontal scroll outright — a request pane you have
+      # to pan sideways to read is a request pane you misread.
+      @editor.wrap = true
       @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
       @editor.chain_peek = true   # tooltip revealing the concealed ¦chain of the §…§ marker under the caret
       @search_hl = ""             # active ^F query → highlight in the response pane (request is via @editor)
@@ -120,7 +125,24 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
-      @xscroll = 0 # horizontal scroll offset shared by response/diff/reveal/transcript
+      # THE response-pane scroll anchor: the top drawn row is visual row @scroll_sub of
+      # logical row @scroll. Replaces the horizontal offset this pane used to carry —
+      # response, diff, reveal and transcript all soft-wrap now, so there is nothing off to
+      # the side to scroll to. A (row, sub-row) pair rather than a flat visual index for the
+      # reason spelled out in Wrap: a flat index can only be produced by wrapping the whole
+      # response, and a response is routinely multiple MB.
+      @scroll_sub = 0
+      @resp_wrap = {} of Int32 => Wrap::Layout # per-row wrap memo, keyed by the width below
+      @resp_wrap_w = -1
+      # Gutter + content width from the LAST render of whichever response pane is active.
+      # Hit-testing and the scroll walkers read these rather than re-deriving them, because
+      # the per-mode line counts the gutter is sized from are not all the same
+      # (`resp_line_count` has no group-transcript branch, for one) and the wrap memo is
+      # KEYED on the content width — a click that recomputed a different width would not
+      # merely land a column off, it would flush and rebuild the memo at a width the anchor
+      # was never laid out against.
+      @resp_last_gw = 0
+      @resp_last_cw = 0
       @loaded = false
       @http2 = false
       # WebSocket repeater mode (a 101 flow): the request editor holds the editable
@@ -163,7 +185,7 @@ module Gori::Tui
       @decode_kind = nil.as(Symbol?) # nil | :saml | :graphql
       @decoded = TextArea.new        # the payload editor (lower split)
       @decoded.gutter = true
-      @decoded.follow_x = true     # long decoded payload lines (SAML XML, GraphQL query) scroll horizontally
+      @decoded.wrap = true         # long decoded payload lines (SAML XML, GraphQL query) wrap, like the envelope
       @decoded.env_complete = true # env tokens re-encode into the request on send here too (WS messages, decoded payload)
       @req_pane = :envelope        # :envelope | :decoded — which split sub-pane is active
       @decoded_dirty = false       # the decoded payload was edited → re-encode on send
@@ -344,6 +366,11 @@ module Gori::Tui
     def exit_request_insert! : Nil
       @request_mode = InputMode::Read
       req_editor.env_complete_close # no dangling $ENV dropdown once we leave insert mode
+      # Drop the INS selection with the mode that owns it. Its band is only painted while
+      # `cursor` is on (INS), so leaving the anchor set hides it without clearing it — and
+      # `esc` then `i` brought a band back that the operator had visually dismissed, over a
+      # caret they had since moved.
+      req_editor.clear_selection
     end
 
     # --- $ENV autocomplete in the request editor (delegates to the active req editor) ---
@@ -534,7 +561,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @diffable = true
       @loaded = true
       @dirty = false
@@ -575,7 +602,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @diffable = false
       @loaded = true
       @dirty = false
@@ -814,7 +841,7 @@ module Gori::Tui
       @ws_result = result
       @ws_lines_cache = nil
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       # Seed @result so the HTTP response tab can render the handshake response
       @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
       reset_result_caches
@@ -872,7 +899,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @diffable = false
       @loaded = true
       @dirty = false
@@ -936,7 +963,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @diffable = false
       @loaded = true
       @dirty = false
@@ -1409,7 +1436,7 @@ module Gori::Tui
       @resp_hex = false
       @reveal = false
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @resp_cursor.reset
       @inflight = false
       @loaded = true
@@ -1459,7 +1486,7 @@ module Gori::Tui
       @focus = :target
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @diffable = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
       @scroll_req = 0
@@ -1579,7 +1606,7 @@ module Gori::Tui
       @focus = :target
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @diffable = false
       @loaded = true
       @dirty = false
@@ -1650,7 +1677,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
       @loaded = true
       @dirty = true
       @inflight = false
@@ -2522,7 +2549,7 @@ module Gori::Tui
       # left untouched, keeping the user where they were.
       @resp_mode = :response unless @resp_mode == :diff && result.ok? && diff_baseline_lines
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
     end
 
     # --- request editor (focus == :request) ---
@@ -2582,7 +2609,12 @@ module Gori::Tui
       mark_req_edit if ed.edits != before # no-op at buffer start — see edit_undo
     end
 
-    def edit_move(dr : Int32, dc : Int32) : Nil
+    # `selecting` is the Shift half of ⇧←/→/↑/↓: it extends the INS-mode selection from its
+    # anchor instead of collapsing it. Defaulted false so every existing caller is a plain
+    # move. The pane-crossing branch below deliberately does NOT forward it — a selection
+    # that jumped from the ENVELOPE into the DECODED sub-pane would span two buffers, and
+    # neither `cut_selection` nor the band painter can express that.
+    def edit_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless @focus == :request
       # In a split-decode tab, a vertical step off the end of one sub-pane crosses into
       # the other (↓ off the ENVELOPE bottom → DECODED top; ↑ off the DECODED top →
@@ -2600,7 +2632,7 @@ module Gori::Tui
           return
         end
       end
-      req_editor.move(dr, dc)
+      req_editor.move(dr, dc, selecting)
       # Cursor navigation is NOT a content edit: leave @dirty alone. Marking it here made
       # pure arrow-key movement persist the tab (V11) and, worse, latch sync-clobber
       # protection so a live cross-session update could no longer refresh the tab.
@@ -2688,7 +2720,7 @@ module Gori::Tui
       @editor.reveal = on
       @decoded.reveal = on # the decode split's payload editor honours reveal too
       @scroll = 0          # reveal renders the response from RAW bytes → a different line count; reset like pretty=/x/d
-      @xscroll = 0
+      resp_wrap_reset
     end
 
     # Pretty toggle feeds `resp_view`, so a change drops only the response-view cache
@@ -2699,7 +2731,7 @@ module Gori::Tui
       @pretty = on
       drop_resp_view_cache
       @scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like x/d toggles)
-      @xscroll = 0
+      resp_wrap_reset
     end
 
     # ^F highlight, scoped to the searched pane (the Runner picks which).
@@ -2805,14 +2837,14 @@ module Gori::Tui
     def toggle_resp_mode : Nil
       @resp_mode = @resp_mode == :response ? :diff : :response
       @scroll = 0
-      @xscroll = 0
+      resp_wrap_reset
     end
 
     # 'x' toggles a raw hex dump of the response bytes (overrides response/diff).
     def toggle_resp_hex : Nil
       @resp_hex = !@resp_hex
       @scroll = 0 # row-based offset differs from the line-based one
-      @xscroll = 0
+      resp_wrap_reset
     end
 
     getter? resp_hex : Bool
@@ -2833,8 +2865,23 @@ module Gori::Tui
       @resp_hex_bytes = combine(result.head, result.body)
     end
 
+    # Scroll the response pane by `delta` DRAWN rows. In hex the pane draws its own fixed
+    # rows and there is nothing to wrap, so that mode keeps the plain row offset.
     def scroll(delta : Int32) : Nil
-      @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
+      if @resp_hex || @resp_last_cw <= 0
+        @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
+        @scroll_sub = 0 # the anchor line moved by whole lines; a carried sub-row would
+        return          # be read against a line that was never laid out at that row
+      end
+      size, line_at, _ = resp_drawn_source
+      return if size <= 0
+      fn = resp_layout_fn(@resp_last_cw, line_at)
+      @scroll = @scroll.clamp(0, size - 1)
+      @scroll, @scroll_sub = if delta < 0
+                               Wrap.step_back(@scroll, @scroll_sub, -delta, fn)
+                             else
+                               Wrap.step_forward(@scroll, @scroll_sub, delta, size, fn)
+                             end
     end
 
     # Response READ: move caret (and optional selection). Scroll follows the caret.
@@ -2847,22 +2894,66 @@ module Gori::Tui
       ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
     end
 
+    # The INS half of the guard is gone: the wheel scrolls the request editor in insert
+    # mode exactly as it does in normal mode. There were TWO guards for this, one here and
+    # one in the controller's handle_wheel, so removing either alone changed nothing — they
+    # landed together in the replay→repeater migration rather than as a decision, and the
+    # neighbours disagree with them (Notes and the Decoder input scroll in insert mode with
+    # no mode guard at all).
+    #
+    # `scroll_view` moves the viewport and drags the caret only when the window would
+    # otherwise leave it behind — that is what NOR already uses, and mode consistency is the
+    # point. A pure detached viewport is not available here: `render` calls `ensure_visible`
+    # on EVERY frame, so a detached scroll would snap back on the next one.
+    #
+    # The hex half stays. `@req_hex_edit` is a different widget and the TextArea behind it
+    # holds stale bytes, so scrolling it would move a buffer the operator is not looking at.
     def request_scroll_view(step : Int32) : Nil
-      return if request_insert? || request_hex?
+      return if request_hex?
       req_editor.scroll_view(step)
     end
 
-    # Wheel: O(1) total from BodyLines offsets; materialise only the caret line for cx clamp.
+    # Wheel: `step` is DRAWN rows. Still O(viewport) — the anchor walk never counts the
+    # response's total rows (see @scroll_sub) and only the caret line is materialised.
     def resp_scroll_view(step : Int32) : Nil
       return unless resp_navigable?
-      size, line_at = resp_line_source
-      return if @resp_last_h <= 0 || size <= @resp_last_h
-      max = size - @resp_last_h
-      @scroll = (@scroll + step).clamp(0, max)
-      lo = @scroll
-      hi = {@scroll + @resp_last_h - 1, size - 1}.min
-      cy = @resp_cursor.cy.clamp(lo, hi)
-      @resp_cursor.sync(cy, @resp_cursor.cx.clamp(0, line_at.call(cy).size))
+      size, drawn_at, off = resp_drawn_source
+      _, line_at = resp_line_source
+      return if @resp_last_h <= 0 || size <= 0
+      cw = @resp_last_cw
+      if cw <= 0
+        return if size <= @resp_last_h
+        @scroll = (@scroll + step).clamp(0, size - @resp_last_h)
+        @scroll_sub = 0 # see `scroll`: no layout exists yet to carry a sub-row against
+      else
+        fn = resp_layout_fn(cw, drawn_at)
+        @scroll = @scroll.clamp(0, size - 1)
+        @scroll, @scroll_sub = if step < 0
+                                 Wrap.step_back(@scroll, @scroll_sub, -step, fn)
+                               else
+                                 Wrap.step_forward(@scroll, @scroll_sub, step, size, fn)
+                               end
+        mli, msub = Wrap.max_anchor(size, @resp_last_h, fn)
+        if @scroll > mli || (@scroll == mli && @scroll_sub > msub)
+          @scroll = mli
+          @scroll_sub = msub
+        end
+      end
+      # Pull the caret into the window, compared in VISUAL rows: a caret on the anchor LINE
+      # can still be several wrapped rows above the anchor ROW, and the line-only clamp let
+      # it sit there and drag the view straight back on the next ensure_resp_visible.
+      rows = resp_rows(cw, @resp_last_h, size, drawn_at)
+      return if rows.empty?
+      first = rows[0]
+      last = rows[rows.size - 1]
+      cy = @resp_cursor.cy
+      cx = @resp_cursor.cx + off # compare in the DRAWN line's coordinates (diff decoration)
+      if cy < first.li || (cy == first.li && cx < first.a)
+        cy, cx = first.li, first.a
+      elsif cy > last.li || (cy == last.li && cx > last.b)
+        cy, cx = last.li, last.a
+      end
+      @resp_cursor.sync(cy, {cx - off, 0}.max.clamp(0, line_at.call(cy).size))
     end
 
     def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
@@ -2874,9 +2965,26 @@ module Gori::Tui
       col = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 1}.max, content.h)
       return unless col.contains?(mx, my)
       body = response_body_rect(col)
-      gw = resp_gutter_w(body)
-      size, line_at = resp_line_source
-      @resp_cursor.click_to_cursor(body, mx, my, @scroll, size, line_at, gw, @xscroll)
+      # Render's own numbers, not a re-derivation — see @resp_last_gw. Falls back to the
+      # gutter estimate only before the first frame, when nothing has been laid out yet.
+      gw = @resp_last_cw > 0 ? @resp_last_gw : resp_gutter_w(body)
+      cw = @resp_last_cw > 0 ? @resp_last_cw : {body.w - gw, 0}.max
+      size, drawn_at, off = resp_drawn_source
+      _, line_at = resp_line_source
+      return if size <= 0
+      row = my - body.y
+      return if row < 0
+      rows = resp_rows(cw, body.h, size, drawn_at)
+      return if rows.empty?
+      # The wrap inverse, not `@scroll + row`: a screen row is a VISUAL row now, and the
+      # continuation rows between it and the anchor are exactly what the old arithmetic
+      # skipped. `Wrap.row_index` clamps to the row it was given, so a click past the end of
+      # a wrapped row stops at the break rather than selecting the next row's first char.
+      vr = rows[row]? || rows[rows.size - 1]
+      drawn = drawn_at.call(vr.li)
+      hit = Wrap.row_index(drawn, nil, vr.a, vr.b, mx - (body.x + gw))
+      @resp_cursor.clear_selection
+      @resp_cursor.sync(vr.li, {hit - off, 0}.max.clamp(0, line_at.call(vr.li).size))
       ensure_resp_visible(body.h)
     end
 
@@ -2906,8 +3014,16 @@ module Gori::Tui
       req_editor.lines_snapshot
     end
 
+    # The INS branch is the other half of `pane_selection?` — see the comment there for why
+    # the two must move together. `selection_text` is `String?` (nil when nothing is
+    # selected); the `||` keeps the NOR path's caret-line fallback rather than letting insert
+    # mode be the one place where a copy with no selection yields nothing.
     def request_copy_text : String
-      @req_read.copy_text(req_editor)
+      if pane_insert?(:request)
+        req_editor.selection_text || @req_read.copy_text(req_editor)
+      else
+        @req_read.copy_text(req_editor)
+      end
     end
 
     def request_copy_all_text : String
@@ -2989,7 +3105,14 @@ module Gori::Tui
 
     def pane_selection? : Bool
       case @focus
-      when :request  then !pane_insert?(:request) && @req_read.selection?
+      # Two selection models, one per mode, and they can never both be live: `@req_read` is
+      # the NOR band (its painter is called with `focused && !ins`), `req_editor` holds the
+      # INS one. Reporting only the NOR side made "Copy selection" absent in INS even with a
+      # visible ⇧-arrow band. Changed together with `request_copy_text` below — this predicate
+      # drives `Runner#read_selection_active?`, which gates BOTH the space-menu entry's title
+      # and `read_copy`, so claiming a selection here while copy still read `@req_read` would
+      # offer "Copy selection" and then copy the caret line.
+      when :request  then pane_insert?(:request) ? req_editor.selection? : @req_read.selection?
       when :response then @resp_cursor.selection?
       when :target   then !pane_insert?(:target) && @target_read.selection?
       else                false
@@ -3036,22 +3159,104 @@ module Gori::Tui
       end
     end
 
+    # Keep the caret's VISUAL row inside the pane. Line-indexed scrolling drifts the moment
+    # anything wraps — the caret can be on the anchor line and still be a dozen drawn rows
+    # off-screen — so the comparison and the re-anchor both happen in rows (Wrap).
+    # Falls back to the line-based arithmetic before the first render, when no width is
+    # known yet and nothing has been laid out to disagree with.
     private def ensure_resp_visible(view_h : Int32) : Nil
       return if view_h <= 0
       cy = @resp_cursor.cy
-      if cy < @scroll
-        @scroll = cy
-      elsif cy >= @scroll + view_h
-        @scroll = cy - view_h + 1
+      cw = @resp_last_cw
+      size, line_at, off = resp_drawn_source
+      if cw <= 0 || size <= 0
+        if cy < @scroll
+          @scroll = cy
+        elsif cy >= @scroll + view_h
+          @scroll = cy - view_h + 1
+        end
+        @scroll = 0 if @scroll < 0
+        return
       end
+      @scroll = @scroll.clamp(0, size - 1)
+      fn = resp_layout_fn(cw, line_at)
+      csub = fn.call(cy).row_of(@resp_cursor.cx + off)
+      @scroll, @scroll_sub = Wrap.ensure_visible(@scroll, @scroll_sub, cy, csub, view_h, fn)
     end
 
-    # Horizontal companion to `scroll` (shift+←/→): nudges the response/diff/reveal/
-    # transcript pane sideways. Floored at 0 here; the render loop clamps the upper
-    # bound to the widest row actually on screen, so it can't scroll past content.
-    def hscroll(delta : Int32) : Nil
-      @xscroll = {@xscroll + delta * 4, 0}.max
+    # --- response soft wrap ----------------------------------------------------
+
+    # Ceiling on the response wrap memo — see TextArea::WRAP_CACHE_CAP, same reasoning.
+    RESP_WRAP_CACHE_CAP = 512
+
+    # Drop the wrap memo and put the anchor back on a first row. Called from every site that
+    # swaps what the pane is showing (a new result, a mode toggle, reveal/pretty, a fresh
+    # load) — the same sites that used to zero the horizontal offset, which is not a
+    # coincidence: those are exactly the moments the old layout stops describing the pane.
+    private def resp_wrap_reset : Nil
+      @scroll_sub = 0
+      @resp_wrap.clear
     end
+
+    # Publish the geometry the active response pane just drew with, so hit-testing and the
+    # scroll walkers key the wrap memo on exactly the width the rows were laid out at.
+    private def resp_record_metrics(gw : Int32, cw : Int32) : Nil
+      @resp_last_gw = gw
+      @resp_last_cw = cw
+    end
+
+    private def resp_layout(li : Int32, cw : Int32, line_at : Int32 -> String) : Wrap::Layout
+      if @resp_wrap_w != cw
+        @resp_wrap.clear
+        @resp_wrap_w = cw
+      end
+      if hit = @resp_wrap[li]?
+        return hit
+      end
+      @resp_wrap.clear if @resp_wrap.size >= RESP_WRAP_CACHE_CAP
+      @resp_wrap[li] = Wrap.layout(line_at.call(li), cw)
+    end
+
+    private def resp_layout_fn(cw : Int32, line_at : Int32 -> String) : Int32 -> Wrap::Layout
+      ->(i : Int32) { resp_layout(i, cw, line_at) }
+    end
+
+    # The response pane's drawn rows for an `h`-row viewport at content width `cw`.
+    private def resp_rows(cw : Int32, h : Int32, size : Int32, line_at : Int32 -> String) : Array(Wrap::Row)
+      return [] of Wrap::Row if size <= 0 || h <= 0 || cw <= 0
+      @scroll = @scroll.clamp(0, size - 1)
+      Wrap.rows(@scroll, @scroll_sub, h, size, resp_layout_fn(cw, line_at))
+    end
+
+    # What the pane actually DRAWS per row, which is what the wrap has to be computed on.
+    # Identical to `resp_line_source` in every mode but DIFF, where each row is prefixed
+    # with a 2-column "+ "/"- " decoration: those columns shift every break, so wrapping the
+    # bare text there would put the anchor, the click inverse and the draw on three
+    # different grids. The third element is that decoration's width, the single constant
+    # that converts between the two coordinate systems (see `render_diff`).
+    private def resp_drawn_source : {Int32, Proc(Int32, String), Int32}
+      if transcript_rows?.nil? && !@reveal && @resp_mode == :diff
+        data = diff_lines
+        return {data.size, ->(i : Int32) do
+          d = data[i]
+          prefix = case d.kind
+                   when .add? then '+'
+                   when .del? then '-'
+                   else            ' '
+                   end
+          "#{prefix} #{d.text}"
+        end, DIFF_PREFIX_COLS}
+      end
+      size, line_at = resp_line_source
+      {size, line_at, 0}
+    end
+
+    # ⇧←/→ used to nudge the response/diff/reveal/transcript pane sideways. There is no
+    # sideways any more: every one of those panes soft-wraps, so the content the operator
+    # was panning to is already on the next row. Kept as an explicit no-op ONLY because the
+    # chord is still bound in `controllers/repeater_controller.cr` — deleting the method
+    # breaks that build, and that file is not in this change's scope. The binding and this
+    # stub should go together.
 
     # ^G go-to-line in the response pane: scroll so 1-based line `n` is at the top
     # (interpreted in the currently-shown mode — response/diff/hex row). Hex mode has
@@ -3065,6 +3270,7 @@ module Gori::Tui
         cy = (n - 1).clamp(0, size - 1)
         @resp_cursor.sync(cy, 0)
         @scroll = cy
+        @scroll_sub = 0 # ^G names a LOGICAL line, so land on its first visual row
       else
         @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
       end
@@ -3342,6 +3548,12 @@ module Gori::Tui
       paint_request_read_chrome(screen, inner, focused && !ins)
     end
 
+    # READ-mode over-paint (selection tint + block caret) on top of the frame the editor
+    # just drew. It inverts `TextArea#last_rows` — the rows that were ACTUALLY laid down —
+    # rather than re-deriving `line - scroll`: under soft wrap a screen row is no longer a
+    # logical line, and the two derivations drifting apart is precisely how a selection ends
+    # up tinting the wrong text. Every span is clipped to its row, so a selection crossing a
+    # wrap break is painted on each row it covers.
     private def paint_request_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
       return unless active
       ed = req_editor
@@ -3349,37 +3561,48 @@ module Gori::Tui
       return if lines.empty?
       @req_read.sync_from(ed)
       sel_bg = Theme.accent_bg
-      scr = ed.scroll
-      @req_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        row = li - scr
-        gw = ed.gutter? ? Gutter.width(lines.size) : 0
-        paint_char_span_bg(screen, rect.x + gw, rect.y + row, lines[li], x0, x1, sel_bg)
-      end
-      cy, cx = ed.cy, ed.cx
-      return unless cy >= scr && cy < scr + rect.h
-      row = cy - scr
+      rows = ed.last_rows
+      return if rows.empty?
       gw = ed.gutter? ? Gutter.width(lines.size) : 0
-      line = lines[cy]
-      px = rect.x + gw + Screen.draw_width(line[0, cx])
-      if px < rect.x + rect.w
+      spans = @req_read.cursor.highlight_spans(lines)
+      cy, cx = ed.cy, ed.cx
+      rows.each_with_index do |vr, row|
+        y = rect.y + row
+        line = lines[vr.li]? || ""
+        spans.each do |(li, x0, x1)|
+          next unless li == vr.li
+          a = {x0, vr.a}.max
+          b = {x1, vr.b}.min
+          next if a >= b
+          paint_char_span_bg(screen, rect.x + gw, y, line, a, b, sel_bg, vr.a)
+        end
+        # The caret belongs to exactly one row: the one whose slice contains it, with the
+        # end of a wrapped row losing to the row it starts (Wrap::Layout#row_of's rule,
+        # spelled out here because ReadCursor holds no layout of its own).
+        next unless vr.li == cy && cx >= vr.a && (cx < vr.b || vr.b >= line.size)
+        px = rect.x + gw + Wrap.row_col(line, nil, vr.a, cx)
+        next unless px < rect.x + rect.w
         ch = cx < line.size ? line[cx] : ' '
-        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + row)
+        screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, y)
       end
     end
 
+    # `row_start` is the char index the drawn row begins at — 0 for an unwrapped line, the
+    # wrap break for a continuation row. Columns are measured from THERE, so a tint on a
+    # continuation row starts at the pane's left edge like the text it covers.
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+                                   x0 : Int32, x1 : Int32, bg : Color, row_start : Int32 = 0) : Nil
       return if x0 >= x1
       # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
       # CHARS is exactly the retired per-codepoint measure: it drifts right by each
       # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
       # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
       # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
+      a = {Screen.cluster_start(line, {x0, line.size}.min), row_start}.max
       b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
+      return if a >= b
+      px = x + Wrap.row_col(line, nil, row_start, a)
       i = a
       while i < b
         e = Screen.cluster_end(line, i + 1)
@@ -3441,10 +3664,22 @@ module Gori::Tui
       total = rv.total
       gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
-      rows = (0...body.h).compact_map { |i| i < total ? styled_resp_line(rv, i) : nil }
-      rows.each_with_index do |styled, i|
-        Gutter.draw(screen, body.x, body.y + i, i, gw) if gw > 0
-        shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
+      return if cw <= 0
+      # This card is always pinned to the top of the handshake response and has its own
+      # tiny window, so it wraps from row 0 with a local layout rather than sharing the
+      # transcript's anchor + memo (different line source, ≤7 rows to lay out).
+      rows = Wrap.rows(0, 0, body.h, total, ->(i : Int32) { Wrap.layout(rv.line_text(i), cw) })
+      rows.each_with_index do |vr, i|
+        if gw > 0
+          if vr.sub == 0
+            Gutter.draw(screen, body.x, body.y + i, vr.li, gw)
+          else
+            screen.text(body.x, body.y + i, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
+          end
+        end
+        # slice_chars is the identity for a row that IS the whole line, so an unwrapped
+        # handshake header costs nothing extra.
+        shown = Highlight.slice_chars(styled_resp_line(rv, vr.li), vr.a, vr.b)
         Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
       end
     end
@@ -3500,24 +3735,17 @@ module Gori::Tui
       end
       gw = Settings.show_gutter ? {Gutter.width(lines.size), body.w}.min : 0
       cw = {body.w - gw, 0}.max
-      # draw_width, not display_width: the rows are drawn with `screen.text` (below), which
-      # advances ≥1 per grapheme, so a control byte inside a WS text frame owns a cell the
-      # raw measure scores 0 — the clamp then stopped short of the real content. Switching
-      # to the _upto variant also gives this site the early exit its siblings have: it runs
-      # every frame, and one WS frame can carry a multi-MB single-line payload.
-      widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.draw_width_upto(t, @xscroll + cw + 1) } || 0
-      @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       @resp_last_h = body.h
+      resp_record_metrics(gw, cw)
+      return if cw <= 0
       sel_spans = resp_sel_spans_if(focused)
-      (0...body.h).each do |i|
-        li = @scroll + i
-        break if li >= lines.size
-        text, color = lines[li]
-        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @resp_cursor.cy) if gw > 0
-        shown = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
-        screen.text(body.x + gw, body.y + i, shown, color, width: cw)
-        paint_resp_line_chrome(screen, body.x + gw, body.y + i, li, text, focused, sel_spans)
-        SearchHi.mark(screen, body.x + gw, body.y + i, shown, @search_hl, body.x + gw + cw) unless @search_hl.empty?
+      resp_rows(cw, body.h, lines.size, ->(i : Int32) { lines[i][0] }).each_with_index do |vr, i|
+        text, color = lines[vr.li]
+        y = body.y + i
+        draw_resp_gutter(screen, body.x, y, gw, vr, focused)
+        screen.text(body.x + gw, y, text[vr.a...vr.b], color, width: cw)
+        paint_resp_line_chrome(screen, body.x + gw, y, vr.li, text, focused, sel_spans, vr.a, vr.b)
+        Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
       Frame.scroll_gauge(screen, body, lines.size, @scroll, focused)
     end
@@ -3699,25 +3927,22 @@ module Gori::Tui
       @resp_last_h = rect.h
       gw = Settings.show_gutter ? {Gutter.width(total), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
-      # draw_width, not display_width: the rows below are drawn through Reveal.styled, which
-      # maps EVERY control char to a 1-column marker (tab → '→', CR → '␍'). display_width
-      # calls a tab 0 columns, so the clamp under-counted by one per tab and pinned @xscroll
-      # short of the content — on a tab-indented body it pinned it at 0 outright, leaving the
-      # tail of the line permanently unreachable on the very surface built to inspect tabs.
-      # _upto keeps the early exit: this runs every frame and a minified line can be MBs.
-      widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.draw_width_upto(l, @xscroll + cw + 1) } || 0
-      @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
+      resp_record_metrics(gw, cw)
+      return if cw <= 0
       sel_spans = resp_sel_spans_if(focused)
-      (0...rect.h).each do |i|
-        li = @scroll + i
-        break if li >= total
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy) if gw > 0
-        styled = Reveal.styled(lines[li], li < total - 1, cw + @xscroll)
-        styled = Highlight.slice_left(styled, @xscroll) if @xscroll > 0
-        Highlight.draw(screen, rect.x + gw, rect.y + i, styled, width: cw)
-        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, lines[li], focused, sel_spans)
-        st = @xscroll > 0 ? Highlight.slice_left_text(lines[li], @xscroll) : lines[li]
-        SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+      # Reveal substitutes a 1-column marker for every control char (tab → '→', CR → '␍'),
+      # which is exactly what `Screen.grapheme_cols` already scores them, so the wrap of the
+      # RAW line and the wrap of the revealed line are the same break — no second layout.
+      resp_rows(cw, rect.h, total, ->(i : Int32) { lines[i] }).each_with_index do |vr, i|
+        y = rect.y + i
+        line = lines[vr.li]
+        draw_resp_gutter(screen, rect.x, y, gw, vr, focused)
+        # `last` only on the row that actually ends the line — the ␊ marker belongs at the
+        # true end of the line, not at every wrap break inside it.
+        eol = vr.b >= line.size && vr.li < total - 1
+        Highlight.draw(screen, rect.x + gw, y, Reveal.styled(line[vr.a...vr.b], eol, cw), width: cw)
+        paint_resp_line_chrome(screen, rect.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b)
+        Wrap.mark_search(screen, rect.x + gw, y, line, vr.a, vr.b, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -3755,35 +3980,61 @@ module Gori::Tui
       @resp_last_h = rect.h
       gw = Settings.show_gutter ? {Gutter.width(total), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
-      rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? styled_resp_line(rv, li) : nil }
-      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @xscroll + cw + 1) } || 0) - cw, 0}.max)
+      resp_record_metrics(gw, cw)
+      return if cw <= 0
       sel_spans = resp_sel_spans_if(focused)
-      rows.each_with_index do |styled, i|
-        li = @scroll + i
+      # The wrap is computed on the PLAIN text (`line_text`) and the styled overlay is then
+      # sliced to the same char range — Highlight is a 1:1 colour overlay, so one layout
+      # describes both and the colours cannot land a column off the glyphs.
+      resp_rows(cw, rect.h, total, ->(i : Int32) { rv.line_text(i) }).each_with_index do |vr, i|
+        li = vr.li
+        y = rect.y + i
         need_plain = (focused && resp_navigable? && (li == @resp_cursor.cy || sel_spans)) || !@search_hl.empty?
         text = need_plain ? rv.line_text(li) : nil
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy) if gw > 0
-        shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
-        Highlight.draw(screen, rect.x + gw, rect.y + i, shown, width: cw)
-        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, text, focused, sel_spans) if text
+        draw_resp_gutter(screen, rect.x, y, gw, vr, focused)
+        shown = Highlight.slice_chars(styled_resp_line(rv, li), vr.a, vr.b)
+        Highlight.draw(screen, rect.x + gw, y, shown, width: cw)
+        paint_resp_line_chrome(screen, rect.x + gw, y, li, text, focused, sel_spans, vr.a, vr.b) if text
         if (t = text) && !@search_hl.empty?
-          st = @xscroll > 0 ? Highlight.slice_left_text(t, @xscroll) : t
-          SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw)
+          Wrap.mark_search(screen, rect.x + gw, y, t, vr.a, vr.b, @search_hl, rect.x + gw + cw)
         end
       end
     end
 
+    # Response-pane gutter: the row number rides the FIRST visual row of a logical row only
+    # (Burp style); a continuation gets a blank of the same width so the text column stays
+    # put and no stale digits survive there.
+    private def draw_resp_gutter(screen : Screen, x : Int32, y : Int32, gw : Int32,
+                                 vr : Wrap::Row, focused : Bool) : Nil
+      return if gw <= 0
+      if vr.sub == 0
+        Gutter.draw(screen, x, y, vr.li, gw, current: focused && vr.li == @resp_cursor.cy)
+      else
+        screen.text(x, y, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
+      end
+    end
+
+    # Selection tint + block caret for ONE drawn row. `rs`/`re` bound the row's slice of the
+    # line (the whole line when nothing wrapped), so a selection spanning a wrap break is
+    # painted on each row it covers and the caret paints on exactly one of them — the row
+    # that STARTS at its column, matching Wrap::Layout#row_of.
     private def paint_resp_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
-                                       focused : Bool, sel_spans : Array({Int32, Int32, Int32})? = nil) : Nil
+                                       focused : Bool, sel_spans : Array({Int32, Int32, Int32})? = nil,
+                                       rs : Int32 = 0, re : Int32 = -1) : Nil
       return unless focused && resp_navigable?
+      re = line.size if re < 0
       if spans = sel_spans
         spans.each do |(l, x0, x1)|
-          paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+          next unless l == li
+          a = {x0, rs}.max
+          b = {x1, re}.min
+          paint_char_span_bg(screen, x, y, line, a, b, Theme.accent_bg, rs) if a < b
         end
       end
       return unless li == @resp_cursor.cy
       cx = @resp_cursor.cx.clamp(0, line.size)
-      px = x + Screen.draw_width(line[0, cx])
+      return unless cx >= rs && (cx < re || re >= line.size)
+      px = x + Wrap.row_col(line, nil, rs, cx)
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
       screen.cursor(px, y)
@@ -3796,39 +4047,45 @@ module Gori::Tui
       @resp_cursor.highlight_spans(size, line_at)
     end
 
+    # The diff pane draws a 2-column "+ "/"- " decoration in front of each line, so the
+    # wrapped row is a slice of `full` (decoration + text) while the caret, selection and
+    # search all address `text`. The two coordinate systems differ by exactly 2 characters
+    # of width 1 each — that constant is the ONLY place they are reconciled, here.
+    DIFF_PREFIX_COLS = 2
+
     private def render_diff(screen : Screen, rect : Rect, focused : Bool) : Nil
       data = diff_lines
       gw = Settings.show_gutter ? {Gutter.width(data.size), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
-      rows = (0...rect.h).compact_map do |i|
-        di = @scroll + i
-        next nil if di >= data.size
-        d = data[di]
-        prefix, color = case d.kind
-                        when .add? then {'+', Theme.green}
-                        when .del? then {'-', Theme.red}
-                        else            {' ', Theme.muted}
-                        end
-        {di, "#{prefix} #{d.text}", color, d.text}
-      end
-      # draw_width, not display_width — `full` (the "+ "/"- " prefix plus the diff line) is
-      # drawn by `screen.text` below, so a control char in either side of the diff holds a
-      # cell the raw measure scores 0 and the clamp cut the line short. _upto for the early
-      # exit, as everywhere else this clamp shape appears: it runs every frame.
-      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |(_, full, _, _)| Screen.draw_width_upto(full, @xscroll + cw + 1) } || 0) - cw, 0}.max)
       @resp_last_h = rect.h
+      resp_record_metrics(gw, cw)
+      return if cw <= 0
       sel_spans = resp_sel_spans_if(focused)
-      rows.each_with_index do |(di, full, color, text), i|
-        Gutter.draw(screen, rect.x, rect.y + i, di, gw, current: focused && di == @resp_cursor.cy) if gw > 0
-        shown = @xscroll > 0 ? Highlight.slice_left_text(full, @xscroll) : full
-        screen.text(rect.x + gw, rect.y + i, shown, color, width: cw)
-        paint_resp_line_chrome(screen, rect.x + gw + 2, rect.y + i, di, text, focused, sel_spans)
-        # Highlight only the line text (past the 2-col "+ "/"- " prefix, shifted left by
-        # any horizontal scroll), so the marks match what response_search_lines counts
-        # (d.text), not the diff decoration.
-        mark_x = rect.x + gw + {2 - @xscroll, 0}.max
-        st = @xscroll > 2 ? Highlight.slice_left_text(text, @xscroll - 2) : text
-        SearchHi.mark(screen, mark_x, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+      # The pane scrolls in rows of the DECORATED line, so that is what the anchor, the wrap
+      # memo and the click inverse all index — `resp_line_source` hands out the bare text,
+      # which is 2 columns narrower and would wrap at different offsets. `resp_drawn_source`
+      # is the single definition of that; using it here keeps render and hit-testing on one
+      # grid instead of two that agree until a line is exactly pane-wide.
+      _, decorated, _ = resp_drawn_source
+      resp_rows(cw, rect.h, data.size, decorated).each_with_index do |vr, i|
+        d = data[vr.li]
+        y = rect.y + i
+        color = case d.kind
+                when .add? then Theme.green
+                when .del? then Theme.red
+                else            Theme.muted
+                end
+        draw_resp_gutter(screen, rect.x, y, gw, vr, focused)
+        screen.text(rect.x + gw, y, decorated.call(vr.li)[vr.a...vr.b], color, width: cw)
+        # Re-base the row onto `text`: on the first row the text starts DIFF_PREFIX_COLS in,
+        # on a continuation it starts at the pane edge.
+        tx = rect.x + gw + {DIFF_PREFIX_COLS - vr.a, 0}.max
+        ts = {vr.a - DIFF_PREFIX_COLS, 0}.max
+        te = {vr.b - DIFF_PREFIX_COLS, 0}.max
+        paint_resp_line_chrome(screen, tx, y, vr.li, d.text, focused, sel_spans, ts, te)
+        # Mark only the line text, so the highlights match what response_search_lines
+        # counts (d.text) rather than the diff decoration.
+        Wrap.mark_search(screen, tx, y, d.text, ts, te, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -3878,6 +4135,7 @@ module Gori::Tui
     # Memoized + dropped only when a new result is applied (reset_result_caches), so
     # a held Repeater tab isn't re-parsed / re-highlighted / re-diffed 20×/sec.
     private def reset_result_caches : Nil
+      resp_wrap_reset # the wrap memo describes the OLD rows; a new result replaces them
       drop_resp_view_cache
       @diff_lines_cache = nil
       @resp_hex_bytes = nil
