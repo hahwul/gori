@@ -1402,12 +1402,17 @@ module Gori::Tui
     # (click_project moved to ProjectController#handle_click)
 
     # The space menu floats over everything: a click on an entry runs it, a click
-    # elsewhere dismisses it. Always consumes the click (returns true).
+    # OUTSIDE the card dismisses it, and a click inside that isn't an entry (a group
+    # header, a column-break filler, the gap between columns, the border) is inert —
+    # matching every other centered modal. That last case matters now the card is
+    # centered and multi-column: it carries real header rows the operator can plausibly
+    # click, and dismissing on those would throw away the menu mid-decision.
+    # Always consumes the click (returns true).
     private def click_space_menu(layout : Layout, mx : Int32, my : Int32) : Bool
       if idx = @space_menu.row_at(layout.body, mx, my)
         @space_menu.set_selected(idx)
         run_space_verb(@space_menu.selected_verb)
-      else
+      elsif !@space_menu.box(layout.body).contains?(mx, my)
         close_space_menu
       end
       true
@@ -2504,25 +2509,43 @@ module Gori::Tui
         @space_menu.move(-1)
       elsif key.down? || key.tab?
         @space_menu.move(1)
+      elsif key.left?
+        space_menu_move_column(-1)
+      elsif key.right?
+        space_menu_move_column(1)
       elsif key.enter?
         run_space_verb(@space_menu.selected_verb)
       elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
-        # A bound mnemonic always wins (helix leader). Only when j/k are NOT a live
+        # A bound mnemonic always wins (helix leader). Only when j/k/h/l are NOT a live
         # mnemonic in this menu do they fall back to vim-style nav — so the reflex
         # keystroke moves the selection instead of dismissing the menu, while scopes
-        # that bind 'k' (e.g. link-to-issue) keep their mnemonic.
+        # that bind 'k' (link-to-issue) or 'h' (add-host, dismiss-host) keep theirs.
         if verb = @space_menu.verb_for(c)
           run_space_verb(verb)
         elsif c == 'j'
           @space_menu.move(1)
         elsif c == 'k'
           @space_menu.move(-1)
+        elsif c == 'h'
+          space_menu_move_column(-1)
+        elsif c == 'l'
+          space_menu_move_column(1)
         else
           close_space_menu # an unmapped leader key dismisses (helix feel)
         end
       else
         close_space_menu
       end
+    end
+
+    # ←/→ (and h/l) in the space menu: how many columns the popup has is a function of
+    # the body it is drawn into, so recompute the same geometry render uses. Silently
+    # inert when the menu is a single column or already at the outer one — an arrow key
+    # must never dismiss the menu the way an unmapped leader key does.
+    private def space_menu_move_column(delta : Int32) : Nil
+      w, h = @backend.size
+      return unless Layout.usable?(w, h)
+      @space_menu.move_column(delta, Layout.compute(w, h, statusline_active?).body)
     end
 
     # Close the menu, then run the verb (if any) and surface its status toast.
@@ -3032,7 +3055,7 @@ module Gori::Tui
     # the active tab, and any open overlay (so the user always sees what the keys
     # under their fingers do right now).
     private def key_hints : String
-      return "press a key · ↑/↓ select · ↵ run · esc close" if @space_menu_open
+      return "press a key · ↑/↓ select · ←/→ column · ↵ run · esc close" if @space_menu_open
       if pt = prompt_picker # prompt-tier Overlays carry their own hint too
         return pt.hint
       end

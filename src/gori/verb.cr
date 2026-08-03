@@ -134,12 +134,24 @@ module Gori
       # that scope's menu. Defaults to :common so untouched registrations render
       # exactly as they do today (one flat group).
       getter section : Symbol
+      # The SEMANTIC band this verb sits in within whatever section shows it —
+      # :view / :send / :triage / :copy / :scope / :danger (see
+      # Tui::SpaceMenu::GROUP_LABELS). Orthogonal to `section`, which is a FOCUS-AREA
+      # axis: `section` answers "which pane is focused" (and a section's verbs only
+      # appear when that pane IS focused), while `group` answers "what kind of action
+      # is this" and never gates visibility. The single-region scopes — History's Body
+      # (19 entries), HistoryDetail (16), Probe (14), Sitemap (10) — have no focus
+      # sub-areas at all, so `section` can never break their one flat list up; `group`
+      # is what makes them scannable. Defaults to :none, which renders exactly as
+      # before (no header, no subdivision), so an untagged scope is unchanged.
+      getter group : Symbol
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
                      @coming_soon : Bool = false, @category : Category = Category::Action,
                      @mnemonic : Char? = nil, @section : Symbol = :common,
+                     @group : Symbol = :none,
                      &@handler : ExecContext -> String?)
       end
 

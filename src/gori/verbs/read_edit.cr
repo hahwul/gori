@@ -136,7 +136,7 @@ module Gori
       r.register Verb::Definition.new(
         "detail.select-line", "Select line", "Select the entire current line",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("x")],
-        available: in_detail_nav, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_detail_nav, mnemonic: 'x', group: :view) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "detail.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }

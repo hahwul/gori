@@ -282,10 +282,11 @@ describe Gori::Tui::SpaceMenu do
     backend2.contains?("SPACE · COMMON").should be_false # flat render — no section suffix
   end
 
-  # #442 — History's Body menu is the SINGLE-GROUP case (no context section), where the card
-  # title is normally bare "SPACE". A banner has to reach that branch too, or a batch action
-  # over 3 marked flows would look identical to a single-flow one.
-  it "puts a state banner in the card title, including on a flat single-group render" do
+  # #442 — History's Body menu has no context SECTION, so the card title is normally a
+  # bare "SPACE". A banner has to reach that branch too, or a batch action over 3 marked
+  # flows would look identical to a single-flow one. It is also the branch that carries
+  # SEMANTIC groups, which must not leak a focus-area label into the title.
+  it "puts a state banner in the card title, and never a focus-area label on a semantically-grouped menu" do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
@@ -294,7 +295,10 @@ describe Gori::Tui::SpaceMenu do
     backend = MemoryBackend.new(100, 30)
     menu.render(Screen.new(backend), Rect.new(0, 0, 100, 28))
     backend.contains?("SPACE · 3 MARKED").should be_true
-    backend.contains?("COMMON").should be_false # still flat: no group headers
+    # Semantic bands render (VIEW/SEND/…), but the focus-area label never does: there is
+    # no focused sub-area here, so "COMMON" would be naming something that isn't shown.
+    backend.contains?("─ VIEW ─").should be_true
+    backend.contains?("COMMON").should be_false
 
     # No banner ⇒ byte-identical to before (a bare "SPACE" card).
     menu.open(Gori::Verb::Scope::Body, :common, ctx)
@@ -497,16 +501,191 @@ describe Gori::Tui::SpaceMenu do
     menu.entries.empty?.should be_true
   end
 
-  it "renders a bottom-right SPACE popup with the mnemonic key + title" do
+  it "renders a centered SPACE popup with the mnemonic key + title" do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
     menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     backend = MemoryBackend.new(80, 24)
-    menu.render(Screen.new(backend), Rect.new(0, 3, 80, 20))
+    body = Rect.new(0, 3, 80, 20)
+    menu.render(Screen.new(backend), body)
     backend.contains?("SPACE").should be_true     # the card title
     backend.contains?("Copy flow").should be_true # an entry title
+
+    # Centered, not corner-anchored: the card had outgrown a corner, and bottom-right it
+    # covered the very columns the operator decides from (PATH / STATUS / SIZE / DUR).
+    # Gutters match within the 1 cell an odd leftover cannot split.
+    b = menu.box(body)
+    ((b.x - body.x) - (body.right - b.right)).abs.should be <= 1
+    ((b.y - body.y) - (body.bottom - b.bottom)).abs.should be <= 1
+  end
+
+  it "splits into reading-order columns when one column will not fit, and never strands a header" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+    menu.entries.size.should be > SpaceMenu::MAX_ROWS # more entries than one column holds
+
+    body = Rect.new(0, 0, 100, 26)
+    b = menu.box(body)
+    b.h.should be <= body.h
+    backend = MemoryBackend.new(100, 26)
+    menu.render(Screen.new(backend), body)
+
+    # Nothing clipped: the first and last entries of the LAST band are both on screen,
+    # which is only possible once a second column exists.
+    backend.contains?("Open flow detail").should be_true # first band (VIEW)
+    backend.contains?("Clear history").should be_true    # last band (DANGER)
+    backend.contains?("▼").should be_false               # …and no scrolling was needed
+
+    # Every band header that renders has at least one of its entries on the SAME row or
+    # below it in the same column — i.e. no header alone at a column's last row.
+    interior = (1...(b.h - 1)).map { |i| backend.row(b.y + i) }
+    last_row = interior.last
+    Gori::Tui::SpaceMenu::GROUP_LABELS.each_value do |label|
+      last_row.includes?("─ #{label} ─").should be_false
+    end
+  end
+
+  # The semantic axis must be purely additive: it subdivides what `section` already
+  # selected and NEVER gates what is reachable. A half-tagged scope is the risky case —
+  # an untagged verb must keep a home rather than vanish between the bands.
+  it "subdivides a bucket into semantic bands, keeping untagged verbs under the bucket label" do
+    reg = Gori::Verb::Registry.new
+    [{'a', :view}, {'b', :view}, {'c', :send}, {'d', :danger}].each_with_index do |(key, group), i|
+      reg.register(Gori::Verb::Definition.new(
+        "demo.tagged.#{i}", "Tagged #{key}", "x", Gori::Verb::Scope::Body,
+        mnemonic: key, group: group) { |_| nil })
+    end
+    # Deliberately left :none — the half-tagged case.
+    reg.register(Gori::Verb::Definition.new(
+      "demo.untagged", "Untagged one", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'z') { |_| nil })
+
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+
+    # Nothing dropped, and the bands are in GROUP_ORDER with the leftovers last.
+    menu.entries.size.should eq(5)
+    menu.entries.map(&.id).should contain("demo.untagged")
+    menu.verb_for('z').try(&.id).should eq("demo.untagged")
+
+    backend = MemoryBackend.new(60, 30)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 60, 28))
+    backend.contains?("─ VIEW ─").should be_true
+    backend.contains?("─ SEND ─").should be_true
+    backend.contains?("─ DANGER ─").should be_true
+    backend.contains?("─ COMMON ─").should be_true # the untagged leftover's home
+    backend.contains?("Untagged one").should be_true
+  end
+
+  it "leaves a fully untagged scope byte-identical to the pre-grouping flat list" do
+    reg = Gori::Verb::Registry.new
+    4.times do |i|
+      reg.register(Gori::Verb::Definition.new(
+        "demo.#{i}", "Item #{i}", "x", Gori::Verb::Scope::Body,
+        mnemonic: ('a'.ord + i).unsafe_chr) { |_| nil })
+    end
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+
+    backend = MemoryBackend.new(60, 30)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 60, 28))
+    backend.contains?("Item 0").should be_true
+    backend.contains?("─").should be_true           # the card border, yes
+    backend.contains?("─ COMMON ─").should be_false # but no header row at all
+    Gori::Tui::SpaceMenu::GROUP_LABELS.each_value do |label|
+      backend.contains?("─ #{label} ─").should be_false
+    end
+  end
+
+  it "keeps the single scrolling column on a terminal too short to split" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+
+    backend = MemoryBackend.new(40, 8)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 40, 6))
+    backend.contains?("▼").should be_true # still the pre-column vertical-scroll path
+  end
+
+  # ↑/↓ walk the whole list in reading order; ←/→ is the across axis the column layout
+  # implies. Before this, an arrow key that wasn't up/down fell through to the "unmapped
+  # leader key" branch and DISMISSED the menu.
+  it "moves the selection across columns with move_column, landing only on real entries" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+
+    body = Rect.new(0, 0, 100, 26) # wide + tall enough to split into columns
+    first = menu.selected_verb.try(&.id)
+
+    menu.move_column(1, body)
+    right = menu.selected_verb.try(&.id)
+    right.should_not eq(first) # actually moved
+    right.should_not be_nil    # …onto a real entry, not a header or a filler
+
+    menu.move_column(-1, body)
+    menu.selected_verb.try(&.id).should eq(first) # and back
+
+    # Clamped at the outer columns rather than wrapping or going out of range.
+    menu.move_column(-1, body)
+    menu.selected_verb.try(&.id).should eq(first)
+    8.times { menu.move_column(1, body) }
+    menu.selected_verb.should_not be_nil
+  end
+
+  it "leaves move_column inert when the popup is a single column" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+
+    narrow = Rect.new(0, 0, 40, 6) # the short/narrow single-column scroll path
+    before = menu.selected_verb.try(&.id)
+    menu.move_column(1, narrow)
+    menu.selected_verb.try(&.id).should eq(before)
+    menu.move_column(-1, narrow)
+    menu.selected_verb.try(&.id).should eq(before)
+  end
+
+  # Runner#click_space_menu keys off BOTH of these: row_at nil + inside the box ⇒ inert,
+  # row_at nil + outside ⇒ dismiss. Centering made this load-bearing (the card now sits
+  # over the list and carries header rows the operator can plausibly click), so pin the
+  # two predicates the Runner relies on.
+  it "reports its box so a click inside it can be told from a click outside" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+
+    body = Rect.new(0, 0, 100, 26)
+    b = menu.box(body)
+    b.contains?(b.x + 2, b.y + 1).should be_true # a header row: inside, but row_at is nil
+    menu.row_at(body, b.x + 2, b.y + 1).should be_nil
+    b.contains?(body.x, body.y).should be_false # the body's corner is outside the card
+  end
+
+  it "does not make a header row or a column-break filler clickable" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+
+    body = Rect.new(0, 0, 100, 26)
+    b = menu.box(body)
+    # The first interior row of column 1 is the VIEW header (see the grouped render).
+    menu.row_at(body, b.x + 2, b.y + 1).should be_nil
+    # …and every cell that DOES resolve maps to a real entry index.
+    (1...(b.h - 1)).each do |i|
+      if idx = menu.row_at(body, b.x + 2, b.y + i)
+        idx.should be < menu.entries.size
+      end
+    end
   end
 
   it "scrolls to keep the selection on-screen when the popup is shorter than the list" do

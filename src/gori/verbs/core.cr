@@ -123,12 +123,12 @@ module Gori
         # Batch-capable (#442): gates on the effective target set (marks if any, else the
         # cursor row) — which also aligns the gate with what the handler already acted on
         # (history_target_flow_id, i.e. the OPEN DETAIL's flow when one is up).
-        Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, mnemonic: 'h') { |ctx| ctx.scope_add_host; nil }
+        Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, mnemonic: 'h', group: :scope) { |ctx| ctx.scope_add_host; nil }
 
       r.register Verb::Definition.new(
         "scope.toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
         Verb::Scope::Body, [Verb::Chord.new("s", shift: true)],
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
 
       # --- Project tab SCOPE pane: the rule-list action menu (space) + its a/e/d keys.
       # Project scope is unique to that pane, so no current_tab gate is needed. The lens

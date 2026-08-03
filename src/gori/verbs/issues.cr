@@ -9,7 +9,7 @@ module Gori
       r.register Verb::Definition.new(
         "issue.create", "Add issue", "Create an issue from the selected flow (every marked flow is attached as evidence)", Verb::Scope::Body,
         [Verb::Chord.new("f", shift: true)],
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, mnemonic: 'a') { |ctx| ctx.issue_create; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, mnemonic: 'a', group: :triage) { |ctx| ctx.issue_create; nil }
 
       # issues list
       r.register Verb::Definition.new(

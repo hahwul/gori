@@ -21,72 +21,72 @@ module Gori
       # open-evidence (parity with the detail scope).
       r.register Verb::Definition.new(
         "probe.open", "Open issue", "View the selected issue's detail", Verb::Scope::Probe,
-        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'v') { |ctx| ctx.probe_open; nil }
+        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'v', group: :view) { |ctx| ctx.probe_open; nil }
 
       r.register Verb::Definition.new(
         "probe.filter", "Filter issues", "Filter the list (severity:/status:/category:/host:/code:/free text)",
-        Verb::Scope::Probe, [Verb::Chord.new("/")]) { |ctx| ctx.probe_query; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.probe_query; nil }
 
       # Probe-local `m` (mode cycle). Global Match & Replace is palette-only by default,
       # so this no longer needs to shadow a Global bare letter.
       r.register Verb::Definition.new(
         "probe.mode", "Set mode", "Choose the scan mode (off / passive / passive+active)",
-        Verb::Scope::Probe, [Verb::Chord.new("m")]) { |ctx| ctx.probe_set_mode; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("m")], group: :view) { |ctx| ctx.probe_set_mode; nil }
 
       # `c`: one-key dismiss for the selected row (open ⇄ false-positive). The high-value
       # triage action; mutes recurring noise so it drops out of the default open-only lens.
       r.register Verb::Definition.new(
         "probe.dismiss-selected", "Dismiss issue", "Toggle dismiss (false-positive ⇄ open) on the selected issue",
-        Verb::Scope::Probe, [Verb::Chord.new("c")]) { |ctx| ctx.probe_dismiss; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("c")], group: :triage) { |ctx| ctx.probe_dismiss; nil }
 
       r.register Verb::Definition.new(
         "probe.toggle-closed", "Show closed", "Toggle between open-only and all issues (incl. dismissed)",
-        Verb::Scope::Probe, [Verb::Chord.new("a")]) { |ctx| ctx.probe_toggle_closed; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("a")], group: :view) { |ctx| ctx.probe_toggle_closed; nil }
 
       # Toggle the scope lens from Probe too (History has its own ⇧S binding; Sitemap
       # mirrors it). scope_toggle_lens reloads the active Probe list, and the bar shows
       # the ⇧S chip — so the toggle is reachable where its effect is visible.
       r.register Verb::Definition.new(
         "probe.scope-toggle", "Toggle scope lens", "Filter issues to in-scope hosts on/off",
-        Verb::Scope::Probe, [Verb::Chord.new("s", shift: true)], mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("s", shift: true)], mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
       # code, or a whole host, in one confirmed action. 'r' is reserved for repeater-evidence
       # (parity with the detail scope).
       r.register Verb::Definition.new(
         "probe.dismiss-code", "Dismiss all with this code", "Mute every open issue sharing the selected issue's check code",
-        Verb::Scope::Probe, mnemonic: 'g') { |ctx| ctx.probe_dismiss_code; nil }
+        Verb::Scope::Probe, mnemonic: 'g', group: :triage) { |ctx| ctx.probe_dismiss_code; nil }
 
       r.register Verb::Definition.new(
         "probe.dismiss-host", "Dismiss all on this host", "Mute every open issue on the selected issue's host",
-        Verb::Scope::Probe, mnemonic: 'h') { |ctx| ctx.probe_dismiss_host; nil }
+        Verb::Scope::Probe, mnemonic: 'h', group: :triage) { |ctx| ctx.probe_dismiss_host; nil }
 
       # Detail-parity actions on the selected row (no need to drill in first).
       r.register Verb::Definition.new(
         "probe.open-evidence", "Open evidence", "Open the selected issue's sample flow in History",
-        Verb::Scope::Probe, [Verb::Chord.new("o")]) { |ctx| ctx.probe_open_flow; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("o")], group: :view) { |ctx| ctx.probe_open_flow; nil }
 
       r.register Verb::Definition.new(
         "probe.repeater-evidence", "Repeater evidence", "Send the selected issue's sample flow to Repeater",
-        Verb::Scope::Probe, [Verb::Chord.new("r")]) { |ctx| ctx.probe_repeater_flow; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("r")], group: :send) { |ctx| ctx.probe_repeater_flow; nil }
 
       # Re-run the ACTIVE checks against the selected issue's sample flow (menu-only 'A') — opens
       # a confirm with the expected request count. 'a' is toggle-closed; capital 'A' is free.
       r.register Verb::Definition.new(
         "probe.active-rescan", "Run active scan", "Re-run the Probe active checks against the selected issue's sample flow",
-        Verb::Scope::Probe, mnemonic: 'A') { |ctx| ctx.probe_active_rescan; nil }
+        Verb::Scope::Probe, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_rescan; nil }
 
       r.register Verb::Definition.new(
         "probe.promote-selected", "Promote to issue", "Create a Issue from the selected issue",
-        Verb::Scope::Probe, [Verb::Chord.new("p")]) { |ctx| ctx.probe_promote; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("p")], group: :triage) { |ctx| ctx.probe_promote; nil }
 
       r.register Verb::Definition.new(
         "probe.delete-selected", "Delete issue", "Delete the selected issue",
-        Verb::Scope::Probe, [Verb::Chord.new("d")]) { |ctx| ctx.probe_delete; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.probe_delete; nil }
 
       r.register Verb::Definition.new(
         "probe.clear", "Clear issues", "Delete all Probe issues for this project", Verb::Scope::Probe,
-        [Verb::Chord.new("x")]) { |ctx| ctx.probe_clear; nil }
+        [Verb::Chord.new("x")], group: :danger) { |ctx| ctx.probe_clear; nil }
 
       r.register Verb::Definition.new(
         "probe.leave", "Back to menu", "Return focus to the tab menu", Verb::Scope::Probe,

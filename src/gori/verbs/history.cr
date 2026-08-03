@@ -29,15 +29,15 @@ module Gori
       r.register Verb::Definition.new(
         "body.open", "Open flow detail", "View the selected request/response", Verb::Scope::Body,
         [Verb::Chord.new("enter"), Verb::Chord.new("right"), Verb::Chord.new("l")],
-        available: history_selected, mnemonic: 'o') { |ctx| ctx.open_detail; nil }
+        available: history_selected, mnemonic: 'o', group: :view) { |ctx| ctx.open_detail; nil }
 
       r.register Verb::Definition.new(
         "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
-        Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history) { |ctx| ctx.history_query; nil }
+        Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view) { |ctx| ctx.history_query; nil }
 
       r.register Verb::Definition.new(
         "history.toggle-follow", "Toggle follow", "Follow newest flows (tail) on/off",
-        Verb::Scope::Body, [Verb::Chord.new("f")], available: in_history) { |ctx| ctx.toggle_follow; nil }
+        Verb::Scope::Body, [Verb::Chord.new("f")], available: in_history, group: :view) { |ctx| ctx.toggle_follow; nil }
 
       # --- multi-select marks (#442) ---
       # Marks make the EXISTING space menu act on N flows — every batch verb below reads
@@ -54,7 +54,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.mark-toggle", "Mark flow", "Mark/unmark this flow and step to the next older one — the space menu then acts on every marked flow",
         Verb::Scope::Body, [Verb::Chord.new("t")],
-        available: history_selected, mnemonic: 't') { |ctx| ctx.history_mark_toggle; nil }
+        available: history_selected, mnemonic: 't', group: :triage) { |ctx| ctx.history_mark_toggle; nil }
 
       # ⇧T, the list's Ctrl+A: mark everything the CURRENT filter shows, so `/ status:>=500`
       # then ⇧T marks exactly the errors. The chord is Chord.new("t", shift: true), NOT
@@ -63,7 +63,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.mark-all", "Mark all (filtered)", "Mark every flow the current filter shows",
         Verb::Scope::Body, [Verb::Chord.new("t", shift: true)],
-        available: in_history, mnemonic: 'T') { |ctx| ctx.history_mark_all; nil }
+        available: in_history, mnemonic: 'T', group: :triage) { |ctx| ctx.history_mark_all; nil }
 
       # esc clears too (HistoryController#handle_body_key shadows body.to-menu only while
       # marks are set) — that's the reflex; this is the discoverable form. Menu-only: 'N' is
@@ -96,7 +96,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.copy", "Copy flow", "Copy the selected flow — or every marked flow's URL — to the clipboard",
         Verb::Scope::Body, [Verb::Chord.new("y")],
-        available: history_targets) { |ctx| ctx.copy_selection; nil }
+        available: history_targets, group: :copy) { |ctx| ctx.copy_selection; nil }
 
       # "Copy as X" for the list, mirroring repeater.copy-as / detail.copy-as: a picker over
       # urls / host list / curl / raw requests / raw responses / req+res pairs, spanning the
@@ -105,44 +105,44 @@ module Gori
       # from the Project tab — that verb now lives in Verb::Scope::ProjectDesc.)
       r.register Verb::Definition.new(
         "history.copy-as", "Copy as…", "Pick a copy format for the selected/marked flows (urls/hosts/curl/raw)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Body, available: history_targets, mnemonic: 'Y', group: :copy) { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
         "history.repeater", "Repeater flow", "Open the selected flow in the Repeater tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
-        available: history_targets, mnemonic: 'r') { |ctx| ctx.repeater_selected; nil }
+        available: history_targets, mnemonic: 'r', group: :send) { |ctx| ctx.repeater_selected; nil }
 
       # Spider + brute-force the selected flow's host (opens the Discover config popup; the
       # run streams into the Target → Discover sub-tab). Menu-only (no chord).
       r.register Verb::Definition.new(
         "history.discover", "Discover from flow", "Spider + brute-force the selected flow's host",
         Verb::Scope::Body, [] of Verb::Chord,
-        available: history_targets, mnemonic: 'd') { |ctx| ctx.history_discover; nil }
+        available: history_targets, mnemonic: 'd', group: :send) { |ctx| ctx.history_discover; nil }
 
       # Send the selected flow to the Comparer's next slot (A → B → A), then open the
       # Comparer tab to view the diff.
       r.register Verb::Definition.new(
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
+        Verb::Scope::Body, available: history_targets, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_selected; nil }
 
       # Manually run the Probe ACTIVE checks (reflected params, CORS) against the selected flow,
       # regardless of the Probe mode — opens a confirm dialog with the expected request count.
       # Menu-only ('A'); mirrors detail.probe-active in the drill-in.
       r.register Verb::Definition.new(
         "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'A') { |ctx| ctx.probe_active_selected; nil }
+        Verb::Scope::Body, available: history_targets, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_selected; nil }
 
       # Delete the selected flow (confirm-gated). Menu-only — L3 destructive; 'X' is free
       # across Body COMMON (lowercase 'x' is select-line). Mirrors probe.delete-selected.
       r.register Verb::Definition.new(
         "history.delete", "Delete flow", "Delete the selected flow from History (asks first)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'X') { |ctx| ctx.history_delete; nil }
+        Verb::Scope::Body, available: history_targets, mnemonic: 'X', group: :danger) { |ctx| ctx.history_delete; nil }
 
       # Wipe the project's entire History (confirm-gated). Menu-only; 'C' is free across
       # Body COMMON (lowercase 'c' is compare). Available whenever History has any rows.
       r.register Verb::Definition.new(
         "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
-        Verb::Scope::Body, available: in_history, mnemonic: 'C') { |ctx| ctx.history_clear; nil }
+        Verb::Scope::Body, available: in_history, mnemonic: 'C', group: :danger) { |ctx| ctx.history_clear; nil }
 
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
@@ -354,15 +354,15 @@ module Gori
       # ^X (plain `x` = select-line), so it carries an explicit 'e' mnemonic for the menu.
       r.register Verb::Definition.new(
         "detail.toggle-hex", "Hex view", "Toggle a raw hex dump of the request/response bytes",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("x", ctrl: true)], mnemonic: 'e') { |ctx| ctx.toggle_detail_hex; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("x", ctrl: true)], mnemonic: 'e', group: :view) { |ctx| ctx.toggle_detail_hex; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")]) { |ctx| ctx.toggle_reveal; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")], group: :view) { |ctx| ctx.toggle_reveal; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies (display only)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("p")]) { |ctx| ctx.toggle_pretty; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], group: :view) { |ctx| ctx.toggle_pretty; nil }
 
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord
@@ -371,63 +371,63 @@ module Gori
       r.register Verb::Definition.new(
         "detail.repeater", "Repeater flow", "Open this flow in the Repeater tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
-        mnemonic: 'r') { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
+        mnemonic: 'r', group: :send) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 
       # Create an issue while reading the flow — the natural moment to file one.
       # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
       r.register Verb::Definition.new(
         "detail.issue", "Add issue", "Create an issue from this flow",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
-        mnemonic: 'a') { |ctx| ctx.close_detail; ctx.issue_create; nil }
+        mnemonic: 'a', group: :triage) { |ctx| ctx.close_detail; ctx.issue_create; nil }
 
       # Send the open flow to the Comparer (mirrors history.compare from the list).
       r.register Verb::Definition.new(
         "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
-        Verb::Scope::HistoryDetail, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_selected; nil }
 
       # Copy the selection (or current line) from the navigable detail text — flow copy
       # lives in the space menu only (history.copy / detail.copy-flow).
       r.register Verb::Definition.new(
         "detail.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("y")],
-        mnemonic: 'y') { |ctx| ctx.detail_copy_selection; nil }
+        mnemonic: 'y', group: :copy) { |ctx| ctx.detail_copy_selection; nil }
 
       # "Copy as X" for the drill-in: same focus-aware format picker as Repeater, over the
       # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y' (free in the
       # HistoryDetail menu, whose keys are y/O/r/a/c/z/h/x/b/p).
       r.register Verb::Definition.new(
         "detail.copy-as", "Copy as…", "Pick a copy format for this pane (url/headers/body/cookies/curl/raw)",
-        Verb::Scope::HistoryDetail, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'Y', group: :copy) { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
         "detail.copy-flow", "Copy flow", "Copy this flow's raw request to the clipboard",
-        Verb::Scope::HistoryDetail, mnemonic: 'O') { |ctx| ctx.copy_selection; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'O', group: :copy) { |ctx| ctx.copy_selection; nil }
 
       # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I/'z' from the list) —
       # close the detail first so it doesn't float over the Fuzzer tab.
       r.register Verb::Definition.new(
         "detail.fuzz", "Send to Fuzzer", "Open this flow in the Fuzzer tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("i", shift: true)],
-        mnemonic: 'z') { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
+        mnemonic: 'z', group: :send) { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
 
       # Add the open flow's host to the scope lens (mirrors scope.add-host 'h' from the
       # list — also menu-only there; 'h' is the ← pane-nav chord in the detail).
       r.register Verb::Definition.new(
         "detail.add-host", "Add host to scope", "Add this flow's host to the scope lens",
-        Verb::Scope::HistoryDetail, mnemonic: 'h') { |ctx| ctx.scope_add_host; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'h', group: :scope) { |ctx| ctx.scope_add_host; nil }
 
       # Run the Probe active checks against the open flow (mirrors history.probe-active 'A' from
       # the list) — close the detail first so the confirm dialog isn't buried under it.
       r.register Verb::Definition.new(
         "detail.probe-active", "Run active scan", "Run the Probe active checks against this flow (shows the request count first)",
-        Verb::Scope::HistoryDetail, mnemonic: 'A') { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'A', group: :send) { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
 
       # Delete the open flow (mirrors history.delete). Menu-only 'X' — free in HistoryDetail
       # (lowercase 'x' is select-line). Confirm runs after the menu closes; the controller
       # captures the id so a live reload can't retarget the delete.
       r.register Verb::Definition.new(
         "detail.delete", "Delete flow", "Delete this flow from History (asks first)",
-        Verb::Scope::HistoryDetail, mnemonic: 'X') { |ctx| ctx.history_delete; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'X', group: :danger) { |ctx| ctx.history_delete; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
@@ -443,7 +443,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
-        available: history_targets, mnemonic: 'z') { |ctx| ctx.fuzz_selected; nil }
+        available: history_targets, mnemonic: 'z', group: :send) { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
         "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'f') { |ctx| ctx.fuzz_from_repeater; nil }
@@ -559,10 +559,10 @@ module Gori
 
       r.register Verb::Definition.new(
         "history.mine", "Mine parameters", "Discover hidden parameters for the selected flow",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'm') { |ctx| ctx.mine_selected; nil }
+        Verb::Scope::Body, available: history_targets, mnemonic: 'm', group: :send) { |ctx| ctx.mine_selected; nil }
       r.register Verb::Definition.new(
         "detail.mine", "Mine parameters", "Discover hidden parameters for this flow",
-        Verb::Scope::HistoryDetail, mnemonic: 'm') { |ctx| ctx.close_detail; ctx.mine_selected; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'm', group: :send) { |ctx| ctx.close_detail; ctx.mine_selected; nil }
       r.register Verb::Definition.new(
         "repeater.mine", "Mine parameters", "Discover hidden parameters for this repeater request",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'm') { |ctx| ctx.mine_from_repeater; nil }

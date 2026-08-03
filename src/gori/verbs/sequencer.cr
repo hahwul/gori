@@ -15,10 +15,10 @@ module Gori
 
       r.register Verb::Definition.new(
         "history.sequence", "Send to Sequencer", "Collect this flow's token and analyze its randomness",
-        Verb::Scope::Body, available: history_selected, mnemonic: 'q') { |ctx| ctx.sequence_selected; nil }
+        Verb::Scope::Body, available: history_selected, mnemonic: 'q', group: :send) { |ctx| ctx.sequence_selected; nil }
       r.register Verb::Definition.new(
         "detail.sequence", "Send to Sequencer", "Collect this flow's token and analyze its randomness",
-        Verb::Scope::HistoryDetail, mnemonic: 'q') { |ctx| ctx.close_detail; ctx.sequence_selected; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'q', group: :send) { |ctx| ctx.close_detail; ctx.sequence_selected; nil }
       r.register Verb::Definition.new(
         "repeater.sequence", "Send to Sequencer", "Collect this request's token repeatedly and analyze randomness",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'q') { |ctx| ctx.sequence_from_repeater; nil }
@@ -27,7 +27,7 @@ module Gori
       # retired :sitemap top-level symbol and never fire (Sitemap is now a Target sub-tab).
       r.register Verb::Definition.new(
         "sitemap.sequence", "Send to Sequencer", "Collect the selected endpoint's token and analyze randomness",
-        Verb::Scope::Sitemap, mnemonic: 'q') { |ctx| ctx.sequence_from_sitemap; nil }
+        Verb::Scope::Sitemap, mnemonic: 'q', group: :send) { |ctx| ctx.sequence_from_sitemap; nil }
 
       r.register Verb::Definition.new(
         "sequence.run", "Run collection", "Re-run token collection for this session", Verb::Scope::Sequencer,

@@ -27,7 +27,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "sitemap.query", "Filter (QL)", "Filter the tree with a query (host: path: method: status: tag: …)",
-        Verb::Scope::Sitemap, [Verb::Chord.new("/")]) { |ctx| ctx.sitemap_query; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.sitemap_query; nil }
 
       # --- multi-select marks (mirrors History #442) ---
       # Marks make the EXISTING action menu act on N paths — the batch verbs below read the
@@ -41,7 +41,7 @@ module Gori
       # into the same batch as the endpoints under them.
       r.register Verb::Definition.new(
         "sitemap.mark-toggle", "Mark path", "Mark/unmark this path and step down — the action menu then acts on every marked path",
-        Verb::Scope::Sitemap, [Verb::Chord.new("t")]) { |ctx| ctx.sitemap_mark_toggle; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("t")], group: :triage) { |ctx| ctx.sitemap_mark_toggle; nil }
 
       # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
       # shift+click. Free in this scope: Keymap#lookup matches a Chord record EXACTLY, so
@@ -73,12 +73,12 @@ module Gori
       r.register Verb::Definition.new(
         "sitemap.tag", "Tag path", "Pin a free-text memo to the selected — or every marked — path (filter with tag:)",
         Verb::Scope::Sitemap, [Verb::Chord.new("t", shift: true)],
-        mnemonic: 'T') { |ctx| ctx.sitemap_tag; nil }
+        mnemonic: 'T', group: :triage) { |ctx| ctx.sitemap_tag; nil }
 
       # `g` — fold/unfold path-param ids (/users/<uuid> → {uuid}, /users/1,2,3… → [1, 2, 3 … +N]).
       r.register Verb::Definition.new(
         "sitemap.toggle-grouping", "Fold ids", "Fold path-param ids into {uuid}/{hex}/{date} and [1, 2, 3 …] groups",
-        Verb::Scope::Sitemap, [Verb::Chord.new("g")]) { |ctx| ctx.sitemap_toggle_grouping; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("g")], group: :view) { |ctx| ctx.sitemap_toggle_grouping; nil }
 
       # Toggle the scope lens from the Sitemap too (History has its own ⇧S binding).
       # scope_toggle_lens reloads the active sitemap, and the bar shows the ⇧S chip —
@@ -86,7 +86,7 @@ module Gori
       # action menu (its only chord is ⇧S, which yields no menu key).
       r.register Verb::Definition.new(
         "sitemap.scope-toggle", "Toggle scope lens", "Filter the tree to in-scope endpoints on/off",
-        Verb::Scope::Sitemap, [Verb::Chord.new("s", shift: true)], mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("s", shift: true)], mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
 
       # `a` — add the cursor row to the project scope, pre-filling the SAME popup the Project
       # tab's `a` opens (hence the same chord): a host row seeds a `host` rule, a path row a
@@ -94,12 +94,12 @@ module Gori
       # rule is authored there instead of retyping the host in the Project tab.
       r.register Verb::Definition.new(
         "sitemap.scope-add", "Add to scope", "Add the selected host — or host + path — to the scope rules",
-        Verb::Scope::Sitemap, [Verb::Chord.new("a")], mnemonic: 'a') { |ctx| ctx.sitemap_scope_add; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("a")], mnemonic: 'a', group: :scope) { |ctx| ctx.sitemap_scope_add; nil }
 
       # `d` — spider + brute-force the selected host/path (opens the Discover config popup).
       r.register Verb::Definition.new(
         "sitemap.discover", "Discover here", "Spider + brute-force the selected host or path subtree",
-        Verb::Scope::Sitemap, [Verb::Chord.new("d")], mnemonic: 'd') { |ctx| ctx.sitemap_discover; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("d")], mnemonic: 'd', group: :send) { |ctx| ctx.sitemap_discover; nil }
 
       # `o` — read the bytes behind the selected endpoint: resolve its representative captured
       # flow and open History's detail on it. Same chord and same shape as the Issues tab's
@@ -110,13 +110,13 @@ module Gori
       # shows one flow, so there is nothing for a batch to mean here.
       r.register Verb::Definition.new(
         "sitemap.open-flow", "Open flow", "Open the selected endpoint's captured request/response in History",
-        Verb::Scope::Sitemap, [Verb::Chord.new("o")], mnemonic: 'o') { |ctx| ctx.sitemap_open_flow; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("o")], mnemonic: 'o', group: :view) { |ctx| ctx.sitemap_open_flow; nil }
 
       # `r` — send the selected endpoint (or every marked one) to Repeater, resolving a
       # representative captured flow per path.
       r.register Verb::Definition.new(
         "sitemap.repeater", "Send to Repeater", "Open the selected — or every marked — endpoint's captured request in Repeater",
-        Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r') { |ctx| ctx.sitemap_repeater; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r', group: :send) { |ctx| ctx.sitemap_repeater; nil }
 
       r.register Verb::Definition.new(
         "sitemap.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Sitemap,
