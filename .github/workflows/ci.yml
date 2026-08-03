@@ -82,7 +82,35 @@ jobs:
       - name: Install dependencies
         run: shards install
       - name: Run tests
-        run: crystal spec
+        # `-Wl,--no-export-dynamic` is a WORKAROUND for a linker bug, not a preference.
+        #
+        # Crystal links every binary with `-rdynamic`, which puts the whole program into
+        # `.dynsym`. Past some size the produced spec binary's symbol table and its version
+        # table stop agreeing, and the loader refuses it with a nonsense pairing:
+        #
+        #   undefined symbol: sqlite3_open_v2, version GLIBC_2.3
+        #   undefined symbol: sqlite3_open_v2, version GLIBC_2.25   # same build, next run
+        #   undefined symbol: environ, version Socket#read_timeout=<Time::Span>:Time::Span
+        #
+        # — a sqlite symbol tagged with a glibc version, a glibc symbol tagged with a Crystal
+        # METHOD NAME, and the tag changing between builds of the same tree. Nothing is
+        # actually missing: `ldd` is clean, the libraries are installed, and the same tree
+        # runs green on macOS and links fine into `bin/gori` (the `build-crystal` job above
+        # passes). It is the version index being read from a table that no longer lines up.
+        #
+        # Measured on the PR that first tripped it: `crystal spec` failed at load, `--no-debug`
+        # failed the same way (so it is not debug info), and this flag ran the suite green.
+        # The tree was 143 symbols and 0.19% larger than the `main` that passed — i.e. `main`
+        # sits just under the cliff and the next change of any size would have gone over.
+        # Scoped to this job because it is the only binary that crosses it.
+        #
+        # Nothing is lost: with debug info on (the default here) Crystal symbolizes backtraces
+        # from DWARF, not from the dynamic symbol table, so spec failures still name their
+        # frames. gori dlopen()s nothing and no linked C library calls back into a Crystal
+        # symbol by name, so there is no consumer of the export either.
+        #
+        # DELETE THIS once the toolchain stops mis-emitting the table.
+        run: crystal spec --link-flags "-Wl,--no-export-dynamic"
 # No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
 # arm64 on every PR, and those two builds — each compiling a static Crystal
 # binary from source, the arm64 one on a native runner because QEMU is far too
