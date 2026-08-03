@@ -55,8 +55,18 @@ module Gori
       }
     end
 
+    # Cascades `entity_links`, same as `delete_fuzz_session` and for the same reason
+    # (`delete_repeater` states it in full): `miner_sessions.id` is `INTEGER PRIMARY KEY`
+    # without AUTOINCREMENT and a ^W closes the NEWEST tab, so the id comes straight back and
+    # a surviving link re-binds — silently — to a session against another target instead of
+    # reading `miner #N (gone)`. One exec_task for both statements so a rollback can never
+    # strand the link, and the predicate carries ref_kind because ids collide across kinds.
     def delete_miner_session(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM miner_sessions WHERE id = ?", id); nil }
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM entity_links WHERE ref_kind = 'miner' AND ref_id = ?", id)
+        c.exec("DELETE FROM miner_sessions WHERE id = ?", id)
+        nil
+      }
     end
   end
 end

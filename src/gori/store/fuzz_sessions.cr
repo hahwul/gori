@@ -59,8 +59,25 @@ module Gori
       }
     end
 
+    # Cascades `entity_links`, for `delete_repeater`'s reason (repeater_sessions.cr states it
+    # in full): `fuzz_sessions.id` is `INTEGER PRIMARY KEY` WITHOUT AUTOINCREMENT, and closing
+    # a sub-tab (^W) deletes at the TOP of the id space, so the very next ^N is handed the id
+    # that just went. A link left behind therefore does not settle at `fuzz #1 (gone)` — it
+    # re-binds, `stale: false`, to a session against a DIFFERENT target, and an issue's
+    # evidence confidently names traffic the operator never linked (links overlay, exports,
+    # MCP `list_links`). Losing the pointer is strictly better than a pointer that starts lying.
+    #
+    # Both statements in ONE exec_task: the writer batches ops into a single transaction, so a
+    # rollback that spares the link row while the session goes is exactly the stranded state
+    # this exists to prevent. Matched on ref_kind AND ref_id — session ids collide across
+    # kinds (every workbench table starts at 1), so ref_id alone would take a live miner/flow
+    # ref with it.
     def delete_fuzz_session(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM fuzz_sessions WHERE id = ?", id); nil }
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM entity_links WHERE ref_kind = 'fuzz' AND ref_id = ?", id)
+        c.exec("DELETE FROM fuzz_sessions WHERE id = ?", id)
+        nil
+      }
     end
   end
 end
