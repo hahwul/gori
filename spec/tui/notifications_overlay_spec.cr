@@ -159,10 +159,95 @@ describe Gori::Tui::NotificationsOverlay do
     picked.should eq(["a"]) # newest-first (c, b, a), so row 2 is the oldest note
   end
 
+  it "keeps the cursor on the note being read when a drain pushes a new one" do
+    # THE LOST UPDATE. This overlay holds no snapshot — `notes` re-derives `@store.all`
+    # (newest-first) on every call — while the cursor was a bare Int32. Any background
+    # completion that reaches a controller drain (a Probe issue, an OAST callback, a
+    # fuzz/miner/discover Done) becomes index 0 and shifts everything by +1, so the ↵ the
+    # operator presses against the frame they were reading jumps to the NEIGHBOUR.
+    # OastController#drain_events guards the identical shape by capturing {session_id, uid}
+    # and re-anchoring @cb_sel; a Note's `id` is that stable key here (never recycled —
+    # `clear` does not reset @next_id).
+    s = store("a", "b", "c") # newest-first: c, b, a
+    ov = NotificationsOverlay.new(s)
+    h = OverlayHarness.new(ov)
+    h.press(Termisu::Input::Key::Down).should eq(:open)
+    ov.selected_note.not_nil!.message.should eq("b")
+
+    s.push(:success, "Probe: issue on GET /x") # a drain lands mid-read
+    ov.selected_note.not_nil!.message.should eq("b")
+
+    # The highlight has to move with it, or the frame disagrees with what ↵ will do.
+    box = h.box.not_nil!
+    h.render.row(box.y + 2 + 2).should contain("▎") # list is now [Probe…, c, b, a]
+    h.render.row(box.y + 2 + 2).should contain("b")
+
+    jumped = [] of String
+    h.on_commit do
+      jumped << ov.selected_note.not_nil!.message
+      true
+    end
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    jumped.should eq(["b"])
+  end
+
+  it "anchors from the moment it opens, before the operator has moved at all" do
+    # The unmoved-cursor case is the same bug: the center opens on the newest note, a drain
+    # prepends, and ↵ opens something the operator never saw. The Runner builds a fresh
+    # overlay per open (Runner#open_notifications), so `initialize` IS the open.
+    s = store("a")
+    ov = NotificationsOverlay.new(s)
+    s.push(:warn, "OAST: callback for s1")
+    ov.selected_note.not_nil!.message.should eq("a")
+  end
+
+  it "falls back to the clamped index when the anchored note is gone" do
+    # `clear` and the retention trim can retire the anchor. OastController's re-anchor is a
+    # no-op when the key no longer resolves; the same choice here keeps the cursor roughly
+    # where it was rather than snapping to the top of a list the operator did not touch.
+    s = store("a", "b", "c")
+    ov = NotificationsOverlay.new(s)
+    ov.move(2) # → "a", the oldest
+    ov.selected_note.not_nil!.message.should eq("a")
+    s.clear
+    s.push(:info, "fresh")
+    ov.selected_note.not_nil!.message.should eq("fresh") # clamped, never an index error
+  end
+
   it "clamps the selection on an empty store instead of raising" do
     h = OverlayHarness.new(NotificationsOverlay.new(Notifications.new))
     h.press(Termisu::Input::Key::Down).should eq(:open)
     h.overlay.as(NotificationsOverlay).selected_note.should be_nil
     h.rendered?("(no notifications yet)").should be_true
+  end
+end
+
+# `c` clears the whole store, so it must not fire on a modified chord. This is not
+# hypothetical tidiness: `Event::Key#char` is `@char || key.to_char`, so ^C reports 'c', and
+# the branch was reachable-by-accident-only — the shell used to claim ^C for the quit-arm
+# before any overlay saw a key. Once the quit-arm learned to yield while a modal is up (so ^D
+# could reach the Fuzzer payload-set editor), ^C started reaching this overlay, where it
+# erased every notification instead of arming quit. Pinned so the guard cannot be dropped as
+# redundant on the strength of a Runner invariant that already changed once.
+describe "NotificationsOverlay clear guard" do
+  it "clears on a bare c but never on ^C or ⌥C" do
+    store = Gori::Tui::Notifications.new
+    store.push(:info, "first")
+    store.push(:info, "second")
+
+    ov = Gori::Tui::NotificationsOverlay.new(store)
+    ctrl_c = Termisu::Event::Key.new(Termisu::Input::Key::LowerC, Termisu::Input::Modifier::Ctrl)
+    alt_c = Termisu::Event::Key.new(Termisu::Input::Key::LowerC, Termisu::Input::Modifier::Alt)
+
+    # The chord an operator presses to leave must not destroy their evidence.
+    ov.handle_key(ctrl_c).should eq(:stay)
+    store.all.size.should eq(2)
+    ov.handle_key(alt_c).should eq(:stay)
+    store.all.size.should eq(2)
+
+    # The advertised mnemonic still works — the hint says "c clear".
+    ov.hint.should contain("c clear")
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC)).should eq(:stay)
+    store.all.size.should eq(0)
   end
 end
