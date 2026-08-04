@@ -12,6 +12,7 @@ require "./url"
 require "./fmt"
 require "./flow_status"
 require "./read_cursor"
+require "./wrap"
 require "./copy_menu"
 require "../store"
 require "../repeater/flow_request"
@@ -60,6 +61,9 @@ module Gori::Tui
     getter? follow : Bool
     getter? querying : Bool
     getter query : String
+    # The detail body's read caret (mirrors RepeaterView#resp_cursor) — the pane's own
+    # position, which the wrap walkers move in visual rows.
+    getter detail_read : ReadCursor
 
     def initialize(@max_rows : Int32 = MAX_ROWS, @trim_slack : Int32 = TRIM_SLACK)
       # Display order follows Settings.history_list_order: newest-first (id DESC) or
@@ -107,8 +111,14 @@ module Gori::Tui
       @detail_graphql = nil.as(Graphql::Op?)         # GraphQL operation → GRAPHQL pane
       @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
+      # Scroll anchor: a (logical line, visual sub-row) pair rather than a flat visual-row
+      # index — see the header of `Wrap`. @detail_scroll_sub is 0 in hex (which draws its own
+      # fixed rows) and before the first frame has published a content width.
       @detail_scroll = 0
-      @detail_xscroll = 0 # horizontal scroll offset for the detail body (caret-follow)
+      @detail_scroll_sub = 0
+      # Per-line wrap memo for the detail body, keyed by the content width below.
+      @detail_wrap = {} of Int32 => Wrap::Layout
+      @detail_wrap_w = -1
       @detail_pane = initial_detail_pane
       @detail_focus = :strip                 # :strip (chip row) | :body (caret/text) — two-level detail focus
       @search_hl = ""                        # active ^F query → highlight in the detail body
@@ -130,8 +140,13 @@ module Gori::Tui
       @detail_styled_cache = {} of Int32 => Highlight::Line
       @detail_cache_rev = Theme.revision # the theme the cached (colour-baked) head/notes were built under
       @detail_read = ReadCursor.new
+      # The geometry the last text render actually drew with. Hit-testing reads these back
+      # rather than re-deriving them: `detail_gutter_w` is fed a different total by each
+      # render path (dv.total vs reveal_lines.size), so a re-derivation could key the wrap
+      # memo at a width the rows were never laid out at — flushing it on every click.
       @detail_last_h = 0
-      @detail_last_cw = 0 # last body content width — drives horizontal caret-follow (ensure_detail_visible_x)
+      @detail_last_gw = 0
+      @detail_last_cw = 0
       # settings:layout History Req/Res preview (list page bottom pane) — separate from full detail.
       @preview_detail = nil.as(Store::FlowDetail?)
       @preview_id = nil.as(Int64?)
@@ -794,7 +809,7 @@ module Gori::Tui
       # (DETAIL_LOG_CAP) with the full count kept for the "older not loaded" note.
       load_detail_logs(store)
       @detail_scroll = 0
-      @detail_xscroll = 0
+      detail_wrap_reset
       @detail_pane = initial_detail_pane
       @detail_focus = :strip # open lands on the strip (sub-tabs/chips); down-arrow enters the body
       drop_detail_cache
@@ -901,7 +916,7 @@ module Gori::Tui
       return if log_pane? # frames/events have no raw-bytes hex; don't strand a hidden flag
       @detail_hex = !@detail_hex
       @detail_scroll = 0 # row-based offset differs from the line-based one
-      @detail_xscroll = 0
+      detail_wrap_reset
       @detail_read.reset
     end
 
@@ -935,72 +950,159 @@ module Gori::Tui
       end
     end
 
-    # True when the detail is at its very top: caret on row 0 (navigable text) or the
-    # scroll offset pinned to 0 (hex dump). Mirrors the list's at_top? so a ↑ here pops
-    # focus to the tab bar exactly as it does from the list's first row.
+    # True when the detail is at its very top: caret on the FIRST VISUAL ROW of line 0
+    # (navigable text) or the scroll offset pinned to 0 (hex dump). Mirrors the list's
+    # at_top? so a ↑ here pops focus to the tab bar exactly as it does from the list's
+    # first row. The sub-row half matters under wrap: a caret parked three rows into a
+    # wrapped line 0 is not at the top, and popping focus from there would skip the very
+    # rows the ↑ was asked to walk.
     def detail_at_top? : Bool
-      detail_navigable? ? @detail_read.cy == 0 : @detail_scroll == 0
+      return @detail_scroll == 0 unless detail_navigable?
+      @detail_read.cy == 0 && detail_caret_sub == 0
+    end
+
+    # The caret's visual row WITHIN its logical line, or 0 when nothing has been laid out
+    # yet (hex, or before the first frame published a content width).
+    private def detail_caret_sub : Int32
+      cw = @detail_last_cw
+      return 0 if @detail_hex || cw <= 0
+      size, line_at = detail_line_source
+      return 0 if size <= 0 || @detail_read.cy >= size
+      detail_layout(@detail_read.cy, cw, line_at).row_of(@detail_read.cx)
     end
 
     # READ-mode caret move (+ optional shift selection). Arrow keys / detail.up/down
     # route here when the pane is navigable text (not a raw hex dump).
     # Lazy (size + line_at): a vertical step only materialises the destination line —
     # never every BodyLines entry on a multi-MiB body.
+    #
+    # ↑/↓ step one VISUAL row (see `detail_visual_target`), so they walk the continuation
+    # rows the pane is drawing instead of jumping over them to the next line number.
     def detail_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless detail_navigable?
       size, line_at = detail_line_source
       return if size <= 0
-      @detail_read.move(dr, dc, size, line_at, selecting)
+      if target = detail_visual_target(dr, size, line_at)
+        @detail_read.move_to(target[0], target[1], selecting: selecting)
+      else
+        @detail_read.move(dr, dc, size, line_at, selecting)
+      end
       ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
-      ensure_detail_visible_x(@detail_last_cw) if @detail_last_cw > 0
     end
 
-    # Wheel: scroll the viewport without moving the caret (READ panes).
-    # Uses detail_view.total (O(1) line count from BodyLines offsets) rather than
-    # materialising every plain line just to know the scroll range.
+    # The caret `dr` visual rows away, or nil when this pane has no wrap to walk — hex draws
+    # its own fixed rows, and before the first frame there is no content width to have laid
+    # anything out at. The caller then steps logical lines, which is what a row is there.
+    private def detail_visual_target(dr : Int32, size : Int32,
+                                     line_at : Int32 -> String) : {Int32, Int32}?
+      return nil if dr == 0 || @detail_hex || @detail_last_cw <= 0
+      Wrap.step_caret(@detail_read.cy, @detail_read.cx, dr, size, line_at,
+        detail_layout_fn(@detail_last_cw, line_at))
+    end
+
+    # Wheel: scroll the viewport by DRAWN rows without moving the caret (READ panes).
+    # Still O(viewport) — the anchor walk never counts the pane's total rows (see
+    # @detail_scroll_sub) and only the caret's line is materialised.
     def detail_scroll_view(step : Int32) : Nil
       return unless detail_navigable?
-      total = if @reveal && (rl = reveal_lines)
-                rl.size
-              else
-                detail_view.total
-              end
-      return if @detail_last_h <= 0 || total <= @detail_last_h
-      max = total - @detail_last_h
-      @detail_scroll = (@detail_scroll + step).clamp(0, max)
-      lo = @detail_scroll
-      hi = {@detail_scroll + @detail_last_h - 1, total - 1}.min
-      cy = @detail_read.cy.clamp(lo, hi)
-      line_len = if @reveal && (rl = reveal_lines)
-                   rl[cy]?.try(&.size) || 0
-                 else
-                   detail_view.line_text(cy).size
-                 end
-      @detail_read.sync(cy, @detail_read.cx.clamp(0, line_len))
+      size, line_at = detail_line_source
+      return if @detail_last_h <= 0 || size <= 0
+      cw = @detail_last_cw
+      if cw <= 0
+        return if size <= @detail_last_h
+        @detail_scroll = (@detail_scroll + step).clamp(0, size - @detail_last_h)
+        @detail_scroll_sub = 0 # no layout exists yet to carry a sub-row against
+      else
+        fn = detail_layout_fn(cw, line_at)
+        @detail_scroll = @detail_scroll.clamp(0, size - 1)
+        @detail_scroll, @detail_scroll_sub = if step < 0
+                                               Wrap.step_back(@detail_scroll, @detail_scroll_sub, -step, fn)
+                                             else
+                                               Wrap.step_forward(@detail_scroll, @detail_scroll_sub, step, size, fn)
+                                             end
+        mli, msub = Wrap.max_anchor(size, @detail_last_h, fn)
+        if @detail_scroll > mli || (@detail_scroll == mli && @detail_scroll_sub > msub)
+          @detail_scroll = mli
+          @detail_scroll_sub = msub
+        end
+      end
+      # Pull the caret into the window, compared in VISUAL rows: a caret on the anchor LINE
+      # can still be several wrapped rows above the anchor ROW, and a line-only clamp would
+      # leave it there to drag the view straight back on the next ensure_detail_visible.
+      rows = detail_rows(cw, @detail_last_h, size, line_at)
+      if rows.empty?
+        cy = @detail_read.cy.clamp(0, size - 1)
+        @detail_read.sync(cy, @detail_read.cx.clamp(0, line_at.call(cy).size))
+        return
+      end
+      first = rows[0]
+      last = rows[rows.size - 1]
+      cy = @detail_read.cy
+      cx = @detail_read.cx
+      if cy < first.li || (cy == first.li && cx < first.a)
+        cy, cx = first.li, first.a
+      elsif cy > last.li || (cy == last.li && cx > last.b)
+        cy, cx = last.li, last.a
+      end
+      @detail_read.sync(cy, cx.clamp(0, line_at.call(cy).size))
     end
 
     # `selecting` is the DRAG half: the anchor stays where the press left it and the caret
     # follows the pointer, so a drag over the request/response text selects it — the mouse
     # spelling of the ⇧arrows this pane already had.
+    #
+    # The hit test is the wrap's inverse, not `@detail_scroll + row`: a screen row is a
+    # VISUAL row now, and the continuation rows between it and the anchor are exactly what
+    # the old arithmetic skipped.
     def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, focused : Bool,
                                selecting : Bool = false) : Nil
+      @detail_click_hit = false
       return unless focused && detail_navigable?
       size, line_at = detail_line_source
       return if rect.empty? || size <= 0
-      gw = detail_gutter_w(rect, size)
-      @detail_read.click_to_cursor(rect, mx, my, @detail_scroll, size, line_at, gw, @detail_xscroll, selecting)
+      # Render's own numbers, not a re-derivation — see @detail_last_gw. Falls back to the
+      # gutter estimate only before the first frame, when nothing has been laid out yet.
+      gw = @detail_last_cw > 0 ? @detail_last_gw : detail_gutter_w(rect, size)
+      cw = @detail_last_cw > 0 ? @detail_last_cw : {rect.w - gw, 0}.max
+      row = my - rect.y
+      # A drag above the pane pins to its first visible row — the pointer left the top edge
+      # with the button held, which is an upward selection, not a miss.
+      if row < 0
+        return unless selecting
+        row = 0
+      end
+      rows = detail_rows(cw, rect.h, size, line_at)
+      return if rows.empty?
+      @detail_click_hit = true
+      # `Wrap.row_index` clamps to the row it was given, so a click past the end of a wrapped
+      # row stops at the break rather than selecting the next row's first char.
+      vr = rows[row]? || rows[rows.size - 1]
+      cx = Wrap.row_index(line_at.call(vr.li), nil, vr.a, vr.b, mx - (rect.x + gw))
+      if selecting
+        @detail_read.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor
+      else
+        @detail_read.clear_selection
+        @detail_read.sync(vr.li, cx)
+      end
       ensure_detail_visible(rect.h)
     end
 
-    # Double-click: select the word under the pointer. False when the pane is not navigable
-    # (the hex dump) or the pointer is on whitespace — the caller then leaves the plain
-    # click's caret placement standing.
+    # Whether the last `detail_click_to_cursor` actually landed on the pane (as opposed to
+    # returning early on a click outside it) — the double-click needs to tell "the caret did
+    # not move because the pointer was already there" from "the click missed entirely".
+    @detail_click_hit = false
+
+    # Double-click: select the word under the pointer. The hit test is
+    # `detail_click_to_cursor`'s (the pane's own wrap + windowed line source), so this only
+    # has to supply the word spread. False when the pane is not navigable (the hex dump) or
+    # the pointer is on whitespace — the caller then leaves the plain click's caret standing.
     def detail_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless detail_navigable?
       size, line_at = detail_line_source
       return false if rect.empty? || size <= 0
-      gw = detail_gutter_w(rect, size)
-      hit = @detail_read.select_word_at(rect, mx, my, @detail_scroll, size, line_at, gw, @detail_xscroll)
+      detail_click_to_cursor(rect, mx, my, focused: true)
+      return false unless @detail_click_hit
+      hit = @detail_read.select_word_at_cursor(size, line_at)
       ensure_detail_visible(rect.h)
       hit
     end
@@ -1209,40 +1311,75 @@ module Gori::Tui
       {Gutter.width(total), body.w}.min
     end
 
+    # Keep the caret's VISUAL row inside the pane. Line-indexed scrolling drifts the moment
+    # anything wraps — the caret can be on the anchor line and still be a dozen drawn rows
+    # off-screen — so the comparison and the re-anchor both happen in rows (Wrap). Falls back
+    # to the line-based arithmetic before the first render, when no width is known yet and
+    # nothing has been laid out to disagree with.
     private def ensure_detail_visible(view_h : Int32) : Nil
       return if view_h <= 0
       cy = @detail_read.cy
-      if cy < @detail_scroll
-        @detail_scroll = cy
-      elsif cy >= @detail_scroll + view_h
-        @detail_scroll = cy - view_h + 1
-      end
-    end
-
-    # Horizontal companion to ensure_detail_visible: slide @detail_xscroll so the caret
-    # column stays inside the visible content width [xscroll, xscroll + cw). Mirrors
-    # TextArea#ensure_visible_x; uses Screen.draw_width (the caret painter's measure, and
-    # the one Highlight.slice_left consumes @detail_xscroll in — they used to disagree).
-    private def ensure_detail_visible_x(cw : Int32) : Nil
-      return if cw <= 0
+      cw = @detail_last_cw
       size, line_at = detail_line_source
-      return if size <= 0 || @detail_read.cy >= size
-      line = line_at.call(@detail_read.cy)
-      if Screen.draw_width(line) <= cw
-        @detail_xscroll = 0
+      if @detail_hex || cw <= 0 || size <= 0
+        if cy < @detail_scroll
+          @detail_scroll = cy
+        elsif cy >= @detail_scroll + view_h
+          @detail_scroll = cy - view_h + 1
+        end
+        @detail_scroll = 0 if @detail_scroll < 0
         return
       end
-      cx = @detail_read.cx.clamp(0, line.size)
-      curx = Screen.draw_width(line[0, cx])
-      @detail_xscroll = curx if curx < @detail_xscroll
-      @detail_xscroll = curx - cw + 1 if curx >= @detail_xscroll + cw
-      @detail_xscroll = 0 if @detail_xscroll < 0
+      @detail_scroll = @detail_scroll.clamp(0, size - 1)
+      fn = detail_layout_fn(cw, line_at)
+      csub = fn.call(cy.clamp(0, size - 1)).row_of(@detail_read.cx)
+      @detail_scroll, @detail_scroll_sub =
+        Wrap.ensure_visible(@detail_scroll, @detail_scroll_sub, cy.clamp(0, size - 1), csub, view_h, fn)
     end
 
-    # Horizontal companion to `scroll_detail` (shift+←/→). Floored at 0 here; the
-    # render loop clamps the upper bound to the widest row actually on screen.
-    def hscroll_detail(delta : Int32) : Nil
-      @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
+    # --- detail soft wrap ------------------------------------------------------
+
+    # Ceiling on the detail wrap memo — see RepeaterView::RESP_WRAP_CACHE_CAP, same reasoning.
+    DETAIL_WRAP_CACHE_CAP = 512
+
+    # Drop the wrap memo and put the anchor back on a first row. Called from every site that
+    # swaps what the pane is showing (a fresh open, a pane/hex/reveal/pretty toggle) — the
+    # same sites that used to zero the horizontal offset, which is not a coincidence: those
+    # are exactly the moments the old layout stops describing the pane.
+    private def detail_wrap_reset : Nil
+      @detail_scroll_sub = 0
+      @detail_wrap.clear
+    end
+
+    # Publish the geometry the active detail pane just drew with, so hit-testing and the
+    # scroll walkers key the wrap memo on exactly the width the rows were laid out at.
+    private def detail_record_metrics(gw : Int32, cw : Int32) : Nil
+      @detail_last_gw = gw
+      @detail_last_cw = cw
+    end
+
+    private def detail_layout(li : Int32, cw : Int32, line_at : Int32 -> String) : Wrap::Layout
+      if @detail_wrap_w != cw
+        @detail_wrap.clear
+        @detail_wrap_w = cw
+      end
+      if hit = @detail_wrap[li]?
+        return hit
+      end
+      @detail_wrap.clear if @detail_wrap.size >= DETAIL_WRAP_CACHE_CAP
+      @detail_wrap[li] = Wrap.layout(line_at.call(li), cw)
+    end
+
+    private def detail_layout_fn(cw : Int32, line_at : Int32 -> String) : Int32 -> Wrap::Layout
+      ->(i : Int32) { detail_layout(i, cw, line_at) }
+    end
+
+    # The detail pane's drawn rows for an `h`-row viewport at content width `cw`.
+    private def detail_rows(cw : Int32, h : Int32, size : Int32,
+                            line_at : Int32 -> String) : Array(Wrap::Row)
+      return [] of Wrap::Row if size <= 0 || h <= 0 || cw <= 0
+      @detail_scroll = @detail_scroll.clamp(0, size - 1)
+      Wrap.rows(@detail_scroll, @detail_scroll_sub, h, size, detail_layout_fn(cw, line_at))
     end
 
     # ^G go-to-line in the detail view: scroll so 1-based line `n` is at the top
@@ -1257,6 +1394,7 @@ module Gori::Tui
         cy = (n - 1).clamp(0, size - 1)
         @detail_read.sync(cy, 0)
         @detail_scroll = cy
+        @detail_scroll_sub = 0 # ^G names a LOGICAL line, so land on its first visual row
       else
         @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
       end
@@ -1275,7 +1413,10 @@ module Gori::Tui
       return if @reveal == on
       @reveal = on
       @detail_scroll = 0
-      @detail_xscroll = 0
+      # Reveal renders on its own line space, so the memo (keyed only by line index and
+      # width) would hand the new path the OLD lines' layouts. drop_detail_cache is not on
+      # this path — it clears the windowed view, which reveal doesn't use — so reset here.
+      detail_wrap_reset
       @detail_read.reset
     end
 
@@ -1287,7 +1428,7 @@ module Gori::Tui
       @pretty = on
       drop_detail_cache
       @detail_scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like hex/pane toggles)
-      @detail_xscroll = 0
+      detail_wrap_reset
       @detail_read.reset
     end
 
@@ -1393,7 +1534,7 @@ module Gori::Tui
     private def set_detail_pane(pane : Symbol) : Nil
       @detail_pane = pane
       @detail_scroll = 0
-      @detail_xscroll = 0
+      detail_wrap_reset
       drop_detail_cache       # pane switch changes the content
       @detail_hex_bytes = nil # …and the hex source bytes
       @detail_read.reset
@@ -1840,8 +1981,8 @@ module Gori::Tui
     end
 
     # The normal (non-hex, non-reveal) detail body: request/response/decoded-pane text,
-    # windowed + horizontally scrollable. Split out of render_detail to keep that
-    # dispatch's cyclomatic complexity under ameba's threshold.
+    # windowed + soft-wrapped. Split out of render_detail to keep that dispatch's
+    # cyclomatic complexity under ameba's threshold.
     # Steady-scroll hot path: only materialises/styles VISIBLE lines — never the full
     # multi-MiB body. Full plain-line materialisation is reserved for selection spans
     # (rare) and caret/search helpers outside the every-frame loop.
@@ -1851,11 +1992,8 @@ module Gori::Tui
       @detail_last_h = body.h
       gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
-      @detail_last_cw = cw # remember for horizontal caret-follow (ensure_detail_visible_x)
-      # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
-      # never re-styles just to measure width (mirrors RepeaterView#render_response_body).
-      rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? styled_detail_line(dv, li) : nil }
-      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
+      detail_record_metrics(gw, cw)
+      return if cw <= 0
       ensure_detail_visible(body.h) if detail_navigable? && focused
       # Selection spans only fetch lines in the selected range (lazy line_at).
       sel_spans = if focused && detail_navigable? && @detail_read.selection?
@@ -1864,19 +2002,21 @@ module Gori::Tui
                   else
                     nil
                   end
-      rows.each_with_index do |styled, i|
-        li = @detail_scroll + i
-        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy) if gw > 0
-        shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
-        Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
+      # The wrap is computed on the PLAIN text (`line_text`) and the styled overlay is then
+      # sliced to the same char range — Highlight is a 1:1 colour overlay, so one layout
+      # describes both and the colours cannot land a column off the glyphs.
+      detail_rows(cw, body.h, total, ->(i : Int32) { dv.line_text(i) }).each_with_index do |vr, i|
+        li = vr.li
+        y = body.y + i
+        draw_detail_gutter(screen, body.x, y, gw, vr, focused)
+        Highlight.draw(screen, body.x + gw, y, Highlight.slice_chars(styled_detail_line(dv, li), vr.a, vr.b), width: cw)
         need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || !@search_hl.empty?
         plain = need_plain ? dv.line_text(li) : nil
-        paint_detail_line_chrome(screen, body.x + gw, body.y + i, li, plain, focused, cw, sel_spans)
-        # The plain-text line + its left-slice feed ONLY the search overlay, so skip both
-        # when no query is active (else every frame builds/scans discarded strings per row).
+        paint_detail_line_chrome(screen, body.x + gw, y, li, plain, focused, sel_spans, vr.a, vr.b) if plain
+        # The plain-text line feeds ONLY the search overlay, so skip it when no query is
+        # active (else every frame builds/scans discarded strings per row).
         if (text = plain) && !@search_hl.empty?
-          st = @detail_xscroll > 0 ? Highlight.slice_left_text(text, @detail_xscroll) : text
-          SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw)
+          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw)
         end
       end
     end
@@ -1888,67 +2028,86 @@ module Gori::Tui
       @detail_last_h = body.h
       gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
-      @detail_last_cw = cw # remember for horizontal caret-follow (ensure_detail_visible_x)
-      # draw_width, not display_width — as RepeaterView#render_reveal. Reveal.styled gives
-      # every control char a 1-column marker, so a tab is a drawn cell the raw measure calls
-      # 0. Here it also FOUGHT the caret: ensure_detail_visible_x sets @detail_xscroll with
-      # column_width (tab ≥1), then this clamp immediately clawed it back with the smaller
-      # raw measure, so on a tabbed line the caret could never scroll into view at all.
-      widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.draw_width_upto(l, @detail_xscroll + cw + 1) } || 0
-      @detail_xscroll = @detail_xscroll.clamp(0, {widest - cw, 0}.max)
+      detail_record_metrics(gw, cw)
+      return if cw <= 0
       ensure_detail_visible(body.h) if detail_navigable? && focused
-      (0...body.h).each do |i|
-        li = @detail_scroll + i
-        break if li >= total
-        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy) if gw > 0
-        styled = Reveal.styled(lines[li], li < total - 1, cw + @detail_xscroll)
-        styled = Highlight.slice_left(styled, @detail_xscroll) if @detail_xscroll > 0
-        Highlight.draw(screen, body.x + gw, body.y + i, styled, width: cw)
-        paint_detail_line_chrome(screen, body.x + gw, body.y + i, li, lines[li], focused, cw)
-        st = @detail_xscroll > 0 ? Highlight.slice_left_text(lines[li], @detail_xscroll) : lines[li]
-        SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw) unless @search_hl.empty?
+      # Reveal substitutes a 1-column marker for every control char (tab → '→', CR → '␍'),
+      # which is exactly what `Screen.grapheme_cols` already scores them, so the wrap of the
+      # RAW line and the wrap of the revealed line are the same break — no second layout.
+      detail_rows(cw, body.h, total, ->(i : Int32) { lines[i] }).each_with_index do |vr, i|
+        y = body.y + i
+        line = lines[vr.li]
+        draw_detail_gutter(screen, body.x, y, gw, vr, focused)
+        # `last` only on the row that actually ends the line — the ␊ marker belongs at the
+        # true end of the line, not at every wrap break inside it.
+        eol = vr.b >= line.size && vr.li < total - 1
+        Highlight.draw(screen, body.x + gw, y, Reveal.styled(line[vr.a...vr.b], eol, cw), width: cw)
+        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, nil, vr.a, vr.b)
+        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
 
-    # cw = visible content width; caret + selection are shifted by @detail_xscroll and
-    # clipped to [x, x + cw) so they stay aligned with the horizontally-scrolled body.
+    # Detail-pane gutter: the line number rides the FIRST visual row of a logical line only
+    # (Burp style); a continuation gets a blank of the same width so the text column stays
+    # put and no stale digits survive there.
+    private def draw_detail_gutter(screen : Screen, x : Int32, y : Int32, gw : Int32,
+                                   vr : Wrap::Row, focused : Bool) : Nil
+      return if gw <= 0
+      if vr.sub == 0
+        Gutter.draw(screen, x, y, vr.li, gw, current: focused && vr.li == @detail_read.cy)
+      else
+        screen.text(x, y, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
+      end
+    end
+
+    # Selection tint + block caret for ONE drawn row. `rs`/`re` bound the row's slice of the
+    # line (the whole line when nothing wrapped), so a selection spanning a wrap break is
+    # painted on each row it covers and the caret paints on exactly one of them — the row
+    # that STARTS at its column, matching Wrap::Layout#row_of.
     private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32,
-                                         line : String?, focused : Bool, cw : Int32,
-                                         sel_spans : Array({Int32, Int32, Int32})? = nil) : Nil
-      return unless focused && detail_navigable? && line
+                                         line : String, focused : Bool,
+                                         sel_spans : Array({Int32, Int32, Int32})? = nil,
+                                         rs : Int32 = 0, re : Int32 = -1) : Nil
+      return unless focused && detail_navigable?
+      re = line.size if re < 0
       if spans = sel_spans
         spans.each do |(l, x0, x1)|
-          paint_char_span_bg(screen, x, y, line, x0, x1, cw, Theme.accent_bg) if l == li
+          next unless l == li
+          a = {x0, rs}.max
+          b = {x1, re}.min
+          paint_char_span_bg(screen, x, y, line, a, b, Theme.accent_bg, rs) if a < b
         end
       end
       return unless li == @detail_read.cy
       cx = @detail_read.cx.clamp(0, line.size)
-      px = x + Screen.draw_width(line[0, cx]) - @detail_xscroll
-      return if px < x || px >= x + cw # caret scrolled outside the visible content
+      return unless cx >= rs && (cx < re || re >= line.size)
+      px = x + Wrap.row_col(line, nil, rs, cx)
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
       screen.cursor(px, y)
     end
 
+    # `row_start` is the char index the drawn row begins at — 0 for an unwrapped line, the
+    # wrap break for a continuation row. Columns are measured from THERE, so a tint on a
+    # continuation row starts at the pane's left edge like the text it covers.
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, cw : Int32, bg : Color) : Nil
-      return if x0 >= x1 || cw <= 0
-      # Start at the span's on-screen column: drawn width up to x0, shifted by xscroll.
+                                   x0 : Int32, x1 : Int32, bg : Color, row_start : Int32 = 0) : Nil
+      return if x0 >= x1
       # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
       # CHARS is exactly the retired per-codepoint measure: it drifts right by each
       # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
       # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
       # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
+      a = {Screen.cluster_start(line, {x0, line.size}.min), row_start}.max
       b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a]) - @detail_xscroll
+      return if a >= b
+      px = x + Wrap.row_col(line, nil, row_start, a)
       i = a
       while i < b
         e = Screen.cluster_end(line, i + 1)
         seg = line[i...e]
-        w = Screen.draw_width(seg)
-        screen.text(px, y, seg, Theme.text, bg) if px >= x && px + w <= x + cw
-        px += w
+        screen.text(px, y, seg, Theme.text, bg)
+        px += Screen.draw_width(seg)
         i = e
       end
     end
@@ -2141,6 +2300,12 @@ module Gori::Tui
     private def drop_detail_cache : Nil
       @detail_cache = nil
       @detail_styled_cache.clear
+      # …and the wrap memo, which is keyed by (line index, width) only: new content at the
+      # same index would be laid out against the OLD line's breaks. `refresh_detail` reaches
+      # here without touching the anchor (by design — it must not scroll a live-updating
+      # flow), so the anchor is deliberately left alone; `Wrap.rows` re-clamps a sub-row that
+      # the new content made too large.
+      @detail_wrap.clear
     end
 
     # Ceiling on the styled-body memo (a visible window is ~tens of lines, so this covers many

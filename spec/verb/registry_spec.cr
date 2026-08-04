@@ -152,10 +152,6 @@ private class FakeContext < ExecContext
     @calls << :detail_copy_selection
   end
 
-  def hscroll_detail(delta : Int32) : Nil
-    @calls << :hscroll_detail
-  end
-
   def toggle_detail_pane : Nil
     @calls << :toggle_detail_pane
   end

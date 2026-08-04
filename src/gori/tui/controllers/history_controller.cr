@@ -587,10 +587,6 @@ module Gori::Tui
       @history.list_copy_as_menu(@host.session.store, ids)
     end
 
-    def hscroll_detail(delta : Int32) : Nil
-      @history.hscroll_detail(delta)
-    end
-
     def toggle_detail_pane : Nil
       @history.toggle_pane
     end

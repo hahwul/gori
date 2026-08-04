@@ -186,10 +186,6 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:detail_copy_selection)
   end
 
-  def hscroll_detail(delta : Int32) : Nil
-    rec(:hscroll_detail, delta)
-  end
-
   def toggle_detail_pane : Nil
     rec(:toggle_detail_pane)
   end

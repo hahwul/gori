@@ -93,10 +93,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.detail_copy_selection
   end
 
-  def hscroll_detail(delta : Int32) : Nil
-    history_controller.hscroll_detail(delta)
-  end
-
   def toggle_detail_pane : Nil
     history_controller.toggle_detail_pane
   end

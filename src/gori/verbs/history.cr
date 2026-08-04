@@ -340,9 +340,10 @@ module Gori
         "detail.up", "Move detail up", "Move the detail caret up (scroll in hex mode)", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("k"), Verb::Chord.new("up")], hidden: true) { |ctx| ctx.scroll_detail(-1); nil }
 
-      # Shift+←/→ now extends a horizontal selection (handled inline in
-      # HistoryController#handle_detail_body_key), so there is no dedicated h-scroll
-      # binding — the caret follows the viewport instead (ensure_detail_visible_x).
+      # Shift+←/→ extends a horizontal selection (handled inline in
+      # HistoryController#handle_detail_body_key), and there is no h-scroll to bind
+      # anywhere: the detail's req/res panes soft-wrap, so a long line is already on the
+      # next drawn row rather than off the right edge.
 
       r.register Verb::Definition.new(
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",

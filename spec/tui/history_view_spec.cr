@@ -373,7 +373,12 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  it "hscroll_detail scrolls a long response body line sideways into view (shift+←/→)" do
+  # Was: "hscroll_detail scrolls a long response body line sideways into view (shift+←/→)".
+  # There is no sideways any more — the detail's req/res panes soft-wrap, so the tail of a
+  # long line is on the next row with nothing to chase it with. What is still under test is
+  # the same requirement the h-scroll spec encoded: BOTH ends of an over-wide line must be
+  # reachable, and now they are visible at once.
+  it "wraps a long response body line so both ends are on screen without scrolling" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
@@ -393,13 +398,11 @@ describe Gori::Tui::HistoryView do
       backend = MemoryBackend.new(80, 16)
       view.render_detail(Screen.new(backend), rect)
       backend.contains?("HEAD").should be_true
-      backend.contains?("TAIL").should be_false # off the right edge, clipped
-
-      20.times { view.hscroll_detail(1) } # scroll well past the line's width
-      backend2 = MemoryBackend.new(80, 16)
-      view.render_detail(Screen.new(backend2), rect)
-      backend2.contains?("TAIL").should be_true
-      backend2.contains?("HEAD").should be_false # scrolled off the left edge
+      backend.contains?("TAIL").should be_true # on a continuation row, not clipped away
+      # …and on DIFFERENT rows: the tail wrapped rather than being squeezed onto one line.
+      head_y = (0...16).find { |y| backend.row(y).includes?("HEAD") }.not_nil!
+      tail_y = (0...16).find { |y| backend.row(y).includes?("TAIL") }.not_nil!
+      tail_y.should be > head_y
     end
   end
 
@@ -442,7 +445,11 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  it "follows the caret horizontally as ←/→ walk a long line (no explicit h-scroll)" do
+  # Was: "follows the caret horizontally as ←/→ walk a long line (no explicit h-scroll)".
+  # The caret no longer drags a horizontal offset — the line is wrapped, so walking ←/→ to
+  # its end lands the caret on a continuation row that is already drawn. What is still under
+  # test is that the walk REACHES the end of the line and the pane keeps showing it.
+  it "walks the caret to the end of a wrapped line without scrolling the pane sideways" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
@@ -459,22 +466,24 @@ describe Gori::Tui::HistoryView do
       view.toggle_pane # request -> response
 
       rect = Rect.new(0, 0, 80, 16)
-      # The first render records the body's content width so caret moves can follow-x.
+      # The first render publishes the body's content width, which the wrap is keyed on.
       b0 = MemoryBackend.new(80, 16)
       view.render_detail(Screen.new(b0), rect)
       b0.contains?("HEAD").should be_true
-      b0.contains?("TAIL").should be_false # off the right edge at xscroll 0
+      b0.contains?("TAIL").should be_true # already on a continuation row
 
       # Park the caret at the start of the long body line, then walk it to end-of-line
       # (the body has no trailing newline, so moving past EOL clamps — it never wraps).
       row = view.detail_search_lines("HEAD").first
       view.goto_detail_line(row + 1)
-      130.times { view.detail_move(0, 1) } # plain ←/→ horizontal caret; ensure_detail_visible_x tracks it
+      130.times { view.detail_move(0, 1) } # plain ←/→ horizontal caret
+      view.detail_read.cy.should eq(row)
+      view.detail_read.cx.should eq(108) # HEAD + 100 dots + TAIL
 
       b1 = MemoryBackend.new(80, 16)
       view.render_detail(Screen.new(b1), rect)
-      b1.contains?("TAIL").should be_true  # caret-follow scrolled the tail into view
-      b1.contains?("HEAD").should be_false # the start slid off the left edge
+      b1.contains?("TAIL").should be_true # the caret's row is still on screen …
+      b1.contains?("HEAD").should be_true # … and so is the line's start
     end
   end
 
@@ -551,12 +560,13 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  # Same clamp bug as RepeaterView#render_reveal, but here it also FOUGHT the caret:
-  # ensure_detail_visible_x slides @detail_xscroll using column_width (a tab counts 1),
-  # then this clamp immediately clawed it back with display_width (a tab counts 0). The
-  # caret-follow and the clamp were pulling in opposite directions every frame, so on a
-  # tab-indented body the caret could never scroll into view at the end of a line.
-  it "scrolls a tab-filled response line to its end in reveal mode" do
+  # Was: "scrolls a tab-filled response line to its end in reveal mode" — a regression test
+  # for two measures disagreeing about a tab's width (display_width says 0, draw_width says
+  # 1) while one drove the h-scroll clamp and the other the caret-follow. There is no
+  # h-scroll left to clamp, but the SAME disagreement would now break the wrap: `Wrap` breaks
+  # on `Screen.grapheme_cols`, so a 100-tab line has to occupy several drawn rows rather than
+  # the single 14-column one the raw measure would predict.
+  it "wraps a tab-filled response line onto continuation rows in reveal mode" do
     tmp_store do |store|
       line = "STARTTOK#{"\t" * 100}ENDTOK"
       Screen.display_width(line).should eq(14) # the raw measure the clamp used to trust
@@ -580,14 +590,13 @@ describe Gori::Tui::HistoryView do
       at0 = MemoryBackend.new(80, 16)
       view.render_detail(Screen.new(at0), rect)
       at0.contains?("STARTTOK").should be_true
-      at0.contains?("ENDTOK").should be_false # tail off to the right
-      at0.contains?("→").should be_true       # reveal is drawing tab markers
+      at0.contains?("→").should be_true      # reveal is drawing tab markers
+      at0.contains?("ENDTOK").should be_true # …and the tail wrapped into view
 
-      20.times { view.hscroll_detail(4) }
-      scrolled = MemoryBackend.new(80, 16)
-      view.render_detail(Screen.new(scrolled), rect)
-      scrolled.contains?("ENDTOK").should be_true    # reachable now
-      scrolled.contains?("STARTTOK").should be_false # head genuinely scrolled off
+      # The two must be on different rows: 114 drawn columns cannot fit one ~76-column row.
+      start_y = (0...16).find { |y| at0.row(y).includes?("STARTTOK") }.not_nil!
+      end_y = (0...16).find { |y| at0.row(y).includes?("ENDTOK") }.not_nil!
+      end_y.should be > start_y
     end
   end
 
