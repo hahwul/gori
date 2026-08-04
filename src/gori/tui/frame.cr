@@ -144,6 +144,15 @@ module Gori::Tui
     # Notes, …). NOR advertises ↵ (and i) as the way into insert; INS is a plain lit label
     # (esc exits — already in the status strip). Clickable via `mode_badge_hit`. Returns
     # the badge's left x for chaining, or `right_edge` when it doesn't fit.
+    #
+    # `insert` must be the pane's REAL mode — never `focused && insert?`. The two labels are
+    # different WIDTHS (" ↵:NOR " is 7 cells, " INS " is 5), and `mode_badge_hit` is called from a
+    # click handler that has no idea which pane had focus when the frame was drawn; every caller's
+    # hit-test therefore passes the bare mode. Gating the label on focus desynchronised the two:
+    # a pane that retained INS while focus moved away (no view exits insert on a focus change)
+    # drew the 7-cell NOR chip over a 5-cell hit rect — two dead cells on its left — and a click
+    # on a chip reading "↵:NOR" ran the INS branch and turned insert OFF. Focus belongs in the
+    # BORDER (`Frame.pane_border(focused, insert:)`), not in this label.
     def self.mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
                         insert : Bool) : Int32
       text = mode_badge_label(insert)

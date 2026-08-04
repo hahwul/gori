@@ -2217,6 +2217,65 @@ describe Gori::Tui::RepeaterView do
       view.request_text.should_not contain("Content-Length: 30")
     end
   end
+
+  # The single-pane REQUEST column, through the shared hit-test seam
+  # (`request_hit`/`request_sub_rect`/`place_request_caret`) the split panes now share. There
+  # was no drag or double-click coverage anywhere in the suite before, so the seam's
+  # rewrite had nothing pinning the case it was factored out of.
+  describe "mouse drag + double-click (plain HTTP request pane)" do
+    head = "GET /alpha/beta HTTP/1.1\nHost: h.test\nUser-Agent: gori\n\n"
+
+    rendered = -> {
+      view = RepeaterView.new
+      view.restore("https://h.test", head, false, true)
+      view.focus_pane(:request)
+      rect = Rect.new(0, 0, 100, 24)
+      b = MemoryBackend.new(100, 24)
+      view.render(Screen.new(b), rect) # geometry: @last_cw / last_rows are set here
+      {view, b, rect}
+    }
+
+    # The request card sits under the 3-row TARGET band, in the left half, inset by its border.
+    body_y = 4
+
+    it "extends a READ-mode selection along the request line" do
+      view, b, rect = rendered.call
+      x0 = b.row(body_y).index("GET").not_nil!
+      view.request_click_to_cursor(rect, x0, body_y)
+      view.request_drag_to_cursor(rect, x0 + 3, body_y)
+      view.pane_selection?.should be_true
+      view.pane_copy_text.should eq("GET")
+    end
+
+    it "extends an INSERT-mode selection through the editor's own anchor" do
+      view, b, rect = rendered.call
+      x0 = b.row(body_y).index("GET").not_nil!
+      view.enter_request_insert!
+      view.request_click_to_cursor(rect, x0, body_y)
+      view.request_drag_to_cursor(rect, x0 + 3, body_y)
+      view.pane_selection?.should be_true
+      view.pane_copy_text.should eq("GET")
+    end
+
+    # `word_char?` breaks a path at every `/`, so double-clicking inside "beta" takes the
+    # segment and not the whole target.
+    it "takes the word under a double-click" do
+      view, b, rect = rendered.call
+      x = b.row(body_y).index("beta").not_nil! + 1
+      view.request_click_to_cursor(rect, x, body_y)
+      view.request_select_word.should be_true
+      view.pane_copy_text.should eq("beta")
+    end
+
+    # Hex has a nibble cursor, which has no selection to extend — the one request shape still
+    # excluded from the drag.
+    it "leaves the hex nibble cursor alone on a drag" do
+      view, b, rect = rendered.call
+      view.toggle_request_hex.should be_true
+      view.request_drag_to_cursor(rect, b.row(body_y).size - 1, body_y) # must not raise
+      view.pane_selection?.should be_false
+    end
+  end
 end
 
 describe "RepeaterView WebSocket frame shapes (V7)" do

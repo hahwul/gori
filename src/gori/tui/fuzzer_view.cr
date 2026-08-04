@@ -1623,12 +1623,22 @@ module Gori::Tui
 
     # Home/End: caret to line start/end — pure navigation, no dirty. `selecting` is the Shift
     # half (extends instead of collapsing), like the arrows.
+    #
+    # These move the EDITOR's caret directly, so READ mode has to adopt the result — the anchor
+    # rules live in `@template_read`, and `paint_template_read_chrome`'s per-frame `sync_from`
+    # copies cy/cx while leaving the anchor alone. Without `sync_to`: a plain Home left the anchor
+    # where it was and painted a band from there to column 0, over a selection the operator had
+    # just collapsed — and `y` then copied "" because the band's two ends had crossed. ⇧Home/⇧End
+    # planted no anchor at all and extended nothing. `sync_to` is the helper written for exactly
+    # this pair; Notes, Issues, Project and the Decoder input all already call it.
     def template_home(selecting : Bool = false) : Nil
       @editor.home(selecting)
+      @template_read.sync_to(@editor, selecting: selecting) unless template_insert?
     end
 
     def template_end(selecting : Bool = false) : Nil
       @editor.end_of_line(selecting)
+      @template_read.sync_to(@editor, selecting: selecting) unless template_insert?
     end
 
     # ⌃/⌥ + Home/End — the buffer's start/end rather than the line's.
@@ -1938,7 +1948,9 @@ module Gori::Tui
       return if rect.h < 2
       ins = focused && target_insert?
       Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
-      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
+      # The REAL mode, not `ins` — `target_chrome_hit` measures the bare `target_insert?`, and the
+      # two labels are different widths. See `Frame.mode_badge`.
+      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, target_insert?)
       unless @sni.strip.empty?
         badge = " SNI "
         bx = {rect.right - badge.size - 1, rect.x + 9}.max
@@ -1994,9 +2006,19 @@ module Gori::Tui
       # estimate stays there as a passive summary (render_run_summary).
       run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x, "^R", "RUN", !running?)
       pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x, "^U", "PRETTY", false)
-      Frame.mode_badge(screen, pretty_x, rect.y, min_x, ins)
-      screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
-        pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
+      # The mode chip states the pane's REAL mode, not `focused && …`: `template_chrome_hit` and
+      # `apply_chrome_click` both read `template_insert?` alone, so gating the LABEL on focus made
+      # an unfocused pane that had retained INS draw " ↵:NOR " (7 cols) over a 5-col " INS " hit
+      # rect — two dead cells on the left of the chip — and a click on a chip reading "↵:NOR" then
+      # EXITED insert mode. Focus is still carried, by the border colour below.
+      mode_x = Frame.mode_badge(screen, pretty_x, rect.y, min_x, template_insert? || @chain_focused)
+      # …and `§N` chains off the mode chip's left edge. It used to be drawn at `pretty_x - 4`,
+      # which is INSIDE the 7-cell mode badge — so it overwrote "NOR " and the border read
+      # "↵: §2", destroying the mode chip and leaving the marker count ambiguous. Every other
+      # badge on every other pane chains off its neighbour's returned left x; this one did not.
+      badge_x = mode_x - badge.size
+      screen.text(badge_x, rect.y, badge,
+        pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg) if badge_x >= min_x
       # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a
       # trailing ¦chain (Decoder transform-on-send) is over-painted with a neutral band so
       # it reads as metadata, not payload. Colours resolved fresh each frame (offsets are
@@ -2018,29 +2040,37 @@ module Gori::Tui
       paint_template_read_chrome(screen, inner, read_active)
     end
 
+    # READ-mode over-paint (selection band + block caret) on top of the frame the editor drew.
+    #
+    # Band and caret both go through the EDITOR, which owns the concealed-run map. This pane is
+    # THE place operators write `§value¦chain§`, and the `¦chain` is concealed here — so measuring
+    # a span on the raw line put the tint and the caret N columns right of the text they addressed
+    # (N = the hidden width to their left), and re-drawing the raw segment for the band put the
+    # hidden chain back on screen: selecting a line UNCONCEALED it and shifted the rest of the row.
+    # The copy was right all along (it reads buffer coordinates), so the band highlighted different
+    # bytes than `y` copied. See the READ-mode over-paint seam in `text_area.cr`.
+    #
+    # `scroll`-relative rows are correct here where they would not be in the Repeater: this editor
+    # does not soft-wrap (no `wrap = true`), so one logical line is one drawn row.
     private def paint_template_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
       return unless active
       lines = @editor.lines_snapshot
       return if lines.empty?
       @template_read.sync_from(@editor)
-      sel_bg = Theme.accent_bg
       scr = @editor.scroll
+      gw = @editor.gutter? ? Gutter.width(lines.size) : 0
+      cw = {rect.w - gw, 0}.max
       @template_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
         next unless li >= scr && li < scr + rect.h
-        row = li - scr
-        gw = @editor.gutter? ? Gutter.width(lines.size) : 0
-        paint_char_span_bg(screen, rect.x + gw, rect.y + row, lines[li], x0, x1, sel_bg)
+        @editor.paint_read_band(screen, rect.x + gw, rect.y + (li - scr), li, x0, x1, 0, -1, cw)
       end
       cy, cx = @editor.cy, @editor.cx
       return unless cy >= scr && cy < scr + rect.h
-      row = cy - scr
-      gw = @editor.gutter? ? Gutter.width(lines.size) : 0
-      line = lines[cy]
-      px = rect.x + gw + Screen.draw_width(line[0, cx])
+      col, ch = @editor.read_caret_cell(cy, cx)
+      px = rect.x + gw + col
       if px < rect.x + rect.w
-        ch = cx < line.size ? line[cx] : ' '
-        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + row)
+        screen.cell(px, rect.y + (cy - scr), ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + (cy - scr))
       end
     end
 

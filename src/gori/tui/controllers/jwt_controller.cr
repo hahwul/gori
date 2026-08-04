@@ -40,6 +40,30 @@ module Gori::Tui
       @header = TextArea.new("")
       @payload = TextArea.new("")
     end
+
+    # Home/End on the INPUT pane. They move the EDITOR's caret, so READ mode has to adopt the
+    # result: `JwtView#paint_read_chrome` paints purely from `input_read`, which nothing here was
+    # updating — so both keys moved a caret nobody could see and left the painted block caret
+    # parked where it stood. `selecting` was not threaded either, so ⇧Home/⇧End behaved as plain
+    # Home/End and could not start a selection.
+    #
+    # The pair lives on the session rather than in the controller's `case` because both halves —
+    # the editor move and the read-cursor adoption — have to travel together; four sibling views
+    # (Notes, Issues, Project, the Decoder input) pair them at their own seam for the same reason.
+    def input_home(selecting : Bool = false) : Nil
+      @input.home(selecting)
+      adopt_input_caret(selecting)
+    end
+
+    def input_end(selecting : Bool = false) : Nil
+      @input.end_of_line(selecting)
+      adopt_input_caret(selecting)
+    end
+
+    private def adopt_input_caret(selecting : Bool) : Nil
+      return if @input_mode == InputMode::Insert # INS owns its own anchor, inside the TextArea
+      @input_read.sync_to(@input, selecting: selecting)
+    end
   end
 
   # The JWT tab: a hidden workbench for decoding, editing/re-signing, and generating
@@ -322,8 +346,8 @@ module Gori::Tui
         s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
-      when key.home?  then s.input.home
-      when key.end?   then s.input.end_of_line
+      when key.home?  then s.input_home(selecting) # editor move + read-cursor adopt — see JwtSession
+      when key.end?   then s.input_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # x/y + Global breath → keymap
       end

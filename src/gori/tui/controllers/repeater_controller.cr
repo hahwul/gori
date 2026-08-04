@@ -237,10 +237,13 @@ module Gori::Tui
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · #{hex}/esc exit" if v.request_hex?
       read_common = "⇧arrows select · #{y} copy · space cmds"
       if v.ws_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · #{send} send · ↹ pane · esc tabs" : ws_hint(v)
+        # The response column has two cards on a WS tab, so name the card being read and the
+        # key that swaps them — the same shape `ws_hint` uses for the request column's two.
+        return ws_resp_hint(v, read_common, send) if v.focus == :response
+        return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · #{send} send · ↹ pane · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · esc tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
@@ -252,7 +255,7 @@ module Gori::Tui
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ⇧←/→ h-scroll · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -386,6 +389,14 @@ module Gori::Tui
       "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · ↹ pane"
     end
 
+    # The RESPONSE column's footer on a WS tab — the twin of `ws_hint`, naming the card being
+    # read and `^T` as the way to the other one. Without it the handshake response card was
+    # reachable and nothing said so.
+    private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
+      card = v.resp_pane == :handshake ? "handshake response" : "transcript"
+      "↑/↓ move #{card} · #{read_common} · ←/→ char · ^T switch · ^F find · #{send} send · ↹ pane · esc tabs"
+    end
+
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
     # A gRPC request flow: an HTTP/2 call whose request content-type is application/grpc.
     private def grpc_flow?(detail : Store::FlowDetail) : Bool
@@ -422,6 +433,15 @@ module Gori::Tui
     def repeater_toggle_decoded : Nil
       view = current_view
       return @host.status("no repeater open") unless view
+      # With the RESPONSE pane focused on a WebSocket tab, ^T toggles THAT column's two cards
+      # (handshake response ⇄ transcript) instead of the request's. Same key, same gesture —
+      # "switch the card I am reading" — on whichever column has focus; this method has been
+      # context-sensitive since it was written, and the response column is the third context.
+      if view.ws_mode? && view.focus == :response
+        pane = view.toggle_resp_pane
+        @host.status(pane == :handshake ? "reading the handshake response (101 head)" : "reading the message transcript")
+        return
+      end
       if view.decode_mode? || view.ws_mode?
         @host.request_focus(:body)
         view.focus_pane(:request)
@@ -469,8 +489,17 @@ module Gori::Tui
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
       elsif view.focus == :response
-        view.toggle_resp_hex
-        @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
+        # A transcript pane never renders the hex dump — `render_response` returns at its own
+        # branch long before the `@resp_hex` one — but `resp_navigable?` reads the same flag, so
+        # setting it here silently killed the caret, the selection and every arrow key while the
+        # pane looked completely unchanged. (Reachable only on a pipelined GROUP send: WS and
+        # gRPC are refused above.) Refuse it where it cannot be honoured.
+        if view.group_mode?
+          @host.status("no hex dump for a group transcript — it is N responses, not one byte stream")
+        else
+          view.toggle_resp_hex
+          @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
+        end
       else
         @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
       end
@@ -604,6 +633,9 @@ module Gori::Tui
       when :req_hex
         view.focus_pane(:request)
         repeater_toggle_hex
+      when :ws_key
+        view.focus_pane(:request)
+        repeater_toggle_ws_key
       when :send
         view.focus_pane(:request)
         repeater_send
@@ -622,6 +654,21 @@ module Gori::Tui
           view.enter_target_insert!
         end
       end
+    end
+
+    # The wheel with the pointer position: a split request column (WS handshake + messages, a
+    # decode tab's envelope + payload) scrolls the sub-pane UNDER the cursor rather than the
+    # one holding the caret. Everything else — including the whole response column — keeps the
+    # coordinate-free behaviour, so this is the split's fix and nothing else's change.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      v = current_view
+      return true unless v
+      body = body_rect_below_filter(rect)
+      if v.focus == :request && v.pane_at(body, mx, my) == :request
+        v.request_scroll_view_at(step, body, mx, my)
+        return true
+      end
+      handle_wheel(step)
     end
 
     def handle_wheel(step : Int32) : Bool
@@ -772,8 +819,9 @@ module Gori::Tui
       body = body_rect_below_filter(rect)
       return false if v.chrome_hit(body, mx, my) # a border badge is a button, not text
       case v.focus
-      when :request  then v.request_select_word(body, mx, my)
-      when :response then v.resp_select_word(body, mx, my)
+      # Both spread from the caret the press placed rather than hit-testing again — see the view.
+      when :request  then v.request_select_word
+      when :response then v.resp_select_word
       else                false
       end
     end
@@ -2051,14 +2099,18 @@ module Gori::Tui
       transcript = view.ws_mode? || view.grpc_mode? || view.group_mode?
       nav = view.resp_navigable?
       c = ev.char || key.to_char
+      # ←/→ (and ⇧←/⇧→) move the read caret by a character in EVERY navigable response shape,
+      # transcripts included. They used to be gated off for WS / gRPC / group, which left the
+      # transcript with vertical motion only — while a mouse drag across the same rows selected
+      # by character and `resp_copy_text` copied exactly that char span. Nothing in the model
+      # was transcript-specific: `resp_drawn_source` reports a decoration offset of 0 for a
+      # transcript (only DIFF has one), so the caret columns are the row's own columns.
       case
-      when key.enter?               then repeater_send
-      when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
-      when key.down?, key.lower_j?  then resp_nav_step(view, 1, 0, selecting, nav)
-      when key.left? && !selecting  then resp_nav_step(view, 0, -1, false, nav) unless transcript
-      when key.right? && !selecting then resp_nav_step(view, 0, 1, false, nav) unless transcript
-      when key.left? && selecting   then resp_nav_step(view, 0, -1, true, nav) unless transcript
-      when key.right? && selecting  then resp_nav_step(view, 0, 1, true, nav) unless transcript
+      when key.enter?              then repeater_send
+      when key.up?, key.lower_k?   then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
+      when key.down?, key.lower_j? then resp_nav_step(view, 1, 0, selecting, nav)
+      when key.left?               then resp_nav_step(view, 0, -1, selecting, nav)
+      when key.right?              then resp_nav_step(view, 0, 1, selecting, nav)
       when transcript
         # Transcript: no d/x/p tools; still let Global breath / copy through.
         return false if c && !ev.ctrl? && !ev.alt? && !c.control?

@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 require "base64"
 require "uri"
 require "json"
@@ -144,6 +145,100 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
       view.req_pane.should eq(:decoded)
       view.edit_move(-1, 0) # ↑ off the DECODED top → ENVELOPE
       view.req_pane.should eq(:envelope)
+    end
+
+    # The same crossing in READ mode, which is where it did not exist: the step lived inline
+    # in `edit_move` (INS only), so `request_read_move` clamped at each sub-pane's edge and
+    # `^T` was the only way across. Both modes call `try_cross_req_pane` now.
+    it "crosses in READ mode too, and drops the read selection when it does" do
+      detail = detail_of("/graphql", gql_head, gql_body)
+      op = Gori::Graphql.from_flow("/graphql", gql_head.to_slice, gql_body.to_slice).not_nil!
+      view = RepeaterView.new
+      view.load_graphql(detail, op)
+      view.request_insert?.should be_false # a decode tab opens in READ, like every other tab
+
+      view.pane_select_line
+      view.pane_selection?.should be_true
+
+      10.times { view.request_read_move(1, 0) } # past the ENVELOPE's last line
+      view.req_pane.should eq(:decoded)
+      view.pane_selection?.should be_false # an anchor cannot follow the caret into another buffer
+
+      view.request_read_move(-1, 0)
+      view.req_pane.should eq(:envelope)
+    end
+  end
+
+  # Mouse gestures in the split column, which used to return early on `@decode_kind`: a drag
+  # selected nothing and a double-click took no word, in either sub-pane. They go through the
+  # same `request_hit` / `request_sub_rect` / `place_request_caret` seam as plain HTTP and WS.
+  describe "mouse drag + double-click in the split sub-panes" do
+    gql_body = %({"query":"query FindUser { name }"})
+    gql_head = "POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/json\r\nContent-Length: #{gql_body.bytesize}\r\n\r\n"
+
+    # The DECODED card's content rect, re-derived as `render` does (target band → left half →
+    # `decode_split` with the ACTIVE pane enlarged → the card's 1-cell inset).
+    decoded_rect = ->(view : RepeaterView, rect : Rect) {
+      target_h = {rect.h, 3}.min
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      half = {(content.w - 1) // 2, 1}.max
+      col = Rect.new(content.x, content.y, half, content.h)
+      inactive = {col.h // 3, 1}.max
+      env_h = view.req_pane == :envelope ? {col.h - inactive, 1}.max : inactive
+      Rect.new(col.x, col.y + env_h, col.w, {col.h - env_h, 0}.max).inset(1, 1)
+    }
+
+    rendered = -> {
+      detail = detail_of("/graphql", gql_head, gql_body)
+      op = Gori::Graphql.from_flow("/graphql", gql_head.to_slice, gql_body.to_slice).not_nil!
+      view = RepeaterView.new
+      view.load_graphql(detail, op)
+      rect = Rect.new(0, 0, 100, 24)
+      b = MemoryBackend.new(100, 24)
+      view.render(Screen.new(b), rect) # geometry: @last_cw / last_rows are set here
+      {view, b, rect}
+    }
+
+    it "adopts the DECODED sub-pane a press landed in and places its caret" do
+      view, b, rect = rendered.call
+      view.req_pane.should eq(:envelope)
+      dec = decoded_rect.call(view, rect)
+      x = b.row(dec.y).index("query").not_nil!
+
+      view.request_click_to_cursor(rect, x, dec.y)
+      view.req_pane.should eq(:decoded)
+      view.pane_copy_text.should contain("FindUser") # the caret line is the GraphQL query
+    end
+
+    # ^T into DECODED first, so the card is already at its active (enlarged) size and one
+    # render describes the layout both the press and the drag are inverted against.
+    it "extends a READ-mode selection inside the DECODED sub-pane" do
+      view, _, rect = rendered.call
+      view.toggle_req_pane
+      view.req_pane.should eq(:decoded)
+      b = MemoryBackend.new(100, 24)
+      view.render(Screen.new(b), rect)
+
+      dec = decoded_rect.call(view, rect)
+      x = b.row(dec.y).index("query").not_nil!
+      view.request_click_to_cursor(rect, x, dec.y)
+      view.request_drag_to_cursor(rect, x + 5, dec.y)
+
+      view.pane_selection?.should be_true
+      view.pane_copy_text.should eq("query")
+    end
+
+    it "takes the word under a double-click in the DECODED sub-pane" do
+      view, _, rect = rendered.call
+      view.toggle_req_pane
+      b = MemoryBackend.new(100, 24)
+      view.render(Screen.new(b), rect)
+
+      dec = decoded_rect.call(view, rect)
+      x = b.row(dec.y).index("FindUser").not_nil! + 2
+      view.request_click_to_cursor(rect, x, dec.y)
+      view.request_select_word.should be_true
+      view.pane_copy_text.should eq("FindUser")
     end
   end
 end

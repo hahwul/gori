@@ -143,6 +143,16 @@ module Gori::Tui
       # was never laid out against.
       @resp_last_gw = 0
       @resp_last_cw = 0
+      # Which card of a split RESPONSE column is being read (WebSocket only — see resp_split?).
+      # Starts on the transcript: that is what an operator opens a WS tab to read, and it keeps
+      # a non-WS tab's behaviour literally unchanged.
+      @resp_pane = :transcript
+      # The INACTIVE response sub-pane's parked {scroll, scroll_sub, cy, cx}. The active pane's
+      # copy lives in the live fields, so every existing consumer of `@scroll` / `@resp_cursor`
+      # keeps reading them with no idea a second pane exists; `switch_resp_pane` swaps the two.
+      # Parked rather than reset, mirroring the request column — each TextArea there keeps its
+      # own caret and scroll, so crossing back lands where you left.
+      @resp_alt = {0, 0, 0, 0}
       @loaded = false
       @http2 = false
       # WebSocket repeater mode (a 101 flow): the request editor holds the editable
@@ -420,7 +430,7 @@ module Gori::Tui
     end
 
     def resp_navigable? : Bool
-      @focus == :response && !@resp_hex
+      @focus == :response && !resp_hex_active?
     end
 
     # --- persistence accessors (the Runner saves these + reconciles by them) ---
@@ -851,6 +861,11 @@ module Gori::Tui
       @ws_result = result
       @ws_lines_cache = nil
       @scroll = 0
+      # A send replaces BOTH response documents — the transcript here, and the handshake head via
+      # the `@result` seed below (which `reset_result_caches` re-derives `resp_view` from). So the
+      # parked sub-pane's anchor describes a document that no longer exists; zero it with the live
+      # one rather than leaving `clamp_resp_cursor` to salvage a position from the last run.
+      @resp_alt = {0, 0, 0, 0}
       resp_wrap_reset
       # Seed @result so the HTTP response tab can render the handshake response
       @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
@@ -984,7 +999,7 @@ module Gori::Tui
     # The editor the request column's input/cursor targets: the decoded payload when its
     # split sub-pane is active, else the envelope (the only editor in a non-decode tab).
     private def req_editor : TextArea
-      ((@decode_kind || @ws_mode) && @req_pane == :decoded) ? @decoded : @editor
+      (req_split? && @req_pane == :decoded) ? @decoded : @editor
     end
 
     # ^T: toggle the active request sub-pane (envelope ⇄ decoded). No-op outside a
@@ -1006,12 +1021,75 @@ module Gori::Tui
     # it); entering DECODED RE-DECODES the envelope's current param (so it reflects any
     # envelope edits). No-op outside a decode tab / when the pane is unchanged.
     private def switch_req_pane(to : Symbol) : Nil
-      return unless @decode_kind || @ws_mode
+      return unless req_split?
       return if to == @req_pane
       if @decode_kind
         to == :envelope ? commit_decoded : refresh_decoded
       end
       @req_pane = to
+      # ONE `@req_read` serves both sub-panes (it is a cursor over whatever `req_editor`
+      # returns), so an anchor left over from the pane being left would paint a band across
+      # the arriving buffer's text — coordinates from one document applied to another. A
+      # single-buffer tab never had this to answer for; a split one does, and the answer is
+      # that crossing panes ends the selection, exactly as it would in INS (`edit_move`'s
+      # cross-pane branch deliberately does not forward `selecting`).
+      @req_read.clear_selection
+      req_editor.clear_selection
+    end
+
+    # ^T on the RESPONSE column: toggle the active card (handshake ⇄ transcript). No-op outside
+    # a WebSocket tab. Returns the new active pane so the controller can name it in a toast.
+    def toggle_resp_pane : Symbol
+      switch_resp_pane(@resp_pane == :transcript ? :handshake : :transcript)
+      @resp_pane
+    end
+
+    # Change the active RESPONSE card. The two panes are different DOCUMENTS behind one cursor
+    # and one scroll anchor, so the swap has three parts and all three are load-bearing:
+    #
+    #   * the outgoing pane's {scroll, scroll_sub, cy, cx} is parked and the incoming pane's is
+    #     restored, so crossing back lands where you left (what the request column gets for
+    #     free from each TextArea holding its own);
+    #   * the wrap memo is dropped. It is keyed by LINE INDEX (guarded only on width), so line 3
+    #     of the transcript would otherwise hand back a layout computed for line 3 of the
+    #     handshake head — the anchor, the click inverse and the draw all reading one memo built
+    #     from the wrong text; and
+    #   * the selection is cleared. An anchor cannot span two documents, exactly as on the
+    #     request side.
+    private def switch_resp_pane(to : Symbol) : Nil
+      return unless resp_split?
+      return if to == @resp_pane
+      parked = @resp_alt
+      @resp_alt = {@scroll, @scroll_sub, @resp_cursor.cy, @resp_cursor.cx}
+      @resp_pane = to
+      @resp_cursor.clear_selection
+      resp_wrap_reset # drops the memo AND zeroes @scroll_sub — restore after, not before
+      @scroll = parked[0]
+      @resp_cursor.sync(parked[2], parked[3])
+      clamp_resp_cursor
+    end
+
+    # Pull the parked anchor + caret back inside the pane being restored into. Both documents
+    # change out from under a parked position — a resend rebuilds the transcript AND re-seeds the
+    # handshake head — so a caret parked at line 40 can come back to a 3-line document.
+    #
+    # `@scroll_sub` is deliberately NOT restored, only zeroed (by `resp_wrap_reset` above): a
+    # sub-row is an index INTO a specific line's wrap layout, so the only way to carry one across
+    # a park is to prove the line still wraps the same way, and nothing here can. Reading a stale
+    # one is exactly what `scroll`'s own comment refuses to do ("a carried sub-row would be read
+    # against a line that was never laid out at that row"). The cost is at most one wrapped row of
+    # remembered scroll position; the alternative is tracking invalidation across every site that
+    # replaces either document.
+    private def clamp_resp_cursor : Nil
+      size, line_at = resp_line_source
+      if size <= 0
+        @resp_cursor.sync(0, 0)
+        @scroll = 0
+        return
+      end
+      cy = @resp_cursor.cy.clamp(0, size - 1)
+      @resp_cursor.sync(cy, @resp_cursor.cx.clamp(0, line_at.call(cy).size))
+      @scroll = @scroll.clamp(0, size - 1)
     end
 
     # Re-encode the (edited) decoded payload back into the envelope — SAML param via
@@ -1706,11 +1784,17 @@ module Gori::Tui
       @target_mode = InputMode::Read
     end
 
-    # {head, body} strings of the last HTTP response (nil until a send lands, or in
-    # WS/gRPC mode where the "response" is a transcript, not raw head+body bytes).
-    # Feeds the RESPONSE pane's "copy as X" options (status+headers / body / raw).
+    # {head, body} strings of the last HTTP response (nil until a send lands, or where the
+    # "response" is a transcript rather than raw head+body bytes). Feeds the RESPONSE pane's
+    # "copy as X" options (status+headers / body / raw).
+    #
+    # A WebSocket tab reading its HANDSHAKE RESPONSE card is NOT one of those cases: that card
+    # shows a real HTTP 101 head (`apply_ws` seeds `@result` with it), so it gets the same
+    # head/body/raw options every other response head gets. It is only the TRANSCRIPT that has
+    # no head+body to split, and that is what `@resp_pane` distinguishes.
     def response_parts : {String, String}?
-      return nil if @ws_mode || @grpc_mode
+      return nil if @grpc_mode
+      return nil if @ws_mode && !resp_handshake_active?
       res = @result
       return nil unless res
       {String.new(res.head), (b = res.body) ? String.new(b) : ""}
@@ -2457,6 +2541,13 @@ module Gori::Tui
       mx >= content.x + half + 1 ? :response : nil
     end
 
+    # The HANDSHAKE REQUEST card's right-chained badges, right-to-left — ONE list, read by the
+    # draw (`render_request`, for both the badges and where the mode chip chains to) and by the
+    # hit-test below. `␣K:KEY` was drawn from one place and hit-tested from another, and the
+    # second one did not list it: the badge was a dead cell, while HTTP's `^L:CL`/`^U:PRETTY`
+    # next to it have always been clickable.
+    WS_BADGES = [{:send, "^R", "SEND"}, {:ws_key, "␣K", "KEY"}] of {Symbol, String, String}
+
     # Border-chrome hit-test for REQUEST/RESPONSE toggle chips. Shares geometry with
     # render_request / render_response_chrome (label strings + start_x / right chain).
     # Returns a chip id, or nil so the caller can fall through to caret placement.
@@ -2488,34 +2579,37 @@ module Gori::Tui
         end
       end
 
-      # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/PRETTY (or
-      # HEX) when drawn; NOR/INS mode chip chains left of those. Decode / CHAIN splits
-      # keep chrome on the top card. WS/gRPC skip the mode chip (no render_mode_badge).
-      req_card = (@decode_kind || @ws_mode) ? decode_split(left)[0] : left
+      # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/PRETTY (or HEX,
+      # or gRPC's ^X:MSG, or WS's ␣K:KEY) when drawn; the NOR/INS mode chip chains left of
+      # those. Decode / CHAIN splits keep chrome on the top card.
+      req_card = req_split? ? decode_split(left)[0] : left
       if req_card.w >= 2 && my == req_card.y
         label = render_request_label
         min_x = req_card.x + label.size + 4
         right_edge = req_card.right - 1
-        badges = [{:send, "^R", "SEND"}] of {Symbol, String, String}
-        if @grpc_mode
-          if @req_hex_edit
-            badges << {:req_hex, "^X", "HEX"} # editing the payload
-          elsif @grpc_reframable
-            badges << {:req_hex, "^X", "MSG"} # click to hex-edit the unary payload
-          end
-        elsif !@ws_mode
-          if @req_hex_edit
-            badges << {:req_hex, "^X", "HEX"}
-          else
-            badges << {:cl, "^L", "CL"}
-            badges << {:pretty_req, "^U", "PRETTY"}
-          end
-        end
+        badges = if @grpc_mode
+                   b = [{:send, "^R", "SEND"}] of {Symbol, String, String}
+                   if @req_hex_edit
+                     b << {:req_hex, "^X", "HEX"} # editing the payload
+                   elsif @grpc_reframable
+                     b << {:req_hex, "^X", "MSG"} # click to hex-edit the unary payload
+                   end
+                   b
+                 elsif @ws_mode
+                   WS_BADGES # ^R:SEND + ␣K:KEY — the list render_request draws from
+                 elsif @req_hex_edit
+                   [{:send, "^R", "SEND"}, {:req_hex, "^X", "HEX"}] of {Symbol, String, String}
+                 else
+                   [{:send, "^R", "SEND"}, {:cl, "^L", "CL"}, {:pretty_req, "^U", "PRETTY"}] of {Symbol, String, String}
+                 end
         if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
           return hit
         end
-        # Mode chip only drawn for plain HTTP request (not WS / gRPC / hex-edit).
-        unless @ws_mode || @grpc_mode || @req_hex_edit
+        # Mode chip: drawn on every non-hex request card — plain HTTP, the WS handshake and the
+        # gRPC head are all mode-switched text editors. Hex is the exception and draws none (a
+        # nibble cursor has no READ/INS), so hit-testing one there would invent a live cell over
+        # a badge that was never painted — the inverse of the dead `␣K:KEY` this pass fixed.
+        unless @req_hex_edit
           mode_edge = Frame.right_badge_edge(right_edge, min_x, badges)
           if Frame.mode_badge_hit(mx, my, req_card.y, mode_edge, min_x, request_insert?)
             return :mode
@@ -2525,70 +2619,115 @@ module Gori::Tui
       nil
     end
 
-    # Mouse: place the request-editor caret (text) or nibble cursor (hex) at a click.
-    # `rect` is the full body rect render() receives; re-derive the request half-pane
-    # (target band + split, then the card's 1-cell inset) exactly as render_request does.
+    # Mouse: place the request-editor caret (text) or nibble cursor (hex) at a click. A split
+    # tab (WS HANDSHAKE/MESSAGES, SAML/GraphQL ENVELOPE/DECODED) first adopts the sub-pane the
+    # pointer is in, then places the caret in it — through the SAME mode branch a single-pane
+    # tab uses, which is the whole point of the seam below.
+    #
+    # The split used to call `TextArea#click_to_cursor` directly, bypassing `@req_read`. That
+    # left READ mode's cursor model untouched by a click, so its anchor kept whatever an
+    # earlier selection had planted — invisible only because nothing painted the read band in
+    # those panes. Both halves are fixed together.
     def request_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless @loaded
-      target_h = {rect.h, target_card_h}.min
-      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return if content.h <= 0
-      half = {(content.w - 1) // 2, 1}.max
-      col = Rect.new(content.x, content.y, half, content.h)
-      if @decode_kind || @ws_mode # split: click selects the envelope/handshake or decoded/messages sub-pane + places its caret
-        env, dec = decode_split(col)
-        if my >= dec.y
-          switch_req_pane(:decoded)
-          @decoded.click_to_cursor(dec.inset(1, 1), mx, my)
-        else
-          switch_req_pane(:envelope)
-          @editor.click_to_cursor(env.inset(1, 1), mx, my)
-        end
-        return
-      end
+      pane = request_hit(rect, mx, my) || return
+      # The rect comes out BEFORE the switch: `decode_split` sizes the two cards from
+      # `@req_pane` (the active one is enlarged), so switching first would invert the click
+      # against a layout that has not been drawn yet. The caret goes in AFTER, because
+      # `switch_req_pane` can `set_text` an editor (commit/re-decode) and reset its caret.
+      inner = request_sub_rect(rect, pane) || return
+      switch_req_pane(pane)
       commit_chain_pane if @chain_focused # a click outside the ^Y modal commits + dismisses it, then places the caret
-      inner = col.inset(1, 1)
-      if h = @req_hex_edit
-        h.click_to_nibble(inner, mx, my, @scroll_req) # hex mode: place the nibble cursor
-      elsif request_insert?
-        @editor.click_to_cursor(inner, mx, my)
-      else
-        @req_read.click(@editor, inner, mx, my) # READ mode paints the read cursor's selection
-      end
+      place_request_caret(inner, mx, my)
     end
 
     # Mouse DRAG in the request pane — extend the selection to the pointer. The two modes keep
     # their own selection models (INS: the editor's own anchor, painted by `TextArea#render`;
     # READ: `@req_read`, painted by the owner), and each is extended through the model that
-    # owns it. Hex and the split-decode panes are excluded: a nibble cursor has no selection
-    # and a drag across two buffers has no meaning.
+    # owns it.
+    #
+    # Always the ACTIVE sub-pane's rect, never the one under the pointer: a drag that wanders
+    # into the other half of a split column must keep extending the selection it started, not
+    # jump buffers mid-gesture (neither `cut_selection` nor the band painter can express a
+    # selection spanning two buffers). `TextArea#click_to_cursor` clamps a row past the pane's
+    # bottom to its last visible row and pins one above the top when `selecting`, so leaving
+    # the sub-pane vertically extends to its edge — which is what a drag off a 1/3-height
+    # sub-pane means.
+    #
+    # Hex stays excluded: a nibble cursor has no selection to extend.
     def request_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @loaded && !@req_hex_edit && @decode_kind.nil? && !@ws_mode
-      inner = request_editor_rect(rect) || return
+      return unless @loaded && !@req_hex_edit
+      inner = request_sub_rect(rect, @req_pane) || return
+      place_request_caret(inner, mx, my, selecting: true)
+    end
+
+    # Mouse DOUBLE-CLICK in the request pane — spread to the word under the CARET, which the
+    # press of the pair has already placed at the pointer (`handle_click` runs first, always).
+    # No geometry, and that is the point: a second hit-test would have to invert the same screen
+    # row again, and in a split column the layout MOVED in between — press 1 adopts the lower
+    # sub-pane, which grows the active card to ~2/3 and lifts the lower card's top edge by ~1/3
+    # of the column. (The upper card's `y` is `col.y` whatever its height, so only this
+    # direction was ever wrong.) Inverting against the new rect selected a token about a third of
+    # a column below the pointer; spreading from the caret inherits press 1's correct inverse.
+    def request_select_word : Bool
+      return false unless @loaded && !@req_hex_edit
+      ed = req_editor
+      request_insert? ? ed.select_word_at_cursor : @req_read.select_word_at_cursor(ed)
+    end
+
+    # The one place a pointer position becomes a caret in the request column. INS drives the
+    # editor's own anchor; READ drives `@req_read` (whose `click` runs the editor's hit test
+    # and then owns the selection). Hex has neither, so it places its nibble cursor instead.
+    private def place_request_caret(inner : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      if h = @req_hex_edit
+        return if selecting # a nibble cursor has no selection to drag
+        h.click_to_nibble(inner, mx, my, @scroll_req)
+        return
+      end
+      ed = req_editor
       if request_insert?
-        @editor.click_to_cursor(inner, mx, my, selecting: true)
+        ed.click_to_cursor(inner, mx, my, selecting: selecting)
       else
-        @req_read.click(@editor, inner, mx, my, selecting: true)
+        @req_read.click(ed, inner, mx, my, selecting: selecting)
       end
     end
 
-    # Mouse DOUBLE-CLICK in the request pane — select the word under the pointer.
-    def request_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
-      return false unless @loaded && !@req_hex_edit && @decode_kind.nil? && !@ws_mode
-      inner = request_editor_rect(rect) || return false
-      request_insert? ? @editor.select_word_at(inner, mx, my) : @req_read.select_word(@editor, inner, mx, my)
+    # Whether the request column is split into two editor cards (WS handshake + messages, or
+    # a decode tab's envelope + payload). The predicate `req_editor`, `mark_req_edit`,
+    # `render` and the hit-tests all branch on — spelled once so they cannot drift.
+    private def req_split? : Bool
+      !@decode_kind.nil? || @ws_mode
     end
 
-    # The plain-text request editor's content rect inside `rect` (the body render() gets), or
-    # nil when the pane is too small to hold one. The same derivation
-    # `request_click_to_cursor` walks, factored out so the click, the drag and the
-    # double-click cannot land on three slightly different rects.
-    private def request_editor_rect(rect : Rect) : Rect?
+    # Which request sub-pane the point (mx, my) falls in — `:decoded` for the lower card of a
+    # split column, `:envelope` otherwise (and always, for a single-pane tab). nil when the
+    # column has no room to draw. Geometry only; the caller decides what to do with it.
+    private def request_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      col = request_col_rect(rect) || return nil
+      return :envelope unless req_split?
+      _, dec = decode_split(col)
+      my >= dec.y ? :decoded : :envelope
+    end
+
+    # The CONTENT rect (after the card's 1-cell inset) of request sub-pane `pane` inside
+    # `rect` — the body rect render() receives. nil when the column is too small to hold one.
+    # The click, the drag, the double-click and the wheel all measure with this, so none of
+    # them can land on a slightly different rect than the render did.
+    private def request_sub_rect(rect : Rect, pane : Symbol) : Rect?
+      col = request_col_rect(rect) || return nil
+      return col.inset(1, 1) unless req_split?
+      env, dec = decode_split(col)
+      (pane == :decoded ? dec : env).inset(1, 1)
+    end
+
+    # The request half-pane (the whole left column, borders included) — render's own
+    # derivation: the target band on top, then a half-width request|response split.
+    private def request_col_rect(rect : Rect) : Rect?
       target_h = {rect.h, target_card_h}.min
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
       return nil if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
-      Rect.new(content.x, content.y, half, content.h).inset(1, 1)
+      Rect.new(content.x, content.y, half, content.h)
     end
 
     # Vertical split of the request column into {envelope, decoded} rects for a decode
@@ -2602,13 +2741,67 @@ module Gori::Tui
       {env, dec}
     end
 
+    # Vertical split of the RESPONSE column into {handshake, transcript} rects for a WebSocket
+    # tab — the request column's `decode_split` on the other side of the divider.
+    #
+    # The default sizing is deliberately NOT symmetric with `decode_split`: a 101 handshake
+    # response is 4-5 header lines, so while the TRANSCRIPT is the active card the handshake
+    # keeps the fixed 7 rows it has always had, and the transcript keeps everything else. Only
+    # when the handshake becomes the active card does it grow to ~2/3 — which is what makes a
+    # long handshake response (a proxy that answers with a full HTML error page, say) readable
+    # and selectable instead of a 5-line porthole.
     private def ws_resp_split(col : Rect) : {Rect, Rect}
-      # The handshake response header is short (typically 4-5 lines of HTTP headers).
-      # We allocate a fixed height (7 rows) for the handshake card, and the rest for transcript.
-      handshake_h = 7.clamp(1, {col.h - 2, 1}.max)
+      handshake_h = if @resp_pane == :handshake
+                      {col.h - {col.h // 3, 1}.max, 1}.max
+                    else
+                      WS_HANDSHAKE_ROWS
+                    end
+      handshake_h = handshake_h.clamp(1, {col.h - 2, 1}.max)
       handshake = Rect.new(col.x, col.y, col.w, handshake_h)
       transcript = Rect.new(col.x, col.y + handshake_h, col.w, {col.h - handshake_h, 0}.max)
       {handshake, transcript}
+    end
+
+    WS_HANDSHAKE_ROWS = 7 # the handshake card's height while the TRANSCRIPT owns the column
+
+    # Whether the RESPONSE column is split into two cards. WebSocket is the only mode that
+    # splits it: gRPC and a pipelined group render one transcript over the whole column.
+    # `req_split?`'s counterpart, and read by the same shape of hit-test / render code.
+    private def resp_split? : Bool
+      @ws_mode
+    end
+
+    # Which response sub-pane owns the read cursor: `:handshake` | `:transcript`. Always
+    # `:transcript` when the column is not split, so a non-WS tab answers exactly as before.
+    getter resp_pane : Symbol
+
+    # Whether the response column is a TRANSCRIPT rather than one HTTP response. A flag check —
+    # deliberately not `transcript_rows?`, which builds (and caches, and theme-checks) the rows:
+    # this is read per drawn row through `resp_navigable?`.
+    private def resp_transcript? : Bool
+      @ws_mode || @grpc_mode || group_mode?
+    end
+
+    # Whether the hex dump is what the response pane is ACTUALLY drawing. `@resp_hex` alone is
+    # not that question: `render_response` returns at its WS / gRPC / group branch long before the
+    # hex one, so on a transcript the flag describes a pane nobody can see — while
+    # `resp_navigable?` still read it and silently killed the caret, the selection and every arrow
+    # key with no visual change at all.
+    #
+    # The flag survives (flip back to a single HTTP response and the dump is still on); only its
+    # authority over the transcript is withdrawn. Reachable without any hex chip being clickable
+    # on a WS tab: `^X` a plain HTTP response, then edit the request into an upgrade handshake —
+    # `apply_request_fields` flips the SAME view into ws_mode and nothing clears `@resp_hex`
+    # (`apply_group` is the only place that ever did). With `at_top?` now crossing cards rather
+    # than ejecting, that left a response column you could neither navigate nor leave upward.
+    private def resp_hex_active? : Bool
+      @resp_hex && !resp_transcript?
+    end
+
+    # The HANDSHAKE RESPONSE card is the one being read/selected right now. The single
+    # predicate `resp_line_source`, `resp_line_count` and the two renderers branch on.
+    private def resp_handshake_active? : Bool
+      resp_split? && @resp_pane == :handshake
     end
 
     # Mouse: focus the URL or SNI field of the TARGET band by which row was clicked,
@@ -2637,7 +2830,7 @@ module Gori::Tui
       when :request
         if h = @req_hex_edit
           h.at_top?
-        elsif (@decode_kind || @ws_mode) && @req_pane == :decoded
+        elsif req_split? && @req_pane == :decoded
           false
         else
           @editor.at_top?
@@ -2646,8 +2839,19 @@ module Gori::Tui
         # ↑/⇧↑ move/extend the read cursor upward until it reaches line 0 with scroll at top,
         # instead of ejecting the pane whenever the response fits on screen (@scroll stays 0).
         # The non-navigable hex dump has no caret, so keep scroll-based ejection there.
-      when :response then resp_navigable? ? (@resp_cursor.cy == 0 && @scroll == 0) : @scroll == 0
-      else                false
+      when :response
+        # On a split column's LOWER card, ↑ at the top crosses UP to the HANDSHAKE RESPONSE
+        # (handled in resp_move) rather than ejecting to the tab bar — the response-side twin of
+        # the `:decoded` branch above, and the reason the handshake card is reachable by keyboard
+        # at all.
+        if resp_split? && @resp_pane == :transcript
+          false
+        elsif resp_navigable?
+          @resp_cursor.cy == 0 && @scroll == 0
+        else
+          @scroll == 0
+        end
+      else false
       end
     end
 
@@ -2681,7 +2885,7 @@ module Gori::Tui
     # by skipping it — an undo snapshot is a state the buffer really held, Content-Length line
     # included, so what comes back is already self-consistent.
     private def mark_req_edit(reflect : Bool = true) : Nil
-      if (@decode_kind || @ws_mode) && @req_pane == :decoded
+      if req_split? && @req_pane == :decoded
         @decoded_dirty = true
         @ws_out_edited = true
       else
@@ -2761,35 +2965,61 @@ module Gori::Tui
     # neither `cut_selection` nor the band painter can express that.
     def edit_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless @focus == :request
-      # In a split-decode tab, a vertical step off the end of one sub-pane crosses into
-      # the other (↓ off the ENVELOPE bottom → DECODED top; ↑ off the DECODED top →
-      # ENVELOPE bottom), syncing the two at the boundary — so the split feels like one
-      # continuous column. (↑ off the ENVELOPE top pops to the tab bar via at_top?.)
-      if (@decode_kind || @ws_mode) && dc == 0
-        if dr > 0 && @req_pane == :envelope && @editor.at_bottom?
-          switch_req_pane(:decoded)
-          @decoded.goto_line(1)
-          return
-        end
-        if dr < 0 && @req_pane == :decoded && @decoded.at_top?
-          switch_req_pane(:envelope)
-          @editor.goto_line(Int32::MAX) # clamps to the last line
-          return
-        end
-      end
+      return if dc == 0 && try_cross_req_pane(dr)
       req_editor.move(dr, dc, selecting)
       # Cursor navigation is NOT a content edit: leave @dirty alone. Marking it here made
       # pure arrow-key movement persist the tab (V11) and, worse, latch sync-clobber
       # protection so a live cross-session update could no longer refresh the tab.
     end
 
+    # In a split column, a vertical step off the end of one sub-pane crosses into the other
+    # (↓ off the ENVELOPE/HANDSHAKE bottom → DECODED/MESSAGES top; ↑ off the lower pane's top
+    # → the upper pane's last line), so the split feels like one continuous column. (↑ off the
+    # upper pane's top pops to the tab bar via `at_top?`.) Returns true when it crossed and
+    # the caller must not also step inside a buffer.
+    #
+    # Shared by INS (`edit_move`) and READ (`request_read_move`) on purpose. It lived inline
+    # in `edit_move` only, so a WebSocket tab — which `restore` leaves in READ mode — could
+    # not get from HANDSHAKE to MESSAGES with the arrow keys at all: ↓ clamped at the bottom
+    # of one buffer and ↑ clamped at the top of the other, leaving `^T` as the only way
+    # across. That is the same "the keyboard does nothing here" the invisible READ caret
+    # produced, from a different direction.
+    private def try_cross_req_pane(dr : Int32) : Bool
+      return false unless req_split?
+      if dr > 0 && @req_pane == :envelope && @editor.at_bottom?
+        switch_req_pane(:decoded)
+        @decoded.goto_line(1)
+        @req_read.sync_from(@decoded) # READ paints from @req_read; leave it on the arriving caret
+        return true
+      end
+      if dr < 0 && @req_pane == :decoded && @decoded.at_top?
+        switch_req_pane(:envelope)
+        @editor.goto_line(Int32::MAX) # clamps to the last line
+        @req_read.sync_from(@editor)
+        return true
+      end
+      false
+    end
+
     # Home/End: pure navigation (caret to line start/end) → does NOT dirty, like edit_move.
+    #
+    # These move the EDITOR's caret directly, so READ mode has to adopt the result: without
+    # `sync_to`, a plain Home left `@req_read`'s anchor where it was and the band was painted
+    # from there to column 0 — a selection the operator had just collapsed — while ⇧Home
+    # planted no anchor at all and extended nothing. `sync_to` is the helper written for
+    # exactly this pair; Notes, Issues, Project and the Decoder input all already call it.
     def edit_home(selecting : Bool = false) : Nil
-      req_editor.home(selecting) if @focus == :request
+      return unless @focus == :request
+      ed = req_editor
+      ed.home(selecting)
+      @req_read.sync_to(ed, selecting: selecting) unless request_insert?
     end
 
     def edit_end(selecting : Bool = false) : Nil
-      req_editor.end_of_line(selecting) if @focus == :request
+      return unless @focus == :request
+      ed = req_editor
+      ed.end_of_line(selecting)
+      @req_read.sync_to(ed, selecting: selecting) unless request_insert?
     end
 
     # PageUp / PageDown in the request editor: `dir` is -1/+1, sized from the editor's OWN
@@ -2809,7 +3039,7 @@ module Gori::Tui
     # routed through `edit_move` there and everything else still comes here.
     def edit_motion_key(ev : Termisu::Event::Key) : Bool
       return false unless @focus == :request
-      if (@decode_kind || @ws_mode) && (ev.key.up? || ev.key.down?)
+      if req_split? && (ev.key.up? || ev.key.down?)
         edit_move(ev.key.up? ? -1 : 1, 0, selecting: ev.shift?)
         return true
       end
@@ -3067,7 +3297,7 @@ module Gori::Tui
     # Scroll the response pane by `delta` DRAWN rows. In hex the pane draws its own fixed
     # rows and there is nothing to wrap, so that mode keeps the plain row offset.
     def scroll(delta : Int32) : Nil
-      if @resp_hex || @resp_last_cw <= 0
+      if resp_hex_active? || @resp_last_cw <= 0
         @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
         @scroll_sub = 0 # the anchor line moved by whole lines; a carried sub-row would
         return          # be read against a line that was never laid out at that row
@@ -3089,6 +3319,7 @@ module Gori::Tui
     # ↑/↓ step one VISUAL row (see `resp_visual_target`), like the request editor's.
     def resp_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless resp_navigable?
+      return if dc == 0 && try_cross_resp_pane(dr)
       size, line_at = resp_line_source
       return if size <= 0
       if target = resp_visual_target(dr)
@@ -3096,6 +3327,43 @@ module Gori::Tui
       else
         @resp_cursor.move(dr, dc, size, line_at, selecting)
       end
+      ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
+    end
+
+    # A vertical step off the end of one response card crosses into the other — ↓ off the
+    # HANDSHAKE RESPONSE bottom lands on the TRANSCRIPT's first line, ↑ off the TRANSCRIPT top
+    # lands on the handshake's last — so the column reads as one document, exactly as
+    # `try_cross_req_pane` makes the request column read as one. Returns true when it crossed.
+    #
+    # (↑ off the HANDSHAKE top still pops to the tab bar, via `at_top?`.)
+    private def try_cross_resp_pane(dr : Int32) : Bool
+      return false unless resp_split?
+      size, _ = resp_line_source
+      return false if size <= 0
+      if dr > 0 && @resp_pane == :handshake && @resp_cursor.cy >= size - 1
+        switch_resp_pane(:transcript)
+        resp_goto_edge(:first)
+        return true
+      end
+      if dr < 0 && @resp_pane == :transcript && @resp_cursor.cy == 0
+        switch_resp_pane(:handshake)
+        resp_goto_edge(:last)
+        return true
+      end
+      false
+    end
+
+    # Park the read cursor on the arriving pane's first or last line, column 0, with the view
+    # following. `switch_resp_pane` restores a PARKED caret; this overrides it for the crossing
+    # case, where the caret has to land at the boundary the step arrived through.
+    private def resp_goto_edge(edge : Symbol) : Nil
+      size, _ = resp_line_source
+      return if size <= 0
+      cy = edge == :first ? 0 : size - 1
+      @resp_cursor.clear_selection
+      @resp_cursor.sync(cy, 0)
+      @scroll = cy
+      @scroll_sub = 0
       ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
     end
 
@@ -3110,7 +3378,7 @@ module Gori::Tui
     # `{cx - off, 0}.max.clamp(…)` the click and the wheel already use — a caret that lands
     # on the decoration belongs at column 0 of the text, the only place it can be drawn.
     private def resp_visual_target(dr : Int32) : {Int32, Int32}?
-      return nil if dr == 0 || @resp_hex || @resp_last_cw <= 0
+      return nil if dr == 0 || resp_hex_active? || @resp_last_cw <= 0
       size, drawn_at, off = resp_drawn_source
       return nil if size <= 0
       _, line_at = resp_line_source
@@ -3136,6 +3404,19 @@ module Gori::Tui
     def request_scroll_view(step : Int32) : Nil
       return if request_hex?
       req_editor.scroll_view(step)
+    end
+
+    # The same wheel notch, aimed at the sub-pane the POINTER is over rather than the active
+    # one. A single-pane column answers identically (the hit is always `:envelope`), so this
+    # only changes a split column — where wheeling over MESSAGES used to scroll HANDSHAKE
+    # because that was the sub-pane holding the caret. `scroll_view` drags the caret into the
+    # window it moved, exactly as it does for the focused pane, so the inactive pane keeps a
+    # caret consistent with what it is showing.
+    def request_scroll_view_at(step : Int32, rect : Rect, mx : Int32, my : Int32) : Nil
+      return if request_hex?
+      pane = request_hit(rect, mx, my)
+      return request_scroll_view(step) unless pane
+      (pane == :decoded ? @decoded : @editor).scroll_view(step)
     end
 
     # Wheel: `step` is DRAWN rows. Still O(viewport) — the anchor walk never counts the
@@ -3181,38 +3462,64 @@ module Gori::Tui
       @resp_cursor.sync(cy, {cx - off, 0}.max.clamp(0, line_at.call(cy).size))
     end
 
-    # Mouse DRAG in the response pane — extend the read selection to the pointer.
-    def resp_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      resp_click_to_cursor(rect, mx, my, selecting: true)
+    # Mouse PRESS in the response column. On a split (WebSocket) column the press first adopts
+    # the card it landed in — the response half of what `request_click_to_cursor` does — and the
+    # body rect is taken BEFORE the switch, because `ws_resp_split` sizes the two cards from
+    # `@resp_pane` and switching first would invert the click against a layout not yet drawn.
+    def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless resp_navigable? && @loaded
+      col = response_col_rect(rect) || return
+      return unless col.contains?(mx, my)
+      pane = resp_hit(col, my)
+      body = resp_body_rect_for(col, pane)
+      switch_resp_pane(pane)
+      resp_place_caret(body, mx, my, selecting: false)
     end
 
-    # Mouse DOUBLE-CLICK in the response pane — select the word under the pointer. The hit
-    # test is `resp_click_to_cursor`'s (the response's own wrap + BodyLines source), so this
-    # only has to supply the word spread.
-    def resp_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+    # Mouse DRAG in the response pane — extend the read selection to the pointer. Always the
+    # ACTIVE card, never the one under the pointer: a drag that wanders across the divider keeps
+    # extending the selection it started, because an anchor cannot span two documents.
+    def resp_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless resp_navigable? && @loaded
+      col = response_col_rect(rect) || return
+      resp_place_caret(response_body_rect(col), mx, my, selecting: true)
+    end
+
+    # Mouse DOUBLE-CLICK in the response pane — spread to the word under the CARET, which the
+    # press of the pair already placed (`handle_click` always runs first). No second hit test,
+    # for the reason `request_select_word` spells out: adopting a card resizes the column, so
+    # re-inverting the same screen row would address a rect that has since moved.
+    def resp_select_word : Bool
       return false unless resp_navigable? && @loaded
-      before = {@resp_cursor.cy, @resp_cursor.cx}
-      resp_click_to_cursor(rect, mx, my)
-      return false if {@resp_cursor.cy, @resp_cursor.cx} == before && !@resp_click_hit
       size, line_at = resp_line_source
+      return false if size <= 0
       @resp_cursor.select_word_at_cursor(size, line_at)
     end
 
-    # Whether the last `resp_click_to_cursor` actually landed on the pane (as opposed to
-    # returning early on a click outside it) — the double-click needs to tell "the caret did
-    # not move because the pointer was already there" from "the click missed entirely".
-    @resp_click_hit = false
-
-    def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
-      @resp_click_hit = false
-      return unless resp_navigable? && @loaded
+    # The response half-pane (the whole right column, borders included) — render's own
+    # derivation, factored out so the click, the drag and the wheel share it.
+    private def response_col_rect(rect : Rect) : Rect?
       target_h = {rect.h, target_card_h}.min
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return if content.h <= 0
+      return nil if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
-      col = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 1}.max, content.h)
-      return unless col.contains?(mx, my)
-      body = response_body_rect(col)
+      Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 1}.max, content.h)
+    end
+
+    # Which response card the row `my` falls in. `:transcript` for an unsplit column, always.
+    private def resp_hit(col : Rect, my : Int32) : Symbol
+      return :transcript unless resp_split?
+      handshake, _ = ws_resp_split(col)
+      my < handshake.bottom ? :handshake : :transcript
+    end
+
+    private def resp_body_rect_for(col : Rect, pane : Symbol) : Rect
+      return col.inset(1, 1) unless resp_split?
+      handshake, transcript = ws_resp_split(col)
+      (pane == :handshake ? handshake : transcript).inset(1, 1)
+    end
+
+    private def resp_place_caret(body : Rect, mx : Int32, my : Int32, selecting : Bool) : Nil
       # Render's own numbers, not a re-derivation — see @resp_last_gw. Falls back to the
       # gutter estimate only before the first frame, when nothing has been laid out yet.
       gw = @resp_last_cw > 0 ? @resp_last_gw : resp_gutter_w(body)
@@ -3229,7 +3536,6 @@ module Gori::Tui
       end
       rows = resp_rows(cw, body.h, size, drawn_at)
       return if rows.empty?
-      @resp_click_hit = true
       # The wrap inverse, not `@scroll + row`: a screen row is a VISUAL row now, and the
       # continuation rows between it and the anchor are exactly what the old arithmetic
       # skipped. `Wrap.row_index` clamps to the row it was given, so a click past the end of
@@ -3247,19 +3553,31 @@ module Gori::Tui
       ensure_resp_visible(body.h)
     end
 
+    # READ-mode caret move in the request column. A single-row `dc == 0` step first asks
+    # whether it leaves the sub-pane entirely — the same question INS asks in `edit_move`,
+    # through the same helper — so the split column is one continuous document in both modes.
     def request_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return if request_insert? || request_hex?
-      lines = request_read_lines
-      return if lines.empty?
-      @req_read.move(req_editor, dr, dc, selecting: selecting)
+      return if dc == 0 && try_cross_req_pane(dr)
+      request_read_step(dr, dc, selecting)
     end
 
     # PageUp / PageDown with the request pane in READ mode: the read cursor steps a screenful,
     # sized from the editor that draws the same pane. `ReadCursor#move` clamps the row itself,
     # so a page past the last line lands on it rather than doing nothing.
+    #
+    # Deliberately NOT through `request_read_move`: a page clamps inside its own sub-pane
+    # rather than crossing into the next one, which is what `edit_page` does in INS (it never
+    # went through `edit_move` either). A screenful is a viewport gesture; crossing panes on it
+    # would skip past everything between the caret and the boundary.
     def request_read_page(dir : Int32, selecting : Bool = false) : Nil
       return if request_insert? || request_hex?
-      request_read_move(dir * req_editor.page_rows, 0, selecting: selecting)
+      request_read_step(dir * req_editor.page_rows, 0, selecting)
+    end
+
+    private def request_read_step(dr : Int32, dc : Int32, selecting : Bool) : Nil
+      return if request_read_lines.empty?
+      @req_read.move(req_editor, dr, dc, selecting: selecting)
     end
 
     def target_read_move(dc : Int32, selecting : Bool = false) : Nil
@@ -3308,21 +3626,23 @@ module Gori::Tui
     end
 
     def resp_plain_lines : Array(String)
-      if t = transcript_rows?
-        t.map(&.[0])
-      elsif @resp_mode == :diff
-        diff_lines.map(&.text)
-      elsif @reveal && (rl = reveal_lines)
-        rl
-      else
-        rv = resp_view
-        (0...rv.total).map { |i| rv.line_text(i) }
-      end
+      size, line_at = resp_line_source
+      (0...size).map { |i| line_at.call(i) }
     end
 
-    # O(1) count + lazy line fetch for BodyLines-backed response panes.
+    # O(1) count + lazy line fetch for the response pane the read cursor is on. THE one
+    # definition of "what lines is this pane showing" — the caret, the selection, the copy, the
+    # search, the wheel and the click inverse all read it, so a new pane wires into every one of
+    # them by appearing here and nowhere else.
+    #
+    # The handshake branch comes FIRST because `transcript_rows?` answers for the whole of WS
+    # mode: on a WebSocket tab both cards exist, and which one this returns is exactly what
+    # `@resp_pane` decides.
     def resp_line_source
-      if t = transcript_rows?
+      if resp_handshake_active?
+        rv = resp_view # the 101 head, the same source render_ws_handshake draws
+        {rv.total, ->(i : Int32) { rv.line_text(i) }}
+      elsif t = transcript_rows?
         {t.size, ->(i : Int32) { t[i][0] }}
       elsif @resp_mode == :diff
         data = diff_lines
@@ -3417,13 +3737,11 @@ module Gori::Tui
       {Gutter.width(resp_line_count), body.w}.min
     end
 
+    # The content rect of the response card the read cursor is on. It used to hard-code the
+    # transcript for WS mode, which is why a click on the HANDSHAKE RESPONSE card produced a
+    # negative row and was dropped — the card was on screen and unreachable.
     private def response_body_rect(col : Rect) : Rect
-      if @ws_mode
-        _, transcript = ws_resp_split(col)
-        transcript.inset(1, 1)
-      else
-        col.inset(1, 1)
-      end
+      resp_body_rect_for(col, @resp_pane)
     end
 
     # Keep the caret's VISUAL row inside the pane. Line-indexed scrolling drifts the moment
@@ -3519,11 +3837,11 @@ module Gori::Tui
     end
 
     # ⇧←/→ used to nudge the response/diff/reveal/transcript pane sideways. There is no
-    # sideways any more: every one of those panes soft-wraps, so the content the operator
-    # was panning to is already on the next row. Kept as an explicit no-op ONLY because the
-    # chord is still bound in `controllers/repeater_controller.cr` — deleting the method
-    # breaks that build, and that file is not in this change's scope. The binding and this
-    # stub should go together.
+    # sideways any more: every one of those panes soft-wraps, so the content the operator was
+    # panning to is already on the next row. The method, its binding and — as of the transcript
+    # ←/→ fix — the footer hint that still advertised "⇧←/→ h-scroll" are all gone; ⇧←/→ now
+    # extends the read selection by a character, in the transcript as much as in a plain
+    # response (see `handle_repeater_response`). Nothing is left to delete.
 
     # ^G go-to-line in the response pane: scroll so 1-based line `n` is at the top
     # (interpreted in the currently-shown mode — response/diff/hex row). Hex mode has
@@ -3545,20 +3863,16 @@ module Gori::Tui
 
     # ^F search in the response pane: 0-based line indices containing `query` in the
     # CURRENTLY-shown mode (response text or diff). Empty in hex mode.
+    # Through `resp_line_source`, not a fourth per-mode ladder of its own. That re-derivation
+    # had already drifted twice over: it had no REVEAL branch, so searching a whitespace-revealed
+    # response scanned the plain lines and returned indices into a document the pane was not
+    # showing — and it would have needed a fifth branch for the WS handshake card. One source.
     def response_search_lines(query : String) : Array(Int32)
       hits = [] of Int32
-      return hits if query.empty? || @resp_hex
+      return hits if query.empty? || resp_hex_active?
       q = query.downcase
-      if t = transcript_rows? # the transcript is the active "response" pane (WS / gRPC / group)
-        t.each_with_index { |row, i| hits << i if row[0].downcase.includes?(q) }
-        return hits
-      end
-      if @resp_mode == :diff
-        diff_lines.each_with_index { |d, i| hits << i if d.text.downcase.includes?(q) }
-      else
-        rv = resp_view
-        (0...rv.total).each { |i| hits << i if rv.line_text(i).downcase.includes?(q) }
-      end
+      size, line_at = resp_line_source
+      (0...size).each { |i| hits << i if line_at.call(i).downcase.includes?(q) }
       hits
     end
 
@@ -3582,7 +3896,7 @@ module Gori::Tui
       left = Rect.new(content.x, content.y, half, content.h)
       right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
       req_focused = focused && @focus == :request
-      if @decode_kind || @ws_mode # split the request column into ENVELOPE/HANDSHAKE (top) + DECODED/MESSAGES (bottom)
+      if req_split? # split the request column into ENVELOPE/HANDSHAKE (top) + DECODED/MESSAGES (bottom)
         env, dec = decode_split(left)
         render_request(screen, env, req_focused && @req_pane == :envelope)
         render_decoded(screen, dec, req_focused && @req_pane == :decoded)
@@ -3673,7 +3987,16 @@ module Gori::Tui
         screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
       end
       # XML/JSON-ish payload / WS messages → plain editing (no HTTP request/header colouring).
-      @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil, peek: focused, gauge: true, gauge_focused: focused)
+      #
+      # `cursor` is gated on INSERT, exactly as the plain REQUEST pane gates it, and READ gets
+      # the over-painted band + block caret instead. It used to be a bare `focused`: the pane
+      # drew an insert caret in both modes, so the operator could not tell which one they were
+      # in, and a READ-mode selection — the one `y`/space▸copy actually copies — was invisible
+      # while `x`, ⇧arrows and a drag were all quietly building it.
+      inner = rect.inset(1, 1)
+      ins = focused && request_insert?
+      @decoded.render(screen, inner, cursor: ins, highlight: nil, peek: focused, gauge: true, gauge_focused: focused)
+      paint_request_read_chrome(screen, inner, @decoded, focused && !ins)
     end
 
     private def pane_border(focused : Bool, insert : Bool = false) : Color
@@ -3685,7 +4008,7 @@ module Gori::Tui
       return if rect.h < 2
       ins = focused && target_insert?
       Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
-      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
+      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, target_insert?) # the REAL mode, not focused&&mode — see Frame.mode_badge
       # An at-a-glance SNI marker on the top border (right of the title) whenever an
       # override is set, so a custom SNI is visible even before the row is reached.
       unless @sni.strip.empty?
@@ -3777,10 +4100,16 @@ module Gori::Tui
           Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
           @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         else
-          Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
-          @editor.conceal_spans = [] of {Int32, Int32} # gRPC frames aren't §-marker HTTP text — no stale concealment
+          msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
+          # The gRPC head is a mode-switched text editor like every other non-hex request card
+          # (`i`/esc, READ selection, and — since the read chrome landed here — a visible NORMAL
+          # caret), so it carries the chip too. It was skipped while its READ caret was invisible;
+          # leaving it off now would make this the one pane showing a block caret with nothing on
+          # screen naming the mode it belongs to.
+          Frame.mode_badge(screen, msg_edge || send_edge, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
+          @editor.conceal_spans = [] of {Int32, Int32}                                    # gRPC frames aren't §-marker HTTP text — no stale concealment
           @editor.chain_peek_text = nil
-          @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
+          render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)
         end
         return
       end
@@ -3789,10 +4118,16 @@ module Gori::Tui
         # OFF (the default) means gori drops it and appends a fresh one, so the key in this
         # editor is NOT the key on the wire — which is worth a badge on its own, because the
         # pane otherwise reads as byte-exact. ON sends the block as written.
+        #
+        # The NOR/INS chip chains left of it, over the SAME badge list `chrome_hit` measures
+        # (`WS_BADGES`), so the click and the draw agree about where each one sits. Without it
+        # the WS handshake was the one editor pane in the tree whose input mode was not on
+        # screen anywhere — and the pane it belongs to is a `restore`-lands-in-READ tab.
+        Frame.mode_badge(screen, Frame.right_badge_edge(right_edge, min_x, WS_BADGES), rect.y, min_x, request_insert?)
         Frame.toggle_badge(screen, send_edge, rect.y, min_x, "␣K", "KEY", @ws_keep_key)
         @editor.conceal_spans = [] of {Int32, Int32} # WS messages aren't §-marker HTTP text — no stale concealment
         @editor.chain_peek_text = nil
-        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
+        render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)
         return
       end
       if h = @req_hex_edit
@@ -3802,7 +4137,7 @@ module Gori::Tui
       end
       cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
       mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^U", "PRETTY", false)
-      mark_x = Frame.mode_badge(screen, mode_x, rect.y, min_x, ins)
+      mark_x = Frame.mode_badge(screen, mode_x, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
       # Only when a `§` is actually in the buffer, so a request without one draws exactly the
       # border it drew before. Unlit = the capture's § are literal bytes (^K declares them);
       # lit = this buffer is a template and ^R renders them. See `markers_live?`.
@@ -3810,9 +4145,20 @@ module Gori::Tui
         Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^K", "MARK", markers_live?)
       end
       update_request_marker_tint
-      inner = rect.inset(1, 1)
+      render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)
+    end
+
+    # The envelope editor + its READ-mode over-paint, for every non-hex shape of the top
+    # request card (plain HTTP, the WS handshake, a gRPC head, a decode tab's ENVELOPE).
+    #
+    # The two calls belong together and were only paired on the plain-HTTP path: the WS and
+    # gRPC branches returned before the over-paint, so in READ mode those panes drew NO caret
+    # at all (`cursor` is off outside INS) and no selection band. An operator pressing ↓ or
+    # ⇧→ in a WebSocket handshake saw the screen not change — the keyboard was working and
+    # only its evidence was missing.
+    private def render_plain_request_editor(screen : Screen, inner : Rect, focused : Bool, ins : Bool) : Nil
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
-      paint_request_read_chrome(screen, inner, focused && !ins)
+      paint_request_read_chrome(screen, inner, @editor, focused && !ins)
     end
 
     # READ-mode over-paint (selection tint + block caret) on top of the frame the editor
@@ -3821,35 +4167,41 @@ module Gori::Tui
     # logical line, and the two derivations drifting apart is precisely how a selection ends
     # up tinting the wrong text. Every span is clipped to its row, so a selection crossing a
     # wrap break is painted on each row it covers.
-    private def paint_request_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
+    # `ed` is passed in rather than read from `req_editor`: the caller knows which card it is
+    # drawing, and a split column has two. Deriving it here meant that painting the DECODED
+    # card while the ENVELOPE was the active sub-pane would invert the ENVELOPE's `last_rows`
+    # into the DECODED rect — the exact "two derivations drifting apart" this method's own
+    # comment warns about, one level up. The `active` gate happens to make that unreachable
+    # today; the parameter makes it unrepresentable.
+    private def paint_request_read_chrome(screen : Screen, rect : Rect, ed : TextArea, active : Bool) : Nil
       return unless active
-      ed = req_editor
       lines = ed.lines_snapshot
       return if lines.empty?
       @req_read.sync_from(ed)
-      sel_bg = Theme.accent_bg
       rows = ed.last_rows
       return if rows.empty?
       gw = ed.gutter? ? Gutter.width(lines.size) : 0
+      cw = {rect.w - gw, 0}.max
       spans = @req_read.cursor.highlight_spans(lines)
       cy, cx = ed.cy, ed.cx
       rows.each_with_index do |vr, row|
         y = rect.y + row
         line = lines[vr.li]? || ""
+        # The band and the caret both go through the EDITOR, which owns the concealed-run map:
+        # `§value¦chain§` hides the `¦chain` in this very pane, and measuring the span here on the
+        # raw line put the tint N columns right of its text while re-drawing the raw segment
+        # unconcealed the chain (see the READ-mode over-paint seam in `text_area.cr`).
         spans.each do |(li, x0, x1)|
           next unless li == vr.li
-          a = {x0, vr.a}.max
-          b = {x1, vr.b}.min
-          next if a >= b
-          paint_char_span_bg(screen, rect.x + gw, y, line, a, b, sel_bg, vr.a)
+          ed.paint_read_band(screen, rect.x + gw, y, li, x0, x1, vr.a, vr.b, cw)
         end
         # The caret belongs to exactly one row: the one whose slice contains it, with the
         # end of a wrapped row losing to the row it starts (Wrap::Layout#row_of's rule,
         # spelled out here because ReadCursor holds no layout of its own).
         next unless vr.li == cy && cx >= vr.a && (cx < vr.b || vr.b >= line.size)
-        px = rect.x + gw + Wrap.row_col(line, nil, vr.a, cx)
+        col, ch = ed.read_caret_cell(vr.li, cx, vr.a)
+        px = rect.x + gw + col
         next unless px < rect.x + rect.w
-        ch = cx < line.size ? line[cx] : ' '
         screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
         screen.cursor(px, y)
       end
@@ -3918,9 +4270,19 @@ module Gori::Tui
     NO_REGIONS = [] of {Int32, Int32, Int32}
     NO_SPANS   = [] of {Int32, Int32}
 
-    private def render_ws_handshake(screen : Screen, rect : Rect, focused : Bool) : Nil
+    # The HANDSHAKE RESPONSE card (the 101 head). `active` says this card owns the response read
+    # cursor, and it decides two things:
+    #
+    #   * the ANCHOR. Active, the card scrolls on the shared `@scroll`/`@scroll_sub` and publishes
+    #     the metrics the hit-tests and scroll walkers read, so it is navigable like any other
+    #     response pane. Inactive, it stays pinned to row 0 with a local layout and publishes
+    #     nothing — the transcript owns the cursor then, and clobbering the metrics with this
+    #     card's would send every click and wheel notch to the wrong geometry.
+    #   * the CHROME. Only the active card paints the caret + selection band; the other one's
+    #     cursor coordinates address a different document.
+    private def render_ws_handshake(screen : Screen, rect : Rect, focused : Bool, active : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "HANDSHAKE RESPONSE", bg: Theme.bg, border: pane_border(focused))
+      Frame.card(screen, rect, "HANDSHAKE RESPONSE", bg: Theme.bg, border: pane_border(focused && active))
       if result = @result
         meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
         meta_x = rect.right - meta.size - 1
@@ -3931,32 +4293,45 @@ module Gori::Tui
       total = rv.total
       gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
+      lit = focused && active
+      if active
+        @resp_last_h = body.h
+        resp_record_metrics(gw, cw)
+      end
       return if cw <= 0
-      # This card is always pinned to the top of the handshake response and has its own
-      # tiny window, so it wraps from row 0 with a local layout rather than sharing the
-      # transcript's anchor + memo (different line source, ≤7 rows to lay out).
-      rows = Wrap.rows(0, 0, body.h, total, ->(i : Int32) { Wrap.layout(rv.line_text(i), cw) })
+      line_text = ->(i : Int32) { rv.line_text(i) }
+      sel_spans = active ? resp_sel_spans_if(lit) : nil
+      # Active: the shared anchor + wrap memo, so this card can be scrolled and the caret walked
+      # through it. Inactive: pinned to row 0 with a local layout, which is what it always did
+      # (it is 7 rows showing a 4-5 line head — there is nothing to scroll to).
+      rows = if active
+               resp_rows(cw, body.h, total, line_text)
+             else
+               Wrap.rows(0, 0, body.h, total, ->(i : Int32) { Wrap.layout(line_text.call(i), cw) })
+             end
       rows.each_with_index do |vr, i|
-        if gw > 0
-          if vr.sub == 0
-            Gutter.draw(screen, body.x, body.y + i, vr.li, gw)
-          else
-            screen.text(body.x, body.y + i, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
-          end
-        end
+        y = body.y + i
+        draw_resp_gutter(screen, body.x, y, gw, vr, lit)
         # slice_chars is the identity for a row that IS the whole line, so an unwrapped
         # handshake header costs nothing extra.
         shown = Highlight.slice_chars(styled_resp_line(rv, vr.li), vr.a, vr.b)
-        Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
+        Highlight.draw(screen, body.x + gw, y, shown, width: cw)
+        next unless active
+        text = line_text.call(vr.li)
+        paint_resp_line_chrome(screen, body.x + gw, y, vr.li, text, lit, sel_spans, vr.a, vr.b)
+        Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
+      Frame.scroll_gauge(screen, body, total, @scroll, lit) if active
     end
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       if @ws_mode
         handshake_rect, transcript_rect = ws_resp_split(rect)
-        render_ws_handshake(screen, handshake_rect, focused)
-        render_transcript(screen, transcript_rect, focused, "TRANSCRIPT", ws_transcript_lines, @ws_result.try(&.duration_us))
+        on_handshake = @resp_pane == :handshake
+        render_ws_handshake(screen, handshake_rect, focused, active: on_handshake)
+        render_transcript(screen, transcript_rect, focused, "TRANSCRIPT", ws_transcript_lines,
+          @ws_result.try(&.duration_us), active: !on_handshake)
         return
       end
       if @grpc_mode
@@ -3984,11 +4359,20 @@ module Gori::Tui
       Frame.scroll_gauge(screen, body, resp_line_count, @scroll, focused)
     end
 
-    # Shared windowed renderer for the WS / gRPC transcript panes (a list of
+    # Shared windowed renderer for the WS / gRPC / group transcript panes (a list of
     # {text, colour} rows, scrolled by @scroll). `dur_us` rides the top border.
+    #
+    # `active` is only ever false for the WS transcript while the HANDSHAKE RESPONSE card above
+    # it owns the cursor — gRPC and a pipelined group fill the whole column and are always
+    # active. It gates the same two things it gates on the handshake card: the shared anchor +
+    # published metrics, and the caret/selection chrome. Both cards render every frame, so
+    # whichever one wrote the metrics LAST would otherwise win regardless of which one the
+    # cursor is actually on.
     private def render_transcript(screen : Screen, rect : Rect, focused : Bool,
-                                  title : String, lines : Array({String, Color}), dur_us : Int64?) : Nil
-      Frame.card(screen, rect, title, bg: Theme.bg, border: pane_border(focused))
+                                  title : String, lines : Array({String, Color}), dur_us : Int64?,
+                                  active : Bool = true) : Nil
+      lit = focused && active
+      Frame.card(screen, rect, title, bg: Theme.bg, border: pane_border(lit))
       if d = dur_us
         meta = Fmt.dur(d)
         mx = rect.right - meta.size - 1
@@ -4002,19 +4386,27 @@ module Gori::Tui
       end
       gw = Settings.show_gutter ? {Gutter.width(lines.size), body.w}.min : 0
       cw = {body.w - gw, 0}.max
-      @resp_last_h = body.h
-      resp_record_metrics(gw, cw)
+      if active
+        @resp_last_h = body.h
+        resp_record_metrics(gw, cw)
+      end
       return if cw <= 0
-      sel_spans = resp_sel_spans_if(focused)
-      resp_rows(cw, body.h, lines.size, ->(i : Int32) { lines[i][0] }).each_with_index do |vr, i|
+      sel_spans = active ? resp_sel_spans_if(lit) : nil
+      rows = if active
+               resp_rows(cw, body.h, lines.size, ->(i : Int32) { lines[i][0] })
+             else
+               Wrap.rows(0, 0, body.h, lines.size, ->(i : Int32) { Wrap.layout(lines[i][0], cw) })
+             end
+      rows.each_with_index do |vr, i|
         text, color = lines[vr.li]
         y = body.y + i
-        draw_resp_gutter(screen, body.x, y, gw, vr, focused)
+        draw_resp_gutter(screen, body.x, y, gw, vr, lit)
         screen.text(body.x + gw, y, text[vr.a...vr.b], color, width: cw)
-        paint_resp_line_chrome(screen, body.x + gw, y, vr.li, text, focused, sel_spans, vr.a, vr.b)
+        next unless active
+        paint_resp_line_chrome(screen, body.x + gw, y, vr.li, text, lit, sel_spans, vr.a, vr.b)
         Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
-      Frame.scroll_gauge(screen, body, lines.size, @scroll, focused)
+      Frame.scroll_gauge(screen, body, lines.size, @scroll, lit) if active
     end
 
     # The transcript as {text, colour} rows (cached; rebuilt only when a new result
@@ -4366,13 +4758,15 @@ module Gori::Tui
 
     # --- content ------------------------------------------------------------
 
-    # The visible line count of the active response view (drives the scroll bound).
+    # The visible line count of the active response view (drives the scroll bound + the gauge).
     private def resp_line_count : Int32
-      if @ws_mode
+      if resp_handshake_active?
+        {resp_view.total, 1}.max
+      elsif @ws_mode
         {ws_transcript_lines.size, 1}.max
       elsif @grpc_mode
         {grpc_transcript_lines.size, 1}.max
-      elsif @resp_hex
+      elsif resp_hex_active?
         (bytes = resp_hex_bytes) ? HexView.rows(bytes.size) : 1
       elsif @resp_mode == :diff
         diff_lines.size

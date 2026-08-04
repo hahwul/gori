@@ -938,6 +938,18 @@ module Gori::Tui
     # grabbing the run of spaces: the gesture means "give me this token", and there is none.
     def select_word_at(rect : Rect, mx : Int32, my : Int32) : Bool
       click_to_cursor(rect, mx, my)
+      select_word_at_cursor
+    end
+
+    # The word-spread half of `select_word_at`, WITHOUT the hit test — for a caller whose caret
+    # is already where the pointer put it. `ReadCursor` carries this same pair for the same
+    # reason (see its comment): a second inverse can disagree with the first when the layout
+    # moved between the two presses of a double-click, which is exactly what a Repeater split
+    # column does — adopting the lower sub-pane on press 1 resizes both cards, so press 2's
+    # rect is no longer the one press 1 was inverted against.
+    def select_word_at_cursor : Bool
+      return false if @lines.empty?
+      @cy = @cy.clamp(0, @lines.size - 1)
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       return false if cx >= line.size || line[cx].whitespace?
@@ -1627,26 +1639,88 @@ module Gori::Tui
       return if li < y0 || li > y1
       lo = {li == y0 ? x0 : 0, a}.max
       hi = {li == y1 ? x1 : line.size, b}.min
+      paint_band(screen, cx0, y, line, cr, a, lo, hi, cw)
+    end
+
+    # --- READ-mode over-paint seam --------------------------------------------------------
+    # The NORMAL-mode selection band and block caret are drawn by the OWNER (the Repeater's
+    # request pane, the Fuzzer template, Notes, …): that selection lives in a `ReadCursor` this
+    # widget deliberately does not model. The COLUMN MATH, though, is this widget's — and both
+    # owners of a CONCEALING editor had re-derived it without the concealed runs, which is two
+    # separate wrongs at once:
+    #
+    #   * measured on the raw line, the caret and the band land N columns right of the text they
+    #     address, N being the width of the `¦chain` runs hidden to their left; and
+    #   * each band chunk RE-DRAWS its own text, so painting from the raw line put the hidden
+    #     chain back on screen — selecting a line UNCONCEALED it and shifted the rest of the row.
+    #
+    # Both were live in the Repeater's request pane and the Fuzzer template, the two places an
+    # operator actually writes `§value¦chain§`. The copy was correct throughout (it reads buffer
+    # coordinates), so the band highlighted different bytes than `y` put on the clipboard.
+    #
+    # These two methods are the same measure and the same conceal walk `render` uses for the
+    # INSERT band, exposed so an owner cannot derive a second, conceal-blind one.
+
+    # This line's concealed runs in LINE-local char coords, or nil when nothing is hidden there
+    # (which is every editor that never sets `conceal_spans`, and every line of one that does).
+    def conceal_of(li : Int32) : Array({Int32, Int32})?
+      return nil if @conceal_spans.empty? || @reveal
+      line = @lines[li]? || return nil
+      cr = line_conceal(line_start_offset(li), line.size)
+      cr.empty? ? nil : cr
+    end
+
+    # Where a READ block caret for buffer index `cx` on line `li` belongs: its drawn column
+    # (measured from `row_start`, which is the wrap break for a continuation row) and the first
+    # VISIBLE glyph at or after it — a caret parked on a hidden `¦chain` byte has to invert the
+    # glyph the operator can actually see, which is the closing `§`. `render` computes exactly
+    # this pair for the INSERT caret.
+    def read_caret_cell(li : Int32, cx : Int32, row_start : Int32 = 0) : {Int32, Char | String}
+      line = @lines[li]? || ""
+      cr = conceal_of(li)
+      col = Wrap.row_col(line, cr, row_start, cx)
+      r = cx
+      cr.each { |(ra, rb)| r = rb if r >= ra && r < rb } if cr
+      {col, Screen.caret_glyph(line, r)}
+    end
+
+    # Paint `[x0, x1)` of line `li` on the selection background, clipped to the drawn row
+    # `[row_start, row_end)` and split around this editor's concealed runs. `cx0` is the row's
+    # first content cell (past the gutter); `cw` its width.
+    def paint_read_band(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
+                        x0 : Int32, x1 : Int32, row_start : Int32, row_end : Int32, cw : Int32) : Nil
+      line = @lines[li]? || return
+      lo = {x0, row_start}.max
+      hi = {x1, row_end < 0 ? line.size : row_end}.min
+      paint_band(screen, cx0, y, line, conceal_of(li), row_start, lo, hi, cw)
+    end
+
+    # `[lo, hi)` of `line` on the selection background, split around the concealed runs in `cr`.
+    #
+    # A concealed `¦chain` occupies no cells, so the band is laid down as the VISIBLE runs between
+    # the hidden ones; painting straight through would tint cells the chain's neighbours are
+    # standing in, shift the rest of the row's tint right by its length, and — because each chunk
+    # RE-DRAWS its own text — put the hidden chain back on screen.
+    private def paint_band(screen : Screen, cx0 : Int32, y : Int32, line : String,
+                           cr : Array({Int32, Int32})?, row_start : Int32,
+                           lo : Int32, hi : Int32, cw : Int32) : Nil
       return if lo >= hi
       if cr.nil? || cr.empty?
-        paint_sel_chunk(screen, cx0, y, line, cr, a, lo, hi, cw)
+        paint_sel_chunk(screen, cx0, y, line, cr, row_start, lo, hi, cw)
         return
       end
-      # A concealed `¦chain` occupies no cells, so the band is laid down as the VISIBLE runs
-      # between the hidden ones; painting straight through would tint cells the chain's
-      # neighbours are standing in and shift the rest of the row's tint right by its length.
       chunk = lo
       i = lo
       while i < hi
         if run = cr.find { |(ra, rb)| i >= ra && i < rb }
-          paint_sel_chunk(screen, cx0, y, line, cr, a, chunk, i, cw)
+          paint_sel_chunk(screen, cx0, y, line, cr, row_start, chunk, i, cw)
           i = {run[1], hi}.min
           chunk = i
         else
           i += 1
         end
       end
-      paint_sel_chunk(screen, cx0, y, line, cr, a, chunk, hi, cw)
+      paint_sel_chunk(screen, cx0, y, line, cr, row_start, chunk, hi, cw)
     end
 
     # One contiguous, fully-visible `[s, e)` of the row that starts at `row_start`, re-drawn

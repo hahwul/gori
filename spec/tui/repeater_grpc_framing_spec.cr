@@ -102,4 +102,49 @@ describe "RepeaterView gRPC framing failure" do
       backend.contains?("(no complete gRPC messages)").should be_true
     end
   end
+
+  # The GRPC REQUEST head is a mode-switched text editor (`i`/esc, READ selection, and — since
+  # the READ over-paint reached this branch — a visible NORMAL block caret), so it carries the
+  # NOR/INS chip like every other non-hex request card. Draw and hit-test share
+  # `Frame.right_badge_edge` over one badge list; this pins them together, because a chip that
+  # is drawn but not hit-testable (or the reverse) is the exact defect `␣K:KEY` had.
+  it "draws a clickable NOR/INS mode chip on the request head" do
+    grpc_tmp_store do |store|
+      view = def_view.call(store)
+      view.focus_pane(:request)
+      rect = Rect.new(0, 0, 160, 24)
+      b = MemoryBackend.new(160, 24)
+      view.render(Screen.new(b), rect)
+
+      # The request card's top border: below the 3-row TARGET band.
+      border_y = rect.y + 3
+      row = b.row(border_y)
+      row.should contain("↵:NOR")
+      col = row.index("↵:NOR").not_nil!
+      view.chrome_hit(rect, col + 1, border_y).should eq(:mode)
+
+      # And it reports the mode it is in, rather than a fixed label.
+      view.enter_request_insert!
+      b2 = MemoryBackend.new(160, 24)
+      view.render(Screen.new(b2), rect)
+      b2.row(border_y).should contain("INS")
+    end
+  end
+
+  # Hex draws no chip (a nibble cursor has no READ/INS), so none may be hit-testable there.
+  it "reports no mode chip while the payload is hex-edited" do
+    grpc_tmp_store do |store|
+      view = def_view.call(store)
+      view.focus_pane(:request)
+      rect = Rect.new(0, 0, 160, 24)
+      view.render(Screen.new(MemoryBackend.new(160, 24)), rect)
+      border_y = rect.y + 3
+
+      view.toggle_request_hex.should be_true
+      b = MemoryBackend.new(160, 24)
+      view.render(Screen.new(b), rect)
+      b.row(border_y).should_not contain("↵:NOR")
+      (0...160).each { |x| view.chrome_hit(rect, x, border_y).should_not eq(:mode) }
+    end
+  end
 end

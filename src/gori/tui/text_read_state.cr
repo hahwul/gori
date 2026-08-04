@@ -79,6 +79,17 @@ module Gori::Tui
       lines = editor.lines_snapshot
       return false if lines.empty?
       editor.click_to_cursor(rect, mx, my)
+      select_word_at_cursor(editor, lines)
+    end
+
+    # The word spread WITHOUT the hit test, for a caller whose caret is already at the pointer
+    # (the press of a double-click placed it). `ReadCursor` and `TextArea` both carry this pair;
+    # the reason is a layout that can move BETWEEN the two presses — a Repeater split column
+    # resizes both of its cards when press 1 adopts the lower one, so a second hit-test would
+    # invert the same screen row against a rect that has since shifted.
+    def select_word_at_cursor(editor : TextArea, lines : Array(String)? = nil) : Bool
+      lines ||= editor.lines_snapshot
+      return false if lines.empty?
       @cursor.sync(editor.cy, editor.cx)
       return false unless @cursor.select_word_at_cursor(lines)
       apply(editor, lines)
