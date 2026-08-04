@@ -329,9 +329,16 @@ module Gori::Tui
              regions.input.x + 6, s.input_mode == InputMode::Insert)
           s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
           s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
-        else
+        elsif s.input_mode == InputMode::Insert
           s.input.click_to_cursor(regions.input.inset(1, 1), mx, my)
-          s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
+        else
+          # READ's selection lives in `input_read`, and `TextReadState#click` is the path that
+          # COLLAPSES it — `sync_from` deliberately does not touch the anchor (see
+          # `ReadCursor#sync`), so a plain click on top of a ⇧arrow selection used to re-shape
+          # it instead of dropping it, which is not what a click means anywhere else. The
+          # Repeater and Fuzzer template panes already click through their read state for
+          # exactly this reason; this is that call.
+          s.input_read.click(s.input, regions.input.inset(1, 1), mx, my)
         end
       elsif regions.chain.contains?(mx, my)
         s.pane = :chain
@@ -351,11 +358,17 @@ module Gori::Tui
       true
     end
 
+    # INS scrolls like READ. The `&& s.input_mode == InputMode::Read` that stood on the INPUT
+    # arm is the same guard `RepeaterView#request_scroll_view` shed: a wheel notch is not an
+    # editing gesture, and the operator who pressed `i` did not ask to give up reading the
+    # buffer they are typing into. `TextArea#scroll_view` pulls the caret into the new window
+    # itself, so the next inserted char lands where the pane is now looking rather than
+    # snapping the view back — which is what made this feel unsafe to allow.
     def handle_wheel(step : Int32) : Bool
       s = cur
       if s.pane == :output
         s.view.output_scroll_view(step, s.result)
-      elsif s.pane == :input && s.input_mode == InputMode::Read
+      elsif s.pane == :input
         s.input.scroll_view(step)
       end
       true

@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_area"
+require "./read_pane"
 require "../rules/stub"
 require "../store"
 require "../bindings"
@@ -66,8 +67,7 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, rules : Array(Store::MatchRule), sel : Int32,
                scroll : Int32, enabled_count : Int32, focus : Symbol, body_focused : Bool,
-               live : Bool, preview_input : TextArea, preview_output : String,
-               out_scroll : Int32) : Nil
+               live : Bool, preview_input : TextArea, preview_out : ReadPane) : Nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules, body_focused)
       list_r, pin_r, pout_r = layout(rect)
@@ -75,8 +75,7 @@ module Gori::Tui
         body_focused && focus == :list, live)
       unless pin_r.empty?
         render_preview_input(screen, pin_r, preview_input, body_focused && focus == :preview_in)
-        render_preview_output(screen, pout_r, preview_output, out_scroll,
-          body_focused && focus == :preview_out)
+        render_preview_output(screen, pout_r, preview_out, body_focused && focus == :preview_out)
       end
     end
 
@@ -307,20 +306,15 @@ module Gori::Tui
       ed.render(screen, body, cursor: focused, highlight: :request, gauge: true, gauge_focused: focused)
     end
 
-    private def render_preview_output(screen : Screen, rect : Rect, text : String,
-                                      scroll : Int32, focused : Bool) : Nil
+    # The transformed sample. The pane owns its scroll, caret, selection and gauge — this used
+    # to be a plain windowed draw over a `String` with no caret at all, so the one pane that
+    # shows what a rule DID to a message was the one you could not copy a line out of.
+    private def render_preview_output(screen : Screen, rect : Rect, pane : ReadPane, focused : Bool) : Nil
       return if rect.w < 4 || rect.h < 2
       Frame.card(screen, rect, "PREVIEW OUTPUT", bg: Theme.bg, border: Frame.pane_border(focused))
       body = rect.inset(1, 1)
       return if body.empty?
-      lines = text.empty? ? ["(empty)"] : text.split('\n')
-      top = scroll.clamp(0, {lines.size - body.h, 0}.max)
-      (0...body.h).each do |i|
-        line = lines[top + i]?
-        break unless line
-        screen.text(body.x, body.y + i, line, Theme.text, Theme.bg, width: body.w)
-      end
-      Frame.scroll_gauge(screen, body, lines.size, top, focused)
+      pane.render(screen, body, focused)
     end
 
     # Both moved onto `Rules` (rules.cr) when the global rule-preset library started

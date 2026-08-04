@@ -13,6 +13,14 @@ private def flow(method, target, host = "h.test", body = "body")
   Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, nil, resp, body.to_slice)
 end
 
+# A pair whose bodies differ on exactly one line, so the diff has a same / changed / same shape.
+private def diff_view : ComparerView
+  v = ComparerView.new
+  v.set_pair(flow("GET", "/a", body: "keep\nDROPPED\ntail"),
+    flow("GET", "/a", body: "keep\nADDED\ntail"))
+  v
+end
+
 describe ComparerView do
   it "builds auto labels from slots and prefers a custom name" do
     v = ComparerView.new
@@ -194,5 +202,86 @@ describe ComparerView do
       v.set_pane(:response)
       v.xscroll.should eq(0)
     end
+  end
+end
+
+# The Comparer was the one tab you could read and not get a byte out of: no caret, no selection,
+# no `y` — no copy verb in `Verb::Scope::Comparer` at all. It has a ROW cursor now
+# (`ReadPane(line_select_only: true)`): a screen row is two columns of the same diff, so a char
+# rectangle would address cells that are not adjacent, and the copy payload is the row projected
+# to unified-diff text (`  same` / `- left` / `+ right` / `~ left → right`).
+describe "ComparerView row cursor" do
+  it "copies the cursor's row as unified text, and the whole diff with nothing selected" do
+    v = diff_view
+    v.render(Screen.new(MemoryBackend.new(100, 20)), Rect.new(0, 0, 100, 20), true)
+    v.selection?.should be_false
+    first = v.copy_text
+    first.should_not be_empty
+    first[0].should eq(' ') # an unchanged row carries the two-space unified prefix
+
+    all = v.copy_all
+    all.lines.size.should be > 1
+    all.should contain("DROPPED")
+    all.should contain("ADDED")
+  end
+
+  it "grows a WHOLE-ROW selection on ⇧↓ and never a partial column span" do
+    v = diff_view
+    v.render(Screen.new(MemoryBackend.new(100, 20)), Rect.new(0, 0, 100, 20), true)
+    v.move_rows(1, true)
+    v.selection?.should be_true
+    text = v.copy_text
+    text.lines.size.should eq(2)
+    text.lines.each { |l| l.size.should be > 1 } # each is a full projected row, not a fragment
+    v.clear_selection
+    v.selection?.should be_false
+  end
+
+  it "places the row cursor at a click inside the diff body" do
+    v = diff_view
+    rect = Rect.new(0, 0, 100, 20)
+    v.render(Screen.new(MemoryBackend.new(100, 20)), rect, true)
+    body = v.body_rect(rect)
+    v.click_row(body, body.x + 3, body.y + 2)
+    v.rowsel.cursor.cy.should eq(2)
+    v.copy_text.should eq(v.rowsel.line(2))
+  end
+
+  # A wheel notch is a reading gesture: it must move the viewport and leave the cursor put,
+  # which is the split every other read pane in the tree makes.
+  it "scrolls on the wheel without moving the row cursor" do
+    v = ComparerView.new
+    long_a = (1..60).map { |i| "line#{i}" }.join("\n")
+    long_b = (1..60).map { |i| i == 30 ? "CHANGED" : "line#{i}" }.join("\n")
+    v.set_pair(flow("GET", "/a", body: long_a), flow("GET", "/a", body: long_b))
+    rect = Rect.new(0, 0, 100, 12)
+    v.render(Screen.new(MemoryBackend.new(100, 12)), rect, true)
+    v.rowsel.cursor.cy.should eq(0)
+
+    5.times { v.wheel(1) }
+    v.rowsel.scroll.should be > 0
+    v.rowsel.cursor.cy.should be >= v.rowsel.scroll # pulled into the window, not dragged along
+  end
+
+  it "drops the row cursor when the pair or the diffed half changes" do
+    v = diff_view
+    v.render(Screen.new(MemoryBackend.new(100, 20)), Rect.new(0, 0, 100, 20), true)
+    v.move_rows(2, true)
+    v.selection?.should be_true
+    v.toggle_pane # request ⇄ response renumbers every row
+    v.selection?.should be_false
+    v.rowsel.cursor.cy.should eq(0)
+  end
+
+  it "tints the whole cursor row, both columns and the marker band" do
+    v = diff_view
+    rect = Rect.new(0, 0, 100, 20)
+    b = MemoryBackend.new(100, 20)
+    v.render(Screen.new(b), rect, true)
+    body = v.body_rect(rect)
+    # The cursor is on row 0 of the body; the band must reach the right-hand column too.
+    b.bg_grid[body.y][2].should eq(Theme.accent_bg)
+    b.bg_grid[body.y][body.right - 3].should eq(Theme.accent_bg)
+    b.bg_grid[body.y + 1][2].should_not eq(Theme.accent_bg) # and only that row
   end
 end

@@ -93,7 +93,7 @@ module Gori::Tui
       if rules_tab?
         return "↑/↓ move · ↵/x toggle · a add · e edit · d delete · space cmds · ↑ sub-tabs · esc tabs"
       elsif @probe.detail_open?
-        "o flow · r repeater · p promote · c dismiss · d delete · space cmds · ←/esc back"
+        "↑/↓ URL · ⇧arrows select · y copy · o flow · r repeater · p promote · space cmds · ←/esc back"
       elsif @probe.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @probe.mode.off?
@@ -131,7 +131,12 @@ module Gori::Tui
         end
         return true
       end
-      return true if @probe.detail_open? # detail pane: clicks are inert (use keys)
+      if @probe.detail_open?
+        # The AFFECTED URLS list takes a caret from the pointer; the rest of the card is chrome.
+        @host.focus_body
+        @probe.detail_click(content, mx, my)
+        return true
+      end
       @host.focus_body
       if @probe.preview_enabled? && @probe.preview_at?(content, mx, my)
         @probe.set_preview_focus(:preview)
@@ -152,7 +157,7 @@ module Gori::Tui
       if rules_tab?
         @rules.move(step)
       elsif @probe.detail_open?
-        @probe.scroll_detail(step)
+        @probe.detail_wheel(step) # viewport only — ↑/↓ are the caret
       else
         @probe.move(step)
       end
@@ -179,9 +184,9 @@ module Gori::Tui
       return false if ev.ctrl? || ev.alt?
       if @probe.detail_open?
         case
-        when key.up?, key.lower_k?   then @probe.scroll_detail(-1)
-        when key.down?, key.lower_j? then @probe.scroll_detail(1)
-        else                              return false
+        when key.up?, key.lower_k?   then @probe.detail_move(-1, ev.shift?)
+        when key.down?, key.lower_j? then @probe.detail_move(1, ev.shift?)
+        else                              return @probe.detail_motion_key(ev) # Home/End/PgUp/PgDn, ⇧ extending
         end
         return true
       end
@@ -500,6 +505,56 @@ module Gori::Tui
     private def reload_rules : Nil
       @rules.reload(@host.session.store)
       @host.session.probe.reload_rule_config
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # The detail's AFFECTED URLS only: the issue list selects rows, where a drag is a fast
+    # repeated select and a double-click is two opens.
+    def supports_drag? : Bool
+      !rules_tab? && @probe.detail_open?
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless supports_drag?
+      @probe.detail_click(BodyChrome.content_rect(rect, strip: true), mx, my, selecting: true)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless supports_drag?
+      @probe.detail_select_word(BodyChrome.content_rect(rect, strip: true), mx, my)
+    end
+
+    # --- READ-pane delegators (the detail's read verbs + the Runner's read_* ladders) ---
+    def probe_detail_readable? : Bool
+      !rules_tab? && @probe.detail_open?
+    end
+
+    def probe_detail_selection_active? : Bool
+      @probe.detail_selection?
+    end
+
+    def probe_detail_selection_text : String
+      @probe.detail_copy_text
+    end
+
+    def probe_detail_select_line : Nil
+      @probe.detail_select_line
+    end
+
+    def probe_detail_clear_selection : Nil
+      @probe.detail_clear_selection
+    end
+
+    # `y`: the selected URLs, or every affected URL when nothing is selected. This list IS the
+    # finding's evidence, and it had no copy at all.
+    def probe_detail_copy : Nil
+      return unless probe_detail_readable?
+      sel = @probe.detail_selection?
+      text = sel ? @probe.detail_copy_text : @probe.detail_copy_all
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
   end
 end

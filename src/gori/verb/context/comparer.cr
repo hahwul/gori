@@ -10,4 +10,7 @@ abstract class Gori::Verb::ExecContext
   abstract def comparer_close_subtab : Nil        # close the active comparison (keeps ≥1)
   abstract def comparer_rename_subtab : Nil       # rename the active comparison chip
   abstract def comparer_duplicate_subtab : Nil    # clone the active A/B pair
+  # Both flows are set, so there are diff rows with a cursor on them — the gate for the row
+  # select / copy verbs. A blank comparison has nothing to select.
+  abstract def comparer_diff_shown? : Bool
 end

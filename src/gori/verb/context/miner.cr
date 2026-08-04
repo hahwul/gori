@@ -9,4 +9,7 @@ abstract class Gori::Verb::ExecContext
   abstract def miner_duplicate_subtab : Nil   # clone the active miner sub-tab's content into a new sibling
   abstract def miner_finding_selected? : Bool # a finding is selected in the focused miner session
   abstract def mine_repeater_selected : Nil   # send the selected miner finding to Repeater
+  # The FINDING pane holds focus — the gate for its row select / copy verbs. A mined parameter's
+  # fields are what go into a report, and the pane had no copy at all.
+  abstract def miner_detail_readable? : Bool
 end

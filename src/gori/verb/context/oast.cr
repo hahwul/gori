@@ -15,4 +15,7 @@ abstract class Gori::Verb::ExecContext
   abstract def oast_payload_available? : Bool # a listening session exists (gates the menu entries)
   abstract def oast_insert_payload : Nil      # insert a fresh payload at the editor cursor
   abstract def oast_copy_payload : Nil        # copy a fresh payload to the clipboard (History)
+  # A callback's detail is open on a row — the gate for its select-line / copy verbs. The pane
+  # holds the raw callback, which is the evidence an OAST finding rests on.
+  abstract def oast_detail_readable? : Bool
 end

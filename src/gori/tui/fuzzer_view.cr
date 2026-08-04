@@ -1347,6 +1347,84 @@ module Gori::Tui
       detail_plain_lines.join("\n")
     end
 
+    # --- mouse over the RESULT detail ---------------------------------------
+    # This pane paints a selection band, grows it on ⇧arrows and copies it with `y`, and the
+    # POINTER was the one way in that did nothing at all: the controller's drag and
+    # double-click arms both bailed unless the focused pane was the template, and its click arm
+    # had no `:detail` branch, so a click focused the card and left the caret where it was.
+    # Compare the History drill-in, which has had all four (chips, caret, drag, word) since it
+    # grew a read cursor. The inverse is `DecoderView#output_click_to_cursor`'s: `ReadCursor`
+    # owns the mapping, the pane supplies the scroll anchor, the gutter and the h-scroll.
+
+    # The card `render_bottom` hands `render_detail`, so every gesture inverts against exactly
+    # the rect that was drawn. nil unless the detail is what is actually on screen there.
+    private def detail_card_rect(rect : Rect) : Rect?
+      return nil unless @focus == :detail
+      _, _, bottom = stack_rects(rect)
+      bottom.h > 0 ? bottom : nil
+    end
+
+    # The detail card's interior + its gutter width, or nil when there is nothing to hit-test.
+    private def detail_hit_geometry(rect : Rect) : {Rect, Array(String), Int32}?
+      return nil unless detail_navigable?
+      card = detail_card_rect(rect)
+      return nil unless card
+      lines = detail_plain_lines
+      return nil if lines.empty?
+      inner = card.inset(1, 1)
+      return nil if inner.empty?
+      {inner, lines, {Gutter.width(lines.size), inner.w}.min}
+    end
+
+    def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      inner, lines, gw = detail_hit_geometry(rect) || return
+      @detail_cursor.click_to_cursor(inner, mx, my, @detail_scroll, lines, gw, @detail_xscroll, selecting)
+      ensure_detail_visible(inner.h)
+    end
+
+    def detail_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      hit = detail_hit_geometry(rect)
+      return false unless hit
+      inner, lines, gw = hit
+      took = @detail_cursor.select_word_at(inner, mx, my, @detail_scroll, lines, gw, @detail_xscroll)
+      ensure_detail_visible(inner.h)
+      took
+    end
+
+    # The pane chip under (mx, my) on the detail card's TOP BORDER, or nil. Inverts
+    # `render_detail_chips` — same start column, same `" label "` padding, same +1 gap, same
+    # right-edge break — so the strip the card draws is the strip a click can reach. The
+    # History detail's chips have been clickable via `detail_pane_at`; these were drawn only.
+    def detail_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      card = detail_card_rect(rect)
+      return nil unless card && my == card.y
+      x = card.x + 14
+      detail_panes.each do |pane|
+        label = " #{detail_pane_label(pane)} "
+        break if x + label.size >= card.right - 1
+        return pane if mx >= x && mx < x + label.size
+        x += label.size + 1
+      end
+      nil
+    end
+
+    # Show `pane` in the detail card (a chip click), no-op for a pane this result has no
+    # section for. Routes through `detail_step_pane`'s reset so the scroll, the h-scroll, the
+    # caret and both line caches are dropped together, exactly as ←/→ does. Named `show_` not
+    # `set_`: it is a navigation action with side effects, not a writer for `@detail_pane`.
+    #
+    # The already-showing case has to bail BEFORE that, because a zero delta is not a no-op in
+    # `detail_step_pane` — its range guard passes, it re-assigns the same pane and runs the whole
+    # reset. Clicking the chip you are already on would then silently throw away your scroll
+    # position and your selection, which is the opposite of what re-clicking a tab means.
+    def show_detail_pane(pane : Symbol) : Nil
+      return if pane == @detail_pane
+      panes = detail_panes
+      i = panes.index(pane)
+      return unless i
+      detail_step_pane(i - (panes.index(@detail_pane) || 0))
+    end
+
     # Horizontal companion to `detail_scroll` (shift+←/→). Floored at 0 here; the
     # render loop clamps the upper bound to the widest row actually on screen.
     def hscroll_detail(delta : Int32) : Nil
@@ -1701,8 +1779,15 @@ module Gori::Tui
       template_read_move(dir * @editor.page_rows, 0, selecting: selecting)
     end
 
+    # `chain_pane_active?` still bails — the ^Y chain sub-pane owns the wheel while it is up,
+    # so scrolling the template underneath it would move a pane the operator is not in.
+    # `template_insert?` does NOT, and that was the defect: the guard read the MODE, not the
+    # pane, so the wheel died the moment `i` was pressed. Same reasoning as
+    # `RepeaterController#handle_wheel`'s dropped `unless v.request_insert?` — INS is the same
+    # pane showing the same bytes, and `scroll_view` pulls the caret into the new window so the
+    # next keystroke lands where the operator is looking.
     def template_scroll_view(step : Int32) : Nil
-      return if template_insert? || chain_pane_active?
+      return if chain_pane_active?
       @editor.scroll_view(step)
     end
 
@@ -1862,17 +1947,31 @@ module Gori::Tui
         TrafficEmptyState.render(screen, rect, variant: :fuzzer, title: "no request loaded")
         return
       end
-      target_h = {rect.h, target_card_h}.min
-      render_target(screen, Rect.new(rect.x, rect.y, rect.w, target_h), focused && @focus == :target)
-      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return if rest.h <= 0
-      top_h = {rest.h * 45 // 100, 5}.max
-      top_h = rest.h if rest.h < 6
-      top = Rect.new(rest.x, rest.y, rest.w, top_h)
-      bottom = Rect.new(rest.x, rest.y + top_h, rest.w, {rest.h - top_h, 0}.max)
+      target, top, bottom = stack_rects(rect)
+      render_target(screen, target, focused && @focus == :target)
+      return if top.h <= 0
       render_top(screen, top, focused)
       render_bottom(screen, bottom, focused) if bottom.h > 0
       render_chain_overlay(screen, rect) if @chain_focused # centered ^Y modal ON TOP (replaces the old split)
+    end
+
+    # The body's three horizontal bands — TARGET, the template/config row, and the
+    # results-or-detail row — in one place because `render`, `pane_at` and the detail
+    # hit-tests all need them and each used to re-derive `target_h` / `top_h` by hand. A
+    # `top.h` of 0 means the body is too short for anything under TARGET (render bails, the
+    # hit-tests answer nil), which is the `rest.h <= 0` guard those copies carried.
+    private def stack_rects(rect : Rect) : {Rect, Rect, Rect}
+      target_h = {rect.h, target_card_h}.min
+      target = Rect.new(rect.x, rect.y, rect.w, target_h)
+      rest_h = {rect.h - target_h, 0}.max
+      empty = Rect.new(rect.x, rect.y + target_h, rect.w, 0)
+      return {target, empty, empty} if rest_h <= 0
+      rest_y = rect.y + target_h
+      top_h = {rest_h * 45 // 100, 5}.max
+      top_h = rest_h if rest_h < 6
+      {target,
+       Rect.new(rect.x, rest_y, rect.w, top_h),
+       Rect.new(rect.x, rest_y + top_h, rect.w, {rest_h - top_h, 0}.max)}
     end
 
     private def render_top(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -2974,20 +3073,17 @@ module Gori::Tui
 
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded && rect.contains?(mx, my)
-      target_h = {rect.h, target_card_h}.min
-      return :target if my < rect.y + target_h
-      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return nil if rest.h <= 0
-      top_h = {rest.h * 45 // 100, 5}.max
-      top_h = rest.h if rest.h < 6
-      if my < rest.y + top_h
-        half = {(rest.w - 1) // 2, 1}.max
-        mx < rest.x + half ? :template : :config
+      target, top, bottom = stack_rects(rect)
+      return :target if target.contains?(mx, my)
+      return nil if top.h <= 0
+      if my < top.bottom
+        half = {(top.w - 1) // 2, 1}.max
+        mx < top.x + half ? :template : :config
       elsif @focus == :detail
         :detail
       else
-        vw = @show_dist ? dist_width(rest.w) : 0
-        vw > 0 && mx >= rest.x + rest.w - vw ? nil : :results # read-only DIST sidebar → no-op
+        vw = @show_dist ? dist_width(bottom.w) : 0
+        vw > 0 && mx >= bottom.x + bottom.w - vw ? nil : :results # read-only DIST sidebar → no-op
       end
     end
   end

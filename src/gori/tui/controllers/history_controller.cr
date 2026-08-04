@@ -105,26 +105,44 @@ module Gori::Tui
       Rect.new(inner.x + 1, top, {inner.w - 2, 0}.max, h)
     end
 
+    # A click inside the detail drill-in: the pane chips, then the mode chips (both on the
+    # strip rows), then the text. Lifted out of `handle_click`, which carries the LIST arm as
+    # well and was over ameba's complexity ceiling with a third condition on this ladder.
+    private def click_detail(rect : Rect, inner : Rect, mx : Int32, my : Int32) : Nil
+      if pane = @history.detail_pane_at(inner, mx, my)
+        @history.set_detail_pane_public(pane)
+        @history.set_detail_focus(:strip) # a chip click parks focus on the strip
+        return
+      end
+      if mode = @history.detail_mode_at(inner, mx, my)
+        @host.focus_body
+        @history.set_detail_focus(:strip) # the mode chips live on the strip row too
+        case mode
+        when :hex    then @history.toggle_detail_hex
+        when :ws     then @host.toggle_reveal
+        when :pretty then @host.toggle_pretty
+        end
+        return
+      end
+      # `detail_text_rect`, not a second Rect built here: that helper's own comment says it
+      # exists so click, drag and double-click cannot land on three slightly different rects —
+      # and this arm was the third copy. Same rect, same rows: the helper answers nil exactly
+      # where the inline version clamped the height to 0, and a 0-height rect was already a
+      # no-op (`ReadCursor#click_to_cursor` returns on `rect.empty?`). The `my >= inner.y + 2`
+      # guard stays: without it a click on the strip row that missed every chip would newly
+      # pull focus down to the text level.
+      return unless my >= inner.y + 2
+      body = detail_text_rect(rect)
+      return unless body
+      @host.focus_body
+      @history.set_detail_focus(:body) # a body click enters the caret/text level
+      @history.detail_click_to_cursor(body, mx, my, focused: true)
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1) # framed insets 1,1
       if @host.overlay == :detail
-        if pane = @history.detail_pane_at(inner, mx, my)
-          @history.set_detail_pane_public(pane)
-          @history.set_detail_focus(:strip) # a chip click parks focus on the strip
-        elsif mode = @history.detail_mode_at(inner, mx, my)
-          @host.focus_body
-          @history.set_detail_focus(:strip) # the mode chips live on the strip row too
-          case mode
-          when :hex    then @history.toggle_detail_hex
-          when :ws     then @host.toggle_reveal
-          when :pretty then @host.toggle_pretty
-          end
-        elsif my >= inner.y + 2
-          body = Rect.new(inner.x + 1, inner.y + 2, {inner.w - 2, 0}.max, {inner.bottom - (inner.y + 2), 0}.max)
-          @host.focus_body
-          @history.set_detail_focus(:body) # a body click enters the caret/text level
-          @history.detail_click_to_cursor(body, mx, my, focused: true)
-        end
+        click_detail(rect, inner, mx, my)
         return true
       end
       @host.focus_body

@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./read_pane"
 require "./highlight"
 require "./url"
 require "./flow_status"
@@ -30,7 +31,13 @@ module Gori::Tui
       @slot_a = nil.as(Store::FlowDetail?)
       @slot_b = nil.as(Store::FlowDetail?)
       @pane = :response
-      @scroll = 0
+      # Row cursor + selection + vertical scroll for the diff. `line_select_only`: a screen row
+      # here is TWO columns of the same diff, so a char rectangle would address cells that are
+      # not next to each other — selection is whole rows, and there is no word to double-click.
+      # The pane draws NOTHING (this view paints two columns per row itself); it is called for
+      # `viewport_top`, `row_marked?` and the gestures. Before it, the Comparer was the one tab
+      # you could read a diff in and not get a single byte out of: no caret, no selection, no `y`.
+      @rowsel = ReadPane.new(line_select_only: true)
       # Leftmost visible display COLUMN, shared by BOTH columns (⇧←/→). One offset, not
       # two: the rows are LCS-aligned, so moving A and B together is what keeps a long
       # line comparable — an independent per-column offset would break that alignment.
@@ -91,9 +98,8 @@ module Gori::Tui
       @slot_b = other.@slot_b
       @pane = other.@pane
       @fill_next = other.@fill_next
-      @scroll = 0
       @xscroll = 0
-      invalidate
+      invalidate # resets the row cursor too
     end
 
     # Reset to a blank pair (used when closing the last sub-tab).
@@ -102,7 +108,7 @@ module Gori::Tui
       @slot_a = nil
       @slot_b = nil
       @pane = :response
-      @scroll = 0
+      @rowsel = ReadPane.new(line_select_only: true) # see initialize
       @xscroll = 0
       @fill_next = :a
       invalidate
@@ -166,9 +172,8 @@ module Gori::Tui
 
     def toggle_pane : Nil
       @pane = @pane == :response ? :request : :response
-      @scroll = 0  # request/response differ in length — start from the top
-      @xscroll = 0 # …and in width, so start from the left edge too
-      invalidate
+      @xscroll = 0 # request/response differ in width, so start from the left edge too
+      invalidate   # …and in length, so the row cursor starts from the top
     end
 
     # Jump straight to a half (mouse chip); no-op when already there.
@@ -176,9 +181,16 @@ module Gori::Tui
       return unless pane == :request || pane == :response
       return if @pane == pane
       @pane = pane
-      @scroll = 0
       @xscroll = 0
       invalidate
+    end
+
+    # The diff BODY: below the A/B header and the REQ⇄RES divider, above the footer. One
+    # derivation, so `render`, the row-cursor click and the drag all address the same rows.
+    def body_rect(rect : Rect) : Rect
+      top = rect.y + 2
+      h = {(rect.bottom - 1) - top, 0}.max
+      Rect.new(rect.x, top, rect.w, h)
     end
 
     # Hit-test the REQ / RES chips on the divider row (render_pane_selector geometry).
@@ -199,8 +211,64 @@ module Gori::Tui
 
     # --- scrolling ---------------------------------------------------------
 
+    # The row cursor, for the controller + the verbs.
+    def rowsel : ReadPane
+      @rowsel
+    end
+
+    # ↑/↓ (and the wheel, and ⇧ for a selection) move the CURSOR, which drags the viewport with
+    # it — selection-follow, like every list in the tree. The pane used to scroll a viewport with
+    # no cursor in it at all.
     def scroll(delta : Int32) : Nil
-      @scroll = {@scroll + delta, 0}.max # render clamps the ceiling against the body height
+      sync_rowsel
+      @rowsel.move(delta, 0)
+    end
+
+    def move_rows(delta : Int32, selecting : Bool) : Nil
+      sync_rowsel
+      @rowsel.move(delta, 0, selecting: selecting)
+    end
+
+    # A wheel notch scrolls the viewport without moving the cursor — the same split every other
+    # read pane makes between a reading gesture and a cursor gesture.
+    def wheel(delta : Int32) : Nil
+      sync_rowsel
+      @rowsel.scroll_view(delta)
+    end
+
+    def motion_key(ev : Termisu::Event::Key) : Bool
+      sync_rowsel
+      @rowsel.motion_key(ev)
+    end
+
+    def select_row_line : Nil
+      sync_rowsel
+      @rowsel.select_line
+    end
+
+    def clear_selection : Nil
+      @rowsel.clear_selection
+    end
+
+    def selection? : Bool
+      @rowsel.selection?
+    end
+
+    # The selected rows (or the cursor's row) as unified-diff text — see `unified_lines`.
+    def copy_text : String
+      sync_rowsel
+      @rowsel.copy_text
+    end
+
+    def copy_all : String
+      sync_rowsel
+      @rowsel.copy_all
+    end
+
+    # Place the row cursor at a click inside the diff BODY (`body_rect`), `selecting` for a drag.
+    def click_row(body : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      sync_rowsel
+      @rowsel.click(body, mx, my, selecting)
     end
 
     # ⇧←/→: shift BOTH columns by the same amount, 4 columns per step (Repeater/History/
@@ -211,7 +279,7 @@ module Gori::Tui
     end
 
     def at_top? : Bool
-      @scroll == 0
+      @rowsel.at_top?
     end
 
     # Current h-offset — for the footer readout and specs.
@@ -228,6 +296,30 @@ module Gori::Tui
       @styled_same = nil
       @lines_a = nil
       @lines_b = nil
+      @rowsel.reset # a new pair (or the other half of it) renumbers every row
+    end
+
+    # Point the row cursor at the current diff. Cheap and idempotent — `rows` is memoized, and
+    # this only re-hands the same two values — so every gesture and every verb can call it and
+    # none of them can act on a stale row count.
+    private def sync_rowsel : Nil
+      rs = rows
+      @rowsel.source(rs.size, ->(i : Int32) { unified_line(rs[i]) })
+    end
+
+    # ONE row projected to ONE line of unified-diff text — what a copy produces, and the reason
+    # the row cursor can address a two-column draw at all: the projection is 1:1 with the screen
+    # rows, so row N of the copy is row N of the diff.
+    #
+    # `~` (changed) carries BOTH sides, because that is the row's information; a `- `/`+ ` pair
+    # would double the line count and break that 1:1.
+    private def unified_line(r : Repeater::SideBySide::Row) : String
+      case r.kind
+      when .same?     then "  #{r.left}"
+      when .del_only? then "- #{r.left}"
+      when .add_only? then "+ #{r.right}"
+      else                 "~ #{r.left}  →  #{r.right}" # changed
+      end
     end
 
     private def rows : Array(Repeater::SideBySide::Row)
@@ -307,9 +399,10 @@ module Gori::Tui
         render_pane_selector(screen, rect)
       end
 
-      body_top = rect.y + 2
+      body = body_rect(rect)
+      body_top = body.y
+      body_h = body.h
       footer_y = rect.bottom - 1
-      body_h = {footer_y - body_top, 0}.max
 
       unless both_set?
         if body_h > 0
@@ -322,16 +415,19 @@ module Gori::Tui
 
       data = rows
       sr = styled_same
-      clamp_scroll(body_h, data.size)
+      sync_rowsel
+      top = @rowsel.viewport_top(body_h) # the state half of ReadPane#render — this view draws its own rows
       # Clamp against the NARROWER column: the two differ by at most one cell (odd frame
       # width), and pinning to the wider one would leave the narrow column's last cell of
       # the widest line permanently unreachable.
       clamp_hscroll(data, body_h, {left_w, right_w}.min)
       (0...body_h).each do |i|
-        di = @scroll + i
+        di = top + i
         break if di >= data.size
-        draw_diff_row(screen, rect.x, body_top + i, left_w, sep_x, right_x, right_w, data[di], sr[di]?)
+        marked = focused && @rowsel.row_marked?(di)
+        draw_diff_row(screen, rect.x, body_top + i, left_w, sep_x, right_x, right_w, data[di], sr[di]?, marked)
       end
+      Frame.scroll_gauge(screen, Rect.new(rect.x, body_top, rect.w, body_h), data.size, top, focused)
       draw_footer(screen, rect, footer_y)
     end
 
@@ -375,9 +471,19 @@ module Gori::Tui
       "#{row.method} #{row.host}#{Url.origin_path(row.target)} · #{FlowStatus.cell(row)[0]}"
     end
 
+    # `marked` = this row is under the row cursor, or inside a selection. It tints the WHOLE row
+    # (both columns and the marker band) rather than a character span, because that is the only
+    # honest highlight for a two-column diff — see the `line_select_only` note on `@rowsel`.
     private def draw_diff_row(screen : Screen, x : Int32, y : Int32, left_w : Int32,
                               sep_x : Int32, right_x : Int32, right_w : Int32,
-                              r : Repeater::SideBySide::Row, styled : Highlight::Line?) : Nil
+                              r : Repeater::SideBySide::Row, styled : Highlight::Line?,
+                              marked : Bool = false) : Nil
+      bg = marked ? Theme.accent_bg : Theme.bg
+      if marked
+        # Fill first, so a shorter line's tail carries the band too and the row reads as one
+        # selected unit instead of a ragged highlight the width of its text.
+        screen.text(x, y, " " * {left_w + SEP_W + right_w, 0}.max, Theme.text, bg)
+      end
       lcolor, rcolor, glyph, gcolor = case r.kind
                                       when .same?     then {Theme.text, Theme.text, '│', Theme.border}
                                       when .changed?  then {Theme.red, Theme.green, '~', Theme.yellow}
@@ -390,13 +496,13 @@ module Gori::Tui
       # columns scroll under it, so the ~/-/+ signal survives any h-offset.
       if styled && r.kind.same?
         shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
-        Highlight.draw(screen, x, y, shown, bg: Theme.bg, width: left_w) if left_w > 0
-        screen.cell(sep_x + 1, y, glyph, gcolor)
-        Highlight.draw(screen, right_x, y, shown, bg: Theme.bg, width: right_w) if right_w > 0
+        Highlight.draw(screen, x, y, shown, bg: bg, width: left_w) if left_w > 0
+        screen.cell(sep_x + 1, y, glyph, gcolor, bg)
+        Highlight.draw(screen, right_x, y, shown, bg: bg, width: right_w) if right_w > 0
       else
-        screen.text(x, y, sliced(r.left), lcolor, width: left_w) if left_w > 0
-        screen.cell(sep_x + 1, y, glyph, gcolor)
-        screen.text(right_x, y, sliced(r.right), rcolor, width: right_w) if right_w > 0
+        screen.text(x, y, sliced(r.left), lcolor, bg, width: left_w) if left_w > 0
+        screen.cell(sep_x + 1, y, glyph, gcolor, bg)
+        screen.text(right_x, y, sliced(r.right), rcolor, bg, width: right_w) if right_w > 0
       end
     end
 
@@ -414,10 +520,6 @@ module Gori::Tui
       screen.text(rect.x + 1, y, note, Theme.muted, width: {rect.w - 2, 1}.max) # pane + ←/→ moved to the divider selector
     end
 
-    private def clamp_scroll(body_h : Int32, total : Int32) : Nil
-      @scroll = @scroll.clamp(0, {total - body_h, 0}.max)
-    end
-
     # Pin the h-offset to the widest row CURRENTLY ON SCREEN, across both columns — the
     # same rule the Repeater response uses. Measured with draw_width_upto so a minified
     # multi-MB body line is never fully walked once per frame.
@@ -429,7 +531,7 @@ module Gori::Tui
       limit = @xscroll + cw + 1
       widest = 0
       (0...body_h).each do |i|
-        r = data[@scroll + i]?
+        r = data[@rowsel.scroll + i]?
         break unless r
         {r.left, r.right}.each do |t|
           next unless t

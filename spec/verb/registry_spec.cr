@@ -1101,6 +1101,34 @@ private class FakeContext < ExecContext
     true
   end
 
+  def rewriter_preview_out? : Bool
+    false
+  end
+
+  def comparer_diff_shown? : Bool
+    false
+  end
+
+  def intercept_preview_readable? : Bool
+    false
+  end
+
+  def oast_detail_readable? : Bool
+    false
+  end
+
+  def probe_detail_readable? : Bool
+    false
+  end
+
+  def sequencer_analysis_readable? : Bool
+    false
+  end
+
+  def miner_detail_readable? : Bool
+    false
+  end
+
   def rewriter_save_preset : Nil
   end
 

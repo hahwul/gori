@@ -5,6 +5,7 @@ require "./traffic_empty_state"
 require "../settings"
 require "./highlight"
 require "./text_area"
+require "./read_pane"
 require "./url"
 require "../interceptor"
 require "../store"
@@ -83,9 +84,12 @@ module Gori::Tui
       @detail_win_id = nil.as(Int64?)
       @detail_win_rev = Theme.revision # the theme the cached (colour-baked) head was built under
       @detail_win_edit_rev = -1        # @editor.edits the preview was built at (-1 = built from the pristine held bytes)
-      @detail_xscroll = 0              # horizontal scroll offset for the read-only held-item preview
-      @detail_scroll = 0               # vertical scroll offset (lines) for the read-only preview
-      @reload_rev = -1                 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
+      # The read-only held-item preview: caret, selection, both scroll axes and its draw. Sourced
+      # from the item's `Highlight::Windowed` LAZILY — a held body runs to megabytes and this is
+      # the pane that must not materialise it. `Highlight.plain` is the bridge from the styled
+      # window to the text the caret and a copy address; the window itself paints.
+      @preview = ReadPane.new
+      @reload_rev = -1 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
       # Multi-select marks (#442's model, ported to the hold queue), keyed by ITEM ID rather
       # than row index: a forward/drop of an earlier entry shifts every index below it, so an
       # index-keyed set would silently retarget on the next revision tick. Unlike History there
@@ -784,12 +788,6 @@ module Gori::Tui
       @editing = false
     end
 
-    # Click the detail pane → focus the editor, but only when an item is loaded
-    # (mirrors toggle_edit's guard; loads the selected item's bytes if needed).
-    def focus_detail : Nil
-      toggle_edit unless @editing || selected_item.nil?
-    end
-
     # Mouse: place the held-message editor cursor at a click. `rect` is the body rect
     # render() receives; re-derive the right (detail) pane + its 1-cell inset exactly
     # as render_detail does. Only meaningful while editing (the editor is shown then).
@@ -1029,22 +1027,8 @@ module Gori::Tui
       if @editing && @loaded_id == it.id
         @editor.render(screen, inner, cursor: focused, highlight: mode, gauge: true, gauge_focused: focused)
       else
-        win = detail_window_for(it)
-        total = win.total
-        # Clamp the vertical offset so a body longer than the pane is scrollable but can
-        # never blank it (content may be shorter than a stale offset). Cap at total-inner.h
-        # so the LAST screenful stays visible at max scroll (not just one trailing line).
-        # Upper-bound clamp lives here (mirrors @detail_xscroll below).
-        @detail_scroll = @detail_scroll.clamp(0, {total - inner.h, 0}.max)
-        # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
-        # mirrors RepeaterView#render_response_body / HistoryView#render_detail.
-        rows = (0...inner.h).compact_map { |i| (li = @detail_scroll + i) < total ? win.line_at(li) : nil }
-        @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + inner.w + 1) } || 0) - inner.w, 0}.max)
-        rows.each_with_index do |styled, i|
-          shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
-          Highlight.draw(screen, inner.x, inner.y + i, shown, width: inner.w)
-        end
-        Frame.scroll_gauge(screen, inner, total, @detail_scroll, focused)
+        sync_preview(it)
+        @preview.render(screen, inner, focused, styled_at: preview_styled_at(it))
       end
     end
 
@@ -1074,11 +1058,24 @@ module Gori::Tui
       screen.text(x, rect.y, label, Theme.muted)
     end
 
+    # The item's styled window, and the plain projection of it the caret/selection/copy use.
+    # Both lazy: `line_at` is only ever called for a row that is drawn, or for the one row a
+    # caret sits on.
+    private def preview_styled_at(it : Interceptor::Item) : Int32 -> Highlight::Line
+      win = detail_window_for(it)
+      ->(i : Int32) { win.line_at(i) }
+    end
+
+    private def sync_preview(it : Interceptor::Item) : Nil
+      win = detail_window_for(it)
+      @preview.source(win.total, ->(i : Int32) { Highlight.plain(win.line_at(i)) })
+    end
+
     # Nudge the read-only held-item preview sideways (shift+←/→). No-op while
     # editing — the TextArea editor's own follow_x already handles that case.
     def hscroll_detail(delta : Int32) : Nil
       return if @editing
-      @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
+      @preview.hscroll(delta)
     end
 
     # Vertical companion to hscroll_detail (shift+↑/↓): scroll the read-only preview so a
@@ -1086,7 +1083,94 @@ module Gori::Tui
     # risks mutating byte-exact held bytes). Floored at 0 here; render clamps the upper bound.
     def vscroll_detail(delta : Int32) : Nil
       return if @editing
-      @detail_scroll = {@detail_scroll + delta, 0}.max
+      with_preview { @preview.scroll_view(delta) }
+    end
+
+    # Run `blk` with the preview pointed at the selected item — every gesture and every verb
+    # goes through it, so none of them can act on a pane sourced from a different held message.
+    private def with_preview(&) : Nil
+      return if @editing
+      it = selected_item || return
+      sync_preview(it)
+      yield
+    end
+
+    # ↑/↓ and ⇧↑/↓ over the preview: the caret moves, ⇧ grows the selection. The pane had a
+    # scroll gauge and no caret at all — readable, and not selectable or copyable by any route.
+    def preview_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      with_preview { @preview.move(dr, dc, selecting: selecting) }
+    end
+
+    def preview_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if @editing
+      it = selected_item || return false
+      sync_preview(it)
+      @preview.motion_key(ev)
+    end
+
+    def preview_select_line : Nil
+      with_preview { @preview.select_line }
+    end
+
+    def preview_clear_selection : Nil
+      @preview.clear_selection
+    end
+
+    def preview_selection? : Bool
+      !@editing && @preview.selection?
+    end
+
+    def preview_copy_text : String
+      return "" if @editing
+      it = selected_item || return ""
+      sync_preview(it)
+      @preview.copy_text
+    end
+
+    def preview_copy_all : String
+      return "" if @editing
+      it = selected_item || return ""
+      sync_preview(it)
+      @preview.copy_all
+    end
+
+    # Mouse into the read-only preview. `rect` is the body rect render() receives; re-derive the
+    # right pane's interior exactly as render_detail does.
+    def preview_click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      return if @editing
+      _, right = split_panes(body_rect(rect))
+      inner = right.inset(1, 1)
+      return if inner.empty?
+      with_preview { @preview.click(inner, mx, my, selecting) }
+    end
+
+    def preview_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false if @editing
+      _, right = split_panes(body_rect(rect))
+      inner = right.inset(1, 1)
+      return false if inner.empty?
+      it = selected_item || return false
+      sync_preview(it)
+      @preview.select_word(inner, mx, my)
+    end
+
+    # A wheel notch over the DETAIL pane, whichever of its two faces is up: the TextArea while
+    # editing, the read-only window while previewing. One entry point because the pointer does
+    # not know which is drawn there, and because `move` — what the wheel used to reach from
+    # anywhere in this tab — must NOT run for this pane: it walks the queue, which reloads a
+    # different held message under a preview that draws its own scroll gauge.
+    #
+    # Editing scrolls like previewing (`TextArea#scroll_view` pulls the caret into the new
+    # window), for the reason `DecoderController#handle_wheel` spells out: the wheel is a
+    # reading gesture, and `e` is not a request to stop reading. `vscroll_detail` keeps its own
+    # `@editing` bail, so the two faces cannot both move on one notch.
+    def scroll_detail_pane(delta : Int32) : Nil
+      @editing ? @editor.scroll_view(delta) : vscroll_detail(delta)
+    end
+
+    # At the top of the read-only preview — ↑ there pops focus back to the queue.
+    def preview_at_top? : Bool
+      @preview.at_top?
     end
 
     # Windowed view of the held item's raw bytes, cached by item id (held bytes
@@ -1102,10 +1186,7 @@ module Gori::Tui
       edit_rev = edited ? @editor.edits : -1
       cached = @detail_win
       return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision && @detail_win_edit_rev == edit_rev
-      if @detail_win_id != it.id # a newly-previewed item resets both scroll axes
-        @detail_xscroll = 0
-        @detail_scroll = 0
-      end
+      @preview.reset if @detail_win_id != it.id # a newly-previewed item renumbers every row
       @detail_win_id = it.id
       @detail_win_rev = Theme.revision
       @detail_win_edit_rev = edit_rev

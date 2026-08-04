@@ -504,30 +504,43 @@ module Gori::Tui
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      each_editor_at(rect, mx, my) { |ed, area| ed.click_to_cursor(area, mx, my, selecting: true) }
+      ed, area, read = editor_at(rect, mx, my) || return
+      ed.click_to_cursor(area, mx, my, selecting: true)
+      # In READ mode the band on screen is the read cursor's, not the editor's, so the drag has
+      # to grow THAT one. `sync_to(selecting: true)` plants the anchor with `||=`, which is only
+      # safe because the press collapsed the old selection (see `handle_click`) — without that
+      # collapse a drag would extend from an anchor the operator never pressed on.
+      read.try &.sync_to(ed, selecting: true)
     end
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      each_editor_at(rect, mx, my) { |ed, area| ed.select_word_at(area, mx, my) } || false
+      ed, area, read = editor_at(rect, mx, my) || return false
+      return read.select_word(ed, area, mx, my) if read
+      ed.select_word_at(area, mx, my)
     end
 
-    # Yield the editor under (mx, my) with its content rect, or nil when the pointer is not
-    # over one. One derivation for both gestures, matching `handle_click`'s layout call.
-    private def each_editor_at(rect : Rect, mx : Int32, my : Int32, & : TextArea, Rect -> _)
+    # The editor under (mx, my), its content rect, and the `TextReadState` that owns the
+    # SELECTION there — nil for a plain always-editing pane (HEADER / PAYLOAD, and INPUT while
+    # in INS, where the TextArea carries its own anchor). One derivation for both gestures,
+    # matching `handle_click`'s layout call.
+    #
+    # The INPUT arm used to bail unless the pane was in INS, which left READ mode — the mode
+    # whose whole purpose is select-and-copy, and which advertises "⇧arrows select · y copy" —
+    # with no drag and no double-click at all, while the identical Decoder pane has both. The
+    # press placed a caret there the whole time; only the two gestures that continue it were
+    # missing.
+    private def editor_at(rect : Rect, mx : Int32, my : Int32) : {TextArea, Rect, TextReadState?}?
       body = body_rect_below_filter(rect)
       s = cur
       if s.mode == :decode
         input_c, _, _ = s.view.decode_layout(body)
         return nil unless input_c.contains?(mx, my)
-        return nil unless s.input_mode == InputMode::Insert
-        yield s.input, input_c.inset(1, 1)
+        {s.input, input_c.inset(1, 1), s.input_mode == InputMode::Insert ? nil : s.input_read}
       else
         hdr_c, pay_c, _, _ = s.view.encode_layout(body)
-        if hdr_c.contains?(mx, my)
-          yield s.header, hdr_c.inset(1, 1)
-        elsif pay_c.contains?(mx, my)
-          yield s.payload, pay_c.inset(1, 1)
-        end
+        return {s.header, hdr_c.inset(1, 1), nil} if hdr_c.contains?(mx, my)
+        return {s.payload, pay_c.inset(1, 1), nil} if pay_c.contains?(mx, my)
+        nil
       end
     end
 
@@ -544,9 +557,12 @@ module Gori::Tui
                s.input_mode == InputMode::Insert)
             s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
             s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
-          else
+          elsif s.input_mode == InputMode::Insert
             s.input.click_to_cursor(input_c.inset(1, 1), mx, my)
-            s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
+          else
+            # Through the read state so the click COLLAPSES a ⇧arrow selection — see the same
+            # call in `DecoderController#handle_click` for why `sync_from` could not.
+            s.input_read.click(s.input, input_c.inset(1, 1), mx, my)
           end
         elsif dec_c.contains?(mx, my)
           enter_pane(s, :decoded)
@@ -570,13 +586,16 @@ module Gori::Tui
       true
     end
 
+    # The INPUT arm carries no `input_mode == Read` guard, for the reason spelled out on
+    # `DecoderController#handle_wheel`: a token pasted into this pane is long enough to need
+    # scrolling in both modes, and the wheel is a reading gesture in either.
     def handle_wheel(step : Int32) : Bool
       s = cur
       case s.pane
       when :decoded then s.view.scroll_decoded(step)
       when :output  then s.view.scroll_output(step)
       when :attacks then s.view.attacks_move(step)
-      when :input   then s.input.scroll_view(step) if s.input_mode == InputMode::Read
+      when :input   then s.input.scroll_view(step)
       end
       true
     end

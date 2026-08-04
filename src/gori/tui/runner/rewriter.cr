@@ -46,6 +46,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rewriter_controller.rules_sub?
   end
 
+  # The PREVIEW OUTPUT pane holds focus — the gate for its four read verbs (x / v / S / y).
+  def rewriter_preview_out? : Bool
+    rewriter_controller.rewriter_preview_out_focused?
+  end
+
   def rewriter_save_preset : Nil
     open_rule_preset_save
   end

@@ -215,19 +215,23 @@ module Gori::Tui
           # Side-by-side: up leaves to Config; stacked: Analysis sits under Samples.
           v.focus_pane(v.side_by_side? ? :config : :samples)
         else
-          v.analysis_scroll(-1)
+          v.analysis_move(-1, ev.shift?)
         end
       when key.down?, key.lower_j?
-        v.analysis_scroll(1)
+        v.analysis_move(1, ev.shift?)
+      else
+        v.analysis_motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
       end
     end
 
     private def handle_detail(ev : Termisu::Event::Key, v : SequencerView) : Nil
       key = ev.key
       if key.up? || key.lower_k?
-        v.detail_scroll(-1)
+        v.detail_move(-1, ev.shift?)
       elsif key.down? || key.lower_j?
-        v.detail_scroll(1)
+        v.detail_move(1, ev.shift?)
+      else
+        v.detail_motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
       end
     end
 
@@ -237,16 +241,84 @@ module Gori::Tui
       if pane = v.pane_at(body, mx, my)
         v.focus_pane(pane) unless pane == :detail
         @host.focus_body
+        # The ANALYSIS report takes a row cursor from the pointer; the other panes are lists and
+        # fields the click already selected.
+        v.analysis_click(v.analysis_body(body), mx, my) if pane == :analysis
+        v.detail_click(body, mx, my) if pane == :detail
       end
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # The ANALYSIS report only: a drag grows the row selection. No word to double-click — its rows
+    # are two columns, so the double-click declines and the plain click stands.
+    def supports_drag? : Bool
+      current_view.try { |v| v.focus == :analysis || v.focus == :detail } || false
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless v = current_view
+      body = body_rect_below_filter(rect)
+      case v.focus
+      when :analysis then v.analysis_click(v.analysis_body(body), mx, my, selecting: true)
+      when :detail   then v.detail_click(body, mx, my, selecting: true)
+      end
+    end
+
+    # --- READ-pane delegators (the ANALYSIS read verbs + the Runner's read_* ladders) ---
+    # Two read panes, one set of delegators, chosen by focus: the ANALYSIS report and the TOKEN
+    # field list. Both are `line_select_only` row cursors over `"label  value"` projections, so a
+    # verb needs to know only which pane the operator is in.
+    def sequencer_analysis_readable? : Bool
+      current_view.try { |v| v.focus == :analysis || v.focus == :detail } || false
+    end
+
+    def sequencer_selection_active? : Bool
+      v = current_view
+      return false unless v
+      v.focus == :detail ? v.detail_selection? : v.analysis_selection?
+    end
+
+    def sequencer_selection_text : String
+      v = current_view
+      return "" unless v
+      v.focus == :detail ? v.detail_copy_text : v.analysis_copy_text
+    end
+
+    def sequencer_select_line : Nil
+      v = current_view || return
+      v.focus == :detail ? v.detail_select_line : v.analysis_select_line
+    end
+
+    def sequencer_clear_selection : Nil
+      v = current_view || return
+      v.focus == :detail ? v.detail_clear_selection : v.analysis_clear_selection
+    end
+
+    # `y`: the selected report rows, or the whole entropy report when nothing is selected. The
+    # report is the finding — a randomness verdict you cannot paste into an issue is half a tool.
+    def sequencer_copy : Nil
+      v = current_view
+      return unless v && (v.focus == :analysis || v.focus == :detail)
+      detail = v.focus == :detail
+      sel = detail ? v.detail_selection? : v.analysis_selection?
+      text = if sel
+               detail ? v.detail_copy_text : v.analysis_copy_text
+             else
+               detail ? v.detail_copy_all : v.analysis_copy_all
+             end
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
 
     def handle_wheel(step : Int32) : Bool
       if v = current_view
         case v.focus
         when :samples  then v.samples_move(step)
-        when :analysis then v.analysis_scroll(step)
-        when :detail   then v.detail_scroll(step)
+        when :analysis then v.analysis_wheel(step) # viewport only — ↑/↓ are the cursor
+        when :detail   then v.detail_wheel(step)   # viewport only — ↑/↓ are the cursor
         end
       end
       true

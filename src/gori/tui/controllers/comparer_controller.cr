@@ -125,14 +125,12 @@ module Gori::Tui
       return true if handle_body_hscroll(ev)
       case
       when key.up?, key.lower_k?
-        if view.at_top?
-          @host.request_focus(:subtabs)
-        else
-          view.scroll(-1)
-        end
+        # The cursor moves and drags the viewport with it; ⇧ grows a row selection. At the top
+        # the ↑ still leaves for the sub-tab strip, as it always did.
+        view.at_top? ? @host.request_focus(:subtabs) : view.move_rows(-1, ev.shift?)
         true
       when key.down?, key.lower_j?
-        view.scroll(1)
+        view.move_rows(1, ev.shift?)
         true
       when key.left?, key.right?, key.lower_h?, key.lower_l?
         view.toggle_pane
@@ -141,7 +139,7 @@ module Gori::Tui
         @host.request_focus(:subtabs)
         true
       else
-        false
+        view.motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
       end
     end
 
@@ -161,8 +159,10 @@ module Gori::Tui
       end
     end
 
+    # A wheel notch scrolls the viewport and leaves the row cursor where it is — a reading
+    # gesture, not a cursor one. ↑/↓ are the cursor.
     def handle_wheel(step : Int32) : Bool
-      view.scroll(step)
+      view.wheel(step)
       true
     end
 
@@ -174,8 +174,56 @@ module Gori::Tui
       inner = body_rect_below_filter(rect)
       if pane = view.pane_chip_at(inner, mx, my)
         view.set_pane(pane)
+        return true
       end
+      body = view.body_rect(inner)
+      view.click_row(body, mx, my) unless body.empty?
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # A drag grows the ROW selection; there is no word to double-click (two columns, see
+    # `ComparerView`'s row-cursor note), so the double-click declines and the plain click stands.
+    def supports_drag? : Bool
+      view.both_set?
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      body = view.body_rect(body_rect_below_filter(rect))
+      view.click_row(body, mx, my, selecting: true) unless body.empty?
+    end
+
+    # --- READ-pane delegators (the Comparer read verbs + the Runner's read_* ladders) ---
+    def comparer_diff_shown? : Bool
+      view.both_set?
+    end
+
+    def comparer_selection_active? : Bool
+      view.selection?
+    end
+
+    def comparer_selection_text : String
+      view.copy_text
+    end
+
+    def comparer_select_line : Nil
+      view.select_row_line
+    end
+
+    def comparer_clear_selection : Nil
+      view.clear_selection
+    end
+
+    # `y`: the selected rows, or the whole diff when nothing is selected — as unified text, which
+    # is the only form a two-column diff has that pastes anywhere useful.
+    def comparer_copy : Nil
+      return unless view.both_set?
+      sel = view.selection?
+      text = sel ? view.copy_text : view.copy_all
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
 
     def body_hint(focus : Symbol) : String
@@ -183,7 +231,7 @@ module Gori::Tui
       a = Hotkeys.binding_label(reg, "comparer.pick-a", "a")
       b = Hotkeys.binding_label(reg, "comparer.pick-b", "b")
       s = Hotkeys.binding_label(reg, "comparer.swap", "s")
-      "←/→ req|res · ↑/↓ scroll · ⇧←/→ h-scroll · #{a}/#{b} pick · #{s} swap · ^N new · ^W close · space cmds · ↹/esc tabs"
+      "←/→ req|res · ↑/↓ row · ⇧↑/↓ select · y copy · ⇧←/→ h-scroll · #{a}/#{b} pick · #{s} swap · space cmds · esc tabs"
     end
   end
 end

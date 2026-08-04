@@ -16,4 +16,8 @@ abstract class Gori::Verb::ExecContext
   abstract def intercept_mark_clear : Nil                 # drop every mark
   abstract def intercept_mark_extend(delta : Int32) : Nil # ⇧↑/⇧↓: extend a range from the anchor
   abstract def marked_intercept_count : Int32
+  # The read-only held-message preview is on screen (a queue with a selection, not editing) —
+  # the gate for its select-line / copy verbs. Its caret comes from the POINTER: the tab has no
+  # focus tier for this pane, so there is no keyboard caret to gate on.
+  abstract def intercept_preview_readable? : Bool
 end

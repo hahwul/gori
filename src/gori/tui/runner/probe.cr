@@ -157,4 +157,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def probe_custom_rule_selected? : Bool
     probe_controller.rules_custom_selected?
   end
+
+  # A Probe issue's detail is open — the gate for its AFFECTED URLS read verbs.
+  def probe_detail_readable? : Bool
+    probe_controller.probe_detail_readable?
+  end
 end

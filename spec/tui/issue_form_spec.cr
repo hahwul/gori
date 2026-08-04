@@ -104,14 +104,84 @@ describe Gori::Tui::IssueForm do
     h.render.contains?("ㅎ").should be_false
   end
 
-  # Pre-seam the shell had NO click arm for this modal, so neither a click-away nor a click
-  # on the card did anything. The Overlay base default dismisses on click-away, so this
-  # asserts the RAW vocabulary: `:stay`, not merely "the harness still reports open".
-  it "ignores clicks entirely, inside the card and outside it" do
+  # This modal used to answer `:stay` to EVERY click, inside the card and out — the one
+  # overlay in the tree a click-away could not dismiss, while the `Overlay` base default and
+  # `PickerOverlay` give that to all thirty-odd others. Assert the RAW vocabulary, not merely
+  # "the harness reports closed", so the outcome is pinned as a dismiss and not a commit.
+  it "dismisses on a click outside the card, like every other modal" do
     h = OverlayHarness.new(IssueForm.new)
-    h.overlay.handle_click(h.area, 40, 12).should eq(:stay) # dead centre, on the card
-    h.overlay.handle_click(h.area, 0, 0).should eq(:stay)   # far corner, click-away
-    h.click(0, 0).should eq(:open)
+    h.overlay.handle_click(h.area, 0, 0).should eq(:cancel)
+    h.click(0, 0).should eq(:closed)
+    h.commits.should eq(0) # a click-away is a cancel, never a create
+  end
+
+  it "swallows a click on the card's inert rows rather than leaking it underneath" do
+    h = OverlayHarness.new(IssueForm.new)
+    box = h.box.not_nil!
+    h.overlay.handle_click(h.area, box.x + 2, box.y + 2).should eq(:stay) # blank row under the title
+    h.click_in_box(2, 2).should eq(:open)
+  end
+
+  # The card draws `title › <text>` on its second row and nothing inverted that column, so
+  # the caret could only be moved with ←/→ from wherever it happened to sit.
+  it "places the title caret at a click on the title row" do
+    h = OverlayHarness.new(IssueForm.new("abcdef"))
+    form = h.overlay.as(IssueForm)
+    # `title › ` is 8 columns past the card's 2-column inset, so +10 is the first title cell;
+    # +13 lands on 'd' — the click must put the caret BEFORE it, not at the end of the string.
+    h.click_in_box(13, IssueForm::TITLE_ROW).should eq(:open)
+    h.type("X")
+    form.issue_title.should eq("abcXdef")
+  end
+
+  it "clamps a click past the end of the title to the end of the text" do
+    h = OverlayHarness.new(IssueForm.new("ab"))
+    h.click_in_box(40, IssueForm::TITLE_ROW)
+    h.type("!")
+    h.overlay.as(IssueForm).issue_title.should eq("ab!")
+  end
+
+  # The severity row draws `severity ‹ MEDIUM ›  (tab to change)`. The chevrons and the hint
+  # both promise a step; before this the row was drawn and dead.
+  it "steps severity from the row's own chevrons" do
+    h = OverlayHarness.new(IssueForm.new)
+    form = h.overlay.as(IssueForm)
+    h.click_in_box(2 + IssueForm::SEV_PREFIX.index('‹').not_nil!, IssueForm::SEV_ROW) # the ‹ cell
+    form.severity.should eq(Gori::Store::Severity::Low)
+    h.click_in_box(2 + IssueForm::SEV_PREFIX.size + form.severity.label.size + 1, IssueForm::SEV_ROW) # the › cell
+    form.severity.should eq(Gori::Store::Severity::Medium)
+  end
+
+  it "treats a click on the severity label as the forward step its hint advertises" do
+    h = OverlayHarness.new(IssueForm.new)
+    h.click_in_box(2 + IssueForm::SEV_PREFIX.size + 1, IssueForm::SEV_ROW)
+    h.overlay.as(IssueForm).severity.should eq(Gori::Store::Severity::High)
+  end
+
+  # The interactive span ends at the closing `›`. Past it the row holds a hint and then blank
+  # cells; a dead cell that silently changes the severity of the issue about to be filed is the
+  # same divergence as an affordance that does nothing, pointed the other way.
+  it "leaves severity alone for a click past the row's drawn span" do
+    h = OverlayHarness.new(IssueForm.new)
+    box = h.box.not_nil!
+    h.click(box.right - 2, box.y + IssueForm::SEV_ROW).should eq(:open)
+    h.overlay.as(IssueForm).severity.should eq(Gori::Store::Severity::Medium) # untouched
+  end
+
+  # …and the cells LEFT of the `‹`, which draw the word "severity".
+  it "leaves severity alone for a click on the row's label text" do
+    h = OverlayHarness.new(IssueForm.new)
+    h.click_in_box(2, IssueForm::SEV_ROW)
+    h.overlay.as(IssueForm).severity.should eq(Gori::Store::Severity::Medium)
+  end
+
+  # `overlay_box` is now the geometry `render` itself draws from, so a card with no room to
+  # draw and the base "any click dismisses" path agree.
+  it "reports no box — and dismisses any click — when the area cannot hold the card" do
+    tiny = OverlayHarness.new(IssueForm.new, area: Gori::Tui::Rect.new(0, 0, 80, 4))
+    tiny.box.should be_nil
+    tiny.rendered?("NEW ISSUE").should be_false
+    tiny.overlay.handle_click(tiny.area, 1, 1).should eq(:cancel)
   end
 
   # The base default routes a wheel notch to `move`, which HERE walks the title caret —

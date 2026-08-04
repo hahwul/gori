@@ -16,6 +16,17 @@ module Gori::Tui
   # pending link with it: a cancelled create-and-link can no longer leave a stale ref
   # behind for a later standalone create to silently attach.
   class IssueForm < Overlay
+    # Card geometry + the two labels the draw lays down, in one place because `render` and the
+    # click hit-tests below both measure off them. A second copy of `"severity ‹ "` next to the
+    # inverse is this repo's standing hazard: the moment the two drift, the click lands on a
+    # cell the card never drew there.
+    TITLE_PREFIX = "title › "
+    SEV_PREFIX   = "severity ‹ "
+    SEV_SUFFIX   = " ›  (tab to change)"
+    TITLE_ROW    = 1
+    SEV_ROW      = 3
+    CARD_H       = 6
+
     getter issue_title : String
     getter host : String?
     getter flow_id : Int64?
@@ -76,10 +87,28 @@ module Gori::Tui
       :stay
     end
 
-    # Inert on purpose: the pre-seam shell had no click arm for this modal, so neither a
-    # click-away nor a click on the card did anything. Caret placement by click is the
-    # follow-up that will give this a real body.
+    # This was inert on purpose, carrying the pre-seam shell's lack of a click arm forward and
+    # naming caret placement as the follow-up. It is the follow-up. Inert made this the ONE
+    # modal in the tree a click-away could not dismiss — the base `Overlay#handle_click` gives
+    # every other one that, and `PickerOverlay` repeats it for the seven pickers — so an
+    # operator who opened NEW ISSUE by mistake had to find esc, with no visible hint that a
+    # click outside would not do.
+    #
+    # Inside the card, the two rows the draw makes look interactive now are:
+    #   · the title row → place the caret at the pointer (the same inverse `TextField` uses)
+    #   · the DRAWN span of the severity row → step the cycler, `‹` back and the rest forward,
+    #     which is what the chevrons and the row's own "(tab to change)" already promise
+    # Anything else inside — including the empty tail of the severity row past its label — is
+    # swallowed, so it neither leaks to the pane underneath nor makes dead cells do something.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if my == box.y + TITLE_ROW
+        @cx = Screen.column_for(@issue_title, mx - title_base(box)) # already clamped to the string
+        @preedit = ""                                               # a caret move ends any in-progress composition, as `insert` does
+      elsif my == box.y + SEV_ROW && (lo = sev_back_x(box)) && mx >= lo && mx <= sev_forward_end(box)
+        severity_cycle(mx == lo ? -1 : 1)
+      end
       :stay
     end
 
@@ -116,21 +145,47 @@ module Gori::Tui
       @preedit = text
     end
 
-    def render(screen : Screen, area : Rect) : Nil
+    # The card `render` draws — extracted from it so the click-away hit test and the draw are
+    # one geometry. `nil` = no room, which is also the `Overlay#overlay_box` contract for
+    # "treat any click as a dismiss".
+    def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 56}.min
-      h = 6
-      return if w < 12 || area.h < h
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      box = Rect.new(x, y, w, h)
+      return nil if w < 12 || area.h < CARD_H
+      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - CARD_H) // 2, w, CARD_H)
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      return unless box
+      w = box.w
       Frame.card(screen, box, @heading, border: Theme.border_focus)
-      prefix = "title › "
-      screen.text(box.x + 2, box.y + 1, prefix, Theme.accent, Theme.panel)
-      base = box.x + 2 + prefix.size
-      screen.input_line(base, box.y + 1, @issue_title, @cx, @preedit, Theme.text_bright, Theme.panel, width: w - prefix.size - 4)
-      sx = screen.text(box.x + 2, box.y + 3, "severity ‹ ", Theme.accent, Theme.panel)
-      sx = screen.text(sx, box.y + 3, @severity.label.upcase, sev_color(@severity), Theme.panel, Attribute::Bold)
-      screen.text(sx, box.y + 3, " ›  (tab to change)", Theme.muted, Theme.panel)
+      screen.text(box.x + 2, box.y + TITLE_ROW, TITLE_PREFIX, Theme.accent, Theme.panel)
+      screen.input_line(title_base(box), box.y + TITLE_ROW, @issue_title, @cx, @preedit,
+        Theme.text_bright, Theme.panel, width: w - TITLE_PREFIX.size - 4)
+      sx = screen.text(box.x + 2, box.y + SEV_ROW, SEV_PREFIX, Theme.accent, Theme.panel)
+      sx = screen.text(sx, box.y + SEV_ROW, @severity.label.upcase, sev_color(@severity), Theme.panel, Attribute::Bold)
+      screen.text(sx, box.y + SEV_ROW, SEV_SUFFIX, Theme.muted, Theme.panel)
+    end
+
+    # Content column the title text starts at — `screen.text`'s own advance over the prefix,
+    # so the caret inverse uses the same measure the draw did.
+    private def title_base(box : Rect) : Int32
+      box.x + 2 + Screen.draw_width(TITLE_PREFIX)
+    end
+
+    # The `‹` cell on the severity row, measured off SEV_PREFIX itself rather than re-typed —
+    # the only cell that steps BACKWARD, everything from there to `sev_forward_end` reads as the
+    # forward step the label's own "(tab to change)" names.
+    private def sev_back_x(box : Rect) : Int32
+      i = SEV_PREFIX.index('‹') || 0
+      box.x + 2 + Screen.draw_width(SEV_PREFIX[0, i])
+    end
+
+    # Last cell of the interactive span: the closing `›`, one column past the label, which is
+    # where `render`'s third `screen.text` puts it (SEV_SUFFIX opens with a space). The cells
+    # after it hold the "(tab to change)" hint and then nothing — a click there must be inert.
+    private def sev_forward_end(box : Rect) : Int32
+      box.x + 2 + Screen.draw_width(SEV_PREFIX) + Screen.draw_width(@severity.label.upcase) + 1
     end
 
     private def sev_color(s : Store::Severity) : Color

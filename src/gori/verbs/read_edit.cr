@@ -132,6 +132,141 @@ module Gori
         "project.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::ProjectDesc, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
+      # The Rewriter's PREVIEW OUTPUT, tagged `:preview` — the tab is multi-pane, and its rule
+      # list already spends `x` on "Enable/disable" (see verbs/rewriter.cr for why every list
+      # verb moved into a `:rules` section at the same time). Two sections never render together,
+      # so `x` keeps meaning "select line" here and "toggle" there.
+      in_rewriter_out = ->(ctx : Verb::ExecContext) { ctx.current_tab == :rewriter && ctx.rewriter_preview_out? }
+      r.register Verb::Definition.new(
+        "rewriter.select-line", "Select line", "Select the entire current preview line",
+        Verb::Scope::Rewriter, [Verb::Chord.new("x")],
+        available: in_rewriter_out, mnemonic: 'x', section: :preview) { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "rewriter.clear-selection", "Clear selection", "Clear the preview text selection",
+        Verb::Scope::Rewriter, available: in_sel, mnemonic: 'v', section: :preview) { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "rewriter.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Rewriter, available: in_sel, mnemonic: 'S', section: :preview) { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "rewriter.copy", "Copy", "Copy the selected preview text, or the whole transformed sample if nothing is selected",
+        Verb::Scope::Rewriter, [Verb::Chord.new("y")],
+        available: in_rewriter_out, mnemonic: 'y', section: :preview) { |ctx| ctx.read_copy; nil }
+
+      # The Comparer's diff. Whole ROWS, never a char span: a screen row is two columns of the
+      # same diff, so `ReadPane(line_select_only: true)` is what the cursor is — see
+      # `ComparerView#unified_line` for the text a copy produces. `:common` is right here: the
+      # tab's other groups are `:subtab` / `:tab` chrome, and the diff IS its body.
+      in_comparer_diff = ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.comparer_diff_shown? }
+      r.register Verb::Definition.new(
+        "comparer.select-line", "Select row", "Select the whole diff row under the cursor",
+        Verb::Scope::Comparer, [Verb::Chord.new("x")],
+        available: in_comparer_diff, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "comparer.clear-selection", "Clear selection", "Clear the diff row selection",
+        Verb::Scope::Comparer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "comparer.send-to", "Send selection to…", "Send the selected diff rows to another tool (Decoder, …)",
+        Verb::Scope::Comparer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "comparer.copy", "Copy", "Copy the selected diff rows as unified text, or the whole diff if nothing is selected",
+        Verb::Scope::Comparer, [Verb::Chord.new("y")],
+        available: in_comparer_diff, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
+      # The Intercept's read-only held-message preview. Mouse-placed caret (see
+      # `InterceptController#handle_click`), so `x`/`y` act on wherever the pointer left it.
+      # No chords: the queue already spends nearly every letter, and `x`/`y` there would collide
+      # with a live queue action — the menu is the discoverable route, as it is for the Project
+      # description.
+      in_icept_preview = ->(ctx : Verb::ExecContext) { ctx.current_tab == :intercept && ctx.intercept_preview_readable? }
+      r.register Verb::Definition.new(
+        "intercept.select-line", "Select line", "Select the entire current preview line",
+        Verb::Scope::Intercept, available: in_icept_preview, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "intercept.clear-selection", "Clear selection", "Clear the preview text selection",
+        Verb::Scope::Intercept, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "intercept.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Intercept, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "intercept.copy", "Copy", "Copy the selected preview text, or the whole held message if nothing is selected",
+        Verb::Scope::Intercept, available: in_icept_preview, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
+      # An OAST callback's detail. `section: :detail` (OastController#command_section answers to
+      # match): the callbacks LIST spends `y` on "copy the generated payload", and this pane's `y`
+      # copies what came back — opposite directions of one interaction, so the two views must not
+      # render together.
+      in_oast_detail = ->(ctx : Verb::ExecContext) { ctx.oast_detail_readable? }
+      r.register Verb::Definition.new(
+        "oast.select-line", "Select line", "Select the entire current callback line",
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("x")],
+        available: in_oast_detail, mnemonic: 'x', section: :detail) { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "oast.clear-selection", "Clear selection", "Clear the callback text selection",
+        Verb::Scope::OastCallbacks, available: in_sel, mnemonic: 'v', section: :detail) { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "oast.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::OastCallbacks, available: in_sel, mnemonic: 'S', section: :detail) { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "oast.copy-callback", "Copy callback", "Copy the selected callback text, or the whole callback if nothing is selected",
+        Verb::Scope::OastCallbacks,
+        available: in_oast_detail, mnemonic: 'y', section: :detail) { |ctx| ctx.read_copy; nil }
+
+      # A Probe issue's AFFECTED URLS. `Verb::Scope::ProbeDetail` carries no mnemonics of its own,
+      # so `x`/`v`/`S`/`y` land in `:common` with nothing to collide with.
+      in_probe_detail = ->(ctx : Verb::ExecContext) { ctx.probe_detail_readable? }
+      r.register Verb::Definition.new(
+        "probe.select-line", "Select URL", "Select the affected URL under the cursor",
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("x")],
+        available: in_probe_detail, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "probe.clear-selection", "Clear selection", "Clear the affected-URL selection",
+        Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "probe.send-to", "Send selection to…", "Send the selected URLs to another tool (Decoder, …)",
+        Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "probe.copy", "Copy", "Copy the selected affected URLs, or every affected URL if nothing is selected",
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("y")],
+        available: in_probe_detail, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
+      # The Sequencer's ANALYSIS report. Whole ROWS (label + value in two columns — see
+      # `SequencerView#analysis_plain` for the projection a copy produces). `x`/`v`/`S`/`y` are all
+      # free in this scope; `r`/`s`/`c` are the run/stop/configure trio.
+      in_seq_analysis = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.sequencer_analysis_readable? }
+      r.register Verb::Definition.new(
+        "sequence.select-line", "Select row", "Select the analysis row under the cursor",
+        Verb::Scope::Sequencer, [Verb::Chord.new("x")],
+        available: in_seq_analysis, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "sequence.clear-selection", "Clear selection", "Clear the analysis row selection",
+        Verb::Scope::Sequencer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "sequence.send-to", "Send selection to…", "Send the selected rows to another tool (Decoder, …)",
+        Verb::Scope::Sequencer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "sequence.copy", "Copy", "Copy the selected analysis rows, or the whole entropy report if nothing is selected",
+        Verb::Scope::Sequencer, [Verb::Chord.new("y")],
+        available: in_seq_analysis, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
+      # The Miner's FINDING pane. Whole ROWS (label + value in two columns — see
+      # `MinerView#detail_plain`). `x`/`v`/`S`/`y` are free in this scope; `r`/`s`/`p` are run,
+      # stop and send-to-repeater.
+      in_miner_detail = ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_detail_readable? }
+      r.register Verb::Definition.new(
+        "mine.select-line", "Select row", "Select the finding row under the cursor",
+        Verb::Scope::Miner, [Verb::Chord.new("x")],
+        available: in_miner_detail, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "mine.clear-selection", "Clear selection", "Clear the finding row selection",
+        Verb::Scope::Miner, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "mine.send-to", "Send selection to…", "Send the selected rows to another tool (Decoder, …)",
+        Verb::Scope::Miner, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+      r.register Verb::Definition.new(
+        "mine.copy", "Copy", "Copy the selected finding rows, or the whole finding if nothing is selected",
+        Verb::Scope::Miner, [Verb::Chord.new("y")],
+        available: in_miner_detail, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
       in_detail_nav = ->(ctx : Verb::ExecContext) { ctx.detail_navigable? }
       r.register Verb::Definition.new(
         "detail.select-line", "Select line", "Select the entire current line",

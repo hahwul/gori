@@ -64,4 +64,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     Clipboard.copy(url)
     @toast = "copied OAST payload: #{url}"
   end
+
+  # A callback's detail is open — the gate for its read verbs.
+  def oast_detail_readable? : Bool
+    oast_controller.oast_detail_readable?
+  end
 end

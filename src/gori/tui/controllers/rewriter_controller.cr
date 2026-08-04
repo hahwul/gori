@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../rewriter_view"
 require "../text_area"
+require "../read_pane"
 require "../../store"
 require "../../rules"
 
@@ -30,7 +31,10 @@ module Gori::Tui
       sample = @host.session.store.setting(Store::REWRITER_SAMPLE_KEY) || DEFAULT_SAMPLE
       @preview_input = TextArea.new(sample)
       @saved_sample = @preview_input.text # what the store holds, in the form `commit` compares
-      @out_scroll = 0
+      # The transformed sample: caret, selection, both scroll axes and its whole draw. No gutter
+      # — these rows are a rewritten MESSAGE, and the sample's own line numbers would only
+      # invite the reader to map them onto the input pane, which a head/body rewrite can shift.
+      @out = ReadPane.new
       @last_body = Rect.new(0, 0, 0, 0) # last content rect — click/wheel geometry
     end
 
@@ -40,6 +44,13 @@ module Gori::Tui
 
     def command_scope : Verb::Scope
       Verb::Scope::Rewriter
+    end
+
+    # The focus area the space menu shows alongside COMMON. `:preview` while either preview pane
+    # holds focus, `:rules` otherwise — so the rule actions are offered where a rule is selected
+    # and the read actions where there is text to select, and neither view repeats a letter.
+    def command_section : Symbol
+      @sub == :rules && (@focus == :preview_in || @focus == :preview_out) ? :preview : :rules
     end
 
     def body_badge : Symbol
@@ -122,8 +133,9 @@ module Gori::Tui
       list = rule_list
       @sel = @sel.clamp(0, {list.size - 1, 0}.max)
       ensure_visible(inner, list.size)
+      sync_preview_out
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
-        @focus, body_focused, rules_engine.active?, @preview_input, preview_output, @out_scroll)
+        @focus, body_focused, rules_engine.active?, @preview_input, @out)
     end
 
     private def render_extract(screen : Screen, inner : Rect, body_focused : Bool) : Nil
@@ -173,6 +185,16 @@ module Gori::Tui
         @scroll = @sel - lh + 1
       end
       @scroll = @scroll.clamp(0, {count - lh, 0}.max)
+    end
+
+    # Point the OUTPUT pane at the current transform. Recomputed rather than cached, exactly as
+    # the old per-frame `preview_output` call was — `transform_message` over one sample is cheap
+    # next to a frame, and any cache key would have to track the sample AND every enabled rule.
+    # Called from `render_rules` and from each selection/copy delegator, so a verb never reads a
+    # pane pointed at a stale transform.
+    private def sync_preview_out : Nil
+      text = preview_output
+      @out.source(text.empty? ? ["(empty)"] : text.split('\n'))
     end
 
     # Enabled rules applied to the sample (request side; host from Host: header).
@@ -337,20 +359,26 @@ module Gori::Tui
 
     private def handle_preview_out_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
+      # ⇧←/→ grow the selection sideways, and they are checked BEFORE the bare ← that leaves for
+      # the INPUT pane — inside the `case` below that arm claims EVERY left press, shifted or not,
+      # so ⇧← left the pane instead of selecting. (ameba's Lint/DuplicateWhenCondition is what
+      # named it: the later `when key.left?` was unreachable.) Same ordering the Comparer's
+      # `handle_body_hscroll` and the Repeater use, for the same reason.
+      if ev.shift? && (key.left? || key.right?)
+        @out.move(0, key.left? ? -1 : 1, selecting: true)
+        return true
+      end
       case
       when key.escape?, key.left? then @focus = :preview_in
       when key.up?, key.lower_k?
-        if @out_scroll <= 0
-          @focus = :preview_in
-        else
-          @out_scroll = {@out_scroll - 1, 0}.max
-        end
-      when key.down?, key.lower_j?
-        @out_scroll += 1
+        # At the top the ↑ crosses back to the INPUT editor, as it always did; below it the
+        # caret steps, so ⇧↑ can grow a selection the way it does in every other read pane.
+        @out.at_top? ? (@focus = :preview_in) : @out.move(-1, 0, selecting: ev.shift?)
+      when key.down?, key.lower_j? then @out.move(1, 0, selecting: ev.shift?)
       when key.space? && !ev.ctrl? && !ev.alt?
         @host.open_space_menu
       else
-        return false
+        return @out.motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
       end
       true
     end
@@ -402,8 +430,88 @@ module Gori::Tui
         @preview_input.click_to_cursor(body, mx, my) unless body.empty?
       when :preview_out
         @focus = :preview_out
+        body = @view.preview_output_body(inner)
+        sync_preview_out
+        @out.click(body, mx, my) unless body.empty?
       end
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # The OUTPUT pane only: the rule list selects rows and the INPUT editor is a TextArea the
+    # shell already drags through its own arm below.
+    def supports_drag? : Bool
+      @sub == :rules && (@focus == :preview_in || @focus == :preview_out)
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      inner = BodyChrome.frame_inner(rect)
+      case @focus
+      when :preview_in
+        body = @view.preview_input_body(inner)
+        @preview_input.click_to_cursor(body, mx, my, selecting: true) unless body.empty?
+      when :preview_out
+        body = @view.preview_output_body(inner)
+        return if body.empty?
+        sync_preview_out
+        @out.click(body, mx, my, selecting: true)
+      end
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      inner = BodyChrome.frame_inner(rect)
+      case @focus
+      when :preview_in
+        body = @view.preview_input_body(inner)
+        body.empty? ? false : @preview_input.select_word_at(body, mx, my)
+      when :preview_out
+        body = @view.preview_output_body(inner)
+        return false if body.empty?
+        sync_preview_out
+        @out.select_word(body, mx, my)
+      else false
+      end
+    end
+
+    # --- READ-pane delegators (the Rewriter verbs + the Runner's read_* ladders) ---
+    def rewriter_selection_active? : Bool
+      @sub == :rules && @focus == :preview_out && @out.selection?
+    end
+
+    def rewriter_selection_text : String
+      return "" unless @sub == :rules && @focus == :preview_out
+      sync_preview_out
+      @out.copy_text
+    end
+
+    def rewriter_select_line : Nil
+      return unless @sub == :rules && @focus == :preview_out
+      sync_preview_out
+      @out.select_line
+    end
+
+    def rewriter_clear_selection : Nil
+      @out.clear_selection
+    end
+
+    # `y`: the selection, or the whole transformed sample when nothing is selected. The pane is
+    # the only place the post-rewrite bytes exist — the sample in the store is the INPUT.
+    # Same `Clipboard.copy` + status shape every other tab's copy verb uses, so the toast reads
+    # the same and the OSC-52 truncation note is not re-derived here.
+    def rewriter_copy : Nil
+      return unless @sub == :rules && @focus == :preview_out
+      sync_preview_out
+      sel = @out.selection?
+      text = sel ? @out.copy_text : @out.copy_all
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+    end
+
+    # True while the OUTPUT pane is the focused one — the `available:` gate for its read verbs.
+    def rewriter_preview_out_focused? : Bool
+      @sub == :rules && @focus == :preview_out
     end
 
     def handle_wheel(step : Int32) : Bool
@@ -413,7 +521,7 @@ module Gori::Tui
       end
       case @focus
       when :preview_in  then @preview_input.scroll_view(step)
-      when :preview_out then @out_scroll = {@out_scroll + step, 0}.max
+      when :preview_out then sync_preview_out; @out.scroll_view(step)
       else                   move_sel(step)
       end
       true
@@ -618,7 +726,7 @@ module Gori::Tui
       when :preview_in
         "type sample HTTP · ↑ list · ↓/→ output · esc list"
       when :preview_out
-        "↑/↓ scroll · ← input · esc input"
+        "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ← input · esc input"
       else
         "[/] sub-tab · ↑/↓ select · ↓ preview · a add · ↵/e edit · x on/off · d delete · ⇧J/⇧K reorder · esc tabs"
       end

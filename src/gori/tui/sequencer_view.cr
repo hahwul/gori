@@ -2,6 +2,7 @@ require "json"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./read_pane"
 require "./spark"
 require "./fmt"
 require "../store"
@@ -56,11 +57,19 @@ module Gori::Tui
       @focus = :config
       @sel = 0
       @scroll = 0
-      @analysis_scroll = 0
-      @analysis_line_count = 0
-      @analysis_h = 0
+      # The ANALYSIS report's row cursor, selection and scroll. `line_select_only`: a row here is
+      # a label/value pair drawn in two columns (or a banner, or a sparkline), so a char rectangle
+      # would address cells that are not adjacent — selection is whole rows, and the copy payload
+      # is the row projected to `"label  value"`. The pane paints its own rows (`draw_analysis_line`
+      # is kind-specific), so `ReadPane#render` is never called; `viewport_top` + `row_marked?` are.
+      # Before this, the entropy report was readable and there was no way to get it out.
+      @analysis = ReadPane.new(line_select_only: true)
+      @analysis_w = 0      # last drawn interior width — `analysis_lines` sizes its sparkline from it
       @side_by_side = true # last render layout (Samples | Analysis vs stacked)
-      @detail_scroll = 0
+      # The TOKEN pane's row cursor — same shape as ANALYSIS above, over its six `label  value`
+      # field rows. The token itself is the thing an operator reaches for, and this pane had no
+      # copy of any kind.
+      @token = ReadPane.new(line_select_only: true)
       @job_id = 0
     end
 
@@ -223,7 +232,18 @@ module Gori::Tui
     end
 
     def analysis_at_top? : Bool
-      @analysis_scroll <= 0
+      @analysis.at_top?
+    end
+
+    def analysis : ReadPane
+      @analysis
+    end
+
+    # The ANALYSIS card's interior — the rect `render_analysis` draws into, so the row cursor's
+    # click and the draw address the same rows. Empty when the pane is not on screen.
+    def analysis_body(rect : Rect) : Rect
+      _, _, an = pane_rects(rect)
+      an.empty? ? an : an.inset(1, 1)
     end
 
     # Last render put Samples and Analysis side-by-side (wide) vs stacked (narrow).
@@ -245,19 +265,148 @@ module Gori::Tui
       @sel = (@sel + d).clamp(0, @samples.size - 1)
     end
 
+    # ↑/↓ (⇧ to select) walk the report rows; the wheel scrolls the viewport and leaves the
+    # cursor put — the split every read pane in the tree makes.
     def analysis_scroll(d : Int32) : Nil
-      max = {@analysis_line_count - @analysis_h, 0}.max
-      @analysis_scroll = (@analysis_scroll + d).clamp(0, max)
+      sync_analysis
+      @analysis.move(d, 0)
+    end
+
+    def analysis_move(d : Int32, selecting : Bool) : Nil
+      sync_analysis
+      @analysis.move(d, 0, selecting: selecting)
+    end
+
+    def analysis_wheel(d : Int32) : Nil
+      sync_analysis
+      @analysis.scroll_view(d)
+    end
+
+    def analysis_motion_key(ev : Termisu::Event::Key) : Bool
+      sync_analysis
+      @analysis.motion_key(ev)
+    end
+
+    def analysis_select_line : Nil
+      sync_analysis
+      @analysis.select_line
+    end
+
+    def analysis_clear_selection : Nil
+      @analysis.clear_selection
+    end
+
+    def analysis_selection? : Bool
+      @analysis.selection?
+    end
+
+    def analysis_copy_text : String
+      sync_analysis
+      @analysis.copy_text
+    end
+
+    def analysis_copy_all : String
+      sync_analysis
+      @analysis.copy_all
+    end
+
+    def analysis_click(body : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      sync_analysis
+      @analysis.click(body, mx, my, selecting)
+    end
+
+    # Point the row cursor at the current report. Idempotent — `report` is the engine's own cached
+    # value — so every gesture and every verb can call it and none can act on a stale row count.
+    private def sync_analysis : Nil
+      ls = analysis_lines(report, {@analysis_w, 20}.max)
+      @analysis.source(ls.size, ->(i : Int32) { analysis_plain(ls[i]) })
+    end
+
+    # ONE report row projected to ONE line of text — the copy payload, 1:1 with the screen rows so
+    # row N of a paste is row N of the report. A banner and a divider carry their own words; a
+    # kv/test/spark row is `label  value`.
+    private def analysis_plain(l : ALine) : String
+      case l.kind
+      when :banner  then "#{l.a} — #{l.b}"
+      when :divider then "-- #{l.a} --"
+      when :test    then (v = l.verdict) ? "#{l.a}  #{l.b}  #{v.label}" : "#{l.a}  #{l.b}"
+      else               "#{l.a}  #{l.b}"
+      end
     end
 
     def open_detail : Nil
       return if @samples.empty?
-      @detail_scroll = 0
+      @token.reset
       @focus = :detail
     end
 
     def detail_scroll(d : Int32) : Nil
-      @detail_scroll = {@detail_scroll + d, 0}.max
+      with_token { @token.move(d, 0) }
+    end
+
+    def detail_move(d : Int32, selecting : Bool) : Nil
+      with_token { @token.move(d, 0, selecting: selecting) }
+    end
+
+    def detail_wheel(d : Int32) : Nil
+      with_token { @token.scroll_view(d) }
+    end
+
+    def detail_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if selected_sample.nil?
+      sync_token
+      @token.motion_key(ev)
+    end
+
+    def detail_select_line : Nil
+      with_token { @token.select_line }
+    end
+
+    def detail_clear_selection : Nil
+      @token.clear_selection
+    end
+
+    def detail_selection? : Bool
+      @token.selection?
+    end
+
+    def detail_copy_text : String
+      return "" if selected_sample.nil?
+      sync_token
+      @token.copy_text
+    end
+
+    def detail_copy_all : String
+      return "" if selected_sample.nil?
+      sync_token
+      @token.copy_all
+    end
+
+    # The TOKEN card's interior — the rect `render_detail` draws into (it takes the whole body).
+    def detail_body(rect : Rect) : Rect
+      rect.inset(2, 1)
+    end
+
+    def detail_click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      body = detail_body(rect)
+      return if body.empty?
+      with_token { @token.click(body, mx, my, selecting) }
+    end
+
+    private def sync_token : Nil
+      smp = selected_sample
+      unless smp
+        @token.source(0, ->(_i : Int32) { "" })
+        return
+      end
+      ls = detail_lines(smp)
+      @token.source(ls.size, ->(i : Int32) { "#{ls[i][0]}  #{ls[i][1]}" })
+    end
+
+    private def with_token(&) : Nil
+      return if selected_sample.nil?
+      sync_token
+      yield
     end
 
     def close_detail : Nil
@@ -290,7 +439,7 @@ module Gori::Tui
       @report_rev = -1
       @sel = 0
       @scroll = 0
-      @analysis_scroll = 0
+      @analysis.reset
     end
 
     def finish_run : Nil
@@ -599,25 +748,23 @@ module Gori::Tui
     private def render_analysis(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "ANALYSIS", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
-      @analysis_h = {inner.h, 0}.max
+      @analysis_w = inner.w
       return if inner.h <= 0 || inner.w <= 2
       rep = report
       if rep.usable_count == 0
-        @analysis_line_count = 1
-        @analysis_scroll = 0
+        @analysis.source(0, ->(_i : Int32) { "" })
         screen.text(inner.x + 1, inner.y, @running ? "collecting…" : "no tokens yet", Theme.muted, Theme.bg)
         return
       end
       lines = analysis_lines(rep, inner.w)
-      @analysis_line_count = lines.size
-      max_scroll = {lines.size - inner.h, 0}.max
-      @analysis_scroll = @analysis_scroll.clamp(0, max_scroll)
+      sync_analysis
+      top = @analysis.viewport_top(inner.h) # the state half of ReadPane#render — this pane draws its own rows
       inner.h.times do |i|
-        li = @analysis_scroll + i
+        li = top + i
         break if li >= lines.size
-        draw_analysis_line(screen, inner, lines[li], inner.y + i)
+        draw_analysis_line(screen, inner, lines[li], inner.y + i, focused && @analysis.row_marked?(li))
       end
-      Frame.scroll_gauge(screen, inner, lines.size, @analysis_scroll, focused)
+      Frame.scroll_gauge(screen, inner, lines.size, top, focused)
     end
 
     # A flat display line for the analysis pane. `kind` ∈ :banner :kv :divider :test :spark.
@@ -646,7 +793,12 @@ module Gori::Tui
       lines
     end
 
-    private def draw_analysis_line(screen : Screen, inner : Rect, line : ALine, py : Int32) : Nil
+    # `marked` = this row is under the row cursor or inside a selection. The whole row is tinted
+    # (never a character span): its two columns are not one run of text — see `@analysis`.
+    private def draw_analysis_line(screen : Screen, inner : Rect, line : ALine, py : Int32,
+                                   marked : Bool = false) : Nil
+      # The banner paints its own full-width fill, so a band under it would be invisible anyway.
+      screen.fill(Rect.new(inner.x, py, inner.w, 1), Theme.accent_bg) if marked && !line.kind.==(:banner)
       case line.kind
       when :banner
         color = rating_color(line.a)
@@ -702,12 +854,19 @@ module Gori::Tui
         return
       end
       lines = detail_lines(s)
-      lines.each_with_index do |(lbl, val, color), i|
-        y = inner.y + i - @detail_scroll
-        next unless inner.y <= y < inner.bottom
-        screen.text(inner.x, y, lbl, Theme.muted, Theme.bg)
-        screen.text(inner.x + 10, y, val, color, Theme.bg, width: {inner.w - 10, 1}.max)
+      sync_token
+      top = @token.viewport_top(inner.h)
+      inner.h.times do |i|
+        li = top + i
+        break if li >= lines.size
+        lbl, val, color = lines[li]
+        y = inner.y + i
+        bg = focused && @token.row_marked?(li) ? Theme.accent_bg : Theme.bg
+        screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if bg != Theme.bg
+        screen.text(inner.x, y, lbl, Theme.muted, bg)
+        screen.text(inner.x + 10, y, val, color, bg, width: {inner.w - 10, 1}.max)
       end
+      Frame.scroll_gauge(screen, inner, lines.size, top, focused)
     end
 
     private def detail_lines(s : Sequencer::Sample) : Array({String, String, Color})

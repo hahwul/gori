@@ -680,11 +680,16 @@ module Gori::Tui
       when :request
         # INS scrolls like NOR. It is the same pane showing the same text and the wheel is
         # not an editing gesture — the operator who presses `i` has not asked to give up
-        # scrolling, and every other TextArea-backed pane in the tree (Notes, the Decoder
-        # input) already wheels while in insert mode. The `unless v.request_insert?` that
-        # stood here was one of TWO guards on this path; the other is inside
-        # `RepeaterView#request_scroll_view`, so neither is sufficient on its own and
-        # dropping this one is half the fix (see the report / that method).
+        # scrolling. That is now the rule for EVERY TextArea-backed pane in the tree, not
+        # just the ones that happened to have it: this claim named "Notes, the Decoder input"
+        # as already correct, and the Decoder input was in fact gated on
+        # `InputMode::Read` — as were the JWT input, the Fuzzer template
+        # (`FuzzerView#template_scroll_view`) and the Intercept held-message editor
+        # (`InterceptView#scroll_detail_pane`). All four dropped the mode test; a new pane
+        # that reads the MODE to decide whether the wheel works is re-introducing this bug.
+        # The `unless v.request_insert?` that stood here was one of TWO guards on this path;
+        # the other is inside `RepeaterView#request_scroll_view`, so neither is sufficient on
+        # its own and dropping this one is half the fix (see the report / that method).
         v.request_scroll_view(step)
       end
       true

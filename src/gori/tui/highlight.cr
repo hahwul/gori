@@ -663,6 +663,16 @@ module Gori::Tui
       line.sum { |span| Screen.draw_width(span.text) }
     end
 
+    # The styled line's own characters, colour dropped. The bridge for a pane whose ONLY source
+    # is styled — the windowed message views (`Windowed#line_at` returns a `Line`) — into
+    # anything that addresses text: `ReadPane`'s caret and selection, a copy, a search. Spans
+    # partition the line in order and carry no inserted padding, so this is the exact string the
+    # draw put on screen.
+    def self.plain(line : Line) : String
+      return line[0].text if line.size == 1
+      String.build { |io| line.each { |span| io << span.text } }
+    end
+
     # As `line_width`, but stops summing once the running width reaches `limit` — and
     # caps WITHIN a span too (a huge minified body is one plain span > MAX_HL_LINE), so
     # the per-frame h-scroll clamp never fully measures a multi-MB line. See

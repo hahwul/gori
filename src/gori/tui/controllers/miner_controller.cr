@@ -204,9 +204,11 @@ module Gori::Tui
     private def handle_detail(ev : Termisu::Event::Key, v : MinerView) : Nil
       key = ev.key
       if key.up? || key.lower_k?
-        v.detail_scroll(-1)
+        v.detail_move(-1, ev.shift?)
       elsif key.down? || key.lower_j?
-        v.detail_scroll(1)
+        v.detail_move(1, ev.shift?)
+      else
+        v.detail_motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
       end
     end
 
@@ -216,15 +218,64 @@ module Gori::Tui
       if pane = v.pane_at(body, mx, my)
         v.focus_pane(pane) unless pane == :detail
         @host.focus_body
+        # The FINDING pane takes a row cursor from the pointer; the other two are lists the click
+        # already selected in.
+        v.detail_click(body, mx, my) if pane == :detail
       end
       true
+    end
+
+    # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # The FINDING pane only. Its rows are two columns, so there is no word to double-click.
+    def supports_drag? : Bool
+      current_view.try(&.focus) == :detail
+    end
+
+    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless v = current_view
+      return unless v.focus == :detail
+      v.detail_click(body_rect_below_filter(rect), mx, my, selecting: true)
+    end
+
+    # --- READ-pane delegators (the FINDING read verbs + the Runner's read_* ladders) ---
+    def miner_detail_readable? : Bool
+      current_view.try { |v| v.focus == :detail } || false
+    end
+
+    def miner_selection_active? : Bool
+      current_view.try(&.detail_selection?) || false
+    end
+
+    def miner_selection_text : String
+      current_view.try(&.detail_copy_text) || ""
+    end
+
+    def miner_select_line : Nil
+      current_view.try(&.detail_select_line)
+    end
+
+    def miner_clear_selection : Nil
+      current_view.try(&.detail_clear_selection)
+    end
+
+    # `y`: the selected field rows, or the whole finding when nothing is selected. A mined
+    # parameter's evidence is what goes into a report, and it had no copy at all.
+    def miner_copy : Nil
+      v = current_view
+      return unless v && v.focus == :detail
+      sel = v.detail_selection?
+      text = sel ? v.detail_copy_text : v.detail_copy_all
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
 
     def handle_wheel(step : Int32) : Bool
       if v = current_view
         case v.focus
         when :results then v.results_move(step)
-        when :detail  then v.detail_scroll(step)
+        when :detail  then v.detail_wheel(step) # viewport only — ↑/↓ are the cursor
         end
       end
       true

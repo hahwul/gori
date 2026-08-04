@@ -258,20 +258,74 @@ module Gori::Tui
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # Both faces of the held-message pane drag: the editor's own caret while editing, the
+    # read-only preview's while previewing.
     def supports_drag? : Bool
-      @intercept.editing?
+      !@intercept.empty?
+    end
+
+    # All four pointer entries invert against `BodyChrome.frame_inner(rect)` — the SAME rect
+    # `render_body` hands the view through `BodyChrome.framed`. Drag and double-click used to
+    # pass the RAW body rect while the press insetted, so the press placed the caret through
+    # one mapping and the gesture that continued it used another: one row down, and one or two
+    # columns across, because `split_panes` divides a `w` that is 2 cells too wide. A press on
+    # line N whose drag extends from line N+1 is #587's shape ("a click that landed on a line it
+    # wasn't drawn on") — here inside the one pane where a selection is the point. The helper
+    # exists for exactly this ("shared by render and click hit-tests"); use it, not a fourth
+    # hand-written `inset(1, 1)`.
+    private def hit_rect(rect : Rect) : Rect
+      BodyChrome.frame_inner(rect)
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      @intercept.editor_drag_to_cursor(rect, mx, my)
+      inner = hit_rect(rect)
+      if @intercept.editing?
+        @intercept.editor_drag_to_cursor(inner, mx, my)
+      else
+        @intercept.preview_click(inner, mx, my, selecting: true)
+      end
     end
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      @intercept.editor_select_word(rect, mx, my)
+      inner = hit_rect(rect)
+      @intercept.editing? ? @intercept.editor_select_word(inner, mx, my) : @intercept.preview_select_word(inner, mx, my)
+    end
+
+    # --- READ-pane delegators (the preview's read verbs + the Runner's read_* ladders) ---
+    def intercept_preview_readable? : Bool
+      !@intercept.empty? && !@intercept.editing?
+    end
+
+    def intercept_preview_selection_active? : Bool
+      @intercept.preview_selection?
+    end
+
+    def intercept_preview_selection_text : String
+      @intercept.preview_copy_text
+    end
+
+    def intercept_preview_select_line : Nil
+      @intercept.preview_select_line
+    end
+
+    def intercept_preview_clear_selection : Nil
+      @intercept.preview_clear_selection
+    end
+
+    # `y`: the selection, or the whole held message when nothing is selected. The bytes here are
+    # the item's own — byte-exact, which is the point of holding it.
+    def intercept_preview_copy : Nil
+      return unless intercept_preview_readable?
+      sel = @intercept.preview_selection?
+      text = sel ? @intercept.preview_copy_text : @intercept.preview_copy_all
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      inner = rect.inset(1, 1)                        # framed insets 1,1
+      inner = hit_rect(rect)
       if zone = @intercept.bar_zone_at(inner, mx, my) # click the top filter bar
         @host.focus_body
         case zone
@@ -291,13 +345,43 @@ module Gori::Tui
           end_range_gesture unless idx == @intercept.selected_index
           @intercept.select_index(idx)
         end
-      else
-        @intercept.focus_detail
+      elsif @intercept.editing?
         @intercept.editor_click_to_cursor(inner, mx, my)
+      else
+        # A click on the read-only preview places a READ caret; it no longer starts editing.
+        # That is what makes the pane selectable at all — and the edit affordance was never the
+        # text, it is the `e`:EDIT badge on the card's own border (plus ↵ / `e`), which the
+        # bar-zone arm above already claims. The Intercept has no focus tier for this pane (Tab
+        # opens the editor, ⇧arrows are the queue's mark-range gesture), so the pointer is the
+        # only place a caret can come from here — hence mouse selection + `x`/`y`, and no
+        # keyboard caret.
+        @intercept.preview_click(inner, mx, my)
       end
       true
     end
 
+    # The wheel with the pointer position. This tab draws two panes side by side and only the
+    # LEFT one's wheel arm moves a selection, so a coordinate-free notch was wrong in both
+    # directions: over the held-message pane it walked the queue (reloading a different message
+    # under a preview that draws its own scroll gauge, and never scrolling that preview — whose
+    # only other path is PgUp/PgDn), and inside the editor it did nothing at all, because
+    # `move` bails while `@editing`. That bail stays: moving the selection with the editing flag
+    # up would leave the flag on with the editor no longer rendered. The fix is to send the
+    # notch to the pane under the pointer instead. Same move the Repeater's split request
+    # column made — see `RepeaterController#handle_wheel_at`.
+    #
+    # `hit_rect` for the same reason the press uses it: the view's hit-tests all invert against
+    # the framed interior `render_body` drew into.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      case @intercept.pane_at(hit_rect(rect), mx, my)
+      when :detail then @intercept.scroll_detail_pane(step)
+      when :list   then handle_wheel(step)
+      end # nil → the filter-bar row, the 1-cell gap column, or an empty queue: nothing to scroll
+      true
+    end
+
+    # The queue's own arm, kept separate so `:list` and any coordinate-free caller cannot
+    # drift. Self-guards on `@editing` (see `InterceptView#move`).
     def handle_wheel(step : Int32) : Bool
       @intercept.move(step)
       true

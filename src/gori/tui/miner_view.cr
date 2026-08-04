@@ -2,6 +2,7 @@ require "json"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./read_pane"
 require "../host_overrides"
 require "../store"
 require "../miner"
@@ -50,7 +51,11 @@ module Gori::Tui
       @focus = :summary
       @sel = 0
       @scroll = 0
-      @detail_scroll = 0
+      # The FINDING pane's row cursor, selection, scroll and draw-state. `line_select_only`: a row
+      # is a label and a value in two columns, so selection is whole rows and the copy payload is
+      # `"label  value"` (see `detail_plain`). The pane paints its own two columns, so
+      # `ReadPane#render` is never called — `viewport_top` and `row_marked?` are.
+      @finding = ReadPane.new(line_select_only: true)
       @job_id = 0
     end
 
@@ -237,12 +242,62 @@ module Gori::Tui
 
     def open_detail : Nil
       return if @results.empty?
-      @detail_scroll = 0
+      @finding.reset
       @focus = :detail
     end
 
+    # ↑/↓ (⇧ to select) walk the FINDING's fields; the wheel scrolls the viewport.
     def detail_scroll(d : Int32) : Nil
-      @detail_scroll = {@detail_scroll + d, 0}.max
+      with_finding { @finding.move(d, 0) }
+    end
+
+    def detail_move(d : Int32, selecting : Bool) : Nil
+      with_finding { @finding.move(d, 0, selecting: selecting) }
+    end
+
+    def detail_wheel(d : Int32) : Nil
+      with_finding { @finding.scroll_view(d) }
+    end
+
+    def detail_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if selected_finding.nil?
+      sync_finding
+      @finding.motion_key(ev)
+    end
+
+    def detail_select_line : Nil
+      with_finding { @finding.select_line }
+    end
+
+    def detail_clear_selection : Nil
+      @finding.clear_selection
+    end
+
+    def detail_selection? : Bool
+      @finding.selection?
+    end
+
+    def detail_copy_text : String
+      return "" if selected_finding.nil?
+      sync_finding
+      @finding.copy_text
+    end
+
+    def detail_copy_all : String
+      return "" if selected_finding.nil?
+      sync_finding
+      @finding.copy_all
+    end
+
+    # The FINDING card's interior — the rect `render_detail` draws into.
+    def detail_body(rect : Rect) : Rect
+      rect.inset(2, 1)
+    end
+
+    def detail_click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      body = detail_body(rect)
+      return if body.empty?
+      with_finding { @finding.click(body, mx, my, selecting) }
     end
 
     def close_detail : Nil
@@ -552,12 +607,42 @@ module Gori::Tui
         return
       end
       lines = detail_lines(f)
-      lines.each_with_index do |(lbl, val, color), i|
-        y = inner.y + i - @detail_scroll
-        next unless inner.y <= y < inner.bottom
-        screen.text(inner.x, y, lbl, Theme.muted, Theme.bg)
-        screen.text(inner.x + 12, y, val, color, Theme.bg, width: inner.w - 12)
+      sync_finding
+      top = @finding.viewport_top(inner.h)
+      inner.h.times do |i|
+        li = top + i
+        break if li >= lines.size
+        lbl, val, color = lines[li]
+        y = inner.y + i
+        bg = focused && @finding.row_marked?(li) ? Theme.accent_bg : Theme.bg
+        screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if bg != Theme.bg
+        screen.text(inner.x, y, lbl, Theme.muted, bg)
+        screen.text(inner.x + 12, y, val, color, bg, width: inner.w - 12)
       end
+      Frame.scroll_gauge(screen, inner, lines.size, top, focused)
+    end
+
+    # ONE field row projected to ONE line of text — the copy payload, 1:1 with the screen rows.
+    private def detail_plain(row : {String, String, Color}) : String
+      "#{row[0]}  #{row[1]}"
+    end
+
+    # Point the row cursor at the selected finding's fields. Idempotent, so every gesture and
+    # every verb can call it and none can act on a pane sourced from another finding.
+    private def sync_finding : Nil
+      f = selected_finding
+      unless f
+        @finding.source(0, ->(_i : Int32) { "" })
+        return
+      end
+      ls = detail_lines(f)
+      @finding.source(ls.size, ->(i : Int32) { detail_plain(ls[i]) })
+    end
+
+    private def with_finding(&) : Nil
+      return if selected_finding.nil?
+      sync_finding
+      yield
     end
 
     private def detail_lines(f : Miner::Finding) : Array({String, String, Color})

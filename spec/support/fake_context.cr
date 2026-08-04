@@ -1080,6 +1080,13 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   property rewriter_rule_selected : Bool = false # settable so the has-rule gate can be exercised
   property rewriter_rules_sub : Bool = true      # settable so the RULES-sub-tab gate (load-preset) can be exercised
+  property rewriter_preview_out : Bool = false   # settable so the PREVIEW OUTPUT read-pane gate can be exercised
+  property comparer_diff : Bool = false          # settable so the Comparer row-cursor gate can be exercised
+  property intercept_preview : Bool = false      # settable so the Intercept preview read-pane gate can be exercised
+  property miner_detail_read : Bool = false      # settable so the Miner FINDING read-pane gate can be exercised
+  property sequencer_analysis : Bool = false     # settable so the Sequencer ANALYSIS read-pane gate can be exercised
+  property probe_detail_read : Bool = false      # settable so the Probe AFFECTED-URLS read-pane gate can be exercised
+  property oast_detail : Bool = false            # settable so the OAST callback-detail read-pane gate can be exercised
 
   def rewriter_add : Nil
     rec(:rewriter_add)
@@ -1115,6 +1122,34 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def rewriter_rules_sub? : Bool
     @rewriter_rules_sub
+  end
+
+  def rewriter_preview_out? : Bool
+    @rewriter_preview_out
+  end
+
+  def comparer_diff_shown? : Bool
+    @comparer_diff
+  end
+
+  def intercept_preview_readable? : Bool
+    @intercept_preview
+  end
+
+  def oast_detail_readable? : Bool
+    @oast_detail
+  end
+
+  def probe_detail_readable? : Bool
+    @probe_detail_read
+  end
+
+  def sequencer_analysis_readable? : Bool
+    @sequencer_analysis
+  end
+
+  def miner_detail_readable? : Bool
+    @miner_detail_read
   end
 
   def rewriter_save_preset : Nil

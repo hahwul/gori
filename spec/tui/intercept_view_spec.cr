@@ -123,6 +123,182 @@ describe Gori::Tui::InterceptView do
     end
   end
 
+  # The editor's four pointer entries (press, drag, double-click, wheel) must all invert against
+  # the rect `render` was handed. `InterceptController` passed the RAW body rect for drag and
+  # double-click while the press insetted it, so the two disagreed by a row and a column and a
+  # double-click never found a word to take. Pinned here at the view layer, where the rect is
+  # explicit: hit-test with exactly the rect the render used, and the word under the pointer is
+  # the word the gesture takes.
+  it "editor_select_word takes the word drawn under the pointer" do
+    tmp_interceptor do |ic|
+      raw = "GET /dt HTTP/1.1\r\nHost: acme.test\r\nX-Alpha: WORDONE\r\nX-Gamma: WORDTHREE\r\n\r\n"
+      hold_req(ic, "acme.test", "/dt", raw)
+      view = InterceptView.new
+      view.reload(ic)
+      view.toggle_edit
+      rect = Rect.new(0, 0, 110, 16)
+      b = MemoryBackend.new(110, 16)
+      view.render(Screen.new(b), rect)
+
+      y = (0...16).find { |r| b.row(r).includes?("WORDTHREE") }.not_nil!
+      x = b.row(y).index("WORDTHREE").not_nil! + 4 # mid-word
+
+      view.editor_select_word(rect, x, y).should be_true
+      view.edit_backspace # a selection outranks the char under the caret — see TextArea#backspace
+      view.editor_text.should contain("X-Gamma: ")
+      view.editor_text.should_not contain("WORDTHREE")
+      view.editor_text.should contain("WORDONE") # the neighbouring row is untouched
+    end
+  end
+
+  # `pane_at` is the hit-test the wheel now routes on as well as the click, so pin it against
+  # the columns the RENDER actually put each pane's text in rather than against `split_panes`'
+  # arithmetic — the two drifting apart is what would send a notch to the wrong pane.
+  it "pane_at answers with the pane the renderer drew at that column" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\nX-Mark: DETAILONLY\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      rect = Rect.new(0, 0, 100, 16)
+      b = MemoryBackend.new(100, 16)
+      view.render(Screen.new(b), rect)
+
+      # Find a row+column the queue text occupies, and one the held bytes occupy.
+      list_y = (0...16).find { |y| b.row(y).includes?("/login") }.not_nil!
+      detail_y = (0...16).find { |y| b.row(y).includes?("DETAILONLY") }.not_nil!
+      list_x = b.row(list_y).index("/login").not_nil!
+      detail_x = b.row(detail_y).index("DETAILONLY").not_nil!
+
+      view.pane_at(rect, list_x, list_y).should eq(:list)
+      view.pane_at(rect, detail_x, detail_y).should eq(:detail)
+      view.pane_at(rect, list_x, rect.y).should be_nil # the filter-bar row owns its own zones
+    end
+  end
+
+  # The wheel used to reach nothing but `move` from anywhere in this tab, so over the DETAIL
+  # pane it walked the QUEUE — the pane drawing a scroll gauge was the one pane a notch could
+  # not move — and inside the editor it did nothing at all, because `move` bails while
+  # `@editing`. `scroll_detail_pane` is the one entry point for both faces of that pane.
+  describe "#scroll_detail_pane" do
+    it "scrolls the read-only preview while previewing" do
+      tmp_interceptor do |ic|
+        filler = (1..20).map { |i| "X-#{i}: v#{i}" }.join("\r\n")
+        raw = "GET /login HTTP/1.1\r\nHost: acme.test\r\nX-Top: TOPMARK\r\n#{filler}\r\nX-Bot: BOTMARK\r\n\r\n"
+        hold_req(ic, "acme.test", "/login", raw)
+        view = InterceptView.new
+        view.reload(ic)
+        rect = Rect.new(0, 0, 100, 8)
+        view.render(Screen.new(MemoryBackend.new(100, 8)), rect)
+
+        30.times { view.scroll_detail_pane(1) }
+        b = MemoryBackend.new(100, 8)
+        view.render(Screen.new(b), rect)
+        b.contains?("BOTMARK").should be_true
+        b.contains?("TOPMARK").should be_false
+      end
+    end
+
+    # INS scrolls like READ: `e` opens the editor, it does not withdraw the right to read the
+    # buffer. Mirrors the Repeater request pane, whose identical `unless insert?` guard went.
+    it "scrolls the held-message EDITOR while editing" do
+      tmp_interceptor do |ic|
+        filler = (1..20).map { |i| "X-#{i}: v#{i}" }.join("\r\n")
+        raw = "GET /login HTTP/1.1\r\nHost: acme.test\r\nX-Top: TOPMARK\r\n#{filler}\r\nX-Bot: BOTMARK\r\n\r\n"
+        hold_req(ic, "acme.test", "/login", raw)
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        view.editing?.should be_true
+        rect = Rect.new(0, 0, 100, 8)
+        view.render(Screen.new(MemoryBackend.new(100, 8)), rect) # the editor learns its height here
+
+        30.times { view.scroll_detail_pane(1) }
+        b = MemoryBackend.new(100, 8)
+        view.render(Screen.new(b), rect)
+        b.contains?("BOTMARK").should be_true
+        b.contains?("TOPMARK").should be_false
+        # The queue selection is untouched — the notch scrolled a pane, it did not load
+        # another held message.
+        view.selected_index.should eq(0)
+      end
+    end
+  end
+
+  # The read-only preview had a scroll gauge and no caret: readable, and not selectable or
+  # copyable by any route. It is a `ReadPane` sourced LAZILY from the item's `Highlight::Windowed`
+  # (a held body runs to megabytes), with `Highlight.plain` bridging the styled window to the text
+  # the caret and a copy address. Its caret comes from the POINTER — the tab has no focus tier for
+  # this pane, so a click places a read caret instead of opening the editor.
+  describe "read-only preview selection" do
+    it "places a caret at a click, takes a word, and copies it" do
+      tmp_interceptor do |ic|
+        raw = "GET /login HTTP/1.1\r\nHost: acme.test\r\nX-Mark: PREVIEWWORD\r\n\r\n"
+        hold_req(ic, "acme.test", "/login", raw)
+        view = InterceptView.new
+        view.reload(ic)
+        view.editing?.should be_false
+        rect = Rect.new(0, 0, 110, 16)
+        b = MemoryBackend.new(110, 16)
+        view.render(Screen.new(b), rect)
+
+        y = (0...16).find { |r| b.row(r).includes?("PREVIEWWORD") }.not_nil!
+        x = b.row(y).index("PREVIEWWORD").not_nil!
+        view.preview_click(rect, x + 2, y)
+        view.preview_copy_text.should contain("PREVIEWWORD") # the caret's whole line
+
+        view.preview_select_word(rect, x + 2, y).should be_true
+        view.preview_selection?.should be_true
+        view.preview_copy_text.should eq("PREVIEWWORD")
+      end
+    end
+
+    it "grows the selection on a drag and copies the whole message with nothing selected" do
+      tmp_interceptor do |ic|
+        raw = "GET /d HTTP/1.1\r\nHost: acme.test\r\nX-One: AAA\r\nX-Two: BBB\r\n\r\n"
+        hold_req(ic, "acme.test", "/d", raw)
+        view = InterceptView.new
+        view.reload(ic)
+        rect = Rect.new(0, 0, 110, 16)
+        b = MemoryBackend.new(110, 16)
+        view.render(Screen.new(b), rect)
+
+        y1 = (0...16).find { |r| b.row(r).includes?("X-One") }.not_nil!
+        x1 = b.row(y1).index("X-One").not_nil!
+        view.preview_click(rect, x1, y1)
+        view.preview_click(rect, x1 + 10, y1 + 1, selecting: true)
+        text = view.preview_copy_text
+        text.should contain("AAA")
+        text.should contain("X-Two")
+
+        view.preview_clear_selection
+        view.preview_selection?.should be_false
+        all = view.preview_copy_all
+        all.should contain("GET /d HTTP/1.1")
+        all.should contain("BBB")
+      end
+    end
+
+    # The read caret and the editor's are different carets over the same bytes: while the editor
+    # is open the preview is not drawn, so its gestures must stand down rather than address a
+    # pane nobody is looking at.
+    it "stands down entirely while the editor is open" do
+      tmp_interceptor do |ic|
+        hold_req(ic, "acme.test", "/e", "GET /e HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+        view = InterceptView.new
+        view.reload(ic)
+        rect = Rect.new(0, 0, 110, 16)
+        view.render(Screen.new(MemoryBackend.new(110, 16)), rect)
+        view.toggle_edit
+        view.editing?.should be_true
+
+        view.preview_select_word(rect, 60, 8).should be_false
+        view.preview_selection?.should be_false
+        view.preview_copy_text.should eq("")
+        view.preview_copy_all.should eq("")
+      end
+    end
+  end
+
   it "edits a held request and forwards the edited bytes" do
     tmp_interceptor do |ic|
       hold_req(ic, "acme.test", "/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")

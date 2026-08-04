@@ -16,6 +16,27 @@ private def loaded_fuzzer : FuzzerView
   view
 end
 
+# A view with its RESULT detail open on a three-line response body — two marker words on
+# separate lines, so a hit-test that lands a row off is visible in what gets copied.
+private def detail_open_fuzzer : FuzzerView
+  view = loaded_fuzzer
+  body = "alpha ONEWORD tail\nbeta TWOWORD tail\ngamma THREEWORD tail"
+  r = Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 60_i64, 9, 5, 1000_i64, nil, false, false, nil,
+    "HTTP/1.1 200 OK\r\n\r\n".to_slice, body.to_slice)
+  view.append_result(r)
+  view.open_detail
+  view
+end
+
+# Screen cell of `word` after one render, so every mouse example inverts against what was
+# actually drawn rather than against the layout arithmetic.
+private def drawn_cell(view : FuzzerView, rect : Rect, word : String) : {Int32, Int32}
+  b = MemoryBackend.new(rect.w, rect.h)
+  view.render(Screen.new(b), rect)
+  y = (0...rect.h).find { |r| b.row(r).includes?(word) }.not_nil!
+  {b.row(y).index(word).not_nil!, y}
+end
+
 # A row the run's keep_bodies dropped: no head, no body, no request — the TUI default
 # (:matched) leaves EVERY non-matching row in this shape.
 private def unretained_result(idx : Int32, payloads : Array(String)) : Gori::Fuzz::Result
@@ -163,6 +184,47 @@ describe Gori::Tui::FuzzerView do
     grid2 = (0...30).map { |y| b2.row(y) }.join("\n")
     grid2.should contain("§x§")
     grid2.should_not contain("§x¦rot13§")
+  end
+
+  # `template_scroll_view` used to bail on `template_insert?`, so the wheel died the moment `i`
+  # was pressed — the same `unless insert?` the Repeater request pane shed, in the one other
+  # pane that had it. `chain_pane_active?` still bails: the ^Y sub-pane owns the wheel then.
+  describe "#template_scroll_view" do
+    seed = "GET /?x=1 HTTP/1.1\r\nHost: h\r\n" +
+           (1..30).map { |i| "X-#{i}: TAG#{i}" }.join("\r\n") + "\r\n\r\n"
+
+    it "scrolls the template in INS as it does in NOR" do
+      [true, false].each do |insert|
+        view = FuzzerView.new
+        view.load_request("https://h", seed, false, "")
+        view.focus_pane(:template)
+        view.enter_template_insert! if insert
+        rect = Rect.new(0, 0, 100, 22)
+        view.render(Screen.new(MemoryBackend.new(100, 22)), rect) # the editor learns its height
+
+        40.times { view.template_scroll_view(1) }
+        b = MemoryBackend.new(100, 22)
+        view.render(Screen.new(b), rect)
+        grid = (0...22).map { |y| b.row(y) }.join("\n")
+        grid.should contain("TAG30")     # scrolled to the tail…
+        grid.should_not contain("TAG1:") # …and off the head
+        view.template_insert?.should eq(insert)
+      end
+    end
+
+    it "leaves the template alone while the ^Y CHAIN sub-pane owns the wheel" do
+      view = FuzzerView.new
+      view.load_request("https://h", "§x§ HTTP/1.1\r\nHost: h\r\n" + seed, false, "")
+      view.focus_pane(:template)
+      view.focus_chain_pane.should be_nil
+      rect = Rect.new(0, 0, 100, 22)
+      view.render(Screen.new(MemoryBackend.new(100, 22)), rect)
+
+      40.times { view.template_scroll_view(1) }
+      b = MemoryBackend.new(100, 22)
+      view.render(Screen.new(b), rect)
+      (0...22).map { |y| b.row(y) }.join("\n").should contain("§x§") # still on the first row
+    end
   end
 
   it "CHAIN pane: esc discards the edit instead of committing it" do
@@ -1095,6 +1157,100 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
     # The per-codepoint measure over-counted by one for every combining mark.
     Screen.draw_width(target).should eq(15)
     target.each_char.sum { |c| Screen.draw_width(c.to_s) }.should eq(16)
+  end
+end
+
+# The RESULT detail paints a selection band, grows it on ⇧arrows and copies it with `y` — and
+# the pointer used to do nothing there at all: the controller's drag/double-click arms bailed
+# unless the TEMPLATE was focused and its click arm had no `:detail` branch. These pin the view
+# half (the controller has no unit harness — it needs a Host).
+describe "FuzzerView result-detail mouse" do
+  it "places the detail caret at a click and copies the line it landed on" do
+    view = detail_open_fuzzer
+    rect = Rect.new(0, 0, 110, 30)
+    x, y = drawn_cell(view, rect, "TWOWORD")
+    view.detail_click_to_cursor(rect, x, y)
+    view.detail_copy_text.should contain("TWOWORD") # no selection → the caret's whole line
+    view.detail_copy_text.should_not contain("ONEWORD")
+  end
+
+  it "takes the word under the pointer on a double-click" do
+    view = detail_open_fuzzer
+    rect = Rect.new(0, 0, 110, 30)
+    x, y = drawn_cell(view, rect, "TWOWORD")
+    view.detail_select_word(rect, x + 2, y).should be_true
+    view.detail_copy_text.should eq("TWOWORD")
+  end
+
+  it "extends the selection to the pointer on a drag" do
+    view = detail_open_fuzzer
+    rect = Rect.new(0, 0, 110, 30)
+    x1, y1 = drawn_cell(view, rect, "ONEWORD")
+    view.detail_click_to_cursor(rect, x1, y1) # the press
+    x2, y2 = drawn_cell(view, rect, "TWOWORD")
+    view.detail_click_to_cursor(rect, x2 + "TWOWORD".size, y2, selecting: true)
+    text = view.detail_copy_text
+    text.should contain("ONEWORD")
+    text.should contain("TWOWORD")
+    text.should_not contain("THREEWORD") # the drag stopped on line 2
+  end
+
+  it "reports no word on a double-click over whitespace past the line's end" do
+    view = detail_open_fuzzer
+    rect = Rect.new(0, 0, 110, 30)
+    _, y = drawn_cell(view, rect, "TWOWORD")
+    view.detail_select_word(rect, 100, y).should be_false
+  end
+
+  # The chip strip rides the card's TOP BORDER, drawn by render_detail_chips. It was drawn and
+  # dead; the History drill-in's equivalent strip has always been clickable.
+  it "switches the detail section from a chip click on the card border" do
+    view = detail_open_fuzzer
+    rect = Rect.new(0, 0, 110, 30)
+    b = MemoryBackend.new(110, 30)
+    view.render(Screen.new(b), rect)
+    y = (0...30).find { |r| b.row(r).includes?("request") && b.row(r).includes?("response") }.not_nil!
+    x = b.row(y).index("response").not_nil!
+
+    view.detail_chip_at(rect, x, y).should eq(:response)
+    view.detail_chip_at(rect, b.row(y).index("request").not_nil!, y).should eq(:request)
+    view.detail_chip_at(rect, x, y + 1).should be_nil # one row into the text is not the strip
+
+    # open_detail lands on :response, so drive a real transition both ways.
+    view.show_detail_pane(:request)
+    b2 = MemoryBackend.new(110, 30)
+    view.render(Screen.new(b2), rect)
+    b2.contains?("ONEWORD").should be_false # the request has no response body in it
+    b2.contains?("GET /?x=1").should be_true
+
+    view.show_detail_pane(:response)
+    b3 = MemoryBackend.new(110, 30)
+    view.render(Screen.new(b3), rect)
+    b3.contains?("ONEWORD").should be_true
+  end
+
+  # Re-clicking the chip you are already on must keep the pane's state. `detail_step_pane`'s
+  # range guard passes for a zero delta, so it re-assigns the same pane and runs its full reset
+  # — scroll, h-scroll, caret and both line caches — which would silently throw away the
+  # selection the operator had just made.
+  it "keeps the caret and the selection when the ACTIVE chip is clicked again" do
+    view = detail_open_fuzzer
+    rect = Rect.new(0, 0, 110, 30)
+    x, y = drawn_cell(view, rect, "TWOWORD")
+    view.detail_select_word(rect, x + 2, y).should be_true
+    view.detail_copy_text.should eq("TWOWORD")
+
+    view.show_detail_pane(:response) # already showing :response — a re-click
+    view.detail_copy_text.should eq("TWOWORD")
+  end
+
+  it "answers no chip and no caret move when the detail is not the pane on screen" do
+    view = detail_open_fuzzer
+    view.focus_pane(:template)
+    rect = Rect.new(0, 0, 110, 30)
+    view.detail_chip_at(rect, 20, 12).should be_nil
+    view.detail_click_to_cursor(rect, 20, 12) # inert rather than hit-testing a card that isn't drawn
+    view.detail_select_word(rect, 20, 12).should be_false
   end
 end
 

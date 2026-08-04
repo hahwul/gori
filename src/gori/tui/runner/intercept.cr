@@ -48,4 +48,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def marked_intercept_count : Int32
     intercept_controller.marked_intercept_count
   end
+
+  # The read-only held-message preview is on screen — the gate for its read verbs.
+  def intercept_preview_readable? : Bool
+    intercept_controller.intercept_preview_readable?
+  end
 end

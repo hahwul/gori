@@ -204,21 +204,34 @@ module Gori::Tui
       !current_view.nil?
     end
 
-    # Motion with the button held — TEMPLATE only (the RESULTS list selects rows, and a drag
-    # across rows would just be a fast repeated select). No save/focus side effects: the
+    # Motion with the button held — the two TEXT panes only. The RESULTS list selects rows, and
+    # a drag across rows would just be a fast repeated select. No save/focus side effects: the
     # press that began the drag already did those.
+    #
+    # The RESULT detail is that second text pane: it has a caret, a painted selection band, a
+    # ⇧arrow grow and a `y`, and both arms here used to bail unless the TEMPLATE was focused —
+    # so the pointer was the one route into it that did nothing.
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless v = current_view
-      return unless v.focus == :template
-      v.template_drag_to_cursor(body_rect_below_filter(rect), mx, my)
+      body = body_rect_below_filter(rect)
+      case v.focus
+      when :template then v.template_drag_to_cursor(body, mx, my)
+      when :detail   then v.detail_click_to_cursor(body, mx, my, selecting: true)
+      end
     end
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless v = current_view
-      return false unless v.focus == :template
       body = body_rect_below_filter(rect)
-      return false if v.template_chrome_hit(body, mx, my) # a border badge is a button, not text
-      v.template_select_word(body, mx, my)
+      case v.focus
+      when :template
+        return false if v.template_chrome_hit(body, mx, my) # a border badge is a button, not text
+        v.template_select_word(body, mx, my)
+      when :detail
+        return false if v.detail_chip_at(body, mx, my) # a pane chip is a button, not text
+        v.detail_select_word(body, mx, my)
+      else false
+      end
     end
 
     # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
@@ -706,6 +719,14 @@ module Gori::Tui
           v.template_click_to_cursor(body, mx, my)
         when :target
           v.target_click_to_cursor(body, mx, my)
+        when :detail
+          # The chip strip on the card's top border first (it selects a section, it does not
+          # place a caret) — then the text, which had no click arm here at all.
+          if chip = v.detail_chip_at(body, mx, my)
+            v.show_detail_pane(chip)
+          else
+            v.detail_click_to_cursor(body, mx, my)
+          end
         end
       end
       true

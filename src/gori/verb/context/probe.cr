@@ -30,4 +30,6 @@ abstract class Gori::Verb::ExecContext
   abstract def probe_active_selected : Nil      # active-scan History's selected (or open) flow
   abstract def probe_active_rescan : Nil        # re-active-scan the selected Probe issue's sample flow
   abstract def probe_active_from_repeater : Nil # active-scan the current Repeater session's last send
+  # A Probe issue's detail is open — the gate for the AFFECTED URLS list's read verbs.
+  abstract def probe_detail_readable? : Bool
 end

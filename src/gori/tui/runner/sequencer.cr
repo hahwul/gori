@@ -37,4 +37,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def sequence_configure : Nil
     reconfigure_sequence
   end
+
+  # The ANALYSIS report holds focus — the gate for its read verbs.
+  def sequencer_analysis_readable? : Bool
+    sequencer_controller.sequencer_analysis_readable?
+  end
 end

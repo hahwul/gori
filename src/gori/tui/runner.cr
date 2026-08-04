@@ -5152,13 +5152,20 @@ module Gori::Tui
 
     def read_selection_active? : Bool
       case @active_tab
-      when :notes    then notes_controller.view.selection?
-      when :repeater then repeater_controller.repeater_selection_active?
-      when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
-      when :decoder  then decoder_controller.decoder_selection_active?
-      when :jwt      then jwt_controller.jwt_selection_active?
-      when :issues   then issues_controller.issues_notes_selection_active?
-      when :project  then project_controller.project_desc_selection_active?
+      when :notes     then notes_controller.view.selection?
+      when :repeater  then repeater_controller.repeater_selection_active?
+      when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
+      when :decoder   then decoder_controller.decoder_selection_active?
+      when :jwt       then jwt_controller.jwt_selection_active?
+      when :issues    then issues_controller.issues_notes_selection_active?
+      when :project   then project_controller.project_desc_selection_active?
+      when :rewriter  then rewriter_controller.rewriter_selection_active?
+      when :comparer  then comparer_controller.comparer_selection_active?
+      when :intercept then intercept_controller.intercept_preview_selection_active?
+      when :oast      then oast_controller.oast_detail_selection_active?
+      when :probe     then probe_controller.probe_detail_selection_active?
+      when :sequencer then sequencer_controller.sequencer_selection_active?
+      when :miner     then miner_controller.miner_selection_active?
       when :history
         @overlay.detail? && history_controller.detail_selection_active?
       else
@@ -5172,13 +5179,20 @@ module Gori::Tui
     # *_selection_text getter. "" when the active tab has no selection surface.
     def read_selection_text : String
       case @active_tab
-      when :notes    then notes_controller.notes_selection_text
-      when :repeater then repeater_controller.repeater_selection_text
-      when :fuzzer   then fuzzer_controller.fuzzer_selection_text
-      when :decoder  then decoder_controller.decoder_selection_text
-      when :jwt      then jwt_controller.jwt_selection_text
-      when :issues   then issues_controller.issues_notes_selection_text
-      when :project  then project_controller.project_desc_selection_text
+      when :notes     then notes_controller.notes_selection_text
+      when :repeater  then repeater_controller.repeater_selection_text
+      when :fuzzer    then fuzzer_controller.fuzzer_selection_text
+      when :decoder   then decoder_controller.decoder_selection_text
+      when :jwt       then jwt_controller.jwt_selection_text
+      when :issues    then issues_controller.issues_notes_selection_text
+      when :project   then project_controller.project_desc_selection_text
+      when :rewriter  then rewriter_controller.rewriter_selection_text
+      when :comparer  then comparer_controller.comparer_selection_text
+      when :intercept then intercept_controller.intercept_preview_selection_text
+      when :oast      then oast_controller.oast_detail_selection_text
+      when :probe     then probe_controller.probe_detail_selection_text
+      when :sequencer then sequencer_controller.sequencer_selection_text
+      when :miner     then miner_controller.miner_selection_text
       when :history
         @overlay.detail? ? history_controller.detail_selection_text : ""
       else
@@ -5188,13 +5202,20 @@ module Gori::Tui
 
     def read_select_line : Nil
       case @active_tab
-      when :notes    then notes_controller.view.select_line
-      when :repeater then repeater_controller.repeater_select_line
-      when :fuzzer   then fuzzer_controller.fuzzer_select_line
-      when :decoder  then decoder_controller.decoder_select_line
-      when :jwt      then jwt_controller.jwt_select_line
-      when :issues   then issues_controller.issues_notes_select_line
-      when :project  then project_controller.project_desc_select_line
+      when :notes     then notes_controller.view.select_line
+      when :repeater  then repeater_controller.repeater_select_line
+      when :fuzzer    then fuzzer_controller.fuzzer_select_line
+      when :decoder   then decoder_controller.decoder_select_line
+      when :jwt       then jwt_controller.jwt_select_line
+      when :issues    then issues_controller.issues_notes_select_line
+      when :project   then project_controller.project_desc_select_line
+      when :rewriter  then rewriter_controller.rewriter_select_line
+      when :comparer  then comparer_controller.comparer_select_line
+      when :intercept then intercept_controller.intercept_preview_select_line
+      when :oast      then oast_controller.oast_detail_select_line
+      when :probe     then probe_controller.probe_detail_select_line
+      when :sequencer then sequencer_controller.sequencer_select_line
+      when :miner     then miner_controller.miner_select_line
       when :history
         history_controller.detail_select_line if @overlay.detail?
       end
@@ -5202,13 +5223,20 @@ module Gori::Tui
 
     def read_clear_selection : Nil
       case @active_tab
-      when :notes    then notes_controller.view.clear_selection
-      when :repeater then repeater_controller.repeater_clear_selection
-      when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
-      when :decoder  then decoder_controller.decoder_clear_selection
-      when :jwt      then jwt_controller.jwt_clear_selection
-      when :issues   then issues_controller.issues_notes_clear_selection
-      when :project  then project_controller.project_desc_clear_selection
+      when :notes     then notes_controller.view.clear_selection
+      when :repeater  then repeater_controller.repeater_clear_selection
+      when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
+      when :decoder   then decoder_controller.decoder_clear_selection
+      when :jwt       then jwt_controller.jwt_clear_selection
+      when :issues    then issues_controller.issues_notes_clear_selection
+      when :project   then project_controller.project_desc_clear_selection
+      when :rewriter  then rewriter_controller.rewriter_clear_selection
+      when :comparer  then comparer_controller.comparer_clear_selection
+      when :intercept then intercept_controller.intercept_preview_clear_selection
+      when :oast      then oast_controller.oast_detail_clear_selection
+      when :probe     then probe_controller.probe_detail_clear_selection
+      when :sequencer then sequencer_controller.sequencer_clear_selection
+      when :miner     then miner_controller.miner_clear_selection
       when :history
         history_controller.detail_clear_selection if @overlay.detail?
       end
@@ -5227,6 +5255,16 @@ module Gori::Tui
       when :jwt      then jwt_copy
       when :issues   then read_selection_active? ? issues_copy : issues_copy_all
       when :project  then read_selection_active? ? project_copy : project_copy_all
+        # One delegator, not the selection/all pair: the pane's own copy verb already picks
+        # between them and formats the toast, because "all" here means the whole TRANSFORM —
+        # a string that exists nowhere else, not a buffer the shell could re-read.
+      when :rewriter  then rewriter_controller.rewriter_copy
+      when :comparer  then comparer_controller.comparer_copy
+      when :intercept then intercept_controller.intercept_preview_copy
+      when :oast      then oast_controller.oast_detail_copy
+      when :probe     then probe_controller.probe_detail_copy
+      when :sequencer then sequencer_controller.sequencer_copy
+      when :miner     then miner_controller.miner_copy
       when :history
         # No whole-rendered-pane delegator exists for the detail text pane — both
         # branches fall back to the selection-or-current-line copy.

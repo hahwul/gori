@@ -14,4 +14,9 @@ abstract class Gori::Verb::ExecContext
   abstract def rewriter_rules_sub? : Bool       # the RULES sub-tab is on screen (gates load-preset)
   abstract def rewriter_save_preset : Nil       # save the selected rule to the global library (name popup)
   abstract def rewriter_load_preset : Nil       # add a rule from the global library (picker popup)
+  # The PREVIEW OUTPUT pane holds focus — the read-pane gate, matching the per-tab
+  # `*_read_mode?` predicates the other read panes carry. It is the transformed sample, the one
+  # place the post-rewrite bytes exist, so it is the only Rewriter pane with a caret to select
+  # with (the rule list selects rows, the INPUT half is an editable TextArea).
+  abstract def rewriter_preview_out? : Bool
 end

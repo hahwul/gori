@@ -163,4 +163,27 @@ describe Gori::Tui::RewriterView do
     list.y.should eq(1)
     (pin.y > list.y).should be_true
   end
+
+  # PREVIEW OUTPUT is a `ReadPane` now, not a windowed draw over a bare String: it is the one
+  # place the post-rewrite bytes exist, and it had no caret, no selection and no `y`. The view
+  # half is what a spec can reach (the controller needs a Host) — that the pane it is handed is
+  # the pane it draws, into the rect `preview_output_body` hit-tests.
+  it "draws the PREVIEW OUTPUT through the read pane it is handed" do
+    v = RewriterView.new
+    rect = Rect.new(0, 0, 100, 30)
+    pane = ReadPane.new
+    pane.source(["OUTMARK one", "OUTMARK two"])
+    b = MemoryBackend.new(100, 30)
+    v.render(Screen.new(b), rect, [] of Gori::Store::MatchRule, 0, 0, 0,
+      :preview_out, true, false, TextArea.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), pane)
+    b.contains?("PREVIEW OUTPUT").should be_true
+    b.contains?("OUTMARK one").should be_true
+
+    # The caret the pane painted sits inside the rect the click hit-test inverts against.
+    body = v.preview_output_body(rect)
+    body.empty?.should be_false
+    pane.click(body, body.x + 4, body.y + 1)
+    pane.cursor.cy.should eq(1)
+    pane.copy_text.should eq("OUTMARK two")
+  end
 end

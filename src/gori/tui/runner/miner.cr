@@ -55,4 +55,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       name: seed.label)
     @toast = "repeater ← miner: #{seed.label}"
   end
+
+  # The FINDING pane holds focus — the gate for its read verbs.
+  def miner_detail_readable? : Bool
+    miner_controller.miner_detail_readable?
+  end
 end

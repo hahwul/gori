@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./read_pane"
 require "./traffic_empty_state"
 require "../settings"
 require "../store"
@@ -30,7 +31,10 @@ module Gori::Tui
       @scroll = 0
       @detail = nil.as(Store::ProbeIssue?)
       @detail_flow = nil.as(Store::FlowRow?)
-      @detail_scroll = 0
+      # The AFFECTED URLS list in the detail: caret, selection, scroll and draw. The list is the
+      # finding's evidence and had no caret and no copy — the one thing an operator wants out of a
+      # scan issue is the URLs it fired on.
+      @affected = ReadPane.new
       @query = ""
       @qcx = 0
       @preedit_q = ""
@@ -289,17 +293,82 @@ module Gori::Tui
       return false unless issue
       @detail = issue
       @detail_flow = issue.sample_flow_id.try { |fid| store.flow_row(fid) }
-      @detail_scroll = 0
+      @affected.reset
       true
     end
 
     def close_detail : Nil
       @detail = nil
-      @detail_scroll = 0
+      @affected.reset
     end
 
+    # ↑/↓ (⇧ to select) walk the AFFECTED URLS; the wheel scrolls the viewport and leaves the
+    # caret put, the split every read pane in the tree makes.
     def scroll_detail(delta : Int32) : Nil
-      @detail_scroll = {@detail_scroll + delta, 0}.max
+      with_affected { @affected.move(delta, 0) }
+    end
+
+    def detail_move(delta : Int32, selecting : Bool) : Nil
+      with_affected { @affected.move(delta, 0, selecting: selecting) }
+    end
+
+    def detail_wheel(delta : Int32) : Nil
+      with_affected { @affected.scroll_view(delta) }
+    end
+
+    def detail_motion_key(ev : Termisu::Event::Key) : Bool
+      issue = @detail || return false
+      sync_affected(issue)
+      @affected.motion_key(ev)
+    end
+
+    def detail_at_top? : Bool
+      @affected.at_top?
+    end
+
+    def detail_select_line : Nil
+      with_affected { @affected.select_line }
+    end
+
+    def detail_clear_selection : Nil
+      @affected.clear_selection
+    end
+
+    def detail_selection? : Bool
+      !@detail.nil? && @affected.selection?
+    end
+
+    def detail_copy_text : String
+      issue = @detail || return ""
+      sync_affected(issue)
+      @affected.copy_text
+    end
+
+    def detail_copy_all : String
+      issue = @detail || return ""
+      sync_affected(issue)
+      @affected.copy_all
+    end
+
+    # The AFFECTED list's rect inside the detail card — the derivation `render_detail` walks, so
+    # the click and the draw address the same rows. nil when the card is too short for any.
+    def affected_rect(rect : Rect) : Rect?
+      list_y = rect.y + 7 # header row + 3 meta rows + divider + section head (see render_detail)
+      h = {rect.bottom - list_y, 0}.max
+      h > 0 ? Rect.new(rect.x + 1, list_y, {rect.w - 2, 0}.max, h) : nil
+    end
+
+    def detail_click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      box = affected_rect(rect) || return
+      with_affected { @affected.click(box, mx, my, selecting) }
+    end
+
+    def detail_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
+      box = affected_rect(rect)
+      return false unless box
+      issue = @detail || return false
+      sync_affected(issue)
+      @affected.select_word(box, mx, my)
     end
 
     # `c`: one-key dismiss for the targeted issue. open → false-positive (mute), anything
@@ -606,12 +675,21 @@ module Gori::Tui
       screen.text(rect.x + 1, y + 1, head, Theme.accent, attr: Attribute::Bold)
       list_y = y + 2
       avail = {rect.bottom - list_y, 0}.max
-      @detail_scroll = @detail_scroll.clamp(0, {issue.affected.size - avail, 0}.max)
-      (0...avail).each do |i|
-        idx = @detail_scroll + i
-        break if idx >= issue.affected.size
-        screen.text(rect.x + 1, list_y + i, issue.affected[idx], Theme.text, width: w)
-      end
+      return if avail <= 0
+      sync_affected(issue)
+      @affected.render(screen, Rect.new(rect.x + 1, list_y, w, avail), focused)
+    end
+
+    # Point the AFFECTED pane at the open issue's URL list. Cheap and idempotent, so every
+    # gesture and every verb can call it and none can act on a pane sourced from another issue.
+    private def sync_affected(issue : Store::ProbeIssue) : Nil
+      @affected.source(issue.affected)
+    end
+
+    private def with_affected(&) : Nil
+      issue = @detail || return
+      sync_affected(issue)
+      yield
     end
 
     private def chip(screen : Screen, x : Int32, y : Int32, label : String, color : Color) : Int32

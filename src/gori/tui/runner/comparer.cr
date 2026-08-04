@@ -78,4 +78,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     comparer_controller.view.set_pair(a, b)
     @toast = "comparer: A ##{older} · B ##{newer} — open Comparer (^P) to view the diff"
   end
+
+  # Both flows are set — the gate for the diff's row select / copy verbs.
+  def comparer_diff_shown? : Bool
+    comparer_controller.comparer_diff_shown?
+  end
 end

@@ -4,6 +4,7 @@ require "../theme"
 require "../frame"
 require "../highlight"
 require "../clipboard"
+require "../read_pane"
 require "../text_field"
 require "../../store"
 require "../../settings"
@@ -89,7 +90,10 @@ module Gori::Tui
       @cb_sel = 0
       @cb_scroll = 0
       @cb_detail = false
-      @cb_detail_scroll = 0
+      # The callback detail's caret, selection, scroll and draw. This pane holds the raw callback
+      # — the evidence an OAST finding rests on — and had no caret and no copy of its own: the
+      # tab's `y` copies the PAYLOAD, not what came back.
+      @cb_pane = ReadPane.new
       @filter = TextField.new # Callbacks free-text filter (`/`)
       @filter_editing = false
       @prov_sel = 0
@@ -111,6 +115,15 @@ module Gori::Tui
     # --- identity ---
     def tab : Symbol
       :oast
+    end
+
+    # The focus area the space menu shows alongside COMMON: `:detail` with a callback open,
+    # `:list` on the callbacks list, `:common` on Providers. The split exists because the two
+    # views spend `y` differently — the list copies the payload gori generated, the detail copies
+    # what came back — and two sections never render together.
+    def command_section : Symbol
+      return :common unless callbacks_sub?
+      @cb_detail ? :detail : :list
     end
 
     def command_scope : Verb::Scope
@@ -166,7 +179,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if callbacks_sub?
-        return "←/esc back · ↑/↓ scroll" if @cb_detail
+        return "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ←/esc back" if @cb_detail
         return "type to filter · ↵ keep · esc clear" if @filter_editing
         "↑/↓ select · ‹/› provider · g payload · y copy · / filter · ^R listen · ^X stop · ↵ detail · space cmds"
       else
@@ -653,12 +666,28 @@ module Gori::Tui
       screen.text(inner.x + 1, inner.y, meta, Theme.muted, Theme.bg, width: inner.w - 2)
       body = Rect.new(inner.x, inner.y + 2, inner.w, inner.h - 2)
       return if body.h <= 0 # collapsed pane (tiny terminal): a negative slice count would raise
-      text = row.raw_response ? "#{row.raw_request}\n\n--- response ---\n#{row.raw_response}" : row.raw_request
-      lines = text.split('\n')
-      @cb_detail_scroll = @cb_detail_scroll.clamp(0, {lines.size - body.h, 0}.max)
-      lines[@cb_detail_scroll, body.h]?.try &.each_with_index do |line, i|
-        screen.text(body.x + 1, body.y + i, line, Theme.text, Theme.bg, width: body.w - 2)
-      end
+      sync_cb_pane(row)
+      @cb_pane.render(screen, Rect.new(body.x + 1, body.y, {body.w - 2, 0}.max, body.h), focused)
+    end
+
+    # The raw callback as text: request, then the response when the provider captured one. The
+    # copy payload and the caret's coordinate system, in one place so the draw and a `y` cannot
+    # disagree about what "this callback" is.
+    private def cb_detail_text(row : CbRow) : String
+      row.raw_response ? "#{row.raw_request}\n\n--- response ---\n#{row.raw_response}" : row.raw_request
+    end
+
+    private def sync_cb_pane(row : CbRow) : Nil
+      @cb_pane.source(cb_detail_text(row).split('\n'))
+    end
+
+    # Run `blk` with the detail pane pointed at the open callback. Every gesture and every verb
+    # goes through it, so none can act on a pane sourced from a different row.
+    private def with_cb_pane(&) : Nil
+      return unless @cb_detail
+      row = selected_callback || return
+      sync_cb_pane(row)
+      yield
     end
 
     private def render_providers(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -805,15 +834,17 @@ module Gori::Tui
         when key.escape?, key.left?, key.lower_h?
           @cb_detail = false
         when key.up?, key.lower_k?
-          if @cb_detail_scroll <= 0
+          # At the top the ↑ still closes the detail and leaves; below it the caret steps, so
+          # ⇧↑ can grow a selection the way it does in every other read pane.
+          if @cb_pane.at_top?
             @cb_detail = false
             @host.request_focus(:subtabs)
           else
-            @cb_detail_scroll -= 1
+            with_cb_pane { @cb_pane.move(-1, 0, selecting: ev.shift?) }
           end
-        when key.down?, key.lower_j?
-          @cb_detail_scroll += 1
+        when key.down?, key.lower_j? then with_cb_pane { @cb_pane.move(1, 0, selecting: ev.shift?) }
         else
+          with_cb_pane { @cb_pane.motion_key(ev) } # Home / End / PgUp / PgDn, ⇧ extending
           return true
         end
         return true
@@ -827,7 +858,7 @@ module Gori::Tui
       when key.enter?
         if selected_callback
           @cb_detail = true
-          @cb_detail_scroll = 0
+          @cb_pane.reset # a different callback renumbers every line
         end
       when c == 'g' then generate_payload
       when c == 'y' then copy_payload
@@ -927,7 +958,7 @@ module Gori::Tui
       @filter_editing = false # a row click commits the filter, like History's list click
       if idx == @cb_sel
         @cb_detail = true
-        @cb_detail_scroll = 0
+        @cb_pane.reset
       else
         @cb_sel = idx
         sync_scroll
@@ -984,7 +1015,7 @@ module Gori::Tui
     def handle_wheel(step : Int32) : Bool
       if callbacks_sub?
         if @cb_detail
-          @cb_detail_scroll += step
+          with_cb_pane { @cb_pane.scroll_view(step) }
         else
           @cb_sel = (@cb_sel + step).clamp(0, {filtered_callbacks.size - 1, 0}.max)
           sync_scroll
@@ -1152,6 +1183,45 @@ module Gori::Tui
     def reveal_session(id : Int64) : Nil
       @active_sub = 0
       @host.focus_body
+    end
+
+    # --- READ-pane delegators (the callback detail's read verbs + the Runner's read_* ladders) ---
+    def oast_detail_readable? : Bool
+      callbacks_sub? && @cb_detail && !selected_callback.nil?
+    end
+
+    def oast_detail_selection_active? : Bool
+      @cb_detail && @cb_pane.selection?
+    end
+
+    def oast_detail_selection_text : String
+      row = selected_callback
+      return "" unless row && callbacks_sub? && @cb_detail
+      sync_cb_pane(row)
+      @cb_pane.copy_text
+    end
+
+    def oast_detail_select_line : Nil
+      with_cb_pane { @cb_pane.select_line }
+    end
+
+    def oast_detail_clear_selection : Nil
+      @cb_pane.clear_selection
+    end
+
+    # `y` inside the detail: the selection, or the whole callback. Distinct from the list's `y`,
+    # which copies the PAYLOAD gori generated — the two are the opposite directions of the same
+    # interaction, and an evidence tool must let you take what came BACK.
+    def oast_detail_copy : Nil
+      row = selected_callback
+      return unless row && callbacks_sub? && @cb_detail
+      sync_cb_pane(row)
+      sel = @cb_pane.selection?
+      text = sel ? @cb_pane.copy_text : @cb_pane.copy_all
+      return if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text.bytesize)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
   end
 end

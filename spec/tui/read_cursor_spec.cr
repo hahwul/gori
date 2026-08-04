@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -58,5 +59,45 @@ describe Gori::Tui::ReadCursor do
         x0.should be < x1
       end
     end
+  end
+end
+
+# `sync_from` and `click` differ in ONE way that decides what a mouse press means, and two
+# controllers picked the wrong one: `ReadCursor#sync` moves the caret and deliberately leaves
+# the anchor alone ("without disturbing selection", per its own doc), so a Decoder/JWT INPUT
+# press in READ mode used to re-shape a ⇧arrow selection instead of dropping it. Every other
+# read pane clicks through `TextReadState#click`, which collapses. The drag added in the same
+# change depends on this: `sync_to(selecting: true)` plants its anchor with `||=`, so without a
+# collapsing press it would extend from wherever an older selection had been left.
+describe Gori::Tui::TextReadState do
+  it "keeps the selection on sync_from and collapses it on a click" do
+    ed = TextArea.new("alpha bravo\ncharlie delta\necho foxtrot")
+    rect = Rect.new(0, 0, 40, 5)
+    ed.render(Screen.new(MemoryBackend.new(40, 5)), rect, true) # the editor learns its geometry
+
+    read = TextReadState.new
+    read.select_line(ed)
+    read.selection?.should be_true
+
+    read.sync_from(ed)
+    read.selection?.should be_true # a caret adopt is not a selection gesture
+
+    read.click(ed, rect, 3, 1) # a plain press on line 1
+    read.selection?.should be_false
+    read.cursor.cy.should eq(1)
+  end
+
+  it "grows the selection from the press position on a drag" do
+    ed = TextArea.new("alpha bravo\ncharlie delta\necho foxtrot")
+    rect = Rect.new(0, 0, 40, 5)
+    ed.render(Screen.new(MemoryBackend.new(40, 5)), rect, true)
+
+    read = TextReadState.new
+    read.click(ed, rect, 0, 0)                  # press at line 0 col 0
+    read.click(ed, rect, 7, 1, selecting: true) # drag into line 1
+    read.selection?.should be_true
+    text = read.copy_text(ed)
+    text.should start_with("alpha bravo")
+    text.should_not contain("foxtrot") # the drag stopped on line 1
   end
 end

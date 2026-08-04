@@ -22,7 +22,12 @@ module Gori
 
       r.register Verb::Definition.new(
         "oast.copy", "Copy payload URL", "Copy the last generated OAST payload URL to the clipboard",
-        Verb::Scope::OastCallbacks, [] of Verb::Chord, mnemonic: 'y') { |ctx| ctx.oast_copy; nil }
+        # `section: :list`, not :common: the callback DETAIL's own `y` copies what came back, and
+        # this one copies the payload gori sent — opposite directions of one interaction, and
+        # `Registry#validate_menu_keys!` refuses one letter for two meanings inside a view. The
+        # verb is also meaningless with a detail open, where there is no payload in front of you.
+        Verb::Scope::OastCallbacks, [] of Verb::Chord, mnemonic: 'y',
+        section: :list) { |ctx| ctx.oast_copy; nil }
 
       r.register Verb::Definition.new(
         "oast.filter", "Filter callbacks", "Filter the callbacks list by protocol/method/source/destination/provider",

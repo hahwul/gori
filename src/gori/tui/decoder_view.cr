@@ -4,6 +4,7 @@ require "./frame"
 require "./text_area"
 require "./input_mode"
 require "./read_cursor"
+require "./read_pane"
 require "./text_read_state"
 require "./gutter"
 require "../decoder"
@@ -26,8 +27,6 @@ module Gori::Tui
 
     @prefer : Decoder::RenderAs? = nil # nil = auto
     @prefer_idx : Int32 = 0
-    @out_scroll : Int32 = 0
-    @out_xscroll : Int32 = 0 # horizontal scroll offset for the OUTPUT card (shift+←/→)
     @last_step_count : Int32 = 0
     # Cached OUTPUT lines, rebuilt only when the chain recomputes or the display mode
     # changes (NOT every frame) — encoding/splitting a near-MAX_OUT (32 MiB) output on
@@ -35,8 +34,10 @@ module Gori::Tui
     # controller on every recompute) + cycle_out_mode set the dirty flag.
     @out_lines : Array(String) = [] of String
     @out_dirty : Bool = true
-    @out_read = ReadCursor.new
-    @out_last_h : Int32 = 0
+    # The OUTPUT pane's caret, selection, both scroll axes and its whole draw. Gutter on: these
+    # rows ARE source lines of the decoded text, and ^G-style line references only mean
+    # something with numbers beside them.
+    @out = ReadPane.new(gutter: true)
 
     # Card rects for the four sections, stacked top-to-bottom. Each is a full
     # `Frame.card` (border + interior), NOT a divided slice of one outer frame —
@@ -200,133 +201,68 @@ module Gori::Tui
       end
     end
 
+    # The OUTPUT card's interior. Everything below `output_lines` — the scroll clamps, the
+    # gutter, the h-slice, the selection band, the block caret, the gauge — is `ReadPane`'s;
+    # this pane was one of the three hand-rolled copies that component was extracted from, and
+    # migrating it is what proves the component's API rather than merely fitting new callers.
+    # Red text is the only thing left that is the Decoder's own: a failed chain prints its
+    # error here instead of bytes.
     private def render_output(screen : Screen, rect : Rect, result : Decoder::ChainResult, focused : Bool = false) : Nil
       return if rect.h <= 0
-      lines = output_lines(result)
-      @out_last_h = rect.h
-      @out_scroll = @out_scroll.clamp(0, {lines.size - rect.h, 0}.max)
-      fg = result.output.nil? ? Theme.red : Theme.text
-      gw = {Gutter.width(lines.size), rect.w}.min
-      cw = {rect.w - gw, 0}.max
-      rows = (0...rect.h).compact_map { |i| lines[@out_scroll + i]? }
-      # draw_width, not display_width: the rows go out through `screen.text` below, which
-      # advances ≥1 per grapheme. Decoder output is exactly where raw control bytes surface
-      # (a base64/hex decode of binary), and the raw measure scores every one of them 0 —
-      # so the clamp pinned @out_xscroll short and the tail of a decoded line was
-      # unreachable. _upto preserves the per-frame early exit on a huge single-line decode.
-      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.draw_width_upto(l, @out_xscroll + cw + 1) } || 0) - cw, 0}.max)
-      ensure_out_visible(rect.h) if focused
-      rows.each_with_index do |line, i|
-        li = @out_scroll + i
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @out_read.cy)
-        shown = @out_xscroll > 0 ? Highlight.slice_left_text(line, @out_xscroll) : line
-        screen.text(rect.x + gw, rect.y + i, shown, fg, Theme.bg, width: cw)
-        paint_out_line_chrome(screen, rect.x + gw, rect.y + i, li, line, lines, focused)
-      end
-      Frame.scroll_gauge(screen, rect, lines.size, @out_scroll, focused)
+      output_lines(result) # keeps @out's source in step with the cache
+      @out.render(screen, rect, focused, fg: result.output.nil? ? Theme.red : Theme.text)
     end
 
+    # Every gesture below is `ReadPane`'s; the `result` argument stays because the OUTPUT text
+    # is derived from it and `output_lines` is what keeps the pane's source in step with the
+    # cache (a recompute or a ^X mode flip re-splits, everything else is a hash-free read).
+
     def output_move(dr : Int32, dc : Int32, result : Decoder::ChainResult, selecting : Bool = false) : Nil
-      lines = output_lines(result)
-      return if lines.empty?
-      @out_read.move(dr, dc, lines, selecting: selecting)
-      ensure_out_visible(@out_last_h) if @out_last_h > 0
+      output_lines(result)
+      @out.move(dr, dc, selecting)
     end
 
     def output_scroll_view(step : Int32, result : Decoder::ChainResult) : Nil
-      lines = output_lines(result)
-      return if @out_last_h <= 0 || lines.size <= @out_last_h
-      max = lines.size - @out_last_h
-      @out_scroll = (@out_scroll + step).clamp(0, max)
-      lo = @out_scroll
-      hi = {@out_scroll + @out_last_h - 1, lines.size - 1}.min
-      @out_read.sync(
-        @out_read.cy.clamp(lo, hi),
-        @out_read.cx.clamp(0, lines[@out_read.cy].size))
+      output_lines(result)
+      @out.scroll_view(step)
     end
 
     # `selecting` is the DRAG half — the anchor stays where the press landed.
     def output_click_to_cursor(rect : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult,
                                selecting : Bool = false) : Nil
-      lines = output_lines(result)
-      return if rect.empty? || lines.empty?
-      gw = {Gutter.width(lines.size), rect.w}.min
-      @out_read.click_to_cursor(rect, mx, my, @out_scroll, lines, gw, @out_xscroll, selecting)
-      ensure_out_visible(rect.h)
+      output_lines(result)
+      @out.click(rect, mx, my, selecting)
     end
 
     # Double-click: select the word under the pointer.
     def output_select_word(rect : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult) : Bool
-      lines = output_lines(result)
-      return false if rect.empty? || lines.empty?
-      gw = {Gutter.width(lines.size), rect.w}.min
-      hit = @out_read.select_word_at(rect, mx, my, @out_scroll, lines, gw, @out_xscroll)
-      ensure_out_visible(rect.h)
-      hit
+      output_lines(result)
+      @out.select_word(rect, mx, my)
     end
 
     # READ-mode Home/End/Page over the OUTPUT pane, with ⇧ extending the selection. The page
     # step comes from the pane's LAST RENDERED height, so it matches what is on screen.
     def output_motion_key(ev : Termisu::Event::Key, result : Decoder::ChainResult) : Bool
-      lines = output_lines(result)
-      return false if lines.empty?
-      key = ev.key
-      shift = ev.shift?
-      page = {@out_last_h - 2, 1}.max
-      case
-      when key.home?      then @out_read.move_to(@out_read.cy, 0, selecting: shift)
-      when key.end?       then @out_read.move_to(@out_read.cy, lines[@out_read.cy.clamp(0, lines.size - 1)].size, selecting: shift)
-      when key.page_up?   then @out_read.move(-page, 0, lines, selecting: shift)
-      when key.page_down? then @out_read.move(page, 0, lines, selecting: shift)
-      else                     return false
-      end
-      ensure_out_visible(@out_last_h) if @out_last_h > 0
-      true
+      output_lines(result)
+      @out.motion_key(ev)
     end
 
     def output_copy_text(result : Decoder::ChainResult) : String
-      lines = output_lines(result)
-      return "" if lines.empty?
-      @out_read.selection_text(lines) || @out_read.current_line(lines)
+      output_lines(result)
+      @out.copy_text
     end
 
     def output_selection? : Bool
-      @out_read.selection?
+      @out.selection?
     end
 
     def output_select_line(result : Decoder::ChainResult) : Nil
-      lines = output_lines(result)
-      return if lines.empty?
-      @out_read.select_line(lines)
-      ensure_out_visible(@out_last_h) if @out_last_h > 0
+      output_lines(result)
+      @out.select_line
     end
 
     def output_clear_selection : Nil
-      @out_read.clear_selection
-    end
-
-    private def ensure_out_visible(view_h : Int32) : Nil
-      return if view_h <= 0
-      cy = @out_read.cy
-      if cy < @out_scroll
-        @out_scroll = cy
-      elsif cy >= @out_scroll + view_h
-        @out_scroll = cy - view_h + 1
-      end
-    end
-
-    private def paint_out_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
-                                      lines : Array(String), focused : Bool) : Nil
-      return unless focused
-      @out_read.highlight_spans(lines).each do |(l, x0, x1)|
-        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
-      end
-      return unless li == @out_read.cy
-      cx = @out_read.cx.clamp(0, line.size)
-      px = x + Screen.draw_width(line[0, cx])
-      ch = cx < line.size ? line[cx] : ' '
-      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
-      screen.cursor(px, y)
+      @out.clear_selection
     end
 
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
@@ -356,6 +292,7 @@ module Gori::Tui
       if @out_dirty
         @out_lines = output_text(result).split('\n')
         @out_dirty = false
+        @out.source(@out_lines) # the pane addresses exactly the text it is about to draw
       end
       @out_lines
     end
@@ -429,29 +366,22 @@ module Gori::Tui
       ] of {Symbol, String, String}).nil?
     end
 
-    def scroll_output(step : Int32) : Nil
-      @out_scroll += step
-    end
-
-    # Horizontal companion to `scroll_output` (shift+←/→). Floored at 0 here; render
-    # clamps the upper bound to the widest row actually on screen.
+    # Shift+←/→ over the OUTPUT card.
     def hscroll_output(step : Int32) : Nil
-      @out_xscroll = {@out_xscroll + step * 4, 0}.max
+      @out.hscroll(step)
     end
 
     # Whether the OUTPUT is scrolled to the top — ↑ here pops focus up to CHAIN
-    # (render clamps @out_scroll on every frame, so this reads the true top).
+    # (render clamps the scroll on every frame, so this reads the true top).
     def output_at_top? : Bool
-      @out_scroll <= 0 && @out_read.cy <= 0
+      @out.at_top?
     end
 
     # Invoked by the controller after every recompute: reset scroll AND invalidate
     # the cached output lines (the content changed).
     def reset_output_scroll : Nil
-      @out_scroll = 0
-      @out_xscroll = 0
       @out_dirty = true
-      @out_read.reset
+      @out.reset
     end
   end
 
