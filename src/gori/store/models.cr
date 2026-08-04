@@ -714,11 +714,16 @@ module Gori
       # Off by default — regeneration stays what every existing session does. See
       # `WsEngine.build_handshake` for why this is opt-in and not simply fixed.
       getter? ws_keep_key : Bool
+      # The operator overrode WebSocket auto-detection: send this handshake as a plain HTTP
+      # request and read the response as a response (Schema V11). Off by default — auto-detect
+      # stays what every existing session does. The request bytes are untouched either way, and
+      # the tab's `ws_messages` rows survive the override, so it is reversible without loss.
+      getter? ws_http_only : Bool
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,
                      @response_duration_us = nil, @name = nil, @sni = nil,
-                     @tags = nil, @ws_keep_key = false)
+                     @tags = nil, @ws_keep_key = false, @ws_http_only = false)
       end
     end
 

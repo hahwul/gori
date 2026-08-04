@@ -54,7 +54,7 @@ module Gori::Tui
         view.restore(r.target, request_text, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
           sni: r.sni || "", ws_messages: ws_msgs, ws_keep_key: r.ws_keep_key?,
-          evidence: !r.flow_id.nil?)
+          ws_http_only: r.ws_http_only?, evidence: !r.flow_id.nil?)
         view.name = r.name                       # custom sub-tab label survives reopen
         view.tags = Repeater::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_repeater_original(view, r.flow_id)
@@ -264,7 +264,10 @@ module Gori::Tui
           # the footer said otherwise for both.
           "type to edit · ⇧arrows select · ^Z undo · ^G goto · ^F find · #{hex} hex · esc read · ↹ text"
         else
-          "i/↵ edit · #{read_common} · ^G goto · ^F find · #{hex} hex · ↹ pane · esc tabs"
+          # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
+          # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
+          back = v.ws_http_only? ? " · ^V websocket" : ""
+          "i/↵ edit · #{read_common} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · esc tabs"
         end
       else
         ""
@@ -386,7 +389,9 @@ module Gori::Tui
     private def ws_hint(v : RepeaterView) : String
       sub = v.req_pane == :envelope ? "handshake request" : "messages"
       mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
-      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · ↹ pane"
+      # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
+      # nothing in the tab suggested a handshake could be sent as an ordinary request.
+      "#{mode} #{sub} · ^T switch · ^V http · ^G goto · ^F find · esc read · ↹ pane"
     end
 
     # The RESPONSE column's footer on a WS tab — the twin of `ws_hint`, naming the card being
@@ -524,13 +529,24 @@ module Gori::Tui
       end
     end
 
-    # Flip the request between HTTP/1.1 and HTTP/2 (overriding the captured protocol) so
-    # the next ^R dials the other engine. Refused for WebSocket (h1 by definition) and
-    # gRPC (rides h2) where the transport is intrinsic.
+    # Flip which engine the next ^R dials, overriding the captured protocol.
+    #
+    # Two states on an ordinary tab (HTTP/1.1 ⇄ HTTP/2); THREE on one holding a WebSocket
+    # handshake — WS → HTTP/1.1 → HTTP/2 → WS. `WsEngine`, `Engine` and `H2Engine` are three
+    # transports, and this key has always meant "the operator overrides the detected one", so
+    # the WS case belongs on it rather than on a key of its own.
+    #
+    # It used to answer "transport is fixed for WebSocket flows" and stop there. It is not
+    # fixed: a handshake is an ordinary HTTP request, and refusing here was what made "is this
+    # endpoint reachable without an Upgrade, and what does it answer?" unaskable in the tab
+    # that had the request in it. gRPC keeps the refusal — that one IS intrinsic (it rides h2
+    # by specification, and the tab's framed body has no h1 form).
     def repeater_toggle_http2 : Nil
       return unless view = current_view
-      if view.ws_mode? || view.grpc_mode?
-        @host.status("transport is fixed for #{view.ws_mode? ? "WebSocket" : "gRPC"} flows")
+      if view.grpc_mode?
+        @host.status("transport is fixed for gRPC flows (h2 by specification)")
+      elsif view.ws_content?
+        @host.status(view.cycle_ws_transport)
       else
         h2 = view.toggle_http2
         @host.status(h2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1")
@@ -1176,7 +1192,7 @@ module Gori::Tui
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
         next if v.request_side_matches?(row.target, String.new(row.request), row.http2?,
-                  row.auto_content_length?, row.sni, row.ws_keep_key?)
+                  row.auto_content_length?, row.sni, row.ws_keep_key?, row.ws_http_only?)
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
@@ -1188,7 +1204,7 @@ module Gori::Tui
         end
         v.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
-          evidence: !row.flow_id.nil?)
+          ws_http_only: row.ws_http_only?, evidence: !row.flow_id.nil?)
         seed_repeater_original(v, row.flow_id) # baseline may need re-seed if it was empty
       end
 
@@ -1204,7 +1220,7 @@ module Gori::Tui
         end
         view.restore(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
-          evidence: !row.flow_id.nil?)
+          ws_http_only: row.ws_http_only?, evidence: !row.flow_id.nil?)
         seed_repeater_original(view, row.flow_id)
         @repeaters << RepeaterTab.new(view, row.flow_id, row.id)
       end
@@ -1332,7 +1348,7 @@ module Gori::Tui
               else
                 persist_new_repeater(view, nil)
               end
-      if (id = db_id) && view.ws_mode?
+      if (id = db_id) && view.ws_content? # the frames come along even on an HTTP-mode duplicate
         @host.session.store.update_repeater_ws_messages(id, view.ws_out_messages_raw)
         view.ws_out_persisted
       end
@@ -1345,7 +1361,8 @@ module Gori::Tui
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_repeater(view : RepeaterView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_repeater(view.target, view.request_text.to_slice, view.http2?,
-        view.auto_content_length?, flow_id, @repeaters.size, view.sni_override)
+        view.auto_content_length?, flow_id, @repeaters.size, view.sni_override,
+        ws_keep_key: view.ws_keep_key?, ws_http_only: view.ws_http_only?)
       id == 0 ? nil : id
     end
 
@@ -1817,12 +1834,16 @@ module Gori::Tui
       return unless tab = current_repeater_tab
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      if v.ws_mode?
+      # `ws_content?`, NOT `ws_mode?`: this asks whether there are frames to write, and a tab
+      # sent as plain HTTP (`^V`) still HAS them. Asking the send-side question here meant
+      # flipping a WS tab to HTTP and leaving the tab dropped every captured frame it held —
+      # gori silently editing the operator's test case and reporting a successful save.
+      if v.ws_content?
         # Persist the RAW handshake text (request_text = the editor's `$KEY` tokens, in the
         # line endings the editor holds), NOT ws_upgrade_bytes (env-expanded): baking the
         # expanded form in would write secrets to the DB and defeat the reconcile guard.
         @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-          v.sni_override, ws_keep_key: v.ws_keep_key?)
+          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?)
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
         @host.session.store.update_repeater_ws_messages(id, v.ws_out_messages_raw)
         v.ws_out_persisted

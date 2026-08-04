@@ -838,7 +838,28 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10]
+      # `repeaters.ws_http_only` is the operator's override of gori's WebSocket AUTO-DETECTION.
+      #
+      # Whether a Repeater tab is a WebSocket tab has never been stored: it is re-derived from
+      # the request bytes on every load (`WsEngine.upgrade_request?` — an `Upgrade:` header),
+      # and that verdict decides the engine `^R` dials, the split request pane, the transcript
+      # response, and — the part that is easy to miss — whether diff, pretty-print, hex edit,
+      # minimize, group send, Match&Replace and the h1/h2 toggle are available at all. They are
+      # all gated on the same flag, so a WS endpoint could only ever be tested as a WebSocket.
+      #
+      # A handshake is also an ordinary HTTP request, and "does this endpoint 101 for an
+      # unauthenticated Origin?" is an HTTP question. This column says the operator answered it:
+      # dial the h1/h2 engine, read the response as a response, stop there. It does NOT touch
+      # the bytes — the `Upgrade:` header stays exactly as authored — and it does not discard
+      # the tab's frames: `ws_messages` rows are still persisted, so `^V` back to WebSocket
+      # replays the same session.
+      #
+      # 0 on every existing row, which is what they have always done: auto-detect.
+      V11 = [
+        "ALTER TABLE repeaters ADD COLUMN ws_http_only INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

@@ -218,6 +218,7 @@ module Gori
         flow_id : Int64? = nil
         sni : String? = nil
         ws_keep_key = false
+        ws_http_only = false
         keep_request_line = false
 
         parser = OptionParser.new do |p|
@@ -240,6 +241,7 @@ module Gori
           p.on("--keep-request-line", "With --flow: store the flow's request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
+          p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the upgrade handshake is sent as an ordinary request and the 101 read as a response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
@@ -332,7 +334,8 @@ module Gori
             flow_id: flow_id,
             position: pos.to_i32,
             sni: sni,
-            ws_keep_key: ws_keep_key
+            ws_keep_key: ws_keep_key,
+            ws_http_only: ws_http_only
           )
 
           abort "gori run repeater create: failed to create repeater session" if id == 0
@@ -465,6 +468,10 @@ module Gori
         allow_unscoped = false
         verbatim = false
         ws_keep_key = false
+        # nil = use the session's stored setting; true = this send is plain HTTP whatever it says.
+        # There is no `--websocket` counterpart: the stored default IS WebSocket unless the
+        # operator turned it off, so the only direction that needs a per-send override is this one.
+        http_only : Bool? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -481,6 +488,7 @@ module Gori
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_messages << parse_message_frame(v) }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (overrides the session's stored setting for this send)") { ws_keep_key = true }
           p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
+          p.on("--http", "WebSocket: send the upgrade handshake as an ordinary HTTP request and print the response, instead of performing the framed exchange (overrides the session's stored setting for this send). The bytes are unchanged — this selects the engine, not a rewrite") { http_only = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -515,7 +523,11 @@ module Gori
         # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
         abort_if_out_of_scope!(outbound, plan, "gori run repeater send")
 
-        if plan.websocket?
+        # The session's stored `ws_http_only` (the TUI's `^V`) is the default, and `--http`
+        # overrides it for this send. Both mean the same thing: dial the h1/h2 engine and read
+        # the 101 as a response. `Engine` already treats 101 as terminal and bodyless, and
+        # `ConnPool` already refuses to park an upgraded socket, so nothing else has to change.
+        if plan.websocket? && !(http_only.nil? ? rec.ws_http_only? : http_only)
           # `rec.flow_id` IS the provenance test, the same one the engine tabs and the h1
           # flow-replay path make: only a `--flow` / MCP `flow_id` seed sets it, and only a
           # seed puts CAPTURED frames in `ws_messages`. A session built from `--request-raw`

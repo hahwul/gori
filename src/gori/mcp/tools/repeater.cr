@@ -227,7 +227,8 @@ module Gori
           flow_id: flow_id,
           position: position.to_i32,
           sni: sni.try { |s| wire_field(s) },
-          ws_keep_key: bool_arg(h, "ws_keep_key", false)
+          ws_keep_key: bool_arg(h, "ws_keep_key", false),
+          ws_http_only: bool_arg(h, "ws_http_only", false)
         )
 
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
@@ -432,6 +433,7 @@ module Gori
 
         sni = present?(h, "sni") ? str(h, "sni") : existing.sni
         ws_keep_key = bool_arg(h, "ws_keep_key", existing.ws_keep_key?)
+        ws_http_only = bool_arg(h, "ws_http_only", existing.ws_http_only?)
 
         # Masked for the REPLY only. `target`/`sni` are stored as authored (`wire_field`) —
         # this is the write that made a plain RENAME destroy them: both fall back to the
@@ -452,7 +454,8 @@ module Gori
                  http2: http2,
                  auto_cl: auto_cl,
                  sni: sni.try { |s| wire_field(s) },
-                 ws_keep_key: ws_keep_key
+                 ws_keep_key: ws_keep_key,
+                 ws_http_only: ws_http_only
                )
           return busy("repeater NOT updated (store busy or unwritable); it is unchanged")
         end

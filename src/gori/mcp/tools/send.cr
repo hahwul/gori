@@ -65,7 +65,7 @@ module Gori
         body_cap, body_omit = body_return_opts(h)
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules, plan.h2_fields,
-          request_line_rewritten),
+          request_line_rewritten, plan.websocket?),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -556,7 +556,8 @@ module Gori
                                    ignored : Array(String), body_cap : Int32, body_omit : Bool,
                                    applied_rules : Bool = false,
                                    h2_fields : Array({String, String})? = nil,
-                                   request_line_rewritten : Bool = false) : String
+                                   request_line_rewritten : Bool = false,
+                                   websocket_handshake : Bool = false) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -567,6 +568,17 @@ module Gori
             # origin-form line that actually went out). Absent means nothing was rewritten.
             j.field "request_line_rewritten", true if request_line_rewritten
             j.field "match_replace_applied", true if applied_rules
+            # `send_request` has always sent an RFC 6455 upgrade as an ordinary HTTP request —
+            # it dials `Engine`/`H2Engine` and reads the 101 as a response, where the TUI and
+            # `gori run repeater send` would perform the framed exchange. That is a useful
+            # thing to be able to do (it is what the TUI's `^V` now exposes), but it was
+            # unnamed: a caller expecting frames got a bodyless 101 and nothing said why.
+            if websocket_handshake
+              j.field "websocket_handshake", true
+              j.field "websocket_note",
+                "this request is a WebSocket upgrade; send_request performed the HTTP round-trip only " \
+                "(the response is the handshake). Use send_websocket with a repeater_id for the framed exchange."
+            end
             unless ignored.empty?
               j.field("ignored_fields") { j.array { ignored.each { |f| j.string f } } }
               j.field "precedence_warning",

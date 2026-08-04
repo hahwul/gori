@@ -171,4 +171,40 @@ describe "Gori::Store repeater tabs (v9)" do
       store.repeaters.find!(&.id.==(id)).tags.should be_nil
     end
   end
+
+  # V11: the operator's override of WebSocket auto-detection (the TUI's `^V`). It has to
+  # survive on EVERY read path, not just the one the TUI opens with — `repeaters_meta` is the
+  # reconcile poll's source, and an override missing from it reads as a peer reverting the tab.
+  it "round-trips the V11 ws_http_only override on every read path" do
+    with_store do |store|
+      handshake = "GET /s HTTP/1.1\r\nUpgrade: websocket\r\n\r\n".to_slice
+      off = store.insert_repeater("https://ws.test", handshake, false, true, nil, 0)
+      on = store.insert_repeater("https://ws.test", handshake, false, true, nil, 1,
+        ws_http_only: true)
+
+      store.repeaters.find!(&.id.==(off)).ws_http_only?.should be_false # default: auto-detect
+      store.repeaters.find!(&.id.==(on)).ws_http_only?.should be_true
+      store.repeaters_meta.find!(&.id.==(on)).ws_http_only?.should be_true
+      store.repeaters_mcp.find!(&.id.==(on)).ws_http_only?.should be_true
+      store.get_repeater(on).not_nil!.ws_http_only?.should be_true
+      store.get_repeater_full(on).not_nil!.ws_http_only?.should be_true
+    end
+  end
+
+  it "updates the ws_http_only override without disturbing the request" do
+    with_store do |store|
+      handshake = "GET /s HTTP/1.1\r\nUpgrade: websocket\r\n\r\n".to_slice
+      id = store.insert_repeater("https://ws.test", handshake, false, true, nil, 0)
+
+      store.update_repeater(id, "https://ws.test", handshake, false, true, nil,
+        ws_keep_key: false, ws_http_only: true).should be_true
+      r = store.repeaters.find!(&.id.==(id))
+      r.ws_http_only?.should be_true
+      r.request.should eq(handshake) # the override selects an engine; it rewrites nothing
+
+      store.update_repeater(id, "https://ws.test", handshake, false, true, nil,
+        ws_keep_key: false, ws_http_only: false).should be_true
+      store.repeaters.find!(&.id.==(id)).ws_http_only?.should be_false # …and flips back
+    end
+  end
 end

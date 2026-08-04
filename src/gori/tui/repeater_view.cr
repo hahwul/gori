@@ -155,10 +155,25 @@ module Gori::Tui
       @resp_alt = {0, 0, 0, 0}
       @loaded = false
       @http2 = false
-      # WebSocket repeater mode (a 101 flow): the request editor holds the editable
-      # outbound MESSAGES (one per line) and the response pane shows the TRANSCRIPT.
-      # Session-only — these tabs are never persisted/synced (db_id stays nil).
+      # WebSocket repeater CONTENT (a 101 flow): this tab holds a handshake plus an editable
+      # outbound MESSAGES list. It says what the tab IS, not what `^R` does with it — read
+      # `ws_mode?` for that, and see `@ws_http_only` for the difference.
       @ws_mode = false
+      # …and the operator's override of it: send the handshake as an ordinary HTTP request
+      # (h1 or h2, per `@http2`) and read the response as a response, instead of dialing
+      # `WsEngine` and pumping frames. `^V` cycles WS → HTTP/1.1 → HTTP/2 → WS.
+      #
+      # A handshake IS an HTTP request, and "does this endpoint 101 for an unauthenticated
+      # Origin?" is an HTTP question — one that could not be asked here, because auto-detection
+      # gated the whole tab: diff, pretty-print, hex edit, minimize, group send, Match&Replace
+      # and the h1/h2 toggle are all off in WS mode, and every one of them is a thing you want
+      # while testing a handshake. The override switches those back on by making `ws_mode?`
+      # false; `@ws_mode` stays true, so the frames are still here and still persisted.
+      #
+      # It changes NO BYTES. The `Upgrade:` header goes out exactly as authored — this is the
+      # engine gori dials, not a rewrite of the request. (In this mode `@ws_keep_key` is moot:
+      # `Engine` sends the head verbatim, so the key line in the editor is the key on the wire.)
+      @ws_http_only = false
       @ws_upgrade = nil.as(Bytes?) # the captured upgrade-request bytes (handshake source)
       @ws_result = nil.as(Repeater::WsEngine::Result?)
       @ws_lines_cache = nil.as(Array({String, Color})?)
@@ -587,7 +602,63 @@ module Gori::Tui
       reflect_content_length_in_editor if @auto_content_length
     end
 
-    getter? ws_mode : Bool
+    # Does this tab HOLD WebSocket content — a handshake and a list of outbound frames?
+    #
+    # This is the persistence question, and it is deliberately not the same one `ws_mode?`
+    # answers. Everything that would LOSE the frames by forgetting they exist asks here:
+    # `save_current_repeater`, the duplicate path's `update_repeater_ws_messages`, `dirty?`
+    # (the MESSAGES pane's own edits), and the MCP snapshot. Asking `ws_mode?` there meant
+    # flipping a tab to HTTP and closing the project silently dropped its captured frames.
+    def ws_content? : Bool
+      @ws_mode
+    end
+
+    # Does `^R` dial `WsEngine`, and does the tab RENDER as a WebSocket (split request column,
+    # transcript response, the WS badges, and the feature gates that ride with them)?
+    #
+    # WebSocket content the operator has not overridden. See `@ws_http_only`.
+    def ws_mode? : Bool
+      @ws_mode && !@ws_http_only
+    end
+
+    # The operator overrode auto-detection: a WS tab being sent as plain HTTP. False on a tab
+    # that holds no WebSocket content at all — there is nothing to override there, and the
+    # chip/`^V` cycle must not claim otherwise.
+    def ws_http_only? : Bool
+      @ws_mode && @ws_http_only
+    end
+
+    # Cycle the transport `^R` dials: WS → HTTP/1.1 → HTTP/2 → WS. Returns the new state as a
+    # label for the status line. Only a tab holding a handshake has three states; anything
+    # else keeps the plain two-state h1/h2 toggle (`toggle_http2`).
+    #
+    # The pane geometry is mode-dependent (a WS tab splits its request column and parks a
+    # second caret), so both sub-pane selections are reset to the ones the destination mode
+    # draws — otherwise the request column came back on `:decoded` with no decoded card under
+    # it, and the response cursor sat on a `:handshake` card the HTTP branch never renders.
+    def cycle_ws_transport : String
+      return @http2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1" unless @ws_mode
+      @dirty = true
+      if !@ws_http_only # WS → HTTP/1.1
+        @ws_http_only = true
+        @http2 = false
+      elsif !@http2 # HTTP/1.1 → HTTP/2
+        @http2 = true
+      else # HTTP/2 → WS (h2 is not a WebSocket transport here — RFC 8441 is out of scope)
+        @ws_http_only = false
+        @http2 = false
+      end
+      @req_pane = ws_mode? ? :decoded : :envelope
+      @resp_pane = :transcript
+      @resp_alt = {0, 0, 0, 0}
+      resp_wrap_reset
+      reset_result_caches
+      if ws_mode?
+        "transport: WebSocket — ^R dials WsEngine and pumps the MESSAGES pane"
+      else
+        "transport: #{@http2 ? "HTTP/2 (h2)" : "HTTP/1.1"} — the handshake is sent as a plain request (frames kept)"
+      end
+    end
 
     # Load a captured WebSocket flow (101) for repeater. The request editor is seeded
     # with the handshake upgrade request; the messages editor is seeded with the recorded
@@ -599,8 +670,9 @@ module Gori::Tui
       @evidence = true # the handshake AND the seeded frames are the capture's
       @markers_declared = false
       @ws_mode = true
-      @ws_keep_key = false # a fresh capture: the regenerated key is the default (see the ivar)
-      @http2 = false       # WebSocket is HTTP/1.1
+      @ws_http_only = false # a fresh capture starts on auto-detect; ^V is the operator's to press
+      @ws_keep_key = false  # a fresh capture: the regenerated key is the default (see the ivar)
+      @http2 = false        # WebSocket is HTTP/1.1
       @ws_upgrade = detail.request_head
       @ws_result = nil
       @ws_lines_cache = nil
@@ -662,7 +734,10 @@ module Gori::Tui
     getter? ws_keep_key : Bool
 
     def toggle_ws_keep_key : Bool
-      return @ws_keep_key unless @ws_mode
+      # `ws_mode?`, not `ws_content?`: in HTTP-only mode the head goes out verbatim through
+      # `Engine`, so the key line in the editor IS the key on the wire and there is nothing
+      # for this flag to switch. It keeps its stored value for the trip back to WebSocket.
+      return @ws_keep_key unless ws_mode?
       @dirty = true
       @ws_keep_key = !@ws_keep_key
     end
@@ -803,7 +878,12 @@ module Gori::Tui
       j.field "http2", @http2
       j.field "auto_content_length", @auto_content_length
       j.field "ws_keep_key", @ws_keep_key
+      # Both halves of the WebSocket answer, because they are two different facts and an MCP
+      # client needs each: `ws_mode` is what the tab HOLDS (a handshake + frames), `ws_http_only`
+      # is what `^R` currently DOES with it. A tab reporting `ws_mode: true, ws_http_only: true`
+      # still lists its `messages` below — they are kept, not discarded.
       j.field "ws_mode", @ws_mode
+      j.field "ws_http_only", @ws_http_only if @ws_mode
       j.field "grpc_mode", @grpc_mode
       j.field "decode_mode", decode_mode?
       if kind = @decode_kind
@@ -888,6 +968,7 @@ module Gori::Tui
       @evidence = true
       @markers_declared = false
       @grpc_mode = true
+      @ws_http_only = false # in lockstep with @ws_mode below — a gRPC tab holds no handshake
       @ws_mode = false
       @http2 = true # gRPC is HTTP/2
       @grpc_body = detail.request_body || Bytes.empty
@@ -969,6 +1050,7 @@ module Gori::Tui
       @markers_declared = false
       @decode_kind = kind
       @ws_mode = false
+      @ws_http_only = false # in lockstep with @ws_mode — a decode tab holds no handshake
       @grpc_mode = false
       @http2 = detail.http_version == "HTTP/2"
       @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
@@ -1290,7 +1372,7 @@ module Gori::Tui
     # refused a whole-buffer send. Folding hex into this predicate is what let the sharpest
     # face of the defect through on the first attempt at the fix.
     private def group_framing_applies? : Bool
-      !(@grpc_mode || @ws_mode || @decode_kind || @http2)
+      !(@grpc_mode || ws_mode? || @decode_kind || @http2)
     end
 
     # "Minimize request" removes header/cookie/param lines from the plain-text request and
@@ -1322,7 +1404,7 @@ module Gori::Tui
     # an h1 primitive), the pane already reflects the whole buffer, and there is nothing
     # chunk-scoped to misread.
     def minimize_refusal : String?
-      if @req_hex_edit || @grpc_mode || @ws_mode || @decode_kind
+      if @req_hex_edit || @grpc_mode || ws_mode? || @decode_kind
         return "minimize needs a plain HTTP text request (not hex/gRPC/WS/decode)"
       end
       unless marker_regions.empty?
@@ -1555,6 +1637,7 @@ module Gori::Tui
                 sni : String = "",
                 ws_messages : Array(Store::WsOutMessage)? = nil,
                 ws_keep_key : Bool = false,
+                ws_http_only : Bool = false,
                 evidence : Bool = false) : Nil
       @flow = nil
       # `@flow` is deliberately cleared on a restore (the FlowDetail is not persisted), so
@@ -1567,7 +1650,7 @@ module Gori::Tui
       # can defend — see `markers_live?`. (A marked-up capture reopens with its markers inert
       # and the border chip saying so; ^K re-declares.)
       @markers_declared = false
-      apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key)
+      apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key, ws_http_only)
 
       @original_lines = [] of String
       # Rebuild the persisted result: a head (success) or an error (failed send)
@@ -1598,11 +1681,12 @@ module Gori::Tui
                            sni : String = "",
                            ws_messages : Array(Store::WsOutMessage)? = nil,
                            ws_keep_key : Bool = false,
+                           ws_http_only : Bool = false,
                            evidence : Bool = false) : Nil
       @evidence = evidence
       # A peer's row carries the same two facts a restore does, so the same answer: see restore.
       @markers_declared = false
-      apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key)
+      apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key, ws_http_only)
       @req_hex_edit = nil
       # Leave @result / @prev_result / @focus / @scroll / @resp_mode / @original_lines alone.
       reflect_content_length_in_editor if @auto_content_length
@@ -1619,11 +1703,16 @@ module Gori::Tui
     # made the compare blind to a pure line-ending difference, which is a real edit now.
     # (FuzzerView#session_side_matches? still normalizes — its template is a document, not
     # a captured message, and it is persisted from `#text`.)
+    #
+    # `ws_http_only` is compared for the same reason `ws_keep_key` is: it is a stored,
+    # cross-session request-side field, so a peer's `^V` has to converge here. Leaving it out
+    # meant the poll saw the row as unchanged and the override never crossed sessions.
     def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
-                              sni : String?, ws_keep_key : Bool = false) : Bool
+                              sni : String?, ws_keep_key : Bool = false,
+                              ws_http_only : Bool = false) : Bool
       @target == target && request_text == request &&
         @http2 == http2 && @auto_content_length == auto_cl &&
-        @ws_keep_key == ws_keep_key &&
+        @ws_keep_key == ws_keep_key && @ws_http_only == ws_http_only &&
         (sni_override || "") == (sni || "")
     end
 
@@ -1631,7 +1720,8 @@ module Gori::Tui
     private def apply_request_fields(target : String, request : String, http2 : Bool, auto_cl : Bool,
                                      sni : String,
                                      ws_messages : Array(Store::WsOutMessage)?,
-                                     ws_keep_key : Bool = false) : Nil
+                                     ws_keep_key : Bool = false,
+                                     ws_http_only : Bool = false) : Nil
       @ws_keep_key = ws_keep_key
       @http2 = http2
       @target = target
@@ -1641,6 +1731,10 @@ module Gori::Tui
       @target_field = :url
 
       is_ws = !ws_messages.nil? || Repeater::WsEngine.upgrade_request?(request)
+      # The stored override only means anything on a tab that HOLDS a handshake; a row that
+      # carries it without one (a request edited out of upgrade shape by a peer) reads as the
+      # plain HTTP tab it now is, rather than a tab claiming to override a mode it isn't in.
+      @ws_http_only = is_ws && ws_http_only
       if is_ws
         @ws_mode = true
         @ws_upgrade = request.to_slice
@@ -1653,7 +1747,10 @@ module Gori::Tui
         # wire form exactly, and slam the caret.)
         @editor.set_text(request) if @editor.wire_text != request
         seed_ws_out(ws_messages || [] of Store::WsOutMessage)
-        @req_pane = :decoded
+        # The MESSAGES card is the one the operator wants on a WS tab — but it is not DRAWN
+        # under the override (`req_split?` is false there), so parking the active sub-pane on
+        # it would leave the request column focused on a card that does not exist.
+        @req_pane = ws_mode? ? :decoded : :envelope
       else
         @ws_mode = false
         @editor.set_text(request) if @editor.wire_text != request
@@ -1730,6 +1827,7 @@ module Gori::Tui
       @name = SubtabClone.copy_name(src.@name)
 
       @ws_mode = src.@ws_mode
+      @ws_http_only = src.@ws_http_only # a duplicate opens on the transport its source is on
       @ws_upgrade = src.@ws_upgrade.try(&.dup)
       @ws_result = nil
       @ws_lines_cache = nil
@@ -1794,7 +1892,7 @@ module Gori::Tui
     # no head+body to split, and that is what `@resp_pane` distinguishes.
     def response_parts : {String, String}?
       return nil if @grpc_mode
-      return nil if @ws_mode && !resp_handshake_active?
+      return nil if ws_mode? && !resp_handshake_active?
       res = @result
       return nil unless res
       {String.new(res.head), (b = res.body) ? String.new(b) : ""}
@@ -1804,7 +1902,7 @@ module Gori::Tui
     # which rebuilds a synthetic flow from the current request + this response. nil until a send
     # lands (a response head is required), or in WS/gRPC mode where the active rules don't apply.
     def last_http_response : {Bytes, Bytes?}?
-      return nil if @ws_mode || @grpc_mode
+      return nil if ws_mode? || @grpc_mode
       res = @result
       return nil unless res
       return nil if res.head.empty?
@@ -2013,7 +2111,7 @@ module Gori::Tui
     # request-line version token to match so the editor display agrees with the wire (and
     # the verbatim h1 send doesn't ship a stray "HTTP/2"). Dirties so the choice persists.
     def toggle_http2 : Bool
-      return @http2 if @ws_mode || @grpc_mode
+      return @http2 if ws_mode? || @grpc_mode
       @http2 = !@http2
       retarget_request_version unless @req_hex_edit # hex is byte-exact — leave its bytes alone
       @dirty = true
@@ -2046,7 +2144,7 @@ module Gori::Tui
     # connection); for a single ^R the whole buffer is ONE request, so a `%%%` there is body
     # text and the lines under it must not be touched.
     def downgrade_h2_request_lines(*, group : Bool) : Bool
-      return false if @http2 || @req_hex_edit || @grpc_mode || @ws_mode
+      return false if @http2 || @req_hex_edit || @grpc_mode || ws_mode?
       changed = false
       at_request_line = true # line 0 starts a request; with `group`, so does the line after a `%%%`
       @editor.lines_snapshot.each_with_index do |line, i|
@@ -2070,7 +2168,7 @@ module Gori::Tui
 
     def pretty_print_request : String?
       return "hex mode active" if request_hex?
-      if @ws_mode && @req_pane == :decoded
+      if ws_mode? && @req_pane == :decoded
         return "websocket messages editor doesn't support pretty-printing"
       end
 
@@ -2322,7 +2420,7 @@ module Gori::Tui
     # where the send framed 34: the same display-vs-wire lie in the other direction.
     private def reflect_content_length_in_editor : Nil
       return unless @auto_content_length
-      return if @req_hex_edit || @grpc_mode || @ws_mode
+      return if @req_hex_edit || @grpc_mode || ws_mode?
       return if @decode_kind && @req_pane == :decoded
 
       wl = @editor.wire_lines
@@ -2421,7 +2519,7 @@ module Gori::Tui
     # elsewhere. Models reflect_content_length_in_editor (locate the header by content, then
     # replace_line). @dirty is already set by the target edit that triggered this.
     private def reflect_target_host_in_editor : Nil
-      return if @req_hex_edit || @ws_mode || @grpc_mode
+      return if @req_hex_edit || ws_mode? || @grpc_mode
       scheme, host, port = parse_target
       return if host.empty?
       # Shared with the engine and the CLI (build_target derives from the same call), so the
@@ -2567,7 +2665,7 @@ module Gori::Tui
       right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
 
       # RESPONSE: d:diff / x:hex / p:pretty (not drawn in WS/gRPC/group transcript modes)
-      unless @ws_mode || @grpc_mode || group_mode?
+      unless ws_mode? || @grpc_mode || group_mode?
         if right.w >= 2 && my == right.y
           if hit = Frame.left_chip_hit(mx, my, right.y, right.x + 12, [
                {:diff, " d:diff "},
@@ -2595,7 +2693,7 @@ module Gori::Tui
                      b << {:req_hex, "^X", "MSG"} # click to hex-edit the unary payload
                    end
                    b
-                 elsif @ws_mode
+                 elsif ws_mode?
                    WS_BADGES # ^R:SEND + ␣K:KEY — the list render_request draws from
                  elsif @req_hex_edit
                    [{:send, "^R", "SEND"}, {:req_hex, "^X", "HEX"}] of {Symbol, String, String}
@@ -2696,7 +2794,7 @@ module Gori::Tui
     # a decode tab's envelope + payload). The predicate `req_editor`, `mark_req_edit`,
     # `render` and the hit-tests all branch on — spelled once so they cannot drift.
     private def req_split? : Bool
-      !@decode_kind.nil? || @ws_mode
+      !@decode_kind.nil? || ws_mode?
     end
 
     # Which request sub-pane the point (mx, my) falls in — `:decoded` for the lower card of a
@@ -2768,7 +2866,7 @@ module Gori::Tui
     # splits it: gRPC and a pipelined group render one transcript over the whole column.
     # `req_split?`'s counterpart, and read by the same shape of hit-test / render code.
     private def resp_split? : Bool
-      @ws_mode
+      ws_mode?
     end
 
     # Which response sub-pane owns the read cursor: `:handshake` | `:transcript`. Always
@@ -2779,7 +2877,7 @@ module Gori::Tui
     # deliberately not `transcript_rows?`, which builds (and caches, and theme-checks) the rows:
     # this is read per drawn row through `resp_navigable?`.
     private def resp_transcript? : Bool
-      @ws_mode || @grpc_mode || group_mode?
+      ws_mode? || @grpc_mode || group_mode?
     end
 
     # Whether the hex dump is what the response pane is ACTUALLY drawing. `@resp_hex` alone is
@@ -3662,7 +3760,7 @@ module Gori::Tui
     # send), else nil (a normal single response). The single source these read/copy/search
     # paths share so a new transcript mode wires into all of them at once.
     private def transcript_rows? : Array({String, Color})?
-      return ws_transcript_lines if @ws_mode
+      return ws_transcript_lines if ws_mode?
       return grpc_transcript_lines if @grpc_mode
       return group_transcript_lines if group_mode?
       nil
@@ -3972,7 +4070,7 @@ module Gori::Tui
     # decoded split pane all have their own byte semantics and CLEAR concealment, so a §
     # there is literal payload, not a marker.
     private def req_marker_editable? : Bool
-      @focus == :request && !request_hex? && !@grpc_mode && !@ws_mode &&
+      @focus == :request && !request_hex? && !@grpc_mode && !ws_mode? &&
         @decode_kind.nil? && req_editor.same?(@editor)
     end
 
@@ -4003,7 +4101,7 @@ module Gori::Tui
     # with a badge naming the codec (+ the SAML param/binding) on the top border.
     private def render_decoded(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      label = if @ws_mode
+      label = if ws_mode?
                 "MESSAGES"
               elsif @decode_kind == :saml
                 "DECODED · SAML XML"
@@ -4011,7 +4109,7 @@ module Gori::Tui
                 "DECODED · GraphQL"
               end
       Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused))
-      if @ws_mode
+      if ws_mode?
         # The seeded frames this pane cannot render as a line. Without this the operator sees
         # an empty (or short) MESSAGES pane and has no way to know a PING, a CLOSE 1002 or an
         # RSV1 frame is still in the seed and still going out — which is precisely the
@@ -4127,7 +4225,11 @@ module Gori::Tui
     end
 
     private def render_request_label : String
-      return "HANDSHAKE REQUEST" if @ws_mode
+      return "HANDSHAKE REQUEST" if ws_mode?
+      # Still a handshake — it is the transport that was overridden, not the bytes — so the
+      # card says so, and names the engine `^R` will dial. Without this the tab was
+      # indistinguishable from an ordinary REQUEST while its MESSAGES pane sat hidden.
+      return @http2 ? "HANDSHAKE (h2)" : "HANDSHAKE (h1)" if ws_http_only?
       return "GRPC REQUEST" if @grpc_mode
       return "ENVELOPE" if @decode_kind # the full request; the payload is the DECODED split below
       @http2 ? "REQUEST (h2)" : "REQUEST"
@@ -4161,7 +4263,7 @@ module Gori::Tui
         end
         return
       end
-      if @ws_mode
+      if ws_mode?
         # KEY names what happens to the `Sec-WebSocket-Key` line the operator is looking at.
         # OFF (the default) means gori drops it and appends a fresh one, so the key in this
         # editor is NOT the key on the wire — which is worth a badge on its own, because the
@@ -4374,7 +4476,7 @@ module Gori::Tui
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      if @ws_mode
+      if ws_mode?
         handshake_rect, transcript_rect = ws_resp_split(rect)
         on_handshake = @resp_pane == :handshake
         render_ws_handshake(screen, handshake_rect, focused, active: on_handshake)
@@ -4810,7 +4912,7 @@ module Gori::Tui
     private def resp_line_count : Int32
       if resp_handshake_active?
         {resp_view.total, 1}.max
-      elsif @ws_mode
+      elsif ws_mode?
         {ws_transcript_lines.size, 1}.max
       elsif @grpc_mode
         {grpc_transcript_lines.size, 1}.max

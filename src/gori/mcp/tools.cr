@@ -1236,6 +1236,7 @@ module Gori
               s.field "name", strprop("optional custom name for the repeater tab")
               s.field "ws_out_messages", ws_out_messages_prop
               s.field "ws_keep_key", boolprop("WebSocket: send this session's own Sec-WebSocket-Key instead of a fresh one (default false)")
+              s.field "ws_http_only", boolprop("WebSocket: treat this session as plain HTTP — `gori run repeater send` and the TUI send the upgrade handshake as an ordinary request and read the 101 as a response, instead of performing the framed exchange. The bytes are unchanged and the session's messages are kept (default false)")
             end
 
             tool j, "update_repeater", "Update an existing repeater tab's properties by database id." do |s|
@@ -1250,6 +1251,7 @@ module Gori
               s.field "tags", strprop("free-text tags for grouping tabs (the TUI subtab label); empty string clears them")
               s.field "ws_out_messages", ws_out_messages_prop
               s.field "ws_keep_key", boolprop("WebSocket: send this session's own Sec-WebSocket-Key instead of a fresh one")
+              s.field "ws_http_only", boolprop("WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and the 101 read as a response. The bytes are unchanged and the session's messages are kept")
             end
 
             tool j, "delete_repeater", "Delete a repeater tab by database id." do |s|
