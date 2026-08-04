@@ -140,6 +140,23 @@ module Gori::Tui
       x
     end
 
+    # A right-chained badge that reports STATE rather than an on/off toggle, so it carries its
+    # own colours instead of `toggle_badge`'s lit/muted pair. Same `" chord:NAME "` geometry, so
+    # it chains with the others and hit-tests through `right_badge_hit` unchanged.
+    #
+    # For a chip whose NAME is the state (Repeater's ` ^V:WS ` / ` ^V:h1 `), muted-when-off is
+    # the wrong dress: there is no "off", and a grey chip reads as a disabled one. Callers pass
+    # a fill so the resting state is still legible and an exceptional state can shout.
+    def self.state_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
+                         chord : String, name : String, fg : Color, bg : Color,
+                         attr : Attribute = Attribute::None) : Int32
+      text = " #{chord}:#{name} "
+      x = right_edge - text.size
+      return right_edge if x < min_x
+      screen.text(x, y, text, fg, bg, attr)
+      x
+    end
+
     # READ/INS mode chip on an editor pane's top border (Repeater REQUEST, Decoder INPUT,
     # Notes, …). NOR advertises ↵ (and i) as the way into insert; INS is a plain lit label
     # (esc exits — already in the status strip). Clickable via `mode_badge_hit`. Returns

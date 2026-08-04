@@ -628,6 +628,36 @@ module Gori::Tui
       @ws_mode && @ws_http_only
     end
 
+    # Can `^V` change what `^R` dials on this tab? False only for gRPC, whose transport is
+    # fixed by specification (see `repeater_toggle_http2`'s refusal). Gates the `^V` badge:
+    # a chip is drawn exactly where the key does something, so a tab that shows none is a tab
+    # whose transport is not the operator's to pick.
+    def transport_switchable? : Bool
+      !@grpc_mode
+    end
+
+    # The transport `^R` will dial, as the `^V` badge names it. Only meaningful when
+    # `transport_switchable?` — a gRPC tab is always h2 and draws no badge to say so.
+    #
+    # An overridden handshake tab names BOTH ends ("WS→h1"): its request card is titled
+    # REQUEST, because that is what `^R` sends, so this chip is the only text on screen saying
+    # the tab holds a WebSocket handshake at all. Naming just the destination would put the tab
+    # back where it started — indistinguishable from an ordinary request with a hidden MESSAGES
+    # pane, which is the defect the card title used to carry alone.
+    def transport_label : String
+      return "WS" if ws_mode?
+      http = @http2 ? "h2" : "h1"
+      ws_http_only? ? "WS→#{http}" : http
+    end
+
+    # Should the `^V` badge wear the loud dress? Only when the operator overrode auto-detection
+    # — a tab holding a WebSocket handshake that `^R` will send as a plain request. h1 vs h2 on
+    # an ordinary tab is not an override (the tab has no other shape to be): it keeps the
+    # resting fill and lets the LABEL carry the state.
+    def transport_badge_lit? : Bool
+      ws_http_only?
+    end
+
     # Cycle the transport `^R` dials: WS → HTTP/1.1 → HTTP/2 → WS. Returns the new state as a
     # label for the status line. Only a tab holding a handshake has three states; anything
     # else keeps the plain two-state h1/h2 toggle (`toggle_http2`).
@@ -2572,6 +2602,36 @@ module Gori::Tui
     TARGET_PREFIX = "›"
     SNI_PREFIX    = "SNI ›"
 
+    # The TARGET band's SNI override marker (not a toggle — `^S` edits the row below).
+    SNI_BADGE = " SNI "
+
+    # Left stop for the TARGET band's right-chained chrome: one column clear of the card
+    # title, which `Frame.card` draws at `rect.x + 2`.
+    private def target_chip_min(rect : Rect) : Int32
+      rect.x + 9
+    end
+
+    # The TARGET band's right-to-left chrome after the NOR/INS mode chip: the SNI marker,
+    # then the `^V` transport chip. Returns `{sni_x, transport_right_edge}` — `sni_x` nil when
+    # no override is set or the marker doesn't fit. Pure geometry, shared by `render_target`
+    # and `chrome_hit`.
+    #
+    # The SNI marker used to place itself at `rect.right - size - 1`, which is INSIDE the mode
+    # chip's cells: setting an SNI override painted over the right five columns of " ↵:NOR ",
+    # leaving a truncated chip behind. Chaining it fixes that too.
+    private def target_chrome_chain(rect : Rect) : {Int32?, Int32}
+      min_x = target_chip_min(rect)
+      edge = rect.right - 1
+      mode = Frame.mode_badge_label(target_insert?)
+      edge -= mode.size if edge - mode.size >= rect.x + 8 # the mode chip's own stop — see render_target
+      sni_x = nil
+      if !@sni.strip.empty? && edge - SNI_BADGE.size >= min_x
+        edge -= SNI_BADGE.size
+        sni_x = edge
+      end
+      {sni_x, edge}
+    end
+
     private def field_base(rect : Rect, prefix : String) : Int32
       rect.x + 2 + prefix.size + 1
     end
@@ -2652,10 +2712,18 @@ module Gori::Tui
     def chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded && rect.contains?(mx, my)
       target_h = {rect.h, target_card_h}.min
-      # TARGET NOR/INS chip (top band) — click toggles insert like ↵/esc.
+      # TARGET NOR/INS chip (top band) — click toggles insert like ↵/esc. The `^V` transport
+      # chip chains left of it (past the SNI marker) and cycles the transport on click.
       if my == rect.y && target_h >= 2
         if Frame.mode_badge_hit(mx, my, rect.y, rect.right - 1, rect.x + 8, target_insert?)
           return :target_mode
+        end
+        if transport_switchable?
+          _, tr_edge = target_chrome_chain(rect)
+          if hit = Frame.right_badge_hit(mx, my, rect.y, tr_edge, target_chip_min(rect),
+               [{:transport, "^V", transport_label}] of {Symbol, String, String})
+            return hit
+          end
         end
       end
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
@@ -4150,12 +4218,27 @@ module Gori::Tui
       ins = focused && target_insert?
       Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
       Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, target_insert?) # the REAL mode, not focused&&mode — see Frame.mode_badge
+      sni_x, tr_edge = target_chrome_chain(rect)
       # An at-a-glance SNI marker on the top border (right of the title) whenever an
       # override is set, so a custom SNI is visible even before the row is reached.
-      unless @sni.strip.empty?
-        badge = " SNI "
-        bx = {rect.right - badge.size - 1, rect.x + 9}.max
-        screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg)
+      screen.text(sni_x, rect.y, SNI_BADGE, Theme.text_bright, Theme.accent_bg) if sni_x
+      # ` ^V:h1 ` / ` ^V:h2 ` / ` ^V:WS ` — the transport `^R` will dial, and the only thing on
+      # screen saying `^V` has anything to offer. It rides the TARGET band rather than the
+      # REQUEST border because that is where the rest of "how do we connect" already lives
+      # (the URL, the SNI override) and because the request border is a half-width column that
+      # already drops its NOR/INS chip when a fifth badge is chained onto it.
+      #
+      # Two dresses, no third: a filled chip at rest (the NAME is the state, so muted grey
+      # would read as "disabled"), and the ^R:SEND gold when the operator has overridden
+      # auto-detection — a handshake tab that will NOT speak WebSocket is the one thing on this
+      # band worth interrupting a glance for.
+      if transport_switchable?
+        fg, bg, attr = if transport_badge_lit?
+                         {Theme.ink_on(Theme.focus_gold), Theme.focus_gold, Attribute::Bold}
+                       else
+                         {Theme.text_bright, Theme.accent_bg, Attribute::None}
+                       end
+        Frame.state_badge(screen, tr_edge, rect.y, target_chip_min(rect), "^V", transport_label, fg, bg, attr)
       end
       url_active = focused && @target_field == :url
       sni_active_row = focused && @target_field == :sni
@@ -4224,15 +4307,23 @@ module Gori::Tui
       end
     end
 
+    # The request card's title says WHAT this card is in the pane it sits in. WHICH transport
+    # `^R` will dial is the TARGET band's ` ^V:… ` chip, in one place, on every tab.
+    #
+    # Both facts used to live here — "HANDSHAKE (h1)", "REQUEST (h2)" — because nothing else on
+    # screen carried the transport. That cost the card up to five columns of title, and the
+    # badge chain measures its left stop from the title: at 100 columns (a 49-wide request
+    # column) an h2 tab pushed its own ` ↵:NOR ` chip past `min_x` and drew no mode chip at all.
+    #
+    # An overridden handshake tab is titled REQUEST, not HANDSHAKE: `^R` sends it as an
+    # ordinary request and reads a response, the MESSAGES pane is gone, and the card is one
+    # card again — it IS a request pane. That the request happens to be an upgrade handshake is
+    # the ` ^V:WS→h1 ` chip's line, and the bytes' own.
     private def render_request_label : String
-      return "HANDSHAKE REQUEST" if ws_mode?
-      # Still a handshake — it is the transport that was overridden, not the bytes — so the
-      # card says so, and names the engine `^R` will dial. Without this the tab was
-      # indistinguishable from an ordinary REQUEST while its MESSAGES pane sat hidden.
-      return @http2 ? "HANDSHAKE (h2)" : "HANDSHAKE (h1)" if ws_http_only?
+      return "HANDSHAKE REQUEST" if ws_mode? # one of TWO cards here — MESSAGES is the other
       return "GRPC REQUEST" if @grpc_mode
       return "ENVELOPE" if @decode_kind # the full request; the payload is the DECODED split below
-      @http2 ? "REQUEST (h2)" : "REQUEST"
+      "REQUEST"
     end
 
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil

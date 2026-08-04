@@ -652,6 +652,12 @@ module Gori::Tui
       when :ws_key
         view.focus_pane(:request)
         repeater_toggle_ws_key
+      when :transport
+        # No `focus_pane`: the chip sits on the TARGET band but the choice belongs to the whole
+        # tab, and `cycle_ws_transport` already re-seats the request/response sub-panes it
+        # invalidates. Moving focus here would yank the caret out of whatever pane was being
+        # edited — the key (`^V`) doesn't, and the click should not differ.
+        repeater_toggle_http2 # cycles WS→h1→h2 on a handshake tab, flips h1⇄h2 elsewhere
       when :send
         view.focus_pane(:request)
         repeater_send

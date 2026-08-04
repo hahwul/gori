@@ -135,9 +135,18 @@ describe "RepeaterView WebSocket transport override" do
     dup.ws_out_messages_raw.size.should eq(2)
   end
 
-  it "titles the request card so the override is visible on screen" do
+  it "shows the override on screen: the card is a REQUEST, the band says WS→h1" do
     # Without this the overridden tab was indistinguishable from an ordinary REQUEST while its
     # MESSAGES pane sat hidden — the operator could not see which engine ^R would dial.
+    #
+    # The two facts are split now. The card title says what the card IS in its pane: with the
+    # override on, `^R` sends an ordinary request and reads a response, MESSAGES is gone and
+    # the split is one card again — so it is titled REQUEST, exactly like the tab it now
+    # behaves as. The WebSocket half of the story moved to the TARGET band's chip, which names
+    # BOTH ends (` ^V:WS→h1 `) precisely so the tab is still not mistakable for a plain one.
+    #
+    # The title used to carry both facts, and the extra columns pushed the card's own ↵:NOR
+    # chip off a 100-col terminal — the badge chain measures its left stop from the title.
     rect = Rect.new(0, 0, 100, 24)
     draw = ->(v : RepeaterView) {
       b = MemoryBackend.new(100, 24)
@@ -147,9 +156,13 @@ describe "RepeaterView WebSocket transport override" do
     draw.call(ws_view).contains?("HANDSHAKE REQUEST").should be_true
 
     http = ws_view(http_only: true)
-    draw.call(http).contains?("HANDSHAKE (h1)").should be_true
+    b = draw.call(http)
+    b.contains?("HANDSHAKE").should be_false # not a handshake pane any more — a request pane
+    b.row(rect.y + 3).should contain("REQUEST")
+    b.row(rect.y).should contain("^V:WS→h1")  # …and the band is what says it was a handshake
+    b.row(rect.y + 3).should contain("↵:NOR") # the request card keeps its mode chip at 100 cols
 
     http.cycle_ws_transport # → h2
-    draw.call(http).contains?("HANDSHAKE (h2)").should be_true
+    draw.call(http).row(rect.y).should contain("^V:WS→h2")
   end
 end
