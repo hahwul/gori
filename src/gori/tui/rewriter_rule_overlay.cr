@@ -281,6 +281,13 @@ module Gori::Tui
       "REWRITER RULE"
     end
 
+    # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
+    # is the whole opt-in: caret placement on a press, drag to extend, double-click for a
+    # word, all inverted by the field against the geometry `render` last drew it at.
+    def text_fields : Array(TextField)
+      @fields.values.to_a # NamedTuple on some cards, Hash on others — one shape out
+    end
+
     def hint : String
       "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
     end
@@ -304,6 +311,10 @@ module Gori::Tui
         return :commit if on_save_row?
         @on_edit_stub.try(&.call) if idx == ROW_VALUE && short_circuit_op?
       end
+      # …then the caret, if the press landed inside a drawn field. The row pick above is
+      # what focuses; this is what puts the caret where the operator pointed instead of
+      # leaving it wherever the last keystroke did (Overlay#click_text_field).
+      click_text_field(mx, my)
       :stay
     end
 

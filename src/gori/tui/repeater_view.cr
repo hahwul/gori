@@ -2806,17 +2806,49 @@ module Gori::Tui
 
     # Mouse: focus the URL or SNI field of the TARGET band by which row was clicked,
     # and place that field's caret. The value bases mirror render_target (field_base).
-    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    # `selecting` is the DRAG half: it extends the read selection from wherever the press
+    # planted the anchor, and — unlike a press — it never switches FIELDS. A drag that
+    # crossed from the URL row down onto the SNI row would otherwise re-aim the anchor at a
+    # different string, so the band would be measured in one value and painted over another.
+    #
+    # A bare press goes through `move_cx` too, rather than assigning the caret: that is what
+    # COLLAPSES a standing selection. Assigning left the anchor behind, so a click after a
+    # ⇧←/→ run repainted the band from the old anchor to the new caret — a selection the
+    # operator had just clicked away from.
+    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       return unless @loaded
       # The SNI row is at exactly rect.y+2 (bottom border is rect.y+3) — match it
       # precisely, so a click on the card's border doesn't route edits into @sni.
-      if sni_active? && my == rect.y + 2
-        @target_field = :sni
-        @scx = Screen.column_for(@sni, mx - field_base(rect, SNI_PREFIX))
-      else
-        @target_field = :url
-        @tcx = Screen.column_for(@target, mx - field_base(rect, TARGET_PREFIX))
-      end
+      @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
+      prefix = @target_field == :sni ? SNI_PREFIX : TARGET_PREFIX
+      line = target_active_line
+      to = Screen.column_for(line, mx - field_base(rect, prefix))
+      cx = @target_read.move_cx(target_active_cx, to - target_active_cx, line.size, selecting: selecting)
+      @target_field == :sni ? (@scx = cx) : (@tcx = cx)
+    end
+
+    # Pointer moved with the button held over the target card — extend from the press.
+    #
+    # READ mode only, because that is the only mode whose band `draw_target_row` paints
+    # (`active && !insert`). Extending in INSERT would plant an anchor nothing draws and
+    # `target_copy_text` would then hand back a slice the operator never saw selected — a
+    # silent selection is worse than none. The INSERT half of this field has no selection at
+    # all yet; when it grows one, this guard is what lifts.
+    def target_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return if target_insert?
+      target_click_to_cursor(rect, mx, my, selecting: true)
+    end
+
+    # Double-click: take the word the press already placed the caret on. Spreads from THAT
+    # caret rather than hit-testing again (the same rule the request/response panes follow),
+    # so the two presses of the pair cannot disagree about which character was under the
+    # pointer. False on whitespace or an empty field, leaving the press's caret standing.
+    def target_select_word : Bool
+      return false unless @loaded && !target_insert?
+      cx = @target_read.select_word_at_cursor(target_active_line, target_active_cx)
+      return false unless cx
+      @target_field == :sni ? (@scx = cx) : (@tcx = cx)
+      true
     end
 
     # Top boundary of the focused pane — the Runner pops focus to the tab bar when
@@ -3242,12 +3274,23 @@ module Gori::Tui
     end
 
     # Home/End on the single-line target/SNI field — pure caret moves, no dirty.
-    def target_home : Nil
-      @target_field == :sni ? (@scx = 0) : (@tcx = 0)
+    # Home/End on the target/SNI row, ⇧ EXTENDING like every other pane's.
+    #
+    # These two assigned the caret directly, which meant ⇧Home/⇧End DROPPED the selection the
+    # shift was asking them to grow — the read cursor's anchor lives in `@target_read` and
+    # nothing here told it anything. Same defect #583 fixed in `TextArea#home`/`#end_of_line`,
+    # left standing on the one field that is not a TextArea. Routed through `move_cx` with a
+    # delta to the line edge so the anchor rule stays in ONE place: a bare press still clears
+    # it, which is what the INSERT-mode callers (who pass no `selecting`) rely on.
+    def target_home(selecting : Bool = false) : Nil
+      cx = @target_read.move_cx(target_active_cx, -target_active_cx, target_active_line.size, selecting: selecting)
+      @target_field == :sni ? (@scx = cx) : (@tcx = cx)
     end
 
-    def target_end : Nil
-      @target_field == :sni ? (@scx = @sni.size) : (@tcx = @target.size)
+    def target_end(selecting : Bool = false) : Nil
+      len = target_active_line.size
+      cx = @target_read.move_cx(target_active_cx, len - target_active_cx, len, selecting: selecting)
+      @target_field == :sni ? (@scx = cx) : (@tcx = cx)
     end
 
     # Forward-delete the char under the caret on the target/SNI field — a content edit.
@@ -4029,12 +4072,17 @@ module Gori::Tui
       screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
       base = field_base(rect, prefix)
       w = {rect.right - base - 1, 1}.max
+      Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
+      # AFTER the value, and before the caret below. `Highlight.draw` writes its own `bg`
+      # into every cell it touches, so a band painted first was applied and erased on the
+      # same frame: ⇧←/→ on this row selected, `y` copied the right slice, and the operator
+      # saw nothing. The caret still goes last, because when the selection grows LEFTWARD
+      # the caret cell is inside the span and the band would otherwise erase it.
       if active && !insert
         if span = @target_read.selection_span(cx)
           paint_char_span_bg(screen, base, row, value, span[0], span[1], Theme.accent_bg)
         end
       end
-      Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
       if active
         # column_width — the measure paint_char_span_bg (the selection tint, a few lines up)
         # already uses on this same value in this same render, and the exact inverse of the

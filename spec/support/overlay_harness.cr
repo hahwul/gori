@@ -12,6 +12,9 @@ require "./memory_backend"
 #   * `press` / `click` mirror `Runner#dispatch_overlay_key` / `#dispatch_overlay_click`
 #     LINE FOR LINE — :cancel closes, :commit runs `commit` and closes iff it returns
 #     true, anything else stays open.
+#   * `drag` / `double_click` mirror `Runner#dispatch_drag` / `#dispatch_double_click`'s
+#     OVERLAY tier, including its `supports_drag?` gate: a modal that never opted in must
+#     see the gesture do nothing, which is what the shell does.
 #   * `open?` mirrors whether the shell still holds the modal in `@active_overlay`.
 #   * `commits` counts runs of the injected `on_commit` closure — the open-site behaviour
 #     a migrated modal no longer carries itself.
@@ -134,6 +137,47 @@ class OverlayHarness
     b = box
     raise "overlay has no box to click in (overlay_box returned nil)" unless b
     click(b.x + dx, b.y + dy)
+  end
+
+  # Pointer motion with the button held — `Runner#dispatch_drag`'s overlay tier. The shell
+  # only routes this when the press that started it landed on a modal that opted in
+  # (`Runner#drag_press_target?` → `Overlay#supports_drag?`), so this mirrors that gate
+  # rather than calling `handle_drag` unconditionally: a spec that drags a modal which never
+  # opted in must see nothing happen, exactly as the operator would.
+  #
+  # Unlike `click`, a drag has NO outcome vocabulary — the shell reads no return value, so a
+  # modal can never dismiss itself mid-drag. That asymmetry is the contract, not an omission.
+  def drag(mx : Int32, my : Int32) : Nil
+    live!
+    return unless @overlay.supports_drag?
+    @overlay.handle_drag(@area, mx, my)
+  end
+
+  def drag_in_box(dx : Int32, dy : Int32) : Nil
+    b = box
+    raise "overlay has no box to drag in (overlay_box returned nil)" unless b
+    drag(b.x + dx, b.y + dy)
+  end
+
+  # Two presses in the same cell inside the shell's double-click window. Mirrors
+  # `Runner#press_left`: the pair is dispatched to `handle_double_click` FIRST, and only a
+  # false answer falls back to the ordinary click (which, for a modal, includes the
+  # click-away dismiss). Returns whether the overlay took a word.
+  #
+  # The first press of the pair is the caller's job — the shell's real sequence is
+  # press → press, and `handle_double_click` spreads from the caret that first press left.
+  def double_click(mx : Int32, my : Int32) : Bool
+    live!
+    return false unless @overlay.supports_drag?
+    took = @overlay.handle_double_click(@area, mx, my)
+    dispatch(@overlay.handle_click(@area, mx, my)) unless took
+    took
+  end
+
+  def double_click_in_box(dx : Int32, dy : Int32) : Bool
+    b = box
+    raise "overlay has no box to double-click in (overlay_box returned nil)" unless b
+    double_click(b.x + dx, b.y + dy)
   end
 
   # A scroll-wheel notch over the modal, already ±3-scaled like Runner#handle_wheel.

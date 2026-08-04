@@ -1400,32 +1400,59 @@ module Gori::Tui
         return
       end
       dispatch_click(layout, mx, my)
-      @dragging = body_click_target?(layout, mx, my)
+      @dragging = drag_press_target?(layout, mx, my)
     end
 
-    # Whether a press at these coords landed on a body pane that can extend a selection —
-    # i.e. whether the motion that follows means anything. Nothing else (tab bar, sub-tab
-    # strip, overlays, the bottom prompts) drags.
-    # `!modal_overlay?` and NOT `@overlay.none?`, mirroring `dispatch_click`'s own precedence:
-    # `:detail` is a History body drill-in rather than a capturing modal, so a press inside it
-    # reaches the tab — and so must the drag and the double-click that follow, or the
-    # request/response text is the one place selection works by keyboard and not by mouse.
-    private def body_click_target?(layout : Layout, mx : Int32, my : Int32) : Bool
-      return false unless @focus == :body && !modal_overlay?
+    # Whether a press at these coords landed somewhere that can extend a selection — i.e.
+    # whether the motion that follows means anything.
+    #
+    # TWO tiers, in `dispatch_click`'s order, because whatever took the PRESS is what the
+    # motion continuing it has to reach: the migrated modal on top when it opts in
+    # (`Overlay#supports_drag?`), otherwise the active tab's body pane. Everything that
+    # captures a click without owning selectable text answers false — the space menu, the
+    # copy-as / send-to pickers, the bottom prompts, and the two un-migrated modals.
+    #
+    # The overlay tier is new. It used to read "nothing else (tab bar, sub-tab strip,
+    # overlays, the bottom prompts) drags", which made the modals that embed a full
+    # multi-line editor the one class of text box where the keyboard could select and the
+    # pointer could not.
+    #
+    # `!modal_overlay?` on the TAB tier and NOT `@overlay.none?`, mirroring `dispatch_click`'s
+    # own precedence: `:detail` is a History body drill-in rather than a capturing modal, so a
+    # press inside it reaches the tab — and so must the drag and the double-click that follow,
+    # or the request/response text is the one place selection works by keyboard and not by mouse.
+    private def drag_press_target?(layout : Layout, mx : Int32, my : Int32) : Bool
       return false if @space_menu_open || copy_as_shown? || send_to_shown?
       return false if @goto_open || @search_open || @rename_open || @tag_edit_open
+      # An overlay hit-tests its own card, so the shell asks only whether it opts in — it owns
+      # no geometry inside the modal to test against.
+      if ov = active_overlay
+        return ov.supports_drag?
+      end
+      return false if modal_overlay? # palette / more menu: capture without dragging
+      return false unless @focus == :body
       layout.body.contains?(mx, my) && (@tabs[@active_tab]?.try(&.supports_drag?) || false)
     end
 
     private def dispatch_drag(layout : Layout, mx : Int32, my : Int32) : Nil
       return unless @dragging
+      # Re-resolved per motion rather than captured at the press: a modal that opened mid-drag
+      # must take the motion from the tab underneath it, not let the tab keep extending a
+      # selection the operator can no longer see.
+      if ov = active_overlay
+        ov.handle_drag(layout.body, mx, my)
+        return
+      end
       @tabs[@active_tab]?.try(&.handle_drag(layout.body, mx, my))
     end
 
     private def dispatch_double_click(layout : Layout, mx : Int32, my : Int32) : Bool
-      return false unless body_click_target?(layout, mx, my)
+      return false unless drag_press_target?(layout, mx, my)
       # The first press of the pair already placed the caret and focused the pane, so the
       # word selection lands where the operator is looking.
+      if ov = active_overlay
+        return ov.handle_double_click(layout.body, mx, my)
+      end
       @tabs[@active_tab]?.try(&.handle_double_click(layout.body, mx, my)) || false
     end
 

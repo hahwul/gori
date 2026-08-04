@@ -98,7 +98,24 @@ module Gori::Tui
       box = overlay_box(area)
       @card_drawn = !box.nil?
       return try_commit unless box
-      box.contains?(mx, my) ? :stay : try_commit
+      return try_commit unless box.contains?(mx, my)
+      @editor.click_to_cursor(editor_rect(box), mx, my) # a press inside is a caret, not a no-op
+      :stay
+    end
+
+    # --- pointer selection (see Overlay#supports_drag?) ---
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
+      return unless box = overlay_box(area)
+      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
+      return false unless box = overlay_box(area)
+      @editor.select_word_at(editor_rect(box), mx, my)
     end
 
     # esc = save & close (:commit); every other key edits the buffer (:stay).
@@ -106,8 +123,6 @@ module Gori::Tui
       key = ev.key
       case
       when key.escape? then return try_commit
-      when key.up?     then @editor.move(-1, 0)
-      when key.down?   then @editor.move(1, 0)
       else                  edit(ev)
       end
       :stay
@@ -128,17 +143,21 @@ module Gori::Tui
     # ⏎ inserts a new header line; the rest are the usual TextArea editing/caret keys.
     # Any edit retracts a standing refusal — it is re-derived on the next commit attempt,
     # so the red line can never outlive the line it was about.
+    # ↑/↓ have no pane to cross into (the card is the whole surface), so everything below
+    # ⏎/⌫/Del is `TextArea#handle_motion_key` — the ONE editor keymap: ⇧arrows select,
+    # PageUp/PageDown, ⇧Home/⇧End, ⌥/⌃←→ by word, ⌥⌫. It hand-rolled bare ←→↑↓ and Home/End
+    # and passed no `selecting:` anywhere, so the buffer whose whole job is a list of header
+    # lines had no way to select one and retype it.
     private def edit(ev : Termisu::Event::Key) : Nil
       @refused = nil
       key = ev.key
       case
-      when key.enter?     then @editor.insert_newline
-      when key.backspace? then @editor.backspace
-      when key.delete?    then @editor.delete
-      when key.left?      then @editor.move(0, -1)
-      when key.right?     then @editor.move(0, 1)
-      when key.home?      then @editor.home
-      when key.end?       then @editor.end_of_line
+      when key.enter? then @editor.insert_newline
+        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
+      when key.backspace?                then @editor.backspace
+      when key.delete?                   then @editor.delete
+      when @editor.handle_motion_key(ev) then nil
       else
         ch = ev.char || key.to_char
         @editor.insert(ch) if ch && !ev.ctrl? && !ev.alt?
@@ -156,6 +175,15 @@ module Gori::Tui
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
+    # The buffer's rect inside a drawn card. Shared by `render` and the three pointer entries
+    # so the caret cannot land on a row it wasn't drawn on — a click inverting one geometry
+    # while the draw used another is #587's shape, and here it would select the header line
+    # above or below the one pointed at.
+    private def editor_rect(box : Rect) : Rect
+      top = box.y + 1
+      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2) - top, 1}.max)
+    end
+
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       @card_drawn = !box.nil? # what try_commit reads on the next key (see there)
@@ -166,9 +194,8 @@ module Gori::Tui
       # bg: Theme.bg (not the card default panel) so the embedded editor, which paints
       # on Theme.bg, doesn't two-tone against the card interior.
       Frame.card(screen, box, "CUSTOM HEADERS", bg: Theme.bg, border: Theme.border_focus)
-      top = box.y + 1
       hintline = box.bottom - 2
-      editor = Rect.new(box.x + 2, top, box.w - 4, {hintline - top, 1}.max)
+      editor = editor_rect(box)
       if @editor.line_count == 1 && @editor.text.empty?
         screen.text(editor.x, editor.y, "one header per line — e.g. Authorization: Bearer …", Theme.muted, Theme.bg, width: editor.w)
         screen.cursor(editor.x, editor.y)

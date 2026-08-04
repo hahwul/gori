@@ -112,6 +112,13 @@ module Gori::Tui
       "OAST PROVIDER"
     end
 
+    # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
+    # is the whole opt-in: caret placement on a press, drag to extend, double-click for a
+    # word, all inverted by the field against the geometry `render` last drew it at.
+    def text_fields : Array(TextField)
+      [@name, @host, @token]
+    end
+
     def hint : String
       "↑/↓ field · ←/→ scope/type · type name/host/token · ↵ save · esc cancel"
     end
@@ -125,6 +132,10 @@ module Gori::Tui
         set_selected(idx)
         return :commit if on_save_row?
       end
+      # …then the caret, if the press landed inside a drawn field. The row pick above is
+      # what focuses; this is what puts the caret where the operator pointed instead of
+      # leaving it wherever the last keystroke did (Overlay#click_text_field).
+      click_text_field(mx, my)
       :stay
     end
 

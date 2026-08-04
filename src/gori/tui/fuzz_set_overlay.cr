@@ -35,7 +35,7 @@ module Gori::Tui
     def initialize(@edit_index : Int32? = nil)
       @ptype = :list
       @preset_name = Gori::Fuzz::Presets.names.first? || "sqli" # the built-in preset selector's value
-      @sel = 0 # row cursor: 0 = the Type selector, then the type's fields
+      @sel = 0                                                  # row cursor: 0 = the Type selector, then the type's fields
       @fields = {
         :from    => TextField.new("1"),
         :to      => TextField.new("100"),
@@ -135,6 +135,13 @@ module Gori::Tui
       "PAYLOAD SET"
     end
 
+    # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
+    # is the whole opt-in: caret placement on a press, drag to extend, double-click for a
+    # word, all inverted by the field against the geometry `render` last drew it at.
+    def text_fields : Array(TextField)
+      @fields.values.to_a # NamedTuple on some cards, Hash on others — one shape out
+    end
+
     def hint : String
       "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
     end
@@ -174,11 +181,11 @@ module Gori::Tui
     private def handle_preset_name(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
-      when key.left?             then cycle_preset(-1)
-      when key.right?            then cycle_preset(1)
-      when key.up?               then move_row(-1)
-      when key.down?             then move_row(1)
-      when key.enter?            then return :commit
+      when key.left?  then cycle_preset(-1)
+      when key.right? then cycle_preset(1)
+      when key.up?    then move_row(-1)
+      when key.down?  then move_row(1)
+      when key.enter? then return :commit
       end
       :stay
     end
@@ -212,25 +219,31 @@ module Gori::Tui
 
     private def handle_values(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      # A ROW-crossing ↑ claims only a BARE press: ⇧ means a selection is mid-build and
+      # leaving the buffer would abandon it, and ⌥↑ is a motion this editor owns. The same
+      # line the Notes and Project-description editors draw.
+      crossing = !ev.shift? && !ev.ctrl? && !ev.alt?
       case
-      when key.up?   then @values.at_top? ? move_row(-1) : @values.move(-1, 0)
-      when key.down? then @values.move(1, 0) unless @values.at_bottom?
-      else                edit_values(ev) # enter = new value line, else edit/caret
+      when key.up? && crossing && @values.at_top?      then move_row(-1)
+      when key.down? && crossing && @values.at_bottom? then nil             # the last value is the floor
+      else                                                  edit_values(ev) # enter = new value line, else edit/caret
       end
       :stay
     end
 
-    # ⏎ inserts a new value line; the rest are the usual TextArea editing/caret keys.
+    # ⏎ inserts a new value line; everything below ⌫/Del is `TextArea#handle_motion_key` —
+    # the ONE editor keymap (⇧arrows select, PageUp/PageDown, ⇧Home/⇧End, ⌥/⌃←→ by word,
+    # ⌥⌫). This buffer hand-rolled bare ←→ and Home/End and passed no `selecting:` anywhere,
+    # so the pane an operator PASTES A WORDLIST INTO had no way to select a run of it back out.
     private def edit_values(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.enter?     then @values.insert_newline
-      when key.backspace? then @values.backspace
-      when key.delete?    then @values.delete
-      when key.left?      then @values.move(0, -1)
-      when key.right?     then @values.move(0, 1)
-      when key.home?      then @values.home
-      when key.end?       then @values.end_of_line
+      when key.enter? then @values.insert_newline
+        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when @values.word_delete_key?(ev)  then @values.handle_motion_key(ev)
+      when key.backspace?                then @values.backspace
+      when key.delete?                   then @values.delete
+      when @values.handle_motion_key(ev) then nil
       else
         ch = ev.char || key.to_char
         @values.insert(ch) if ch && !ev.ctrl? && !ev.alt?
@@ -348,13 +361,13 @@ module Gori::Tui
 
     private def field_label(f : Symbol) : String
       case f
-      when :from    then "From"
-      when :to      then "To"
-      when :step    then "Step"
-      when :count   then "Count"
-      when :charset then "Charset"
-      when :min     then "Min"
-      when :max     then "Max"
+      when :from        then "From"
+      when :to          then "To"
+      when :step        then "Step"
+      when :count       then "Count"
+      when :charset     then "Charset"
+      when :min         then "Min"
+      when :max         then "Max"
       when :path        then "Path"
       when :preset_name then "Preset"
       else                   ""
@@ -474,10 +487,16 @@ module Gori::Tui
       nil
     end
 
-    private def render_values(screen : Screen, box : Rect) : Nil
+    # The value list's rect inside a drawn card. Shared by `render_values` and the three
+    # pointer entries so the caret cannot land on a row it wasn't drawn on — the click arm
+    # used to re-derive this expression by hand, one copy away from drifting.
+    private def values_rect(box : Rect) : Rect
       top = box.y + 3
-      h = {(box.bottom - 2) - top, 1}.max
-      editor = Rect.new(box.x + 2, top, box.w - 4, h)
+      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2) - top, 1}.max)
+    end
+
+    private def render_values(screen : Screen, box : Rect) : Nil
+      editor = values_rect(box)
       foc = focused == :values
       if @values.line_count == 1 && @values.text.empty?
         screen.text(editor.x, editor.y, "one value per line — paste a wordlist, it splits automatically", Theme.muted, Theme.bg, width: editor.w)
@@ -516,13 +535,34 @@ module Gori::Tui
         sync_path_complete
       elsif @ptype == :list
         @sel = rows.index(:values) || @sel
-        @values.click_to_cursor(Rect.new(box.x + 2, box.y + 3, box.w - 4, {(box.bottom - 2) - (box.y + 3), 1}.max), mx, my)
+        @values.click_to_cursor(values_rect(box), mx, my)
       else
         i = my - (box.y + 3)
         @sel = (i + 1).clamp(1, rows.size - 1) if 0 <= i < field_rows.size
         sync_path_complete
       end
       :stay
+    end
+
+    # --- pointer selection (see Overlay#supports_drag?) ---
+    # This card has BOTH kinds of text: the LIST payload type is a real multi-line `TextArea`
+    # (`@values`), every other type is single-line `TextField` rows. So each entry handles the
+    # buffer when it is showing and otherwise falls through to the base, which routes to
+    # whichever listed field was drawn under the pointer.
+    def supports_drag? : Bool
+      @ptype == :list || super
+    end
+
+    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
+      return super unless @ptype == :list
+      return unless box = overlay_box(area)
+      @values.click_to_cursor(values_rect(box), mx, my, selecting: true)
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
+      return super unless @ptype == :list
+      return false unless box = overlay_box(area)
+      @values.select_word_at(values_rect(box), mx, my)
     end
 
     def move(d : Int32) : Nil

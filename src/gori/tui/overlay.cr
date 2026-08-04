@@ -1,6 +1,7 @@
 require "termisu"
 require "./screen"
 require "./geometry"
+require "./text_field"
 
 module Gori::Tui
   # Every modal state the shell's `@overlay` can hold. This was a bare `Symbol` with 33
@@ -168,7 +169,64 @@ module Gori::Tui
     # stays" behaviour; overlays with clickable rows override to also commit on a hit.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      (box.nil? || !box.contains?(mx, my)) ? :cancel : :stay
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      click_text_field(mx, my) # a press inside a drawn field is a caret, not a no-op
+      :stay
+    end
+
+    # Whether a press inside this modal can start a DRAG — pointer motion with the button
+    # held, which extends a selection from where the press landed. False by default: an
+    # overlay opts in only when its card holds text with a selection to extend.
+    #
+    # The shell dragged NOTHING over an overlay before this: `Runner#dispatch_drag` reached
+    # only the active tab, so the three modals that embed a real multi-line editor (the
+    # Rewriter stub, the Discover headers, the Fuzzer SET value list) were text an operator
+    # could type into and could not select with the pointer. The tab-side contract this
+    # mirrors is `TabController#supports_drag?` / `#handle_drag` / `#handle_double_click`,
+    # deliberately spelled the same way so the shell's two tiers read alike.
+    #
+    # All three take the SAME `area` the shell hands `handle_click` (the body rect), because
+    # an overlay hit-tests its own card: the shell owns no geometry inside it.
+    def supports_drag? : Bool
+      !text_fields.empty?
+    end
+
+    # The single-line fields this modal draws. Default empty; an overlay that lists them
+    # here gets drag-select and double-click word-select for FREE, because a `TextField`
+    # remembers the x/y/width it was last drawn at and inverts its own clicks (`hit?`).
+    #
+    # That indirection is the point: the geometry of a "label value" row lives in the
+    # overlay's `render` and nowhere else, so the alternative was thirteen hand-written row
+    # rects for the pointer to invert — thirteen chances to land the caret a column off what
+    # was drawn. The field is the only thing that already knows.
+    #
+    # The PRESS is still each overlay's own business (it also picks the focused row), which
+    # is why `handle_click` is not defaulted here.
+    def text_fields : Array(TextField)
+      [] of TextField
+    end
+
+    # Pointer moved with the button held. Extends the selection to (mx, my).
+    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
+      text_fields.each { |f| break if f.click_to_cursor(mx, my, selecting: true) }
+    end
+
+    # Two presses in the same cell inside the double-click window. Selects the word under
+    # the pointer; return false to fall back to the ordinary single-click behaviour (which,
+    # for a modal, includes the click-away dismiss — so a modal that answers true here is
+    # also saying "this press was text, not a dismiss").
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
+      text_fields.each { |f| return true if f.select_word_at(mx, my) }
+      false
+    end
+
+    # Place the caret in whichever listed field was drawn under the pointer, collapsing any
+    # standing selection. Overlays call this from their own `handle_click` — one line, after
+    # they have picked the focused row — so a press inside a field is a caret rather than a
+    # no-op. Returns whether a field took it.
+    def click_text_field(mx : Int32, my : Int32) : Bool
+      text_fields.each { |f| return true if f.click_to_cursor(mx, my) }
+      false
     end
 
     # The modal's box within `area` — the click-away hit-test. `nil` means the card has

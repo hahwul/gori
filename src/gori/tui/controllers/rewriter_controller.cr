@@ -318,32 +318,43 @@ module Gori::Tui
       true
     end
 
+    # Everything below the three pane-crossing arms is `TextArea#handle_motion_key` — the ONE
+    # editor keymap (⇧arrows select, Page keys, ⇧Home/⇧End, ⌥/⌃←→ by word, ⌥⌫). This pane was
+    # the last TextArea editor still hand-rolling its own arrows, and the hand-rolled set passed
+    # no `selecting:` anywhere: it had the MOUSE half of selection (drag + double-click, below)
+    # and none of the keyboard half, while the OUTPUT pane beside it had ⇧arrows all along.
+    #
+    # A crossing arm claims only a BARE press. ⇧ means a selection is mid-build and leaving
+    # would abandon it (the same line Notes and the Project description draw), and ⌥←/⌥↑ are
+    # word/buffer motions this pane owns — routing them out would make ⌥← at column 0 jump to
+    # the rule list instead of stepping back a word.
     private def handle_preview_in_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       ed = @preview_input
+      crossing = !ev.shift? && !ev.ctrl? && !ev.alt?
       case
       when key.escape?
         @focus = :list
-      when key.up?
-        ed.at_top? ? (@focus = :list) : ed.move(-1, 0)
-      when key.down?
-        ed.at_bottom? ? (@focus = :preview_out) : ed.move(1, 0)
-      when key.left?
-        ed.at_start? ? (@focus = :list) : ed.move(0, -1)
-      when key.right?
-        ed.move(0, 1)
+      when key.up? && crossing && ed.at_top?
+        @focus = :list
+      when key.down? && crossing && ed.at_bottom?
+        @focus = :preview_out
+      when key.left? && crossing && ed.at_start?
+        @focus = :list
       when key.enter?
         ed.insert_newline
+      when ev.ctrl_z?
+        ed.undo
+        # Before plain ⌫, which would otherwise swallow the modified form as a one-character
+        # delete on a terminal that reports ⌥⌫ as Backspace+Alt.
+      when ed.word_delete_key?(ev)
+        ed.handle_motion_key(ev)
       when key.backspace?
         ed.backspace
       when key.delete?
         ed.delete
-      when key.home?
-        ed.home
-      when key.end?
-        ed.end_of_line
-      when ev.ctrl_z?
-        ed.undo
+      when ed.handle_motion_key(ev)
+        # consumed: a caret motion, with or without a selection riding along
       else
         if (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
           ed.insert(c)

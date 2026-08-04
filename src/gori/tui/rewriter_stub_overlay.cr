@@ -49,33 +49,53 @@ module Gori::Tui
     end
 
     # Nothing to cancel INTO (the rule form is still underneath), so a click outside the card
-    # saves exactly like esc.
+    # saves exactly like esc. A click INSIDE places the caret: this is a text editor, and a
+    # press that only kept the card up was the one pointer gesture it answered.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      (box.nil? || !box.contains?(mx, my)) ? :commit : :stay
+      return :commit if box.nil? || !box.contains?(mx, my)
+      @editor.click_to_cursor(editor_rect(box), mx, my)
+      :stay
+    end
+
+    # --- pointer selection (see Overlay#supports_drag?) ---
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
+      return unless box = overlay_box(area)
+      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
+      return false unless box = overlay_box(area)
+      @editor.select_word_at(editor_rect(box), mx, my)
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
       when key.escape? then return :commit
-      when key.up?     then @editor.move(-1, 0)
-      when key.down?   then @editor.move(1, 0)
       else                  edit(ev)
       end
       :stay
     end
 
+    # ↑/↓ have no pane to cross into (the card is the whole surface), so everything below
+    # ⏎/⌫/Del is `TextArea#handle_motion_key` — the ONE editor keymap: ⇧arrows select,
+    # PageUp/PageDown, ⇧Home/⇧End, ⌥/⌃←→ by word, ⌥⌫. This editor hand-rolled bare ←→↑↓ and
+    # Home/End and passed no `selecting:` anywhere, so a multi-line HTTP response was a buffer
+    # with no way to select a header line and replace it.
     private def edit(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.enter?     then @editor.insert_newline
-      when key.backspace? then @editor.backspace
-      when key.delete?    then @editor.delete
-      when key.left?      then @editor.move(0, -1)
-      when key.right?     then @editor.move(0, 1)
-      when key.home?      then @editor.home
-      when key.end?       then @editor.end_of_line
+      when key.enter? then @editor.insert_newline
+        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
+      when key.backspace?                then @editor.backspace
+      when key.delete?                   then @editor.delete
+      when @editor.handle_motion_key(ev) then nil
       else
         ch = ev.char || key.to_char
         @editor.insert(ch) if ch && !ev.ctrl? && !ev.alt?
@@ -93,6 +113,15 @@ module Gori::Tui
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
+    # The buffer's rect inside a drawn card. Shared by `render` and the three pointer
+    # entries so the caret cannot land on a row it wasn't drawn on: a click that inverts one
+    # geometry while the draw used another is #587's shape, and here it would be a header
+    # line selected one row off the one the operator pointed at.
+    private def editor_rect(box : Rect) : Rect
+      top = box.y + 1
+      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 3) - top, 1}.max)
+    end
+
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
@@ -105,7 +134,7 @@ module Gori::Tui
       top = box.y + 1
       statusy = box.bottom - 3
       hintline = box.bottom - 2
-      editor = Rect.new(box.x + 2, top, box.w - 4, {statusy - top, 1}.max)
+      editor = editor_rect(box)
       if @editor.line_count == 1 && @editor.text.empty?
         screen.text(editor.x, editor.y, "200 OK", Theme.muted, Theme.bg, width: editor.w)
         screen.text(editor.x, editor.y + 1, "Content-Type: application/json", Theme.muted, Theme.bg, width: editor.w) if editor.h > 1

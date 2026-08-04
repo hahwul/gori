@@ -84,6 +84,13 @@ module Gori::Tui
       "EXPORT #{label}"
     end
 
+    # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
+    # is the whole opt-in: caret placement on a press, drag to extend, double-click for a
+    # word, all inverted by the field against the geometry `render` last drew it at.
+    def text_fields : Array(TextField)
+      [@field]
+    end
+
     def hint : String
       "type to complete · ↹ pick · ↑↓ browse · ↵ write · esc cancel"
     end

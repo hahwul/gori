@@ -525,9 +525,47 @@ module Gori::Tui
     # character — so a caller can syntax-highlight what is being typed. The live IME
     # preedit always uses `fg`: it is not part of `value` yet, so nothing has classified
     # it. A short/absent array simply falls back to `fg` for the uncovered tail.
+    # Tint the background of `line[x0...x1]` — the selection band every text pane paints
+    # under its value before drawing it.
+    #
+    # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
+    # CHARS is exactly the retired per-codepoint measure: it drifts right by each cluster's
+    # inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing char-by-char also
+    # SHREDS a cluster across cells, stranding a bare combining mark in one of its own. Span
+    # edges snap outward so the tint covers whole glyphs.
+    #
+    # Seven views carry this as an identical private method (`paint_char_span_bg`); two of
+    # them — the WRAPPING panes, History detail and the Repeater request — carry a variant
+    # that takes a `row_start` and measures with `Wrap.row_col` instead. This is the plain
+    # one, promoted so `TextField` could paint a band without becoming an eighth copy. The
+    # existing seven are untouched: folding them in is a cleanup of its own, and the two
+    # wrap-aware ones are not this function.
+    def char_span_bg(x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      a = Screen.cluster_start(line, {x0, line.size}.min)
+      b = Screen.cluster_end(line, {x1, line.size}.min)
+      px = x + Screen.draw_width(line[0, a])
+      i = a
+      while i < b
+        e = Screen.cluster_end(line, i + 1)
+        seg = line[i...e]
+        text(px, y, seg, Theme.text, bg)
+        px += Screen.draw_width(seg)
+        i = e
+      end
+    end
+
+    # `sel` is a half-open {from, to} CHARACTER range into `value` to tint as the selection
+    # band. It is drawn HERE, between the value and the block caret, because those are the
+    # only two orderings that work and a caller can only reach one of them: painting before
+    # the value is what `draw_target_row` did, and `styled_run`/`Highlight.draw` both write
+    # their own `bg` over every cell they touch — so that band was applied and then erased on
+    # the same frame, leaving ⇧←/→ on the Repeater and Fuzzer target rows a selection that
+    # copied correctly and was INVISIBLE. Painting after the whole call instead would erase
+    # the caret whenever the selection grew leftward (the caret cell is inside the span then).
     def input_line(x : Int32, y : Int32, value : String, cx : Int32, preedit : String,
                    fg : Color, bg : Color = Theme.bg, width : Int32? = nil,
-                   colors : Array(Color)? = nil) : Nil
+                   colors : Array(Color)? = nil, sel : {Int32, Int32}? = nil) : Nil
       cx = cx.clamp(0, value.size)
       right = x + (width || (@width - x))
       prefix = value[0, cx]
@@ -536,6 +574,11 @@ module Gori::Tui
       px = styled_run(px, y, prefix, 0, colors, fg, bg, right) unless prefix.empty?
       px = text(px, y, preedit, fg, bg, attr: Attribute::Underline, width: {right - px, 0}.max) unless preedit.empty?
       styled_run(px, y, suffix, cx, colors, fg, bg, right) unless suffix.empty?
+      # Only meaningful with no preedit in flight: composing text shifts every column right
+      # of the caret, and a band measured against `value` would sit under the wrong glyphs.
+      if sel && preedit.empty?
+        char_span_bg(x, y, value, sel[0].clamp(0, value.size), sel[1].clamp(0, value.size), Theme.accent_bg)
+      end
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
       # draw_width, NOT display_width. `cx` is a CHARACTER index into `value` (see the

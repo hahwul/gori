@@ -217,6 +217,9 @@ module Gori::Tui
       case v.focus
       when :template then v.template_drag_to_cursor(body, mx, my)
       when :detail   then v.detail_click_to_cursor(body, mx, my, selecting: true)
+        # The TARGET row is the third text pane: a single-line READ field with a caret, an
+        # anchor and a painted band (LineFieldRead). It had ⇧←/→ and no pointer route at all.
+      when :target then v.target_drag_to_cursor(body, mx, my)
       end
     end
 
@@ -230,6 +233,8 @@ module Gori::Tui
       when :detail
         return false if v.detail_chip_at(body, mx, my) # a pane chip is a button, not text
         v.detail_select_word(body, mx, my)
+      when :target
+        v.target_select_word
       else false
       end
     end
@@ -435,8 +440,8 @@ module Gori::Tui
       when key.down?  then v.pane_advance(1)
       when key.left?  then v.target_read_move(-1, selecting: selecting)
       when key.right? then v.target_read_move(1, selecting: selecting)
-      when key.home?  then v.target_home
-      when key.end?   then v.target_end
+      when key.home?  then v.target_home(selecting)
+      when key.end?   then v.target_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # x select-line, y copy, Global breath → keymap
       end

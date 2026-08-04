@@ -814,6 +814,11 @@ module Gori::Tui
       case v.focus
       when :request  then v.request_drag_to_cursor(body, mx, my)
       when :response then v.resp_drag_to_cursor(body, mx, my)
+        # The TARGET row is a single-line READ field with a caret, an anchor and a painted
+        # band (LineFieldRead) — everything a drag needs. It was missing from both pointer
+        # arms, so the one field an operator most often wants to copy a slice out of (the
+        # URL) had ⇧←/→ and nothing the mouse could do.
+      when :target then v.target_drag_to_cursor(body, mx, my)
       end
     end
 
@@ -824,9 +829,11 @@ module Gori::Tui
       body = body_rect_below_filter(rect)
       return false if v.chrome_hit(body, mx, my) # a border badge is a button, not text
       case v.focus
-      # Both spread from the caret the press placed rather than hit-testing again — see the view.
+      # All three spread from the caret the press placed rather than hit-testing again — see
+      # the view.
       when :request  then v.request_select_word
       when :response then v.resp_select_word
+      when :target   then v.target_select_word
       else                false
       end
     end
@@ -2054,8 +2061,8 @@ module Gori::Tui
       when key.down?  then view.pane_advance(1)
       when key.left?  then view.target_read_move(-1, selecting: selecting)
       when key.right? then view.target_read_move(1, selecting: selecting)
-      when key.home?  then view.target_home
-      when key.end?   then view.target_end
+      when key.home?  then view.target_home(selecting)
+      when key.end?   then view.target_end(selecting)
       when c == 'x'   then view.pane_select_line
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false

@@ -1590,12 +1590,24 @@ module Gori::Tui
       end
     end
 
-    def target_home : Nil
-      @target_field == :sni ? (@scx = 0) : (@tcx = 0)
+    # Home/End on the target/SNI row, ⇧ EXTENDING — the Repeater twin of these carries the
+    # reasoning: assigning the caret directly DROPPED the selection ⇧Home/⇧End was asking to
+    # grow, because the anchor lives in `@target_read` and a bare assignment never reaches it.
+    # A bare press still clears the anchor, which is what the INSERT-mode callers rely on.
+    def target_home(selecting : Bool = false) : Nil
+      if @target_field == :sni
+        @scx = @target_read.move_cx(@scx, -@scx, @sni.size, selecting: selecting)
+      else
+        @tcx = @target_read.move_cx(@tcx, -@tcx, @target.size, selecting: selecting)
+      end
     end
 
-    def target_end : Nil
-      @target_field == :sni ? (@scx = @sni.size) : (@tcx = @target.size)
+    def target_end(selecting : Bool = false) : Nil
+      if @target_field == :sni
+        @scx = @target_read.move_cx(@scx, @sni.size - @scx, @sni.size, selecting: selecting)
+      else
+        @tcx = @target_read.move_cx(@tcx, @target.size - @tcx, @target.size, selecting: selecting)
+      end
     end
 
     def target_read_move(dc : Int32, selecting : Bool = false) : Nil
@@ -2074,12 +2086,15 @@ module Gori::Tui
       screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
       base = field_base(rect, prefix)
       w = {rect.right - base - 1, 1}.max
+      Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
+      # AFTER the value and before the caret — see `RepeaterView#draw_target_row`, whose note
+      # carries the reasoning: `Highlight.draw` writes its own `bg` over every cell, so a band
+      # painted first was erased on the same frame and this row's ⇧←/→ selection was invisible.
       if active && !insert
         if span = @target_read.selection_span(cx)
           paint_char_span_bg(screen, base, row, value, span[0], span[1], Theme.accent_bg)
         end
       end
-      Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
       if active
         cursor_x = base + Screen.draw_width(value[0, cx])
         if cursor_x < rect.right - 1
@@ -2933,18 +2948,49 @@ module Gori::Tui
     # --- clicks --------------------------------------------------------------
     # Mouse: place the TARGET field caret at a click. Single-line field; the value
     # base mirrors render_target (the "›" marker at rect.x+2, the value at rect.x+4).
-    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    # `selecting` is the DRAG half — see `RepeaterView#target_click_to_cursor`, whose
+    # reasoning this mirrors: a drag never switches FIELDS (the anchor would end up measured
+    # in one value and painted over another), and even a bare press routes through `move_cx`
+    # so it COLLAPSES a standing selection instead of leaving the anchor behind.
+    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       return unless @loaded
       # Row 2 is the SNI field when it is showing — a click there selects that field, the
       # same mapping RepeaterView#target_click_to_cursor makes, so the caret cannot land on
       # the row the click did not point at.
-      if sni_active? && my == rect.y + 2
-        @target_field = :sni
-        @scx = Screen.column_for(@sni, mx - field_base(rect, SNI_PREFIX))
+      @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
+      if @target_field == :sni
+        to = Screen.column_for(@sni, mx - field_base(rect, SNI_PREFIX))
+        @scx = @target_read.move_cx(@scx, to - @scx, @sni.size, selecting: selecting)
       else
-        @target_field = :url
-        @tcx = Screen.column_for(@target, mx - field_base(rect, TARGET_PREFIX))
+        to = Screen.column_for(@target, mx - field_base(rect, TARGET_PREFIX))
+        @tcx = @target_read.move_cx(@tcx, to - @tcx, @target.size, selecting: selecting)
       end
+    end
+
+    # Pointer moved with the button held over the target card — READ mode only, for the
+    # reason spelled out on `RepeaterView#target_drag_to_cursor`: INSERT paints no band, so
+    # extending there would plant a selection nothing draws and `target_copy_text` would
+    # still honour it.
+    def target_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return if target_insert?
+      target_click_to_cursor(rect, mx, my, selecting: true)
+    end
+
+    # Double-click: take the word the press already placed the caret on, spreading from THAT
+    # caret rather than hit-testing again. False on whitespace or an empty field, leaving the
+    # press's caret standing.
+    def target_select_word : Bool
+      return false unless @loaded && !target_insert?
+      if @target_field == :sni
+        cx = @target_read.select_word_at_cursor(@sni, @scx)
+        return false unless cx
+        @scx = cx
+      else
+        cx = @target_read.select_word_at_cursor(@target, @tcx)
+        return false unless cx
+        @tcx = cx
+      end
+      true
     end
 
     # Mouse: place the TEMPLATE editor caret at a click. Re-derives the template
