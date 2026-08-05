@@ -28,7 +28,7 @@ module Gori::Settings
 
   private def self.parse_retention(node : JSON::Any?) : Nil
     return unless h = node.try(&.as_h?)
-    h["max_flows"]?.try(&.as_i?).try { |v| self.retention_max_flows = v < 0 ? 0 : v }
+    int_field(h, "max_flows").try { |v| self.retention_max_flows = v < 0 ? 0 : v }
   end
 
   # Omitted at the factory default, like the other optional sections, so an untouched install

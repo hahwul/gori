@@ -307,15 +307,26 @@ module Gori
         return QL::EMPTY unless active_unlocked?
         inc_conds = [] of String
         exc_conds = [] of String
-        args = [] of DB::Any
+        # Bucket the values with their conditions. The SQL below is assembled
+        # includes-then-excludes, but @rules is in rule-id order, so a single flat array
+        # bound an exclude's pattern to an include's `?` (and vice versa) whenever an
+        # exclude rule was stored first — the filter then silently described a different
+        # set than `in_scope_url?`. Same placeholder/value discipline QL.tree_sql documents.
+        inc_args = [] of DB::Any
+        exc_args = [] of DB::Any
         @rules.each do |rule|
           cond, cargs = rule_cond(rule)
-          (rule.include? ? inc_conds : exc_conds) << cond
-          args.concat(cargs)
+          if rule.include?
+            inc_conds << cond
+            inc_args.concat(cargs)
+          else
+            exc_conds << cond
+            exc_args.concat(cargs)
+          end
         end
         inc_sql = inc_conds.empty? ? "1" : "(#{inc_conds.join(" OR ")})"
         exc_sql = exc_conds.empty? ? "" : " AND NOT (#{exc_conds.join(" OR ")})"
-        QL::Filter.new("(#{inc_sql}#{exc_sql})", args)
+        QL::Filter.new("(#{inc_sql}#{exc_sql})", inc_args + exc_args)
       end
     end
 

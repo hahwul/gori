@@ -15,6 +15,38 @@ module Gori
     module RequestBuilder
       record Built, bytes : Bytes, scheme : String, host : String, port : Int32
 
+      # `headers` as name→value pairs, in the caller's order.
+      #
+      # An `as_h?`-only read answered nil for every non-object shape and the caller then
+      # skipped the loop entirely — so a JSON-encoded string or a pair array meant the
+      # request went out with ZERO caller headers and still reported success. An entire
+      # authenticated crawl could run unauthenticated with no signal anywhere. Accept the
+      # shapes an agent actually sends, and RAISE on anything else rather than vanish —
+      # same contract as `parse_h2_fields`, which already takes object-or-encoded-string.
+      def self.header_pairs(raw : JSON::Any?) : Array({String, String})
+        return [] of {String, String} if raw.nil? || raw.raw.nil?
+        node = raw
+        if s = raw.as_s?
+          # A whole object handed over as a JSON string — common when an agent stringifies.
+          parsed = (JSON.parse(s) rescue nil)
+          raise Gori::Error.new(
+            "invalid 'headers' (expected an object of name->value, got an unparseable string)") unless parsed
+          node = parsed
+        end
+
+        if h = node.as_h?
+          return h.map { |k, v| {k, v.as_s? || v.to_s} }
+        end
+        if arr = node.as_a?
+          return arr.map do |item|
+            pair = item.as_a?
+            raise Gori::Error.new("invalid 'headers' (array form must hold [name, value] pairs)") unless pair && pair.size == 2
+            {pair[0].as_s? || pair[0].to_s, pair[1].as_s? || pair[1].to_s}
+          end
+        end
+        raise Gori::Error.new("invalid 'headers' (expected an object of name->value)")
+      end
+
       # `args` is the tool's `arguments` object (a parsed JSON hash).
       def self.build(args : Hash(String, JSON::Any)) : Built
         uri, scheme, host, port = parse_origin(args)
@@ -167,12 +199,10 @@ module Gori
         reject_token_breakers(target, "request target")
 
         headers = [] of {String, String}
-        if h = args["headers"]?.try(&.as_h?)
-          h.each do |k, v|
-            value = Env.expand(v.as_s? || v.to_s)
-            validate_header(k, value)
-            headers << {k, value}
-          end
+        RequestBuilder.header_pairs(args["headers"]?).each do |(k, v)|
+          value = Env.expand(v)
+          validate_header(k, value)
+          headers << {k, value}
         end
 
         unless headers.any? { |(k, _)| k.compare("host", case_insensitive: true) == 0 }

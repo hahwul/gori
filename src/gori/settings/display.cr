@@ -110,7 +110,7 @@ module Gori::Settings
     if ord = o["history_list_order"]?.try(&.as_s?)
       self.history_list_order = normalize_history_list_order(ord)
     end
-    if d = o["sitemap_expand_depth"]?.try(&.as_i?)
+    if d = int_field(o, "sitemap_expand_depth")
       self.sitemap_expand_depth = normalize_sitemap_depth(d)
     end
   end
@@ -122,7 +122,7 @@ module Gori::Settings
     if cmd = o["command"]?.try(&.as_s?)
       self.statusline_command = cmd
     end
-    if iv = o["interval"]?.try(&.as_i?)
+    if iv = int_field(o, "interval")
       self.statusline_interval = {iv, 1}.max
     end
   end
@@ -138,7 +138,7 @@ module Gori::Settings
       self.history_time_format = v == "relative" ? "relative" : "absolute"
     end
     self.show_gutter = load_bool_h(o, "show_gutter", show_gutter)
-    if v = o["preview_body_kib"]?.try(&.as_i?)
+    if v = int_field(o, "preview_body_kib")
       self.preview_body_kib = v.clamp(1, MAX_PREVIEW_BODY_KIB)
     end
     self.resource_meter = load_bool_h(o, "resource_meter", resource_meter?)
@@ -157,7 +157,7 @@ module Gori::Settings
     return unless o = node.try(&.as_h?)
     self.notify_bell = load_bool_h(o, "bell", notify_bell?)
     self.notify_toast = load_bool_h(o, "toast", notify_toast?)
-    if v = o["retention"]?.try(&.as_i?)
+    if v = int_field(o, "retention")
       self.notify_retention = {v, 1}.max
     end
   end

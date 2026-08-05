@@ -475,7 +475,14 @@ module Gori
           Frame.read(io)
         rescue IO::TimeoutError
           return false # idle, not dead — the caller decides whether that is fatal
-        rescue IO::Error
+        rescue IO::Error | Gori::Error
+          # `Gori::Error` here is `read_exact`'s "unexpected EOF mid-frame" — a FIN that
+          # landed inside a frame rather than on its boundary. That is end-of-data, not a
+          # reason to raise: `Gori::Error < Exception`, not `IO::Error`, so it used to
+          # escape `pump_once`, escape `write_data`'s stall loop and `await_settings`, and
+          # unwind out of `write_request` before `read_response` could drain the complete
+          # response already sitting in `flow.pending` — the exact lie `write_data`'s
+          # comment below swore off. Treated like the reset socket it is.
           flow.eof = true
           return false
         end
@@ -769,18 +776,30 @@ module Gori
             # An IO error mid-response (connection reset — e.g. an origin that closed
             # right after a non-END_STREAM DATA) is end-of-data, not a hard failure:
             # treat it like a clean EOF and return what arrived, flagged incomplete
-            # (mirrors the h1 engine). A Gori::Error from Frame.read (oversized/corrupt
-            # frame — a real protocol violation) is NOT swallowed: it propagates to the
-            # outer rescue and surfaces as a failed repeater, since the workbench exists to
-            # reveal exactly that. An idle TIMEOUT is separated from a closed socket: "the
-            # origin sent nothing" and "the origin hung up" are different findings and only
-            # one of them is worth retrying.
+            # (mirrors the h1 engine). An idle TIMEOUT is separated from a closed socket:
+            # "the origin sent nothing" and "the origin hung up" are different findings and
+            # only one of them is worth retrying.
+            #
+            # `Gori::Error` is swallowed the same way. This arm once deliberately let it
+            # propagate, on the stated ground that it meant an oversized/corrupt frame —
+            # a real protocol violation worth surfacing. That ground was void: `len` is
+            # three bytes (max 16777215) and the default MAX_PAYLOAD is exactly 16777215,
+            # and no caller here passes a tighter cap, so `Frame.read`'s `len > max_payload`
+            # guard cannot fire. The only Gori::Error reaching this line is `read_exact`'s
+            # "unexpected EOF mid-frame", and letting THAT propagate destroyed a fully
+            # decoded status + headers + body over a FIN that happened to land inside a
+            # frame instead of on its boundary — splitting one wire event three ways
+            # (boundary EOF → kept; RST → kept; mid-frame FIN → destroyed). Only the third
+            # was destructive, against this file's own rule that "a response that arrived
+            # keeps its head and body regardless". If a discriminable protocol violation is
+            # ever wanted here, give `Frame.read` a distinct subtype for it rather than
+            # resting on a guard that cannot trip.
             frame = begin
               Frame.read(io)
             rescue IO::TimeoutError
               timed_out = true
               nil
-            rescue IO::Error
+            rescue IO::Error | Gori::Error
               nil
             end
             break if frame.nil?

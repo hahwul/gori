@@ -28,11 +28,15 @@ module Gori
         ts_seg : String,      # base62 unix second
         signature : String
 
-      # `Cookie.detect`: a ":"-separated cookie with exactly three parts and no Rack "--".
-      # Django's segments (base64url / base62 / base64url) never contain ":", so an exact
-      # 3-way split is a reliable signal.
+      # `Cookie.detect`: a ":"-separated cookie with exactly three parts. Django's segments
+      # (base64url / base62 / base64url) never contain ":", so an exact 3-way split is a
+      # reliable signal.
+      #
+      # Deliberately does NOT reject "--": base64url uses '-', so a genuine Django payload
+      # can contain a "--" run, and rejecting it made those cookies undetectable. Rack is
+      # already separated — `detect` tests it first, and Rack's strict-base64 body plus hex
+      # tail contains no ':' at all, so it can never reach a count of two.
       def looks_like?(s : String) : Bool
-        return false if s.includes?("--")
         s.count(':') == 2
       end
 

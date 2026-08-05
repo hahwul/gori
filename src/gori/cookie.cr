@@ -176,10 +176,19 @@ module Gori
       end
     end
 
+    # nil on anything that isn't a base62 unix second — an out-of-alphabet character OR a
+    # run long enough to overflow the accumulator. A crafted cookie chooses this segment
+    # freely, and Crystal's arithmetic is overflow-checked, so an unguarded `n * 62` raised
+    # OverflowError straight out of Django's decode_text/decode_json. Callers already
+    # render nil as "(invalid base62 …)" / a null field, which is the honest answer for
+    # both cases (same reasoning as `unix_to_s`'s rescue below).
     def base62_decode(s : String) : Int64?
       n = 0_i64
       s.each_char do |c|
         idx = BASE62.index(c) || return nil
+        # Checked BEFORE the multiply: a wrap-and-test would miss a value that wraps twice
+        # and lands positive again.
+        return nil if n > (Int64::MAX - idx) // 62
         n = n * 62 + idx
       end
       n

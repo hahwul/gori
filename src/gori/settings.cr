@@ -98,16 +98,37 @@ module Gori
     # Split out of load so load stays a small read → parse → apply flow.
     # Not private: import_document reuses it, so a profile import runs the SAME per-section
     # readers as a normal load rather than a parallel implementation that could drift.
+    # An Int32 field that cannot raise. `JSON::Any#as_i?` is `as?(Int).try(&.to_i)`, and
+    # `to_i` on an Int64 outside Int32 raises OverflowError — so a value in the
+    # Int32::MAX < |v| <= Int64::MAX band (larger fails in JSON.parse and takes the
+    # documented .corrupt path) aborted apply_sections partway. Everything after the
+    # raising line then kept its factory default, and the next `save` wrote those defaults
+    # over the operator's file: `merge_with_disk` short-circuits on `disk == base` and
+    # returns `mine`, so the 3-way merge never gets a chance to preserve the lost sections.
+    # Out-of-range reads as absent, which is what every caller's `|| default` already means.
+    protected def self.int_field(node : JSON::Any, key : String) : Int32?
+      node[key]?.try(&.as_i?)
+    rescue OverflowError
+      nil
+    end
+
+    # Same guard for the sections that have already unwrapped their node to a Hash.
+    protected def self.int_field(node : Hash(String, JSON::Any), key : String) : Int32?
+      node[key]?.try(&.as_i?)
+    rescue OverflowError
+      nil
+    end
+
     protected def self.apply_sections(root : JSON::Any) : Nil
       if net = root["network"]?
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
-        self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
+        self.bind_port = int_field(net, "bind_port") || bind_port
         self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
         self.serve_landing = load_bool(net, "serve_landing", serve_landing?)
-        net["connect_timeout_secs"]?.try(&.as_i?).try { |v| self.connect_timeout_secs = {v, 1}.max }
-        net["io_timeout_secs"]?.try(&.as_i?).try { |v| self.io_timeout_secs = {v, 1}.max }
-        net["capture_max_mib"]?.try(&.as_i?).try { |v| self.capture_max_mib = v.clamp(1, MAX_CAPTURE_MAX_MIB) }
+        int_field(net, "connect_timeout_secs").try { |v| self.connect_timeout_secs = {v, 1}.max }
+        int_field(net, "io_timeout_secs").try { |v| self.io_timeout_secs = {v, 1}.max }
+        int_field(net, "capture_max_mib").try { |v| self.capture_max_mib = v.clamp(1, MAX_CAPTURE_MAX_MIB) }
         parse_tls_passthrough(net)
         net["http2"]?.try(&.as_s?).try { |v| self.http2 = v if HTTP2_MODES.includes?(v) }
       end

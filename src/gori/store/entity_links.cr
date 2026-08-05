@@ -36,7 +36,12 @@ module Gori
       return 0 if refs.empty?
       ts = now_us
       inserted = 0
-      exec_task ->(c : DB::Connection) {
+      # exec_task_ok, not exec_task: the tally accumulates inside the transaction, so a
+      # batch that later rolls back still produced a nonzero count and the caller toasted
+      # "linked N" for rows that never committed. (exec_task's own Int64 reply cannot
+      # stand in — on a committed batch where every INSERT OR IGNORE was ignored,
+      # last_insert_rowid is a stale nonzero, so it can't discriminate either.)
+      ok = exec_task_ok ->(c : DB::Connection) {
         refs.each do |(ref_kind, ref_id)|
           c.exec(
             "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES (?,?,?,?,?)",
@@ -45,7 +50,7 @@ module Gori
         end
         nil
       }
-      inserted
+      ok ? inserted : 0
     end
 
     def link_id(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?

@@ -21,7 +21,7 @@ module Gori::Settings
     if locs = obj["locations"]?.try(&.as_a?)
       self.mine_locations = locs.compact_map(&.as_s?).map(&.downcase.strip).reject(&.empty?)
     end
-    obj["concurrency"]?.try(&.as_i?).try { |n| self.mine_concurrency = n }
+    int_field(obj, "concurrency").try { |n| self.mine_concurrency = n }
     obj["notify"]?.try(&.as_s?).try { |s| self.mine_notify = s }
   end
 

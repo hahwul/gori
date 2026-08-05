@@ -25,9 +25,15 @@ module Gori
         signature : String
 
       # Cheap structural test for `Cookie.detect`: two dot-separated tail segments and no
-      # Rack "--" / Django ":" punctuation. Deliberately loose — a real parse validates.
+      # Django ":" punctuation. Deliberately loose — a real parse validates.
+      #
+      # Deliberately does NOT reject "--": base64url's alphabet contains '-', so a genuine
+      # Flask payload carries a "--" run often enough to matter, and rejecting it made
+      # those cookies undetectable on every surface. Rack cannot be confused with Flask
+      # here — `detect` tests Rack first, and Rack's own predicate needs a 40-hex tail
+      # after the "--", while Rack's strict-base64 body has no '.' to reach `count`.
       def looks_like?(s : String) : Bool
-        return false if s.includes?("--") || s.includes?(':')
+        return false if s.includes?(':')
         s.count('.') >= 2
       end
 

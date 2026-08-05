@@ -131,11 +131,11 @@ module Gori
       # `{"headers": {"X-A": "1"}}` as raw `Name: Value` lines. `$VAR` in a value is left
       # alone here — the builder expands it (and re-applies the CRLF guard afterwards).
       private def discover_header_lines(h) : Array(String)
-        lines = [] of String
-        if hm = h["headers"]?.try(&.as_h?)
-          hm.each { |k, v| lines << "#{k}: #{v.as_s? || v.to_s}" }
-        end
-        lines
+        # Shares RequestBuilder.header_pairs with send_request: a stringified or
+        # pair-array `headers` used to be dropped here too, and discover_start echoes no
+        # request at all, so an unauthenticated crawl of an authenticated surface was
+        # completely silent.
+        RequestBuilder.header_pairs(h["headers"]?).map { |(k, v)| "#{k}: #{v}" }
       end
 
       # MCP's wording for a plan the args can't produce — the builder reports the

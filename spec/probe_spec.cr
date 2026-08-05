@@ -3626,6 +3626,18 @@ describe "Gori::Probe::Active::HostHeaderInjection" do
     end
   end
 
+  it "survives a Cache-Control max-age past Int32 (hand-rolled accumulator overflowed)" do
+    # `positive_max_age?` accumulated digits into an Int32 with checked arithmetic, so a
+    # 10-digit delta-seconds (here a 100-year max-age, which RFC 9111 §1.2.2 says to clamp)
+    # raised OverflowError out of `gate`. Nothing rescues between there and the TUI event
+    # loop, so the `A` keypress took the whole process down. No "public" token, so the
+    # `||` cannot short-circuit before the accumulator runs.
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: max-age=3153600000\r\n\r\n", target: "/page")
+      probe.plan(detail).should_not be_nil
+    end
+  end
+
   it "does not fire on a bare mention, a path segment, or a longer hostname" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\nCache-Control: public\r\n\r\n", target: "/page")

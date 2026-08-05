@@ -746,6 +746,19 @@ describe Gori::Update do
       end
     end
 
+    it "raises a clean Gori::Error for valid JSON whose root is not an object" do
+      # `data["tag_name"]?` on a non-Hash JSON::Any raises a BARE Exception, which no
+      # rescue on the `gori update` path catches (cli.cr rescues Gori::Error), so the
+      # operator got an unhandled backtrace instead of the intended message. Any 200 whose
+      # body is valid JSON with a non-object root reaches this — a captive proxy, a GHE
+      # mirror, or GORI_UPDATE_API_URL pointed at a list endpoint.
+      {"[]", "null", %("a string"), "42"}.each do |body|
+        expect_raises(Gori::Error, /could not parse release information/) do
+          Gori::Update.parse_release(body)
+        end
+      end
+    end
+
     it "update_binary surfaces the same clean error for a non-JSON release response" do
       io = IO::Memory.new
       expect_raises(Gori::Error, /could not parse release information/) do

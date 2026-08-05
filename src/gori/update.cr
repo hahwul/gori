@@ -470,11 +470,18 @@ module Gori
       rescue ex : JSON::ParseException
         raise Error.new("could not parse release information (server did not return valid JSON): #{ex.message}")
       end
-      tag = data["tag_name"]?.try(&.as_s?)
+      # Valid JSON with a non-object root ([], null, a bare string/number) would otherwise
+      # make `data["tag_name"]?` raise a BARE Exception — not a Gori::Error — and nothing
+      # on the `gori update` path rescues that, so the operator got a backtrace instead of
+      # a message. Reachable from any 200 carrying such a body: a captive portal, a GHE
+      # mirror, or GORI_UPDATE_API_URL aimed at a list endpoint.
+      obj = data.as_h? || raise Error.new(
+        "could not parse release information (expected a JSON object, got #{data.raw.class})")
+      tag = obj["tag_name"]?.try(&.as_s?)
       raise Error.new("release JSON missing tag_name") unless tag
 
       assets = [] of Asset
-      if arr = data["assets"]?.try(&.as_a?)
+      if arr = obj["assets"]?.try(&.as_a?)
         arr.each do |item|
           name = item["name"]?.try(&.as_s?) || next
           url = item["browser_download_url"]?.try(&.as_s?) || next

@@ -103,17 +103,20 @@ module Gori
           cc.includes?("public") || positive_max_age?(cc)
         end
 
+        # Overflow-safe like the other three max-age readers in the probe engine
+        # (security_headers.cr, cookies.cr, cacheable_api.cr all use `to_i64?`). The
+        # hand-rolled Int32 accumulator this replaces raised OverflowError on any
+        # delta-seconds past Int32::MAX — a 100-year `max-age=3153600000` is enough — and
+        # `gate` is called from `Analyzer#active_estimate` with no rescue between it and
+        # the TUI event loop, so one hostile Cache-Control header ended the process.
+        # RFC 9111 §1.2.2 says to clamp an oversized delta-seconds, so a value we cannot
+        # represent still counts as a positive max-age rather than silently reading false.
         private def positive_max_age?(cc : String) : Bool
           idx = cc.index("max-age=") || return false
-          i = idx + 8
-          n = 0
-          seen = false
-          while i < cc.size && cc[i].ascii_number?
-            n = n * 10 + (cc[i].ord - '0'.ord)
-            seen = true
-            i += 1
-          end
-          seen && n > 0
+          digits = cc[(idx + 8)..].each_char.take_while(&.ascii_number?).join
+          return false if digits.empty?
+          # nil == more digits than Int64 holds, which is unambiguously a positive age.
+          (digits.to_i64? || Int64::MAX) > 0
         end
 
         private def body_reflects?(result : Repeater::Result) : Bool

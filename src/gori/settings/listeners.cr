@@ -169,11 +169,11 @@ module Gori::Settings
     arr.each do |e|
       next unless o = e.as_h?
       host = o["host"]?.try(&.as_s?).try(&.strip)
-      port = o["port"]?.try(&.as_i?)
+      port = int_field(o, "port")
       next if host.nil? || host.empty? || port.nil? || !(0 <= port <= 65535)
       mode = o["mode"]?.try(&.as_s?).try(&.strip.downcase) || "proxy"
       next unless LISTENER_MODES.includes?(mode)
-      target = o["target_port"]?.try(&.as_i?) || 0
+      target = int_field(o, "target_port") || 0
       target = 0 unless 0 <= target <= 65535
       origin = o["origin"]?.try(&.as_s?).try(&.strip) || ""
       rewrite_host = o["rewrite_host"]?.try(&.as_bool?) || false

@@ -33,12 +33,39 @@ describe Gori::Cookie do
       # Rack's `--<40 hex>` is the strongest signal; check it wins the ordering.
       Gori::Cookie.detect(RACK).should eq("rack")
     end
+
+    it "detects a Flask/Django cookie whose base64url payload contains a '--' run" do
+      # base64url's alphabet includes '-', so two adjacent '-' occur naturally in ~2% of
+      # payloads. Rejecting them as "Rack punctuation" made real cookies undetectable, and
+      # every surface (CLI/MCP/TUI) then aborts with "unrecognized cookie format" — even
+      # when the operator supplies the right secret. Rack is still disambiguated by being
+      # tested first and by its 40-hex tail, which neither of these has.
+      Gori::Cookie.detect("eyJhIjoxfQ--x.am71Yg.gd2MWkbBsGdhg4rScrYWBdGoj-Q").should eq("flask")
+      Gori::Cookie.detect("eyJhIjoxfQ--x:1wqQs6:ofPm07XfGfVUimPfVs9Bdy5M7H0").should eq("django")
+    end
   end
 
   describe "shared helpers" do
     it "base62 round-trips a unix second" do
       Gori::Cookie.base62_encode(1785656674_i64).should eq("1wqQs6")
       Gori::Cookie.base62_decode("1wqQs6").should eq(1785656674_i64)
+    end
+
+    it "base62_decode answers nil (not OverflowError) on a segment past Int64" do
+      # A crafted Django cookie can carry an arbitrarily long timestamp segment. The
+      # accumulator is Int64 and Crystal's arithmetic is overflow-checked, so this used to
+      # raise out of decode_text/decode_json and escape as an unhandled crash. `nil` is the
+      # channel the callers already speak — they render "(invalid base62 …)" — and it is
+      # what the non-base62 character case has always returned. Same contract as the
+      # `unix_to_s` rescue immediately below it in the source.
+      Gori::Cookie.base62_decode("zzzzzzzzzzzzzzzzzzzzzzzz").should be_nil
+      Gori::Cookie.base62_decode("!!!").should be_nil
+    end
+
+    it "decodes a Django cookie carrying an oversized timestamp instead of crashing" do
+      oversized = "eyJhIjoxfQ:zzzzzzzzzzzzzzzzzzzzzzzz:8BooTFI1B28NGHSf42JyGt1Or-0"
+      Gori::Cookie.decode(oversized, "django").should contain("invalid base62")
+      Gori::Cookie.decode_json(oversized, "django").should contain(%("timestamp":null))
     end
 
     it "int_to_b64 is the itsdangerous timestamp codec (plain unix, minimal big-endian)" do

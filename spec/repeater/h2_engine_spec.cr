@@ -151,6 +151,35 @@ end
 # A cleartext-h2 origin that sends HEADERS(:status) + one DATA frame WITHOUT
 # END_STREAM, then drops the connection — a truncated response the client must
 # flag as incomplete (no END_STREAM ever arrives).
+# Sibling of `start_h2_origin_truncated` that closes STRICTLY INSIDE a frame rather than on
+# its boundary: it writes a complete HEADERS + DATA, then 5 bytes of a 9-byte frame header
+# and hangs up. `Frame.read` -> `read_exact` answers that with `Gori::Error`, NOT `IO::Error`
+# — so it used to escape both rescue arms and destroy the fully decoded 200 + body. The
+# boundary helper cannot reach this path: there `Frame.read` returns nil.
+private def start_h2_origin_truncated_midframe(status : Int32, partial : String) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    send_server_preface(conn)
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      break if f.frame_type.in?(Frame::Type::Headers, Frame::Type::Data) && f.end_stream?
+    end
+    block = HPACK::Encoder.new.encode([{":status", status.to_s}])
+    conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, block).to_bytes)
+    conn.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, partial.to_slice).to_bytes)
+    # A PARTIAL frame header — 5 of the 9 bytes — then close. EOF lands mid-frame.
+    conn.write(Bytes[0, 0, 8, 0, 0])
+    conn.flush
+    conn.close
+  end
+  port
+end
+
 private def start_h2_origin_truncated(status : Int32, partial : String) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
@@ -999,6 +1028,23 @@ describe Gori::Repeater::H2Engine do
 
     receive_within(seen).should eq("GET /f body=")
     result.ok?.should be_true
+  end
+
+  it "keeps a response whose origin hung up MID-FRAME, not just on a frame boundary" do
+    # One wire event used to split three ways: boundary EOF -> kept; RST -> kept; mid-frame
+    # FIN -> everything destroyed, because `Frame.read` raises Gori::Error there and only
+    # IO::Error was rescued. The status and body below plainly arrived, so they must
+    # survive — "a response that arrived keeps its head and body regardless".
+    port = start_h2_origin_truncated_midframe(200, "partial")
+
+    request = "GET /midframe HTTP/2\r\n\r\n".to_slice
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.error.should be_nil
+    result.ok?.should be_true
+    result.response.not_nil!.status.should eq(200)
+    String.new(result.body.not_nil!).should eq("partial")
+    result.incomplete?.should be_true # no END_STREAM ever arrived
   end
 
   it "flags an h2 response cut short before END_STREAM as incomplete" do

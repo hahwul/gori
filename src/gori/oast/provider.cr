@@ -111,7 +111,26 @@ module Gori::Oast
       when String
         Time.parse_rfc3339(v) rescue (Time.parse_utc(v, "%Y-%m-%dT%H:%M:%S") rescue Time.utc)
       when Int64, Int32
-        Time.unix(v.to_i64)
+        # Scale-detect before constructing: `Time.unix` raises ArgumentError past
+        # 315_537_897_599, and a millisecond epoch (~1.7e12) is three orders past that.
+        # postb.in's `inserted` field is epoch MILLIseconds, so the shipped "Public
+        # PostBin" preset raised on every callback — and Postbin#poll shifts
+        # destructively, so the raise discarded interactions already consumed from the
+        # bin. The String branch beside this one has always been rescue-guarded; this one
+        # was the only unguarded field, because every other value routes through `field()`
+        # and reaches that guarded path as a string.
+        n = v.to_i64
+        begin
+          if n.abs >= 100_000_000_000_000 # microseconds
+            Time.unix(n // 1_000_000)
+          elsif n.abs >= 100_000_000_000 # milliseconds
+            Time.unix_ms(n)
+          else
+            Time.unix(n)
+          end
+        rescue ArgumentError
+          Time.utc
+        end
       else
         Time.utc
       end

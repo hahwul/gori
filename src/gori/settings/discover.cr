@@ -22,8 +22,8 @@ module Gori::Settings
     end
     self.discover_prefs_saved = true
     obj["containment"]?.try(&.as_s?).try { |s| self.discover_containment = s }
-    obj["max_depth"]?.try(&.as_i?).try { |n| self.discover_max_depth = n }
-    obj["concurrency"]?.try(&.as_i?).try { |n| self.discover_concurrency = n }
+    int_field(obj, "max_depth").try { |n| self.discover_max_depth = n }
+    int_field(obj, "concurrency").try { |n| self.discover_concurrency = n }
     obj["spider"]?.try(&.as_bool?).try { |b| self.discover_spider = b }
     obj["bruteforce"]?.try(&.as_bool?).try { |b| self.discover_bruteforce = b }
     obj["extensions"]?.try(&.as_bool?).try { |b| self.discover_extensions = b }

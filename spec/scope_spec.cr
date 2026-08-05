@@ -240,6 +240,33 @@ describe Gori::Scope do
     end
   end
 
+  it "SQL filter agrees with in_scope_url? when an EXCLUDE rule was stored before the INCLUDE" do
+    # #filter emits placeholders include-first, exclude-second, but used to bind values in
+    # rule-id order. Add the exclude first and the two orders diverge: the include's `?`
+    # takes the exclude's pattern and vice versa, so History/Sitemap silently show a
+    # different set than in_scope_url? computes. Rule ORDER, not rule content, is the
+    # trigger — the existing parity test above adds its include first and cannot see it.
+    with_store do |store|
+      flows = [
+        {"https", "api.acme.test", "/v1/users"},
+        {"https", "api.acme.test", "/static/app.js"},
+        {"https", "other.test", "/v1/users"},
+      ]
+      flows.each { |(sc, h, t)| capture(store, h, t, sc) }
+
+      scope = Gori::Scope.load(store)
+      scope.add("exclude", "string", "/static/") # exclude FIRST — lower rule id
+      scope.add("include", "host", "acme.test")
+      scope.enable
+
+      sql_set = store.search(scope.filter, 50).map { |r| {r.scheme, r.host, r.target} }.to_set
+      mem_set = flows.select { |(sc, h, t)| scope.in_scope_url?(url_of(sc, h, t), h) }
+        .map { |(sc, h, t)| {sc, h, t} }.to_set
+      sql_set.should eq(mem_set)
+      mem_set.should eq([{"https", "api.acme.test", "/v1/users"}].to_set)
+    end
+  end
+
   it "SQL filter agrees with in_scope_url? over Store#search (host/string/regex, incl/excl)" do
     with_store do |store|
       flows = [

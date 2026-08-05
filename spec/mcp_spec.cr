@@ -2401,6 +2401,36 @@ describe Gori::MCP::RequestBuilder do
       .should eq("GET /v HTTP/1.1\r\nHost: h.test\r\nX-B: lf\r\n\r\n")
   end
 
+  # An `as_h?`-only read answered nil for every non-object shape and the caller skipped the
+  # loop, so the request went out with ZERO caller headers and still reported success —
+  # discover_start echoes no request at all, so an authenticated crawl could run
+  # unauthenticated with no signal anywhere. Accept the shapes an agent actually sends.
+  it "accepts a stringified headers object" do
+    args = JSON.parse({"url" => "http://h.test/x", "headers" => %({"Authorization":"Bearer T"})}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should contain("Authorization: Bearer T\r\n")
+  end
+
+  it "accepts headers as an array of [name, value] pairs" do
+    args = JSON.parse({"url" => "http://h.test/x", "headers" => [["Authorization", "Bearer T"]]}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should contain("Authorization: Bearer T\r\n")
+  end
+
+  # BEHAVIOUR CHANGE, pinned deliberately: an unusable `headers` must RAISE, never vanish.
+  # Silently dropping it is what made the bug invisible on both surfaces.
+  it "raises rather than silently dropping an unusable headers value" do
+    ["not-json-at-all", "42"].each do |bad|
+      args = JSON.parse({"url" => "http://h.test/x", "headers" => bad}.to_json).as_h
+      expect_raises(Gori::Error, /headers/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+    args = JSON.parse({"url" => "http://h.test/x", "headers" => [["only-one"]]}.to_json).as_h
+    expect_raises(Gori::Error, /headers/) { Gori::MCP::RequestBuilder.build(args) }
+  end
+
+  it "still treats an absent headers key as no headers" do
+    args = JSON.parse({"url" => "http://h.test/x"}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should eq("GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n")
+  end
+
   it "keeps the bare LF byte-exact under verbatim" do
     raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-B: lf\n\r\n"
     args = JSON.parse({"url" => "http://h.test/", "raw" => raw, "verbatim" => true}.to_json).as_h

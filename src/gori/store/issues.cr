@@ -4,10 +4,18 @@ module Gori
   class Store
     # --- issues ------------------------------------------------------------
 
+    # 0 == not persisted. Three callers guard on that, so the id must come from the
+    # COMMITTED signal, not from the local the closure captured: the closure runs inside
+    # the transaction, but the batch can still roll back afterwards (a COMMIT-time
+    # SQLITE_FULL/IOERR, or an unrelated co-submitted write raising — writer_loop batches
+    # up to BATCH_MAX ops from every fiber into one transaction). Returning the captured
+    # id there handed out the rowid of an issue that does not exist, and because
+    # `issues.id` is INTEGER PRIMARY KEY without AUTOINCREMENT the next issue created is
+    # handed that same id and silently adopts any entity_links written against it.
     def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?) : Int64
       ts = now_us
       issue_id = 0_i64
-      exec_task ->(c : DB::Connection) {
+      ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes) VALUES (?,?,?,?,?,?,'')",
           ts, ts, title, severity.value, host, flow_id)
         # Capture the issue's own id BEFORE the entity_links insert below overwrites
@@ -21,7 +29,7 @@ module Gori
         end
         nil
       }
-      issue_id
+      ok ? issue_id : 0_i64
     end
 
     # Returns whether the write committed (false = store busy/locked/closing). An empty
