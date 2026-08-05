@@ -543,8 +543,17 @@ module Gori
         return {plan, false} unless bool_arg(h, "apply_rules", false)
         rules = Gori::Rules.load(store)
         return {plan, false} unless rules.active?
+        # `add_if_missing: false` — this runs AFTER `Plan.build`, so it is past the point where
+        # `auto_content_length` was honoured, and the two plan shapes that reach here with that
+        # flag deliberately OFF (a `flow_id` capture and a `raw`/verbatim request, both built
+        # below with `auto_content_length: false`) are the ones this must not re-frame. A
+        # capture that carried no Content-Length is evidence — an h2/gRPC streamed POST is
+        # stored exactly that way — and inventing framing for it here would undo the very
+        # thing those call sites turned the flag off for. Rules may still CHANGE the body, so
+        # an EXISTING Content-Length is still re-synced; only the ADD is withheld.
         rewritten = Repeater::FlowRequest.resync_content_length(
-          rules.transform_message(String.new(plan.bytes), Store::RuleTarget::Request, plan.host).to_slice)
+          rules.transform_message(String.new(plan.bytes), Store::RuleTarget::Request, plan.host).to_slice,
+          add_if_missing: false)
         return {plan, false} if rewritten == plan.bytes
         {plan.with_requests([rewritten]), true}
       end

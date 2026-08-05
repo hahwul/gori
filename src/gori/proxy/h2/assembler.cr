@@ -80,6 +80,11 @@ module Gori::Proxy::H2
       # is stamped when the stream is first seen; `resp_first_at` on the first
       # response HEADERS/DATA frame (time-to-first-byte).
       getter started_at : Time::Instant = Time.instant
+      # Wall-clock capture time for THIS stream. A persistent h2 connection carries many
+      # requests over its lifetime (the common case: gori advertises h2 to the client
+      # whenever the origin offers it), so this must be stamped per-stream, not inherited
+      # from the connection's own open time — the same mistake `started_at` above avoids.
+      getter created_at : Int64 = (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
       property resp_first_at : Time::Instant? = nil
       # The stream whose PUSH_PROMISE invented this request, when the client never sent it.
       # A pushed flow was indistinguishable in History / QL / the Sitemap from one the client
@@ -95,7 +100,10 @@ module Gori::Proxy::H2
       getter advisories = [] of String
     end
 
-    def initialize(@sink : FlowSink, @host : String, @port : Int32, @created_at : Int64,
+    # `connection_created_at` is kept as a positional argument for call-site compatibility
+    # (the connection's own open time) but is deliberately NOT stored or used for a flow's
+    # `created_at` — see `Stream#created_at`, which each request stamps for itself.
+    def initialize(@sink : FlowSink, @host : String, @port : Int32, connection_created_at : Int64,
                    @conn_id : Int64 = 0_i64)
       @mutex = Mutex.new
       @streams = {} of UInt32 => Stream
@@ -433,7 +441,7 @@ module Gori::Proxy::H2
       head = synth_request_head(headers, authority, stream.req.trailer_names, stream.pushed_by,
         pseudo(headers, ":protocol"))
       captured = Store::CapturedRequest.new(
-        created_at: @created_at, scheme: scheme, host: host, port: port,
+        created_at: stream.created_at, scheme: scheme, host: host, port: port,
         method: method, target: path, http_version: "HTTP/2", head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64,

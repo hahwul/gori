@@ -1807,9 +1807,17 @@ module Gori::Proxy
     # it is de-chunked to the entity before matching. `yield entity` runs the rule engine
     # (rewrite_request_body / rewrite_response_body), which returns the SAME bytes when
     # nothing matched. On no change we return the ORIGINAL head + wire body byte-exact
-    # (P7) — so an unmatched flow, including a compressed body a literal pattern can't
-    # touch, is never re-framed. On a change we re-frame the head to Content-Length (the
-    # new entity length, Transfer-Encoding dropped) and forward the rewritten entity.
+    # (P7) — so an unmatched flow is never re-framed. On a change we re-frame the head to
+    # Content-Length (the new entity length, Transfer-Encoding dropped) and forward the
+    # rewritten entity.
+    #
+    # A real (non-identity) Content-Encoding is refused BEFORE the rule ever sees the
+    # entity: gzip/br/deflate/zstd are never inflated on this wire path (only for
+    # DISPLAY — see `ContentDecode`), so a literal/regex match runs against opaque
+    # compressed bytes. A short or common pattern (a single byte is enough) can
+    # incidentally match INSIDE the compressed stream purely by chance and corrupt it —
+    # silently: no error, no advisory, Content-Length still recalculated to look
+    # consistent. Refusing keeps the response byte-exact (P7) instead of guessing wrong.
     #
     # The two returned halves are always FRAMED CONSISTENTLY with each other, and #501's
     # extract observer depends on that: it is handed the same pair and lets
@@ -1818,6 +1826,7 @@ module Gori::Proxy
     private def apply_body_rewrite(head : Bytes, wire_body : Bytes?, framing : Codec::BodyFraming,
                                    & : Bytes -> Bytes) : {Bytes, Bytes?}
       return {head, wire_body} if wire_body.nil? || wire_body.empty?
+      return {head, wire_body} if Codec::ContentDecode.content_encoded?(head)
       entity = framing.chunked? ? Codec::ContentDecode.dechunk(wire_body) : wire_body
       rewritten = yield entity
       return {head, wire_body} if rewritten == entity # nothing matched → byte-exact (P7)

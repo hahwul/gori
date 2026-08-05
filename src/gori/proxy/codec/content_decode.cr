@@ -3,6 +3,7 @@ require "compress/deflate"
 require "compress/zlib"
 require "./brotli"
 require "./zstd"
+require "./http1" # Http1.obfuscated_header? — see content_encoded?
 require "../../ascii_bytes"
 
 module Gori::Proxy::Codec
@@ -101,6 +102,32 @@ module Gori::Proxy::Codec
     # header at all? (Byte scan for either full name, case-insensitively.)
     private def self.head_has_encoding?(head : Bytes) : Bool
       AsciiBytes.contains_ci?(head, CE_NEEDLE) || AsciiBytes.contains_ci?(head, TE_NEEDLE)
+    end
+
+    # Whether `head` declares a real (non-identity) Content-Encoding — gzip/br/deflate/zstd,
+    # as opposed to Transfer-Encoding (chunked), which the caller de-chunks separately.
+    # Content-Encoding is never inflated on the live wire path (only for DISPLAY, above) —
+    # a Match&Replace body rule matching against still-compressed bytes can incidentally hit
+    # inside the compressed stream and corrupt it (a short/common literal pattern needs no
+    # more than a byte-value coincidence), so callers on that path use this to refuse rather
+    # than risk it. See `ClientConn#apply_body_rewrite`.
+    # This is a WIRE gate, not a display read, so it must fail CLOSED where the tolerant parser
+    # below cannot see a value. `encoding_headers` walks whole lines and skips any without a
+    # colon, so an obs-folded header (RFC 7230 §3.2.4, `Content-Encoding:\r\n gzip`) parses as an
+    # EMPTY value and the real `gzip` on the continuation line is never seen — which would hand
+    # a compressed body straight to the rule engine, the one outcome this predicate exists to
+    # prevent. `Http1.obfuscated_header?` is the codebase's single home for "this head is folded
+    # or otherwise not cleanly parseable" (see AGENTS.md §1), so ask it rather than re-deriving
+    # the scan here. Response framing deliberately lets obs-folds through byte-exact (see
+    # `Http1.framing_ambiguous?`), so such a head really does reach this gate.
+    def self.content_encoded?(head : Bytes) : Bool
+      return false unless AsciiBytes.contains_ci?(head, CE_NEEDLE)
+      _, ce_values = encoding_headers(head)
+      return true if ce_values.flat_map(&.split(',')).map(&.strip.downcase).any? { |e| !e.empty? && e != "identity" }
+      # A Content-Encoding field-name IS present (a bare `Vary: Content-Encoding` yields no
+      # entry here at all, so it still returns false) but no readable token came back: refuse
+      # only when the head is folded/obfuscated, which is the shape that hides one.
+      !ce_values.empty? && Http1.obfuscated_header?(head)
     end
 
     # `chunked` frames the body only when it's the FINAL transfer-coding (RFC 7230

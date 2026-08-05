@@ -434,6 +434,23 @@ module Gori::Sequencer
         end
         return {false, "non-monotonic"}
       end
+      # Hex path — same correlation idea as the general path below, but decodes each
+      # token's hex DIGITS to their numeric value first instead of reading raw ASCII
+      # bytes. `leading_value` (the general path) treats the string's own bytes as the
+      # magnitude, which silently distorts hex text: ASCII '9' (0x39) to 'a' (0x61) is a
+      # 40-point jump for what is logically a +1 step, so a straightforward incrementing
+      # hex counter can land well under the 0.9 threshold and be missed entirely —
+      # confirmed: `2..301` formatted as zero-padded `%08x` scores corr=0.774 under the
+      # general path despite being a textbook sequential counter. Decoding nibbles first
+      # keeps the magnitude linear in the counter's real value, matching the numeric fast
+      # path's precision for decimal tokens above.
+      if tokens.all? { |t| !t.empty? && t.each_char.all? { |c| c.ascii_number? || ('a'..'f').includes?(c) || ('A'..'F').includes?(c) } }
+        skip = common_prefix_len(tokens)
+        xs = Array(Float64).new(n, &.to_f)
+        ys = tokens.map { |t| hex_leading_value(t, skip) }
+        r = pearson(xs, ys)
+        return {r.abs > 0.9, "corr=#{fmt(r)}"}
+      end
       # General path — correlation of arrival order with a leading-byte magnitude. Shares
       # the same order-dependency the numeric fast path had above (arrival order can be
       # shuffled by concurrency), but isn't fixed here — a coordinate-only fix couldn't
@@ -481,6 +498,21 @@ module Gori::Sequencer
       slice = t.to_slice
       start = {skip, slice.size}.min
       slice[start, {8, slice.size - start}.min].each { |b| v = v * 256.0 + b }
+      v
+    end
+
+    # Like `leading_value`, but for hex text: decodes each character to its NIBBLE value
+    # (0-15) instead of using the character's raw ASCII byte — see the hex path in
+    # `detect_sequential` for why the distinction matters. Window widened to 16 chars (64
+    # bits of hex) to match `leading_value`'s 8-BYTE window at one hex digit per nibble.
+    private def self.hex_leading_value(t : String, skip : Int32 = 0) : Float64
+      v = 0.0
+      chars = t.chars
+      start = {skip, chars.size}.min
+      chars[start, {16, chars.size - start}.min].each do |c|
+        nibble = c.ascii_number? ? (c.ord - '0'.ord) : (c.downcase.ord - 'a'.ord + 10)
+        v = v * 16.0 + nibble
+      end
       v
     end
 

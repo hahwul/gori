@@ -164,8 +164,10 @@ describe "replay reconstruct (P7) — Content-Length re-sync" do
       .should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello")
   end
 
-  it "never ADDS a Content-Length to a request that has none" do
-    # A bodyless GET must stay clean, and a chunked request must keep its framing.
+  it "adds no Content-Length to a bodyless or chunked request" do
+    # A bodyless GET must stay clean, and a chunked request must keep its framing. (A request
+    # that DOES carry a body and no CL is completed instead — see flow_request_spec — because
+    # leaving it unframed made the origin read a zero-length body.)
     get = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
     String.new(Gori::Repeater::FlowRequest.resync_content_length(get)).should eq(String.new(get))
 

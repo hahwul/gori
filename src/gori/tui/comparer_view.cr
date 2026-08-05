@@ -380,7 +380,7 @@ module Gori::Tui
       if @pane == :request
         Repeater::MessageLines.of(d.request_head, d.request_body, decode: false)
       else
-        Repeater::MessageLines.of(d.response_head, d.response_body, decode: true)
+        Repeater::MessageLines.of(d.response_head, d.response_body, decode: true, error: d.error)
       end
     end
 

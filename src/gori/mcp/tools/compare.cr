@@ -102,7 +102,7 @@ module Gori
         if pane == :request
           Repeater::MessageLines.of(redacted_head(d.request_head, include_sensitive), d.request_body, decode: false)
         else
-          Repeater::MessageLines.of(redacted_head(d.response_head, include_sensitive), d.response_body, decode: true)
+          Repeater::MessageLines.of(redacted_head(d.response_head, include_sensitive), d.response_body, decode: true, error: d.error)
         end
       end
 

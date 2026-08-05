@@ -2423,12 +2423,13 @@ module Gori::Tui
       "marking works on the REQUEST pane — ↹ to it"
     end
 
-    # When enabled, rewrite an existing `Content-Length` header so it matches the
-    # actual edited body length (the part after the blank line). Common when
-    # tampering with a captured body — you change the JSON and the length should
-    # follow. Only an EXISTING header is updated (never added, so GETs stay clean);
-    # chunked/h2 bodies have no Content-Length and are left untouched. Shared with the
-    # headless CLI/MCP repeater-send paths via FlowRequest so they can't drift apart.
+    # When enabled, keep `Content-Length` matching the actual edited body length (the
+    # part after the blank line): rewrite an existing header, or ADD one when a non-empty
+    # body has none at all (leaving the header out entirely otherwise sends a
+    # framing-ambiguous request most origins read as an empty body). A bodyless request
+    # (GETs stay clean) never gets a header added; chunked/h2 bodies have no
+    # Content-Length and are left untouched. Shared with the headless CLI/MCP
+    # repeater-send paths via FlowRequest so they can't drift apart.
     private def sync_content_length(raw : Bytes) : Bytes
       Repeater::FlowRequest.resync_content_length(raw)
     end

@@ -297,8 +297,9 @@ module Gori::Repeater
       # `Upgrade: websocket` header would pick the h1 engine and silently exchange nothing.
       websocket = WsEngine.upgrade_request?(String.new(wires.first))
       # A handshake carries no body, and all three surfaces have always sent it verbatim —
-      # `resync_content_length` never ADDS a header, but a captured upgrade that happened to
-      # carry a Content-Length would be rewritten, so skip the pass rather than rely on that.
+      # `resync_content_length` never touches a bodyless request either way (no ADD, and an
+      # existing header still gets rewritten), but a captured upgrade that happened to carry
+      # a Content-Length would still be resynced, so skip the pass rather than rely on that.
       if !websocket
         if options.auto_content_length?
           wires = wires.map { |b| FlowRequest.resync_content_length(b) }

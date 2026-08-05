@@ -57,8 +57,43 @@ describe Gori::Repeater::FlowRequest do
       out.should contain("Content-Length: 10\r\n")
     end
 
-    it "never adds a header (a GET with no Content-Length is untouched)" do
+    it "adds no header to a BODYLESS request (a GET with no Content-Length is untouched)" do
       wire = "GET /x HTTP/1.1\r\nHost: t\r\n\r\n".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+    end
+
+    # The auto-CL toggle's whole job: an operator edits a repeater request, types a body, and
+    # leaves the Content-Length out. Returning the bytes unchanged (the pre-fix behaviour) sent
+    # a framing-ambiguous request that a spec-conforming origin reads as a ZERO-length body —
+    # silently, while gori's own captured `request_body` still displayed the typed text.
+    it "adds a Content-Length when a body has none" do
+      wire = "POST /x HTTP/1.1\r\nHost: t\r\n\r\na=1&b=2".to_slice
+      String.new(Gori::Repeater::FlowRequest.resync_content_length(wire))
+        .should eq("POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: 7\r\n\r\na=1&b=2")
+    end
+
+    # The captured-flow REPLAY path (and MCP `send_request{apply_rules}`, which runs past the
+    # point `auto_content_length` was honoured) opts out: a capture that carried no CL — an
+    # h2/gRPC streamed POST is stored exactly that way — is evidence, not a draft to complete.
+    it "adds nothing when add_if_missing is false" do
+      wire = "POST /x HTTP/1.1\r\nHost: t\r\n\r\na=1&b=2".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire, add_if_missing: false).should eq(wire)
+    end
+
+    # A bare-LF header line makes `split("\r\n")` merge it into the line before, so the
+    # Transfer-Encoding guard cannot see a TE that is really there. Adding a CL beside it would
+    # hand back a CL.TE desync probe the operator never wrote, with the length counting the
+    # CHUNKED wire bytes.
+    it "refuses to add when a bare-LF line hides a Transfer-Encoding" do
+      wire = "POST / HTTP/1.1\r\nHost: x\nTransfer-Encoding: chunked\r\n\r\n5\r\nHELLO\r\n0\r\n\r\n".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+    end
+
+    # An LF-framed head means the first `\r\n\r\n` can occur inside the BODY — here inside a
+    # smuggled inner request — so the "head" runs past the real terminator and the appended
+    # header would land in the middle of the smuggled bytes.
+    it "refuses to add when the CRLFCRLF terminator lands inside the body" do
+      wire = "POST /x HTTP/1.1\nHost: v\n\nGET /admin HTTP/1.1\r\nHost: v\r\n\r\nX".to_slice
       Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
     end
 

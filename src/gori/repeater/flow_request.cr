@@ -106,22 +106,27 @@ module Gori
         end.to_slice
       end
 
-      # Rewrite an EXISTING Content-Length to match the actual body length of a wire-form
-      # request. Used after env-var expansion changes body bytes (a `$KEY` in the body):
-      # `build` framed the CL over the pre-expansion body, so re-sync it or the origin
-      # over/under-reads. Never ADDS a header (GETs stay clean) and leaves chunked/h2
-      # bodies (no Content-Length) untouched. Shared by the TUI Repeater editor and the
-      # headless CLI/MCP repeater-send paths so they can't disagree.
+      # Keep Content-Length matching the actual body length of a wire-form request: rewrite
+      # an EXISTING header (e.g. after env-var expansion changes body bytes — a `$KEY` in the
+      # body means `build` framed the CL over the pre-expansion body, so re-sync it or the
+      # origin over/under-reads), and — when `add_if_missing` (the repeater's own default-on
+      # auto-CL toggle, as opposed to the captured-flow-replay caller below) — ADD one when a
+      # non-empty body has none at all: an operator editing a repeater's raw request text and
+      # leaving out Content-Length entirely otherwise sends a framing-ambiguous request that
+      # most origins read as a zero-length body, silently, with gori's own recorded evidence
+      # still showing the edited body text. A bodyless request (GETs stay clean) never gets a
+      # header added. Shared by the TUI Repeater editor and the headless CLI/MCP
+      # repeater-send paths so they can't disagree.
       #
-      # A head carrying `Transfer-Encoding` is left ALONE, Content-Length or not. RFC 7230
-      # §3.3.3 forbids sending both, so a message with both is a CL.TE / TE.CL smuggling
-      # probe — the two headers disagreeing IS the test — and "correcting" the CL over the
-      # chunked wire form turns it into a different probe with no notice. This is the rule
-      # `build_single_flow_request` already applies on the sibling flow-replay path
-      # (`!explicit_cl && !has_te && body_override`); it was missing here, so `repeater
-      # create` + `send` under the default auto-CL rewrote exactly the requests it exists
-      # to replay.
-      def self.resync_content_length(bytes : Bytes) : Bytes
+      # A head carrying `Transfer-Encoding` is left ALONE, Content-Length or not (added or
+      # existing). RFC 7230 §3.3.3 forbids sending both, so a message with both is a CL.TE /
+      # TE.CL smuggling probe — the two headers disagreeing IS the test — and "correcting"
+      # the CL over the chunked wire form turns it into a different probe with no notice.
+      # This is the rule `build_single_flow_request` already applies on the sibling
+      # flow-replay path (`!explicit_cl && !has_te && body_override`); it was missing here,
+      # so `repeater create` + `send` under the default auto-CL rewrote exactly the requests
+      # it exists to replay.
+      def self.resync_content_length(bytes : Bytes, add_if_missing : Bool = true) : Bytes
         text = String.new(bytes)
         sep = text.index("\r\n\r\n")
         return bytes unless sep
@@ -130,8 +135,25 @@ module Gori
         lines = head.split("\r\n")
         return bytes if lines.any? { |l| l.lstrip[0, 18]?.try(&.downcase) == "transfer-encoding:" }
         idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
-        return bytes unless idx
-        lines[idx] = "Content-Length: #{body.bytesize}"
+        if idx
+          lines[idx] = "Content-Length: #{body.bytesize}"
+        elsif add_if_missing && body.bytesize > 0
+          # ADD only into a head this function actually parsed. `split("\r\n")` collapses a
+          # bare-LF-terminated line into the one before it, and both consequences are the exact
+          # corruption this function exists to avoid:
+          #   * a `Transfer-Encoding` hiding inside such a merged line is invisible to the guard
+          #     above, so a pure TE probe would come back framed BOTH ways — a CL.TE desync test
+          #     the operator never wrote, with the length counting the chunked wire bytes;
+          #   * when the head is LF-framed, `\r\n\r\n` can first occur inside the BODY, so `head`
+          #     runs past the real terminator and the new header lands INSIDE a smuggled request.
+          # A leftover `\n` in any line means exactly that, so leave the bytes as written (P7).
+          # Rewriting an EXISTING Content-Length keeps its pre-existing behaviour: this guard is
+          # only about ADDING framing to bytes we could not parse.
+          return bytes if lines.any?(&.includes?('\n'))
+          lines << "Content-Length: #{body.bytesize}"
+        else
+          return bytes
+        end
         "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
       end
 
@@ -148,11 +170,16 @@ module Gori
       # after expansion the header under-counts a body the operator did not author, and the
       # origin over/under-reads. Detect that by the BODY LENGTH changing — an expansion that
       # only touched the head must not be allowed to overwrite a deliberately-wrong CL.
+      #
+      # `add_if_missing: false` — a captured flow with NO Content-Length at all (relying on
+      # close-delimited framing, or itself a smuggling probe) is evidence same as a wrong one;
+      # this path only ever RESYNCS an existing header, it does not invent framing the
+      # operator's capture never had.
       def self.resync_content_length_if_body_changed(before : Bytes, after : Bytes) : Bytes
         b = body_bytesize(before)
         a = body_bytesize(after)
         return after if b.nil? || a.nil? || b == a
-        resync_content_length(after)
+        resync_content_length(after, add_if_missing: false)
       end
 
       # Body length of a wire-form request, or nil when there is no CRLFCRLF terminator.

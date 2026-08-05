@@ -18,9 +18,16 @@ module Gori
       # text: rendering raw non-UTF-8 bytes here (Comparer + the Repeater response diff)
       # reintroduced PR#86's terminal corruption — accidental wide/emoji graphemes among
       # the bytes desync the terminal's cursor tracking. Text lines are scrubbed too.
-      def of(head : Bytes?, body : Bytes?, *, decode : Bool) : Array(String)
+      #
+      # `error` (a flow's `state: error` reason — Sandbox-blocked, connection refused, etc.)
+      # is prepended as its own line, same placement as `gori run show`'s "error: …" line.
+      # Without it, an errored flow has no head/body at all and this returns an empty array,
+      # so a diff against it renders as an unexplained "response removed" — every line of the
+      # OTHER side deleted, with no hint why — instead of showing the actual, more useful fact.
+      def of(head : Bytes?, body : Bytes?, *, decode : Bool, error : String? = nil) : Array(String)
         b = decode ? display_body(head, body) : body
-        lines = bytes_to_lines(head)
+        lines = error ? ["error: #{error}"] : [] of String
+        lines.concat(bytes_to_lines(head))
         if b && !b.empty?
           lines << ""
           if binary?(b)
