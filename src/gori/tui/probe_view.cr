@@ -34,7 +34,9 @@ module Gori::Tui
       # The AFFECTED URLS list in the detail: caret, selection, scroll and draw. The list is the
       # finding's evidence and had no caret and no copy — the one thing an operator wants out of a
       # scan issue is the URLs it fired on.
-      @affected = ReadPane.new
+      # Soft wrap: these rows are URLs, and a URL long enough to matter is exactly the one the
+      # right edge used to eat.
+      @affected = ReadPane.new(wrap: true)
       @query = ""
       @qcx = 0
       @preedit_q = ""

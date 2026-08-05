@@ -47,7 +47,11 @@ module Gori::Tui
         :path    => TextField.new(""),
       }
       @values = TextArea.new
-      @values.follow_x = true # long list values scroll horizontally to keep the caret visible
+      # Soft wrap, like the template this list feeds. One line is one payload, and a payload
+      # long enough to matter (a SQLi chain, a serialized blob) was exactly the one the
+      # `follow_x` sideways pan made unreadable — you could not see its head and its tail at
+      # the same time, in the pane whose whole job is checking what you are about to send.
+      @values.wrap = true
       @path_complete = PathComplete.new(wordlist_history: true)
     end
 

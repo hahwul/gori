@@ -44,8 +44,13 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @editor = TextArea.new
-      @editor.gutter = true   # line numbers in the held-message editor (pairs with ^G)
-      @editor.follow_x = true # long lines (headers, URLs) scroll horizontally to keep the cursor visible
+      @editor.gutter = true # line numbers in the held-message editor (pairs with ^G)
+      # Soft wrap, Burp-style, exactly as the Repeater's request pane and the Fuzzer template:
+      # a long header, URL or minified body spills onto continuation rows with its line number
+      # on the first of them. These are the same bytes those panes hold, and here they are
+      # under a clock — a held message you have to pan sideways to read is one you forward
+      # without having read it.
+      @editor.wrap = true
       @editing = false
       # Filter bar: the catch direction + on/off mirror the Interceptor (captured on
       # reload, rendered as chips); the condition query is a local edit buffer pushed
@@ -88,7 +93,9 @@ module Gori::Tui
       # from the item's `Highlight::Windowed` LAZILY — a held body runs to megabytes and this is
       # the pane that must not materialise it. `Highlight.plain` is the bridge from the styled
       # window to the text the caret and a copy address; the window itself paints.
-      @preview = ReadPane.new
+      # Soft wrap, matching the editor beside it (and the Repeater / History panes showing the
+      # same bytes): READ and EDIT must not disagree about what a row is in one pane.
+      @preview = ReadPane.new(wrap: true)
       @reload_rev = -1 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
       # Multi-select marks (#442's model, ported to the hold queue), keyed by ITEM ID rather
       # than row index: a forward/drop of an earlier entry shifts every index below it, so an
@@ -1071,16 +1078,9 @@ module Gori::Tui
       @preview.source(win.total, ->(i : Int32) { Highlight.plain(win.line_at(i)) })
     end
 
-    # Nudge the read-only held-item preview sideways (shift+←/→). No-op while
-    # editing — the TextArea editor's own follow_x already handles that case.
-    def hscroll_detail(delta : Int32) : Nil
-      return if @editing
-      @preview.hscroll(delta)
-    end
-
-    # Vertical companion to hscroll_detail (shift+↑/↓): scroll the read-only preview so a
-    # held body taller than the pane is fully readable WITHOUT entering edit mode (which
-    # risks mutating byte-exact held bytes). Floored at 0 here; render clamps the upper bound.
+    # Scroll the read-only preview so a held body taller than the pane is fully readable WITHOUT
+    # entering edit mode (which risks mutating byte-exact held bytes). Floored at 0 here; render
+    # clamps the upper bound. The pane wraps, so this is the only scroll axis it has left.
     def vscroll_detail(delta : Int32) : Nil
       return if @editing
       with_preview { @preview.scroll_view(delta) }

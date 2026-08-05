@@ -4402,50 +4402,16 @@ module Gori::Tui
       paint_request_read_chrome(screen, inner, @editor, focused && !ins)
     end
 
-    # READ-mode over-paint (selection tint + block caret) on top of the frame the editor
-    # just drew. It inverts `TextArea#last_rows` — the rows that were ACTUALLY laid down —
-    # rather than re-deriving `line - scroll`: under soft wrap a screen row is no longer a
-    # logical line, and the two derivations drifting apart is precisely how a selection ends
-    # up tinting the wrong text. Every span is clipped to its row, so a selection crossing a
-    # wrap break is painted on each row it covers.
+    # READ-mode over-paint (selection tint + block caret) on top of the frame the editor just
+    # drew — `TextReadState#paint_chrome`, which carries the reasoning for every line of it.
+    #
     # `ed` is passed in rather than read from `req_editor`: the caller knows which card it is
     # drawing, and a split column has two. Deriving it here meant that painting the DECODED
     # card while the ENVELOPE was the active sub-pane would invert the ENVELOPE's `last_rows`
-    # into the DECODED rect — the exact "two derivations drifting apart" this method's own
-    # comment warns about, one level up. The `active` gate happens to make that unreachable
-    # today; the parameter makes it unrepresentable.
+    # into the DECODED rect — two derivations of the same rows, drifting apart. The `active`
+    # gate happens to make that unreachable today; the parameter makes it unrepresentable.
     private def paint_request_read_chrome(screen : Screen, rect : Rect, ed : TextArea, active : Bool) : Nil
-      return unless active
-      lines = ed.lines_snapshot
-      return if lines.empty?
-      @req_read.sync_from(ed)
-      rows = ed.last_rows
-      return if rows.empty?
-      gw = ed.gutter? ? Gutter.width(lines.size) : 0
-      cw = {rect.w - gw, 0}.max
-      spans = @req_read.cursor.highlight_spans(lines)
-      cy, cx = ed.cy, ed.cx
-      rows.each_with_index do |vr, row|
-        y = rect.y + row
-        line = lines[vr.li]? || ""
-        # The band and the caret both go through the EDITOR, which owns the concealed-run map:
-        # `§value¦chain§` hides the `¦chain` in this very pane, and measuring the span here on the
-        # raw line put the tint N columns right of its text while re-drawing the raw segment
-        # unconcealed the chain (see the READ-mode over-paint seam in `text_area.cr`).
-        spans.each do |(li, x0, x1)|
-          next unless li == vr.li
-          ed.paint_read_band(screen, rect.x + gw, y, li, x0, x1, vr.a, vr.b, cw)
-        end
-        # The caret belongs to exactly one row: the one whose slice contains it, with the
-        # end of a wrapped row losing to the row it starts (Wrap::Layout#row_of's rule,
-        # spelled out here because ReadCursor holds no layout of its own).
-        next unless vr.li == cy && cx >= vr.a && (cx < vr.b || vr.b >= line.size)
-        col, ch = ed.read_caret_cell(vr.li, cx, vr.a)
-        px = rect.x + gw + col
-        next unless px < rect.x + rect.w
-        screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, y)
-      end
+      @req_read.paint_chrome(screen, rect, ed, active)
     end
 
     # `row_start` is the char index the drawn row begins at — 0 for an unwrapped line, the

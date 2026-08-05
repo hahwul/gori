@@ -113,7 +113,12 @@ describe Gori::Tui::IssuesView do
     end
   end
 
-  it "hscroll_notes scrolls a long notes line sideways into view (shift+←/→)" do
+  # Was "hscroll_notes scrolls a long notes line sideways into view (shift+←/→)". The notes
+  # pane soft-wraps now, like the Repeater request pane and the History detail, so the whole
+  # `hscroll_notes` chain is retired and BOTH ends of a long line are on screen at once — with
+  # no chord to press to see the second one. Still under test: that a line wider than the pane
+  # is fully reachable, which is what the h-scroll pair existed to provide.
+  it "wraps a long notes line instead of scrolling it sideways" do
     tmp_store do |store|
       id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
       store.update_issue(id, notes: "HEAD" + ("." * 80) + "TAIL")
@@ -129,13 +134,11 @@ describe Gori::Tui::IssuesView do
       backend = MemoryBackend.new(80, 24)
       view.render(Screen.new(backend), rect, focused: true)
       backend.contains?("HEAD").should be_true
-      backend.contains?("TAIL").should be_false
-
-      30.times { view.hscroll_notes(1) }
-      backend2 = MemoryBackend.new(80, 24)
-      view.render(Screen.new(backend2), rect, focused: true)
-      backend2.contains?("TAIL").should be_true
-      backend2.contains?("HEAD").should be_false
+      backend.contains?("TAIL").should be_true # …on its continuation row, not off the edge
+      # …and on DIFFERENT rows: this is a wrap, not a pane that grew wide enough to fit.
+      head_row = (0...24).find { |y| backend.row(y).includes?("HEAD") }.not_nil!
+      tail_row = (0...24).find { |y| backend.row(y).includes?("TAIL") }.not_nil!
+      tail_row.should be > head_row
     end
   end
 

@@ -812,7 +812,11 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
-  it "hscroll_detail scrolls a long RESULT response line sideways into view (shift+←/→)" do
+  # Was "hscroll_detail scrolls a long RESULT response line sideways into view (shift+←/→)". The
+  # RESULT detail moved onto the wrapping `ReadPane`, so the whole `hscroll_detail` chain is
+  # retired and both ends of an attacker-shaped response line are on screen at once. Still under
+  # test: that the tail of a line wider than the pane is reachable — the h-scroll pair's job.
+  it "wraps a long RESULT response line instead of scrolling it sideways" do
     view = loaded_fuzzer
     long_line = "HEAD" + ("." * 100) + "TAIL"
     r = Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 1200_i64, 40, 5, 1000_i64, nil, false, false, nil,
@@ -824,13 +828,10 @@ describe Gori::Tui::FuzzerView do
     backend = MemoryBackend.new(80, 20)
     view.render(Screen.new(backend), rect)
     backend.contains?("HEAD").should be_true
-    backend.contains?("TAIL").should be_false # off the right edge, clipped
-
-    20.times { view.hscroll_detail(1) } # scroll well past the line's width
-    backend2 = MemoryBackend.new(80, 20)
-    view.render(Screen.new(backend2), rect)
-    backend2.contains?("TAIL").should be_true
-    backend2.contains?("HEAD").should be_false # scrolled off the left edge
+    backend.contains?("TAIL").should be_true # on a continuation row, not off the right edge
+    head_row = (0...20).find { |y| backend.row(y).includes?("HEAD") }.not_nil!
+    tail_row = (0...20).find { |y| backend.row(y).includes?("TAIL") }.not_nil!
+    tail_row.should be > head_row
   end
 end
 

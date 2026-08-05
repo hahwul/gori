@@ -93,7 +93,9 @@ module Gori::Tui
       # The callback detail's caret, selection, scroll and draw. This pane holds the raw callback
       # — the evidence an OAST finding rests on — and had no caret and no copy of its own: the
       # tab's `y` copies the PAYLOAD, not what came back.
-      @cb_pane = ReadPane.new
+      # Soft wrap: a callback's body / headers are the payload under inspection, and an
+      # interaction record is mostly long single lines.
+      @cb_pane = ReadPane.new(wrap: true)
       @filter = TextField.new # Callbacks free-text filter (`/`)
       @filter_editing = false
       @prov_sel = 0

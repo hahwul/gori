@@ -6,6 +6,7 @@ require "./input_mode"
 require "./text_read_state"
 require "./line_field_read"
 require "./read_cursor"
+require "./read_pane"
 require "./gutter"
 require "./traffic_empty_state"
 require "./text_area"
@@ -89,7 +90,12 @@ module Gori::Tui
       @evidence_env_names = Set(String).new
       @editor = TextArea.new
       @editor.gutter = true
-      @editor.follow_x = true     # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
+      # Soft wrap, Burp-style, exactly as the Repeater's request pane: a long header, URL or
+      # §-marked minified body spills onto continuation rows and the line number stays on the
+      # first of them. Replaces the `follow_x` horizontal scroll this pane used to carry — a
+      # request you have to pan sideways to read is a request you misread, and here the thing
+      # off the right edge is a `§…§` marker whose position IS the payload's insertion point.
+      @editor.wrap = true
       @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
       @editor.chain_peek = true   # tooltip revealing the concealed ¦chain of the §…§ marker under the caret
       @last_synced_config = ""    # last store config blob applied (reconcile equality)
@@ -183,11 +189,17 @@ module Gori::Tui
       @run_total = nil.as(Int64?)
       @job_id = 0
       @stop_requested = false
-      @detail_scroll = 0
-      @detail_xscroll = 0 # horizontal scroll offset for the RESULT detail (shift+←/→)
       @detail_pane = :response
-      @detail_cursor = ReadCursor.new
-      @detail_last_h = 0 # viewport height from last detail render (wheel clamp)
+      # The RESULT detail's caret, selection, scroll anchor and whole draw. This pane is one of
+      # the three hand-rolled copies `ReadPane` was extracted to replace (see its class comment)
+      # and the last to move onto it: it carried its own `@detail_scroll` / `@detail_xscroll` /
+      # `@detail_last_h` / `ReadCursor` plus its own `ensure_detail_visible`, and the drift
+      # between that copy and the Decoder's was already a documented bug.
+      #
+      # Gutter on: these rows ARE lines of the request/response under test. Wrap on: a fuzz
+      # response is attacker-shaped, so "one enormous line" is the normal case here, and the
+      # tail of it used to be reachable only by panning sideways with ⇧←/→.
+      @detail_read = ReadPane.new(gutter: true, wrap: true)
       @target_mode = InputMode::Read
       @template_mode = InputMode::Read
       @template_read = TextReadState.new
@@ -207,6 +219,9 @@ module Gori::Tui
       # (same invariant @decoded_index relies on), so this only recomputes on pane/row change.
       @detail_lines_cache = nil.as(Array(String)?)
       @detail_lines_key = nil.as({Symbol, Int64}?)
+      # The Array `@detail_read` is currently pointed at, compared by IDENTITY — see
+      # `sync_detail_source`.
+      @detail_source_lines = nil.as(Array(String)?)
       # Styled overlay for the detail lines (syntax highlighting), keyed by pane/row +
       # theme revision so a palette switch rebuilds it. Held in lockstep with the plain
       # @detail_lines_cache; the plain lines still back the gutter/cursor/selection math.
@@ -479,7 +494,20 @@ module Gori::Tui
     # --- READ / INS input modes (target + template panes) ---
     getter target_mode : InputMode
     getter template_mode : InputMode
-    getter detail_cursor : ReadCursor
+
+    # The RESULT detail's caret + selection. Read off the pane that owns them now, rather than
+    # being a second cursor beside it.
+    def detail_cursor : ReadCursor
+      @detail_read.cursor
+    end
+
+    # The READ-mode caret/selection over the TEMPLATE pane. Exposed like
+    # `HistoryView#detail_read` so a wrap example can assert where a visual-row step landed in
+    # BUFFER coordinates — the one thing a screen-cell assertion cannot distinguish from a
+    # caret that stopped on the right cell of the wrong line.
+    def template_read : ReadCursor
+      @template_read.cursor
+    end
 
     def target_insert? : Bool
       @target_mode == InputMode::Insert
@@ -810,7 +838,11 @@ module Gori::Tui
       @results_rev += 1
       # A fresh run reuses result indices from 0, so drop the {pane, index}-keyed detail
       # cache — otherwise an old row's lines could survive under a colliding new index.
+      # `@detail_source_lines` goes with it: dropping the cache alone would already force a
+      # rebuild (and so a re-source, the Array being new), but tying the two together keeps
+      # the "the pane is pointed at THAT Array" invariant readable in one place.
       @detail_lines_cache = nil
+      @detail_source_lines = nil
       @detail_lines_key = nil
       @detail_styled_cache = nil
       @detail_styled_key = nil
@@ -1297,38 +1329,25 @@ module Gori::Tui
     def open_detail : Nil
       return if sorted_results.empty?
       @focus = :detail
-      @detail_scroll = 0
-      @detail_xscroll = 0
       @detail_pane = :response
-      @detail_cursor.reset
+      @detail_read.reset
       decode_detail # parse the decoded-protocol panes for the row we're opening
     end
 
     def detail_cursor_at_top? : Bool
-      @detail_cursor.cy == 0 && @detail_scroll == 0
+      @detail_read.at_top?
     end
 
     def detail_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless detail_navigable?
-      lines = detail_plain_lines
-      return if lines.empty?
-      @detail_cursor.move(dr, dc, lines, selecting: selecting)
-      ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+      sync_detail_source
+      @detail_read.move(dr, dc, selecting: selecting)
     end
 
     def detail_scroll_view(step : Int32) : Nil
       return unless detail_navigable?
-      lines = detail_plain_lines
-      return if @detail_last_h <= 0 || lines.size <= @detail_last_h
-      max = lines.size - @detail_last_h
-      @detail_scroll = (@detail_scroll + step).clamp(0, max)
-      lo = @detail_scroll
-      hi = {@detail_scroll + @detail_last_h - 1, lines.size - 1}.min
-      # Clamp cy into range BEFORE indexing `lines`: while a run streams, a live re-sort
-      # (non-index sort) can swap the fixed @sel onto a shorter result, leaving cy stale
-      # and larger than the new `lines` — a bare `lines[cy]` would then raise IndexError.
-      cy = @detail_cursor.cy.clamp(lo, hi)
-      @detail_cursor.sync(cy, @detail_cursor.cx.clamp(0, lines[cy].size))
+      sync_detail_source
+      @detail_read.scroll_view(step)
     end
 
     def detail_plain_lines : Array(String)
@@ -1338,13 +1357,34 @@ module Gori::Tui
     end
 
     def detail_copy_text : String
-      lines = detail_plain_lines
-      return "" if lines.empty?
-      @detail_cursor.selection_text(lines) || @detail_cursor.current_line(lines)
+      sync_detail_source
+      @detail_read.copy_text
     end
 
     def detail_copy_all_text : String
       detail_plain_lines.join("\n")
+    end
+
+    # Point the detail pane at the OPEN result's lines. Cheap and idempotent — `detail_lines`
+    # is memoized on {pane, row} — so every gesture can call it and none can act on a pane
+    # sourced from a row the list has since re-sorted away underneath it. That re-source is
+    # also what keeps the old hand-rolled `cy` clamp honest: while a run streams, a live
+    # re-sort can swap the fixed `@sel` onto a SHORTER result, and `ReadPane` clamps the caret
+    # against the text it is pointed at.
+    #
+    # A stale cache hit cannot survive that swap, because the memo key holds `r.index` and
+    # `Fuzz::Result#index` is the run's request ORDINAL — `Generator#emit` hands out `idx` once
+    # per emitted job, so no two rows of one run share it. Indices DO restart at 0 on the next
+    # run, and `begin_run` drops the cache for exactly that.
+    private def sync_detail_source : Nil
+      lines = detail_plain_lines
+      prev = @detail_source_lines
+      # IDENTITY, not equality: `detail_lines` hands back the very same Array while its
+      # {pane, row} key holds, and `ReadPane#source` drops the wrap memo — so comparing by
+      # value here would re-wrap the visible window on every keystroke over a body that can
+      # reach multiple MiB, which is exactly what the memo exists to prevent.
+      @detail_read.source(lines) unless prev && lines.same?(prev)
+      @detail_source_lines = lines
     end
 
     # --- mouse over the RESULT detail ---------------------------------------
@@ -1353,8 +1393,8 @@ module Gori::Tui
     # double-click arms both bailed unless the focused pane was the template, and its click arm
     # had no `:detail` branch, so a click focused the card and left the caret where it was.
     # Compare the History drill-in, which has had all four (chips, caret, drag, word) since it
-    # grew a read cursor. The inverse is `DecoderView#output_click_to_cursor`'s: `ReadCursor`
-    # owns the mapping, the pane supplies the scroll anchor, the gutter and the h-scroll.
+    # grew a read cursor. The hit test itself is `ReadPane`'s now — it owns the wrap layout and
+    # the gutter, and a second inverse here would drift from the caret the click lands on.
 
     # The card `render_bottom` hands `render_detail`, so every gesture inverts against exactly
     # the rect that was drawn. nil unless the detail is what is actually on screen there.
@@ -1364,31 +1404,27 @@ module Gori::Tui
       bottom.h > 0 ? bottom : nil
     end
 
-    # The detail card's interior + its gutter width, or nil when there is nothing to hit-test.
-    private def detail_hit_geometry(rect : Rect) : {Rect, Array(String), Int32}?
+    # The detail card's interior, or nil when there is nothing to hit-test. The gutter width is
+    # no longer computed here: `ReadPane` derives it from the size it was sourced with, and two
+    # derivations of it would be two answers about where the text column starts.
+    private def detail_hit_geometry(rect : Rect) : Rect?
       return nil unless detail_navigable?
       card = detail_card_rect(rect)
       return nil unless card
-      lines = detail_plain_lines
-      return nil if lines.empty?
+      sync_detail_source
+      return nil if @detail_read.empty?
       inner = card.inset(1, 1)
-      return nil if inner.empty?
-      {inner, lines, {Gutter.width(lines.size), inner.w}.min}
+      inner.empty? ? nil : inner
     end
 
     def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
-      inner, lines, gw = detail_hit_geometry(rect) || return
-      @detail_cursor.click_to_cursor(inner, mx, my, @detail_scroll, lines, gw, @detail_xscroll, selecting)
-      ensure_detail_visible(inner.h)
+      inner = detail_hit_geometry(rect) || return
+      @detail_read.click(inner, mx, my, selecting)
     end
 
     def detail_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
-      hit = detail_hit_geometry(rect)
-      return false unless hit
-      inner, lines, gw = hit
-      took = @detail_cursor.select_word_at(inner, mx, my, @detail_scroll, lines, gw, @detail_xscroll)
-      ensure_detail_visible(inner.h)
-      took
+      inner = detail_hit_geometry(rect) || return false
+      @detail_read.select_word(inner, mx, my)
     end
 
     # The pane chip under (mx, my) on the detail card's TOP BORDER, or nil. Inverts
@@ -1425,12 +1461,6 @@ module Gori::Tui
       detail_step_pane(i - (panes.index(@detail_pane) || 0))
     end
 
-    # Horizontal companion to `detail_scroll` (shift+←/→). Floored at 0 here; the
-    # render loop clamps the upper bound to the widest row actually on screen.
-    def hscroll_detail(delta : Int32) : Nil
-      @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
-    end
-
     # ←/→ in the RESULT detail: step through the pane chain (request → response →
     # whichever decoded-protocol panes the row carries), clamped — no wrap, so ← past
     # the first / → past the last is a no-op (esc leaves the detail).
@@ -1439,9 +1469,8 @@ module Gori::Tui
       i = (panes.index(@detail_pane) || 0) + dir
       return if i < 0 || i >= panes.size
       @detail_pane = panes[i]
-      @detail_scroll = 0
-      @detail_xscroll = 0
-      @detail_cursor.reset
+      @detail_read.reset
+      @detail_source_lines = nil
       @detail_lines_cache = nil
       @detail_lines_key = nil
       @detail_styled_cache = nil
@@ -1833,7 +1862,7 @@ module Gori::Tui
       case @focus
       when :template then !pane_insert?(:template) && @template_read.selection?
       when :target   then !pane_insert?(:target) && @target_read.selection?
-      when :detail   then detail_navigable? && @detail_cursor.selection?
+      when :detail   then detail_navigable? && @detail_read.selection?
       else                false
       end
     end
@@ -1848,10 +1877,8 @@ module Gori::Tui
         @tcx = @target_read.select_line(@target.size)
       when :detail
         return unless detail_navigable?
-        lines = detail_plain_lines
-        return if lines.empty?
-        @detail_cursor.select_line(lines)
-        ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+        sync_detail_source
+        @detail_read.select_line
       end
     end
 
@@ -1859,7 +1886,7 @@ module Gori::Tui
       case @focus
       when :template then @template_read.clear_selection
       when :target   then @target_read.clear_selection
-      when :detail   then @detail_cursor.clear_selection
+      when :detail   then @detail_read.clear_selection
       end
     end
 
@@ -2164,28 +2191,11 @@ module Gori::Tui
     # The copy was right all along (it reads buffer coordinates), so the band highlighted different
     # bytes than `y` copied. See the READ-mode over-paint seam in `text_area.cr`.
     #
-    # `scroll`-relative rows are correct here where they would not be in the Repeater: this editor
-    # does not soft-wrap (no `wrap = true`), so one logical line is one drawn row.
+    # The shared over-paint — `TextReadState#paint_chrome`, which inverts the row list the
+    # editor actually drew instead of the `li - scroll` sum this method used to carry. That sum
+    # stopped being the screen row the moment this pane started soft-wrapping.
     private def paint_template_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
-      return unless active
-      lines = @editor.lines_snapshot
-      return if lines.empty?
-      @template_read.sync_from(@editor)
-      scr = @editor.scroll
-      gw = @editor.gutter? ? Gutter.width(lines.size) : 0
-      cw = {rect.w - gw, 0}.max
-      @template_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        @editor.paint_read_band(screen, rect.x + gw, rect.y + (li - scr), li, x0, x1, 0, -1, cw)
-      end
-      cy, cx = @editor.cy, @editor.cx
-      return unless cy >= scr && cy < scr + rect.h
-      col, ch = @editor.read_caret_cell(cy, cx)
-      px = rect.x + gw + col
-      if px < rect.x + rect.w
-        screen.cell(px, rect.y + (cy - scr), ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + (cy - scr))
-      end
+      @template_read.paint_chrome(screen, rect, @editor, active)
     end
 
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
@@ -2206,16 +2216,6 @@ module Gori::Tui
         screen.text(px, y, seg, Theme.text, bg)
         px += Screen.draw_width(seg)
         i = e
-      end
-    end
-
-    private def ensure_detail_visible(view_h : Int32) : Nil
-      return if view_h <= 0
-      cy = @detail_cursor.cy
-      if cy < @detail_scroll
-        @detail_scroll = cy
-      elsif cy >= @detail_scroll + view_h
-        @detail_scroll = cy - view_h + 1
       end
     end
 
@@ -2670,48 +2670,13 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       lines = detail_lines(r)
       styled = detail_styled(r, lines)
-      @detail_last_h = inner.h
-      ensure_detail_visible(inner.h) if focused
-      @detail_scroll = @detail_scroll.clamp(0, {lines.size - inner.h, 0}.max)
-      gw = {Gutter.width(lines.size), inner.w}.min
-      cw = {inner.w - gw, 0}.max
-      rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
-      # draw_width, not display_width: these rows are drawn per grapheme (Highlight.draw on
-      # the styled overlay, `screen.text` on the plain fallback), so a control char in a
-      # fuzz response holds a cell the raw measure scores 0 and the clamp stopped short of
-      # the content. _upto keeps the early exit — this runs every frame over response lines
-      # that are attacker-shaped and can be arbitrarily long.
-      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.draw_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
-      # Selection spans for the WHOLE buffer, built once per frame. This used to sit inside
-      # paint_detail_line_chrome, i.e. rebuilt and thrown away once per drawn row — O(rows ×
-      # selection length) tuple appends, plus a fresh Array per row even with nothing selected.
-      spans = focused && detail_navigable? ? @detail_cursor.highlight_spans(lines) : nil
-      rows.each_with_index do |line, i|
-        li = @detail_scroll + i
-        Gutter.draw(screen, inner.x, inner.y + i, li, gw, current: focused && li == @detail_cursor.cy)
-        # Draw the styled overlay; the plain `line` still drives the cursor/selection chrome.
-        sline = styled[li]? || [Highlight::Span.new(line, Theme.text)]
-        sline = Highlight.slice_left(sline, @detail_xscroll) if @detail_xscroll > 0
-        Highlight.draw(screen, inner.x + gw, inner.y + i, sline, bg: Theme.bg, width: cw)
-        paint_detail_line_chrome(screen, inner.x + gw, inner.y + i, li, line, spans)
-      end
-      Frame.scroll_gauge(screen, inner, lines.size, @detail_scroll, focused)
-    end
-
-    # `spans` is the frame's selection-span list (nil when the pane isn't focused/navigable),
-    # built once by render_detail rather than per row.
-    private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
-                                         spans : Array({Int32, Int32, Int32})?) : Nil
-      return unless spans
-      spans.each do |(l, x0, x1)|
-        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
-      end
-      return unless li == @detail_cursor.cy
-      cx = @detail_cursor.cx.clamp(0, line.size)
-      px = x + Screen.draw_width(line[0, cx])
-      ch = cx < line.size ? line[cx] : ' '
-      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
-      screen.cursor(px, y)
+      sync_detail_source
+      # `styled_at` is COLOUR ONLY — its span texts concatenate back to the same `lines[li]` the
+      # pane addresses, which is what lets the caret, the selection band and the wrap layout be
+      # measured on the plain line while the draw paints the coloured one. A row the overlay has
+      # no entry for falls back to the plain text in `Theme.text`, exactly as before.
+      @detail_read.render(screen, inner, focused && detail_navigable?,
+        styled_at: ->(li : Int32) { styled[li]? || Highlight::Line{Highlight::Span.new(lines[li]? || "", Theme.text)} })
     end
 
     # The detail sub-panes in order: REQUEST → RESPONSE → decoded-protocol panes (each

@@ -729,10 +729,6 @@ private class FakeContext < ExecContext
     @calls << :issue_edit_notes
   end
 
-  def issue_hscroll(delta : Int32) : Nil
-    @calls << :issue_hscroll
-  end
-
   def issue_edit_title : Nil
     @calls << :issue_edit_title
   end

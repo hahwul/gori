@@ -53,7 +53,10 @@ module Gori::Tui
       @status_counts = [] of {Int32?, Int64}
       @sev_tally = StaticArray(Int64, 5).new(0_i64)
       @desc_area = TextArea.new
-      @desc_area.follow_x = true # long description lines scroll horizontally to keep the cursor visible
+      # Soft wrap, like every other reading surface in the tree. A description is prose typed
+      # as one logical line per paragraph, so the `follow_x` sideways pan this used to carry
+      # showed one screenful of each and hid the rest behind ⇧←/→.
+      @desc_area.wrap = true
       @desc_dirty = false
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
@@ -1306,53 +1309,11 @@ module Gori::Tui
       insert ? Theme.accent : Frame.pane_border(true)
     end
 
+    # The shared over-paint — see `TextReadState#paint_chrome`, which carries the reasoning
+    # (including the `sync_from` that keeps `^E`'s external editor shrinking the description
+    # under a stale read cursor from taking the render down).
     private def paint_desc_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
-      return unless active
-      lines = @desc_area.lines_snapshot
-      return if lines.empty?
-      # Re-sync the read cursor from the editor before painting: replace_desc (^E external editor)
-      # can shrink the description without touching @desc_read, leaving a stale cursor past the new
-      # end so the lines[cy] below would raise IndexError and crash the TUI render. Mirrors the
-      # notes_view / repeater_view / fuzzer_view read-chrome paint paths.
-      @desc_read.sync_from(@desc_area)
-      scr = @desc_area.scroll
-      sel_bg = Theme.accent_bg
-      @desc_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        row = li - scr
-        paint_char_span_bg(screen, rect.x, rect.y + row, lines[li], x0, x1, sel_bg)
-      end
-      cy, cx = @desc_read.cursor.cy, @desc_read.cursor.cx
-      return unless cy >= scr && cy < scr + rect.h
-      row = cy - scr
-      line = lines[cy]
-      px = rect.x + Screen.draw_width(line[0, cx])
-      if px < rect.x + rect.w
-        ch = cx < line.size ? line[cx] : ' '
-        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + row)
-      end
-    end
-
-    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
-      return if x0 >= x1
-      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
-      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
-      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
-      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
-      # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
-      b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
-        screen.text(px, y, seg, Theme.text, bg)
-        px += Screen.draw_width(seg)
-        i = e
-      end
+      @desc_read.paint_chrome(screen, rect, @desc_area, active)
     end
 
     # NETWORK card: the scope-lens + sandbox toggles over the three inline-editable network

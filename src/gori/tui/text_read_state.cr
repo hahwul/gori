@@ -1,5 +1,6 @@
 require "./read_cursor"
 require "./text_area"
+require "./gutter"
 
 module Gori::Tui
   # Read-mode navigation + selection for a TextArea (shared by Repeater, Fuzzer, Notes, …).
@@ -8,6 +9,61 @@ module Gori::Tui
 
     def initialize
       @cursor = ReadCursor.new
+    end
+
+    # --- the READ-mode over-paint ----------------------------------------------
+    # The NORMAL-mode selection band + block caret, drawn on top of the frame the editor just
+    # laid down. It lives HERE because all five owners of a read-mode editor — the Repeater's
+    # request pane, the Fuzzer template, Notes, an Issue's notes, the Project description —
+    # had grown their own copy of exactly this loop, and the copies had already drifted: two
+    # measured the band on the raw line (blind to the concealed `¦chain` runs, see the
+    # READ-mode over-paint seam in `text_area.cr`), one omitted the `sync_from` the other four
+    # carry against a peer edit shrinking the buffer under a stale cursor, and every one of
+    # them derived the screen row as `li - editor.scroll`.
+    #
+    # That last sum is what soft wrap retires. A wrapped logical line is N drawn rows, so
+    # `li - scroll` names the row the line STARTS on and paints every one of its rows there —
+    # the band and the caret drifting further off with each wrap above them. `last_rows` is
+    # the row list the editor ACTUALLY drew, so inverting it cannot disagree with the draw.
+    #
+    # `rect` must be the same interior the editor was rendered into. Both the band and the
+    # caret go through the EDITOR (`paint_read_band` / `read_caret_cell`), which owns the
+    # concealed-run map and the column measure the base draw advanced by.
+    def paint_chrome(screen : Screen, rect : Rect, editor : TextArea, active : Bool = true) : Nil
+      return unless active
+      lines = editor.lines_snapshot
+      return if lines.empty?
+      # Before painting, not after: a peer edit (a 2nd session, an MCP `update_note`, `^E`'s
+      # external editor) can reload a shorter buffer, which re-clamps the EDITOR's caret and
+      # deliberately leaves this cursor alone — a stale `cy` past the new end then indexes
+      # off the end of `lines` and takes the whole render down.
+      sync_from(editor)
+      rows = editor.last_rows
+      return if rows.empty?
+      gw = editor.gutter? ? Gutter.width(lines.size) : 0
+      cw = {rect.w - gw, 0}.max
+      spans = @cursor.highlight_spans(lines)
+      cy, cx = editor.cy, editor.cx
+      rows.each_with_index do |vr, row|
+        y = rect.y + row
+        line = lines[vr.li]? || ""
+        # Every span is clipped to its ROW, so a selection crossing a wrap break is tinted to
+        # the end of one row and resumed on the next — clipping to the LINE instead paints it
+        # once, at the first row's columns, and the rest reads as unselected.
+        spans.each do |(li, x0, x1)|
+          next unless li == vr.li
+          editor.paint_read_band(screen, rect.x + gw, y, li, x0, x1, vr.a, vr.b, cw)
+        end
+        # The caret belongs to exactly one row: the one whose slice contains it, with the end
+        # of a wrapped row losing to the row it starts (`Wrap::Layout#row_of`'s rule, spelled
+        # out here because `ReadCursor` holds no layout of its own).
+        next unless vr.li == cy && cx >= vr.a && (cx < vr.b || vr.b >= line.size)
+        col, ch = editor.read_caret_cell(vr.li, cx, vr.a)
+        px = rect.x + gw + col
+        next unless px < rect.x + rect.w
+        screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, y)
+      end
     end
 
     def clear_selection : Nil
@@ -33,9 +89,9 @@ module Gori::Tui
     # "down" means in the one pane that wraps.
     #
     # The destination comes from the editor because the editor owns the wrap layout;
-    # `visual_row_target` is nil for every non-wrapping owner (Notes, the project
-    # description, the Fuzzer template), which then keeps the plain logical step it always
-    # had. Horizontal moves are unaffected: a wrapped row has no sideways.
+    # `visual_row_target` is nil for every non-wrapping owner, which then keeps the plain
+    # logical step it always had. Horizontal moves are unaffected: a wrapped row has no
+    # sideways.
     def move(editor : TextArea, dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       lines = editor.lines_snapshot
       return if lines.empty?

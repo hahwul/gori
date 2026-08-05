@@ -143,10 +143,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issues_copy_all
   end
 
-  def issue_hscroll(delta : Int32) : Nil
-    issues_controller.issue_hscroll(delta)
-  end
-
   # Re-open the create form seeded from the open issue (title + severity), in
   # edit mode — commit updates instead of inserting (create_issue_from_form).
   # Stays in the shell: it opens the issue-form OVERLAY (shell-owned).

@@ -80,7 +80,12 @@ describe Gori::Tui::InterceptView do
     end
   end
 
-  it "hscroll_detail scrolls a long held-request header sideways into view (shift+←/→)" do
+  # Was "hscroll_detail scrolls a long held-request header sideways into view (shift+←/→)". The
+  # read-only preview soft-wraps now, like the editor behind it and like the Repeater / History
+  # panes that show the same bytes, so the whole `hscroll_detail` chain is retired. Still under
+  # test: that a header wider than the pane is fully readable — the h-scroll pair's whole job,
+  # and here it matters under a clock (a message you cannot read is one you forward blind).
+  it "wraps a long held-request header instead of scrolling it sideways" do
     tmp_interceptor do |ic|
       long_header = "X-Long: HEAD" + ("." * 80) + "TAIL"
       hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n#{long_header}\r\n\r\n")
@@ -91,13 +96,10 @@ describe Gori::Tui::InterceptView do
       backend = MemoryBackend.new(100, 12)
       view.render(Screen.new(backend), rect)
       backend.contains?("HEAD").should be_true
-      backend.contains?("TAIL").should be_false # off the right edge, clipped
-
-      20.times { view.hscroll_detail(1) } # scroll well past the line's width
-      backend2 = MemoryBackend.new(100, 12)
-      view.render(Screen.new(backend2), rect)
-      backend2.contains?("TAIL").should be_true
-      backend2.contains?("HEAD").should be_false # scrolled off the left edge
+      backend.contains?("TAIL").should be_true # on a continuation row, not off the right edge
+      head_row = (0...12).find { |y| backend.row(y).includes?("HEAD") }.not_nil!
+      tail_row = (0...12).find { |y| backend.row(y).includes?("TAIL") }.not_nil!
+      tail_row.should be > head_row
     end
   end
 

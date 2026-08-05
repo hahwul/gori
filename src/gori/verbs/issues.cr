@@ -155,15 +155,9 @@ module Gori
         "issue.edit-notes", "Edit notes", "Edit the issue notes inline (i/↵/e)", Verb::Scope::IssuesDetail,
         [Verb::Chord.new("e")]) { |ctx| ctx.issue_edit_notes; nil }
 
-      # Shift+←/→ scroll a long notes line sideways. `issue.close` (registered
-      # above) owns plain ← — a distinct chord (shift: true), so no collision.
-      r.register Verb::Definition.new(
-        "issue.hscroll-right", "Scroll notes right", "Scroll a long notes line right", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("right", shift: true)], hidden: true) { |ctx| ctx.issue_hscroll(1); nil }
-
-      r.register Verb::Definition.new(
-        "issue.hscroll-left", "Scroll notes left", "Scroll a long notes line left", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("left", shift: true)], hidden: true) { |ctx| ctx.issue_hscroll(-1); nil }
+      # There is no ⇧←/→ h-scroll pair here any more: the notes pane soft-wraps, so nothing
+      # sits off to the side to scroll to, and `IssuesController#handle_notes_read_key` had
+      # already taken the chord back for the character selection every other text pane gives it.
 
       r.register Verb::Definition.new(
         "issue.delete", "Delete issue", "Delete this issue", Verb::Scope::IssuesDetail,

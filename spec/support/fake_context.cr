@@ -782,10 +782,6 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:issue_edit_notes)
   end
 
-  def issue_hscroll(delta : Int32) : Nil
-    rec(:issue_hscroll, delta)
-  end
-
   def issue_edit_title : Nil
     rec(:issue_edit_title)
   end

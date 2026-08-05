@@ -34,7 +34,11 @@ module Gori::Tui
 
       def initialize(@id : Int64, text : String = "")
         @area = TextArea.new(text)
-        @area.follow_x = true # long lines scroll horizontally to keep the cursor visible (like the Project description)
+        # Soft wrap, like every other reading surface in the tree (the Repeater's request pane,
+        # the History detail, the Fuzzer template). A note is prose — a paragraph typed as one
+        # logical line is the NORMAL case here, not the exception — so the `follow_x` sideways
+        # pan this used to carry hid all but one screenful of nearly every note it held.
+        @area.wrap = true
       end
 
       # Sub-tab label: the note's title (first non-blank line, trimmed) truncated
@@ -433,56 +437,11 @@ module Gori::Tui
       paint_read_chrome(screen, area, ed, focused && !insert_mode?) if !insert_mode?
     end
 
+    # The shared over-paint — see `TextReadState#paint_chrome`, which carries the reasoning
+    # (including the `sync_from` that keeps a peer edit shrinking the note under a stale cursor
+    # from taking the render down).
     private def paint_read_chrome(screen : Screen, rect : Rect, ed : TextArea, focused : Bool) : Nil
-      return unless focused
-      lines = ed.lines_snapshot
-      return if lines.empty?
-      # Re-sync the read cursor from the editor before painting. A peer edit (2nd session or MCP
-      # update_note) can reload a shorter note via soft_merge_from, which resets the editor's
-      # clamped caret but deliberately leaves @read alone — a stale @read.cursor.cy past the new
-      # end would make the lines[cy] below raise IndexError and crash the TUI render. Mirrors
-      # RepeaterView#paint_request_read_chrome.
-      @read.sync_from(ed)
-      scr = ed.scroll
-      sel_bg = Theme.accent_bg
-      @read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        row = li - scr
-        gw = ed.gutter? ? Gutter.width(lines.size) : 0
-        paint_char_span_bg(screen, rect.x + gw, rect.y + row, lines[li], x0, x1, sel_bg)
-      end
-      cy, cx = @read.cursor.cy, @read.cursor.cx
-      return unless cy >= scr && cy < scr + rect.h
-      row = cy - scr
-      gw = ed.gutter? ? Gutter.width(lines.size) : 0
-      line = lines[cy]
-      px = rect.x + gw + Screen.draw_width(line[0, cx])
-      if px < rect.x + rect.w
-        ch = cx < line.size ? line[cx] : ' '
-        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + row)
-      end
-    end
-
-    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
-      return if x0 >= x1
-      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
-      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
-      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
-      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
-      # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
-      b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
-        screen.text(px, y, seg, Theme.text, bg)
-        px += Screen.draw_width(seg)
-        i = e
-      end
+      @read.paint_chrome(screen, rect, ed, focused)
     end
 
     # Sub-tab chip labels (one per note), sourced by the Runner's shared strip: each

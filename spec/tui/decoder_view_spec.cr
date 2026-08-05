@@ -59,12 +59,17 @@ describe Gori::Tui::DecoderView do
   # and recalling a chain are centered modals now (NamePromptOverlay / LibraryPicker), so
   # the coverage moved to spec/tui/library_overlays_spec.cr.
 
-  it "hscroll_output scrolls a long OUTPUT line sideways into view (shift+←/→)" do
+  # Was "hscroll_output scrolls a long OUTPUT line sideways into view (shift+←/→)". The OUTPUT
+  # pane soft-wraps now, like the Repeater's RESPONSE that draws the same line, so the whole
+  # `hscroll_output` chain is retired and both ends of a long decoded line are on screen at
+  # once. Still under test: that the tail of a line wider than the pane is reachable at all —
+  # which is what the h-scroll pair existed to provide.
+  it "wraps a long OUTPUT line instead of scrolling it sideways" do
     view = DecoderView.new
     long_line = "HEAD" + ("." * 150) + "TAIL"
     # `result` (the OUTPUT content) is independent of the `input:` TextArea (the INPUT
-    # card's own display) — keep INPUT short/unrelated so its unscrolled echo of the
-    # long line's head can't be mistaken for the OUTPUT card's (scrollable) content.
+    # card's own display) — keep INPUT short/unrelated so its echo of the long line's head
+    # can't be mistaken for the OUTPUT card's content.
     result = Gori::Decoder.run(REG, long_line.to_slice, "")
     rect = Rect.new(0, 0, 80, 30)
     render_args = {
@@ -75,13 +80,34 @@ describe Gori::Tui::DecoderView do
     backend = MemoryBackend.new(80, 30)
     view.render(Screen.new(backend), rect, **render_args)
     backend.contains?("HEAD").should be_true
-    backend.contains?("TAIL").should be_false # off the right edge, clipped
+    backend.contains?("TAIL").should be_true # on a continuation row, not off the right edge
+    # …and on a LOWER row: this is a wrap, not a pane wide enough to hold the whole line.
+    head_row = (0...30).find { |y| backend.row(y).includes?("HEAD") }.not_nil!
+    tail_row = (0...30).find { |y| backend.row(y).includes?("TAIL") }.not_nil!
+    tail_row.should be > head_row
+  end
 
-    40.times { view.hscroll_output(1) } # scroll well past the line's width
-    backend2 = MemoryBackend.new(80, 30)
-    view.render(Screen.new(backend2), rect, **render_args)
-    backend2.contains?("TAIL").should be_true
-    backend2.contains?("HEAD").should be_false # scrolled off the left edge
+  # `DecoderController#handle_output` pops focus up to the CHAIN field when `output_at_top?`,
+  # so that predicate decides whether ↑ walks the pane or leaves it. Measured on the logical
+  # line alone, a caret three rows into a wrapped line 0 answers true — and ↑ would abandon the
+  # very rows it was asked to walk. `ReadPane#at_top?` measures the first VISUAL row; this pins
+  # it through the wiring that actually ships, not just on a bare pane.
+  it "is not 'at top' while the OUTPUT caret sits on a continuation row of line 0" do
+    view = DecoderView.new
+    long_line = "0123456789" * 20
+    result = Gori::Decoder.run(REG, long_line.to_slice, "")
+    rect = Rect.new(0, 0, 80, 30)
+    render_args = {
+      input: TextArea.new("unrelated"), chain: "", chain_cx: 0, chain_pre: "",
+      result: result, pane: :output, focused: true, popup: ChainComplete.new,
+    }
+    view.render(Screen.new(MemoryBackend.new(80, 30)), rect, **render_args)
+
+    view.output_at_top?.should be_true
+    view.output_move(1, 0, result) # one VISUAL row down — still on line 0
+    view.output_at_top?.should be_false
+    view.output_move(-1, 0, result)
+    view.output_at_top?.should be_true
   end
 
   it "lights only the focused section's card border gold (per-pane focus)" do
@@ -170,13 +196,18 @@ describe Gori::Tui::ChainComplete do
   end
 end
 
-describe "DecoderView OUTPUT h-scroll" do
-  # Decoding is precisely where raw control bytes surface — an unhex/base64 of a binary
-  # blob is the whole point of the tab. The OUTPUT rows draw through `screen.text`, which
-  # gives every control char a cell, but the h-scroll clamp measured them with
-  # display_width, where those chars are 0 columns. The clamp's ceiling therefore fell
-  # short of the real content and the tail of a decoded line could not be scrolled to.
-  it "scrolls a decoded line containing control bytes to its end" do
+describe "DecoderView OUTPUT control bytes" do
+  # Decoding is precisely where raw control bytes surface — an unhex/base64 of a binary blob is
+  # the whole point of the tab. The OUTPUT rows draw through `screen.text`, which gives every
+  # control char a cell, and the retired h-scroll clamp measured them with `display_width`, where
+  # those chars are 0 columns: its ceiling fell short of the real content and the tail of such a
+  # line could not be reached at all.
+  #
+  # The pane wraps now, so the clamp is gone and the same hazard lives in the WRAP measure
+  # instead — `Wrap.layout` breaks on `Screen.grapheme_cols`, the same ≥1-per-cluster measure
+  # the draw advances by. That is what this pins: a line of tabs must break at the pane's edge
+  # and its tail must land on a continuation row, not be counted as 14 columns and never wrap.
+  it "wraps a decoded line containing control bytes so its end is reachable" do
     line = "STARTTOK#{"\t" * 100}ENDTOK"
     Screen.display_width(line).should eq(14) # the raw measure: 60 tabs count for nothing
     Screen.draw_width(line).should eq(114)   # what `text` paints: one cell per tab
@@ -193,23 +224,21 @@ describe "DecoderView OUTPUT h-scroll" do
     end
 
     # Assert on the OUTPUT card ALONE: the PIPELINE card above it echoes the same decoded
-    # bytes as the unhex step's intermediate and does NOT scroll, so a whole-grid match
-    # would report the unscrolled copy (cf. the hscroll_output spec above, which keeps
-    # INPUT unrelated for the same reason).
-    out_card = ->(b : MemoryBackend) do
-      top = (0...30).index { |y| b.row(y).includes?("OUTPUT") }.not_nil!
-      (top...30).map { |y| b.row(y) }.join("\n")
-    end
-
+    # bytes as the unhex step's intermediate and does NOT wrap, so a whole-grid match would
+    # report that copy (cf. the wrap spec above, which keeps INPUT unrelated for the same
+    # reason).
+    top = 0
     at0 = MemoryBackend.new(80, 30)
     render.call(at0)
-    out_card.call(at0).should contain("STARTTOK")
-    out_card.call(at0).should_not contain("ENDTOK") # tail off to the right
-
-    15.times { view.hscroll_output(4) }
-    scrolled = MemoryBackend.new(80, 30)
-    render.call(scrolled)
-    out_card.call(scrolled).should contain("ENDTOK")       # reachable
-    out_card.call(scrolled).should_not contain("STARTTOK") # head genuinely scrolled off
+    top = (0...30).index { |y| at0.row(y).includes?("OUTPUT") }.not_nil!
+    rows = (top...30).map { |y| at0.row(y) }
+    card = rows.join("\n")
+    card.should contain("STARTTOK")
+    card.should contain("ENDTOK") # the tail wrapped onto a later row rather than being clipped
+    # …and onto a DIFFERENT row: the tabs were measured at one cell each, so the 114-column
+    # line broke at the pane's edge instead of being called 14 columns wide and left unwrapped.
+    start_row = rows.index { |r| r.includes?("STARTTOK") }.not_nil!
+    end_row = rows.index { |r| r.includes?("ENDTOK") }.not_nil!
+    end_row.should be > start_row
   end
 end

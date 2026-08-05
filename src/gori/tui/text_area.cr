@@ -1756,9 +1756,9 @@ module Gori::Tui
     # drift the tint left of the cells). Multi-line regions clamp to [0, line.size): first
     # line tints col→EOL, fully-covered lines 0→size, last line BOL→col; the '\n' offset
     # has no cell. Region columns are computed against the FULL (unscrolled) line, then
-    # shifted left by @xscroll and clipped to the visible window — a no-op when
-    # @xscroll == 0 (the common case, since only the Fuzzer template sets bg_regions and
-    # it doesn't enable follow_x).
+    # shifted left by @xscroll and clipped to the visible window — always a no-op today, since
+    # the only editors that set bg_regions (the Fuzzer template, the Repeater request pane)
+    # soft-wrap, and `wrap=` pins @xscroll at 0 for good.
     #
     # `rs`/`re` bound the VISUAL ROW being painted: the whole line without wrap, one wrapped
     # slice of it with. A region is clipped to the row, so a marker that spans a wrap break

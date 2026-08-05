@@ -36,11 +36,9 @@ abstract class Gori::Verb::ExecContext
   abstract def issue_set_severity : Nil # open the severity colour picker
   abstract def issue_set_status : Nil   # open the triage-status colour picker
   abstract def issue_edit_notes : Nil
-  abstract def issues_notes_read_mode? : Bool # detail open, notes not in INS (gates y/copy)
-  abstract def issues_copy : Nil              # copy selection from issue notes (READ)
-  abstract def issues_copy_all : Nil          # copy all issue notes (space menu)
-  # Horizontal scroll (shift+←/→) for notes in READ (no-op in INS — follow_x tracks the caret).
-  abstract def issue_hscroll(delta : Int32) : Nil
+  abstract def issues_notes_read_mode? : Bool       # detail open, notes not in INS (gates y/copy)
+  abstract def issues_copy : Nil                    # copy selection from issue notes (READ)
+  abstract def issues_copy_all : Nil                # copy all issue notes (space menu)
   abstract def issue_edit_title : Nil               # rename + set severity via the form overlay
   abstract def issue_open_flow : Nil                # open the linked flow's detail in History
   abstract def issue_repeater_flow : Nil            # send the linked flow to Repeater

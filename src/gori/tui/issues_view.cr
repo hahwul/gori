@@ -45,7 +45,10 @@ module Gori::Tui
       @notes_mode = InputMode::Read
       @notes_read = TextReadState.new
       @notes = TextArea.new
-      @notes.follow_x = true # long note lines scroll horizontally to keep the cursor visible
+      # Soft wrap, like every other reading surface in the tree. An issue's notes are prose —
+      # a pasted payload or a paragraph of reproduction steps is one logical line — so the
+      # `follow_x` sideways pan this used to carry showed one screenful and hid the rest.
+      @notes.wrap = true
       @loaded = false
       # The `/` filter bar (mirrors History's QL bar but matches in memory).
       @query = ""
@@ -285,14 +288,6 @@ module Gori::Tui
       return false unless idx = @issues.index { |f| f.id == id }
       select_index(idx)
       open_detail(store)
-    end
-
-    # Nudge the notes viewport sideways (shift+←/→ in READ). Pans by moving the read
-    # cursor so follow_x keeps the window aligned (TextArea ensure_visible_x otherwise
-    # resets a bare @xscroll when the caret sits at column 0).
-    def hscroll_notes(delta : Int32) : Nil
-      return if notes_insert_mode?
-      @notes_read.move(@notes, 0, delta * 4)
     end
 
     def close_detail : Nil
@@ -971,48 +966,11 @@ module Gori::Tui
       notes_card_rect(rect).inset(1, 1)
     end
 
+    # The shared over-paint — see `TextReadState#paint_chrome`. This pane's own copy also
+    # skipped the `sync_from` its four siblings carry, so an MCP `update_issue` shrinking the
+    # notes under a stale read cursor could index off the end of the buffer mid-render.
     private def paint_notes_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
-      return unless active
-      lines = @notes.lines_snapshot
-      return if lines.empty?
-      scr = @notes.scroll
-      sel_bg = Theme.accent_bg
-      @notes_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        row = li - scr
-        paint_char_span_bg(screen, rect.x, rect.y + row, lines[li], x0, x1, sel_bg)
-      end
-      cy, cx = @notes_read.cursor.cy, @notes_read.cursor.cx
-      return unless cy >= scr && cy < scr + rect.h
-      row = cy - scr
-      line = lines[cy]
-      px = rect.x + Screen.draw_width(line[0, cx])
-      if px < rect.x + rect.w
-        ch = cx < line.size ? line[cx] : ' '
-        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + row)
-      end
-    end
-
-    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
-      return if x0 >= x1
-      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
-      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
-      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
-      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
-      # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
-      b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
-        screen.text(px, y, seg, Theme.text, bg)
-        px += Screen.draw_width(seg)
-        i = e
-      end
+      @notes_read.paint_chrome(screen, rect, @notes, active)
     end
 
     # A filled "chip": ` LABEL ` painted with `color` as the background. Returns the

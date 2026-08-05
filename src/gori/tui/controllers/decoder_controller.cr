@@ -782,7 +782,6 @@ module Gori::Tui
     # Command letters defer to the keymap (rebindable copy + Global breath).
     private def handle_output(ev : Termisu::Event::Key) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      return true if handle_output_hscroll(ev)
       s = cur
       key = ev.key
       selecting = ev.shift?
@@ -792,10 +791,10 @@ module Gori::Tui
       when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
       when key.left?               then out_nav_step(s, 0, -1, selecting)
       when key.right?              then out_nav_step(s, 0, 1, selecting)
-        # Home/End/Page. ⇧←/→ stay H-SCROLL here, as they are on every read-only pane that
-        # scrolls sideways (the Repeater's RESPONSE draws the same line): an editable pane
-        # follows its caret, so there selection is strictly better — a read-only one has no
-        # caret-driven scroll to piggyback on.
+        # Home/End/Page. ⇧←/→ used to be H-SCROLL here; the pane soft-wraps now (like the
+        # Repeater's RESPONSE, which draws the same line), so there is nothing off to the side
+        # to pan to and the chord goes to the character selection every other text pane gives
+        # it — reached through the plain `key.left?`/`key.right?` arms above.
       when s.view.output_motion_key(ev, s.result) then nil
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false
@@ -828,19 +827,6 @@ module Gori::Tui
         s.input_read.select_word(s.input, regions.input.inset(1, 1), mx, my)
       elsif regions.output.contains?(mx, my)
         s.view.output_select_word(regions.output.inset(1, 1), mx, my, s.result)
-      else
-        false
-      end
-    end
-
-    private def handle_output_hscroll(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      if key.left? && ev.shift?
-        cur.view.hscroll_output(-1)
-        true
-      elsif key.right? && ev.shift?
-        cur.view.hscroll_output(1)
-        true
       else
         false
       end

@@ -153,17 +153,15 @@ describe "Gori::Verbs.register_issues" do
       verb_intents(r, "issue.copy").should eq([:read_copy])
     end
 
-    it "scrolls a long notes line with SHIFT+←/→, leaving plain ← to close" do
-      # issue.close owns plain ←/h; the h-scroll chords carry shift, so they don't collide.
-      r["issue.hscroll-right"].chords.should eq([Gori::Verb::Chord.new("right", shift: true)])
-      r["issue.hscroll-left"].chords.should eq([Gori::Verb::Chord.new("left", shift: true)])
+    # The ⇧←/→ h-scroll pair is retired: the notes pane soft-wraps, so nothing sits off to the
+    # side to scroll to, and `IssuesController#handle_notes_read_key` owns the chord for the
+    # character selection. What is still under test is that plain ← still closes the detail —
+    # the collision the shifted chords existed to avoid.
+    it "leaves plain ← to close the detail, with no h-scroll pair to collide with" do
       r["issue.close"].chords.should contain(Gori::Verb::Chord.new("left"))
-      ctx = FakeExecContext.new
-      r["issue.hscroll-right"].call(ctx)
-      ctx.args_for(:issue_hscroll).should eq(["1"])
-      ctx = FakeExecContext.new
-      r["issue.hscroll-left"].call(ctx)
-      ctx.args_for(:issue_hscroll).should eq(["-1"])
+      ids = r.map(&.id)
+      ids.should_not contain("issue.hscroll-right")
+      ids.should_not contain("issue.hscroll-left")
     end
 
     it "routes the detail actions to their own intents" do

@@ -34,7 +34,9 @@ module Gori::Tui
       # The transformed sample: caret, selection, both scroll axes and its whole draw. No gutter
       # — these rows are a rewritten MESSAGE, and the sample's own line numbers would only
       # invite the reader to map them onto the input pane, which a head/body rewrite can shift.
-      @out = ReadPane.new
+      # Soft wrap, matching the PREVIEW INPUT editor above it: the two panes show the same
+      # message before and after a rule, so they have to agree about what a row is.
+      @out = ReadPane.new(wrap: true)
       @last_body = Rect.new(0, 0, 0, 0) # last content rect — click/wheel geometry
     end
 

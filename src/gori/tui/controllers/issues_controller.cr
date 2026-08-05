@@ -53,7 +53,7 @@ module Gori::Tui
         if @issues.notes_insert_mode?
           "type to edit · esc save · ^W discard"
         elsif @issues.notes_focused?
-          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · ⇧←/→ h-scroll · esc links"
+          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · esc links"
         else
           "↑/↓ links · ↵ open · i/↵ notes · o flow · r repeater · space cmds · ←/esc back"
         end
@@ -231,10 +231,10 @@ module Gori::Tui
       true
     end
 
-    # ⇧←/→ used to h-scroll the notes pane, which shadowed the character selection every
-    # other text pane gives them. The pane has a caret and `follow_x`, so moving the caret
-    # sideways scrolls the view anyway — the selection is what the chord is for, and
-    # `hscroll_notes` stays for the wheel/other callers.
+    # ⇧←/→ used to h-scroll the notes pane, which shadowed the character selection every other
+    # text pane gives them. `handle_notes_read_key` took the chord back for the selection, and
+    # the notes pane now soft-wraps — there is nothing off to the side to scroll to — so the
+    # `hscroll_notes` chain is gone rather than kept as a no-op that still moves a caret.
 
     def set_preedit(text : String) : Bool
       if @issues.querying?
@@ -428,10 +428,6 @@ module Gori::Tui
 
     def issue_edit_notes : Nil
       @issues.enter_notes_insert!
-    end
-
-    def issue_hscroll(delta : Int32) : Nil
-      @issues.hscroll_notes(delta)
     end
 
     def issue_link_move(delta : Int32) : Nil

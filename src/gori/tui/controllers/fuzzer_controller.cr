@@ -639,34 +639,23 @@ module Gori::Tui
       true
     end
 
+    # ⇧←/→ used to H-SCROLL this pane. It soft-wraps now, so there is nothing off to the side to
+    # pan to, and the chord goes to the CHARACTER selection instead — which this pane had no way
+    # to make at all, plain ←/→ being spoken for by the pane chain. ⇧↑/⇧↓ already selected.
     private def handle_detail(ev : Termisu::Event::Key, v : FuzzerView) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      return true if handle_detail_hscroll(ev, v)
       key = ev.key
       selecting = ev.shift?
       case
       when key.up?, key.lower_k?
         v.detail_cursor_at_top? ? v.focus_pane(:results) : v.detail_move(-1, 0, selecting: selecting)
       when key.down?, key.lower_j? then v.detail_move(1, 0, selecting: selecting)
-      when key.left?               then v.detail_step_pane(-1)
-      when key.right?              then v.detail_step_pane(1)
+      when key.left?               then selecting ? v.detail_move(0, -1, selecting: true) : v.detail_step_pane(-1)
+      when key.right?              then selecting ? v.detail_move(0, 1, selecting: true) : v.detail_step_pane(1)
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false # x/y + Global breath → keymap
       end
       true
-    end
-
-    private def handle_detail_hscroll(ev : Termisu::Event::Key, v : FuzzerView) : Bool
-      key = ev.key
-      if key.left? && ev.shift?
-        v.hscroll_detail(-1)
-        true
-      elsif key.right? && ev.shift?
-        v.hscroll_detail(1)
-        true
-      else
-        false
-      end
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

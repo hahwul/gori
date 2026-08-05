@@ -89,9 +89,7 @@ module Gori::Tui
         handle_edit_key(ev)
         true
       else
-        # shift+←/→/↑/↓ (scroll the read-only preview) checked here rather than inside
-        # handle_queue_key — that dispatch is already at ameba's complexity ceiling.
-        queue_key_scroll(ev) || handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
+        handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
       end
     end
 
@@ -190,25 +188,11 @@ module Gori::Tui
       @host.status(n == 0 ? "selection cleared" : "selection cleared — #{n} still marked")
     end
 
-    # Shift+←/→ horizontal scroll for the read-only held-item preview — kept OUT of
-    # handle_queue_key (called from handle_body_key instead), since that dispatch is already
-    # at ameba's complexity ceiling. Bare arrows still navigate the queue.
-    #
-    # ⇧↑/⇧↓ used to scroll this preview vertically; they are now the mark-range gesture
-    # (⇧arrow = "extend the selection" everywhere else in the TUI, incl. History's list and
-    # the flow detail). Vertical reading moved to PgUp/PgDn/Home/End — see #body_scroll.
-    private def queue_key_scroll(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      return false unless ev.shift?
-      if key.left?
-        @intercept.hscroll_detail(-1)
-      elsif key.right?
-        @intercept.hscroll_detail(1)
-      else
-        return false
-      end
-      true
-    end
+    # ⇧←/→ used to h-scroll the read-only held-item preview. The preview soft-wraps now, like
+    # the editor it sits behind and like the Repeater / History panes that show the same bytes,
+    # so there is nothing off to the side to scroll to and the whole `hscroll_detail` chain is
+    # gone rather than kept as a no-op. (⇧↑/⇧↓ had already left for the mark-range gesture;
+    # vertical reading is PgUp/PgDn/Home/End — see `#body_scroll`.)
 
     # PageUp/PageDown/Home/End page the read-only held-message preview (the Runner routes
     # these here when handle_body_key declines them). The preview, not the queue: a hold

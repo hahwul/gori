@@ -37,7 +37,9 @@ module Gori::Tui
     # The OUTPUT pane's caret, selection, both scroll axes and its whole draw. Gutter on: these
     # rows ARE source lines of the decoded text, and ^G-style line references only mean
     # something with numbers beside them.
-    @out = ReadPane.new(gutter: true)
+    # Soft wrap too: a decoded blob arrives as one enormous line more often than not (a base64
+    # payload, a minified JWT claim set), and the whole point of this pane is reading it.
+    @out = ReadPane.new(gutter: true, wrap: true)
 
     # Card rects for the four sections, stacked top-to-bottom. Each is a full
     # `Frame.card` (border + interior), NOT a divided slice of one outer frame —
@@ -364,11 +366,6 @@ module Gori::Tui
       !Frame.right_badge_hit(mx, my, card.y, card.right - 1, min_x, [
         {:mode, "^X", name},
       ] of {Symbol, String, String}).nil?
-    end
-
-    # Shift+←/→ over the OUTPUT card.
-    def hscroll_output(step : Int32) : Nil
-      @out.hscroll(step)
     end
 
     # Whether the OUTPUT is scrolled to the top — ↑ here pops focus up to CHAIN
