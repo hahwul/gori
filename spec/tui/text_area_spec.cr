@@ -974,6 +974,21 @@ describe Gori::Tui::TextArea do
       ta.select_word_at(rect, 3, 0).should be_true
       ta.selection_text.should eq("X-Request-Id") # the hyphen is inside a key, as word_left/right have it
     end
+
+    # The pointer rounds to the NEAREST cluster boundary, so a click past the midpoint of a
+    # 2-cell glyph resolves to the position AFTER it — which for a word's LAST glyph is where
+    # the word has already ended. `Screen.step_back_over_wide` walks back over that one
+    # cluster, and over nothing else: a 1-column cell has no far half, so the ASCII contract
+    # above ("whitespace selects nothing") is untouched. Editor-side twin of the ReadPane case.
+    it "double-click takes the word from EITHER half of a wide glyph" do
+      ta = TextArea.new("한글 선택 테스트")               # 한 0-1, 글 2-3, sp 4, 선 5-6, 택 7-8
+      ta.select_word_at(rect, 5, 0).should be_true # LEFT half of 선
+      ta.selection_text.should eq("선택")
+      ta.select_word_at(rect, 8, 0).should be_true # RIGHT half of 택 — the word's last glyph
+      ta.selection_text.should eq("선택")
+      ta.select_word_at(rect, 3, 0).should be_true # right half of 글
+      ta.selection_text.should eq("한글")
+    end
   end
 
   # ONE definition of "what do the arrow keys do in a text box", shared by every editor in

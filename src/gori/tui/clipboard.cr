@@ -7,8 +7,25 @@ module Gori::Tui
   # works locally AND over SSH, with no platform dependency. That matches gori's
   # "any terminal, headless/SSH" stance.
   #
-  # Caveat: tmux only forwards OSC 52 when `set-clipboard on`; we additionally
-  # wrap the sequence in tmux's DCS passthrough when running inside tmux.
+  # UNDER TMUX WE SEND BOTH FORMS, and that is the fix for a copy that reported
+  # success and delivered nothing. This used to send ONLY the DCS-passthrough wrap
+  # when `$TMUX` was set, on the reasoning that "tmux only forwards OSC 52 when
+  # `set-clipboard on`". Both halves of that are off:
+  #
+  # - tmux parses a BARE OSC 52 itself, and `set-clipboard` defaults to `external`
+  #   — which forwards it to the outer terminal (and `on` additionally fills tmux's
+  #   own paste buffer). So the unwrapped sequence is the one that works by default.
+  # - the DCS wrap is gated on `allow-passthrough`, which defaults to OFF (tmux 3.3+).
+  #   With it off tmux DROPS the sequence outright — it is not forwarded, so nothing
+  #   reaches the outer terminal and nothing reaches the clipboard. Measured by tapping
+  #   a nested tmux's pane with `pipe-pane`: wrapped + passthrough off → zero `ESC]52`
+  #   bytes out; wrapped + passthrough on → one.
+  #
+  # So the wrap replaced a path that works out of the box with one that is off out of
+  # the box. Both go out now, in that order, and they cover disjoint configurations:
+  # the bare one for default tmux, the wrapped one for `set-clipboard off` (where tmux
+  # ignores the bare sequence) with passthrough enabled. A terminal that honours both
+  # simply sets the same clipboard twice.
   module Clipboard
     # Ceiling on the copied payload: OSC 52 writes base64 of `data` straight to the
     # tty, so an unbounded copy (e.g. a multi-MB request/body) would flood the
@@ -16,13 +33,13 @@ module Gori::Tui
     MAX_CLIP = 64 * 1024
 
     # Builds the OSC 52 "set clipboard" sequence for `data` (base64-encoded).
-    # When `tmux` is true, wraps it in the DCS passthrough so the outer terminal
-    # receives it through tmux.
+    # When `tmux` is true, appends the DCS-passthrough copy of the SAME sequence —
+    # appends rather than substitutes, see the module comment for why.
     def self.osc52(data : String, tmux : Bool = false) : String
       core = "\e]52;c;#{Base64.strict_encode(data)}\a"
       return core unless tmux
       # tmux passthrough: ESC P tmux; <ESC-doubled core> ESC \
-      "\eP" + "tmux;" + core.gsub('\e', "\e\e") + "\e\\"
+      core + "\eP" + "tmux;" + core.gsub('\e', "\e\e") + "\e\\"
     end
 
     # Emits the sequence to the terminal. In TUI mode STDOUT is the controlling

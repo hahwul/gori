@@ -6,9 +6,20 @@ describe Gori::Tui::Clipboard do
     Gori::Tui::Clipboard.osc52("hi there").should eq("\e]52;c;#{Base64.strict_encode("hi there")}\a")
   end
 
-  it "wraps in tmux DCS passthrough (ESC-doubled) when requested" do
+  # BOTH forms under tmux, bare one FIRST. The bare sequence is what default tmux
+  # (`set-clipboard external`) actually honours; the DCS wrap is gated on
+  # `allow-passthrough`, which defaults to OFF and makes tmux drop it. Sending only the
+  # wrap — what this did before — meant `y` inside tmux reported success and delivered
+  # nothing. See the Clipboard module comment.
+  it "sends the bare sequence AND the tmux DCS passthrough (ESC-doubled) under tmux" do
     b64 = Base64.strict_encode("data")
-    Gori::Tui::Clipboard.osc52("data", tmux: true).should eq("\ePtmux;\e\e]52;c;#{b64}\a\e\\")
+    bare = "\e]52;c;#{b64}\a"
+    Gori::Tui::Clipboard.osc52("data", tmux: true).should eq("#{bare}\ePtmux;\e\e]52;c;#{b64}\a\e\\")
+  end
+
+  it "starts the tmux form with the bare sequence, so a passthrough-off tmux still copies" do
+    seq = Gori::Tui::Clipboard.osc52("data", tmux: true)
+    seq.starts_with?("\e]52;c;").should be_true
   end
 
   it "round-trips arbitrary request bytes through base64" do

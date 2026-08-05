@@ -950,6 +950,33 @@ module Gori::Tui
       end
     end
 
+    # Home / End over the open detail: the caret to the LINE's start or end (`dir` < 0 / > 0),
+    # extending the selection when `selecting`. False when this pane is not navigable text (the
+    # hex dump), so the caller can fall through to the shell's page/jump keys.
+    #
+    # This pane had NO Home/End of its own, so both fell through to `Runner#page_nav_delta`'s
+    # ±JUMP_ROWS and jumped the caret to the top/bottom of the body — and ⇧Home/⇧End did the
+    # same and selected NOTHING, while the footer advertised "⇧arrows select". Every other
+    # multi-line pane in the tree (Repeater, Notes, Issues, Project, Decoder, Fuzzer, and
+    # `ReadPane#motion_key`) already spells Home/End as line-start/line-end with ⇧ extending;
+    # this is that same keymap, and ⌃/⌥+Home/End keeps the buffer jump (the controller lets
+    # the modified form fall through, matching `TextArea#handle_motion_key`).
+    def detail_line_edge(dir : Int32, selecting : Bool = false) : Bool
+      return false unless detail_navigable?
+      size, line_at = detail_line_source
+      return false if size <= 0
+      cy = @detail_read.cy.clamp(0, size - 1)
+      @detail_read.move_to(cy, dir < 0 ? 0 : line_at.call(cy).size, selecting: selecting)
+      ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+      true
+    end
+
+    # One screenful of the open detail, for ⇧PgUp/⇧PgDn. Same "minus a couple of rows of
+    # overlap" step `ReadPane#motion_key` uses, measured from this pane's own last drawn height.
+    def detail_page_rows : Int32
+      {@detail_last_h - 2, 1}.max
+    end
+
     # True when the detail is at its very top: caret on the FIRST VISUAL ROW of line 0
     # (navigable text) or the scroll offset pinned to 0 (hex dump). Mirrors the list's
     # at_top? so a ↑ here pops focus to the tab bar exactly as it does from the list's
@@ -1077,7 +1104,7 @@ module Gori::Tui
       # `Wrap.row_index` clamps to the row it was given, so a click past the end of a wrapped
       # row stops at the break rather than selecting the next row's first char.
       vr = rows[row]? || rows[rows.size - 1]
-      cx = Wrap.row_index(line_at.call(vr.li), nil, vr.a, vr.b, mx - (rect.x + gw))
+      cx = Wrap.row_index(line_at.call(vr.li), nil, vr.a, vr.b, mx - (rect.x + gw), nearest: true)
       if selecting
         @detail_read.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor
       else

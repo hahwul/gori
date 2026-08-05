@@ -2959,10 +2959,10 @@ module Gori::Tui
       # the row the click did not point at.
       @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
       if @target_field == :sni
-        to = Screen.column_for(@sni, mx - field_base(rect, SNI_PREFIX))
+        to = Screen.column_for_click(@sni, mx - field_base(rect, SNI_PREFIX))
         @scx = @target_read.move_cx(@scx, to - @scx, @sni.size, selecting: selecting)
       else
-        to = Screen.column_for(@target, mx - field_base(rect, TARGET_PREFIX))
+        to = Screen.column_for_click(@target, mx - field_base(rect, TARGET_PREFIX))
         @tcx = @target_read.move_cx(@tcx, to - @tcx, @target.size, selecting: selecting)
       end
     end

@@ -137,6 +137,47 @@ describe Gori::Tui::Screen do
       end
     end
 
+    # `column_for_click` is the POINTER's inverse: same cluster grid, but a column in the FAR
+    # half of a cluster resolves to the boundary AFTER it. Flooring made the whole 2-cell
+    # footprint of a Hangul syllable resolve to the position before it, so half of every
+    # pointer position over such text landed a character short — a drag ending on the right
+    # half of `트` copied one glyph less than it covered, and a click on the right half of `한`
+    # put the caret in front of it.
+    it "column_for_click rounds a pointer to the NEAREST cluster boundary" do
+      s = "한글 선택"                                # 한 0-1, 글 2-3, space 4, 선 5-6, 택 7-8
+      Screen.column_for_click(s, 0).should eq(0) # near half of 한 → before it
+      Screen.column_for_click(s, 1).should eq(1) # FAR half of 한 → after it
+      Screen.column_for_click(s, 2).should eq(1)
+      Screen.column_for_click(s, 3).should eq(2) # far half of 글
+      Screen.column_for_click(s, 4).should eq(2) # the space (1 cell — no far half)
+      Screen.column_for_click(s, 8).should eq(5) # far half of 택 → end of string
+    end
+
+    # The ASCII half of the same rule, and the reason it could be adopted at every hit test at
+    # once: a 1-column cluster has no far half, so the two agree everywhere on ASCII and no
+    # existing click behaviour moved.
+    it "column_for_click is identical to column_for on 1-column clusters" do
+      ["hello world", "a\tb\tc", "GET /x?a=1 HTTP/1.1", "a\u{200B}b"].each do |s|
+        (-2..Screen.draw_width(s) + 2).each do |col|
+          Screen.column_for_click(s, col).should eq(Screen.column_for(s, col)) # (#{s.inspect} @ #{col})
+        end
+      end
+    end
+
+    # The double-click's companion: a pointer that rounded PAST a wide glyph has nothing to
+    # take, so the word spread steps back over that one cluster. Narrow on purpose — a 1-column
+    # cluster can never be rounded past, so "a double-click on a space takes nothing" survives.
+    it "step_back_over_wide moves off a rounded-past WIDE glyph and nothing else" do
+      s = "한글 선택"
+      Screen.step_back_over_wide(s, 2).should eq(1) # the space after 글 ← back onto 글
+      Screen.step_back_over_wide(s, 5).should eq(4) # past the end ← back onto 택
+      Screen.step_back_over_wide(s, 1).should eq(1) # 글 is not whitespace/EOL — untouched
+      a = "alpha bravo"
+      Screen.step_back_over_wide(a, 5).should eq(5) # the space stays the space
+      Screen.step_back_over_wide(a, a.size).should eq(a.size)
+      Screen.step_back_over_wide(a, 0).should eq(0)
+    end
+
     it "column_for never returns an index inside a cluster" do
       # Every column a click can produce must resolve to a cluster START, so a click can
       # never drop the caret between the `e` and the combining acute of `é`.

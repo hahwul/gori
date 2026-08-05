@@ -39,9 +39,11 @@ module Gori
       end
 
       # True while the events being delivered came from a bracketed paste rather than the
-      # keyboard. Nothing reads it yet; it is the seam for a caller that needs to treat pasted
-      # input differently (a bulk insert without per-character work, say), and it is what
-      # makes the swallowed markers observable to a spec.
+      # keyboard — the seam for a caller that must treat pasted input differently from typing.
+      # `Runner#handle` watches its two TRANSITIONS (the markers themselves being swallowed
+      # here, they are the only signal a paste began or ended) and uses them for both things
+      # that need to know: the bulk-insert fast path, and refusing a paste whose keystrokes
+      # would otherwise run as COMMANDS at a focus that takes no text.
       def pasting? : Bool
         @in_paste
       end

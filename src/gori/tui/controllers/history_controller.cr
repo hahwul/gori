@@ -256,6 +256,13 @@ module Gori::Tui
       when key.up?, key.lower_k?          then detail_body_up
       when key.down?, key.lower_j?        then @history.scroll_detail(1)
       when ev.char == 'y' || key.lower_y? then detail_copy_selection
+        # Home/End are the LINE's edges here, like every other multi-line pane. The MODIFIED
+        # form is deliberately not claimed: ⌃/⌥+Home/End falls through to the shell's
+        # ±JUMP_ROWS and keeps the jump-to-top/bottom this pane has always had (and which
+        # used to be all Home/End did). A hex dump has no lines, so `detail_line_edge`
+        # answers false there and the plain form falls through too.
+      when key.home? && !ev.ctrl? && !ev.alt? then return @history.detail_line_edge(-1)
+      when key.end? && !ev.ctrl? && !ev.alt?  then return @history.detail_line_edge(1)
       else
         return false
       end
@@ -267,15 +274,25 @@ module Gori::Tui
       @history.detail_at_top? ? @history.set_detail_focus(:strip) : @history.scroll_detail(-1)
     end
 
-    # ⇧+arrow (or ⇧+h/j/k/l) extends the selection from the caret. Returns false for a
-    # non-arrow key so the caller falls through to the plain-nav case.
+    # ⇧+arrow (or ⇧+h/j/k/l) extends the selection from the caret. Home/End/PageUp/PageDown
+    # extend too — they used to fall through to the shell's ±JUMP_ROWS, which moved the caret
+    # to the top/bottom of the body and planted no anchor, so the two keys the footer's
+    # "⇧arrows select" most obviously implies were the two that selected nothing. Returns
+    # false for anything else (and for the ⌃/⌥ forms, which keep the buffer jump) so the
+    # caller falls through to the plain-nav case.
     private def handle_detail_body_select(ev : Termisu::Event::Key) : Bool
       key = ev.key
+      return false if ev.ctrl? || ev.alt?
+      page = @history.detail_page_rows
       case
       when key.up?, key.lower_k?    then @history.detail_move(-1, 0, selecting: true)
       when key.down?, key.lower_j?  then @history.detail_move(1, 0, selecting: true)
       when key.left?, key.lower_h?  then @history.detail_move(0, -1, selecting: true)
       when key.right?, key.lower_l? then @history.detail_move(0, 1, selecting: true)
+      when key.page_up?             then @history.detail_move(-page, 0, selecting: true)
+      when key.page_down?           then @history.detail_move(page, 0, selecting: true)
+      when key.home?                then return @history.detail_line_edge(-1, selecting: true)
+      when key.end?                 then return @history.detail_line_edge(1, selecting: true)
       else
         return false
       end

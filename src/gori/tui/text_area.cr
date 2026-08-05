@@ -923,7 +923,7 @@ module Gori::Tui
       # start and never an unseen `¦chain` char; it clamps to the row's own end, so a click
       # past the text of a wrapped row stops at the break instead of running into the next
       # row's characters.
-      @cx = Wrap.row_index(line, cr, vr.a, vr.b, target)
+      @cx = Wrap.row_index(line, cr, vr.a, vr.b, target, nearest: true)
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       break_run                 # a caret move ends the typing run — see push_undo
       env_complete_close
@@ -952,6 +952,14 @@ module Gori::Tui
       @cy = @cy.clamp(0, @lines.size - 1)
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
+      # `Screen.column_for_click` rounds a POINTER to the NEAREST cluster boundary, so a
+      # double-click on the RIGHT half of a WIDE glyph — a Hangul syllable, a CJK ideograph:
+      # half of every pointer position over such text — resolves to the position AFTER it,
+      # where the word may have already ended and there is no token to take. Step back over
+      # that one glyph, and ONLY when it is wide: a 1-column cluster cannot be rounded past,
+      # so every ASCII gesture is bit-for-bit what it was (including "a double-click on a
+      # space takes nothing", which is this method's stated contract).
+      cx = Screen.step_back_over_wide(line, cx)
       return false if cx >= line.size || line[cx].whitespace?
       word = word_char?(line[cx])
       a = cx

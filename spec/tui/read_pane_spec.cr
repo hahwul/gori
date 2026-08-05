@@ -91,6 +91,9 @@ describe Gori::Tui::ReadPane do
   end
 
   describe "keyboard" do
+    # A ⇧step keeps the column, so one press takes exactly one line (caret from (1,0) to (2,0))
+    # — the same place a plain ↓ lands. See `ReadCursor#move`: the EOL snap this replaced took
+    # TWO lines per press going down and NOTHING at all going up.
     it "moves the caret and grows a selection on ⇧ vertical steps" do
       pane = ReadPane.new
       pane.source(pane_source(10))
@@ -98,8 +101,20 @@ describe Gori::Tui::ReadPane do
       pane.copy_text.should eq("line1 word1") # no selection → the caret's line
       pane.move(1, 0, selecting: true)
       pane.selection?.should be_true
-      pane.copy_text.should contain("line1")
-      pane.copy_text.should contain("line2")
+      pane.copy_text.should eq("line1 word1\n")
+      pane.move(1, 0, selecting: true)
+      pane.copy_text.should eq("line1 word1\nline2 word2\n")
+    end
+
+    # ⇧↑ used to select nothing at all here: no band was painted and `y` copied one newline.
+    it "grows a selection UPWARD on a ⇧ vertical step" do
+      pane = ReadPane.new
+      pane.source(pane_source(10))
+      3.times { pane.move(1, 0) }
+      pane.move(-1, 0, selecting: true)
+      pane.selection?.should be_true
+      pane.copy_text.should eq("line2 word2\n")
+      pane.cursor.highlight_spans(pane_source(10)).should_not be_empty
     end
 
     it "selects the current line and clears it" do
@@ -203,6 +218,82 @@ describe Gori::Tui::ReadPane do
       pane.source(pane_source(6))
       render_pane(pane)
       pane.select_word(Rect.new(0, 0, 40, 6), 38, 0).should be_false
+    end
+
+    # A pointer rounds to the NEAREST cluster boundary (`Screen.column_for_click`), which is
+    # what makes a drag over Hangul/CJK include the glyph the operator is more than half way
+    # across. The cost it must NOT have: a double-click on the right half of a word's LAST
+    # glyph resolves past the word, where the spread would find no token — so
+    # `Screen.step_back_over_wide` walks back over exactly one WIDE cluster in that case.
+    # Both halves of every wide glyph, and the unchanged ASCII contract, are pinned here.
+    describe "double-click over wide glyphs" do
+      # "한글 선택 테스트" — 한 at cols 0-1, 글 2-3, space 4, 선 5-6, 택 7-8, space 9, 테 10-11.
+      it "takes the word from either half of a wide glyph" do
+        pane = ReadPane.new
+        pane.source(["한글 선택 테스트"])
+        rect = Rect.new(0, 0, 40, 3)
+        render_pane(pane, h: 3)
+        pane.select_word(rect, 5, 0).should be_true # LEFT half of 선
+        pane.copy_text.should eq("선택")
+        pane.select_word(rect, 8, 0).should be_true # RIGHT half of 택 — the word's last glyph
+        pane.copy_text.should eq("선택")
+        pane.select_word(rect, 0, 0).should be_true # left half of the line's first glyph
+        pane.copy_text.should eq("한글")
+      end
+
+      it "still takes nothing on a space, which no 1-column cell can be rounded past" do
+        pane = ReadPane.new
+        pane.source(["alpha bravo"])
+        rect = Rect.new(0, 0, 40, 3)
+        render_pane(pane, h: 3)
+        pane.select_word(rect, 4, 0).should be_true # the 'a' that ends "alpha"
+        pane.copy_text.should eq("alpha")
+        pane.select_word(rect, 5, 0).should be_false # the space after it
+      end
+    end
+
+    # `line_select_only` (Comparer diff, Miner FINDING, Sequencer ANALYSIS/TOKEN): a drag used to
+    # re-anchor on the row under the POINTER every motion event, so dragging across eight rows
+    # selected — and `y` copied — only the last one. Keyboard ⇧↓ over the same rows worked, which
+    # is how the asymmetry stayed hidden.
+    it "grows whole lines from the PRESS row when dragging in line-select mode" do
+      pane = ReadPane.new(line_select_only: true)
+      pane.source(pane_source(10))
+      rect = Rect.new(0, 0, 40, 8)
+      render_pane(pane, h: 8)
+      pane.click(rect, 2, 1) # press on row 1
+      (2..4).each { |r| pane.click(rect, 2, r, selecting: true) }
+      pane.cursor.selected_line_range.should eq({1, 4})
+      (1..4).each { |li| pane.row_marked?(li).should be_true }
+      pane.copy_text.should eq(pane_source(10)[1..4].join("\n"))
+    end
+
+    it "grows whole lines when the drag runs BACK above the press row" do
+      pane = ReadPane.new(line_select_only: true)
+      pane.source(pane_source(10))
+      rect = Rect.new(0, 0, 40, 8)
+      render_pane(pane, h: 8)
+      pane.click(rect, 2, 5)
+      pane.click(rect, 2, 2, selecting: true)
+      pane.cursor.selected_line_range.should eq({2, 5})
+      pane.copy_text.should eq(pane_source(10)[2..5].join("\n"))
+    end
+
+    # A drag that leaves the pane through the top now scrolls the view under it. It used to pin
+    # to row 0 and stop, so a selection taller than the pane could only be dragged DOWNWARD.
+    it "scrolls the view when a drag leaves the pane through the top" do
+      pane = ReadPane.new
+      pane.source(pane_source(100))
+      rect = Rect.new(0, 0, 40, 10)
+      render_pane(pane, h: 10)
+      20.times { pane.scroll_view(1) }
+      pane.scroll.should eq(20)
+      pane.click(rect, 2, 5)                   # press mid-pane
+      pane.click(rect, 2, -1, selecting: true) # …and drag out through the top
+      pane.click(rect, 2, -1, selecting: true)
+      pane.scroll.should eq(18)
+      pane.cursor.cy.should eq(18)
+      pane.cursor.selected_line_range.should eq({18, 25})
     end
   end
 

@@ -104,8 +104,8 @@ module Gori::Tui
       box = overlay_box(area)
       return :cancel if box.nil? || !box.contains?(mx, my)
       if my == box.y + TITLE_ROW
-        @cx = Screen.column_for(@issue_title, mx - title_base(box)) # already clamped to the string
-        @preedit = ""                                               # a caret move ends any in-progress composition, as `insert` does
+        @cx = Screen.column_for_click(@issue_title, mx - title_base(box)) # already clamped to the string
+        @preedit = ""                                                     # a caret move ends any in-progress composition, as `insert` does
       elsif my == box.y + SEV_ROW && (lo = sev_back_x(box)) && mx >= lo && mx <= sev_forward_end(box)
         severity_cycle(mx == lo ? -1 : 1)
       end

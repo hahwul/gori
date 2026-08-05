@@ -223,6 +223,19 @@ describe Gori::Tui::TextField do
       f.selection_text.should eq("X-Custom-Header")
     end
 
+    # The single-line half of the wide-glyph pointer rule (`LineFieldRead#select_word_at_cursor`
+    # is the one home the thirteen fields share). A pointer past the midpoint of a 2-cell glyph
+    # rounds to the position AFTER it, which for a word's last glyph is past the word — so the
+    # spread steps back over that one wide cluster. ASCII is unaffected: the whitespace case
+    # above still takes nothing.
+    it "a double-click takes the word from either half of a wide glyph" do
+      f, _ = drawn_field("한글 선택")           # 한 cols 0-1, 글 2-3, sp 4, 선 5-6, 택 7-8
+      f.select_word_at(5, 1).should be_true # LEFT half of 선
+      f.selection_text.should eq("선택")
+      f.select_word_at(8, 1).should be_true # RIGHT half of 택 — the value's last glyph
+      f.selection_text.should eq("선택")
+    end
+
     it "an UNFOCUSED field is still clickable — that click is how it gets focused" do
       f = TextField.new("hello world")
       b = MemoryBackend.new(40, 3)

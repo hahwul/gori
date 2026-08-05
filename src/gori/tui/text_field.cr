@@ -257,7 +257,7 @@ module Gori::Tui
     def click_to_cursor(mx : Int32, my : Int32, selecting : Bool = false) : Bool
       return false unless hit?(mx, my)
       start = window_start(@last_w)
-      to = start + Screen.column_for(@value[start..], mx - @last_x)
+      to = start + Screen.column_for_click(@value[start..], mx - @last_x)
       @caret = @sel.move_cx(@caret, to.clamp(0, @value.size) - @caret, @value.size, selecting: selecting)
       true
     end

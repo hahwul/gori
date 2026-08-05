@@ -261,6 +261,54 @@ module Gori::Tui
       str.size
     end
 
+    # `column_for` for a POINTER rather than for a measurement: rounds to the NEAREST cluster
+    # boundary instead of flooring to the cluster whose cell the column sits in.
+    #
+    # For a 1-column cluster the two are IDENTICAL (a single cell has no near half and far
+    # half), so every ASCII click behaves exactly as before. The difference is a WIDE glyph —
+    # a Hangul syllable, a CJK ideograph, an emoji — where flooring made the whole 2-cell
+    # footprint resolve to the position BEFORE the glyph. Half of every pointer position over
+    # such text therefore landed one character short: a drag from `선` to the right half of `트`
+    # in `한글 선택 테스트 라인` copied `선택 테스`, and a click on the right half of `한` put
+    # the caret in front of it. Every mainstream editor and terminal includes the glyph once
+    # the pointer is past its midpoint.
+    #
+    # Kept SEPARATE from `column_for` rather than replacing it, because the other callers are
+    # not pointers: `fuzzer_view` / `sitemap_view` / `comparer_view` use it to TRUNCATE a
+    # string to a column budget, where rounding up would return an index whose prefix is one
+    # column wider than the space it has to fit.
+    def self.column_for_click(str : String, target : Int32) : Int32
+      return 0 if target <= 0
+      return {target, str.size}.min if str.ascii_only? # 1 char == 1 cluster == 1 column
+      acc = 0
+      i = 0
+      str.each_grapheme do |g|
+        w = grapheme_cols(g.to_s)
+        # (w + 1) // 2 keeps a 1-wide cluster flooring (its only cell is its near half) while
+        # splitting a 2-wide one down the middle.
+        return i if target < acc + (w + 1) // 2
+        return i + g.size if target < acc + w
+        acc += w
+        i += g.size
+      end
+      str.size
+    end
+
+    # The companion to `column_for_click` for a DOUBLE-CLICK: `i` back over the preceding
+    # cluster when that cluster is WIDE and `i` itself has nothing to take (past the end of
+    # the line, or on whitespace). A pointer in the right half of a 2-cell glyph rounds to the
+    # position after it, which for a word's last glyph is where the word has already ended —
+    # so the word spread would find no token and the gesture would do nothing over exactly the
+    # text (Hangul, CJK) where it is hardest to click precisely.
+    #
+    # Deliberately narrow: a 1-column cluster can never be rounded past, so `i` is returned
+    # unchanged for all ASCII and every existing behaviour built on it survives untouched.
+    def self.step_back_over_wide(str : String, i : Int32) : Int32
+      return i unless i > 0 && (i >= str.size || str[i].whitespace?)
+      prev = cluster_start(str, i - 1)
+      draw_width(str[prev...i]) > 1 ? prev : i
+    end
+
     # Snap a character index to the START of the grapheme cluster holding it (the caret's
     # "round down"); an index already on a boundary is returned unchanged. Paired with
     # `cluster_end` this is how TextArea keeps `@cx` — which stays a CHARACTER index — off

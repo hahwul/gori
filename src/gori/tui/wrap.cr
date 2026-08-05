@@ -349,8 +349,22 @@ module Gori::Tui
     # past the end of a wrapped row lands on the break rather than running into the next
     # row's text, and never returns an index inside a concealed run (those cells aren't
     # drawn) nor inside a cluster (it steps by cluster, like the draw).
+    #
+    # `nearest` is what a POINTER passes: it rounds to the closer edge of the cluster the
+    # column lands in rather than always to its start, which is `Screen.column_for_click`'s
+    # rule and exists for the same reason (see there — the right half of a Hangul syllable
+    # belongs to the position after it). A 1-column cluster is unaffected either way, so this
+    # only ever moves a click over wide text. The CARET's own vertical step (`step_caret`)
+    # leaves it off: a ↓ carries a goal column, and rounding it up would drift the caret one
+    # glyph right per row over a column of CJK.
+    #
+    # ROUNDING UP is the one exit that can hand back the first index of a concealed run: the
+    # skip above only guards indices the loop is about to MEASURE, and `e` leaves before the
+    # next pass tests it. It is kept legal by hopping any run `e` opens, so the invariant above
+    # holds for both settings rather than resting on the one caller that happens to re-snap
+    # afterwards (`TextArea#click_to_cursor`'s `snap_cx_out_of_conceal`).
     def self.row_index(line : String, conceal : Array({Int32, Int32})?, a : Int32, b : Int32,
-                       target : Int32) : Int32
+                       target : Int32, nearest : Bool = false) : Int32
       lo = a.clamp(0, line.size)
       hi = b.clamp(lo, line.size)
       return lo if target <= 0
@@ -363,7 +377,11 @@ module Gori::Tui
         end
         e = {Screen.cluster_end(line, i + 1), hi}.min
         w = Screen.draw_width(line[i...e])
-        return i if target < col + w
+        return i if target < col + (nearest ? (w + 1) // 2 : w)
+        if nearest && target < col + w
+          run = conceal.try &.find { |(ra, rb)| e >= ra && e < rb }
+          return run ? {run[1], hi}.min : e
+        end
         col += w
         i = e
       end

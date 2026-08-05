@@ -20,30 +20,83 @@ describe Gori::Tui::ReadCursor do
       txt.should_not be_nil
     end
 
-    it "copies a downward selection from the anchor column to the caret column" do
+    # A VERTICAL ⇧step keeps the caret's column (clamped), so ⇧↓ ends exactly where a plain ↓
+    # would. It used to snap to the destination line's EOL, which is what made the upward case
+    # below select nothing at all — see `ReadCursor#move`.
+    it "keeps the column on a downward ⇧step, ending where a plain ↓ would" do
       down = ReadCursor.new
       down.sync(0, 2)                         # anchor at col 2 of the short top line
-      down.move(1, 0, lines, selecting: true) # Shift+Down → caret (1, EOL)
-      # Top line from col 2 to end, then the whole bottom line (caret parked at EOL).
-      down.selection_text(lines).should eq("#{lines[0][2..]}\n#{lines[1]}")
+      down.move(1, 0, lines, selecting: true) # Shift+Down → caret (1, 2)
+      down.cy.should eq(1)
+      down.cx.should eq(2)
+      down.selection_text(lines).should eq("#{lines[0][2..]}\n#{lines[1][0...2]}")
     end
 
+    # THE REGRESSION THIS PAIR EXISTS FOR. From column 0 the EOL snap made an upward ⇧step
+    # collapse to a bare "\n" with NO painted band: the boundary columns belong to their
+    # document-order lines, so the caret's column lands on the TOP line, and the caret had been
+    # parked at that line's end. Live, in the Comparer: ⇧↓⇧↓ copied 47b and ⇧↑ copied 1b.
+    it "selects a real span on an UPWARD ⇧step from column 0 (not a bare newline)" do
+      up = ReadCursor.new
+      up.sync(1, 0)
+      up.move(-1, 0, lines, selecting: true) # Shift+Up → caret (0, 0), anchor (1, 0)
+      up.selection_text(lines).should eq("#{lines[0]}\n")
+      up.highlight_spans(lines).should_not be_empty
+    end
+
+    it "paints a band for an upward ⇧step from mid-line" do
+      up = ReadCursor.new
+      up.sync(1, 3)
+      up.move(-1, 0, lines, selecting: true) # caret (0, 3), anchor (1, 3)
+      up.selection_text(lines).should eq("#{lines[0][3..]}\n#{lines[1][0...3]}")
+      up.highlight_spans(lines).map(&.[](0)).should eq([0, 1])
+    end
+
+    # Document-order boundary assignment, with the two columns DIFFERENT so a swap would show.
+    # `move_to` is the soft-wrapped panes' path (History detail, Repeater response), where the
+    # caret really can stop at a column the anchor does not share.
     it "applies the CARET column to the top line for an upward selection (not the anchor's)" do
       up = ReadCursor.new
-      up.sync(1, 3)                          # click at col 3 of the long middle line
-      up.move(-1, 0, lines, selecting: true) # Shift+Up → caret (0, EOL of the short line)
-      # Document order top→bottom is (0, EOL0) → (1, 3): the top line contributes nothing
-      # (caret at its EOL), the bottom line runs from col 0 to the anchor's col 3.
-      # The pre-fix code applied the anchor col (3) to line 0 and the caret col to line 1,
-      # copying "rt\na m" instead.
-      up.selection_text(lines).should eq("\n#{lines[1][0...3]}")
+      up.sync(1, 10)                    # caret at col 10 of the long middle line
+      up.move_to(0, 2, selecting: true) # ⇧↑ under wrap → caret (0, 2), anchor (1, 10)
+      up.selection_text(lines).should eq("#{lines[0][2..]}\n#{lines[1][0...10]}")
+      # Reversed, the top line would be sliced at 10 (past its length) and the bottom at 2.
+      up.selection_text(lines).should_not eq("\n#{lines[1][0...2]}")
     end
 
-    it "copies a clean full-line multi-line selection as whole lines" do
+    # A pane whose screen row is not one run of text (Comparer, Miner, Sequencer) asks for whole
+    # lines explicitly. Both boundary columns are set by DIRECTION, so this works upward too.
+    describe "#extend_lines" do
+      it "grows whole lines downward" do
+        rc = ReadCursor.new
+        rc.sync(0, 2) # a column the caret happened to carry in
+        rc.extend_lines(1, lines.size, ->(i : Int32) { lines[i] })
+        rc.selection_text(lines).should eq("#{lines[0]}\n#{lines[1]}")
+      end
+
+      it "grows whole lines UPWARD" do
+        rc = ReadCursor.new
+        rc.sync(1, 4)
+        rc.extend_lines(-1, lines.size, ->(i : Int32) { lines[i] })
+        rc.selection_text(lines).should eq("#{lines[0]}\n#{lines[1]}")
+        rc.selected_line_range.should eq({0, 1})
+      end
+    end
+  end
+
+  # An anchor sitting exactly on the caret selects no characters and paints no band, so it must
+  # not report a selection: `copy_text` reads `selection_text || current_line` everywhere, and
+  # a "" here defeated the fallback — `y` on an invisible selection copied nothing.
+  describe "an EMPTY selection" do
+    it "is not a selection, and copies as nil rather than an empty string" do
       rc = ReadCursor.new
-      rc.sync(0, 0)                         # start at col 0
-      rc.move(1, 0, lines, selecting: true) # Shift+Down → (1, EOL)
-      rc.selection_text(lines).should eq("#{lines[0]}\n#{lines[1]}")
+      rc.sync(1, 4)
+      rc.move(0, 1, lines, selecting: true) # ⇧→ …
+      rc.selection?.should be_true
+      rc.move(0, -1, lines, selecting: true) # … then ⇧← back onto the anchor
+      rc.selection?.should be_false
+      rc.selection_text(lines).should be_nil
+      rc.highlight_spans(lines).should be_empty
     end
   end
 

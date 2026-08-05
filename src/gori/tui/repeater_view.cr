@@ -2988,7 +2988,7 @@ module Gori::Tui
       @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
       prefix = @target_field == :sni ? SNI_PREFIX : TARGET_PREFIX
       line = target_active_line
-      to = Screen.column_for(line, mx - field_base(rect, prefix))
+      to = Screen.column_for_click(line, mx - field_base(rect, prefix))
       cx = @target_read.move_cx(target_active_cx, to - target_active_cx, line.size, selecting: selecting)
       @target_field == :sni ? (@scx = cx) : (@tcx = cx)
     end

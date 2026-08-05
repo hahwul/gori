@@ -101,9 +101,11 @@ module Gori::Tui
     def move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return if empty?
       if @line_select_only && dr != 0 && selecting
-        # Whole-line growth: `ReadCursor#move`'s selecting branch already parks the caret at
-        # EOL on a vertical step, which IS the line selection this mode wants.
-        @cursor.move(dr, 0, @size, @line_at, selecting: true)
+        # Whole-line growth, asked for explicitly. This used to lean on `ReadCursor#move`'s
+        # selecting branch parking the caret at EOL, which only produced a line selection
+        # going DOWN and from column 0 — see `ReadCursor#move`. `extend_lines` sets both
+        # boundary columns by direction, so ⇧↑ selects whole lines too.
+        @cursor.extend_lines(dr, @size, @line_at)
       else
         @cursor.move(dr, dc, @size, @line_at, selecting: selecting && !@line_select_only)
       end
@@ -191,9 +193,21 @@ module Gori::Tui
     # `selecting` is the drag half: the anchor stays where the press left it.
     def click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       return if empty? || rect.empty?
+      # A drag that has left the pane through the TOP scrolls the view up under it, one line
+      # per motion report, so a selection can be grown past the first visible row. Downward
+      # already worked — `click_to_cursor` puts the caret past the window's last row and
+      # `ensure_visible` follows it — while upward pinned to row 0 and stopped there, so a
+      # range taller than the pane could only ever be dragged in one direction. `@scroll` is
+      # moved DIRECTLY rather than through `scroll_view`, which ends by pulling the caret into
+      # the window and would undo the placement two lines below.
+      row = my - rect.y
+      @scroll = {@scroll + row, 0}.max if row < 0 && selecting
       @cursor.click_to_cursor(rect, mx, my, @scroll, @size, @line_at, gutter_w(rect), @xscroll, selecting)
-      # A line-select pane has no meaningful column, so a drag there grows whole lines.
-      @cursor.select_line(@size, @line_at) if @line_select_only && selecting && @cursor.selection?
+      # A line-select pane has no meaningful column, so a drag there grows whole lines — from
+      # the row the PRESS landed on. It used to call `select_line`, which re-anchors at the
+      # caret's own row: every motion event destroyed the press anchor, so dragging across
+      # eight rows of the Comparer selected (and copied) only the row under the pointer.
+      @cursor.extend_lines_to(@cursor.cy, @size, @line_at) if @line_select_only && selecting
       ensure_visible
     end
 

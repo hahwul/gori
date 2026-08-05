@@ -20,8 +20,18 @@ module Gori::Tui
       @anchor = nil.as({Int32, Int32}?)
     end
 
+    # Whether a NON-EMPTY selection is held. Emptiness matters for the same reason it does in
+    # `TextArea#selection?`, which already answers this way: an anchor sitting exactly on the
+    # caret — a drag that came back to the cell it started in, ⇧→ then ⇧← — selects no
+    # characters, so `highlight_spans` paints nothing and there is nothing on screen to say a
+    # selection exists. Reporting one anyway made `y` copy "" (the `|| current_line` fallback
+    # in every `copy_text` never fired, because `selection_text` returned "" rather than nil)
+    # and report "copied 0b to clipboard" over an invisible selection the operator could not
+    # see to clear.
     def selection? : Bool
-      !@anchor.nil?
+      a = @anchor
+      return false unless a
+      !(a[0] == @cy && a[1] == @cx)
     end
 
     def clear_selection : Nil
@@ -59,8 +69,27 @@ module Gori::Tui
       @cx = line_at.call(@cy).size
     end
 
-    # Move the caret. `extend` (shift held) grows/shrinks the selection from a fixed
-    # anchor. Vertical moves with extend select whole lines between anchor and caret.
+    # Move the caret. `selecting` (shift held) grows/shrinks the selection from a fixed anchor.
+    #
+    # A VERTICAL step KEEPS THE COLUMN, clamped to the line it lands on — exactly what the
+    # unshifted branch below does, so ⇧↓ ends where a plain ↓ would. It used to snap the caret
+    # to the destination line's END instead, and that snap was wrong in both directions:
+    #
+    # - UPWARD it selected nothing. The boundary columns belong to their document-order lines
+    #   (see `selection_text`), so a caret above the anchor puts the CARET column on the top
+    #   line — and the caret was at that line's EOL, making the top line contribute `line[EOL..]`
+    #   = "". From column 0, the whole of ⇧↑ was one "\n": `highlight_spans` painted no band at
+    #   all and `y` copied a single byte. Live: ⇧↓⇧↓ in the Comparer copied 47b, ⇧↑ copied 1b.
+    # - DOWNWARD it only LOOKED line-wise, and only when `cx` happened to be 0. Arrive on the
+    #   line by pressing → a few times first and ⇧↓ started mid-line.
+    #
+    # `move_to`, the path a soft-wrapped pane already takes, has always kept the column and
+    # states the rule this now shares: "⇧↓ has to end exactly where a plain ↓ would or the
+    # selection covers rows the operator never crossed". The History detail runs on it and is
+    # the pane where ⇧↑ works today; this is the same behaviour for everything else.
+    #
+    # A pane that wants WHOLE LINES from a vertical step wants `extend_lines`, which does it
+    # correctly in both directions rather than as a side effect of an EOL snap.
     def move(dr : Int32, dc : Int32, lines : Array(String), selecting : Bool = false) : Nil
       move(dr, dc, lines.size, ->(i : Int32) { lines[i] }, selecting)
     end
@@ -71,7 +100,7 @@ module Gori::Tui
         @anchor ||= {@cy, @cx}
         if dr != 0
           @cy = (@cy + dr).clamp(0, size - 1)
-          @cx = line_at.call(@cy).size
+          @cx = @cx.clamp(0, line_at.call(@cy).size)
         elsif dc != 0
           line = line_at.call(@cy)
           @cx = (@cx + dc).clamp(0, line.size)
@@ -103,18 +132,48 @@ module Gori::Tui
       end
     end
 
+    # Grow a WHOLE-LINE selection by `dr` rows — the vertical gesture of a pane whose screen
+    # row is not one run of text (the Comparer's two diff columns, the Miner/Sequencer field
+    # lists), where a char rectangle would address cells that are not next to each other.
+    #
+    # It assigns BOTH boundary columns by direction, which is what an EOL snap could never do:
+    # the end that is the TOP of the selection takes column 0 and the end that is the BOTTOM
+    # takes its own line's EOL, so the span is whole lines whichever way the operator travelled
+    # and whatever column the caret happened to carry in.
+    def extend_lines(dr : Int32, size : Int32, line_at : Int32 -> String) : Nil
+      return if size <= 0
+      @anchor ||= {@cy, @cx}
+      extend_lines_to(@cy + dr, size, line_at)
+    end
+
+    # `extend_lines` for a destination the owner resolved — the row a drag's pointer is over.
+    # The anchor's ROW is kept (a drag must grow from where the press landed); only the two
+    # columns are re-derived, so calling this per motion event is idempotent.
+    def extend_lines_to(cy : Int32, size : Int32, line_at : Int32 -> String) : Nil
+      return if size <= 0
+      a = (@anchor ||= {@cy, @cx})
+      ay = a[0].clamp(0, size - 1)
+      @cy = cy.clamp(0, size - 1)
+      if @cy < ay
+        @anchor = {ay, line_at.call(ay).size} # anchor is the BOTTOM end → its line's EOL
+        @cx = 0                               # caret is the TOP end → its line's start
+      else
+        @anchor = {ay, 0}
+        @cx = line_at.call(@cy).size
+      end
+    end
+
     # Put the caret on an ALREADY-RESOLVED position, applying `move`'s anchor rules: shift
     # pins the far end where the caret stands now, an unmodified move collapses the
     # selection. For a destination only the owner can compute — the visual row a soft-wrapped
     # ↑/↓ lands on, which needs a layout this class deliberately does not have (see
     # `Wrap.step_caret`, and `RepeaterView#paint_request_read_chrome` on why it has none).
     #
-    # Vertical steps through `move` snap to end-of-line; this does NOT, and that difference
-    # is the point rather than an oversight. Under wrap the caret stops mid-line at the
-    # display column it kept, and ⇧↓ has to end exactly where a plain ↓ would or the
-    # selection covers rows the operator never crossed. Both the span painter and
-    # `selection_text` handle a mid-line boundary already — the char rectangle is the model,
-    # the EOL snap was only ever what stepping whole lines happened to produce.
+    # Under wrap the caret stops mid-line at the display column it kept, and ⇧↓ has to end
+    # exactly where a plain ↓ would or the selection covers rows the operator never crossed.
+    # `move` now keeps the column on a vertical step for the same reason (it used to snap to
+    # end-of-line — see there for what that cost), so the two agree and the char rectangle is
+    # the single model. A pane that wants whole lines asks for them with `extend_lines`.
     def move_to(cy : Int32, cx : Int32, selecting : Bool = false) : Nil
       if selecting
         @anchor ||= {@cy, @cx}
@@ -148,7 +207,7 @@ module Gori::Tui
       selecting ? (@anchor ||= {@cy, @cx}) : (@anchor = nil)
       @cy = {scroll + row, size - 1}.min
       cx0 = rect.x + gutter_w
-      @cx = Screen.column_for(line_at.call(@cy), mx - cx0 + xscroll)
+      @cx = Screen.column_for_click(line_at.call(@cy), mx - cx0 + xscroll)
     end
 
     # Select the WORD under the pointer (double-click). Same boundary rule as
@@ -178,6 +237,14 @@ module Gori::Tui
       @cy = @cy.clamp(0, size - 1)
       line = line_at.call(@cy)
       cx = @cx.clamp(0, line.size)
+      # `Screen.column_for_click` rounds a POINTER to the NEAREST cluster boundary, so a
+      # double-click on the RIGHT half of a WIDE glyph — a Hangul syllable, a CJK ideograph:
+      # half of every pointer position over such text — resolves to the position AFTER it,
+      # where the word may have already ended and there is no token to take. Step back over
+      # that one glyph, and ONLY when it is wide: a 1-column cluster cannot be rounded past,
+      # so every ASCII gesture is bit-for-bit what it was (including "a double-click on a
+      # space takes nothing", which is this method's stated contract).
+      cx = Screen.step_back_over_wide(line, cx)
       return false if cx >= line.size || line[cx].whitespace?
       word = word_char?(line[cx])
       a = cx
@@ -221,6 +288,10 @@ module Gori::Tui
       return nil unless a
       return nil if size <= 0
       ay, ax = a
+      # An EMPTY selection is NO selection — nil, not "". Every `copy_text` in the tree reads
+      # `selection_text(…) || current_line(…)`, so returning "" here defeated the fallback and
+      # `y` on an invisible zero-width selection copied nothing. See `selection?`.
+      return nil if ay == @cy && ax == @cx
       y0, y1 = {ay, @cy}.min, {ay, @cy}.max
       y0 = y0.clamp(0, size - 1)
       y1 = y1.clamp(0, size - 1)

@@ -343,7 +343,7 @@ module Gori::Tui
       elsif regions.chain.contains?(mx, my)
         s.pane = :chain
         field = regions.chain.inset(1, 1)
-        s.chain_cx = Screen.column_for(s.chain, mx - (field.x + 2))
+        s.chain_cx = Screen.column_for_click(s.chain, mx - (field.x + 2))
         refilter_popup
       elsif regions.output.contains?(mx, my)
         s.pane = :output

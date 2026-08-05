@@ -140,6 +140,40 @@ describe Gori::Tui::Wrap do
       Wrap.row_index(line, nil, a, b, 0).should eq(a)
       Wrap.row_index(line, nil, a, b, 2).should eq(a + 2)
     end
+
+    # `nearest` is the POINTER's rounding — the branch the Repeater request pane and the
+    # History detail invert every click and drag through. Flooring made both cells of a
+    # 2-column glyph resolve to the position BEFORE it, so half of every pointer position over
+    # Hangul/CJK landed a character short: a drag ending on the right half of `트` copied one
+    # glyph less than it had covered. See `Screen.column_for_click`, which this mirrors.
+    it "rounds a POINTER to the nearest cluster boundary over wide glyphs" do
+      line = "한글 선택" # 한 0-1, 글 2-3, space 4, 선 5-6, 택 7-8
+      b = line.size
+      {0 => 0, 1 => 1, 2 => 1, 3 => 2, 4 => 2, 5 => 3, 6 => 4, 7 => 4, 8 => 5}.each do |col, idx|
+        Wrap.row_index(line, nil, 0, b, col, nearest: true).should eq(idx) # (col #{col})
+      end
+    end
+
+    it "is identical to the floored form on 1-column clusters" do
+      line = "GET /a?b=1 HTTP/1.1"
+      (0..Screen.draw_width(line) + 2).each do |col|
+        Wrap.row_index(line, nil, 0, line.size, col, nearest: true)
+          .should eq(Wrap.row_index(line, nil, 0, line.size, col)) # (col #{col})
+      end
+    end
+
+    # Rounding UP is the one exit that can land on a concealed run's first index (the loop's
+    # skip only guards indices it is about to measure). A `¦chain` cell is not drawn, so no
+    # click may resolve into one.
+    it "never rounds up INTO a concealed run" do
+      line = "한글¦hidden¦택"
+      conceal = [{2, 10}] # the ¦hidden¦ run
+      b = line.size
+      (0..Screen.draw_width(line) + 2).each do |col|
+        i = Wrap.row_index(line, conceal, 0, b, col, nearest: true)
+        conceal.each { |(ra, rb)| (i >= ra && i < rb).should be_false } # (col #{col} → #{i})
+      end
+    end
   end
 
   describe "mark_search" do

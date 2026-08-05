@@ -938,21 +938,31 @@ module Gori::Tui
     # The bracketed paste being accumulated for a BULK insert, or nil when the paste (if any)
     # is being delivered keystroke by keystroke — see `begin_bulk_paste?`.
     @paste_buf = nil.as(String::Builder?)
+    # A bracketed paste being DROPPED because its keystrokes would run as commands — see
+    # `paste_runs_as_commands?`. Cleared at the paste's end marker.
+    @paste_dropped = false
 
     private def handle(ev : Termisu::Event::Any) : Nil
       was_pasting = @paste_newline.pasting?
       swallowed = @paste_newline.swallow?(ev)
       # PasteStart/PasteEnd are swallowed by the filter, so the transitions are the only
-      # signal that a paste began or ended. Both are read here, at the same funnel, rather
-      # than by a view that would have to guess from the shape of the keystrokes.
+      # signal that a paste began or ended. All three decisions are read here, at the same
+      # funnel, rather than by a view that would have to guess from the shape of the
+      # keystrokes: take it in bulk, deliver it as typing, or refuse it.
       if !was_pasting && @paste_newline.pasting?
-        @paste_buf = String::Builder.new if begin_bulk_paste?
+        if begin_bulk_paste?
+          @paste_buf = String::Builder.new
+        elsif paste_runs_as_commands?
+          @paste_dropped = true
+          @toast = PASTE_REFUSED
+        end
       elsif was_pasting && !@paste_newline.pasting?
-        flush_bulk_paste
+        @paste_dropped ? (@paste_dropped = false) : flush_bulk_paste
       end
       return if swallowed
       case ev
       when Termisu::Event::Key
+        return if @paste_dropped
         return if buffer_bulk_paste(ev)
         handle_key(ev)
       when Termisu::Event::Mouse
@@ -985,6 +995,45 @@ module Gori::Tui
       return false if @space_menu_open || copy_as_shown? || send_to_shown?
       return false if @goto_open || @search_open || @rename_open || @tag_edit_open
       @tabs[@active_tab]?.try(&.accepts_bulk_paste?) || false
+    end
+
+    # Shown when a paste is refused. It names the recovery, because a paste that vanishes
+    # without a word is its own bug report.
+    PASTE_REFUSED = "paste ignored — nothing focused takes text (i edits the pane, ↵ its fields)"
+
+    # Whether a bracketed paste arriving NOW would be dispatched as COMMANDS rather than typed
+    # into text — the state in which the clipboard's own bytes are hotkeys.
+    #
+    # THIS IS THE ONE THING A PASTE MUST NEVER DO, and it was the default. `begin_bulk_paste?`
+    # only buffers for an editor that is in INSERT; everything else fell through to the
+    # per-keystroke path, which is correct for a text field and catastrophic for a keymap.
+    # Pasting a request into the Repeater's REQUEST pane in READ mode ran `POST /log` as
+    # commands until the `i` of "/login" flipped the pane to INSERT, then typed the rest into
+    # the middle of the old request (Content-Length silently re-derived over the wreckage).
+    # Pasting the same thing at the tab bar ran the global breath keys: `i` turned INTERCEPT
+    # ON, so every subsequent request through the proxy was held, with nothing on screen
+    # connecting that to a paste. `c` toggles capture and `q` leaves the project from there.
+    #
+    # The test is deliberately NARROW, and errs toward delivering the paste: everything modal
+    # owns its own keymap and a stray paste inside it is contained, so only the surfaces that
+    # reach the SHELL's keymap answer true — the tab bar, the sub-tab strip, and a body that
+    # is not currently an editor. `:detail` is in that set for the same reason
+    # `drag_press_target?` puts it there: it is a History body drill-in, not a capturing modal,
+    # so its keystrokes are the tab's.
+    #
+    # `body_badge == :editor` is the controllers' own answer to "does this pane capture text",
+    # which is exactly the question (see `TabController#body_badge`) — so every field the
+    # per-keystroke path serves today keeps serving it: the Repeater TARGET/SNI rows and hex
+    # edit, the Decoder INPUT and CHAIN, Notes, the Project description, the Issues notes, the
+    # JWT input, the Fuzzer target. The sub-tab filter row reports through its own predicate.
+    private def paste_runs_as_commands? : Bool
+      return false unless @overlay.none? || @overlay.detail?
+      return false if modal_overlay? # palette / ⋯ menu / any migrated modal
+      return false if @space_menu_open || copy_as_shown? || send_to_shown?
+      return false if @goto_open || @search_open || @rename_open || @tag_edit_open
+      return false if @tabs[@active_tab]?.try(&.subtab_filter_editing?)
+      return false if @focus == :body && @tabs[@active_tab]?.try(&.body_badge) == :editor
+      true
     end
 
     # Accumulate one pasted keystroke, or false when this event is not part of a bulk paste

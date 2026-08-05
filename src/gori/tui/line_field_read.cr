@@ -37,6 +37,11 @@ module Gori::Tui
     # double-click on whitespace fall back to the ordinary click.
     def select_word_at_cursor(line : String, cx : Int32) : Int32?
       c = cx.clamp(0, line.size)
+      # A pointer rounds to the NEAREST cluster boundary (`Screen.column_for_click`), so a
+      # double-click on the right half of a WIDE glyph resolves past it — see the same guard
+      # in `ReadCursor#select_word_at_cursor`. Only a wide cluster can be rounded past, so
+      # ASCII behaviour, including "whitespace takes nothing", is unchanged.
+      c = Screen.step_back_over_wide(line, c)
       return nil if c >= line.size || line[c].whitespace?
       word = word_char?(line[c])
       a = c
