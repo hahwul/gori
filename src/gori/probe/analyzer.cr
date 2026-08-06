@@ -27,6 +27,10 @@ module Gori
       WS_MSG_CAP       = 200        # max WS messages loaded per flow for passive scan
       CATCHUP_INTERVAL = 30.seconds # how often the passive catch-up sweep runs
       CATCHUP_SCAN     = 500        # recent flows the catch-up sweep re-checks each tick
+      # How often outstanding OAST probes are matched against arriving callbacks. Shorter than
+      # the passive sweep because this one is cheap (a rowid-ranged read that returns nothing
+      # once drained) and because a callback is the moment an operator wants to see.
+      OOB_INTERVAL = 10.seconds
 
       getter events : Channel(Event)
       # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
@@ -36,8 +40,10 @@ module Gori
 
       @disabled : Set(String)     # RuleInfo#id of built-ins the operator turned off (Rules sub-tab)
       @disabled_degraded : Bool   # the disabled-list could not be READ — fail closed on active
-      @custom : Array(CustomRule) # merged global+project user match rules
-      @warned_degraded : Bool     # one-shot: the "active skipped, list unreadable" warning
+      @custom : Array(CustomRule)      # merged global+project user match rules
+      @warned_degraded : Bool          # one-shot: the "active skipped, list unreadable" warning
+      @oob : OutOfBand::Minter?        # OAST payload minter — nil until this project registers one
+      @oob_watermark : Int64 = 0_i64   # highest oast_callbacks id already swept
 
       # One enabled active rule that WOULD run against a given flow, plus the request count it
       # sends. `active_estimate` returns these (empty when nothing applies) so the manual "Run
@@ -72,6 +78,11 @@ module Gori
         @disabled, @disabled_degraded = load_disabled
         @warned_degraded = false
         @custom = load_custom
+        # Out-of-band: the minter the OAST rules plan against (nil until this project registers
+        # a listener), and the callback watermark. 0 so the first sweep is a FULL pass — a probe
+        # planted in an earlier run and answered while gori was closed is matched on open.
+        @oob = load_oob
+        @oob_watermark = 0_i64
       end
 
       # Re-read the Rules sub-tab config (disabled built-ins + custom rules) and force a re-scan of
@@ -82,6 +93,10 @@ module Gori
         @disabled, @disabled_degraded = load_disabled
         @warned_degraded = false unless @disabled_degraded # re-arm the warning if the store re-breaks
         @custom = load_custom
+        # Re-resolve the OAST minter too: starting a listener is exactly the kind of change that
+        # should arm the out-of-band rules without a restart, and this is the one place every
+        # surface already calls after touching probe config.
+        @oob = load_oob
         @analyzed.clear
       end
 
@@ -157,6 +172,7 @@ module Gori
         spawn(name: "gori-probe") { passive_loop }
         spawn(name: "gori-probe-active") { active_loop }
         spawn(name: "gori-probe-catchup") { catch_up_loop }
+        spawn(name: "gori-probe-oob") { oob_loop }
         # Project already in an actively-probing mode (persisted) — probe recent in-scope History
         # now, not only traffic that arrives after this open.
         arm_active_backfill if @mode.probes_actively?
@@ -197,6 +213,11 @@ module Gori
       def active_estimate(detail : Store::FlowDetail,
                           opts : Active::Options = Active::Options::DEFAULT) : Array(ActiveEstimate)
         return [] of ActiveEstimate if active_degraded?
+        # The caller chooses the method/cap posture; the OAST minter is NOT theirs to choose —
+        # `run_active_now` always plans with this analyzer's, so an estimate built without it
+        # would omit exactly the rules that are about to run and under-count the sends the
+        # confirm dialog promises.
+        opts = Active::Options.new(allow_unsafe: opts.allow_unsafe, aggressive: opts.aggressive, oob: @oob)
         Active::RULES.compact_map do |rule|
           next if Probe.rule_disabled?(rule.info.id, @disabled)
           next unless rule.dedup_key(detail, opts)
@@ -220,7 +241,7 @@ module Gori
                          notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Nil
         return if @stopped
         return if active_degraded?
-        opts = Active::Options.new(allow_unsafe: allow_unsafe)
+        opts = Active::Options.new(allow_unsafe: allow_unsafe, oob: @oob)
         spawn(name: "gori-probe-active-manual") do
           found = 0
           errored = false
@@ -403,7 +424,7 @@ module Gori
       # keeps the historic safe-method, base-cap defaults; AGGRESSIVE widens to unsafe methods and
       # raises caps / bypass sets (still scope-gated by maybe_enqueue_active).
       private def active_opts : Active::Options
-        @mode.aggressive? ? Active::Options.new(allow_unsafe: true, aggressive: true) : Active::Options::DEFAULT
+        Active::Options.new(allow_unsafe: @mode.aggressive?, aggressive: @mode.aggressive?, oob: @oob)
       end
 
       # Fire-and-forget: walk recent History and enqueue active probes for in-scope surfaces.
@@ -506,6 +527,10 @@ module Gori
         # single-probe rule has none, so this sends exactly the one request as before. Only the
         # PRIMARY failure aborts+notifies — a follow-up that errors is passed through as its errored
         # Result so the rule bails on the incomplete comparison without a second tray post.
+        # Record this plan's out-of-band payloads now that the probe carrying them went out —
+        # the twin of the same line in `Active.analyze`, for the same reason (a payload that
+        # never left is not outstanding). See `Probe::OutOfBand` for the plant/promote split.
+        record_oob(rule, plan, detail)
         results = [result]
         # Verbatim here too — a differential whose baseline resolved `$id` and whose followup
         # did not would be measuring the substitution rather than the target.
@@ -540,6 +565,61 @@ module Gori
         nil
       rescue ex
         emit_active_error(detail.row.host, ex.message || "error")
+        nil
+      end
+
+      # --- out-of-band (OAST) ------------------------------------------------------------
+
+      # Persist the payloads a plan planted, so a callback arriving minutes from now — possibly
+      # in a different process run — can still be tied back to this flow. Failures are swallowed
+      # deliberately: an unrecordable probe costs a missed finding, while letting the exception
+      # out of `execute_active` would report the whole probe as errored.
+      private def record_oob(rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail) : Nil
+        return if plan.oob.empty?
+        row = detail.row
+        plan.oob.each { |c| OutOfBand.record(@store, rule.info.id, c, row, row.id) }
+      end
+
+      # The promote half. Runs on its OWN timer rather than inside catch_up because it is not
+      # gated on the scan mode: the probes it answers were authorised and sent when the mode
+      # allowed it, and a target that calls home after the operator dropped back to Passive has
+      # still proven the finding. Its first pass starts from watermark 0, which is what makes a
+      # callback that landed while gori was closed still count.
+      private def oob_loop : Nil
+        until @stopped
+          sleep OOB_INTERVAL
+          sweep_oob
+        end
+      end
+
+      private def sweep_oob : Nil
+        return if @stopped
+        detections, @oob_watermark = OutOfBand.sweep(@store, @oob_watermark)
+        return if detections.empty?
+        # flow_id rides on each Detection (stamped at plant time from the probed flow), so
+        # `persist` is passed 0 and `with_source` keeps the detection's own id. `persist` bumps
+        # the generation + emits ONE message-less list-refresh event.
+        persist(detections, flow_id: 0_i64, repeater_id: nil)
+        # One tray notification PER confirmed finding. A single sweep can promote several distinct
+        # callbacks (two SSRF targets calling home between ticks), and a blind-SSRF confirmation is
+        # exactly the moment an operator must not miss — collapsing them to the first would drop a
+        # real finding's toast silently.
+        detections.each do |d|
+          msg = "#{d.title} on #{d.host}"
+          msg = "#{msg}: #{d.evidence}" if d.evidence
+          emit(IssueEvent.new(d.host, msg))
+        end
+      rescue DB::Error | SQLite3::Exception
+      rescue Channel::ClosedError
+      end
+
+      # The OAST minter for THIS project, rebuilt each time the rule config is (re)loaded: a
+      # project with no registered session gets nil, and every OAST rule then plans nothing.
+      # Rebuilt rather than cached forever so starting a listener mid-session arms the rules on
+      # the next config reload instead of requiring a restart.
+      private def load_oob : OutOfBand::Minter?
+        OutOfBand::StoreMinter.build(@store)
+      rescue DB::Error | SQLite3::Exception
         nil
       end
 

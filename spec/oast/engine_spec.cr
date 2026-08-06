@@ -106,6 +106,30 @@ describe Gori::Oast do
     end
   end
 
+  # The probe out-of-band bridge ties a callback to the exact payload that caused it by finding
+  # `payload_token(payload)` inside the callback's full_id. That only works if the token this
+  # method extracts is actually a substring of the payload the same provider mints — assert it
+  # per provider, since each puts its nonce in a different position.
+  describe "Provider#payload_token" do
+    it "extracts a nonce that is a substring of the minted payload, per provider" do
+      cases = {
+        O::Interactsh.new("https://oast.pro") => O::Session.new(1_i64, O::ProviderKind::Interactsh, "https://oast.pro", "corr20charsabcdef012", "sec"),
+        O::CustomHttp.new("https://my.oast.example/log") => O::Session.new(1_i64, O::ProviderKind::CustomHttp, "https://my.oast.example/log", "cid", ""),
+        O::WebhookSite.new("https://webhook.site") => O::Session.new(1_i64, O::ProviderKind::WebhookSite, "https://webhook.site", "uuid-1234", ""),
+        O::Boast.new("https://boast.example", "secret") => O::Session.new(1_i64, O::ProviderKind::Boast, "https://boast.example", "boastid", "secret", token: "secret"),
+        O::Postbin.new("https://postb.in") => O::Session.new(1_i64, O::ProviderKind::Postbin, "https://postb.in", "binid", "", token: "binid"),
+      }
+      cases.each do |provider, session|
+        payload = provider.generate_payload(session)
+        token = provider.payload_token(payload)
+        token.should_not be_empty
+        payload.downcase.should contain(token), "#{provider.kind.label}: #{token} not in #{payload}"
+        # a DIFFERENT mint yields a DIFFERENT token (the nonce, not the shared correlation id)
+        provider.payload_token(provider.generate_payload(session)).should_not eq(token)
+      end
+    end
+  end
+
   describe O::ProviderKind do
     it "round-trips labels and tolerant tokens" do
       O::ProviderKind::CustomHttp.label.should eq("custom-http")

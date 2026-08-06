@@ -1,4 +1,5 @@
 require "../issue"
+require "../out_of_band"
 require "../../store"
 require "../../repeater/engine"
 
@@ -30,7 +31,14 @@ module Gori
       #   allow_unsafe — widen the method gate beyond SAFE_METHODS (re-sends POST/PUT/PATCH/DELETE).
       #   aggressive   — raise per-rule caps (MAX_PARAMS_AGGRESSIVE, MAX_PROBE_PARAMS_AGGRESSIVE)
       #                  and use the wider bypass-header set.
-      record Options, allow_unsafe : Bool = false, aggressive : Bool = false do
+      #   oob          — the out-of-band payload minter, present only when this project has a
+      #                  registered OAST session. This is what GATES the OAST rules: they are
+      #                  ordinary default-ON entries in the Rules sub-tab, but with no listener
+      #                  to mint from they `plan` nothing, so nothing is sent and no row appears.
+      #                  A capability, not a switch — an operator who never set up an interaction
+      #                  server never pays for the checks that need one.
+      record Options, allow_unsafe : Bool = false, aggressive : Bool = false,
+        oob : OutOfBand::Minter? = nil do
         DEFAULT = new
 
         # The param budget for this scan (aggressive raises it).
@@ -58,10 +66,17 @@ module Gori
       # returns (via a read timeout) well inside the per-probe budget. An EMPTY `pipeline` (every other
       # rule) is a strict no-op — the branch is skipped and behaviour is byte-for-byte unchanged. Both
       # tail-default so all existing `Plan.new` sites (≤4 positional args) keep compiling untouched.
+      #
+      # `oob` carries the OUT-OF-BAND half of the probe: payloads this plan planted whose proof
+      # can only arrive later, through an OAST callback rather than through any response the
+      # analyzer is about to read. The analyzer records them AFTER a successful primary send
+      # (a payload that never left is not outstanding) and never interprets them; promotion is
+      # `Probe::OutOfBand.sweep`'s job. Empty for every in-band rule.
       record Plan, request : Bytes, params : Array(Param), dedup_key : String,
         followups : Array(Bytes) = [] of Bytes,
         pipeline : Array(Bytes) = [] of Bytes,
-        probe_timeout : Time::Span? = nil
+        probe_timeout : Time::Span? = nil,
+        oob : Array(OutOfBand::Candidate) = [] of OutOfBand::Candidate
 
       # Strip a scheme://authority prefix so an absolute-form (forward-proxy) target becomes
       # origin-form; an already-origin-form target passes through unchanged. The authority

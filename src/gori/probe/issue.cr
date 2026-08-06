@@ -39,6 +39,15 @@ module Gori
     # headless scan, the toggle commands) can drift on what "disabled" means.
     DEFAULT_DISABLED_RULES = Set{"request_smuggling"}
 
+    # Active rules that run OUT-OF-BAND: they plant an OAST payload and are confirmed by a later
+    # callback (`Probe::OutOfBand`), so they can only send when the project has a registered OAST
+    # listener to mint from. They ship ENABLED — nothing to opt into — but are inert until a
+    # listener exists, which is a capability, not a toggle. The Rules sub-tab reads this to badge
+    # them "needs OAST" and to keep their (currently-unpayable) request cost out of the enabled
+    # total. One list so the catalog, the estimate, and the badge cannot drift on which rules
+    # these are.
+    OOB_RULE_IDS = Set{"ssrf_oast"}
+
     # Whether the analyzer/scan must SKIP rule `id`, given the project's stored disabled-id set.
     def self.rule_disabled?(id : String, stored : Set(String)) : Bool
       DEFAULT_DISABLED_RULES.includes?(id) ? !stored.includes?(id) : stored.includes?(id)
@@ -137,6 +146,7 @@ module Gori
       "path_normalization_bypass"      => "A probe reached a denied (401/403) path by rewriting it with a normalization trick (e.g. /admin/..;/admin, /admin/%2e/, /admin//) and got a 2xx. Enforce access control on the NORMALIZED path after the proxy and application collapse ./ ..; // %2e sequences, keep the proxy and backend agreeing on normalization, and reject ambiguous paths. Single-shot; confirm by re-requesting the canonical path.",
       "url_rewrite_bypass"             => "A probe reached a denied resource by requesting / with an X-Original-URL / X-Rewrite-URL header naming the gated path, and got different (served) content than the plain root. Don't let application URL-rewrite headers override the routed path for authorization; strip X-Original-URL / X-Rewrite-URL at the edge and enforce access control on the actual request path. Single-shot; confirm manually.",
       "ssti"                           => "A probe injected template expressions in this parameter and the server returned their evaluated results (7*7→49 and 7*8→56), indicating server-side template injection — frequently a path to remote code execution. Never build templates from user input; pass user data as template variables/context, use a sandboxed or logic-less engine, and validate input. Confirm the engine and impact manually.",
+      "ssrf_oast"                      => "An out-of-band probe pointed this URL parameter at a gori-controlled OAST payload and the server called back to it — confirming the endpoint fetches an attacker-supplied URL (server-side request forgery). Validate the target against a strict allowlist of hosts/schemes, resolve and pin the destination IP (rejecting private/link-local/metadata ranges and DNS-rebinding), and never let a request parameter choose an arbitrary host to connect to. Blind SSRF reaches internal services, cloud metadata (169.254.169.254), and localhost admin panels.",
       "nextjs_action_no_auth"          => "A probe re-sent this Next.js server action (Next-Action) with the session Cookie / Authorization removed and still received a comparable 2xx response. Next.js does not authenticate or authorize server actions for you — enforce authentication and per-user authorization INSIDE every 'use server' function (and treat each action as a public, unauthenticated endpoint until it does). Single-shot; confirm the unauthenticated response actually contains privileged data.",
       "request_smuggling_clte"         => "A timing probe hung on a CL.TE framing conflict: the front-end framed this request by Content-Length while the back-end honoured Transfer-Encoding, so one tier blocked on a body the other had already ended — a request-smuggling / desync primitive. The front-end and back-end MUST agree on framing: reject any request carrying BOTH Content-Length and Transfer-Encoding (RFC 7230 §3.3.3), normalize/strip conflicting framing at the edge, and prefer HTTP/2 end-to-end (its length-prefixed framing removes the ambiguity). Confirm manually with the Repeater 'send group' (a complete smuggled prefix + a benign follow-up on one connection).",
       "request_smuggling_tecl"         => "A timing probe hung on a TE.CL framing conflict: the front-end honoured Transfer-Encoding (the request ended at the terminating chunk) while the back-end waited for Content-Length bytes that never arrived — a request-smuggling / desync primitive. The front-end and back-end MUST agree on framing: reject requests carrying BOTH Content-Length and Transfer-Encoding, have the edge re-chunk or strip conflicting framing, and prefer HTTP/2 end-to-end. Confirm manually with the Repeater 'send group'.",

@@ -14,6 +14,7 @@ require "./active/url_rewrite_bypass"
 require "./active/ssti"
 require "./active/nextjs_action_no_auth"
 require "./active/request_smuggling"
+require "./active/ssrf_oast"
 require "../outbound"
 require "../scope"
 require "../fuzz/engine"
@@ -38,7 +39,8 @@ module Gori
                OpenRedirect.new, HostHeaderInjection.new,
                CrlfInjection.new, PathNormalizationBypass.new,
                UrlRewriteBypass.new, Ssti.new,
-               NextjsActionNoAuth.new, RequestSmuggling.new] of Rule
+               NextjsActionNoAuth.new, RequestSmuggling.new,
+               SsrfOast.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
@@ -124,11 +126,17 @@ module Gori
       # a headless scan honours that config too instead of silently running every built-in.
       # `on_error` (optional) is called with the failing rule's id when a rule raises; see the
       # per-rule rescue below for why that isolation exists at all.
+      # `on_oob` (optional) receives each OUT-OF-BAND candidate a plan planted, once its probe
+      # actually went out. It is a callback rather than a Store write because this module is
+      # deliberately Store-free (rules depend only on the codec, the body decoder and the
+      # sender); the caller that owns a Store — `Probe::Scan`, the TUI analyzer — persists it.
+      # A caller that passes nothing simply does not participate in out-of-band checks.
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
                        timeout : Time::Span = 10.seconds, *, outbound : Outbound,
                        backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
                        disabled : Set(String) = NO_DISABLED,
-                       on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
+                       on_error : Proc(String, Exception, Nil)? = nil,
+                       on_oob : Proc(String, OutOfBand::Candidate, Nil)? = nil) : Array(Detection)
         # A short-circuited flow is refused before a single probe is sent (#511). Its baseline
         # response came from a Match&Replace stub, not from the origin, so every differential
         # this builds would be measuring the rule — and the probes themselves WOULD reach the
@@ -182,6 +190,12 @@ module Gori
               end
               next
             end
+            # The primary carried whatever payloads this plan planted, and it went out — so the
+            # probes are now OUTSTANDING and must be recorded before anything else can fail.
+            # Recorded here rather than at plan time because a payload that never reached the
+            # target is not outstanding, and a row for it would sit unmatched forever, reading
+            # as "we asked and nothing answered" when in fact nobody was ever asked.
+            plan.oob.each { |c| on_oob.try &.call(rule.info.id, c) }
             results = [result]
             # Same verbatim marking as the primary above — a followup is built by the same
             # rule from the same captured request, so a differential whose baseline resolved

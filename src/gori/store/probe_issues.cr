@@ -175,6 +175,11 @@ module Gori
       ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM probe_issues")
         c.exec("DELETE FROM probe_suppressions")
+        # Outstanding out-of-band probes go too: an operator who cleared the findings does not
+        # want a callback that lands afterward re-creating an issue they just wiped. The probes
+        # this drops are the un-promoted ones; a promoted probe's issue was already in the rows
+        # just deleted.
+        c.exec("DELETE FROM probe_oast_probes")
         nil
       }
       bump_probe_generation

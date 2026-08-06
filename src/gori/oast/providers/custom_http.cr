@@ -23,6 +23,15 @@ module Gori::Oast
       "#{session.server_url}#{sep}oid=#{Crypto.random_id(10)}"
     end
 
+    # This provider's nonce rides in a query parameter, not in the path or the host, so the
+    # base implementation (last path segment / first host label) would return the endpoint's
+    # path and match every payload it ever minted. Read back the `oid` this class writes.
+    def payload_token(payload : String) : String
+      idx = payload.rindex("oid=")
+      return super unless idx
+      payload[(idx + 4)..].split('&').first.downcase
+    end
+
     def poll(http : Http, session : Session) : Array(Interaction)
       resp = http.request("GET", session.server_url, custom_headers)
       return [] of Interaction unless resp.status == 200

@@ -5,6 +5,7 @@ require "../scope"
 require "./issue"
 require "./passive"
 require "./active"
+require "./out_of_band"
 require "./from_repeater"
 require "./group"
 
@@ -141,7 +142,47 @@ module Gori
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg,
           active_budget: budget, on_error: on_error)
         detections.concat(repeater_dets)
+        # Promote any OUT-OF-BAND probe whose callback has landed since it was planted. This is
+        # a headless surface, so it cannot wait for one: the probes this run plants are picked
+        # up by whatever sweeps next (the TUI's timer, or the NEXT `gori run probe`), and what
+        # this pass reports are the ones an earlier run planted. Unconditional — the promotion
+        # is a read of already-collected evidence, so it costs nothing on a project with no OAST
+        # probes and must not be gated on `active`, which authorises SENDING.
+        detections.concat(sweep_out_of_band(store))
         {detections, repeater_n}
+      end
+
+      # --- out-of-band (OAST) --------------------------------------------------------------
+
+      # Every callback ever received, matched against everything still outstanding. A headless
+      # scan holds no watermark across runs (there is no process to hold it), so it sweeps from
+      # 0; `mark_probe_oast_matched` is the conditional UPDATE that keeps a promotion single,
+      # including against a TUI sweeping the same project at the same time.
+      private def sweep_out_of_band(store : Store) : Array(Detection)
+        dets, _ = OutOfBand.sweep(store, 0_i64)
+        dets.each { |d| store.upsert_probe_issue(d) }
+        dets
+      rescue DB::Error | SQLite3::Exception
+        [] of Detection
+      end
+
+      # Give a scan its OAST minter, unless this is a passive-only run (never reaches
+      # Active.analyze, so building one is pure waste) or the caller already chose one (a spec).
+      # Resolved ONCE per scan half rather than per flow: it is a store read, and the session it
+      # binds cannot change under a running scan in any way a rule would want to follow.
+      private def with_oob(store : Store, opts : Active::Options, active : Bool) : Active::Options
+        return opts if !active || opts.oob
+        Active::Options.new(allow_unsafe: opts.allow_unsafe, aggressive: opts.aggressive,
+          oob: OutOfBand::StoreMinter.build(store))
+      end
+
+      # The sink that turns a planted payload into a durable row. Closes over the flow being
+      # probed, so the promoted finding points back at the request that carried the payload.
+      private def oob_sink(store : Store, row : Store::FlowRow,
+                           flow_id : Int64?) : Proc(String, OutOfBand::Candidate, Nil)
+        ->(rule_id : String, c : OutOfBand::Candidate) do
+          OutOfBand.record(store, rule_id, c, row, flow_id)
+        end
       end
 
       def scan_flows(store : Store, ids : Array(Int64), *, active : Bool,
@@ -155,6 +196,7 @@ module Gori
         outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
         budget = active_budget || Budget.new(active_limit)
+        opts = with_oob(store, opts, active)
         ids.each_with_index do |id, i|
           begin
             detail = store.get_flow(id)
@@ -170,7 +212,8 @@ module Gori
               # skip every active probe on that origin while the lens still shows it in-scope.
               if active && !cfg.degraded && allows_row?(outbound, detail.row) && budget.take?
                 detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
-                  disabled: cfg.disabled, on_error: on_error))
+                  disabled: cfg.disabled, on_error: on_error,
+                  on_oob: oob_sink(store, detail.row, id)))
               end
             end
           rescue ex : DB::Error | SQLite3::Exception
@@ -198,6 +241,7 @@ module Gori
         outbound = outbound_for(scope, allow_unscoped)
         detections = [] of Detection
         budget = active_budget || Budget.new(nil)
+        opts = with_oob(store, opts, active)
         n = 0
         store.repeaters.each do |rec|
           next unless detail = Probe.detail_from_repeater(rec)
@@ -210,7 +254,8 @@ module Gori
             end
             if active && !cfg.degraded && allows_row?(outbound, detail.row) && budget.take?
               Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
-                disabled: cfg.disabled, on_error: on_error).each do |d|
+                disabled: cfg.disabled, on_error: on_error,
+                on_oob: oob_sink(store, detail.row, rec.flow_id)).each do |d|
                 detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
               end
             end

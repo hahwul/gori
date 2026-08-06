@@ -859,7 +859,54 @@ module Gori
         "ALTER TABLE repeaters ADD COLUMN ws_http_only INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11]
+      # `probe_oast_probes` is the ONE piece of probe state that outlives the scan that created
+      # it. Every other active rule is a synchronous function of a response gori read on the same
+      # socket it wrote; an OAST rule cannot be, because the evidence — a DNS/HTTP callback the
+      # TARGET makes to a third-party interaction server — arrives seconds to hours later, over a
+      # channel gori is not part of, quite possibly in a different process run.
+      #
+      # So the probe is split in two and this table is the seam: at plan time a rule mints a
+      # payload from a registered `oast_sessions` row (`Provider#generate_payload` is LOCAL by
+      # invariant, so this costs no network) and records the finding it WOULD emit; later, when a
+      # callback carrying that payload's unique `token` lands in `oast_callbacks`, the sweep
+      # promotes the row to a real probe issue. Nothing is emitted on the send alone — a payload
+      # going out is not a finding, and a table of un-promoted rows is exactly the "we asked, and
+      # nothing answered" state.
+      #
+      # `token` is UNIQUE and is the substring the provider echoes back in `full_id` /
+      # `raw_request` (the interactsh 13-char label, the custom-http `oid`, …), so matching is a
+      # containment test against callbacks rather than a join on provider-specific identifiers.
+      # `matched_at` is the promotion stamp AND the pending filter — the partial index keeps the
+      # sweep O(outstanding probes), which is a handful, not O(table).
+      #
+      # Rows are kept after promotion: the token in a callback is the only thing tying that
+      # interaction to the parameter that caused it, and deleting the row would leave the issue
+      # unable to say which probe drew it.
+      V12 = [
+        <<-SQL,
+        CREATE TABLE probe_oast_probes (
+          id         INTEGER PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          token      TEXT    NOT NULL,
+          payload    TEXT    NOT NULL,
+          session_id INTEGER NOT NULL,
+          rule_id    TEXT    NOT NULL,
+          code       TEXT    NOT NULL,
+          category   TEXT    NOT NULL,
+          title      TEXT    NOT NULL,
+          severity   INTEGER NOT NULL,
+          host       TEXT    NOT NULL,
+          url        TEXT    NOT NULL,
+          evidence   TEXT,
+          flow_id    INTEGER,
+          matched_at INTEGER,
+          UNIQUE(token)
+        )
+        SQL
+        "CREATE INDEX idx_probe_oast_pending ON probe_oast_probes (id) WHERE matched_at IS NULL",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

@@ -29,6 +29,31 @@ module Gori::Oast
     def deregister(http : Http, session : Session) : Nil
     end
 
+    # The per-payload NONCE inside a payload this provider minted — the substring that comes
+    # back in an `Interaction`'s `full_id` / `raw_request` and is unique to ONE
+    # `generate_payload` call. It exists so a caller that planted a payload somewhere and
+    # walked away (the probe out-of-band bridge) can later tie an arriving callback back to
+    # the exact request it came from, without knowing which provider minted it.
+    #
+    # `correlation_id` is NOT enough: it is per-SESSION, so every payload from one listener
+    # shares it and any callback would match every outstanding probe. Four of the five
+    # providers append their nonce as the last path segment or the first host label, which is
+    # what this default reads; CustomHttp puts it in a query parameter and overrides.
+    #
+    # Lower-cased because the wire is case-insensitive on both sides that carry it: DNS labels
+    # are, and a resolver doing 0x20 case randomization will echo a payload host back in mixed
+    # case that never matches the bytes we minted. Every comparison against this value must
+    # lower-case its own side too.
+    def payload_token(payload : String) : String
+      s = payload.strip
+      s = s[0...s.index('#')] if s.index('#')
+      # Path first: `…/{corr}/{nonce}` (webhook.site, postbin). Then the leading host label:
+      # `{corr}{nonce}.oast.host` (interactsh) / `{nonce}.{corr}.host` (BOAST).
+      seg = s.split('/').reject(&.empty?).last? || s
+      seg = seg.split('?').first
+      seg.split('.').first.downcase
+    end
+
     # Build the right Provider for a configured (kind, host, token). The single dispatch
     # point shared by TUI/CLI/MCP.
     def self.build(kind : ProviderKind, host : String, token : String? = nil) : Provider
