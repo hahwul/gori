@@ -693,6 +693,24 @@ module Gori::Tui
       handle_wheel(step)
     end
 
+    # PageUp/PageDown/Home/End that `handle_body_key` did NOT claim: the response pane's hex
+    # dump (no lines, so `resp_line_edge` declines) and every ⌃/⌥-modified form (deferred to
+    # the keymap before the focus dispatch ever runs). Both land here, and both mean "move the
+    # dump" — the twin of the `history_controller.scroll_detail(delta)` fallthrough the Runner
+    # does for the History detail overlay.
+    #
+    # The `:response` guard is the mechanism, not a comment: it is what keeps this from moving
+    # a pane the operator is not in. The request and target panes do consume these keys
+    # themselves (`handle_repeater_request_read` / `edit_motion_key` in both modes, and a
+    # single-line target has no page to turn), but the guard holds even where they do not —
+    # including the CHAIN pane, which `chain_pane_active?` scopes to `:request` anyway.
+    def body_scroll(delta : Int32) : Bool
+      v = current_view
+      return false unless v && v.focus == :response
+      v.scroll(delta)
+      true
+    end
+
     def handle_wheel(step : Int32) : Bool
       v = current_view
       return true unless v
@@ -2150,6 +2168,26 @@ module Gori::Tui
       when key.down?, key.lower_j? then resp_nav_step(view, 1, 0, selecting, nav)
       when key.left?               then resp_nav_step(view, 0, -1, selecting, nav)
       when key.right?              then resp_nav_step(view, 0, 1, selecting, nav)
+        # Page/line-edge keys, ⇧ extending — the set every other read pane in the tree has
+        # (`ReadPane#motion_key`, `HistoryView#detail_line_edge`/`#detail_page_rows`, and the
+        # request editor beside this one). They sat in NO arm before, so the trailing `true`
+        # swallowed all four and they moved nothing.
+        #
+        # ABOVE the `transcript` arm on purpose: a WS/gRPC/group transcript is navigable text
+        # with a caret, exactly like a plain response — the same reasoning the ←/→ comment
+        # above gives. Only the d/x/p TOOLS are transcript-less.
+        #
+        # A page step goes through `resp_move`, so on a split column it crosses cards only
+        # when the caret is ALREADY on the boundary line — the same condition a single ↓ has
+        # to meet. From mid-card it pages within the card.
+      when key.page_up?   then resp_nav_step(view, -view.resp_page_rows, 0, selecting, nav)
+      when key.page_down? then resp_nav_step(view, view.resp_page_rows, 0, selecting, nav)
+        # Home/End return FALSE on a hex dump (no lines to have edges) so the shell's
+        # ±JUMP_ROWS reaches `body_scroll` and jumps the dump to top/bottom — History's hex
+        # fallthrough. The MODIFIED form never arrives here at all (`handle_body_key` defers
+        # every ctrl/alt chord to the keymap), and lands on that same buffer jump.
+      when key.home? then return view.resp_line_edge(-1, selecting: selecting)
+      when key.end?  then return view.resp_line_edge(1, selecting: selecting)
       when transcript
         # Transcript: no d/x/p tools; still let Global breath / copy through.
         return false if c && !ev.ctrl? && !ev.alt? && !c.control?

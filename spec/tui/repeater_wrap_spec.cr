@@ -263,3 +263,93 @@ describe "Gori::Tui::RepeaterView soft wrap" do
     view.resp_cursor.cx.should be > 0
   end
 end
+
+# A response whose STATUS LINE is long enough to wrap — the shape that makes line 0 span
+# several visual rows without any help from the operator. A hostile (or merely verbose)
+# origin picks the reason phrase, so this is ordinary captured traffic, not a synthetic case.
+private def wrapped_head_view : Gori::Tui::RepeaterView
+  view = Gori::Tui::RepeaterView.new
+  view.load_blank
+  view.focus_pane(:response)
+  hdr = "HTTP/1.1 200 OK #{"Y" * 300}\r\nContent-Type: text/plain\r\n\r\n"
+  view.apply(Gori::Repeater::Result.new(hdr.to_slice, ("body line\n" * 40).to_slice, nil, 1000_i64))
+  view
+end
+
+describe "Gori::Tui::RepeaterView response read motion" do
+  # THE REGRESSION for `at_top?`. The caret one visual row into a wrapped line 0 still has a
+  # row above it inside the pane, and the controller turns `at_top?` into "↑ leaves for the
+  # tab bar" — so answering true there made every continuation row of line 0 unreachable by
+  # ↑. `TextArea#at_top?` (the request pane beside it), `HistoryView#detail_at_top?` and
+  # `ReadPane#at_top?` all test the sub-row; this pane was the last one that did not.
+  it "is not at_top? while the caret sits on a continuation row of a wrapped line 0" do
+    view = wrapped_head_view
+    rect = Rect.new(0, 0, 80, 20)
+    view.render(Screen.new(MemoryBackend.new(80, 20)), rect)
+    view.at_top?.should be_true # caret on line 0, first visual row
+
+    view.resp_move(1, 0) # one VISUAL row down — still inside line 0
+    view.resp_cursor.cy.should eq(0)
+    view.at_top?.should be_false
+
+    view.resp_move(-1, 0) # and back up to the first row, which IS the top
+    view.at_top?.should be_true
+  end
+
+  # Home/End are the LOGICAL line's edges, not the visual row's — the rule `ReadPane#
+  # motion_key` states and `HistoryView#detail_line_edge` follows, so End on a wrapped line
+  # lands on its LAST row rather than at the first wrap break.
+  it "puts End at the logical end of a wrapped line and Home back at its start" do
+    view = wrapped_head_view
+    rect = Rect.new(0, 0, 80, 20)
+    view.render(Screen.new(MemoryBackend.new(80, 20)), rect)
+    len = view.resp_plain_lines[0].size
+    len.should be > 300 # the status line really does wrap at this width
+
+    view.resp_line_edge(1).should be_true
+    view.resp_cursor.cy.should eq(0)
+    view.resp_cursor.cx.should eq(len) # the LINE's end, not the first row's
+
+    view.resp_line_edge(-1).should be_true
+    view.resp_cursor.cx.should eq(0)
+  end
+
+  # ⇧Home/⇧End extend rather than just move — the footer advertises "⇧arrows select", and
+  # before this the two keys reached no arm at all and selected nothing.
+  it "extends the selection when Home/End are given shift" do
+    view = wrapped_head_view
+    rect = Rect.new(0, 0, 80, 20)
+    view.render(Screen.new(MemoryBackend.new(80, 20)), rect)
+    view.resp_cursor.selection?.should be_false
+
+    view.resp_line_edge(1, selecting: true).should be_true
+    view.resp_cursor.selection?.should be_true
+    view.resp_copy_text.should eq(view.resp_plain_lines[0])
+  end
+
+  # The page step is measured from THIS pane's drawn height, not the shell's body height:
+  # the response column carries its own header and borders, so paging by the body's height
+  # would step past the end of what the operator is looking at. Same `-2` overlap as
+  # `ReadPane#motion_key` and `HistoryView#detail_page_rows`.
+  it "pages by its own drawn height, with a couple of rows of overlap" do
+    view = wrapped_head_view
+    rect = Rect.new(0, 0, 80, 20)
+    view.render(Screen.new(MemoryBackend.new(80, 20)), rect)
+    body_h = resp_body_rect(rect).h
+    view.resp_page_rows.should eq({body_h - 2, 1}.max)
+    view.resp_page_rows.should be < body_h # an overlap, not a clean jump
+  end
+
+  # A hex dump has no lines to have edges, so `resp_line_edge` DECLINES — that false is what
+  # lets the controller fall through to the shell's ±JUMP_ROWS and reach
+  # `RepeaterController#body_scroll`, which jumps the dump to top/bottom instead. Answering
+  # true here would swallow the key and leave hex Home/End dead.
+  it "declines Home/End on a hex dump so the buffer jump can claim them" do
+    view = wrapped_head_view
+    rect = Rect.new(0, 0, 80, 20)
+    view.render(Screen.new(MemoryBackend.new(80, 20)), rect)
+    view.toggle_resp_hex
+    view.resp_line_edge(1).should be_false
+    view.resp_line_edge(-1).should be_false
+  end
+end

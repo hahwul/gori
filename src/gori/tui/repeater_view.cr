@@ -3046,7 +3046,13 @@ module Gori::Tui
         if resp_split? && @resp_pane == :transcript
           false
         elsif resp_navigable?
-          @resp_cursor.cy == 0 && @scroll == 0
+          # The sub-row half is not decoration: under wrap a caret parked three rows into a
+          # wrapped line 0 still has three rows above it INSIDE this pane, and popping focus
+          # from there makes exactly those rows unreachable by ↑. A long status reason phrase
+          # wraps line 0 on its own, so this was reachable with no help from the operator.
+          # `TextArea#at_top?` (the request pane beside it), `HistoryView#detail_at_top?` and
+          # `ReadPane#at_top?` all already test it; this pane was the last one that did not.
+          @resp_cursor.cy == 0 && @scroll == 0 && resp_caret_sub == 0
         else
           @scroll == 0
         end
@@ -3540,6 +3546,42 @@ module Gori::Tui
       ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
     end
 
+    # Home / End in the response pane: the LOGICAL line's edges, with ⇧ extending.
+    #
+    # This pane had NO Home/End, and no PgUp/PgDn either: all four reached
+    # `handle_repeater_response`, matched none of its arms, and were swallowed by the
+    # trailing `true` — so the four keys did nothing at all, and ⇧Home/⇧End selected nothing
+    # while the footer advertised "⇧arrows select". Every other multi-line pane in the tree
+    # (the request editor beside it via `TextArea#handle_motion_key`, `HistoryView#
+    # detail_line_edge`, and `ReadPane#motion_key` for the other nine) already spells them
+    # this way; the response pane was the lone hold-out.
+    #
+    # Logical line ends, not visual row ends — the rule `ReadPane#motion_key` states, so a
+    # wrapped line's End lands on its last row and Home on its first, with the shared
+    # `ensure_resp_visible` scrolling to whichever row that turned out to be.
+    #
+    # False on a hex dump: it has no lines to have edges. The controller then returns false
+    # too, and the shell's ±JUMP_ROWS reaches `RepeaterController#body_scroll` — the same
+    # top/bottom buffer jump History's hex dump falls through to.
+    def resp_line_edge(dir : Int32, selecting : Bool = false) : Bool
+      return false unless resp_navigable?
+      size, line_at = resp_line_source
+      return false if size <= 0
+      cy = @resp_cursor.cy.clamp(0, size - 1)
+      @resp_cursor.move_to(cy, dir < 0 ? 0 : line_at.call(cy).size, selecting: selecting)
+      ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
+      true
+    end
+
+    # One screenful of the response pane, for PgUp/PgDn. The same "minus a couple of rows of
+    # overlap" step `ReadPane#motion_key` and `HistoryView#detail_page_rows` use, measured
+    # from THIS pane's own last drawn height rather than the shell's `@body_h`: the response
+    # column is half the body's width but carries its own header and borders, so the body's
+    # height pages past the end of what the operator is looking at.
+    def resp_page_rows : Int32
+      {@resp_last_h - 2, 1}.max
+    end
+
     # A vertical step off the end of one response card crosses into the other — ↓ off the
     # HANDSHAKE RESPONSE bottom lands on the TRANSCRIPT's first line, ↑ off the TRANSCRIPT top
     # lands on the handshake's last — so the column reads as one document, exactly as
@@ -3977,6 +4019,22 @@ module Gori::Tui
       fn = resp_layout_fn(cw, line_at)
       csub = fn.call(cy).row_of(@resp_cursor.cx + off)
       @scroll, @scroll_sub = Wrap.ensure_visible(@scroll, @scroll_sub, cy, csub, view_h, fn)
+    end
+
+    # The caret's visual row WITHIN its logical line, or 0 when nothing has been laid out yet
+    # (hex, or before the first frame published a content width) — `at_top?`'s wrap half, the
+    # twin of `HistoryView#detail_caret_sub`.
+    #
+    # Measured on the DRAWN line and with `cx + off`, exactly as `ensure_resp_visible` above
+    # does: in diff mode every row carries a `"+ "`/`"- "` decoration, so the bare column the
+    # cursor holds sits `off` cells left of the one the wrap was computed on.
+    private def resp_caret_sub : Int32
+      cw = @resp_last_cw
+      return 0 if resp_hex_active? || cw <= 0
+      size, drawn_at, off = resp_drawn_source
+      cy = @resp_cursor.cy
+      return 0 if size <= 0 || cy >= size
+      resp_layout(cy, cw, drawn_at).row_of(@resp_cursor.cx + off)
     end
 
     # --- response soft wrap ----------------------------------------------------
