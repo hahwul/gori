@@ -251,7 +251,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | `--count=N` | 목표 토큰 개수(기본값 500) |
 | `--target`, `--http2`, `--sni`, `-k` | 트랜스포트(`--request`/stdin에는 target 필요) |
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어(상태 기반 토큰을 위해 concurrency는 1 유지) |
-| `--format` | `text`, `json`, 또는 `jsonl` |
+| `--format` | `text`, `json`, `jsonl`, 또는 `markdown`(TUI의 Export가 쓰는 리포트) |
 
 ### run probe {#run-probe}
 

@@ -451,6 +451,23 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:sequence_configure)
   end
 
+  def sequence_export(format : Symbol) : Nil
+    rec(:sequence_export)
+    @sequence_export_format = format
+  end
+
+  getter sequence_export_format : Symbol? = nil
+
+  def sequence_promote : Nil
+    rec(:sequence_promote)
+  end
+
+  property? sequence_report_ready = false
+
+  def sequence_report_ready? : Bool
+    @sequence_report_ready
+  end
+
   def miner_duplicate_subtab : Nil
     rec(:miner_duplicate_subtab)
   end

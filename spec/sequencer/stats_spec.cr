@@ -290,8 +290,13 @@ describe Gori::Sequencer::Stats do
   end
 
   it "renders plural 'N tests failed' rationale when several tests fail without dup/seq" do
-    pref = random_hex(60, 60, 99_u64).map { |s| "abcd" + s[4..] } # constant prefix, random tail
-    report = S.analyze(pref)
+    # A corpus whose bias switches halfway through: distinct, non-sequential, and genuinely
+    # broken in more than one way (drift and periodicity).
+    rng = Random.new(7_u64)
+    drift = Array.new(200) do |i|
+      String.build { |io| 32.times { io << "0123456789abcdef"[(i < 100 ? 0 : 8) + rng.rand(8)] } }
+    end
+    report = S.analyze(drift)
     report.duplicate_count.should eq(0)
     report.sequential.should be_false
     fails = report.tests.count(&.verdict.fail?)
@@ -383,6 +388,158 @@ describe Gori::Sequencer::Stats do
     report = S.analyze(["", "abcd", "", "efgh", "ijkl"])
     report.sample_count.should eq(5)
     report.usable_count.should eq(3)
+  end
+
+  # ── NIST-style bitstream tests: each must fire on the defect it exists for ─────────
+
+  # Nibbles drawn only from the low or high half of the hex alphabet, switching halfway
+  # through the corpus. Every symbol's HIGH BIT is 0 for the first half and 1 for the second,
+  # so the ones total over the whole stream is balanced (Monobit sees nothing) while the
+  # random walk drifts thousands of steps off zero.
+  private_hex = "0123456789abcdef"
+  drifting = begin
+    rng = Random.new(7_u64)
+    Array.new(200) do |i|
+      String.build { |io| 32.times { io << private_hex[(i < 100 ? 0 : 8) + rng.rand(8)] } }
+    end
+  end
+
+  # Each nibble emitted twice: an 8-bit period, with per-position entropy, charset and
+  # single-bit frequencies all untouched.
+  doubled = begin
+    rng = Random.new(11_u64)
+    Array.new(200) do
+      String.build { |io| 16.times { c = private_hex[rng.rand(16)]; io << c << c } }
+    end
+  end
+
+  it "catches a mid-stream bias with Cusum that Monobit cannot see" do
+    report = S.analyze(drifting)
+    # The premise: the defect is invisible to the existing frequency test.
+    report.tests.find { |t| t.name == "Monobit" }.not_nil!.verdict.should eq(S::Verdict::Pass)
+    cusum = report.tests.find { |t| t.name == "Cusum" }.not_nil!
+    cusum.verdict.should eq(S::Verdict::Fail)
+    cusum.detail.should contain("max excursion")
+  end
+
+  it "passes Cusum, Approx entropy and Spectral on a clean high-entropy corpus" do
+    report = S.analyze(random_hex(300, 32))
+    %w[Cusum Approx\ entropy Spectral].each do |name|
+      report.tests.find { |t| t.name == name }.not_nil!.verdict.should eq(S::Verdict::Pass)
+    end
+  end
+
+  it "sizes the Approx entropy block to the sample so a repeat wider than 2 bits is seen" do
+    # Regression for a FIXED m=2: an 8-bit repeat has perfectly uniform 2- and 3-bit block
+    # statistics, and the test scored the ideal ApEn (0.693) on this corpus. m is now derived
+    # from the bit count — 200×32 hex chars = 25600 bits → floor(log2 n) - 6 = 8.
+    apen = S.analyze(doubled).tests.find { |t| t.name == "Approx entropy" }.not_nil!
+    apen.detail.should contain("m=8")
+    apen.verdict.should eq(S::Verdict::Fail)
+  end
+
+  it "flags a periodic bitstream with the spectral test" do
+    S.analyze(doubled).tests.find { |t| t.name == "Spectral" }.not_nil!.verdict.should eq(S::Verdict::Fail)
+  end
+
+  it "reports insufficient rather than grading when a corpus is too small for a bit test" do
+    # 5 tokens × 4 hex chars = 80 bits: under every floor these three carry.
+    report = S.analyze(random_hex(5, 4))
+    %w[Cusum Approx\ entropy Spectral].each do |name|
+      row = report.tests.find { |t| t.name == name }.not_nil!
+      row.verdict.should eq(S::Verdict::Info)
+      row.detail.should eq("insufficient sample")
+    end
+  end
+
+  # ── Bonferroni family ────────────────────────────────────────────────────────────
+
+  it "splits the p-value thresholds across exactly the tests that use them" do
+    # If a p-value test is added without bumping P_VALUE_TESTS, the family-wise correction is
+    # silently wrong — every test in the family becomes more likely to raise a false FAIL.
+    # This pins the roster against the constant the split is computed from.
+    p_value_rows = ["Monobit", "Poker", "Runs", "Chi-square", "Cusum", "Approx entropy", "Spectral"]
+    p_value_rows.size.should eq(S::P_VALUE_TESTS)
+    names = S.analyze(random_hex(300, 32)).tests.map(&.name)
+    p_value_rows.each { |n| names.should contain(n) }
+    S::ALPHA_FAIL.should be_close(0.01 / S::P_VALUE_TESTS, 1e-12)
+    S::ALPHA_WARN.should be_close(0.05 / S::P_VALUE_TESTS, 1e-12)
+  end
+
+  # ── window alignment + structure ─────────────────────────────────────────────────
+
+  it "anchors the per-position window to the token END when that is where the entropy is" do
+    # A variable-length structural head in front of a random tail: aligned to the START, the
+    # columns mix bytes from different logical fields and the strong tail reads far weaker
+    # than it is.
+    rng = Random.new(3_u64)
+    tokens = Array.new(200) { |i| "u#{i}-" + String.build { |io| 32.times { io << "0123456789abcdef"[rng.rand(16)] } } }
+    report = S.analyze(tokens)
+    report.variable_length.should be_true
+    report.aligned_from_end.should be_true
+    # 32 random hex chars ≈ 128 bits, which only the end-anchored window can account for.
+    report.effective_entropy.should be > 120.0
+  end
+
+  it "keeps the start anchor for a fixed-length corpus (both windows are the same bytes)" do
+    report = S.analyze(random_hex(60, 32))
+    report.variable_length.should be_false
+    report.aligned_from_end.should be_false
+  end
+
+  # ── the variable region: structural bytes must not be measured as if they were secret ──
+
+  it "measures the byte-level tests over the varying columns only" do
+    # Regression, measured: the 8-byte `sess_v1_` prefix dragged 5 extra characters into the
+    # alphabet, so charset read 19 — not a power of two, which gated EVERY bit test off as
+    # "n/a" — while chi-square and compression failed on a distribution skewed purely by that
+    # prefix. The verdict was WEAK on 96 bits of perfectly good hex, from tests that had never
+    # looked at it.
+    rng = Random.new(5_u64)
+    tokens = Array.new(300) { "sess_v1_" + String.build { |io| 24.times { io << "0123456789abcdef"[rng.rand(16)] } } }
+    report = S.analyze(tokens)
+
+    report.charset_size.should eq(16) # the prefix's s/e/_/v/1 are excluded
+    report.charset_label.should eq("lower-hex")
+    report.constant_positions.should eq(8)
+    # A power-of-two alphabet, so nothing is gated: the full battery actually ran…
+    report.tests.none? { |t| t.detail.includes?("n/a for non-power-of-2 alphabet") }.should be_true
+    # …and it passes, because the varying region genuinely is 24 random hex characters.
+    report.tests.count(&.verdict.fail?).should eq(0)
+    report.effective_entropy.should be_close(96.0, 0.001)
+  end
+
+  it "falls back to every byte when no column varies at all" do
+    # An all-identical corpus has no varying column; excluding the constant ones would leave
+    # nothing to measure, so the unfiltered bytes are the honest answer.
+    report = S.analyze(Array.new(50, "aaaaaaaaaaaaaaaa"))
+    report.charset_size.should eq(1)
+    report.constant_positions.should eq(16)
+    report.bits_per_char.should eq(0.0)
+    report.rating.should eq(S::Rating::Critical) # 50 duplicates — still the right verdict
+  end
+
+  it "does not count a constant column's bits as bit bias" do
+    # A constant column's ones-count is 0 or n by definition, so each of its bits scores
+    # |z| = √n: unfiltered, a corpus with a fixed prefix reported 85 of 160 positions biased
+    # while its varying region was flawless.
+    rng = Random.new(13_u64)
+    tokens = Array.new(200) { "0000" + String.build { |io| 28.times { io << "0123456789abcdef"[rng.rand(16)] } } }
+    row = S.analyze(tokens).tests.find { |t| t.name == "Bit bias" }.not_nil!
+    row.verdict.should eq(S::Verdict::Pass)
+    row.value.should eq("0/112") # 28 varying chars × 4 bits — the 4 fixed chars contribute none
+  end
+
+  it "counts never-varying positions and reports them as INFO, never as a failure" do
+    # A constant 8-char prefix in front of a random 24-char tail, fixed length throughout.
+    rng = Random.new(5_u64)
+    tokens = Array.new(200) { "sess_v1_" + String.build { |io| 24.times { io << "0123456789abcdef"[rng.rand(16)] } } }
+    report = S.analyze(tokens)
+    report.constant_positions.should eq(8)
+    row = report.tests.find { |t| t.name == "Structure" }.not_nil!
+    row.value.should eq("8/32 fixed")
+    row.verdict.should eq(S::Verdict::Info)               # already priced into effective_entropy — never charged twice
+    report.effective_entropy.should be_close(96.0, 0.001) # 24 hex chars × 4 bits; the prefix adds 0
   end
 
   it "handles a large single-byte corpus and invalid-UTF-8 bytes without raising" do

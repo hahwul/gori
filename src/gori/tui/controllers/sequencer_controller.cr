@@ -128,6 +128,10 @@ module Gori::Tui
         return true
       end
       return false if (ev.ctrl? || ev.alt?) && !ev.key.escape? # ^R/^X → keymap verb
+      # ⇧E → sequence.export, dispatched by the keymap. The line below swallows every key
+      # this body does not itself use, so a SHIFTED chord (which is neither ctrl nor alt)
+      # never reaches the keymap unless it is declined here by name.
+      return false if c == 'E'
       ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
     end
@@ -311,6 +315,76 @@ module Gori::Tui
       written = Clipboard.copy(text)
       note = Clipboard.note(written, text)
       @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+    end
+
+    # --- report out: export to a file, or file the verdict as an Issue ---
+
+    # Whether there is a verdict to report at all — the availability gate both verbs share, so
+    # neither shows up on a session that has collected nothing.
+    def sequencer_report_ready? : Bool
+      current_view.try { |v| v.report.usable_count > 0 } || false
+    end
+
+    # Write this session's randomness report to `path` (the destination came from
+    # ExportOverlay). Returns whether the shell should CLOSE the popup: a correctable failure
+    # returns false so the card stays up with the typed path intact, the same rule
+    # `issues_export_to` follows.
+    #
+    # The trailing newline matches the Issues/Notes exports and `gori run sequence`, so the
+    # same verdict written from the TUI and from the CLI produces byte-identical files.
+    def sequencer_export_to(format : Symbol, path : String) : Bool
+      v = current_view
+      unless v
+        @host.status("no sequencer session")
+        return true
+      end
+      rep = v.report
+      if rep.usable_count == 0
+        @host.status("nothing to export — collect tokens first (^R)")
+        return true
+      end
+      content = if format == :json
+                  Sequencer::Present.report_json(rep)
+                else
+                  Sequencer::Present.report_markdown(rep, v.subject, heading: "Token randomness")
+                end
+      File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
+      msg = "exported #{rep.rating.label} report · #{rep.usable_count} tokens → #{path}"
+      # Only warn when the report landed INSIDE the ephemeral project dir — a file written to
+      # the operator's cwd outlives the project just fine (same rule as issues_export_to).
+      msg += "  ⚠ temp project — copy it before closing" if @host.session.project.ephemeral? && path.starts_with?(@host.session.project.dir)
+      @host.status(msg)
+      true
+    rescue ex
+      @host.status("export failed: #{ex.message}")
+      false
+    end
+
+    # File the current verdict in the Issues report — the Sequencer's counterpart to
+    # `Probe::Triage.promote`. Until this existed a CRITICAL grade lived and died inside the
+    # session: collected tokens are never persisted, so closing the tab took the finding with
+    # it. The Issue carries the Markdown report as its notes and the seeding flow as evidence,
+    # and no token value (see `Present.report_markdown`).
+    def sequencer_promote : Nil
+      tab = current_tab_obj
+      v = tab.try(&.view)
+      return @host.status("no sequencer session") unless tab && v
+      rep = v.report
+      return @host.status("nothing to file — collect tokens first (^R)") if rep.usable_count == 0
+      store = @host.session.store
+      severity = Store::Severity.parse?(Sequencer::Present.issue_severity_label(rep)) || Store::Severity::Info
+      id = store.insert_issue(Sequencer::Present.issue_title(rep, v.subject), severity, v.target_host, tab.flow_id)
+      # insert_issue returns 0 — NOT nil — when the write never committed (busy/locked/closing
+      # store), and 0 is TRUTHY in Crystal. Reporting success there would tell the operator a
+      # finding is recorded when nothing was written; the same trap Probe::Triage.promote names.
+      return @host.status("could not file the issue (store busy) — nothing was written, try again") if id == 0
+      # A failed notes update leaves the Issue standing with its title and severity, which is
+      # still the finding — say which half landed rather than claim the whole thing did.
+      if store.update_issue(id, notes: Sequencer::Present.report_markdown(rep, v.subject))
+        @host.status("filed issue ##{id} (#{severity.label}) — see the Issues tab")
+      else
+        @host.status("filed issue ##{id} (#{severity.label}), but the report body did not save — store busy")
+      end
     end
 
     def handle_wheel(step : Int32) : Bool

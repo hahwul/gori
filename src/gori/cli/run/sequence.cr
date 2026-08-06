@@ -60,7 +60,7 @@ module Gori
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($NAME)") { |v| bind_from = parse_flow_id(v, "gori run sequence") }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
+          p.on("--format=FMT", "Output: text (default) | json | jsonl | markdown") { |v| format = parse_format(v, [:text, :json, :jsonl, :markdown]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run sequence: unknown option: #{f}\n#{p}" }
@@ -72,7 +72,11 @@ module Gori
         if tf = tokens_file
           tokens = read_token_list(tf)
           abort "gori run sequence: no tokens to analyze" if tokens.empty?
-          emit_sequence_report(Sequencer::Stats.analyze(tokens), format)
+          # A pasted list has no origin and no descriptor — name the FILE, so a markdown report
+          # written from one still says where its corpus came from.
+          subject = Sequencer::Present::Subject.new(
+            descriptor: tf == "-" ? "token list (stdin)" : "token list #{tf}", mode: "manual")
+          emit_sequence_report(Sequencer::Stats.analyze(tokens), format, subject)
           return
         end
 
@@ -211,6 +215,8 @@ module Gori
         STDERR.puts "sequencing #{scheme}://#{host}:#{port} · #{loc.label} · goal #{goal}"
         tokens = [] of String
         had_error = false
+        subject = Sequencer::Present::Subject.new(
+          descriptor: loc.label, origin: "#{scheme}://#{host}:#{port}", mode: "live replay")
         engine.run do |ev|
           case ev
           when Sequencer::SampleEvent
@@ -222,7 +228,7 @@ module Gori
           when Sequencer::ErrorEvent    then had_error = true; STDERR.puts "sequence error: #{ev.message}"
           end
         end
-        emit_sequence_report(Sequencer::Stats.analyze(tokens), format)
+        emit_sequence_report(Sequencer::Stats.analyze(tokens), format, subject)
         exit 1 if had_error
         # Collecting NO token because every replay was refused is a failure, not a clean
         # "0 collected" — `had_error` only fires on an orchestration raise. Gated on
@@ -250,10 +256,14 @@ module Gori
       end
 
       # In jsonl mode the samples already streamed, so append the final report as a JSON
-      # line; text prints the human table, json prints the report object.
-      private def self.emit_sequence_report(rep : Sequencer::Stats::Report, format : Symbol) : Nil
+      # line; text prints the human table, json prints the report object, markdown prints the
+      # same document the TUI's "Export report" writes (`gori run sequence … --format markdown
+      # > report.md` and the TUI export are byte-identical for one verdict).
+      private def self.emit_sequence_report(rep : Sequencer::Stats::Report, format : Symbol,
+                                            subject : Sequencer::Present::Subject) : Nil
         case format
         when :json, :jsonl then puts Sequencer::Present.report_json(rep)
+        when :markdown     then puts Sequencer::Present.report_markdown(rep, subject, heading: "Token randomness")
         else                    puts Sequencer::Present.report_text(rep)
         end
       end

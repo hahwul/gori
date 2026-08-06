@@ -40,6 +40,25 @@ module Gori
         "sequence.configure", "Configure token", "Set the token location (cookie/header/regex/position/jsonpath) + goal",
         Verb::Scope::Sequencer, [Verb::Chord.new("c")], available: in_sequencer, mnemonic: 'c') { |ctx| ctx.sequence_configure; nil }
 
+      # Getting the verdict OUT. A randomness grade used to live and die inside the session —
+      # collected tokens are secrets and are never persisted, so closing the tab took the
+      # finding with it. Both are gated on there being a verdict at all, so neither offers
+      # itself on a session that has collected nothing.
+      has_report = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.sequence_report_ready? }
+      # ⇧E, matching notes.export / issues.export-key — export is one key across the tree.
+      # `Chord.new("E")` would be DEAD: a shifted letter is ("e", shift: true).
+      r.register Verb::Definition.new(
+        "sequence.export", "Export report…", "Write this session's randomness report to a Markdown file (asks for the path)",
+        Verb::Scope::Sequencer, [Verb::Chord.new("e", shift: true)], available: has_report,
+        mnemonic: 'E') { |ctx| ctx.sequence_export(:markdown); nil }
+      r.register Verb::Definition.new(
+        "sequence.export-json", "Export report (JSON)…", "Write this session's randomness report to a JSON file (asks for the path)",
+        Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report) { |ctx| ctx.sequence_export(:json); nil }
+      r.register Verb::Definition.new(
+        "sequence.promote", "File as issue", "Record this randomness verdict in the Issues report (no token values)",
+        Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report,
+        mnemonic: 'i') { |ctx| ctx.sequence_promote; nil }
+
       r.register Verb::Definition.new(
         "sequence.find-subtab", "Search sub-tabs", "Filter the open sequencing sessions and jump to one",
         Verb::Scope::Sequencer,

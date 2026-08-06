@@ -135,4 +135,35 @@ describe Gori::Tui::SequencerView do
       end
     end
   end
+
+  # The report SUBJECT: what an exported file and an Issue promoted from the same verdict say
+  # the run was about. Both renderings read it from here, so a mapping bug would make the two
+  # describe the run differently — the one thing having a single renderer is meant to prevent.
+  describe "#subject / #target_host" do
+    it "names the live-replay origin, the descriptor and the operator's session name" do
+      view = Gori::Tui::SequencerView.new
+      cfg = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"))
+      view.load("http://example.com:8080", "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, false, nil, cfg)
+      view.name = "  login  " # trimmed, so an all-blank name does not become a blank row
+      subject = view.subject
+      subject.descriptor.should eq("cookie \"SID\"")
+      subject.origin.should eq("http://example.com:8080")
+      subject.mode.should eq("live replay")
+      subject.session.should eq("login")
+      view.target_host.should eq("example.com")
+    end
+
+    it "carries no origin or host for a manual paste" do
+      view = Gori::Tui::SequencerView.new
+      cfg = Q::Config.new(mode: Q::Mode::Manual, token_loc: Q::TokenLoc.cookie("SID"),
+        manual_tokens: ["aa"])
+      # A manual session still holds the seed's target; the subject must not claim the run
+      # reached it, and `insert_issue` must get a nil host rather than an unvisited one.
+      view.load("http://example.com:8080", Bytes.empty, false, nil, cfg)
+      view.subject.origin.should be_nil
+      view.subject.mode.should eq("manual")
+      view.subject.session.should be_nil
+      view.target_host.should be_nil
+    end
+  end
 end

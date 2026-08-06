@@ -254,7 +254,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | `--target`, `--http2`, `--sni`, `-k` | Transport (target required for `--request`/stdin) |
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control (concurrency stays 1 for stateful tokens) |
 | `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$NAME` session bindings for the rest of the run |
-| `--format` | `text`, `json`, or `jsonl` |
+| `--format` | `text`, `json`, `jsonl`, or `markdown` (the report the TUI's Export writes) |
 
 ### run probe
 

@@ -45,9 +45,31 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 | **Weak** | >= 30 bits |
 | **Critical** | below 30 bits |
 
-**중복**되거나 **순차적인** token이 하나라도 있으면 entropy가 아무리 높아 보여도 판정이 곧바로 Critical로 떨어집니다. 내부적으로 gori는 일련의 통계 테스트(monobit, poker, runs, longest-run, 그리고 token의 심볼 bitstream에 대한 per-bit 편향)와, 알파벳의 entropy 하한과 대조하는 압축 검사, per-position 문자 분포를 실행합니다. 샘플이 작으면(사용 가능한 token이 약 20개 미만) 확실히 판단할 데이터가 부족하므로, 강한 실패를 경고로 완화하고 등급의 상한을 제한합니다.
+**중복**되거나 **순차적인** token이 하나라도 있으면 entropy가 아무리 높아 보여도 판정이 곧바로 Critical로 떨어집니다. 내부적으로 gori는 token의 심볼 bitstream에 대해 일련의 통계 테스트(monobit, poker, runs, longest-run, per-bit 편향, cumulative sums, approximate entropy, spectral)를 실행하고, byte 빈도에 대한 chi-square, lag-1 serial correlation, 알파벳의 entropy 하한과 대조하는 압축 검사를 함께 수행합니다. p-value로 판정하는 테스트들은 Bonferroni 보정된 임계값을 공유하므로, 테스트가 늘어나도 정상적인 token이 잘못 걸릴 확률은 올라가지 않습니다.
+
+샘플이 작으면(사용 가능한 token이 약 20개 미만) 확실히 판단할 데이터가 부족하므로, 강한 실패를 경고로 완화하고 등급의 상한을 제한합니다.
+
+### 구조는 비밀이 아닙니다 {#structure-is-not-secret}
+
+실제 token에는 대개 뼈대가 있습니다. `sess_v1_` 같은 접두사, 버전 byte, base64 padding 같은 것들입니다. **Structure** 행은 샘플 전체에서 한 번도 변하지 않는 위치가 몇 개인지 보여주고, 모든 byte 단위 테스트는 그 다음부터 *변하는* 영역만 측정합니다.
+
+이 구분이 등급을 좌우합니다. `sess_v1_` 뒤에 무작위 hex 24자가 붙은 token은 접두사까지 세면 알파벳 크기가 19가 되는데, 이는 2의 거듭제곱이 아니므로 비트 테스트 전체가 "해당 없음"으로 꺼집니다. 그러면 chi-square와 압축 검사는 순전히 접두사 때문에 치우친 분포를 보고 실패합니다. 변하는 영역만 측정하면 같은 샘플이 원래 모습대로 나옵니다. lower-hex 알파벳에 전체 비트 테스트가 활성화되고 모든 행이 통과합니다.
+
+무작위 부분이 가변 길이 머리 뒤의 *접미사*인 token(`123-<random>`)이라면, gori는 per-position 창을 entropy가 더 많은 쪽 끝에 맞추므로 머리 부분이 추정치를 끌어내리지 않습니다.
 
 패널은 **CONFIG**(소스와 token 위치), **SAMPLES**(수집된 token), **ANALYSIS**(등급과 테스트별 분석)로 구성되며, 개별 샘플에 대한 상세 보기가 함께 제공됩니다.
+
+## 판정 결과 내보내기 {#getting-the-verdict-out}
+
+수집된 token은 살아 있는 자격 증명이므로 디스크에 절대 기록되지 않고 세션과 함께 사라집니다. 판정 결과까지 사라져서는 안 됩니다.
+
+| 동작 | 키 | 기록 대상 |
+|------|-----|-----------|
+| Export report | `⇧E` | 직접 지정한 경로의 Markdown 리포트 |
+| Export report (JSON) | 팔레트 | 동일한 리포트의 JSON |
+| File as issue | `Space` → `i` | Issues 탭의 Issue |
+
+**File as issue**는 등급을 Issues 리포트에 기록하며 Critical은 `critical`, Weak은 `high`, Moderate는 `medium`, Secure는 `info`로 매핑합니다. Issue 본문에는 대상, token 디스크립터, entropy 수치, 전체 테스트 표가 담기고 근거로 시드가 된 flow가 연결됩니다. 내보낸 파일과 Issue 어느 쪽에도 token 값은 들어가지 않습니다. 리포트는 빈도표와 판정만으로 만들어지므로 애초에 유출될 샘플이 들어 있지 않습니다.
 
 ## 헤드리스 {#headless}
 
@@ -60,7 +82,7 @@ gori run sequence --tokens tokens.txt
 cat tokens.txt | gori run sequence --tokens -
 ```
 
-token 위치는 정확히 하나만 고르고(`--cookie` / `--header` / `--regex` / `--position` / `--jsonpath`), 요청은 `--flow`, `--request FILE`, 또는 stdin에서 가져옵니다. 속도 및 전송 관련 플래그는 Fuzzer와 동일합니다(`--concurrency`, `--rate`, `--throttle`, `--timeout`, `--target`, `--http2`, …). 출력 형식은 `text`, `json`, `jsonl`입니다. 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-sequence)에 있습니다.
+token 위치는 정확히 하나만 고르고(`--cookie` / `--header` / `--regex` / `--position` / `--jsonpath`), 요청은 `--flow`, `--request FILE`, 또는 stdin에서 가져옵니다. 속도 및 전송 관련 플래그는 Fuzzer와 동일합니다(`--concurrency`, `--rate`, `--throttle`, `--timeout`, `--target`, `--http2`, …). 출력 형식은 `text`, `json`, `jsonl`, `markdown`입니다(`markdown`은 TUI의 **Export report**가 쓰는 문서와 동일합니다). 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-sequence)에 있습니다.
 
 MCP에서는 `sequence_analyze`가 token 목록을 인라인으로 등급 매기고, `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop`이 라이브 수집을 백그라운드 작업으로 구동합니다. 결과는 항상 **리포트**를 반환하며 raw token은 절대 반환하지 않습니다.
 

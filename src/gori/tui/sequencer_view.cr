@@ -205,6 +205,26 @@ module Gori::Tui
       @target
     end
 
+    # The host an Issue filed from this session belongs to. nil for a manual paste, which has
+    # no origin at all — `insert_issue` takes a nilable host for exactly that case.
+    def target_host : String?
+      return nil if @config.mode.manual?
+      _, host, _ = Repeater::FlowRequest.parse_target(@target)
+      host.empty? ? nil : host
+    end
+
+    # What this session's report is ABOUT — see `Sequencer::Present::Subject`. Built here
+    # because the view is the only place holding the descriptor, the origin and the operator's
+    # name for the session at once, so the exported file and an Issue promoted from the same
+    # verdict cannot describe the run differently.
+    def subject : Sequencer::Present::Subject
+      Sequencer::Present::Subject.new(
+        descriptor: @config.token_loc.label,
+        origin: @config.mode.manual? ? nil : target_origin,
+        mode: @config.mode.label,
+        session: @name.try(&.strip).presence)
+    end
+
     # --- focus ring ---
     def focus_pane(pane : Symbol) : Nil
       @focus = pane if PANE_ORDER.includes?(pane)

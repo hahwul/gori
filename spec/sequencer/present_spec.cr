@@ -41,6 +41,7 @@ private JSON_FIELDS = %w[
   rating rationale sample_count usable_count
   effective_entropy_bits shannon_bits_per_char
   charset_size charset min_len max_len variable_length
+  constant_positions entropy_alignment
   uniqueness duplicate_count sequential tests
 ]
 
@@ -229,6 +230,82 @@ describe Gori::Sequencer::Present do
       text = P.report_text(S.analyze(tokens))
       text.should contain("rating:    ")
       text.should contain("charset:   ")
+    end
+  end
+
+  describe ".report_markdown" do
+    subject = P::Subject.new(descriptor: "cookie \"SID\"", origin: "https://example.com:443",
+      mode: "live replay", session: "login")
+
+    it "renders the subject, the entropy table and one row per test" do
+      rep = S.analyze(random_hex(60, 32))
+      md = P.report_markdown(rep, subject, heading: "Token randomness")
+      md.should start_with("# Token randomness\n")
+      md.should contain("**#{rep.rating.label}** — #{rep.rationale}")
+      md.should contain("| Target | https://example.com:443 |")
+      md.should contain("| Token | cookie \"SID\" |")
+      md.should contain("| Mode | live replay |")
+      md.should contain("| Session | login |")
+      md.should contain("| Samples | 60 usable / 60 collected |")
+      md.should contain("| effective entropy | #{rep.effective_entropy.round(1)} bits |")
+      md.should contain("| structure | 0/32 fixed positions (from token start) |")
+      # Every verdict row makes it into the table.
+      rep.tests.each { |t| md.should contain("| #{t.name} | ") }
+      md.lines.count(&.starts_with?("| ")).should be >= rep.tests.size
+    end
+
+    it "omits the heading and the optional subject rows when they are absent" do
+      md = P.report_markdown(S.analyze(random_hex(30, 16)), P::Subject.new(descriptor: "header X-Token"))
+      md.should_not start_with("#")
+      md.should contain("| Target | — |") # a manual paste has no origin
+      md.should_not contain("| Mode |")
+      md.should_not contain("| Session |")
+    end
+
+    it "never leaks a token value into the report" do
+      # The property that lets this be written to an operator-chosen path: a Stats::Report
+      # holds frequency tables and verdicts, so there is no sample for the renderer to print.
+      tokens = random_hex(40, 24)
+      md = P.report_markdown(S.analyze(tokens), subject)
+      tokens.each { |t| md.should_not contain(t) }
+    end
+
+    it "escapes a pipe in a descriptor so it cannot split the table row" do
+      # `regex /a|b/` is an ordinary token location; unescaped it would end the cell early
+      # and silently drop the rest of the row.
+      md = P.report_markdown(S.analyze(random_hex(30, 16)), P::Subject.new(descriptor: "regex /a|b/"))
+      md.should contain("| Token | regex /a\\|b/ |")
+    end
+
+    it "keeps invalid UTF-8 in a descriptor byte-exact" do
+      # Byte-wise escaping, not gsub: a one-byte needle walks the subject as chars and would
+      # turn every invalid byte into U+FFFD on a report that gets stored as an Issue's notes.
+      raw = String.new(Bytes[0x68_u8, 0xff_u8, 0x7c_u8, 0x69_u8]) # "h\xFF|i"
+      md = P.report_markdown(S.analyze(random_hex(30, 16)), P::Subject.new(descriptor: raw))
+      hay = md.to_slice
+      want = Bytes[0x68_u8, 0xff_u8, 0x5c_u8, 0x7c_u8, 0x69_u8] # 0xFF survives, the pipe gains a backslash
+      (0..hay.size - want.size).any? { |i| hay[i, want.size] == want }.should be_true
+    end
+  end
+
+  describe "issue promotion mapping" do
+    it "leads the title with the grade and names the descriptor" do
+      rep = build_report(rating: S::Rating::Critical)
+      P.issue_title(rep, P::Subject.new(descriptor: "cookie \"SID\"")).should eq("Critical token randomness: cookie \"SID\"")
+    end
+
+    it "maps every rating to a severity the store can parse" do
+      # `issue_severity_label` returns a STRING so Present stays free of the db layer. That
+      # indirection is only safe while every value round-trips — this is the pin.
+      {
+        S::Rating::Critical => Gori::Store::Severity::Critical,
+        S::Rating::Weak     => Gori::Store::Severity::High,
+        S::Rating::Moderate => Gori::Store::Severity::Medium,
+        S::Rating::Secure   => Gori::Store::Severity::Info,
+      }.each do |rating, severity|
+        label = P.issue_severity_label(build_report(rating: rating))
+        Gori::Store::Severity.parse?(label).should eq(severity)
+      end
     end
   end
 end

@@ -19,6 +19,45 @@ module Gori::Sequencer
     # single largest allocation in the report.
     COMPRESS_SCAN_CAP = 256 * 1024
 
+    # How many rows in one report take their verdict from a p-value: Monobit, Poker, Runs,
+    # Chi-square, Cusum, Approx entropy, Spectral. Their thresholds below are Bonferroni-split
+    # by this count.
+    #
+    # Without the split, adding a test makes a GENUINELY RANDOM token more likely to be
+    # demoted: `rate` costs a tier per FAIL, so at a flat α=0.01 each, seven independent tests
+    # give a clean token a 1-0.99^7 ≈ 6.8% chance of one spurious FAIL — and every future test
+    # would push that higher. Splitting α across the family holds the family-wise false-alarm
+    # rate at the ~1% a single test carried, which is what makes the family safe to grow.
+    # Real weakness is unaffected: a broken generator's p-values are ~0, orders below either
+    # threshold. The four rows judged on a hand-set effect size instead (Long run, Serial corr,
+    # Compression, Bit bias) are not part of this family and keep their own bands.
+    P_VALUE_TESTS = 7
+    ALPHA_FAIL    = 0.01 / P_VALUE_TESTS
+    ALPHA_WARN    = 0.05 / P_VALUE_TESTS
+
+    # Approximate-entropy block length, chosen per corpus as floor(log2 n) - 6 within these
+    # bounds (NIST wants m < log2(n) - 5; one further bit of headroom keeps ~64 observations per
+    # pattern, so the chi-square is not read off a sparse table).
+    #
+    # A FIXED small m is the trap here: at m=2 the test only sees 2- and 3-bit blocks, and a
+    # stream built by repeating each nibble — an 8-bit period — has perfectly uniform statistics
+    # at that width. Measured, it scored ApEn=0.693, the ideal, on a corpus three other rows
+    # flagged. The block has to be wide enough to contain the repeat before this test can see it.
+    APEN_M_MIN    =    2
+    APEN_M_MAX    =    8
+    APEN_MIN_BITS = 1000
+
+    # The spectral test needs a power-of-two length for the radix-2 FFT, so the bitstream is
+    # truncated to the largest one it covers. The cap bounds an O(n log n) pass that the TUI
+    # re-runs on a throttle: 2^16 bits is ~1M butterfly ops, and the peak-count statistic is
+    # settled long before a full multi-megabit sample.
+    DFT_MIN_BITS = 1024
+    DFT_MAX_BITS = 1 << 16
+
+    # Above this the Cusum p-value series would run more terms than the answer is worth. A
+    # max excursion that small over that many bits is not a near-miss — see `cusum_p`.
+    CUSUM_MAX_TERMS = 10_000
+
     enum Verdict
       Pass
       Warn
@@ -55,6 +94,55 @@ module Gori::Sequencer
     # One row of the analysis table.
     record TestRow, name : String, value : String, detail : String, verdict : Verdict
 
+    # Which bytes of a token the byte-level tests may read — see the variable region in
+    # `analyze`. Every column of the aligned window that never varies is skipped; every byte
+    # outside the window is kept (a corpus of mixed lengths has no column evidence out there,
+    # so nothing is known to be constant). `full` keeps everything.
+    struct Region
+      def initialize(@min_len : Int32, @constant : Array(Bool), @from_end : Bool, @all : Bool = false)
+      end
+
+      def self.full : Region
+        new(0, [] of Bool, false, all: true)
+      end
+
+      # The corpus flattened to the bytes the tests may read, in token order. Built ONCE and
+      # shared by the frequency table, the symbol bitstream, the symbol sequence and the
+      # compression input, all of which used to re-walk `usable` themselves.
+      def bytes(usable : Array(String)) : Bytes
+        dropped = @constant.count(true)
+        return flatten(usable) if @all || @min_len <= 0 || dropped == 0
+        # `min_len` IS the shortest token's length, so the window fits inside every token and
+        # each one loses exactly `dropped` bytes — the size is known without a counting pass.
+        buf = Bytes.new(usable.sum(&.bytesize) - usable.size * dropped)
+        off = 0
+        usable.each do |t|
+          sl = t.to_slice
+          w0 = @from_end ? sl.size - @min_len : 0
+          i = 0
+          while i < sl.size
+            unless i >= w0 && i - w0 < @min_len && @constant.unsafe_fetch(i - w0)
+              buf.unsafe_put(off, sl.unsafe_fetch(i))
+              off += 1
+            end
+            i += 1
+          end
+        end
+        buf
+      end
+
+      private def flatten(usable : Array(String)) : Bytes
+        buf = Bytes.new(usable.sum(&.bytesize))
+        off = 0
+        usable.each do |t|
+          sl = t.to_slice
+          sl.copy_to(buf.to_unsafe + off, sl.size)
+          off += sl.size
+        end
+        buf
+      end
+    end
+
     record Report,
       sample_count : Int32,
       usable_count : Int32,
@@ -77,7 +165,15 @@ module Gori::Sequencer
       len_min : Int32,
       len_max : Int32,
       per_pos_entropy : Array(Float64),
-      bit_bias : Array(Float64) do
+      bit_bias : Array(Float64),
+      # Positions in the aligned window that NEVER vary — a token's structural skeleton (a
+      # `sess_` prefix, a version byte, base64 padding). They contribute exactly 0 to
+      # `effective_entropy` already; naming the count is what tells an operator that a
+      # 40-character token is really a 24-character one.
+      constant_positions : Int32 = 0,
+      # Whether the per-position window was anchored to the END of each token rather than its
+      # start — see `analyze`. Always false for a fixed-length corpus, where the two agree.
+      aligned_from_end : Bool = false do
       # A one-line rationale for the rating banner.
       def rationale : String
         return "no usable tokens" if usable_count == 0
@@ -103,33 +199,26 @@ module Gori::Sequencer
       len_max = lengths.max
       min_len = len_min
 
-      # Global byte-frequency table (drives Shannon/char-set/chi-square/char chart).
+      # Per-position entropy + the headline effective-entropy budget
+      # (Σ log2(distinct bytes seen at each position over a fixed window of min_len positions).
+      #
+      # It runs BEFORE the byte-frequency pass because its output decides which bytes that pass
+      # is allowed to look at — see the variable region below.
+      per_pos, effective, const_mask, aligned_from_end =
+        aligned_positions(usable, min_len, n, variable_length: len_min != len_max)
+      shannon_total = per_pos.sum
+      constant_positions = const_mask.count(true)
+
+      region_bytes = variable_region(usable, min_len, const_mask, aligned_from_end)
+      total_bytes = region_bytes.size.to_i64
+
       gcounts = Array(Int32).new(256, 0)
-      total_bytes = 0_i64
-      usable.each do |t|
-        t.to_slice.each do |b|
-          gcounts[b] += 1
-          total_bytes += 1
-        end
-      end
+      region_bytes.each { |b| gcounts[b] += 1 }
       present = [] of UInt8
       gcounts.each_with_index { |c, i| present << i.to_u8 if c > 0 }
       charset_size = present.size
       charset_label = classify(present)
       bits_per_char = shannon(gcounts, total_bytes)
-
-      # Per-position entropy + the headline effective-entropy budget
-      # (Σ log2(distinct bytes seen at each position over the common prefix)).
-      per_pos = Array(Float64).new(min_len, 0.0)
-      effective = 0.0
-      (0...min_len).each do |p|
-        col = Array(Int32).new(256, 0)
-        usable.each { |t| col[t.to_slice[p]] += 1 }
-        distinct = col.count(&.positive?)
-        per_pos[p] = shannon(col, n.to_i64)
-        effective += Math.log2(distinct.to_f) if distinct > 0
-      end
-      shannon_total = per_pos.sum
 
       lcounts = Hash(Int32, Int32).new(0)
       lengths.each { |l| lcounts[l] += 1 }
@@ -164,36 +253,51 @@ module Gori::Sequencer
       # bit tests would FAIL a genuinely-random token. Gate their FAIL contribution below.
       pow2 = charset_size > 0 && (charset_size & (charset_size - 1)) == 0
 
-      # Per-symbol-bit bias over the fixed common prefix (feeds the chart + a test).
-      prefix_bits = min_len * bps
-      ones_at = Array(Int32).new(prefix_bits, 0)
+      # Per-symbol-bit bias over the fixed window (feeds the chart + a test). Anchored to the
+      # same end as the per-position pass above — a suffix-aligned corpus measured from the
+      # start would score every column's bias against bytes from different logical fields.
+      window_bits = min_len * bps
+      ones_at = Array(Int32).new(window_bits, 0)
       if bps > 0
         usable.each do |t|
           sl = t.to_slice
           (0...min_len).each do |p|
-            v = idx_of.unsafe_fetch(sl[p])
+            v = idx_of.unsafe_fetch(sl[aligned_from_end ? sl.size - min_len + p : p])
             (0...bps).each { |k| ones_at[p * bps + k] += 1 if (v >> (bps - 1 - k)) & 1 == 1 }
           end
         end
       end
       bit_bias = ones_at.map { |c| (c.to_f / n - 0.5).abs }
 
-      bits = symbol_bits(usable, idx_of, bps, total_bytes)
-      sym_seq = symbol_seq(usable, idx_of, total_bytes)
+      bits = symbol_bits(region_bytes, idx_of, bps)
+      sym_seq = symbol_seq(region_bytes, idx_of)
+      # Over the WHOLE tokens, not the region: whether one value follows another is a property
+      # of the value an operator was issued, and a counter hidden behind a constant prefix is
+      # exactly what `detect_sequential` already goes out of its way to find.
       seq, seq_detail = detect_sequential(usable)
 
       tests = [] of TestRow
       tests << uniqueness_test(unique, n, duplicate_count)
       tests << TestRow.new("Sequential", seq ? "detected" : "none", seq_detail,
         seq ? Verdict::Fail : Verdict::Pass)
+      tests << structure_test(constant_positions, min_len, aligned_from_end)
       tests << gate_bits(monobit_test(bits, small), pow2)
       tests << gate_bits(poker_test(bits, small), pow2)
       tests << gate_bits(runs_test(bits, small), pow2)
       tests << gate_bits(longrun_test(bits, small), pow2)
       tests << chi_square_test(gcounts, present, total_bytes, small)
       tests << serial_test(sym_seq, small)
-      tests << compression_test(usable, total_bytes, charset_size, small)
-      tests << gate_bits(bit_bias_test(ones_at, n, small), pow2)
+      tests << compression_test(region_bytes, total_bytes, charset_size, small)
+      tests << gate_bits(bit_bias_test(ones_at, n, small, const_mask, bps), pow2)
+      # The three NIST-style additions. Each reads the SAME symbol bitstream the four classic
+      # bit tests do, so each is gated on a power-of-two alphabet for the same reason, and each
+      # catches a failure the existing table cannot: Cusum a drift that shows up only partway
+      # through the stream (the monobit total stays balanced), Approx entropy a repeating block
+      # structure (frequencies stay uniform), Spectral a periodicity — the signature of an LCG
+      # or a time-seeded counter, which passes every frequency-and-runs test there is.
+      tests << gate_bits(cusum_test(bits, small), pow2)
+      tests << gate_bits(approx_entropy_test(bits, small), pow2)
+      tests << gate_bits(spectral_test(bits, small), pow2)
 
       rating = rate(effective, duplicate_count, seq, tests, small)
 
@@ -206,7 +310,78 @@ module Gori::Sequencer
         uniqueness: uniqueness, duplicate_count: duplicate_count,
         sequential: seq, rating: rating, tests: tests,
         char_counts: char_counts, len_hist: len_hist, len_min: len_min, len_max: len_max,
-        per_pos_entropy: per_pos, bit_bias: bit_bias)
+        per_pos_entropy: per_pos, bit_bias: bit_bias,
+        constant_positions: constant_positions, aligned_from_end: aligned_from_end)
+    end
+
+    # The per-position pass, anchored to whichever END of the token carries more entropy.
+    #
+    # Anchoring to the START unconditionally — which is all this did — silently under-reports
+    # every token whose random part is a SUFFIX behind a variable-length structural head
+    # (`v2.<random>` / `<user-id>-<random>`): the columns then mix bytes from different logical
+    # fields, distinct counts collapse toward the shared structure, and a strong token reads
+    # Weak. Both alignments are the same measurement of the same corpus, so taking the larger
+    # keeps the figure conservative (still capped by min(N, alphabet) per column) without letting
+    # an arbitrary anchor choice decide the grade. A fixed-length corpus yields identical
+    # windows, so it never pays for the second pass.
+    private def self.aligned_positions(usable : Array(String), min_len : Int32, n : Int32,
+                                       variable_length : Bool) : {Array(Float64), Float64, Array(Bool), Bool}
+      per_pos, effective, mask = positional(usable, min_len, n, from_end: false)
+      return {per_pos, effective, mask, false} unless variable_length
+      s_pos, s_eff, s_mask = positional(usable, min_len, n, from_end: true)
+      s_eff > effective ? {s_pos, s_eff, s_mask, true} : {per_pos, effective, mask, false}
+    end
+
+    # THE VARIABLE REGION: every byte except those sitting at a window column that never varies.
+    # Everything byte-level in `analyze` — the alphabet, Shannon, the char chart, chi-square, the
+    # symbol bitstream all eight bit tests read, and compression — is measured over these bytes
+    # and no others.
+    #
+    # Reading the structural bytes too does not merely add noise, it disables the analysis.
+    # Measured on 300 tokens of `sess_v1_` + 24 random hex chars: the eight prefix bytes drag
+    # five extra characters into the alphabet, so charset reads 19 instead of 16 — NOT a power of
+    # two, which gates every bit test off as "n/a"; chi-square then fails on a byte distribution
+    # skewed purely by the constant prefix, compression fails because the repeated prefix
+    # deflates, and what is left is a WEAK grade on 96 bits of perfectly good hex, produced by
+    # tests that never looked at it. Excluded, the same corpus is what it actually is: a
+    # lower-hex alphabet with the full bit-test battery active and every row passing.
+    #
+    # A constant column carries exactly zero information — `effective_entropy` already scores it
+    # 0 — so dropping it removes nothing a test could have used. The `Region.full` fallback is
+    # for a corpus with NO varying column (an all-identical sample): there the exclusion would
+    # leave nothing to measure at all, and the honest answer is the one the unfiltered bytes give.
+    private def self.variable_region(usable : Array(String), min_len : Int32,
+                                     const_mask : Array(Bool), from_end : Bool) : Bytes
+      bytes = Region.new(min_len, const_mask, from_end).bytes(usable)
+      bytes.empty? ? Region.full.bytes(usable) : bytes
+    end
+
+    # Per-position byte entropy over a fixed window of `min_len` positions, with the
+    # effective-entropy budget (Σ log2 distinct) and a mask marking the columns that never vary.
+    # `from_end` reads position p as the p-th byte from the END of each token; both returned
+    # arrays are in token order (left to right within the window), so a caller charting them
+    # never has to know which anchor won.
+    #
+    # One 256-entry column table, refilled per position rather than reallocated: this runs
+    # twice for a variable-length corpus and min_len reaches the hundreds.
+    private def self.positional(usable : Array(String), min_len : Int32, n : Int32,
+                                from_end : Bool) : {Array(Float64), Float64, Array(Bool)}
+      per_pos = Array(Float64).new(min_len, 0.0)
+      constant = Array(Bool).new(min_len, false)
+      effective = 0.0
+      col = Array(Int32).new(256, 0)
+      (0...min_len).each do |p|
+        col.fill(0)
+        usable.each do |t|
+          sl = t.to_slice
+          col[sl.unsafe_fetch(from_end ? sl.size - min_len + p : p)] += 1
+        end
+        distinct = col.count(&.positive?)
+        per_pos[p] = shannon(col, n.to_i64)
+        effective += Math.log2(distinct.to_f) if distinct > 0
+        constant[p] = distinct == 1
+      end
+      {per_pos, effective, constant}
     end
 
     # A raw fixed-width bit test (monobit/poker/runs/long-run/bit-bias) only measures true
@@ -359,15 +534,15 @@ module Gori::Sequencer
     # Deflate ratio vs the token alphabet's own entropy floor (log2(charset)/8). A random
     # token compresses to ~its floor; a ratio well below it means real structure. Judging
     # against a flat 1.0 would wrongly fail every hex/base64 token for its encoding.
-    private def self.compression_test(tokens : Array(String), bytes : Int64,
+    private def self.compression_test(region : Bytes, bytes : Int64,
                                       charset_size : Int32, small : Bool) : TestRow
       return insufficient("Compression", "#{bytes} bytes") if bytes < 64
       # Cap the deflate input. The ratio is a stable statistic long before the whole sample is
-      # consumed, but `tokens.join` over a full 50k-token sample built a multi-MB String (from
-      # a String.build starting at capacity 64, so a realloc chain on top) and then deflated
-      # every byte of it — on a path the TUI re-runs on a throttle and every MCP poll re-runs
-      # from scratch. Whole tokens only, so a token is never split mid-value.
-      raw = join_capped(tokens, COMPRESS_SCAN_CAP)
+      # consumed, but a full 50k-token sample is multiple megabytes to deflate — on a path the
+      # TUI re-runs on a throttle and every MCP poll re-runs from scratch. A prefix of the
+      # region buffer, so the constant columns a structural prefix contributes (which deflate to
+      # nothing and would drag the ratio under any floor) are already out of it.
+      raw = region[0, {region.size, COMPRESS_SCAN_CAP}.min]
       io = IO::Memory.new(raw.size // 2)
       Compress::Deflate::Writer.open(io, &.write(raw))
       ratio = io.size.to_f / raw.size
@@ -385,14 +560,196 @@ module Gori::Sequencer
       TestRow.new("Compression", fmt(ratio), detail, verdict)
     end
 
-    private def self.bit_bias_test(ones_at : Array(Int32), n : Int32, small : Bool) : TestRow
-      total = ones_at.size
-      return insufficient("Bit bias", "no fixed prefix") if total == 0 || n < SMALL_SAMPLE
+    # How much of the token is skeleton rather than secret. INFO, never a FAIL: these columns
+    # already contribute 0 to `effective_entropy`, so grading them again would charge the same
+    # weakness twice — this row exists to explain a low headline figure, not to lower it.
+    private def self.structure_test(constant : Int32, min_len : Int32, from_end : Bool) : TestRow
+      return TestRow.new("Structure", "—", "no fixed window", Verdict::Info) if min_len <= 0
+      anchor = from_end ? "aligned to token end" : "aligned to token start"
+      detail = constant == 0 ? "every position varies · #{anchor}" : "#{min_len - constant} varying · #{anchor}"
+      TestRow.new("Structure", "#{constant}/#{min_len} fixed", detail, Verdict::Info)
+    end
+
+    # NIST SP 800-22 §2.13 (forward cumulative sums). The bits walk ±1 and the statistic is the
+    # largest absolute excursion. A generator whose bias appears only partway through the stream
+    # — a counter that rolls over, a pool that degrades once it drains — keeps a balanced ONES
+    # TOTAL and sails through Monobit while walking far off zero here.
+    private def self.cusum_test(bits : Array(UInt8), small : Bool) : TestRow
+      n = bits.size
+      return insufficient("Cusum", "#{n} bits") if n < 100
+      s = 0
+      z = 0
+      bits.each do |b|
+        s += b == 1_u8 ? 1 : -1
+        a = s.abs
+        z = a if a > z
+      end
+      # A walk that never leaves zero is not a near-miss — it is a perfectly alternating stream.
+      return TestRow.new("Cusum", "z=0", "walk never leaves 0", small ? Verdict::Warn : Verdict::Fail) if z == 0
+      p = cusum_p(z, n)
+      TestRow.new("Cusum", "z=#{z}", "max excursion · expected ~#{Math.sqrt(n.to_f).round.to_i}", grade(p, small))
+    end
+
+    # The forward-cusum p-value: 1 - Σ[Φ((4k+1)z/√n) - Φ((4k-1)z/√n)] + Σ[Φ((4k+3)z/√n) -
+    # Φ((4k+1)z/√n)], both series over k ≈ ±n/(4z). For a random walk z ≈ √n, so the term count
+    # is ≈ √n/2 — a few hundred terms even on a multi-megabit stream. A z small enough to blow
+    # that budget (n/z past CUSUM_MAX_TERMS·4) means an excursion orders of magnitude under the
+    # random expectation, which is itself decisive: report 0 rather than spend the series
+    # confirming it.
+    private def self.cusum_p(z : Int32, n : Int32) : Float64
+      return 0.0 if n.to_f / z > 4.0 * CUSUM_MAX_TERMS
+      sq = Math.sqrt(n.to_f)
+      zf = z.to_f
+      kmax = ((n.to_f / zf - 1.0) / 4.0).floor.to_i
+      sum1 = 0.0
+      k = ((-n.to_f / zf + 1.0) / 4.0).ceil.to_i
+      while k <= kmax
+        sum1 += phi(((4 * k + 1) * zf) / sq) - phi(((4 * k - 1) * zf) / sq)
+        k += 1
+      end
+      sum2 = 0.0
+      k = ((-n.to_f / zf - 3.0) / 4.0).ceil.to_i
+      while k <= kmax
+        sum2 += phi(((4 * k + 3) * zf) / sq) - phi(((4 * k + 1) * zf) / sq)
+        k += 1
+      end
+      (1.0 - sum1 + sum2).clamp(0.0, 1.0)
+    end
+
+    # NIST SP 800-22 §2.12. Compares the pattern-frequency entropy of m-bit blocks with that of
+    # (m+1)-bit blocks: for a random stream the extra bit buys a full ln2 of surprise. A stream
+    # built from a repeating block — a nonce reused across a chunk of the token, a PRNG with a
+    # short cycle — keeps every SINGLE-bit frequency uniform (so Monobit/Poker pass) while the
+    # transition structure gives it away here.
+    private def self.approx_entropy_test(bits : Array(UInt8), small : Bool) : TestRow
+      n = bits.size
+      return insufficient("Approx entropy", "#{n} bits") if n < APEN_MIN_BITS
+      m = (Math.log2(n.to_f).floor.to_i - 6).clamp(APEN_M_MIN, APEN_M_MAX)
+      apen = block_phi(bits, m) - block_phi(bits, m + 1)
+      chi = 2.0 * n * (Math.log(2.0) - apen)
+      p = chi2_sf(chi, 1 << m)
+      TestRow.new("Approx entropy", "ApEn=#{fmt(apen)}", "m=#{m} · ideal #{fmt(Math.log(2.0))}", grade(p, small))
+    end
+
+    # φ^(m): Σ π ln π over the 2^m block patterns of the CIRCULARLY extended bitstream (the
+    # last m-1 bits wrap onto the first), so all n windows exist and the two φ values are
+    # comparable. A flat 2^m counter array, rolled with a shift-and-mask.
+    private def self.block_phi(bits : Array(UInt8), m : Int32) : Float64
+      n = bits.size
+      counts = Array(Int32).new(1 << m, 0)
+      mask = (1 << m) - 1
+      v = 0
+      (0...(m - 1)).each { |i| v = ((v << 1) | bits.unsafe_fetch(i)) & mask }
+      n.times do |i|
+        v = ((v << 1) | bits.unsafe_fetch((i + m - 1) % n)) & mask
+        counts[v] += 1
+      end
+      total = n.to_f
+      s = 0.0
+      counts.each do |c|
+        next if c == 0
+        pr = c / total
+        s += pr * Math.log(pr)
+      end
+      s
+    end
+
+    # NIST SP 800-22 §2.6 (discrete Fourier transform). Counts how many spectral peaks fall
+    # under the 95% height threshold; a periodic component pushes peaks above it. This is the
+    # test that catches a linear-congruential or time-seeded generator — such a stream has
+    # uniform bit frequencies, well-behaved runs and near-ideal compression, and every other
+    # row in this table passes it.
+    private def self.spectral_test(bits : Array(UInt8), small : Bool) : TestRow
+      avail = {bits.size, DFT_MAX_BITS}.min
+      return insufficient("Spectral", "#{bits.size} bits") if avail < DFT_MIN_BITS
+      n = 1 << Math.log2(avail.to_f).floor.to_i # radix-2 FFT wants a power-of-two length
+      re = Array(Float64).new(n) { |i| bits.unsafe_fetch(i) == 1_u8 ? 1.0 : -1.0 }
+      im = Array(Float64).new(n, 0.0)
+      fft(re, im)
+      threshold = Math.sqrt(Math.log(1.0 / 0.05) * n)
+      half = n // 2
+      below = 0
+      half.times { |i| below += 1 if Math.sqrt(re[i] * re[i] + im[i] * im[i]) < threshold }
+      expected = 0.95 * half
+      d = (below - expected) / Math.sqrt(n * 0.95 * 0.05 / 4.0)
+      # Say so when the spectrum came from a prefix, so the number is never silently a different
+      # measurement from the one the sample size implies (same rule as the compression row).
+      scope = n < bits.size ? " · first #{n} bits" : ""
+      TestRow.new("Spectral", "d=#{fmt(d)}", "#{below}/#{half} peaks under T#{scope}", grade(two_sided(d), small))
+    end
+
+    # In-place iterative radix-2 Cooley-Tukey FFT. `re`/`im` must share a power-of-two length.
+    # The twiddle factor is advanced by recurrence rather than recomputed per butterfly: the
+    # accumulated drift over the 2^16-bit cap is far below the resolution of a peak COUNT
+    # against a fixed threshold, and per-step trig would cost a million calls.
+    private def self.fft(re : Array(Float64), im : Array(Float64)) : Nil
+      n = re.size
+      j = 0
+      (1...n).each do |i|
+        bit = n >> 1
+        while j & bit != 0
+          j ^= bit
+          bit >>= 1
+        end
+        j |= bit
+        if i < j
+          re.swap(i, j)
+          im.swap(i, j)
+        end
+      end
+      len = 2
+      while len <= n
+        ang = -2.0 * Math::PI / len
+        wr = Math.cos(ang)
+        wi = Math.sin(ang)
+        half = len // 2
+        i = 0
+        while i < n
+          cr = 1.0
+          ci = 0.0
+          half.times do |k|
+            ur = re.unsafe_fetch(i + k)
+            ui = im.unsafe_fetch(i + k)
+            xr = re.unsafe_fetch(i + k + half)
+            xi = im.unsafe_fetch(i + k + half)
+            vr = xr * cr - xi * ci
+            vi = xr * ci + xi * cr
+            re.unsafe_put(i + k, ur + vr)
+            im.unsafe_put(i + k, ui + vi)
+            re.unsafe_put(i + k + half, ur - vr)
+            im.unsafe_put(i + k + half, ui - vi)
+            ncr = cr * wr - ci * wi
+            ci = cr * wi + ci * wr
+            cr = ncr
+          end
+          i += len
+        end
+        len <<= 1
+      end
+    end
+
+    # Standard normal CDF, for the cusum series.
+    private def self.phi(x : Float64) : Float64
+      0.5 * Math.erfc(-x / Math.sqrt(2.0))
+    end
+
+    # `constant`/`bps` locate the window columns that never vary, whose bits are skipped. A
+    # constant column's ones-count is 0 or n by definition, so every one of its bits scores
+    # |z| = √n and counted as "biased" — a token behind an 8-character prefix reported 85 of 160
+    # positions biased on a corpus whose varying region was flawless. Structure is reported by
+    # its own INFO row; this row is about the bits that were supposed to be random.
+    private def self.bit_bias_test(ones_at : Array(Int32), n : Int32, small : Bool,
+                                   constant : Array(Bool), bps : Int32) : TestRow
+      return insufficient("Bit bias", "no fixed window") if ones_at.empty? || n < SMALL_SAMPLE
+      total = 0
       biased = 0
-      ones_at.each do |c|
+      ones_at.each_with_index do |c, i|
+        next if bps > 0 && constant[i // bps]? == true
+        total += 1
         z = (2.0 * c - n) / Math.sqrt(n.to_f)
         biased += 1 if z.abs > 2.58
       end
+      return insufficient("Bit bias", "no varying column") if total == 0
       frac = biased.to_f / total
       verdict = if frac > 0.05
                   small ? Verdict::Warn : Verdict::Fail
@@ -539,50 +896,26 @@ module Gori::Sequencer
 
     # ── shared numeric helpers ──────────────────────────────────────────────────────
 
-    # The concatenated symbol bitstream: each byte → its alphabet index → `bps` bits
+    # The symbol bitstream over the variable region: each byte → its alphabet index → `bps` bits
     # (MSB-first). Empty when the alphabet has ≤ 1 symbol (no bits to test).
-    # Concatenated token bytes, stopping at the first WHOLE token that would cross `cap` (so a
-    # token is never split mid-value). Presized, unlike `tokens.join`.
-    private def self.join_capped(tokens : Array(String), cap : Int32) : Bytes
-      total = 0
-      taken = 0
-      tokens.each do |t|
-        break if total + t.bytesize > cap && taken > 0
-        total += t.bytesize
-        taken += 1
-      end
-      buf = Bytes.new(total)
-      off = 0
-      taken.times do |i|
-        sl = tokens.unsafe_fetch(i).to_slice
-        sl.copy_to(buf.to_unsafe + off, sl.size)
-        off += sl.size
-      end
-      buf
-    end
-
-    # Presized: the final length is known exactly (total sample bytes × bps), and growing from
+    #
+    # Presized: the final length is known exactly (region bytes × bps), and growing from
     # capacity 0 to the millions of elements a full sample produces means ~20 doubling reallocs,
     # each copying everything written so far.
-    private def self.symbol_bits(tokens : Array(String), idx_of : Array(Int32), bps : Int32,
-                                 total_bytes : Int64) : Array(UInt8)
+    private def self.symbol_bits(region : Bytes, idx_of : Array(Int32), bps : Int32) : Array(UInt8)
       return [] of UInt8 if bps <= 0
-      bits = Array(UInt8).new((total_bytes * bps).to_i)
-      tokens.each do |t|
-        t.to_slice.each do |b|
-          v = idx_of.unsafe_fetch(b)
-          (bps - 1).downto(0) { |k| bits << ((v >> k) & 1).to_u8 }
-        end
+      bits = Array(UInt8).new(region.size * bps)
+      region.each do |b|
+        v = idx_of.unsafe_fetch(b)
+        (bps - 1).downto(0) { |k| bits << ((v >> k) & 1).to_u8 }
       end
       bits
     end
 
-    # The concatenated sequence of alphabet indices (for serial correlation). Presized for the
-    # same reason as symbol_bits.
-    private def self.symbol_seq(tokens : Array(String), idx_of : Array(Int32),
-                                total_bytes : Int64) : Array(Int32)
-      seq = Array(Int32).new(total_bytes.to_i)
-      tokens.each { |t| t.to_slice.each { |b| seq << idx_of.unsafe_fetch(b) } }
+    # The sequence of alphabet indices (for serial correlation). Presized for the same reason.
+    private def self.symbol_seq(region : Bytes, idx_of : Array(Int32)) : Array(Int32)
+      seq = Array(Int32).new(region.size)
+      region.each { |b| seq << idx_of.unsafe_fetch(b) }
       seq
     end
 
@@ -645,10 +978,12 @@ module Gori::Sequencer
       0.5 * Math.erfc(z / Math.sqrt(2.0))
     end
 
+    # Verdict for a p-value test. The bands are Bonferroni-split across the family — see
+    # `P_VALUE_TESTS` for why a per-test α would make every added test cost accuracy.
     private def self.grade(p : Float64, small : Bool) : Verdict
-      if p < 0.01
+      if p < ALPHA_FAIL
         small ? Verdict::Warn : Verdict::Fail
-      elsif p < 0.05
+      elsif p < ALPHA_WARN
         Verdict::Warn
       else
         Verdict::Pass

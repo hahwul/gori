@@ -412,6 +412,18 @@ private class FakeContext < ExecContext
     @calls << :sequence_configure
   end
 
+  def sequence_export(format : Symbol) : Nil
+    @calls << :sequence_export
+  end
+
+  def sequence_promote : Nil
+    @calls << :sequence_promote
+  end
+
+  def sequence_report_ready? : Bool
+    false
+  end
+
   def miner_duplicate_subtab : Nil
     @calls << :miner_duplicate_subtab
   end

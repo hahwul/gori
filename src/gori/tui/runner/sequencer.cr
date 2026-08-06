@@ -38,6 +38,27 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     reconfigure_sequence
   end
 
+  # Open the destination-path popup, then write the randomness report there. `format` is
+  # :markdown | :json — the same pair `issues_export` offers, and the same overlay.
+  def sequence_export(format : Symbol) : Nil
+    return (@toast = "open a sequencer session first") unless sequencer_controller.current_view
+    json = format == :json
+    kind = json ? :sequence_json : :sequence_md
+    open_export(kind, File.join(Dir.current, "sequence-report.#{json ? "json" : "md"}")) do |p|
+      sequencer_controller.sequencer_export_to(format, p)
+    end
+  end
+
+  def sequence_promote : Nil
+    sequencer_controller.sequencer_promote
+  end
+
+  # A session with a finished analysis is open — the gate for the export / file-as-issue verbs,
+  # so neither offers itself on an empty tab where it could only report "nothing to export".
+  def sequence_report_ready? : Bool
+    sequencer_controller.sequencer_report_ready?
+  end
+
   # The ANALYSIS report holds focus — the gate for its read verbs.
   def sequencer_analysis_readable? : Bool
     sequencer_controller.sequencer_analysis_readable?
