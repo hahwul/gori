@@ -1,4 +1,8 @@
 require "termisu"
+# Without this, the `PasteEnd` half of every mechanism below never arrives on the pinned
+# termisu — see the file for the whole story. Required from here so that anything doing paste
+# filtering (the Runner, and the specs) gets it; it is the one seam they share.
+require "./paste_end_marker_patch"
 
 module Gori
   module Tui
