@@ -110,6 +110,44 @@ describe "PasteNewline bracketed paste" do
     kept.should eq(2) # two newlines => one blank line
   end
 
+  # The escape hatch for a paste the terminal never closes. Without it `pasting?` latches
+  # true and `Runner` swallows every subsequent keystroke into a bulk insert it will never
+  # flush — the reported freeze. See `Runner::PASTE_STALL` for what decides to call this.
+  it "can be forced closed without a PasteEnd" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart))
+    pn.swallow?(pkey(Termisu::Input::Key::LowerA, 'a'))
+    pn.pasting?.should be_true
+    pn.end_paste
+    pn.pasting?.should be_false
+  end
+
+  # Forcing the close must leave the filter usable, not just unlatched: a later paste has to
+  # be recognised as a paste (Runner reads the START transition to decide bulk-vs-refuse) and
+  # its CRLFs still have to collapse.
+  it "recognises a later paste after a forced close" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart))
+    pn.end_paste
+
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart)).should be_true
+    pn.pasting?.should be_true
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\r')).should be_false
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\n')).should be_true
+    pn.swallow?(pkey(Termisu::Input::Key::PasteEnd)).should be_true
+    pn.pasting?.should be_false
+  end
+
+  # A CR left half-paired when the close was forced must not pair with the next keypress and
+  # swallow a real Enter — the same reset the markers do.
+  it "clears the pair state on a forced close" do
+    pn = Gori::Tui::PasteNewline.new
+    pn.swallow?(pkey(Termisu::Input::Key::PasteStart))
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\r')).should be_false
+    pn.end_paste
+    pn.swallow?(pkey(Termisu::Input::Key::Enter, '\n')).should be_false
+  end
+
   # The marker resets the pair state: a CR typed immediately before a paste must not pair
   # with the paste's first LF and swallow a real line break.
   it "does not let a keystroke before the paste pair with the paste's first byte" do

@@ -415,6 +415,7 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
+      last_input = Time.instant                        # last terminal event, for the paste-stall watchdog below
       last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
@@ -438,8 +439,20 @@ module Gori::Tui
             # the user stopped. Draining applies the whole burst before the frame, so
             # scrolling tracks the input. Bounded so an infinitely-held key can't
             # starve the render / async-channel drains below.
-            drain_burst
+            drained = drain_burst
             @pet.wake_on_input # any key/click re-arms Miss Ring's idle clock
+            # Re-arm the paste-stall clock — but while a paste is IN FLIGHT, only for a burst.
+            # An ordinary keystroke must not re-arm it, because keystrokes are exactly what a
+            # wedged paste is swallowing: an operator whose TUI just froze mashes Escape and
+            # q, and each press inside PASTE_STALL would push the deadline out again, so the
+            # watchdog would never fire for the one person who needs it. (Measured: 14 Escapes
+            # over 11s kept it wedged.) See PASTE_BURST for the density that separates them.
+            last_input = Time.instant if drained >= PASTE_BURST || !@paste_newline.pasting?
+          end
+          # A bracketed paste is bounded by its end marker, and a marker that never arrives
+          # leaves this loop swallowing every keystroke — see PASTE_STALL.
+          if @paste_newline.pasting? && Time.instant - last_input >= PASTE_STALL
+            dirty = true if end_stalled_paste
           end
           dirty = true if drain_events # always drains; true if anything arrived
           if repeater_controller.drain_results
@@ -824,7 +837,10 @@ module Gori::Tui
     # seconds on a big paste), and the old 256 for everything else so a held nav key
     # (↑/↓/j/k, or a wheel fed as arrows) can't teleport the view a whole burst per
     # frame.
-    private def drain_burst : Nil
+    #
+    # Returns how many events were drained BEHIND the tick's first one — the density of the
+    # tick, which `PASTE_BURST` reads to tell a paste still streaming from a person typing.
+    private def drain_burst : Int32
       chars = 0
       nav = 0
       while (more = @term.poll_event(0))
@@ -837,6 +853,7 @@ module Gori::Tui
           break if nav >= 256
         end
       end
+      chars + nav
     end
 
     # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
@@ -1006,6 +1023,68 @@ module Gori::Tui
     # Shown when a paste is refused. It names the recovery, because a paste that vanishes
     # without a word is its own bug report.
     PASTE_REFUSED = "paste ignored — nothing focused takes text (i edits the pane, ↵ its fields)"
+
+    # --- a paste whose END MARKER never came ---------------------------------
+    #
+    # Everything above keys off the two `pasting?` transitions, so a paste that never ends
+    # never resolves — and mid-paste BOTH branches eat the keyboard: `@paste_buf` swallows
+    # each keystroke into a bulk insert that is never flushed, and `@paste_dropped` discards
+    # them outright. The render loop is untouched, so the clock keeps ticking and the badge
+    # keeps saying EDITOR while nothing typed has any effect. It reads as a hung app, and it
+    # is not recoverable by any key, because keys are what is being swallowed.
+    #
+    # A terminal can genuinely fail to send `\e[201~` (killed mid-transfer, a dropped ssh
+    # session, DEC 2004 switched off under us), and a parser can lose it: termisu did, on
+    # every paste, because its end-marker probe skipped the fd whenever the poll budget was
+    # spent and the budget is 0 on the very drain its own input source uses (fixed upstream —
+    # `read_paste_end_tail`). One dependency bug in the input layer should not be able to
+    # present as a dead keyboard, so the state is bounded here regardless of the cause.
+    #
+    # A paste STREAMS: its bytes arrive back to back and the terminal owes us the close at
+    # the end of them, so input going quiet this long while `pasting?` is the marker saying
+    # it is never coming. Comfortably longer than termisu's own PASTE_END_TIMEOUT_MS (1s), so
+    # the parser's recovery wins whenever it works and this stays the backstop it is meant
+    # to be. The cost of firing early would only ever be splitting one paste into two
+    # inserts at the same caret; the cost of not firing is the freeze.
+    PASTE_STALL = 1500.milliseconds
+
+    # How many events one tick must carry for it to count as a paste still STREAMING rather
+    # than a person typing — the discriminator PASTE_STALL's clock is re-armed on.
+    #
+    # A paste is dense: its bytes are already on the fd when the tick's first event blocks, so
+    # `drain_burst` takes the whole queue behind it (~31, the input channel's buffer) every
+    # tick until the clipboard runs out. Typing is not: one event per tick, since the drain's
+    # non-blocking poll finds nothing behind a single keypress. Even the fastest key repeat
+    # these terminals emit (~30/s) is 1-2 per 50ms tick, and mashing is slower.
+    #
+    # 8 leaves that a wide margin. In the other direction a paste would have to trickle under
+    # roughly 160 bytes/s for a whole PASTE_STALL window to read as typing — slower than any
+    # link that can carry a terminal session, and a 370 KB paste measured here never came
+    # close. Erring that way ends a paste that was still arriving: into an editor the
+    # remainder simply lands as a second insert at the same caret, but at a focus where the
+    # paste was being REFUSED (`paste_runs_as_commands?`) the remainder would reach the
+    # keymap, which is the thing that guard exists to prevent. That is the cost being traded
+    # against a permanently dead keyboard, and it needs a paste slower than any real one.
+    PASTE_BURST = 8
+
+    # Shown when a paste is closed by the watchdog rather than by its marker: the clipboard
+    # may have been cut short, and (unlike a paste that simply worked) the operator has a
+    # reason to look at what landed.
+    PASTE_UNTERMINATED = "paste ended without its end marker — inserted what arrived"
+
+    # Close a paste the terminal never closed. Returns whether anything the operator can see
+    # changed — a paste being delivered keystroke by keystroke had already landed, so there
+    # is nothing to flush and nothing to say about it, but `pasting?` is still cleared: left
+    # set, the NEXT paste would see no start transition and so would never be offered to
+    # `begin_bulk_paste?` or refused by `paste_runs_as_commands?` — a paste at the tab bar
+    # running as commands again.
+    private def end_stalled_paste : Bool
+      @paste_newline.end_paste
+      latched = @paste_dropped || !@paste_buf.nil?
+      @paste_dropped ? (@paste_dropped = false) : flush_bulk_paste
+      @toast = PASTE_UNTERMINATED if latched
+      latched
+    end
 
     # Whether a bracketed paste arriving NOW would be dispatched as COMMANDS rather than typed
     # into text — the state in which the clipboard's own bytes are hotkeys.

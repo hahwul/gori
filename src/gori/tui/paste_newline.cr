@@ -48,6 +48,18 @@ module Gori
         @in_paste
       end
 
+      # Force the paste closed without having seen a `PasteEnd` — the only way out when the
+      # terminal never sends one (killed mid-transfer, a dropped ssh session, mode 2004
+      # turned off under us) or when the parser loses it. `Runner`'s stall watchdog is the
+      # caller; `Runner::PASTE_STALL` documents why a quiet input stream is the signal that
+      # the marker is not coming. Resets the pair state with it, for exactly the reason the
+      # markers themselves do: whatever byte the paste ended on has nothing to do with the
+      # next keypress.
+      def end_paste : Nil
+        @in_paste = false
+        @after_cr = false
+      end
+
       # True when the caller must drop `ev` — either a paste boundary marker, or the LF half
       # of a pasted CRLF.
       #
