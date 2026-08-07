@@ -7,6 +7,7 @@ require "./screen"
 require "./theme"
 require "./layout"
 require "./paste_newline"
+require "./paste_stall"
 require "./chrome"
 require "./preferences_view"
 require "./tab_controller"
@@ -415,7 +416,6 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
-      last_input = Time.instant                        # last terminal event, for the paste-stall watchdog below
       last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
@@ -439,19 +439,15 @@ module Gori::Tui
             # the user stopped. Draining applies the whole burst before the frame, so
             # scrolling tracks the input. Bounded so an infinitely-held key can't
             # starve the render / async-channel drains below.
-            drained = drain_burst
+            keys_drained = drain_burst
             @pet.wake_on_input # any key/click re-arms Miss Ring's idle clock
-            # Re-arm the paste-stall clock — but while a paste is IN FLIGHT, only for a burst.
-            # An ordinary keystroke must not re-arm it, because keystrokes are exactly what a
-            # wedged paste is swallowing: an operator whose TUI just froze mashes Escape and
-            # q, and each press inside PASTE_STALL would push the deadline out again, so the
-            # watchdog would never fire for the one person who needs it. (Measured: 14 Escapes
-            # over 11s kept it wedged.) See PASTE_BURST for the density that separates them.
-            last_input = Time.instant if drained >= PASTE_BURST || !@paste_newline.pasting?
+            # Tell the stall guard how DENSE this tick was: only a burst means the paste is
+            # still streaming. Key events only — see `PasteStall#saw`.
+            @paste_stall.saw(Time.instant, keys_drained)
           end
           # A bracketed paste is bounded by its end marker, and a marker that never arrives
-          # leaves this loop swallowing every keystroke — see PASTE_STALL.
-          if @paste_newline.pasting? && Time.instant - last_input >= PASTE_STALL
+          # leaves this loop swallowing every keystroke — see `PasteStall`.
+          if @paste_newline.pasting? && @paste_stall.stalled?(Time.instant)
             dirty = true if end_stalled_paste
           end
           dirty = true if drain_events # always drains; true if anything arrived
@@ -838,13 +834,21 @@ module Gori::Tui
     # (↑/↓/j/k, or a wheel fed as arrows) can't teleport the view a whole burst per
     # frame.
     #
-    # Returns how many events were drained BEHIND the tick's first one — the density of the
-    # tick, which `PASTE_BURST` reads to tell a paste still streaming from a person typing.
+    # Returns how many KEY events were drained behind the tick's first one — the density
+    # `PasteStall` reads to tell a paste still streaming from a person typing.
+    #
+    # Keys only, deliberately. The budgets below still count every event (a wheel burst must be
+    # bounded like any other), but mouse reports must not feed the paste-stall clock: gori
+    # enables xterm mode 1002, so a press-and-drag reports pointer motion continuously and would
+    # clear the burst threshold by itself — handing the wedge back to the operator most likely to
+    # be dragging, the one whose keyboard just went dead.
     private def drain_burst : Int32
       chars = 0
       nav = 0
+      keys = 0
       while (more = @term.poll_event(0))
         handle(more)
+        keys += 1 if more.is_a?(Termisu::Event::Key)
         if coalesceable_char?(more)
           chars += 1
           break if chars >= CHAR_DRAIN_CAP
@@ -853,7 +857,7 @@ module Gori::Tui
           break if nav >= 256
         end
       end
-      chars + nav
+      keys
     end
 
     # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
@@ -964,8 +968,17 @@ module Gori::Tui
     # A bracketed paste being DROPPED because its keystrokes would run as commands — see
     # `paste_runs_as_commands?`. Cleared at the paste's end marker.
     @paste_dropped = false
+    # Bounds a paste whose end marker never comes — the decision lives there, not here.
+    @paste_stall = PasteStall.new
 
     private def handle(ev : Termisu::Event::Any) : Nil
+      # A PasteStart arriving while a paste is ALREADY open means the previous one was abandoned
+      # (its marker lost) and a new one is beginning. Close the old one first, or there is no
+      # start transition for the new one and it silently inherits the abandoned paste's
+      # classification — the decision made at whatever focus was current back then.
+      if @paste_newline.pasting? && ev.is_a?(Termisu::Event::Key) && ev.key.paste_start?
+        close_paste
+      end
       was_pasting = @paste_newline.pasting?
       swallowed = @paste_newline.swallow?(ev)
       # PasteStart/PasteEnd are swallowed by the filter, so the transitions are the only
@@ -973,6 +986,10 @@ module Gori::Tui
       # funnel, rather than by a view that would have to guess from the shape of the
       # keystrokes: take it in bulk, deliver it as typing, or refuse it.
       if !was_pasting && @paste_newline.pasting?
+        # Start the stall clock HERE. It must not inherit the last keypress, which may be
+        # minutes old — the ordinary way to paste is to go copy something and come back, and a
+        # clock left at that keypress declared the paste stalled on its own opening tick.
+        @paste_stall.opened(Time.instant)
         if begin_bulk_paste?
           @paste_buf = String::Builder.new
         elsif paste_runs_as_commands?
@@ -980,7 +997,7 @@ module Gori::Tui
           @toast = PASTE_REFUSED
         end
       elsif was_pasting && !@paste_newline.pasting?
-        @paste_dropped ? (@paste_dropped = false) : flush_bulk_paste
+        close_paste
       end
       return if swallowed
       case ev
@@ -989,6 +1006,13 @@ module Gori::Tui
         return if buffer_bulk_paste(ev)
         handle_key(ev)
       when Termisu::Event::Mouse
+        # A click is not part of a paste, and acting on one mid-paste moves the target out from
+        # under it: the tab/focus changes, and the buffered clipboard is then flushed into
+        # whatever is active now. A tab that cannot take it (`paste_text` false) sends the whole
+        # thing to `replay_paste`, i.e. N keystrokes through the keymap — commands, and the
+        # per-character edit cycle this bulk path exists to avoid. Swallowed until the paste
+        # resolves, which the stall guard bounds.
+        return if @paste_newline.pasting?
         handle_mouse(ev)
       when Termisu::Event::Resize
         # termisu already resized its cell buffer to these dims (prepare_event). Re-fit the
@@ -1040,50 +1064,65 @@ module Gori::Tui
     # `read_paste_end_tail`). One dependency bug in the input layer should not be able to
     # present as a dead keyboard, so the state is bounded here regardless of the cause.
     #
-    # A paste STREAMS: its bytes arrive back to back and the terminal owes us the close at
-    # the end of them, so input going quiet this long while `pasting?` is the marker saying
-    # it is never coming. Comfortably longer than termisu's own PASTE_END_TIMEOUT_MS (1s), so
-    # the parser's recovery wins whenever it works and this stays the backstop it is meant
-    # to be. The cost of firing early would only ever be splitting one paste into two
-    # inserts at the same caret; the cost of not firing is the freeze.
-    PASTE_STALL = 1500.milliseconds
+    # WHEN to give up is `PasteStall`'s decision, and it lives in its own object rather than
+    # inline here because it is the delicate part and `run` needs a tty. Read its comments
+    # before touching the re-arm rule — the first version aborted pastes on their opening tick.
 
-    # How many events one tick must carry for it to count as a paste still STREAMING rather
-    # than a person typing — the discriminator PASTE_STALL's clock is re-armed on.
-    #
-    # A paste is dense: its bytes are already on the fd when the tick's first event blocks, so
-    # `drain_burst` takes the whole queue behind it (~31, the input channel's buffer) every
-    # tick until the clipboard runs out. Typing is not: one event per tick, since the drain's
-    # non-blocking poll finds nothing behind a single keypress. Even the fastest key repeat
-    # these terminals emit (~30/s) is 1-2 per 50ms tick, and mashing is slower.
-    #
-    # 8 leaves that a wide margin. In the other direction a paste would have to trickle under
-    # roughly 160 bytes/s for a whole PASTE_STALL window to read as typing — slower than any
-    # link that can carry a terminal session, and a 370 KB paste measured here never came
-    # close. Erring that way ends a paste that was still arriving: into an editor the
-    # remainder simply lands as a second insert at the same caret, but at a focus where the
-    # paste was being REFUSED (`paste_runs_as_commands?`) the remainder would reach the
-    # keymap, which is the thing that guard exists to prevent. That is the cost being traded
-    # against a permanently dead keyboard, and it needs a paste slower than any real one.
-    PASTE_BURST = 8
-
-    # Shown when a paste is closed by the watchdog rather than by its marker: the clipboard
-    # may have been cut short, and (unlike a paste that simply worked) the operator has a
-    # reason to look at what landed.
+    # Shown when the watchdog closed a paste and text really did land. A paste cut short may be
+    # incomplete, so (unlike one that simply worked) the operator has reason to look at it.
     PASTE_UNTERMINATED = "paste ended without its end marker — inserted what arrived"
 
-    # Close a paste the terminal never closed. Returns whether anything the operator can see
-    # changed — a paste being delivered keystroke by keystroke had already landed, so there
-    # is nothing to flush and nothing to say about it, but `pasting?` is still cleared: left
-    # set, the NEXT paste would see no start transition and so would never be offered to
-    # `begin_bulk_paste?` or refused by `paste_runs_as_commands?` — a paste at the tab bar
-    # running as commands again.
-    private def end_stalled_paste : Bool
+    # Shown when the watchdog closed a paste that was being REFUSED. Nothing was inserted, so
+    # "inserted what arrived" would send the operator hunting for text that was deliberately
+    # discarded; this names the same recovery `PASTE_REFUSED` does.
+    PASTE_UNTERMINATED_REFUSED = "paste ended without its end marker — nothing focused took it"
+
+    # Shown when the paste's marker was the only thing that ever arrived. Distinct from the two
+    # above on purpose: at an editor that WOULD have taken the text, "nothing focused took it" is
+    # a false accusation, and "inserted what arrived" is a false promise.
+    PASTE_UNTERMINATED_EMPTY = "paste ended without its end marker — no content arrived"
+
+    # THE one place a paste's state is torn down, called by BOTH exits: the end marker (in
+    # `handle`) and the watchdog. They must not drift — any future close obligation added to one
+    # and not the other yields a paste that closes correctly by marker and wrongly by timeout.
+    #
+    # Returns what became of the clipboard, which is what the watchdog's toast must not get wrong:
+    # `:inserted` text landed · `:refused` the focus takes no text · `:empty` only the marker ever
+    # came · `:typed` it was being delivered keystroke by keystroke and has already landed.
+    private def close_paste : Symbol
       @paste_newline.end_paste
-      latched = @paste_dropped || !@paste_buf.nil?
-      @paste_dropped ? (@paste_dropped = false) : flush_bulk_paste
-      @toast = PASTE_UNTERMINATED if latched
-      latched
+      @paste_stall.closed
+      if @paste_dropped
+        @paste_dropped = false
+        return :refused # a refused paste inserted nothing, by definition
+      end
+      return :typed unless @paste_buf # no bulk buffer: it went in live, nothing was withheld
+      flush_bulk_paste ? :inserted : :empty
+    end
+
+    # Close a paste the terminal never closed, and say which kind it was.
+    #
+    # Clearing `pasting?` matters beyond this paste: left set, the NEXT paste would see no start
+    # transition and so would never be offered to `begin_bulk_paste?` or refused by
+    # `paste_runs_as_commands?` — a paste at the tab bar running as commands again.
+    #
+    # THE PARSER'S OWN paste mode has to go with it, and gori's flag is not the only latch. A
+    # paste truncated with no trailing ESC leaves `Termisu::Input::Parser` in paste mode with
+    # nothing to time out on, and while it is there every later ESC — an arrow key, a mouse
+    # report, Escape itself — is probed as a possible end marker for a full second and then
+    # delivered as a bare Escape with its bytes spilling out as text keys. Resetting only gori's
+    # half left the operator a keyboard that answered a second late, and wrongly.
+    private def end_stalled_paste : Bool
+      outcome = close_paste
+      @term.leave_paste!
+      case outcome
+      when :inserted then @toast = PASTE_UNTERMINATED
+      when :refused  then @toast = PASTE_UNTERMINATED_REFUSED
+      when :empty    then @toast = PASTE_UNTERMINATED_EMPTY
+        # `:typed` says nothing: the text already went in as it arrived, so there is no loss to
+        # report and a toast would only accuse a paste that worked.
+      end
+      true
     end
 
     # Whether a bracketed paste arriving NOW would be dispatched as COMMANDS rather than typed
@@ -1151,14 +1190,18 @@ module Gori::Tui
     # only it can see (a `§` in the clipboard, whose per-character marker guard cannot be
     # expressed as one splice) and lose nothing but the speed-up. Without it, "the tab said
     # no" would mean "the paste vanished".
-    private def flush_bulk_paste : Nil
+    # Returns whether any text actually reached the buffer — false when this paste was being
+    # delivered keystroke by keystroke (nothing was accumulated) or when the marker arrived with
+    # nothing between it and the start, which is what the watchdog's toast has to distinguish.
+    private def flush_bulk_paste : Bool
       buf = @paste_buf
       @paste_buf = nil
-      return unless buf
+      return false unless buf
       text = buf.to_s
-      return if text.empty?
-      return if @tabs[@active_tab]?.try(&.paste_text(text))
+      return false if text.empty?
+      return true if @tabs[@active_tab]?.try(&.paste_text(text))
       replay_paste(text)
+      true
     end
 
     # Deliver `text` through the ordinary key path, one synthesized keystroke per character —

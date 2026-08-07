@@ -14,26 +14,42 @@ require "../spec_helper"
 # `Runner` swallows every subsequent keystroke into a bulk insert it will never flush — the
 # text never appears and the keyboard is dead while the frame keeps repainting.
 
-# Drives the parser over a pipe with the ZERO timeout the input source uses. Polls until
-# *count* events arrive rather than *count* times: an end-marker probe that is still open
-# yields nil, exactly as it does in the real loop. Bounded so a lost marker fails rather than
-# hangs — generously, since the unpatched parser takes a full second to give up and would
-# otherwise flake before it could be caught.
-private def paste_events_nonblocking(bytes : Bytes, count : Int32) : Array(Termisu::Input::Key?)
+# Drives the parser over a pipe with the ZERO timeout the input source uses, optionally writing a
+# SECOND chunk once the end-marker window has closed.
+#
+# One helper rather than two near-identical ones: the only difference between the single-paste and
+# the truncated-then-later-paste cases is that deferred write, and two copies of the pipe setup,
+# poll loop and teardown would drift the moment either is fixed.
+#
+# Polls until *count* events arrive rather than *count* times — a probe that is still open yields
+# nil, exactly as it does in the real loop.
+#
+# `later` is written after `PASTE_END_WINDOW`, read off the parser's own constant rather than
+# hard-coded: the deferred write only has to outlast that window, so naming the coupling keeps the
+# spec honest and lets it shrink if upstream lowers it.
+PASTE_END_WINDOW = Termisu::Input::Parser::PASTE_END_TIMEOUT_MS.milliseconds + 200.milliseconds
+
+private def paste_keys(bytes : Bytes, count : Int32, later : Bytes? = nil) : Array(Termisu::Input::Key?)
   fds = uninitialized Int32[2]
   raise "pipe failed" if LibC.pipe(fds) != 0
   read_fd, write_fd = fds[0], fds[1]
   keys = [] of Termisu::Input::Key?
   reader = nil.as(Termisu::Reader?)
   begin
-    LibC.write(write_fd, bytes, bytes.size)
+    write_all(write_fd, bytes)
     reader = Termisu::Reader.new(read_fd)
     parser = Termisu::Input::Parser.new(reader)
-    deadline = Time.instant + 5.seconds
+    started = Time.instant
+    wrote_later = later.nil?
+    deadline = started + PASTE_END_WINDOW + 5.seconds
     while keys.size < count && Time.instant < deadline
       if ev = parser.poll_event(0)
         keys << (ev.is_a?(Termisu::Event::Key) ? ev.key : nil)
       else
+        if !wrote_later && Time.instant - started > PASTE_END_WINDOW
+          write_all(write_fd, later.not_nil!)
+          wrote_later = true
+        end
         sleep 1.millisecond # mirrors run_loop's idle sleep
       end
     end
@@ -45,48 +61,34 @@ private def paste_events_nonblocking(bytes : Bytes, count : Int32) : Array(Termi
   keys
 end
 
-# Keeps ONE parser across two writes, so a truncated paste can be followed by a later,
-# complete paste through the same parser state. That is the only way to see the question this
-# asks: paste state surviving a truncation is invisible until the NEXT paste is parsed by it.
-# The second write is timed off the clock rather than off an event, so it lands after the
-# end-marker window (PASTE_END_TIMEOUT_MS, 1000ms) has closed regardless of what the give-up
-# emits — otherwise the assertion would be coupled to the behaviour under test.
-private def paste_events_two_phase(first : String, second : String,
-                                   count : Int32) : Array(Termisu::Input::Key?)
-  fds = uninitialized Int32[2]
-  raise "pipe failed" if LibC.pipe(fds) != 0
-  read_fd, write_fd = fds[0], fds[1]
-  keys = [] of Termisu::Input::Key?
-  reader = nil.as(Termisu::Reader?)
-  begin
-    LibC.write(write_fd, first.to_slice, first.bytesize)
-    reader = Termisu::Reader.new(read_fd)
-    parser = Termisu::Input::Parser.new(reader)
-    started = Time.instant
-    wrote_second = false
-    deadline = started + 8.seconds
-    while keys.size < count && Time.instant < deadline
-      if ev = parser.poll_event(0)
-        keys << (ev.is_a?(Termisu::Event::Key) ? ev.key : nil)
-      else
-        if !wrote_second && Time.instant - started > 1500.milliseconds
-          LibC.write(write_fd, second.to_slice, second.bytesize)
-          wrote_second = true
-        end
-        sleep 1.millisecond
-      end
-    end
-  ensure
-    reader.try(&.close)
-    LibC.close(read_fd)
-    LibC.close(write_fd)
+# A short write would otherwise present as an opaque poll timeout rather than a named failure.
+private def write_all(fd : Int32, bytes : Bytes) : Nil
+  written = LibC.write(fd, bytes, bytes.size)
+  raise "short write: #{written} of #{bytes.size}" unless written == bytes.size
+end
+
+# The trigger to DELETE the carried patch.
+#
+# The behavioural examples below cannot supply one: they pass whether the fix comes from the patch
+# or from the shard, which is what makes them safe but also means an upstream fix would never be
+# noticed. gori would keep running its own frozen copy of two private methods forever, silently
+# diverging from the dependency it is overriding.
+#
+# So pin the lock. When termisu moves, this fails and someone re-reads the patch — which is exactly
+# the moment to check whether it is still needed. Assert the LOCK rather than `Termisu::VERSION`,
+# which would not change for a fix on the same version number.
+describe "the termisu pin the carried paste patch is written against" do
+  it "has not moved (if it has, re-check whether paste_end_marker_patch.cr is still needed)" do
+    lock = File.read(File.join(__DIR__, "..", "..", "shard.lock"))
+    pinned = lock[/termisu:.*?commit\.([0-9a-f]{40})/m, 1]?
+
+    pinned.should eq("df6e907e6fe27f2cc70b9f855dff996d08398ad1")
   end
-  keys
 end
 
 describe "bracketed paste end marker (termisu, as the input source drives it)" do
   it "delivers PasteEnd for a paste polled with a zero budget" do
-    keys = paste_events_nonblocking("\e[200~hi\e[201~".to_slice, 4)
+    keys = paste_keys("\e[200~hi\e[201~".to_slice, 4)
 
     keys.should eq([
       Termisu::Input::Key::PasteStart,
@@ -101,7 +103,7 @@ describe "bracketed paste end marker (termisu, as the input source drives it)" d
   # `0`, `1`, `~` spilling in as text behind an Escape that should have been the marker, which
   # is what ended up inside the pasted request.
   it "closes a multi-line paste without leaking the marker as text" do
-    keys = paste_events_nonblocking("\e[200~a\r\nb\e[201~".to_slice, 6)
+    keys = paste_keys("\e[200~a\r\nb\e[201~".to_slice, 6)
 
     keys.should eq([
       Termisu::Input::Key::PasteStart,
@@ -119,14 +121,18 @@ describe "bracketed paste end marker (termisu, as the input source drives it)" d
   # and spilled into the document as text — no `PasteStart`, so gori sees no paste at all: the
   # bulk insert is bypassed AND so is `paste_runs_as_commands?`, which is what stops a paste at
   # the tab bar from running as hotkeys. Every paste for the rest of the session.
+  #
+  # The dangling ESC is DISCARDED, not delivered. Re-queuing it looks kinder but is worse: the
+  # re-read would go through `parse_escape_sequence`, which reads the fd and not the push-back
+  # queue, so it pairs with whatever arrives next — here the `\e` would have merged with the later
+  # paste's `[200~`. A dead paste must not be able to forge a keystroke.
   it "recognises a later paste after one was truncated" do
-    keys = paste_events_two_phase("\e[200~a\e", "\e[200~b\e[201~", 7)
+    keys = paste_keys("\e[200~a\e".to_slice, 6, later: "\e[200~b\e[201~".to_slice)
 
     keys.should eq([
       Termisu::Input::Key::PasteStart,
       Termisu::Input::Key::LowerA,
       Termisu::Input::Key::PasteEnd, # the bracket closes even though the terminal never did
-      Termisu::Input::Key::Escape,   # the dangling ESC, re-read outside the paste
       Termisu::Input::Key::PasteStart,
       Termisu::Input::Key::LowerB,
       Termisu::Input::Key::PasteEnd,
@@ -144,7 +150,7 @@ describe "bracketed paste end marker (termisu, as the input source drives it)" d
   # A paste executing itself is the one outcome `paste_runs_as_commands?` exists to prevent, and
   # a paste with no `PasteStart` never reaches that guard.
   it "recognises a later paste after one was truncated with no trailing ESC" do
-    keys = paste_events_two_phase("\e[200~a", "\e[200~b\e[201~", 5)
+    keys = paste_keys("\e[200~a".to_slice, 5, later: "\e[200~b\e[201~".to_slice)
 
     keys.should eq([
       Termisu::Input::Key::PasteStart,
@@ -160,7 +166,7 @@ describe "bracketed paste end marker (termisu, as the input source drives it)" d
   # that does not match is pushed back byte for byte), so it pins that the override did not
   # trade one behaviour for the other.
   it "delivers an escape sequence inside a paste as its literal bytes" do
-    keys = paste_events_nonblocking("\e[200~\e[A\e[201~".to_slice, 5)
+    keys = paste_keys("\e[200~\e[A\e[201~".to_slice, 5)
 
     keys.should eq([
       Termisu::Input::Key::PasteStart,
