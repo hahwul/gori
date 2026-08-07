@@ -1,0 +1,1872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Every gori subcommand and command-line flag.">
+  <title>CLI Reference - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="CLI Reference">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/reference/cli/">
+  <meta property="og:description" content="Every gori subcommand and command-line flag.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="CLI Reference">
+  <meta name="twitter:description" content="Every gori subcommand and command-line flag.">
+  <link rel="canonical" href="https://gori.hahwul.com/reference/cli/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"CLI Reference","url":"https://gori.hahwul.com/reference/cli/","description":"Every gori subcommand and command-line flag."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Reference","item":"https://gori.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"CLI Reference"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/cli/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/cli/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/reference/cli/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/cli/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/" class="active" aria-current="page">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>CLI Reference</h1>
+    <p>Reference for the <code>gori</code> command line. Running <code>gori</code> with no subcommand starts the TUI.</p>
+<pre><code class="language-text hljs">gori [command] [options]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tui</code></td>
+<td>Start the proxy and terminal UI (default)</td>
+</tr>
+<tr>
+<td><code>run</code></td>
+<td>Non-interactive suite over a project</td>
+</tr>
+<tr>
+<td><code>mcp</code></td>
+<td>Model Context Protocol stdio server</td>
+</tr>
+<tr>
+<td><code>ca</code></td>
+<td>Print the root CA path / PEM, or regenerate / import the CA</td>
+</tr>
+<tr>
+<td><code>settings</code></td>
+<td>Show or edit <code>settings.json</code></td>
+</tr>
+<tr>
+<td><code>wizard</code></td>
+<td>Interactive first-run setup</td>
+</tr>
+<tr>
+<td><code>tutorial</code></td>
+<td>Guided TUI tour (navigation, palette, space menu, edit mode)</td>
+</tr>
+<tr>
+<td><code>update</code></td>
+<td>Channel-aware self-update (binary / Homebrew / Snap / AUR / Nix)</td>
+</tr>
+</tbody>
+</table>
+<p>Global flags: <code>-v</code> / <code>--version</code>, <code>-h</code> / <code>--help</code>.</p>
+<h2 id="gori-tui">gori tui</h2>
+<p>Start the intercepting proxy and TUI. This is the default when no subcommand is given.</p>
+<pre><code class="language-bash hljs">gori
+gori tui --listen 0.0.0.0 --port 8080
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-l</code>, <code>--listen=HOST</code></td>
+<td>Global bind address for this process (defaults to <code>settings.json</code>, else <code>127.0.0.1</code>). Not persisted. A project&#39;s own bind still wins when set.</td>
+</tr>
+<tr>
+<td><code>-p</code>, <code>--port=PORT</code></td>
+<td>Global bind port for this process, <code>0</code>-<code>65535</code> (defaults to <code>settings.json</code>, else <code>8070</code>). Not persisted. Project <code>net.bind_port</code> still wins when set.</td>
+</tr>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>SQLite database path</td>
+</tr>
+<tr>
+<td><code>--ca-dir=PATH</code></td>
+<td>Directory for the root CA</td>
+</tr>
+<tr>
+<td><code>--insecure-upstream</code></td>
+<td>Do not verify upstream TLS certificates</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>GORI_HOME</code> is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the global layer for this run. See <a href="/getting-started/configuration/#network">Configuration</a>. For the root CA path, use <a href="#gori-ca"><code>gori ca</code></a>.</p>
+</blockquote>
+<h2 id="gori-run">gori run</h2>
+<p>The non-interactive suite. Each subcommand operates over a project; with neither <code>--project</code> nor <code>--db</code> it uses the most-recently-active project.</p>
+<pre><code class="language-bash hljs">gori run &lt;subcommand&gt; [options]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>capture</code></td>
+<td>Run the proxy and stream captured flows to STDOUT</td>
+</tr>
+<tr>
+<td><code>history</code> (<code>ls</code>)</td>
+<td>List / query captured flows</td>
+</tr>
+<tr>
+<td><code>show &lt;flow-id&gt;</code></td>
+<td>Print one flow&#39;s request and response</td>
+</tr>
+<tr>
+<td><code>compare &lt;id-a&gt; &lt;id-b&gt;</code></td>
+<td>Diff two flows&#39; request or response</td>
+</tr>
+<tr>
+<td><code>intercept</code></td>
+<td>Inspect and drive a capturing TUI&#39;s live intercept queue</td>
+</tr>
+<tr>
+<td><code>repeater &lt;flow-id&gt;</code> · <code>list</code> · <code>create</code></td>
+<td>Re-send a captured flow, or list / create Repeater workbench sessions</td>
+</tr>
+<tr>
+<td><code>fuzz [&lt;flow-id&gt;]</code></td>
+<td>Intruder-style fuzzer</td>
+</tr>
+<tr>
+<td><code>mine [&lt;flow-id&gt;]</code></td>
+<td>Hidden-parameter discovery</td>
+</tr>
+<tr>
+<td><code>sequence</code> (<code>seq</code>) <code>[&lt;flow-id&gt;]</code></td>
+<td>Grade token randomness (live replay, or <code>--tokens</code> for a pasted list)</td>
+</tr>
+<tr>
+<td><code>probe [QL]</code></td>
+<td>Passive security scan (no requests)</td>
+</tr>
+<tr>
+<td><code>discover</code></td>
+<td>Spider and brute-force endpoints into the Sitemap</td>
+</tr>
+<tr>
+<td><code>import</code></td>
+<td>Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp file</td>
+</tr>
+<tr>
+<td><code>sitemap [QL]</code></td>
+<td>Host → path endpoint tree</td>
+</tr>
+<tr>
+<td><code>oast listen</code> · <code>presets</code></td>
+<td>Out-of-band callback listener (interactsh &amp; friends)</td>
+</tr>
+<tr>
+<td><code>jwt [&lt;token&gt;]</code></td>
+<td>Decode, re-sign, or generate attack payloads for a JWT</td>
+</tr>
+<tr>
+<td><code>convert &lt;chain&gt; [input]</code></td>
+<td>Run a Decoder encode / decode / hash chain</td>
+</tr>
+<tr>
+<td><code>notes [&lt;n&gt;]</code> · <code>create</code> · <code>delete</code></td>
+<td>Read, write, or delete project notes</td>
+</tr>
+<tr>
+<td><code>issues</code> · <code>create</code> · <code>update</code></td>
+<td>List / export issues, or write issues</td>
+</tr>
+<tr>
+<td><code>links</code> · <code>add</code> · <code>delete</code></td>
+<td>Evidence pointers from an issue or note to a flow, Repeater session, or job</td>
+</tr>
+<tr>
+<td><code>rewriter</code> · <code>add</code> · <code>rm</code> · <code>enable</code> · <code>disable</code> · <code>preview</code></td>
+<td>Manage Match &amp; Replace rules</td>
+</tr>
+<tr>
+<td><code>colormarker</code> · <code>add</code> · <code>rm</code> · <code>enable</code> · <code>disable</code> · <code>move</code> · <code>preview</code></td>
+<td>Manage History row-colour rules</td>
+</tr>
+<tr>
+<td><code>project [list]</code></td>
+<td>List known projects</td>
+</tr>
+<tr>
+<td><code>project create &lt;name&gt;</code></td>
+<td>Create (or reopen) a project by name</td>
+</tr>
+<tr>
+<td><code>project delete &lt;name&gt;</code></td>
+<td>Delete a project and everything captured in it (<code>--yes</code> to confirm)</td>
+</tr>
+<tr>
+<td><code>project scope</code></td>
+<td>List / add / delete / enable / disable scope rules</td>
+</tr>
+<tr>
+<td><code>project sandbox</code></td>
+<td>Get / set the hard-containment sandbox gate (<code>status</code>, <code>on</code>, <code>off</code>)</td>
+</tr>
+<tr>
+<td><code>project env</code></td>
+<td>List / set / delete project env vars (<code>$KEY</code> substitution)</td>
+</tr>
+<tr>
+<td><code>project host-override</code></td>
+<td>List / add / update / delete project host to IP dial overrides</td>
+</tr>
+</tbody>
+</table>
+<p>Common flags across read subcommands: <code>--project=NAME</code>, <code>--db=PATH</code>, <code>--format=FMT</code> (usually <code>text</code> or <code>json</code>).</p>
+<h3 id="run-capture">run capture</h3>
+<pre><code class="language-bash hljs">gori run capture --port 8070 --format json --for 5m
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-l</code>, <code>--listen</code>; <code>-p</code>, <code>--port</code></td>
+<td>Global bind for this process (settings default; project override still wins)</td>
+</tr>
+<tr>
+<td><code>--project=NAME</code></td>
+<td>Project to write to (default <code>default</code>)</td>
+</tr>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>Database path</td>
+</tr>
+<tr>
+<td><code>-k</code>, <code>--insecure-upstream</code></td>
+<td>Skip upstream TLS verification</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> or <code>json</code> (JSON Lines)</td>
+</tr>
+<tr>
+<td><code>--for=DURATION</code></td>
+<td>Stop after e.g. <code>30s</code>, <code>5m</code>, <code>1h</code></td>
+</tr>
+<tr>
+<td><code>--max=N</code></td>
+<td>Stop after N flows</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-history-ls">run history / ls</h3>
+<pre><code class="language-bash hljs">gori run history -q 'status:5xx' --limit 100 --format json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-q</code>, <code>--query=QL</code></td>
+<td>Query-language filter (also accepted positionally)</td>
+</tr>
+<tr>
+<td><code>-n</code>, <code>--limit=N</code></td>
+<td>Max rows (default 50)</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code>, <code>json</code>, or <code>har</code></td>
+</tr>
+</tbody>
+</table>
+<p>Subcommands: <code>history show &lt;id&gt;</code> (same as <code>run show</code>), <code>history delete &lt;id&gt;</code>, <code>history clear --yes</code>.</p>
+<p><code>--format har</code> writes the whole result set as one HAR 1.2 log on STDOUT, oldest entry first, so a query can be handed to a teammate or loaded into Burp, Charles, or a browser's network panel. See <a href="#har-export">HAR export</a>.</p>
+<h3 id="run-show">run show</h3>
+<pre><code class="language-bash hljs">gori run show &lt;flow-id&gt; --format raw
+</code></pre>
+<p><code>--format</code> is <code>text</code>, <code>json</code>, <code>raw</code> (exact bytes), or <code>har</code> (a one-entry HAR log). <code>--request-only</code> / <code>--response-only</code> limit the output and do not apply to <code>har</code>. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.</p>
+<h4 id="har-export">HAR export</h4>
+<p>A HAR gori writes imports back into gori as the same flow (<code>gori run import --har</code>), so it round-trips. Three things to know:</p>
+<ul>
+<li><strong>Bodies are the wire bytes</strong>, de-chunked but not decompressed, base64-encoded when they are not valid UTF-8. The <code>Content-Encoding</code> header stays in <code>headers</code>, so body and head keep describing the same message.</li>
+<li><strong>A body capped at the capture limit is marked</strong>, never emitted as if complete: <code>bodySize</code> and <code>content.size</code> stay the true wire size while the text carries only the captured prefix, and a <code>comment</code> on <code>content</code>/<code>postData</code> says so. The command also reports the count on STDERR.</li>
+<li><strong>WebSocket flows and flows with no captured response are skipped</strong>, since HAR cannot represent either. The count and reason go to STDERR; STDOUT stays a pure HAR document.</li>
+</ul>
+<h3 id="run-compare">run compare</h3>
+<p>Line diff of two flows, matching the <a href="/guide/scanning/">Comparer tab</a>.</p>
+<pre><code class="language-bash hljs">gori run compare 41 42 --pane response --changes-only
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--pane=PANE</code></td>
+<td>What to diff: <code>request</code> or <code>response</code> (default)</td>
+</tr>
+<tr>
+<td><code>--changes-only</code></td>
+<td>Print only added / removed lines, omitting unchanged context</td>
+</tr>
+<tr>
+<td><code>--context=N</code></td>
+<td>Collapse unchanged runs to <code>@@ N unchanged lines @@</code> markers, keeping N lines around each change (mutually exclusive with <code>--changes-only</code>)</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> (default) or <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<p>Both sides' <code>status · size · time</code> and the A→B delta print above the diff, so a status flip or a size shift is visible before the first line is read. <code>--format=json</code> carries the same under <code>meta</code>, and a collapsed run becomes <code>{&quot;kind&quot;:&quot;fold&quot;,&quot;hidden&quot;:N}</code> rather than a gap.</p>
+<p><code>--changes-only</code> says <em>what</em> changed but erases <em>where</em>: a 400-line body with one edit comes back as two lines with no position. <code>--context</code> keeps the change in place and states how much it skipped.</p>
+<h3 id="run-intercept">run intercept</h3>
+<p>Drive the live intercept queue of a TUI holding the capture lock. Interception is TUI-only: a headless <code>gori run capture</code> never holds a message, and every subcommand here refuses when no capturing instance is publishing state.</p>
+<pre><code class="language-bash hljs">gori run intercept                              # held items + intercept state
+gori run intercept get 3 --format json
+gori run intercept forward 3
+gori run intercept edit 3 --raw-file edited.txt
+gori run intercept direction request
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list</code> (default)</td>
+<td>Held items plus catch state, direction, and filter</td>
+</tr>
+<tr>
+<td><code>get &lt;item-id&gt;</code></td>
+<td>Full detail for one held item</td>
+</tr>
+<tr>
+<td><code>forward &lt;item-id&gt;</code></td>
+<td>Release a held item byte-exact</td>
+</tr>
+<tr>
+<td><code>drop &lt;item-id&gt;</code></td>
+<td>Drop it. The client gets a canned 502</td>
+</tr>
+<tr>
+<td><code>edit &lt;item-id&gt;</code></td>
+<td>Release with edited bytes: <code>--raw=RAW</code> or <code>--raw-file=PATH</code>. Forwarded verbatim (no <code>$KEY</code> expansion), with <code>Content-Length</code> resynced</td>
+</tr>
+<tr>
+<td><code>enable</code> / <code>disable</code></td>
+<td>Arm or disarm the live catch</td>
+</tr>
+<tr>
+<td><code>filter &lt;query&gt;</code></td>
+<td>Set the conditional-intercept query. Pass <code>&quot;&quot;</code> to clear it</td>
+</tr>
+<tr>
+<td><code>direction &lt;both|request|response&gt;</code></td>
+<td>Which leg(s) the catch holds</td>
+</tr>
+</tbody>
+</table>
+<p><code>list</code> and <code>get</code> redact sensitive header values unless <code>--include-sensitive</code> is passed. Write subcommands round-trip through the project database and poll for the TUI's ack.</p>
+<h3 id="run-repeater">run repeater</h3>
+<p>Re-send one captured flow, or manage the Repeater workbench sessions shared with the TUI.</p>
+<pre><code class="language-bash hljs">gori run repeater &lt;flow-id&gt; --target https://staging.example.com --http2 --diff
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--target=URL</code></td>
+<td>Send to a different URL</td>
+</tr>
+<tr>
+<td><code>--http2</code></td>
+<td>Use HTTP/2</td>
+</tr>
+<tr>
+<td><code>--sni=HOST</code></td>
+<td>TLS SNI override</td>
+</tr>
+<tr>
+<td><code>-k</code>, <code>--insecure-upstream</code></td>
+<td>Skip upstream TLS verification</td>
+</tr>
+<tr>
+<td><code>-H</code>, <code>--header=HEADER</code></td>
+<td>Overwrite/add a request header (repeatable)</td>
+</tr>
+<tr>
+<td><code>-b</code>, <code>--body=BODY</code></td>
+<td>Request body override</td>
+</tr>
+<tr>
+<td><code>--diff</code></td>
+<td>Diff against the original response</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> (default) or <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>repeater list</code></strong>: list saved Repeater sessions (<code>--format text|json</code>).</p>
+<p><strong><code>repeater create</code></strong>: create a Repeater session:</p>
+<pre><code class="language-bash hljs">gori run repeater create --target https://api.example.com --request-file req.txt --name &quot;login probe&quot;
+gori run repeater create --flow 42 --name &quot;clone of 42&quot;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t</code>, <code>--target=URL</code></td>
+<td>Target URL (required unless cloned from <code>--flow</code>)</td>
+</tr>
+<tr>
+<td><code>-f</code>, <code>--request-file=FILE</code></td>
+<td>Read the raw HTTP request from FILE</td>
+</tr>
+<tr>
+<td><code>-r</code>, <code>--request-raw=RAW</code></td>
+<td>Verbatim raw HTTP request string</td>
+</tr>
+<tr>
+<td><code>--flow=ID</code></td>
+<td>Clone request / target / HTTP/2 from a captured flow</td>
+</tr>
+<tr>
+<td><code>--name=NAME</code></td>
+<td>Custom tab name</td>
+</tr>
+<tr>
+<td><code>--http2</code>, <code>--no-auto-cl</code>, <code>--sni=HOST</code></td>
+<td>HTTP/2, skip auto <code>Content-Length</code>, SNI override</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-fuzz">run fuzz</h3>
+<p>Sources: <code>--flow=ID</code>, <code>--request=FILE</code>, or stdin. Positions: <code>§…§</code> markers, <code>--auto</code>, or <code>--mark=TOKEN</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transport</td>
+<td><code>--target=URL</code> (required for <code>--request</code>/stdin), <code>--http2</code>, <code>--sni=HOST</code>, <code>-k</code>/<code>--insecure-upstream</code></td>
+</tr>
+<tr>
+<td>Mode</td>
+<td><code>--mode=</code> <code>sniper</code> (default), <code>batteringram</code>, <code>pitchfork</code>, <code>clusterbomb</code></td>
+</tr>
+<tr>
+<td>Payloads</td>
+<td><code>-w</code>/<code>--wordlist</code>, <code>--preset=NAME[:FILE]</code> (built-in: <code>sqli</code>, <code>xss</code>, <code>traversal</code>, <code>format-string</code>, <code>bad-strings</code>, <code>command-injection</code>), <code>--payloads=LIST</code>, <code>--numbers=FROM-TO[:STEP]</code>, <code>--null=N</code>, <code>--brute=CHARSET:MIN-MAX</code></td>
+</tr>
+<tr>
+<td>Processors</td>
+<td><code>--prefix</code>, <code>--suffix</code>, <code>--encode</code> (<code>url</code>|<code>urlall</code>|<code>base64</code>|<code>hex</code>), <code>--case</code> (<code>upper</code>|<code>lower</code>), <code>--hash</code> (<code>md5</code>|<code>sha1</code>|<code>sha256</code>), <code>--regex-replace=/pat/rep/</code></td>
+</tr>
+<tr>
+<td>Rate</td>
+<td><code>--concurrency</code> (20), <code>--rate=RPS</code>, <code>--throttle=MS</code>, <code>--timeout=SEC</code>, <code>--retries=N</code>, <code>--follow-redirects</code>, <code>--no-keep-alive</code></td>
+</tr>
+<tr>
+<td>Matchers</td>
+<td><code>--mc</code>/<code>--fc</code> status, <code>--ms</code>/<code>--fs</code> size, <code>--mw</code>/<code>--fw</code> words, <code>--ml</code>/<code>--fl</code> lines, <code>--mr</code>/<code>--fr</code> body regex, <code>--extract=REGEX</code>, <code>--ac</code> auto-calibrate</td>
+</tr>
+<tr>
+<td>Session bindings</td>
+<td><code>--bind-from=FLOW-ID</code> — replay that captured flow first so its response fills the project&#39;s <code>$NAME</code> bindings for the rest of the run</td>
+</tr>
+<tr>
+<td>Output</td>
+<td><code>--format</code> (<code>text</code>|<code>json</code>|<code>jsonl</code>), <code>--force</code>, <code>--fail-if-no-matches</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-mine">run mine</h3>
+<pre><code class="language-bash hljs">gori run mine &lt;flow-id&gt; --locations query,headers --wordlist params.txt
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--flow</code>, <code>--request</code>, <code>--target</code>, <code>--sni</code>, <code>--http2</code>, <code>-k</code></td>
+<td>Request source and transport</td>
+</tr>
+<tr>
+<td><code>--locations=LIST</code></td>
+<td><code>query</code>, <code>form</code>, <code>multipart</code>, <code>json</code>, <code>headers</code>, <code>cookies</code> (multipart off by default, pass it explicitly)</td>
+</tr>
+<tr>
+<td><code>--wordlist</code>, <code>--bucket=N</code></td>
+<td>Candidate names and bucket size</td>
+</tr>
+<tr>
+<td><code>--concurrency</code> (10), <code>--rate</code>, <code>--throttle</code>, <code>--timeout</code>, <code>--retries</code> (1), <code>--max-requests=N</code></td>
+<td>Rate control</td>
+</tr>
+<tr>
+<td><code>--no-keep-alive</code></td>
+<td>Dial a fresh connection per probe instead of reusing one</td>
+</tr>
+<tr>
+<td><code>--bind-from=FLOW-ID</code></td>
+<td>Replay that captured flow first so its response fills the project&#39;s <code>$NAME</code> session bindings for the rest of the run</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>, <code>json</code>, or <code>jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<p>Connections are reused by default, so a mine pays one TCP (and on https one TLS) handshake per worker rather than one per probe — the <code>connections · N dialed · M reused</code> line at the end of a run is where you see whether the target honoured it. Turn it off with <code>--no-keep-alive</code> when the target behaves per-connection.</p>
+<h3 id="run-sequence">run sequence</h3>
+<p>Grade the randomness of a token. <strong>Live</strong>: replay a request and extract the token from each response. <strong>Manual</strong>: analyze a pasted list with <code>--tokens</code> (no network). Alias <code>seq</code>.</p>
+<pre><code class="language-bash hljs">gori run sequence 42 --cookie SESSIONID --count 500
+gori run sequence --tokens tokens.txt          # '-' reads stdin
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--flow=ID</code>, <code>--request=FILE</code>, stdin</td>
+<td>Request source for live replay (or a bare <code>&lt;flow-id&gt;</code>)</td>
+</tr>
+<tr>
+<td><code>--tokens=FILE</code></td>
+<td>Analyze a pasted token list (one per line, <code>-</code> = stdin); no network</td>
+</tr>
+<tr>
+<td>Token location (pick one)</td>
+<td><code>--cookie=NAME</code>, <code>--header=NAME</code>, <code>--regex=RE</code>, <code>--position=A:B</code>, <code>--jsonpath=EXPR</code></td>
+</tr>
+<tr>
+<td><code>--count=N</code></td>
+<td>Target token count (default 500)</td>
+</tr>
+<tr>
+<td><code>--target</code>, <code>--http2</code>, <code>--sni</code>, <code>-k</code></td>
+<td>Transport (target required for <code>--request</code>/stdin)</td>
+</tr>
+<tr>
+<td><code>--concurrency</code> (1), <code>--rate</code>, <code>--throttle</code>, <code>--timeout</code>, <code>--retries</code>, <code>--max-requests=N</code></td>
+<td>Rate control (concurrency stays 1 for stateful tokens)</td>
+</tr>
+<tr>
+<td><code>--bind-from=FLOW-ID</code></td>
+<td>Replay that captured flow first so its response fills the project&#39;s <code>$NAME</code> session bindings for the rest of the run</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>, <code>json</code>, <code>jsonl</code>, or <code>markdown</code> (the report the TUI&#39;s Export writes)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-probe">run probe</h3>
+<pre><code class="language-bash hljs">gori run probe --severity high --category cors
+gori run probe -a
+</code></pre>
+<p><code>--severity</code> is <code>info</code>|<code>low</code>|<code>medium</code>|<code>high</code>|<code>critical</code>; <code>--category</code> is <code>headers</code>|<code>cookies</code>|<code>tech</code>|<code>infoleak</code>|<code>cors</code>|<code>client</code>|<code>active</code>; <code>-a</code>/<code>--active</code> includes light-touch active checks; <code>-q</code>/<code>--query</code> filters with QL.</p>
+<p>With <code>--active</code>: <code>--unsafe</code> also probes unsafe methods (<code>POST</code>/<code>PUT</code>/<code>PATCH</code>/<code>DELETE</code>), whose re-sends may mutate server data; <code>--aggressive</code> raises the per-rule caps and widens the forbidden-bypass header set (and implies <code>--unsafe</code>). Both stay scope-gated unless you also pass <code>--allow-unscoped</code>. Use them only against authorized targets.</p>
+<h3 id="run-discover">run discover</h3>
+<p>Spider a target and brute-force unlinked paths; findings flow into the Sitemap unless <code>--no-store</code>. Sends real, unsolicited traffic, so only run it against authorized targets.</p>
+<pre><code class="language-bash hljs">gori run discover --target https://target.example --max-depth 3 --extensions php,json,bak --format jsonl
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--target=URL</code></td>
+<td>Seed origin or path subtree to explore (required)</td>
+</tr>
+<tr>
+<td><code>--max-depth=N</code></td>
+<td>Spider depth from the seed (default 4)</td>
+</tr>
+<tr>
+<td><code>--no-spider</code> / <code>--no-bruteforce</code></td>
+<td>Disable link crawling / directory brute-forcing</td>
+</tr>
+<tr>
+<td><code>--wordlist=PATH</code></td>
+<td>Extra path wordlist, merged with the built-in list</td>
+</tr>
+<tr>
+<td><code>--extensions=LIST</code></td>
+<td>Also probe these extensions (e.g. <code>php,json,bak</code>)</td>
+</tr>
+<tr>
+<td><code>-H</code>, <code>--header=HEADER</code></td>
+<td>Custom header on every probe (repeatable)</td>
+</tr>
+<tr>
+<td><code>--containment=MODE</code></td>
+<td><code>same-origin</code> | <code>scope-aware</code> (default) | <code>host+subdomains</code></td>
+</tr>
+<tr>
+<td><code>--concurrency</code> (20), <code>--rate</code>, <code>--throttle</code>, <code>--timeout</code>, <code>--retries</code>, <code>--max-requests=N</code></td>
+<td>Rate control</td>
+</tr>
+<tr>
+<td><code>--no-keep-alive</code></td>
+<td>Dial a fresh connection per probe instead of reusing one per origin</td>
+</tr>
+<tr>
+<td><code>-k</code>, <code>--insecure-upstream</code></td>
+<td>Skip upstream TLS verification</td>
+</tr>
+<tr>
+<td><code>--bind-from=FLOW-ID</code></td>
+<td>Replay that captured flow first so its response fills the project&#39;s <code>$NAME</code> session bindings for the rest of the run</td>
+</tr>
+<tr>
+<td><code>--allow-unscoped</code></td>
+<td>Run even if the target is outside the project scope. Waives the up-front (Layer 1) check only — Sandbox mode and explicit exclude rules still refuse each send, and the refusal now names which of the two fired.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>Bypass the unbounded-run safety gate</td>
+</tr>
+<tr>
+<td><code>--no-store</code></td>
+<td>Do not write findings into the project</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code>, <code>json</code>, or <code>jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<p>Connections are reused per origin by default, so a brute-force pass pays one TCP (and on https one TLS) handshake per worker rather than one per probe. The <code>connections · N dialed · M reused</code> line at the end of a run is where you see whether the target honoured it. Turn it off with <code>--no-keep-alive</code> when the target behaves per-connection.</p>
+<h3 id="session-bindings-from-the-command-line">Session bindings from the command line</h3>
+<p>A session binding (<code>$SESSION</code> filled from a login response — see the <a href="/guide/workbench/#rewriter">Rewriter guide</a>) lives in the <strong>memory</strong> of the gori process that observed it. It is never written to <code>settings.json</code> or to the project database: a restored token is stale by construction, and re-extracting one costs a single request.</p>
+<p><code>gori run</code> is one process per invocation, and a sweep is deliberately <strong>not</strong> an extraction source (a response echoing an attack payload back could otherwise rebind your session to it). So a headless <code>fuzz</code> / <code>mine</code> / <code>sequence</code> / <code>discover</code> whose template names a declared binding has nothing to resolve it with, and is refused before it sends.</p>
+<p><code>--bind-from FLOW-ID</code> is the missing step: it replays one captured flow — the login — through the deliberate-send path, whose response fills the binding table, and then runs the sweep in the same process.</p>
+<pre><code class="language-bash hljs">gori run fuzz 42 --payloads-file ids.txt --bind-from 17
+# bind-from: flow #17 replayed → bound $SESS
+</code></pre>
+<p>Driving two <code>gori mcp</code> tool calls over one stdio session works the same way and always has.</p>
+<h3 id="run-import">run import</h3>
+<p>Bulk-import flows into the project's History — the CLI counterpart of the TUI's Import overlay (see <a href="/guide/proxy/#import">Proxy &amp; History → Import</a>). Exactly one source flag is required. Sends no traffic.</p>
+<pre><code class="language-bash hljs">gori run import --postman api.postman_collection.json --db ./assessment.db --format json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--har=PATH</code></td>
+<td>A browser/proxy HAR (HTTP Archive) export — full request/response flows</td>
+</tr>
+<tr>
+<td><code>--urls=PATH</code></td>
+<td>A text file of URLs, one per line (<code>#</code> comments and blanks ignored)</td>
+</tr>
+<tr>
+<td><code>--oas=PATH</code></td>
+<td>An OpenAPI/Swagger spec (JSON or YAML) — one template per operation</td>
+</tr>
+<tr>
+<td><code>--postman=PATH</code></td>
+<td>A Postman Collection v2 export (JSON)</td>
+</tr>
+<tr>
+<td><code>--insomnia=PATH</code></td>
+<td>An Insomnia v4 export (JSON)</td>
+</tr>
+<tr>
+<td><code>--burp=PATH</code></td>
+<td>A Burp Suite item export (XML) — request <strong>and</strong> response, byte-exact</td>
+</tr>
+<tr>
+<td><code>--project=NAME</code></td>
+<td>Project to import into (default: most-recently-active)</td>
+</tr>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>Explicit SQLite db file to import into (created if absent)</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code> (default) or <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<p>Import writes flows, so it resolves its target like <code>discover</code>: an explicit <code>--db</code> is created or reopened, and without one it writes into an existing project rather than silently creating a default.</p>
+<p>A malformed entry is skipped rather than aborting the file; the result reports both counts (<code>{&quot;count&quot;: 12, &quot;skipped&quot;: 3}</code>). Only <code>--har</code> and <code>--burp</code> carry responses — the rest import request templates that show as <code>Pending</code> in History until you send them.</p>
+<h3 id="run-sitemap">run sitemap</h3>
+<pre><code class="language-bash hljs">gori run sitemap --in-scope --format paths
+</code></pre>
+<p><code>-q</code>/<code>--query=QL</code> filters endpoints with the same QL as history (also positional), <code>-n</code>/<code>--limit=N</code> caps the endpoints scanned (default <code>SITEMAP_MAX</code>), <code>--in-scope</code> limits to in-scope hosts, <code>--no-group</code> disables id folding, <code>--format</code> is <code>text</code> (tree), <code>json</code>, or <code>paths</code>.</p>
+<h3 id="run-oast">run oast</h3>
+<p>Ad-hoc, store-free out-of-band listener: register a payload, print it, then stream callbacks.</p>
+<pre><code class="language-bash hljs">gori run oast presets                          # list built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site --once --json
+</code></pre>
+<p><code>presets</code> lists the public providers. <code>listen</code> options:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--provider=KIND</code></td>
+<td><code>interactsh</code> (default) | <code>custom-http</code> | <code>webhook.site</code> | <code>BOAST</code> | <code>postbin</code></td>
+</tr>
+<tr>
+<td><code>--server=URL</code></td>
+<td>Provider server / base URL (default: the provider&#39;s public preset)</td>
+</tr>
+<tr>
+<td><code>--token=TOK</code></td>
+<td>Optional provider auth token</td>
+</tr>
+<tr>
+<td><code>--interval=SEC</code></td>
+<td>Poll interval (default 5)</td>
+</tr>
+<tr>
+<td><code>--once</code></td>
+<td>Poll once and exit</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit each callback as a JSON line (same shape as MCP)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-jwt">run jwt</h3>
+<p>Decode, re-sign, or generate attack payloads for a JWT. Store-free compute; the token comes from the <code>&lt;token&gt;</code> argument or stdin.</p>
+<pre><code class="language-bash hljs">gori run jwt eyJhbGci...                        # decode (default)
+gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
+gori run jwt eyJhbGci... --attacks
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--decode</code></td>
+<td>Decode header / payload / signature (default)</td>
+</tr>
+<tr>
+<td><code>--encode</code></td>
+<td>Re-sign the token&#39;s claims with <code>--alg</code> / <code>--secret</code></td>
+</tr>
+<tr>
+<td><code>--attacks</code></td>
+<td>Generate testing payloads (alg:none, weak-secret, header injection)</td>
+</tr>
+<tr>
+<td><code>--alg=ALG</code></td>
+<td>Signing alg for <code>--encode</code>: <code>HS256</code> (default) | <code>HS384</code> | <code>HS512</code> | <code>none</code></td>
+</tr>
+<tr>
+<td><code>--secret=SECRET</code></td>
+<td>HMAC secret for <code>--encode</code> with an HS algorithm</td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code> (default) or <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-decoder">run decoder</h3>
+<p>Run a <a href="/guide/decoder/">Decoder</a> chain over a value. Steps are separated by <code>|</code>, <code>&gt;</code>, or <code>,</code>.</p>
+<pre><code class="language-bash hljs">gori run decoder 'base64-decode | jwt-decode' &quot;$TOKEN&quot;
+echo -n secret | gori run decoder 'sha256 | hex-encode'
+gori run decoder list                           # every converter (name, category, direction)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--input=STR</code></td>
+<td>Value to convert (else the 2nd positional arg, else stdin)</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--output=MODE</code></td>
+<td>Render final bytes: <code>auto</code> (default) | <code>text</code> | <code>base64</code> | <code>hex</code></td>
+</tr>
+<tr>
+<td><code>--format</code></td>
+<td><code>text</code> (default) or <code>json</code> (per-step detail)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-issues-notes">run issues / notes</h3>
+<pre><code class="language-bash hljs">gori run issues --format markdown --export report.md
+gori run notes --all
+</code></pre>
+<p>Write issues from scripts with <code>create</code> / <code>update</code>:</p>
+<pre><code class="language-bash hljs">gori run issues create --title &quot;Reflected XSS on /search&quot; --severity high --host app.example.com --flow 42
+gori run issues update 7 --status confirmed --notes &quot;Verified on staging&quot; --severity critical
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create</code></td>
+<td><code>-t</code>/<code>--title</code> (required), <code>-s</code>/<code>--severity</code> (<code>info</code>|<code>low</code>|<code>medium</code>|<code>high</code>|<code>critical</code>), <code>--host</code>, <code>--flow=ID</code></td>
+</tr>
+<tr>
+<td><code>update &lt;id&gt;</code></td>
+<td><code>-t</code>/<code>--title</code>, <code>-s</code>/<code>--severity</code>, <code>-n</code>/<code>--notes</code>, <code>--status</code> (<code>open</code>|<code>confirmed</code>|<code>false-positive</code>|<code>resolved</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Notes are readable and writable too. <code>notes</code> with no argument lists them (<code>*</code> marks the active note); <code>notes &lt;n&gt;</code> prints one by index:</p>
+<pre><code class="language-bash hljs">gori run notes                                  # list
+gori run notes 2                                # print note 2
+gori run notes create --text &quot;SSRF candidate on /fetch&quot;
+echo &quot;pasted from a scratchpad&quot; | gori run notes create
+gori run notes delete 2
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list</code></td>
+<td><code>--all</code> prints every note in full instead of a summary line</td>
+</tr>
+<tr>
+<td><code>create</code></td>
+<td><code>--text=TEXT</code>, or a positional argument, or STDIN</td>
+</tr>
+<tr>
+<td><code>delete &lt;n&gt;</code> (<code>rm</code>)</td>
+<td>Delete the note at index <code>n</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-links">run links</h3>
+<p>The evidence an Issue or Note points at: a captured Flow, a Repeater session, or a Fuzz / Miner run. The Markdown issue export resolves these already; this is the surface that lists and edits them.</p>
+<pre><code class="language-bash hljs">gori run links --owner=issue --id=7
+gori run links add --owner=issue --id=7 --ref=flow --ref-id=42
+gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--owner=KIND</code></td>
+<td>Owner kind: <code>issue</code> (default) or <code>note</code></td>
+</tr>
+<tr>
+<td><code>--id=N</code></td>
+<td>Owner issue / note id. Required</td>
+</tr>
+<tr>
+<td><code>--ref=KIND</code></td>
+<td>Target kind for <code>add</code> / <code>delete</code>: <code>flow</code>, <code>repeater</code>, <code>fuzz</code>, <code>miner</code></td>
+</tr>
+<tr>
+<td><code>--ref-id=M</code></td>
+<td>Target id for <code>add</code> / <code>delete</code></td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> (default) or <code>json</code>, on <code>list</code></td>
+</tr>
+</tbody>
+</table>
+<p>A pointer whose target was pruned lists as <code>(stale)</code> rather than disappearing, so &quot;no evidence&quot; and &quot;evidence that is gone&quot; stay distinguishable. <code>add</code> is idempotent, and both ends must exist.</p>
+<h3 id="run-rewriter">run rewriter</h3>
+<p>Manage Match &amp; Replace rules from scripts. The same rules the <a href="/guide/proxy/">Rewriter tab</a> edits, applied to live proxy traffic:</p>
+<pre><code class="language-bash hljs">gori run rewriter                                       # list rules in apply order
+gori run rewriter add --op set_header --target request \
+  --find X-Forwarded-For --value 127.0.0.1 --host '*.example.com'
+gori run rewriter add --op replace --target response --part body \
+  --match regex --find 'secret=(\w+)' --value 'secret=[redacted]'
+gori run rewriter add --op remove_header --target response \
+  --find Content-Security-Policy --scope global          # applies in EVERY project
+gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter disable 3
+gori run rewriter disable 2 --scope global               # off in THIS project only
+gori run rewriter disable 2 --scope global --everywhere  # off by default, everywhere
+gori run rewriter rm 3
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--op=OP</code></td>
+<td><code>replace</code> (default), <code>add_header</code>, <code>set_header</code>, <code>remove_header</code></td>
+</tr>
+<tr>
+<td><code>--target=SIDE</code></td>
+<td><code>request</code> (default) or <code>response</code></td>
+</tr>
+<tr>
+<td><code>--part=PART</code></td>
+<td><code>head</code> (default) or <code>body</code>. Only meaningful for <code>replace</code></td>
+</tr>
+<tr>
+<td><code>--match=MODE</code></td>
+<td><code>literal</code> (default) or <code>regex</code>, for <code>replace</code> only. Regex replacements take <code>$1</code>, <code>$2</code>; <code>$$</code> is a literal <code>$</code></td>
+</tr>
+<tr>
+<td><code>-f</code>, <code>--find=FIND</code></td>
+<td>Required. The literal, pattern, or header name to act on</td>
+</tr>
+<tr>
+<td><code>-v</code>, <code>--value=VALUE</code></td>
+<td>Replacement text or header value</td>
+</tr>
+<tr>
+<td><code>--host=GLOB</code></td>
+<td>Limit the rule to matching hosts (substring, <code>*</code> wildcard). Omit to apply everywhere</td>
+</tr>
+<tr>
+<td><code>--name=NAME</code></td>
+<td>Label shown in the rule list</td>
+</tr>
+<tr>
+<td><code>--disabled</code></td>
+<td>Create the rule without arming it</td>
+</tr>
+<tr>
+<td><code>--scope=SCOPE</code></td>
+<td><code>project</code> (default) or <code>global</code>. A global rule lives in <code>settings.json</code> and applies in every project</td>
+</tr>
+<tr>
+<td><code>--everywhere</code></td>
+<td>On <code>enable</code>/<code>disable</code> of a global rule: change the rule&#39;s own default instead of this project&#39;s override</td>
+</tr>
+</tbody>
+</table>
+<p><code>preview</code> takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. <code>rm</code> (<code>delete</code>), <code>enable</code> and <code>disable</code> take a rule id from the list — and <code>--scope</code>, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a <code>G</code>/<code>P</code> prefix (<code>G*</code> = this project overrides that global rule's default) and shows global rules first, the order the proxy applies them in. See <a href="/guide/proxy/#global-and-project-rules">Global and project rules</a>.</p>
+<p>Body rules re-sync <code>Content-Length</code> and de-chunk as needed, and an enabled rule forces HTTP/1.1 on hosts it matches. See <a href="/guide/proxy/">Proxy &amp; History</a> for the interactive editor.</p>
+<h3 id="run-colormarker">run colormarker</h3>
+<p>Manage <strong>Colormarker</strong> rules — which captured History rows get coloured, and how. Display only: a colour rule never modifies traffic, so unlike a Match &amp; Replace rule it costs a misleading list at worst, never a modified message.</p>
+<pre><code class="language-bash hljs">gori run colormarker                                        # list rules in precedence order
+gori run colormarker add --when 'status:&gt;=500' --color red --style full --name 'prod 5xx'
+gori run colormarker add --when 'host:cdn' --color blue --style strip --scope global
+gori run colormarker move 2 --up                            # higher precedence
+gori run colormarker preview --when 'method:DELETE'
+gori run colormarker disable 1 --scope global               # off in THIS project only
+gori run colormarker disable 1 --scope global --everywhere  # off by default, everywhere
+gori run colormarker rm 3
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-w</code>, <code>--when=FILTER</code></td>
+<td>Required. The condition a flow must match — see below</td>
+</tr>
+<tr>
+<td><code>--color=NAME</code></td>
+<td><code>red</code>, <code>orange</code>, <code>yellow</code> (default), <code>green</code>, <code>blue</code>, <code>purple</code>. Resolved through the active theme, so it reads correctly on light and dark alike</td>
+</tr>
+<tr>
+<td><code>--style=STYLE</code></td>
+<td><code>full</code> (default) tints the whole row · <code>strip</code> paints one colour cell in a narrow column ahead of <code>TIME</code></td>
+</tr>
+<tr>
+<td><code>--name=NAME</code></td>
+<td>Label shown in the rule list</td>
+</tr>
+<tr>
+<td><code>--disabled</code></td>
+<td>Create the rule without arming it</td>
+</tr>
+<tr>
+<td><code>--scope=SCOPE</code></td>
+<td><code>project</code> (default) or <code>global</code>. A global rule lives in <code>settings.json</code> and applies in every project</td>
+</tr>
+<tr>
+<td><code>--everywhere</code></td>
+<td>On <code>enable</code>/<code>disable</code> of a global rule: change the rule&#39;s own default instead of this project&#39;s override</td>
+</tr>
+<tr>
+<td><code>--up</code> / <code>--down</code></td>
+<td>On <code>move</code>: raise or lower the rule&#39;s precedence</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Precedence is the rule set's meaning.</strong> Match &amp; Replace rules <em>compose</em> — every enabled rule runs, in order. Colour rules <em>resolve</em>: the <strong>first enabled match paints the row</strong> and the rest are never consulted. That is why <code>move</code> exists here and not on <code>rewriter</code>. Global rules resolve before project ones, so a standing policy outranks a local layer.</p>
+<p><code>--when</code> uses the same boolean grammar the conditional-intercept bar speaks — <code>host:</code> <code>path:</code> <code>method:</code> <code>scheme:</code> <code>status:</code> <code>proto:</code>, plus <code>AND</code> / <code>OR</code> / <code>NOT</code>, <code>-negation</code> and <code>(grouping)</code> — evaluated against the captured flow row. Three caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from an empty list:</p>
+<ul>
+<li><strong><code>body:</code> never matches here.</strong> A History row carries no payload. (Warned, not refused — the term is legal.)</li>
+<li><strong><code>host:</code> is a substring, not a DNS-label glob.</strong> <code>host:alpha.test</code> also matches <code>xalpha.test</code>. (Warned.)</li>
+<li><strong>There is no <code>header:</code> / <code>size:</code> / <code>dur:</code> / <code>url:</code> / <code>stub:</code>.</strong> Those are History QL fields that need a query, and this is evaluated on the render path. An unknown field is <strong>refused</strong> — left alone it would quietly become a free-text search and the rule would never fire.</li>
+</ul>
+<p>A condition that matches <em>every</em> flow (empty, or a half-typed <code>host:</code>) is refused too.</p>
+<p><code>preview</code> reports how many recent flows the condition <strong>matches</strong> and how many it would actually <strong>paint</strong> — the two differ whenever an earlier enabled rule already claims the row. <code>rm</code> (<code>delete</code>), <code>enable</code>, <code>disable</code> and <code>move</code> take a rule id from the list, and <code>--scope</code>, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a <code>G</code>/<code>P</code> prefix (<code>G*</code> = this project overrides that global rule's default).</p>
+<p>The tab is <strong>hidden by default</strong> — show it from <code>settings:tabs</code>, next to Rewriter. See <a href="/guide/proxy/">Proxy &amp; History</a> for the interactive editor.</p>
+<h3 id="run-project">run project</h3>
+<p>List, create, or delete projects, or manage project-scoped config (scope rules, env vars, host overrides):</p>
+<pre><code class="language-bash hljs">gori run project --format json
+gori run project list
+</code></pre>
+<h4 id="project-create">project create</h4>
+<p>Create a project without capturing into it first. <code>gori run capture --project=NAME</code> also creates on demand; this is the traffic-free way to do it, so scripts can set up scope and env before the proxy starts.</p>
+<pre><code class="language-bash hljs">gori run project create &quot;API test&quot;
+gori run project create api-test --description=&quot;staging sweep&quot;
+gori run project create api-test --format json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;name&gt;</code></td>
+<td>Display name. Quote it if it contains spaces</td>
+</tr>
+<tr>
+<td><code>--description=TEXT</code></td>
+<td>Stored in the project&#39;s settings</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> (default) or <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<p>A name that already exists reopens that project instead of failing; <code>--format json</code> reports it as <code>&quot;created&quot;: false</code>. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when <code>--description</code> is given.</p>
+<h4 id="project-delete">project delete</h4>
+<p>Delete a project directory and everything captured in it (flows, issues, notes, scope, rules). Irreversible, so it takes two steps: without <code>--yes</code> it only prints the target and exits non-zero.</p>
+<pre><code class="language-bash hljs">gori run project delete api-test              # preview only, nothing is removed
+gori run project delete api-test --format json
+gori run project rm api-test --yes            # actually delete
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;name&gt;</code></td>
+<td>Matches a short id, id prefix, directory slug, or display name</td>
+</tr>
+<tr>
+<td><code>--yes</code></td>
+<td>Perform the delete. Without it the command removes nothing</td>
+</tr>
+<tr>
+<td><code>--format=FMT</code></td>
+<td><code>text</code> (default) or <code>json</code></td>
+</tr>
+</tbody>
+</table>
+<p>The preview reports flow and issue counts, on-disk size, and whether a capture is live. Deleting a project another gori instance is capturing into is refused: stop that capture first.</p>
+<p>Display names are not unique (two workspaces with the same basename share one). When a name matches more than one project, delete refuses and lists their slugs, since the wrong guess is unrecoverable. Slugs and short ids are unique, so either always resolves.</p>
+<h4 id="project-scope">project scope</h4>
+<p>Manage the project's include/exclude scope rules from scripts:</p>
+<pre><code class="language-bash hljs">gori run project scope                                          # list rules + enabled state
+gori run project scope --format json
+gori run project scope add --kind=include --type=host --pattern=api.example.com
+gori run project scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
+gori run project scope delete 3
+gori run project scope enable
+gori run project scope disable
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default)</td>
+<td>List rules; <code>--format</code> is <code>text</code> or <code>json</code></td>
+</tr>
+<tr>
+<td><code>add</code></td>
+<td><code>--kind=include|exclude</code>, <code>--type=host|string|regex</code>, <code>--pattern=…</code></td>
+</tr>
+<tr>
+<td><code>delete &lt;rule-id&gt;</code></td>
+<td>Remove a rule by id</td>
+</tr>
+<tr>
+<td><code>enable</code> / <code>disable</code></td>
+<td>Toggle whether scope filtering is applied</td>
+</tr>
+</tbody>
+</table>
+<h4 id="project-sandbox">project sandbox</h4>
+<p>Get or set the <strong>hard-containment</strong> sandbox gate, the headless equivalent of the TUI Project NETWORK toggle. When on, the capture proxy forwards only requests the scope allows and blocks everything else. This is distinct from <code>project scope enable</code>, which is only the display lens.</p>
+<pre><code class="language-bash hljs">gori run project sandbox                 # show the current state (status is the default)
+gori run project sandbox status --format json
+gori run project sandbox on              # start blocking out-of-scope traffic
+gori run project sandbox off             # stop blocking
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default) / <code>status</code></td>
+<td>Show the gate state; <code>--format</code> is <code>text</code> or <code>json</code></td>
+</tr>
+<tr>
+<td><code>on</code> / <code>enable</code></td>
+<td>Block every request the scope does not allow</td>
+</tr>
+<tr>
+<td><code>off</code> / <code>disable</code></td>
+<td>Stop blocking</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>With no include rule, turning the sandbox on blocks <strong>all</strong> captured traffic until you add one (<code>gori run project scope add …</code>). The command warns and proceeds, so it can bootstrap containment for CI.</p>
+</blockquote>
+<h4 id="project-env">project env</h4>
+<p>Manage <strong>project</strong> env vars used for <code>$KEY</code> substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in <code>settings.json</code> / the TUI Settings. This command only touches the per-project layer.</p>
+<pre><code class="language-bash hljs">gori run project env                              # list KEY=value
+gori run project env --format json
+gori run project env set TOKEN=secret
+gori run project env set HOST api.example.com
+gori run project env delete TOKEN
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default)</td>
+<td>List project vars; <code>--format</code> is <code>text</code> or <code>json</code></td>
+</tr>
+<tr>
+<td><code>set KEY=value</code> · <code>set KEY value</code></td>
+<td>Upsert a project var (KEY must match <code>[A-Za-z_][A-Za-z0-9_]*</code>)</td>
+</tr>
+<tr>
+<td><code>delete KEY</code></td>
+<td>Remove a project var</td>
+</tr>
+</tbody>
+</table>
+<h4 id="project-host-override">project host-override</h4>
+<p>Manage <strong>project</strong> host overrides: <code>/etc/hosts</code>-style maps that change only the TCP dial target (SNI, certificate hostname, and <code>Host</code> header stay the original name). The value may carry a <strong>port</strong> — <code>IP</code>, <code>IP:PORT</code> or <code>[v6]:PORT</code> — so a hostname can be redirected at a listener on a different port; a bare IP keeps the request's own port. Project entries win over the global hostname overrides on collision. Alias: <code>host-overrides</code>.</p>
+<pre><code class="language-bash hljs">gori run project host-override                              # list
+gori run project host-override --format json
+gori run project host-override add --host=api.example.com --ip=10.0.0.1
+gori run project host-override add 10.0.0.1 api.example.com   # /etc/hosts order
+gori run project host-override add --host=api.example.com --ip=127.0.0.1:8443   # move the port too
+gori run project host-override update 1 --host=api.example.com --ip=10.0.0.9
+gori run project host-override delete 1
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option / subcommand</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(default)</td>
+<td>List overrides; <code>--format</code> is <code>text</code> or <code>json</code></td>
+</tr>
+<tr>
+<td><code>add</code></td>
+<td><code>--host=…</code> + <code>--ip=…</code>, or positional <code>IP HOST</code></td>
+</tr>
+<tr>
+<td><code>update &lt;id&gt;</code></td>
+<td><code>--host=…</code> + <code>--ip=…</code> (both required)</td>
+</tr>
+<tr>
+<td><code>delete &lt;id&gt;</code></td>
+<td>Remove an override by id</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gori-mcp">gori mcp</h2>
+<p>MCP stdio server. See the <a href="/guide/mcp/">MCP guide</a> for tool details.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>Serve this database (overrides <code>--project</code>)</td>
+</tr>
+<tr>
+<td><code>--project=NAME</code></td>
+<td>Serve a named project&#39;s database</td>
+</tr>
+<tr>
+<td><code>--use-active-project</code></td>
+<td>Ignore Git-workspace selection and explicitly serve the active TUI/MRU project</td>
+</tr>
+<tr>
+<td><code>--no-project</code></td>
+<td>Start unbound even inside a Git workspace (agent picks via list/create/switch)</td>
+</tr>
+<tr>
+<td><code>--insecure-upstream</code></td>
+<td><code>send_request</code>: skip upstream TLS verification</td>
+</tr>
+<tr>
+<td><code>--read-only</code></td>
+<td>Disable action tools (<code>send_request</code>, create/update issues, fuzz/mine); <code>switch_project</code> (and <code>create_project</code> when unbound) stay available</td>
+</tr>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Write Claude Desktop <code>mcpServers</code> config</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Write Claude Code <code>~/.claude.json</code> <code>mcpServers</code> entry</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>Write OpenAI Codex <code>~/.codex/config.toml</code> <code>[mcp_servers.gori]</code></td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Write Antigravity <code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Write Grok <code>~/.grok/config.toml</code> <code>[mcp_servers.gori]</code></td>
+</tr>
+</tbody>
+</table>
+<p>Several <code>--install-*</code> flags may be given in one run; each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line — <code>--db</code>, <code>--project</code>, <code>--no-project</code>, <code>--use-active-project</code>, <code>--read-only</code>, <code>--insecure-upstream</code>, and the global <code>--config</code> — is written into the installed command, with paths made absolute. Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.</p>
+<h2 id="gori-ca">gori ca</h2>
+<pre><code class="language-bash hljs">gori ca
+gori ca --pem
+gori ca --ca-dir=DIR
+gori ca regenerate
+gori ca regenerate --yes
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+</code></pre>
+<p>Prints the path to gori's root CA certificate (creates it on first use). Use this when trusting the CA in a browser or system store, or when pointing a client at <code>--cacert</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--ca-dir=DIR</code></td>
+<td>CA directory (default <code>~/.gori/ca</code>, or <code>$GORI_HOME/ca</code>)</td>
+</tr>
+<tr>
+<td><code>--pem</code></td>
+<td>Print the certificate PEM to stdout instead of the path</td>
+</tr>
+</tbody>
+</table>
+<p>A verb comes first and its flags after it — <code>gori ca regenerate --ca-dir=DIR</code>, not <code>gori ca --ca-dir=DIR regenerate</code>. The reverse order is a usage error, because the verb would otherwise be dropped and the command would print the CA path as if it had done the work. None of the three forms takes a positional argument.</p>
+<p><code>gori ca</code> also reports a root CA that loads but cannot serve — a private key that does not match the certificate, or a key gori cannot sign with — on stderr, since the symptom otherwise appears only at the client as an &quot;unknown CA&quot; or &quot;bad signature&quot; handshake failure. <code>regenerate</code> and <code>import</code> are the fix, and both work on a CA directory in any state, including one where only one file of the pair survives.</p>
+<h3 id="gori-ca-regenerate">gori ca regenerate</h3>
+<p>Replaces the on-disk root CA with a freshly minted one. <strong>Destructive</strong>: every client that trusted the old CA must re-trust the new certificate. Any already-running gori process keeps the old CA in memory until restarted.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--yes</code>, <code>-y</code></td>
+<td>Skip the interactive confirm (required when stdin is not a tty)</td>
+</tr>
+<tr>
+<td><code>--ca-dir=DIR</code></td>
+<td>CA directory to regenerate</td>
+</tr>
+</tbody>
+</table>
+<p>Without <code>--yes</code>, the command prompts on a tty and expects you to type <code>regenerate</code> (same word as the TUI confirm). Scripts and CI should pass <code>--yes</code>. On success the new cert path is printed to stdout.</p>
+<h3 id="gori-ca-import">gori ca import</h3>
+<p>Adopts an externally-created root CA (a certificate + matching private key, both PEM) in place of gori's own, for sharing one CA across a team or machines, or reusing an organization CA. gori needs both files because it signs per-host leaf certificates on the fly; clients trust only the certificate. <strong>Destructive</strong>, like <code>regenerate</code>: it replaces the on-disk root and voids prior trust.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--cert FILE</code></td>
+<td>Root CA certificate PEM to adopt (required)</td>
+</tr>
+<tr>
+<td><code>--key FILE</code></td>
+<td>Matching private key PEM (required)</td>
+</tr>
+<tr>
+<td><code>--yes</code>, <code>-y</code></td>
+<td>Skip the interactive confirm (required when stdin is not a tty)</td>
+</tr>
+<tr>
+<td><code>--ca-dir=DIR</code></td>
+<td>CA directory to install into</td>
+</tr>
+</tbody>
+</table>
+<p>The pair is validated before anything is written: the key must match the certificate, the certificate must be a CA (<code>basicConstraints CA:TRUE</code>), and gori must be able to sign a leaf certificate with the key. That last check rules out <strong>Ed25519 and Ed448 roots</strong> — gori signs leaves with SHA-256, which those keys do not support — so use an EC P-256 or an RSA root. A rejected pair aborts without touching the current CA. An expired or not-yet-valid certificate imports with a warning. Confirm by typing <code>import</code> on a tty, or pass <code>--yes</code>. The same action is available from the TUI palette (<strong>Import CA certificate</strong>).</p>
+<p>Generate a root with OpenSSL, then import it:</p>
+<pre><code class="language-bash hljs">openssl ecparam -genkey -name prime256v1 -out root.key.pem
+openssl req -x509 -new -key root.key.pem -days 3650 -subj &quot;/CN=my ca&quot; -out root.crt.pem
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+</code></pre>
+<p>Trust only <code>root.crt.pem</code> in your clients. Never distribute the private key.</p>
+<h2 id="gori-settings">gori settings</h2>
+<pre><code class="language-bash hljs">gori settings                      # print the settings.json path
+gori settings --edit               # open it in $EDITOR
+gori settings sections             # list the top-level sections
+gori settings export [-o FILE]     # write a shareable profile (stdout by default)
+gori settings import FILE          # apply a profile's sections
+</code></pre>
+<h3 id="profiles">Profiles</h3>
+<p><code>export</code> and <code>import</code> move settings between machines, share them with a team, or check a configuration into a repository for a reproducible run. The unit is the top-level section, listed by <code>gori settings sections</code>.</p>
+<pre><code class="language-bash hljs">gori settings export --sections network,scan_rules -o team-profile.json
+gori settings import team-profile.json --dry-run     # show what would be applied
+gori settings import team-profile.json --sections network
+</code></pre>
+<p><code>gori settings sections</code> lists every section gori knows, marking the ones this install has no value for yet:</p>
+<pre><code>network
+scan_rules  (not set — at its default)
+env  (holds secrets — excluded unless named; not set — at its default)
+</code></pre>
+<p>A section marked <em>not set</em> is still a valid name for <code>--sections</code>: exporting it simply carries nothing (gori says so on stderr), and importing one writes it for the first time.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Applies to</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--sections a,b</code></td>
+<td>both</td>
+<td>Comma-separated section names; at least one. Export defaults to everything except secret-bearing sections; import defaults to every section in the file</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--out FILE</code></td>
+<td>export</td>
+<td>Write to a file instead of stdout</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>import</td>
+<td>Print which sections would be applied, then exit without writing</td>
+</tr>
+</tbody>
+</table>
+<p>A section you do not select — or that the profile does not carry — is left <strong>exactly as it was</strong>. That is the guarantee <code>--sections</code> is choosing between. Within a section the profile <em>does</em> carry:</p>
+<ul>
+<li><strong>List and table sections replace wholesale</strong>: <code>upstream_rules</code>, <code>outbound_tls</code>, <code>listeners</code>, <code>scan_rules</code>, <code>hostname_overrides</code>, <code>tabs</code>, and the rest. A profile carrying <code>&quot;upstream_rules&quot;: []</code> clears the table — that is how &quot;no rules&quot; is stated.</li>
+<li><strong>Object-of-scalars sections apply key by key</strong>: <code>network</code>, <code>editor</code>, <code>probe</code>. A key the profile omits keeps its current value, so a team profile that pins <code>network.upstream_proxy</code> does not also reset everyone's <code>bind_port</code> to a default it never mentioned.</li>
+</ul>
+<p>Note that <code>export</code> omits a section sitting at its factory default, so a profile is a set of values to <em>apply</em>, not a snapshot of a whole configuration: exporting from a machine where a value is default will not reset that value on a machine where it is not. Pass <code>--dry-run</code> to see which sections an import would touch — it errs on the side of listing one, so a section it does <em>not</em> name is guaranteed to be a no-op.</p>
+<p>Import goes through the same writer the TUI uses, so it keeps the atomic write and cannot clobber a concurrently-running gori's edit to — or deletion of — a section it did not touch. Unrecognised sections in the file are reported and ignored: they reach neither the live settings nor the file.</p>
+<p>If gori cannot load your <code>settings.json</code> — unparseable, unreadable, or a <code>--config</code> pointing at something it cannot open — both <code>export</code> and <code>import</code> refuse rather than proceeding. Every section is at its factory default at that point, so an import would persist those defaults over every section the profile does not name, and an export would write them out as if they were yours. Fix or remove the file first; an unparseable one is kept alongside it as <code>settings.json.corrupt</code>. <code>--dry-run</code> is the exception: it writes nothing, so it still runs, and says on stderr that the comparison is against defaults.</p>
+<p><code>env</code> and <code>decoder</code> are excluded from an export by default: <code>env</code> holds token values and <code>decoder</code> holds your last input and saved sessions. Naming one explicitly (<code>--sections env</code>) is how you consent to include it. Note that <code>upstream_rules</code> is safe to share — it stores a username and an environment-variable <em>name</em>, never a password.</p>
+<p><code>-o</code> pointing at your live <code>settings.json</code> is refused. An export is not a snapshot — it omits every section at its factory default, and omits <code>env</code> and <code>decoder</code> unless you name them — so writing one back over the real file would delete those sections rather than update it.</p>
+<p>When an export <strong>does</strong> carry one of those sections, <code>-o FILE</code> is created <code>0600</code> and gori says so, naming what is in the file. Consenting to export a credential is not consenting to leave it world-readable. An ordinary export stays <code>0644</code>, and an export that names <code>env</code> on an install with no env vars is an ordinary export — the mode follows what the document actually contains, not what you typed.</p>
+<h3 id="config-path"><code>--config PATH</code></h3>
+<p><code>--config</code> points gori at a specific settings file for one run. It works before any subcommand:</p>
+<pre><code class="language-bash hljs">gori --config ./ci-profile.json run capture --target https://api.example.com
+gori --config ~/profiles/corp.json          # the TUI, with a different config
+</code></pre>
+<p>Resolution order is <code>--config</code> → <code>$GORI_CONFIG</code> → <code>$GORI_HOME/settings.json</code>.</p>
+<p>This is deliberately <strong>orthogonal to <code>GORI_HOME</code></strong>: it changes only which settings file is read and written, leaving the CA, the project databases, the themes and the wordlists where they are. Relocating the whole tree was previously the only way to switch configuration.</p>
+<h2 id="gori-wizard">gori wizard</h2>
+<pre><code class="language-bash hljs">gori wizard
+</code></pre>
+<p>Runs the interactive setup (global proxy bind default, then theme, then the Miss Ring mascot). Also runs automatically on first launch. The bind step writes the shared <code>settings.json</code> defaults. Projects can still pin their own address in the Project tab; <code>--listen</code> / <code>--port</code> override for one run only.</p>
+<h2 id="gori-tutorial">gori tutorial</h2>
+<pre><code class="language-bash hljs">gori tutorial
+</code></pre>
+<p>Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (<code>Ctrl-P</code>), the space menu (<code>Space</code>), and READ/INS edit mode. Each lesson demos the move and prompts you to try the key; a final practice step requires all four before finishing, then points you at a first real session. Offered at the end of <code>gori wizard</code>; safe to re-run anytime without a live proxy session. See the <a href="/getting-started/quick-start/">Quick Start</a>.</p>
+<h2 id="gori-update">gori update</h2>
+<pre><code class="language-bash hljs">gori update
+gori update --exec   # Homebrew/Snap: run the package-manager command
+</code></pre>
+<p>Detects how this <code>gori</code> binary was installed and updates accordingly:</p>
+<table>
+<thead>
+<tr>
+<th>Install channel</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standalone binary (curl install, manual download, workspace build, or a manual copy into <code>/usr/bin</code> that no package manager owns)</td>
+<td>Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling <code>lib/</code> in a dedicated dir)</td>
+</tr>
+<tr>
+<td>Homebrew</td>
+<td>Prints <code>brew upgrade gori</code> (use <code>--exec</code> to run it; never overwrites the brew-managed path)</td>
+</tr>
+<tr>
+<td>Snap</td>
+<td>Prints <code>snap refresh gori</code> (use <code>--exec</code> to run it)</td>
+</tr>
+<tr>
+<td>pacman / AUR</td>
+<td>Prints <code>yay</code> / <code>paru</code> / <code>pacman</code> guidance</td>
+</tr>
+<tr>
+<td>deb (dpkg)</td>
+<td>Prints <code>apt</code> upgrade guidance</td>
+</tr>
+<tr>
+<td>rpm</td>
+<td>Prints <code>dnf</code> / <code>yum</code> / <code>zypper</code> guidance</td>
+</tr>
+<tr>
+<td>Nix (<code>/nix/store</code>)</td>
+<td>Prints <code>nix profile upgrade</code> / flake-update guidance; the store is read-only, so nothing is downloaded</td>
+</tr>
+</tbody>
+</table>
+<p>Paths under <code>/usr/bin</code> or <code>/bin</code> are classified by package ownership (<code>pacman -Qo</code>, <code>dpkg-query -S</code>, <code>rpm -qf</code>). If a manager owns the file, gori never overwrites it. If probes find no owner, the binary channel self-updates. When no package tools are available, <code>/etc/os-release</code> (<code>ID</code> / <code>ID_LIKE</code>) picks Arch-like / Debian-like / RHEL-like guidance as a fallback.</p>
+<p>Release asset names match the <a href="/getting-started/installation/">installation guide</a> (<code>gori-v*-linux-*</code> plain binaries, <code>gori-v*-osx-*.tar.gz</code> archives). macOS archive updates require a dedicated layout (e.g. <code>PREFIX/opt/gori</code> from the curl installer) so bundled <code>lib/</code> is never written under shared roots like <code>/usr/local/lib</code>. If no release assets exist yet, the command exits with a clear error pointing at the releases page. It does not silently no-op.</p>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 그리고 첫 요청 구동.">
+  <title>AI 설정 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="AI 설정">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/getting-started/ai-setup/">
+  <meta property="og:description" content="MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 그리고 첫 요청 구동.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="AI 설정">
+  <meta name="twitter:description" content="MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 그리고 첫 요청 구동.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/getting-started/ai-setup/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"AI 설정","url":"https://gori.hahwul.com/ko/getting-started/ai-setup/","description":"MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 그리고 첫 요청 구동."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"시작하기","item":"https://gori.hahwul.com/ko/getting-started/"},{"@type":"ListItem","position":3,"name":"AI 설정"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/ai-setup/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/ai-setup/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="getting-started">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/" class="active" aria-current="true">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/" class="active" aria-current="true">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/getting-started/ai-setup/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/getting-started/ai-setup/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/" class="active" aria-current="page">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>AI 설정</h1>
+    <p>gori는 하나의 프로젝트와 하나의 엔진 위에 세 가지 진입점을 둡니다. <code>gori</code>(TUI, 당신을 위한 것), <code>gori run</code>(헤드리스 CLI, 스크립트를 위한 것), 그리고 <code>gori mcp</code>(<a href="/ko/guide/mcp/">MCP 서버</a>, AI 에이전트를 위한 것)입니다. 이 페이지는 AI 경로를 다룹니다. 에이전트를 gori 프로젝트에 연결하고 첫 요청까지 구동합니다.</p>
+<p>TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 당신이 직접 가져오고, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 그러면 에이전트가 트래픽을 읽고 당신과 동일한 도구를 구동합니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 <a href="/ko/guide/mcp/">MCP 서버 가이드</a>를 참고하세요.</p>
+<blockquote>
+<p><strong>시작하기 전에.</strong> <a href="/ko/getting-started/installation/">gori를 설치</a>하고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok 등)를 준비하세요.</p>
+</blockquote>
+<h2 id="1-클라이언트에-서버-설치하기-1-install-the-server-into-your-client">1. 클라이언트에 서버 설치하기 {#1-install-the-server-into-your-client}</h2>
+<p><code>gori mcp</code>는 stdio 위에서 JSON-RPC 2.0으로 통신합니다. AI 클라이언트가 이를 spawn 해 STDIN으로 요청을 보내고 STDOUT으로 결과를 읽습니다(STDERR은 로그를 전달합니다). 클라이언트마다 설정을 손으로 편집하는 대신, gori가 대신 작성하게 하세요.</p>
+<pre><code class="language-bash hljs">gori mcp --install-claude-code   # Claude Code
+gori mcp --install-claude        # Claude Desktop
+gori mcp --install-codex         # OpenAI Codex
+gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-grok          # Grok
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>클라이언트</th>
+<th>작성되는 설정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop</td>
+<td><code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code</td>
+<td><code>~/.claude.json</code> (<code>mcpServers.gori</code>)</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex</td>
+<td><code>~/.codex/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok</td>
+<td><code>~/.grok/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 JSON이 아니라 TOML <code>[mcp_servers.gori]</code> 테이블을 사용합니다. 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.</p>
+<p>직접 연결하고 싶다면? 서버는 그저 stdio 위의 <code>gori mcp</code> 명령입니다. 추가 인자 없이 이 명령을 MCP 클라이언트에 가리키기만 하면 됩니다.</p>
+<p><strong>체크포인트.</strong> 클라이언트가 gori의 도구들(<code>list_history</code>, <code>send_request</code>, <code>project_info</code> 등)을 나열합니다. 나타나지 않으면 클라이언트를 재시작했는지, 그리고 <code>gori</code>가 클라이언트가 사용하는 <code>PATH</code>에 있는지 확인하세요.</p>
+<h2 id="2-프로젝트-바인딩-또는-에이전트가-고르게-2-pin-the-right-project">2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-pin-the-right-project}</h2>
+<p>각 gori 프로젝트는 별도의 데이터베이스입니다. 설치 후 <code>gori mcp</code>는 항상 연결됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>클라이언트가 MCP를 띄우는 방식</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Git 리포지토리 안</td>
+<td>그 워크스페이스를 자체 gori 프로젝트에 path-bind</td>
+</tr>
+<tr>
+<td>Git 밖 (Desktop / 전역 에이전트에서 흔함)</td>
+<td><strong>unbound</strong>로 시작 — 핸드셰이크 성공; 에이전트가 트래픽 도구 전에 <code>list_projects</code> / <code>create_project</code> / <code>switch_project</code> 호출</td>
+</tr>
+<tr>
+<td><code>--project</code> / <code>--db</code>로 설치</td>
+<td>첫 도구 호출부터 그 프로젝트 제공</td>
+</tr>
+</tbody>
+</table>
+<p>에이전트가 먼저 <code>project_info</code>를 호출하게 하세요. <code>bound</code>가 false이면 프로젝트를 나열·생성(unbound일 때 create는 자동 바인딩)하거나 switch 한 뒤, bound일 때 이름·DB 경로·선택 출처를 확인한 다음 데이터를 건드리게 합니다.</p>
+<p>설치 시점에 고정 engagement를 박아 두려면:</p>
+<pre><code class="language-bash hljs">gori mcp --project my-engagement --install-codex     # 이름 붙은 프로젝트의 데이터베이스
+gori mcp --db /path/to/project.db --install-claude-code   # 특정 데이터베이스 파일
+</code></pre>
+<p>전체 선택 규칙은 <a href="/ko/guide/mcp/#choosing-a-project">프로젝트 선택</a>에 있습니다.</p>
+<h2 id="3-읽기-전용으로-안전하게-넘기기-3-hand-off-safely-with-read-only">3. 읽기 전용으로 안전하게 넘기기 {#3-hand-off-safely-with-read-only}</h2>
+<p>기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 에이전트(또는 대상에 대해 완전히 신뢰하지는 않는 동료)에게 읽기 도구만 주려면, 읽기 전용으로 설치하세요.</p>
+<pre><code class="language-bash hljs">gori mcp --read-only --install-claude-code
+</code></pre>
+<p>읽기 전용은 <code>list_history</code>, <code>get_flow</code>, <code>list_sitemap</code> 등 검사 도구를 유지하면서 <code>send_request</code>, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. <code>decode</code>, <code>jwt_decode</code> 같은 순수 계산 헬퍼는 네트워크나 데이터를 절대 건드리지 않으므로 그대로 사용할 수 있습니다.</p>
+<h2 id="4-첫-요청-구동하기-4-drive-your-first-request">4. 첫 요청 구동하기 {#4-drive-your-first-request}</h2>
+<p>도구가 살아 있으면, 에이전트에게 평범한 말로 지시하세요. 에이전트가 의도를 읽기·액션 도구로 매핑합니다.</p>
+<blockquote>
+<p>&quot;<code>/login</code>에 대한 마지막 POST 20개를 나열하고, 가장 최근 것을 다른 비밀번호로 재전송한 뒤, 상태 코드가 바뀌면 이슈를 열어줘.&quot;</p>
+</blockquote>
+<p>유능한 에이전트는 이를 짧은 도구 시퀀스로 바꿉니다.</p>
+<pre><code class="language-text hljs">→ list_history   method:POST path~/login   (최신 20개)
+→ get_flow       &lt;가장 최근 플로우&gt;
+→ send_request   POST /login  (본문 편집)
+→ create_issue   &quot;Auth bypass on /login&quot; severity:high
+</code></pre>
+<p>에이전트의 행동은 조용히 지나가지 않습니다. 각 행동은 에이전트에서 온 것으로 표시되어 gori의 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 코파일럿이 프로젝트에 무엇을 했는지 확인할 수 있습니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/guide/mcp/">MCP 서버</a>: 전체 도구 목록, 라이브 인터셉트, 그리고 gori가 MCP 이음새를 쓰는 이유</li>
+<li><a href="/ko/reference/cli/">CLI Reference</a>: 전체 <code>gori mcp</code> 플래그</li>
+<li><a href="/ko/reference/query-language/">Query Language</a>: 에이전트가 <code>list_history</code>에 사용하는 필터 문법</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>
