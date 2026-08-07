@@ -127,8 +127,7 @@ module Gori::Proxy::Tls
     # Gori::Error (leaving the current CA untouched) if a PEM won't parse or the
     # pair is unusable — validation runs BEFORE anything is written.
     def import!(cert_path : String, key_path : String) : String?
-      cert = Cert.read_pem(cert_path)
-      key = KeyPair.read_pem(key_path)
+      cert, key = CertAuthority.read_external_pair(cert_path, key_path)
       warning = CertAuthority.validate_ca_pair!(cert, key)
       install!(cert, key)
       warning
@@ -138,7 +137,33 @@ module Gori::Proxy::Tls
     # CLI) reject a bad import BEFORE creating or loading any CA, so a failed import
     # never leaves a spurious auto-generated CA behind. Same checks as import!.
     def self.validate_pem_pair(cert_path : String, key_path : String) : String?
-      validate_ca_pair!(Cert.read_pem(cert_path), KeyPair.read_pem(key_path))
+      cert, key = read_external_pair(cert_path, key_path)
+      validate_ca_pair!(cert, key)
+    end
+
+    # Read an OPERATOR-NAMED cert/key PEM pair (`gori ca import --cert/--key`, the TUI's
+    # CA import overlay). Distinct from Cert/KeyPair.read_pem for its messages alone: those
+    # surface the raw OpenSSL step ("BIO_new_file(nope.pem) failed", and — because a
+    # directory opens fine — "PEM_read_bio_X509 failed" for `--cert ~/certs`), which names
+    # an internal call instead of the mistake the operator made. Every path here is one they
+    # typed, so a typo, a directory, an unreadable file and a file that simply isn't PEM are
+    # the four likely inputs and each gets said plainly.
+    def self.read_external_pair(cert_path : String, key_path : String) : {Cert, KeyPair}
+      cert = read_operator_pem(cert_path, "certificate") { Cert.read_pem(cert_path) }
+      key = read_operator_pem(key_path, "private key") { KeyPair.read_pem(key_path) }
+      {cert, key}
+    end
+
+    private def self.read_operator_pem(path : String, what : String, &)
+      raise Gori::Error.new("#{what} file not found: #{path}") unless File.exists?(path)
+      raise Gori::Error.new("#{what} path is a directory, not a PEM file: #{path}") if File.directory?(path)
+      raise Gori::Error.new("#{what} file is not readable: #{path}") unless File::Info.readable?(path)
+      begin
+        yield
+      rescue Gori::Error
+        raise Gori::Error.new("#{path} is not a PEM #{what} gori can read " \
+                              "(expecting a -----BEGIN …----- block)")
+      end
     end
 
     # Reject an imported pair that can't serve as a signing root; return a soft
@@ -153,6 +178,29 @@ module Gori::Proxy::Tls
       if LibCrypto.x509_check_ca(cert.handle) == 0
         raise Gori::Error.new("certificate is not a CA (basicConstraints CA:TRUE required)")
       end
+      # A pair can pass BOTH checks above and still be useless to gori: CertBuilder signs
+      # every leaf with SHA-256, and an Ed25519/Ed448 key cannot sign with a digest at all
+      # (X509_sign fails). Such a root imported "successfully", was persisted, and then broke
+      # EVERY interception with "X509_sign failed" at the first CONNECT — a working import
+      # reported as success followed by a proxy that MITMs nothing. Signature algorithms are
+      # not enumerable from here, so prove it functionally: mint one throwaway leaf. `.invalid`
+      # (RFC 2606) can never be a real SNI host, and build_leaf touches no cache or file, so
+      # the probe is pure. Runs before the time checks so a hard "cannot sign" wins over the
+      # soft expiry warning.
+      #
+      # The message cannot name the offending algorithm: EVP_PKEY_id is a real symbol in
+      # OpenSSL 1.1.1 but a macro alias for EVP_PKEY_get_id in 3.x, so binding either one
+      # fails to link against the other — and gori builds against both (Homebrew 3.x, distro
+      # 1.1.1, the static-musl release). Naming the two key types that hit this, plus the two
+      # that work, is as actionable and cannot mislead about an unfamiliar third.
+      begin
+        CertBuilder.build_leaf("probe.invalid", cert, key)
+      rescue
+        raise Gori::Error.new(
+          "gori cannot sign certificates with this CA key — leaf certificates are signed " \
+          "with SHA-256, which Ed25519 and Ed448 keys do not support; use an EC P-256 or an " \
+          "RSA root CA")
+      end
       if LibCrypto.x509_cmp_time(LibCrypto.x509_getm_not_after(cert.handle), Pointer(Void).null) < 0
         return "certificate is expired"
       end
@@ -162,18 +210,34 @@ module Gori::Proxy::Tls
       nil
     end
 
-    # Persist a cert/key pair over the on-disk root and swap it live. Shared by
-    # regenerate! and import!. Overwriting a WORKING CA means a half-written pair
-    # (disk full, a permission error) must not corrupt it: stage both PEMs in full
-    # to temp files, then rename into place (atomic on POSIX; both temps already
-    # exist, so the on-disk cert/key never disagree past the gap between renames).
+    # Persist a cert/key pair over the on-disk root (write_pair) and swap it live. Shared by
+    # regenerate! and import!, which run against a LOADED CA — a running proxy, the TUI
+    # palette — so the in-memory swap and the cache drop belong here rather than in write_pair.
     private def install!(cert : Cert, key : KeyPair) : Nil
-      dir = File.dirname(@ca_cert_path)
+      CertAuthority.write_pair(File.dirname(@ca_cert_path), cert, key)
+      @mutex.synchronize do
+        @cert = cert
+        @key = key
+        @cache.clear # old leaves were signed by the previous root — drop them
+      end
+    end
+
+    # Write a cert/key pair over the root PEMs in `dir` and return the cert path. The
+    # class-level half of install! — no loaded CA required, which is what lets
+    # regenerate_at/import_at repair a directory nothing can load (see those).
+    #
+    # Overwriting a WORKING CA means a half-written pair (disk full, a permission error) must
+    # not corrupt it: stage both PEMs in full to temp files, then rename into place (atomic on
+    # POSIX; both temps already exist, so the on-disk cert/key never disagree past the gap
+    # between the two renames). A crash inside that gap does leave a mismatched pair — hence
+    # key_matches_cert?, and hence regenerate_at not needing a loadable CA to fix one.
+    def self.write_pair(dir : String, cert : Cert, key : KeyPair) : String
       # Full parity with load_or_create, `tighten:` included: the dir may have been removed
       # at runtime, and re-creating it must not re-mode an operator's --ca-dir either.
       Gori::Paths.ensure_dir(dir, tighten: false)
+      cert_path = File.join(dir, CA_CERT_FILE)
       key_path = File.join(dir, CA_KEY_FILE)
-      cert_tmp = "#{@ca_cert_path}.tmp"
+      cert_tmp = "#{cert_path}.tmp"
       key_tmp = "#{key_path}.tmp"
       begin
         cert.write_pem(cert_tmp)
@@ -181,17 +245,66 @@ module Gori::Proxy::Tls
         # inode, mode and all, so the installed key is never briefly readable.
         key.write_pem(key_tmp)
         File.rename(key_tmp, key_path)
-        File.rename(cert_tmp, @ca_cert_path)
+        File.rename(cert_tmp, cert_path)
       rescue ex
         File.delete?(cert_tmp)
         File.delete?(key_tmp)
         raise ex
       end
-      @mutex.synchronize do
-        @cert = cert
-        @key = key
-        @cache.clear # old leaves were signed by the previous root — drop them
+      cert_path
+    end
+
+    # Mint a fresh root straight into `dir`, WITHOUT loading whatever is there. Returns the
+    # cert path.
+    #
+    # This exists because load_or_create is the wrong entry point for a rotation. It refuses a
+    # half-present pair (a lone root.crt.pem after an `rm` of the key, a partial restore) and
+    # tells the operator to "run `gori ca regenerate`" — but regenerate itself went through
+    # load_or_create, so it hit the same refusal and aborted. The advertised repair was blocked
+    # by the very check that advertised it, leaving no non-manual way out of a broken CA dir.
+    # A rotation never needs the old pair, so it no longer asks for it.
+    def self.regenerate_at(dir : String, common_name : String = DEFAULT_CN) : String
+      cert, key = CertBuilder.build_root(common_name)
+      write_pair(dir, cert, key)
+    end
+
+    # Install an external root into `dir` without loading what is there — the import twin of
+    # regenerate_at, and the repair path for the same broken-pair dead end. Validation runs
+    # first, so a bad pair leaves the directory exactly as it was. Returns the installed cert
+    # path plus import!'s soft warning (expired / not-yet-valid), if any.
+    def self.import_at(dir : String, cert_path : String, key_path : String) : {String, String?}
+      cert, key = read_external_pair(cert_path, key_path)
+      warning = validate_ca_pair!(cert, key)
+      {write_pair(dir, cert, key), warning}
+    end
+
+    # Does the private key actually belong to the certificate? load_or_create does not ask
+    # (nothing did), and a mismatch is silent-by-construction — see usability_error.
+    def key_matches_cert? : Bool
+      @mutex.synchronize { LibCrypto.x509_check_private_key(@cert.handle, @key.handle) == 1 }
+    end
+
+    # Why this loaded CA cannot actually serve, phrased as a cause, or nil if it can. The two
+    # ways a CA that LOADS is still broken, both of them silent-by-construction:
+    #
+    #   - the key does not match the cert (a crash inside write_pair's rename gap, one file of
+    #     the pair hand-copied from another machine)
+    #   - gori cannot sign with the key at all (an Ed25519 root that a pre-fix `gori ca import`
+    #     accepted before validate_ca_pair! probed for this)
+    #
+    # Neither produces a gori-side error: gori starts, and every handshake fails at the CLIENT
+    # ("unknown CA", "bad signature") or dies mid-CONNECT. So `gori ca`, the CA's diagnostic
+    # command, asks both questions and is the one place either gets named. Cheap enough to run
+    # on every invocation: one X509_check_private_key, and one throwaway leaf mint.
+    def usability_error : String?
+      return "the private key does not match the certificate" unless key_matches_cert?
+      begin
+        @mutex.synchronize { CertBuilder.build_leaf("probe.invalid", @cert, @key) }
+      rescue
+        return "gori cannot sign leaf certificates with this CA key (leaves are signed with " \
+               "SHA-256, which Ed25519 and Ed448 keys do not support)"
       end
+      nil
     end
 
     # Base64(SHA-256(DER SubjectPublicKeyInfo)) of the root CA — the value a

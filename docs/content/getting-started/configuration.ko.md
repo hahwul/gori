@@ -68,7 +68,7 @@ openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.
 gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
-같은 동작을 팔레트(**Import CA certificate**)에서도 할 수 있습니다. gori는 가져오기 전에 키가 인증서와 일치하는지, 그리고 그 인증서가 CA인지 확인합니다. 신뢰용으로는 `root.crt.pem`만 배포하고, `root.key.pem`은 비밀로 유지하세요. [`gori ca import`](/ko/reference/cli/#gori-ca-import)를 참고하세요.
+같은 동작을 팔레트(**Import CA certificate**)에서도 할 수 있습니다. gori는 가져오기 전에 키가 인증서와 일치하는지, 그 인증서가 CA인지, 그리고 그 키로 실제로 리프 인증서를 서명할 수 있는지 확인합니다 — 리프는 SHA-256으로 서명하므로 Ed25519 · Ed448 루트는 거부됩니다. 신뢰용으로는 `root.crt.pem`만 배포하고, `root.key.pem`은 비밀로 유지하세요. [`gori ca import`](/ko/reference/cli/#gori-ca-import)를 참고하세요.
 
 팔레트의 **Open browser** 동작은 이미 CA를 신뢰하고 프록시를 경유하는 격리된 프로파일로 설치된 브라우저를 실행합니다([빠른 시작](/ko/getting-started/quick-start/) 참조).
 

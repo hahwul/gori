@@ -662,6 +662,10 @@ Prints the path to gori's root CA certificate (creates it on first use). Use thi
 | `--ca-dir=DIR` | CA directory (default `~/.gori/ca`, or `$GORI_HOME/ca`) |
 | `--pem` | Print the certificate PEM to stdout instead of the path |
 
+A verb comes first and its flags after it — `gori ca regenerate --ca-dir=DIR`, not `gori ca --ca-dir=DIR regenerate`. The reverse order is a usage error, because the verb would otherwise be dropped and the command would print the CA path as if it had done the work. None of the three forms takes a positional argument.
+
+`gori ca` also reports a root CA that loads but cannot serve — a private key that does not match the certificate, or a key gori cannot sign with — on stderr, since the symptom otherwise appears only at the client as an "unknown CA" or "bad signature" handshake failure. `regenerate` and `import` are the fix, and both work on a CA directory in any state, including one where only one file of the pair survives.
+
 ### gori ca regenerate
 
 Replaces the on-disk root CA with a freshly minted one. **Destructive**: every client that trusted the old CA must re-trust the new certificate. Any already-running gori process keeps the old CA in memory until restarted.
@@ -684,7 +688,7 @@ Adopts an externally-created root CA (a certificate + matching private key, both
 | `--yes`, `-y` | Skip the interactive confirm (required when stdin is not a tty) |
 | `--ca-dir=DIR` | CA directory to install into |
 
-The pair is validated before anything is written: the key must match the certificate and the certificate must be a CA (`basicConstraints CA:TRUE`). A bad pair aborts without touching the current CA. An expired or not-yet-valid certificate imports with a warning. Confirm by typing `import` on a tty, or pass `--yes`. The same action is available from the TUI palette (**Import CA certificate**).
+The pair is validated before anything is written: the key must match the certificate, the certificate must be a CA (`basicConstraints CA:TRUE`), and gori must be able to sign a leaf certificate with the key. That last check rules out **Ed25519 and Ed448 roots** — gori signs leaves with SHA-256, which those keys do not support — so use an EC P-256 or an RSA root. A rejected pair aborts without touching the current CA. An expired or not-yet-valid certificate imports with a warning. Confirm by typing `import` on a tty, or pass `--yes`. The same action is available from the TUI palette (**Import CA certificate**).
 
 Generate a root with OpenSSL, then import it:
 

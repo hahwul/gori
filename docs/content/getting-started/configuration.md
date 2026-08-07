@@ -68,7 +68,7 @@ openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.
 gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
-The same action is available from the palette (**Import CA certificate**). gori checks the key matches the cert and that it is a CA before adopting it. Distribute only `root.crt.pem` to trust; keep `root.key.pem` secret. See [`gori ca import`](/reference/cli/#gori-ca-import).
+The same action is available from the palette (**Import CA certificate**). gori checks the key matches the cert, that it is a CA, and that it can actually sign a leaf with the key before adopting it — an Ed25519 or Ed448 root is rejected, because leaves are signed with SHA-256. Distribute only `root.crt.pem` to trust; keep `root.key.pem` secret. See [`gori ca import`](/reference/cli/#gori-ca-import).
 
 The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy (see the [Quick Start](/getting-started/quick-start/)).
 

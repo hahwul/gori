@@ -169,3 +169,39 @@ describe "gori settings — section-name validation" do
     Gori::CLI.unknown_sections_for_spec(["network", "bogus", "theme"]).should eq(["bogus"])
   end
 end
+
+describe "gori ca — leftover positionals" do
+  # The one that bit: `gori ca --ca-dir=DIR regenerate`. A verb is recognised in FIRST position
+  # only, so behind a flag it reached the show path, where the parser DISCARDED it — gori printed
+  # the CA path and exited 0, having regenerated nothing, in output identical to a successful
+  # `gori ca`. Same shape as Run.list_leftover_error, for the same reason.
+  it "names the ordering when a verb was written after the flags" do
+    msg = Gori::CLI.ca_leftover_error("ca", ["regenerate"])
+    msg.should_not be_nil
+    msg.not_nil!.should contain("must come FIRST")
+    msg.not_nil!.should contain("nothing was regenerated")
+    Gori::CLI.ca_leftover_error("ca", ["import"]).not_nil!.should contain("nothing was imported")
+  end
+
+  it "rejects a stray word on every ca command" do
+    # `gori ca regenerate --yes bogusword` regenerated and ignored the word; `gori ca --pem
+    # strayword` printed the PEM and ignored it. Neither is a typo worth guessing at.
+    Gori::CLI.ca_leftover_error("ca", ["strayword"]).not_nil!.should contain("unexpected argument")
+    Gori::CLI.ca_leftover_error("ca", ["strayword"]).not_nil!.should contain("verbs: regenerate, import")
+    Gori::CLI.ca_leftover_error("ca regenerate", ["bogusword"]).not_nil!
+      .should contain("`gori ca regenerate` takes no positional arguments")
+    Gori::CLI.ca_leftover_error("ca import", ["STRAY"]).not_nil!.should contain("unexpected argument")
+  end
+
+  it "does not name the verbs where they are not accepted" do
+    # `gori ca regenerate import` is not an ordering mistake, and the show path's verb list
+    # would be a false lead there.
+    Gori::CLI.ca_leftover_error("ca regenerate", ["import"]).not_nil!.should_not contain("verbs:")
+    Gori::CLI.ca_leftover_error("ca regenerate", ["import"]).not_nil!.should_not contain("must come FIRST")
+  end
+
+  it "passes an empty leftover through" do
+    Gori::CLI.ca_leftover_error("ca", [] of String).should be_nil
+    Gori::CLI.ca_leftover_error("ca regenerate", [] of String).should be_nil
+  end
+end
