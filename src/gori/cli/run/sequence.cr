@@ -15,8 +15,6 @@ module Gori
         insecure = false
         kind : Sequencer::ExtractKind? = nil
         selector = ""
-        pos_a = 0
-        pos_b = 0
         count = 500
         concurrency = 1
         rate : Float64? = nil
@@ -70,6 +68,35 @@ module Gori
 
         # Manual mode — analyze a token list, no network.
         if tf = tokens_file
+          # This branch returns before EVERY check below — the arity check, the token-location
+          # requirement, `preflight_bind_from` and `seed_bindings` — so anything that only matters
+          # to a live replay was silently discarded. `sequence 5 --tokens=f.txt` analyzed the file
+          # and never said the `5` had gone; worse, `--tokens=f.txt --bind-from=3` printed a full
+          # report at exit 0 with `--bind-from` a no-op, which is the very defect class (a
+          # `--bind-from` discarded before it could speak) that CLI::Run.preflight_bind_from exists
+          # to close — left open one branch away from it.
+          #
+          # Read off the PARSED state rather than re-scanning argv for flag names, so the list
+          # cannot drift from the parser above. The three numeric collection knobs (--count,
+          # --concurrency, --retries) are deliberately absent: they carry non-nil defaults, so
+          # "was it passed" is not recoverable from state, and each only sizes a collection that is
+          # not happening. Every flag that would put a REQUEST on the wire, and every token-location
+          # flag (redundant against a list of already-extracted tokens), is named.
+          live = [] of String
+          live << "<flow-id> #{positional.join(" ").inspect}" unless positional.empty?
+          live << "--flow" if flow_id
+          live << "--request" if request_file
+          live << "--target" if target_override
+          live << "--sni" if sni
+          live << "--http2" if force_h2
+          live << "--insecure-upstream" if insecure
+          live << "--bind-from" if bind_from
+          live << "--allow-unscoped" if allow_unscoped
+          live << "a token location (--cookie/--header/--regex/--position/--jsonpath)" if kind
+          unless live.empty?
+            abort "gori run sequence: --tokens analyzes a pasted list and sends nothing, so it " \
+                  "cannot be combined with #{live.join(", ")} — drop one"
+          end
           tokens = read_token_list(tf)
           abort "gori run sequence: no tokens to analyze" if tokens.empty?
           # A pasted list has no origin and no descriptor — name the FILE, so a markdown report

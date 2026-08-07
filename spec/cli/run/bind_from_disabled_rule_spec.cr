@@ -142,7 +142,13 @@ describe "gori run --bind-from — the pre-plan refusal" do
       Gori::CLI::Run.bind_from_blocker_for_spec(Gori::Bindings.load(store))
         .should eq(Gori::CLI::Run::BIND_FROM_NO_RULES)
     end
-    # No project at all (--request/stdin) — same answer, one sentence.
+    # A nil layer keeps the no-rules answer HERE, and only here: this blocker is also what
+    # `seed_bindings` reaches, AFTER its own `open_store`, where nil means the load failed rather
+    # than "no project was named". The preflight caller no longer shares that answer — it routes
+    # through `preflight_bind_from_blocker`, which returns BIND_FROM_NO_PROJECT instead, because a
+    # nil layer there means `--request`/stdin was run with no --project/--db and telling that
+    # operator their project "declares no extract rules" was measurably false. Do not merge the two
+    # back together; see spec/cli_run_spec.cr's "no project vs no rules".
     Gori::CLI::Run.bind_from_blocker_for_spec(nil).should eq(Gori::CLI::Run::BIND_FROM_NO_RULES)
   end
 

@@ -1034,3 +1034,41 @@ describe "CLI::Run.list_leftover_error" do
       .not_nil!.should contain("unknown subcommand 'disable'")
   end
 end
+
+# `--bind-from` refused a run in a project that DOES declare extract rules, with the sentence for a
+# project that declares none. `preflight_bind_from` reads `Env.layer`, hydrated only by
+# `open_store`, and on the `--request`/stdin path with no --project/--db nothing has opened a
+# project by then — so a nil layer means "no project in play", not "no rules". Measured: a project
+# holding an enabled `$SESSION` rule was told to run `rewriter extract add` and write it again.
+#
+# Asserted through `preflight_bind_from_blocker`, the function that MAKES the choice — not through
+# the constants alone. Constant-only assertions all stay green if the classification is deleted,
+# which is exactly the coverage gap that let this ship. (`bind_from_blocker_for_spec` already
+# exists in spec/cli/run/bind_from_disabled_rule_spec.cr; do not redefine it here — two reopens of
+# one module silently let the later-parsed body win.)
+describe "gori run --bind-from — no project vs no rules" do
+  it "classifies a nil layer as NO PROJECT, not as a project without rules" do
+    # The fix itself: delete the nil branch in preflight_bind_from_blocker and only this fails.
+    Gori::CLI::Run.preflight_bind_from_blocker(nil)
+      .should eq(Gori::CLI::Run::BIND_FROM_NO_PROJECT)
+  end
+
+  it "sends the no-project case to name the project, NOT to add a rule it may already have" do
+    msg = Gori::CLI::Run.preflight_bind_from_blocker(nil).not_nil!
+    msg.should contain("no project is in play")
+    msg.should contain("--project")
+    # The wrong remedy is the whole bug: following it persists a duplicate rule and the run is
+    # still refused, because the project was never named.
+    msg.should_not contain("rewriter extract add")
+    msg.should_not eq(Gori::CLI::Run::BIND_FROM_NO_RULES)
+  end
+
+  it "still defers to the blocker for a project that IS loaded" do
+    with_store do |store|
+      # An opened project with no rules keeps the add-a-rule remedy, so the split did not swallow
+      # the case the sentence was written for.
+      Gori::CLI::Run.preflight_bind_from_blocker(Gori::Bindings.load(store))
+        .should eq(Gori::CLI::Run::BIND_FROM_NO_RULES)
+    end
+  end
+end

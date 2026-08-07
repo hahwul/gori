@@ -105,6 +105,7 @@ module Gori
         project_name : String? = nil
         format = :text
         include_sensitive = false
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run intercept [list] [options]"
@@ -113,10 +114,16 @@ module Gori
           p.on("--include-sensitive", "Show Authorization/Cookie/etc header values instead of [REDACTED]") { include_sensitive = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run intercept: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run intercept: missing value for #{f}" }
         end
         parser.parse(args)
+        # Both this and the mutating verbs report "no live capturing instance", so the swallowed
+        # `intercept --project=X drop 3` was indistinguishable from a real drop that found no TUI
+        # — the held request stayed held and the client stayed hung, under exit 0.
+        refuse_list_leftovers(leftover, "intercept",
+          "get, forward, drop, edit, enable, disable, filter, direction, list")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

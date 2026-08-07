@@ -27,6 +27,7 @@ module Gori
         owner_s = "issue"
         owner_id : Int64? = nil
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run links [list] --owner=issue|note --id=N\n\n" \
@@ -43,10 +44,15 @@ module Gori
           p.on("--id=N", "Owner issue/note id (required)") { |v| owner_id = parse_link_id(v, "--id") }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run links: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run links: missing value for #{f}" }
         end
         parser.parse(args)
+        # Only ever masked here by a flag mismatch: the COMPLETE mutate form aborts on `--ref`,
+        # which the list parser does not own, but `links --project=X --owner=issue --id=1 delete`
+        # listed and exited 0 with the verb discarded.
+        refuse_list_leftovers(leftover, "links", "add, delete/rm, list")
 
         owner_kind = Store::LinkOwnerKind.parse(owner_s) ||
                      abort("gori run links: invalid --owner '#{owner_s}' (issue|note)")
@@ -104,6 +110,7 @@ module Gori
         owner_id : Int64? = nil
         ref_s : String? = nil
         ref_id : Int64? = nil
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N --ref=KIND --ref-id=M\n\n" \
@@ -115,10 +122,28 @@ module Gori
           p.on("--ref=KIND", "Target kind: flow|repeater|fuzz|miner (required)") { |v| ref_s = v.strip.downcase }
           p.on("--ref-id=M", "Target id (required)") { |v| ref_id = parse_link_id(v, "--ref-id") }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run links #{verb}: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run links #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
+        # Every end of a link is named by a FLAG, so a positional here is always a mistake — most
+        # likely a `--ref`/`--id` value the operator meant to attach to its flag. Silently dropping
+        # it would file (or fail to remove) a different link than the one written.
+        #
+        # Refused AFTER `parse`, never inside the `unknown_args` block: Crystal's OptionParser runs
+        # that callback BEFORE its `starts_with?('-')` → `invalid_option` sweep, and an unrecognized
+        # flag is still sitting in the leftovers at that point. Aborting from inside therefore
+        # pre-empted `invalid_option` and misdiagnosed a typo — `--refid=3` came back as "unexpected
+        # argument" instead of "unknown option: --refid" plus the help listing the real flag names,
+        # which is the one thing that tells the operator they dropped a dash. Deferring lets the
+        # sweep win for flags and leaves this to catch genuine positionals (which is also why the
+        # twelve `refuse_list_leftovers` sites were never exposed to it — they all defer too).
+        unless leftover.empty?
+          abort "gori run links #{verb}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
+                "#{leftover.join(" ").inspect} — every end is named by a flag " \
+                "(--owner, --id, --ref, --ref-id)"
+        end
 
         owner_kind = Store::LinkOwnerKind.parse(owner_s) ||
                      abort("gori run links #{verb}: invalid --owner '#{owner_s}' (issue|note)")

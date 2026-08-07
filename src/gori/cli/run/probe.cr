@@ -80,16 +80,22 @@ module Gori
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
         # A positional QL is accepted too ("gori run probe status:>=500" / "-status:200"),
-        # mirroring history; an explicit --query wins. Terms join with spaces (QL ANDs them).
-        positional_query = (positional + neg_terms).join(' ')
-        query ||= positional_query unless positional_query.empty?
+        # mirroring history. `compose_history_query` owns the precedence, and it is shared rather
+        # than re-spelled here because the local `query ||= (positional + neg_terms).join` this
+        # replaces silently DISCARDED both halves whenever --query was also given: measured,
+        # `probe --query='host:x' '-path:/drop'` scanned 2 flows where the positional form scanned
+        # 1, and the summary line below printed the TRUNCATED query, so the widening was invisible
+        # in the output. A negation is not even the operator's second spelling of an argument —
+        # `split_ql_negations` reclassified it out of argv on their behalf.
+        query, dropped = Run.compose_history_query(query, positional, neg_terms)
+        Run.warn_dropped_query_terms("probe", dropped)
 
         filter : QL::Filter? = nil
         if q = query
           parsed = QL.parse(q)
-          QL.invalid_regex_terms(q).each do |t|
-            STDERR.puts "gori run probe: warning: invalid regex in #{t.inspect} — that term matches nothing"
-          end
+          # Both halves, not just invalid-regex: an UNRECOGNIZED field is dropped by QL and
+          # broadens the scan, which is the direction that matters here — see Run.warn_query_terms.
+          Run.warn_query_terms("probe", q)
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
           # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
           if !q.strip.empty? && parsed == QL::EMPTY

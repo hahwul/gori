@@ -126,9 +126,13 @@ module Gori
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
         # Accept a positional QL too ("gori run sitemap host:api" / "-status:404"), mirroring
-        # history's `/` bar; an explicit --query wins. Terms join with spaces (QL ANDs).
-        positional_query = (positional + neg_terms).join(' ')
-        query ||= positional_query unless positional_query.empty?
+        # history's `/` bar. Shared with history through `compose_history_query` rather than
+        # re-spelled: the local `query ||= (positional + neg_terms).join` this replaces threw both
+        # halves away whenever --query was given, so `sitemap --query='host:x' '-path:/drop'`
+        # printed the /drop endpoint the term excluded — a silently BROADER tree, with nothing on
+        # STDERR to say a term had gone.
+        query, dropped = Run.compose_history_query(query, positional, neg_terms)
+        Run.warn_dropped_query_terms("sitemap", dropped)
 
         # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
         # bad query must not leave a store handle open.
@@ -151,9 +155,9 @@ module Gori
       private def self.sitemap_filter(query : String?) : QL::Filter
         return QL::EMPTY unless q = query
         filter = QL.parse(q)
-        QL.invalid_regex_terms(q).each do |t|
-          STDERR.puts "gori run sitemap: warning: invalid regex in #{t.inspect} — that term matches nothing"
-        end
+        # Both halves — an unrecognized field is dropped and BROADENS the tree. See
+        # Run.warn_query_terms.
+        Run.warn_query_terms("sitemap", q)
         if !q.strip.empty? && filter == QL::EMPTY
           abort "gori run sitemap: query #{q.inspect} did not match any field (check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
         end

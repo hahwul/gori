@@ -27,6 +27,7 @@ module Gori
         project_name : String? = nil
         format = :text
         export_path : String? = nil
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run issues [options]\n\n" \
@@ -39,10 +40,12 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json | markdown") { |v| format = parse_format(v, [:text, :json, :markdown]) }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run issues: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run issues: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "issues", "create, update, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

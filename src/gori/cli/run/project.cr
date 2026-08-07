@@ -66,14 +66,18 @@ module Gori
 
       private def self.cmd_project_list(args : Array(String)) : Nil
         format = :text
+        leftover = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project [list] [options]"
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run project: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "project",
+          "list, create, delete/rm, scope, sandbox, env, host-override")
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         projects = registry.list
@@ -342,6 +346,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project scope [options]\n\n" \
@@ -354,10 +359,13 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run project scope: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project scope: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "project scope",
+          "add, update/edit, delete/rm, enable, disable, list")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
@@ -607,6 +615,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project sandbox [options]\n\n" \
@@ -619,10 +628,16 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run project sandbox: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project sandbox: missing value for #{f}" }
         end
         parser.parse(args)
+        # The one in this family where the silent no-op is a CONTAINMENT failure: `project
+        # sandbox --project=X on` printed the status, left the gate OFF and exited 0, so a CI
+        # bootstrap believed its traffic was contained when it was not.
+        refuse_list_leftovers(leftover, "project sandbox", "on/enable, off/disable, status",
+          read_verb: "status")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
@@ -710,6 +725,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project env [options]\n\n" \
@@ -722,10 +738,12 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run project env: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project env: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "project env", "set, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
@@ -863,6 +881,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project host-override [options]\n\n" \
@@ -877,10 +896,12 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run project host-override: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project host-override: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "project host-override", "add, update, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

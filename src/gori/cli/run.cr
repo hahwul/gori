@@ -478,6 +478,25 @@ module Gori
       BIND_FROM_NO_RULES = "--bind-from: this project declares no extract rules, so a replay has " \
                            "nothing to bind — add one with `gori run rewriter extract add`"
 
+      # The refusal for a `--bind-from` run with NO PROJECT in play, which is a different fact from
+      # the sentence above and used to be told as that one.
+      #
+      # `Env.layer` is hydrated by `open_store`, and on the `--request`/stdin path with no
+      # --project/--db nothing has opened a project by preflight time (`hydrate_project_env` is
+      # skipped, the source is a file, `cli_host_overrides` returns nil without opening). So the
+      # layer is nil, `bind_from_blocker(nil)` said "this project declares no extract rules", and
+      # that was measurably FALSE — the ambient project may declare several — while sending the
+      # operator to `rewriter extract add` to write a rule that already exists. The action they
+      # actually need is to NAME the project.
+      #
+      # Deliberately not fixed by hydrating the ambient project here: binding a standalone run to
+      # the ambient project is the product call `optional_project_outbound` defers on #354, and it
+      # would also silently pull that project's Sandbox/scope into a run this surface announces as
+      # UNSCOPED. One fact, one sentence; the behaviour change stays with #354.
+      BIND_FROM_NO_PROJECT = "--bind-from: no project is in play (--request/stdin without " \
+                             "--project/--db), so no extract rules are loaded and a replay has " \
+                             "nothing to bind — name the project with --project NAME (or --db PATH)"
+
       private def self.bind_from_blocker(bindings : Gori::Bindings?) : String?
         return BIND_FROM_NO_RULES if bindings.nil?
         return nil unless bindings.declared.empty?
@@ -498,8 +517,22 @@ module Gori
       # the time it runs, so it can move ahead of the plan without the store or the outbound.
       private def self.preflight_bind_from(bind_from : Int64?, cmd : String) : Nil
         return unless bind_from
-        err = bind_from_blocker(Env.layer.as?(Gori::Bindings))
+        err = preflight_bind_from_blocker(Env.layer.as?(Gori::Bindings))
         abort "#{cmd}: #{err}" if err
+      end
+
+      # Why `--bind-from` cannot bind at PREFLIGHT time, or nil to go ahead. Split from the abort
+      # for the same reason `bind_from_blocker` is: a decision reached only through `abort` is
+      # untestable by construction, and every spec of it stays green if the line is deleted.
+      #
+      # The one difference from `bind_from_blocker` is the nil case, and it is the whole fix: a nil
+      # layer HERE means no project was ever opened (`Env.layer` is hydrated by `open_store`, which
+      # the `--request`/stdin path with no --project/--db never calls), not a project without rules.
+      # `bind_from_blocker` keeps its own nil branch on the no-rules sentence because `seed_bindings`
+      # reaches it AFTER an `open_store`, where nil is a genuine load failure instead.
+      def self.preflight_bind_from_blocker(layer : Gori::Bindings?) : String?
+        return BIND_FROM_NO_PROJECT if layer.nil?
+        bind_from_blocker(layer)
       end
 
       # One sentence for every `gori run` tool whose builder refused an env token that
@@ -583,6 +616,42 @@ module Gori
         end
       end
 
+      # The two warnings every positional-QL surface owes its operator, beside the composer whose
+      # `dropped` half feeds the first. Shared because the alternative is what it replaced: the
+      # sentence copy-pasted per command (three copies, one word apart) and the SECOND warning
+      # present on `history` alone.
+      #
+      # That second one is the whole reason this is not cosmetic. `compose_history_query`'s own
+      # docstring justifies itself with "A silently BROADER result set is the one outcome
+      # `warn_query_terms` exists to shout about" — but probe and sitemap only ever ran the
+      # invalid-regex half, never `QL.analyze(q).ignored`, so on those two surfaces the thing it
+      # exists to shout about went out silent. Measured before/after on all three:
+      # `--query='path:/keep size:>bogus'` — a KNOWN field whose value will not compile, so
+      # `size_cond` returns nil, `analyze` reports it ignored, the filter collapses to `path:/keep`
+      # and the result is broader than asked. `QL::EMPTY` does not catch it, because `path:/keep`
+      # compiles fine.
+      #
+      # An unknown field NAME (`hostt:x`) is NOT this case and must not be expected here: ql.cr's
+      # `field_cond` else-branch deliberately free-texts the whole token so a typo "matches nothing
+      # real", which means it DID compile and `analyze` rightly does not call it ignored. Negating
+      # one (`-hostt:x`) therefore matches every row — a real sharp edge, but it belongs to that
+      # design decision in ql.cr, not to this warning.
+      def self.warn_dropped_query_terms(cmd : String, dropped : String?) : Nil
+        return unless dropped
+        STDERR.puts "gori run #{cmd}: --query given, so the positional query term(s) " \
+                    "#{dropped.inspect} were ignored"
+      end
+
+      def self.warn_query_terms(cmd : String, q : String) : Nil
+        QL.invalid_regex_terms(q).each do |t|
+          STDERR.puts "gori run #{cmd}: warning: invalid regex in #{t.inspect} — that term matches nothing"
+        end
+        ignored = QL.analyze(q).ignored
+        return if ignored.empty?
+        STDERR.puts "gori run #{cmd}: warning: ignored #{ignored.map(&.inspect).join(", ")} " \
+                    "— unrecognized or invalid, so the result is BROADER than the query asks for"
+      end
+
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
       # aborts them as unknown options before the positional-query join ever runs. Pull
       # them out first so they join the query like any other positional term. A single-
@@ -630,18 +699,34 @@ module Gori
       # file's own header (see the `verb_token?` guards) calls the worst one a scripted surface
       # can have, so it becomes a usage error that names the ordering.
       private def self.refuse_list_leftovers(leftover : Array(String), sub : String,
-                                             verbs : String) : Nil
-        (msg = list_leftover_error(leftover, sub, verbs)) && abort(msg)
+                                             verbs : String, read_verb : String = "list") : Nil
+        (msg = list_leftover_error(leftover, sub, verbs, read_verb)) && abort(msg)
       end
 
       # The sentence `refuse_list_leftovers` aborts with, or nil to proceed. Split out so the
-      # decision AND the message are spec-able — `abort` is not, and this is the one fix of the
-      # three whose blast radius is several call sites (`cmd_rewriter_list`, `cmd_extract_list`,
-      # `cmd_probe_rules_list`) plus one DELIBERATE exclusion: `cmd_probe_scan` takes a positional
-      # QL query (`gori run probe [QL query]`), so a leftover there is the operator's filter, not
-      # a discarded verb. Do not add this to it.
-      def self.list_leftover_error(leftover : Array(String), sub : String, verbs : String) : String?
+      # decision AND the message are spec-able — `abort` is not — and now the single seam for
+      # twelve call sites, which is what makes `read_verb` belong here rather than in each of them.
+      # One DELIBERATE exclusion: `cmd_probe_scan` takes a positional QL query (`gori run probe
+      # [QL query]`), so a leftover there is the operator's filter, not a discarded verb. Do not
+      # add this to it.
+      #
+      # `read_verb` is the command's OWN read verb, and a lone one is NOT refused. The guard exists
+      # for "a destructive mutation that silently no-ops with a SUCCESS status" (see
+      # refuse_list_leftovers above); the read verb is neither destructive nor a no-op — it is
+      # precisely what this command was about to do anyway. Without this, the leading-flag route
+      # turned every `<cmd> --project=X list` into a usage error, because that route hands the list
+      # command its own name as a leftover (`cmd_issues` → `verb_token?("--project=X")` is false →
+      # `cmd_issues_list(["--project=X", "list"])`, leftover `["list"]`). The message was
+      # self-refuting too: it called `list` an unknown subcommand while listing `list` among the
+      # verbs. `gori run project sandbox` passes "status" — the only one of the twelve whose read
+      # verb is not spelled `list`.
+      #
+      # Exactly one token, and exactly that word: `issues --project=X list rm 3` still names `list`
+      # as the discarded-verb position, because there a real second verb followed it.
+      def self.list_leftover_error(leftover : Array(String), sub : String, verbs : String,
+                                   read_verb : String = "list") : String?
         return nil if leftover.empty?
+        return nil if leftover.size == 1 && leftover[0] == read_verb
         "gori run #{sub}: unknown subcommand '#{leftover[0]}' — global flags go AFTER " \
         "the subcommand (`gori run #{sub} #{leftover[0]} … --project=NAME`). Verbs: #{verbs}"
       end

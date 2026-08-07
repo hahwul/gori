@@ -90,6 +90,7 @@ module Gori
         project_name : String? = nil
         show_tokens = false
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run oast providers [list] [options]\n\n" \
@@ -100,10 +101,13 @@ module Gori
           p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| leftover = rest }
           p.invalid_option { |f| abort "gori run oast providers: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast providers: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "oast providers",
+          "add, update, enable, disable, delete/rm, list")
 
         store = open_store(resolve_read_project(project_name, db_path))
         configs = begin
