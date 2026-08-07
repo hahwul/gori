@@ -20,6 +20,33 @@ end
 # ubuntu-latest runner (non-root), so the negative cases below do execute there;
 # this guard is for someone running the suite inside a root container. Probe the
 # actual behaviour rather than guessing from the uid.
+# A response body that yields a few chunks and then dies, the way a connection
+# reset part-way through a release asset does.
+private class BurstThenResetIO < IO
+  def initialize(@chunks : Int32)
+  end
+
+  def read(slice : Bytes) : Int32
+    raise IO::Error.new("connection reset by peer") if @chunks <= 0
+    @chunks -= 1
+    slice.fill(0x61_u8)
+    slice.size
+  end
+
+  def write(slice : Bytes) : Nil
+  end
+end
+
+# A port nothing is listening on: bind to 0 so the OS picks a free one, then
+# close it, so a connect there is REFUSED rather than left to time out (which
+# would make the network examples below take HTTP_TIMEOUT each).
+private def dead_port : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  server.close
+  port
+end
+
 private def mode_enforced?(dir : String) : Bool
   probe = File.join(dir, ".gori-perm-probe")
   File.write(probe, "x")
@@ -27,6 +54,17 @@ private def mode_enforced?(dir : String) : Bool
   false
 rescue
   true
+end
+
+# `verify_download!` is private and only ever called from inside update_binary's
+# tempdir block, where the redirect fallback it disclaims for cannot be reached
+# without talking to github.com. Expose it the way the other specs expose privates
+# (spec/cli_spec.cr does the same for split_subcommand / global_version_flag?).
+module Gori::Update
+  def self.verify_download_for_spec(dest : String, asset : Asset, got : Int64, io : IO, *,
+                                    announce_skip : Bool) : Nil
+    verify_download!(dest, asset, got, io, announce_skip: announce_skip)
+  end
 end
 
 describe Gori::Update do
@@ -1484,6 +1522,251 @@ describe Gori::Update do
           Gori::Update.fetch_latest_release_json(server.api_url)
           server.last_api_headers.not_nil!["Authorization"]?.should be_nil
         end
+      end
+    end
+  end
+
+  # CLI.run's rescue is deliberately narrow: a non-Gori::Error reaches the top of
+  # the process as a Crystal backtrace, "because those are bugs and want a trace"
+  # (cli.cr). Being offline is not a bug — it is the likeliest way an updater
+  # fails — and every network path here used to answer it with exactly that
+  # trace. `gori update` on a machine with no route out printed
+  # `Unhandled exception: ... (Socket::ConnectError)`.
+  describe "I/O failures surface as Gori::Error, never a backtrace (Bug C)" do
+    it "wraps a refused connection to the releases API" do
+      url = "http://127.0.0.1:#{dead_port}/repos/hahwul/gori/releases/latest"
+      expect_raises(Gori::Error, /could not reach 127\.0\.0\.1/) do
+        Gori::Update.fetch_latest_release_json(url)
+      end
+    end
+
+    # fetch_latest_release_json_with_fallback re-raises whatever the API fetch
+    # threw once the redirect fallback has nothing to offer (or is not eligible).
+    # That re-raise is only as clean as the original exception.
+    it "keeps the re-raise from the fallback path a Gori::Error too" do
+      url = "http://127.0.0.1:#{dead_port}/repos/hahwul/gori/releases/latest"
+      expect_raises(Gori::Error, /could not reach/) do
+        Gori::Update.fetch_latest_release_json_with_fallback(url)
+      end
+    end
+
+    it "wraps a refused connection while downloading an asset" do
+      url = "http://127.0.0.1:#{dead_port}/download/gori-v99.0.0-linux-x86_64"
+      dest = File.tempname("gori-dl-")
+      begin
+        expect_raises(Gori::Error, /could not download/) do
+          Gori::Update.download_to(url, dest)
+        end
+      ensure
+        File.delete?(dest)
+      end
+    end
+
+    it "wraps a file that cannot be read for checksumming" do
+      expect_raises(Gori::Error, /could not read .* to checksum it/) do
+        Gori::Update.file_sha256(File.join(File.tempname("gori-absent-", ""), "nope"))
+      end
+    end
+
+    # install_dir_writable? deliberately passes a directory that does not exist
+    # yet, on the grounds that atomic_install creates it — so the mkdir is the
+    # first place the layout can actually be rejected, and it sat outside
+    # atomic_install's own rescue.
+    it "wraps an install directory that cannot be created" do
+      root = File.tempname("gori-mkdir-")
+      Dir.mkdir_p(root)
+      begin
+        blocker = File.join(root, "prefix")
+        File.write(blocker, "a file, not a directory")
+        source = File.join(root, "new-gori")
+        File.write(source, "new")
+
+        # install_dir_writable? says yes (the dir simply is not there yet).
+        Gori::Update.install_dir_writable?(File.join(blocker, "bin", "gori")).should be_true
+        expect_raises(Gori::Error, /could not create the install directory/) do
+          Gori::Update.atomic_install(source, File.join(blocker, "bin", "gori"))
+        end
+      ensure
+        FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+
+    # Process.run RAISES File::NotFoundError when the binary is absent rather
+    # than returning a failed status, so `tar list failed` never got a chance to
+    # run on a minimal image — the macOS archive install backtraced instead.
+    it "wraps a missing tar" do
+      expect_raises(Gori::Error, /could not run tar/) do
+        with_env({"PATH" => File.tempname("gori-empty-path-", "")}) do
+          Gori::Update.list_tar_entries("/nonexistent.tar.gz")
+        end
+      end
+    end
+  end
+
+  describe ".run --exec on channels with no single command" do
+    # package_action deliberately returns `command: nil` for pacman/deb/rpm/nix:
+    # which one is right depends on the AUR helper / how nix installed it, and
+    # the rest need sudo. But the whole acknowledgement lived inside
+    # `if cmd = action[:command]`, so `--exec` printed NOTHING about itself on
+    # those channels and read as though it had run the upgrade.
+    it "says --exec had nothing to run instead of staying silent" do
+      {
+        {"/usr/bin/gori", Gori::Update::OwnerResult::Pacman, Gori::Update::OsFamily::ArchLike, "pacman"},
+        {"/usr/bin/gori", Gori::Update::OwnerResult::Dpkg, Gori::Update::OsFamily::DebianLike, "deb"},
+        {"/usr/bin/gori", Gori::Update::OwnerResult::Rpm, Gori::Update::OsFamily::RhelLike, "rpm"},
+        {"/nix/store/0fhkwk15n3ya0llfr0754awcldpz4x54-gori-0.1.3/bin/gori",
+         Gori::Update::OwnerResult::None, Gori::Update::OsFamily::Unknown, "nix"},
+      }.each do |(path, owner, family, channel)|
+        io = IO::Memory.new
+        Gori::Update.run(io, io, exe_path: path, exec_package_commands: true,
+          owner: owner, os_family: family)
+        out = io.to_s
+        out.should contain("install channel: #{channel}")
+        out.should contain("--exec has nothing to run on the #{channel} channel")
+        # Still no claim that anything was executed.
+        out.should_not contain("Running:")
+      end
+    end
+
+    it "stays quiet about --exec on those channels when it was not passed" do
+      io = IO::Memory.new
+      Gori::Update.run(io, io, exe_path: "/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Pacman,
+        os_family: Gori::Update::OsFamily::ArchLike)
+      io.to_s.should_not contain("--exec")
+    end
+
+    # The channels that DO carry a command keep the hint they always had.
+    it "leaves the Homebrew/Snap hint alone" do
+      io = IO::Memory.new
+      Gori::Update.run(io, io, exe_path: "/opt/homebrew/Cellar/gori/0.1.0/bin/gori")
+      out = io.to_s
+      out.should contain("Re-run with --exec to run the command above automatically.")
+      out.should_not contain("has nothing to run")
+    end
+  end
+
+  describe ".copy_with_progress on a failed transfer" do
+    # The clear used to sit AFTER the copy loop, so an exception skipped it: the
+    # last bar stayed on screen and `gori update: …` was then printed onto that
+    # same line, right after the transfer rate.
+    it "clears the progress line even when the download raises" do
+      term = IO::Memory.new
+      dest = File.tempname("gori-progress-")
+      begin
+        expect_raises(IO::Error, /connection reset/) do
+          Gori::Update.copy_with_progress(BurstThenResetIO.new(2), dest, 10_000_000_i64,
+            progress_io: term, force_progress: true)
+        end
+        drawn = term.to_s
+        drawn.should contain("%") # a bar really was drawn
+        drawn.should end_with("\r\e[K")
+      ensure
+        File.delete?(dest)
+      end
+    end
+  end
+
+  describe ".atomic_install leftover sweep" do
+    # atomic_install's `rescue` only runs when the copy RAISES. Crystal's default
+    # SIGINT terminates without unwinding, so Ctrl-C during the copy (or a kill,
+    # or a power loss) stranded a full ~40 MB duplicate of the binary in the
+    # operator's install directory, and every retry added another. lib/ already
+    # swept its own leftovers; the binary did not.
+    it "clears .gori-update.* temps stranded by an interrupted run" do
+      dir = File.tempname("gori-sweep-")
+      Dir.mkdir_p(dir)
+      begin
+        target = File.join(dir, "gori")
+        File.write(target, "#!/bin/sh\necho old\n")
+        File.chmod(target, 0o755)
+        File.write(File.join(dir, ".gori-update.4242.deadbeef"), "a" * 4096)
+        File.write(File.join(dir, ".gori-update.4243.cafebabe"), "a" * 4096)
+        # Neither the installed binary nor an unrelated sibling may be touched.
+        File.write(File.join(dir, "gori-notes.txt"), "keep me")
+
+        source = File.join(dir, "new-gori")
+        File.write(source, "#!/bin/sh\necho new\n")
+
+        Gori::Update.atomic_install(source, target)
+
+        # Dir.children, not Dir.glob: glob skips dotfiles, so it reports empty
+        # even when the orphans are right there.
+        Dir.children(dir).select(&.starts_with?(".gori-update.")).should be_empty
+        File.read(target).should contain("echo new")
+        File.read(File.join(dir, "gori-notes.txt")).should eq("keep me")
+      ensure
+        FileUtils.rm_rf(dir) if File.exists?(dir)
+      end
+    end
+
+    # Matched by prefix over Dir.children rather than by Dir.glob, for the reason
+    # sweep_lib_leftovers gives: the install path belongs to the operator.
+    it "treats glob metacharacters in the install path as literal" do
+      root = File.tempname("gori-sweep-glob-")
+      dir = File.join(root, "gori[1]*?")
+      Dir.mkdir_p(dir)
+      begin
+        target = File.join(dir, "gori")
+        File.write(target, "old")
+        File.write(File.join(dir, ".gori-update.7.abcd1234"), "stale")
+        source = File.join(root, "new-gori")
+        File.write(source, "new")
+
+        Gori::Update.atomic_install(source, target)
+
+        Dir.children(dir).select(&.starts_with?(".gori-update.")).should be_empty
+        File.read(target).should eq("new")
+      ensure
+        FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+  end
+
+  describe "redirect-fallback checksum notice" do
+    # The "no SHA256SUMS, so verification is skipped" line used to be printed
+    # BEFORE the download, off the versioned asset. But the versioned name on the
+    # redirect path is a GUESS from a tag, and download_asset swaps in the
+    # version-less alias when that guess 404s — and the alias carries its own
+    # SHA256SUMS entry. So the operator was told verification was skipped for an
+    # asset that was never fetched, while the one that was actually installed got
+    # verified. The notice now reads off the asset that came down.
+    it "reports on the asset that was actually downloaded, not the one first guessed" do
+      wrong = Gori::Update::Asset.new("gori-v9.9.9-linux-x86_64", "http://127.0.0.1/x", 0_i64, nil)
+      verified = Gori::Update::Asset.new("gori-linux-x86_64", "http://127.0.0.1/y", 0_i64,
+        "sha256:#{"b" * 64}")
+
+      payload = File.tempname("gori-notice-")
+      begin
+        File.write(payload, "body")
+        real = Gori::Update.file_sha256(payload)
+        good = Gori::Update::Asset.new(verified.name, verified.browser_download_url, 0_i64,
+          "sha256:#{real}")
+
+        io = IO::Memory.new
+        Gori::Update.verify_download_for_spec(payload, good, 4_i64, io, announce_skip: true)
+        out = io.to_s
+        out.should contain("Verifying sha256 checksum")
+        out.should_not contain("verification is skipped")
+
+        # And the genuine no-digest case still says so, naming that same asset.
+        io2 = IO::Memory.new
+        Gori::Update.verify_download_for_spec(payload, wrong, 4_i64, io2, announce_skip: true)
+        io2.to_s.should contain("#{wrong.name} has no SHA256SUMS entry")
+
+        # Off the redirect path there is nothing to disclaim: the API always
+        # hands over a per-asset digest, so silence there is not a skipped check.
+        io3 = IO::Memory.new
+        Gori::Update.verify_download_for_spec(payload, wrong, 4_i64, io3, announce_skip: false)
+        io3.to_s.should be_empty
+
+        # A digest that is present but wrong still fails, notice or not.
+        expect_raises(Gori::Error, /checksum mismatch/) do
+          Gori::Update.verify_download_for_spec(payload, verified, 4_i64, IO::Memory.new,
+            announce_skip: true)
+        end
+      ensure
+        File.delete?(payload)
       end
     end
   end

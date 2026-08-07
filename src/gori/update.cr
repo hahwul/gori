@@ -652,29 +652,35 @@ module Gori
       downloaded = 0_i64
       buf = Bytes.new(PROGRESS_CHUNK)
 
-      File.open(dest, "w") do |file|
-        loop do
-          n = body_io.read(buf)
-          break if n == 0
-          file.write(buf[0, n])
-          downloaded += n
-          on_progress.try &.call(downloaded, total)
+      begin
+        File.open(dest, "w") do |file|
+          loop do
+            n = body_io.read(buf)
+            break if n == 0
+            file.write(buf[0, n])
+            downloaded += n
+            on_progress.try &.call(downloaded, total)
 
-          if show && progress_io
-            now = Time.instant
-            if now - last_draw >= PROGRESS_MIN_INTERVAL || (total > 0 && downloaded >= total)
-              line = format_progress_line(downloaded, total, elapsed: started.elapsed)
-              progress_io.print "\r\e[K  #{line}"
-              progress_io.flush
-              last_draw = now
+            if show && progress_io
+              now = Time.instant
+              if now - last_draw >= PROGRESS_MIN_INTERVAL || (total > 0 && downloaded >= total)
+                line = format_progress_line(downloaded, total, elapsed: started.elapsed)
+                progress_io.print "\r\e[K  #{line}"
+                progress_io.flush
+                last_draw = now
+              end
             end
           end
         end
-      end
-
-      if show && progress_io
-        progress_io.print "\r\e[K"
-        progress_io.flush
+      ensure
+        # In an `ensure`, not after the loop: a reset mid-transfer left the last
+        # bar standing and the error message was then printed onto that same
+        # line, right after the rate — the one moment the operator most needs to
+        # read it. The line belongs to this method either way it exits.
+        if show && progress_io
+          progress_io.print "\r\e[K"
+          progress_io.flush
+        end
       end
       downloaded
     end
@@ -722,12 +728,14 @@ module Gori
     # Streamed SHA256 of a file as lowercase hex (constant memory).
     def self.file_sha256(path : String) : String
       digest = Digest::SHA256.new
-      File.open(path) do |file|
-        buf = Bytes.new(PROGRESS_CHUNK)
-        loop do
-          n = file.read(buf)
-          break if n == 0
-          digest.update(buf[0, n])
+      io_guard("could not read #{path} to checksum it") do
+        File.open(path) do |file|
+          buf = Bytes.new(PROGRESS_CHUNK)
+          loop do
+            n = file.read(buf)
+            break if n == 0
+            digest.update(buf[0, n])
+          end
         end
       end
       digest.hexfinal
@@ -750,10 +758,40 @@ module Gori
     # CLI orchestration + I/O
     # ---------------------------------------------------------------------------
 
+    # Turn the I/O failures an updater actually MEETS — no route to GitHub, DNS
+    # that does not resolve, a TLS store that cannot verify (#323/#333), a
+    # connection reset mid-transfer, a `tar` that is not installed — into the
+    # project's expected-error type.
+    #
+    # CLI.run's rescue is deliberately narrow (see cli.cr): anything that is not
+    # a Gori::Error reaches the top of the process as a Crystal backtrace,
+    # "because those are bugs and want a trace". Being offline is not a bug, and
+    # it is the single likeliest way `gori update` fails — yet that is exactly
+    # what it answered with. Only the I/O families are converted here, so a
+    # genuine bug still gets its trace.
+    #
+    # Gori::Error descends straight from Exception, so the errors this module
+    # raises on purpose (including AssetNotFound, which the alias retry rescues
+    # by type) pass through untouched.
+    private def self.io_guard(what : String, &)
+      yield
+    rescue ex : IO::Error | OpenSSL::Error
+      raise Error.new("#{what}: #{ex.message.presence || ex.class}")
+    end
+
     def self.resolve_executable_path : String
       path = Process.executable_path
       raise Error.new("could not determine the running gori executable path") unless path
       File.realpath(path)
+    rescue ex : File::Error
+      # The running binary was moved or deleted underneath us (a package manager
+      # upgrading it, a concurrent `gori update`). File::Error is not a
+      # Gori::Error, so this used to be the first thing `gori update` did and the
+      # first way it could backtrace.
+      raise Error.new(
+        "could not resolve the running gori executable: #{ex.message.presence || ex.class} " \
+        "(it may have been moved or deleted while running)"
+      )
     end
 
     private def self.http_client(host : String, port : Int32, tls : Bool,
@@ -965,7 +1003,9 @@ module Gori
       tls = uri.scheme == "https"
       client = http_client(host, port, tls, timeout)
       begin
-        response = client.get(uri.request_target, headers: headers)
+        response = io_guard("could not reach #{host}") do
+          client.get(uri.request_target, headers: headers)
+        end
         raise api_error(response.status_code, response.body) unless response.status_code == 200
         response.body
       ensure
@@ -991,40 +1031,45 @@ module Gori
         # Capture result outside the HTTP block (block return is not always the method return).
         result = 0_i64
         redirect_url : String? = nil
-        client.get(uri.request_target, headers: headers) do |response|
-          code = response.status_code
-          if {301, 302, 303, 307, 308}.includes?(code)
-            location = response.headers["Location"]?
-            raise Error.new("redirect without Location from #{url}") unless location
-            response.body_io.gets_to_end
-            # Resolve relative redirects against the current URL.
-            redirect_url = location.starts_with?("http://") || location.starts_with?("https://") ? location : URI.parse(url).resolve(location).to_s
-            next
-          end
-          unless code == 200
-            response.body_io.gets_to_end
-            # 404 gets its own type: it is the one status that means "this exact
-            # name is not in the release", which is the only thing worth retrying
-            # under the version-less alias.
-            raise AssetNotFound.new("download failed HTTP 404 for #{url}") if code == 404
-            raise Error.new("download failed HTTP #{code} for #{url}")
-          end
-          cl = response.headers["Content-Length"]?.try(&.to_i64?) || 0_i64
-          total = cl > 0 ? cl : expected_size
-          result = copy_with_progress(response.body_io, dest, total,
-            progress_io: progress_io,
-            on_progress: on_progress,
-            force_progress: force_progress)
-          # Verify against the ACTUAL HTTP Content-Length header, not just whatever
-          # size the (unauthenticated) release JSON claims. A truncated/interrupted
-          # transfer must never be silently accepted just because the JSON's `size`
-          # field is 0 or wrong — this is the one completeness signal the server
-          # can't lie about without also lying to every other HTTP client.
-          if cl > 0 && result != cl
-            File.delete?(dest)
-            raise Error.new(
-              "download truncated for #{url}: expected #{cl} bytes (Content-Length) but received #{result}"
-            )
+        # Guards the whole streamed exchange, not just the connect: a reset or a
+        # read timeout part-way through tens of MB is the commonest way this
+        # fails, and it surfaces from inside the block.
+        io_guard("could not download #{url}") do
+          client.get(uri.request_target, headers: headers) do |response|
+            code = response.status_code
+            if {301, 302, 303, 307, 308}.includes?(code)
+              location = response.headers["Location"]?
+              raise Error.new("redirect without Location from #{url}") unless location
+              response.body_io.gets_to_end
+              # Resolve relative redirects against the current URL.
+              redirect_url = location.starts_with?("http://") || location.starts_with?("https://") ? location : URI.parse(url).resolve(location).to_s
+              next
+            end
+            unless code == 200
+              response.body_io.gets_to_end
+              # 404 gets its own type: it is the one status that means "this exact
+              # name is not in the release", which is the only thing worth retrying
+              # under the version-less alias.
+              raise AssetNotFound.new("download failed HTTP 404 for #{url}") if code == 404
+              raise Error.new("download failed HTTP #{code} for #{url}")
+            end
+            cl = response.headers["Content-Length"]?.try(&.to_i64?) || 0_i64
+            total = cl > 0 ? cl : expected_size
+            result = copy_with_progress(response.body_io, dest, total,
+              progress_io: progress_io,
+              on_progress: on_progress,
+              force_progress: force_progress)
+            # Verify against the ACTUAL HTTP Content-Length header, not just whatever
+            # size the (unauthenticated) release JSON claims. A truncated/interrupted
+            # transfer must never be silently accepted just because the JSON's `size`
+            # field is 0 or wrong — this is the one completeness signal the server
+            # can't lie about without also lying to every other HTTP client.
+            if cl > 0 && result != cl
+              File.delete?(dest)
+              raise Error.new(
+                "download truncated for #{url}: expected #{cl} bytes (Content-Length) but received #{result}"
+              )
+            end
           end
         end
         if next_url = redirect_url
@@ -1059,8 +1104,19 @@ module Gori
     # part-way with, say, IO::Error would otherwise strand `tmp` next to the binary.
     def self.atomic_install(source : String, target : String) : Nil
       dir = File.dirname(target)
-      Dir.mkdir_p(dir)
-      tmp = File.join(dir, ".gori-update.#{Process.pid}.#{Random::Secure.hex(4)}")
+      # Outside the `begin` below, so it needs its own guard: install_dir_writable?
+      # deliberately passes a directory that does not exist yet ("atomic_install
+      # creates it"), and creating it fails for real — an unwritable parent, or a
+      # plain file sitting at that path.
+      io_guard("could not create the install directory #{dir}") { Dir.mkdir_p(dir) }
+      # Before staging a new one, clear temps an earlier run never got to rename.
+      # The `rescue` below only runs when the copy raises — Crystal's default
+      # SIGINT terminates without unwinding, so a Ctrl-C during the copy (or a
+      # kill, or a power loss) strands a full ~40 MB duplicate of the binary in
+      # the operator's install directory, and every retry adds another. lib/
+      # already sweeps its own leftovers; this is the same sweep for the binary.
+      sweep_install_leftovers(dir)
+      tmp = File.join(dir, "#{INSTALL_TMP_PREFIX}#{Process.pid}.#{Random::Secure.hex(4)}")
       begin
         FileUtils.cp(source, tmp)
         File.chmod(tmp, 0o755)
@@ -1072,6 +1128,25 @@ module Gori
           "(the binary already installed there was left untouched)"
         )
       end
+    end
+
+    # Remove `.gori-update.*` siblings stranded by an interrupted run.
+    #
+    # Matched by prefix over Dir.children rather than by Dir.glob, for the reason
+    # sweep_lib_leftovers gives: the install path is the operator's, and a `[`,
+    # `*` or `?` in it would make a glob both miss the real leftovers and rm
+    # entries it was never meant to see. The prefix starts with a dot and the
+    # installed binary is `gori`, so the target itself can never match.
+    #
+    # A concurrent `gori update` could have its in-flight temp swept here. That
+    # costs the loser a clean "failed to install" — the installed binary is never
+    # touched — which is the right trade against leaving the copies to pile up.
+    private def self.sweep_install_leftovers(dir : String) : Nil
+      Dir.children(dir).each do |name|
+        File.delete?(File.join(dir, name)) if name.starts_with?(INSTALL_TMP_PREFIX)
+      end
+    rescue
+      # A leftover we cannot clear is cosmetic; never fail an update over it.
     end
 
     # `atomic_install` renames a sibling temp file over the target, so replacing
@@ -1087,18 +1162,32 @@ module Gori
     # Crystal has no Dir.mktmpdir; create a unique dir under Dir.tempdir and clean up.
     private def self.with_tempdir(prefix : String, &)
       dir = File.tempname(prefix, "")
-      Dir.mkdir_p(dir)
+      # A TMPDIR that has been removed, or points somewhere unwritable, is an
+      # operator condition and gets a message like every other one.
+      io_guard("could not create a temporary directory under #{File.dirname(dir)}") do
+        Dir.mkdir_p(dir)
+      end
       begin
         yield dir
       ensure
-        FileUtils.rm_rf(dir) if File.exists?(dir)
+        # Rescued so a tempdir we cannot clear — which is cosmetic — never
+        # replaces the real exception on the way out.
+        begin
+          FileUtils.rm_rf(dir) if File.exists?(dir)
+        rescue
+        end
       end
     end
 
+    # `tar` is assumed present, and on a minimal image it is not: Process.run
+    # raises File::NotFoundError rather than returning a failed status, which is
+    # not a Gori::Error and so backtraced out of the macOS archive install.
     def self.list_tar_entries(archive : String) : String
       listing = IO::Memory.new
       tar_err = IO::Memory.new
-      status = Process.run("tar", ["tzf", archive], output: listing, error: tar_err)
+      status = io_guard("could not run tar") do
+        Process.run("tar", ["tzf", archive], output: listing, error: tar_err)
+      end
       raise Error.new("tar list failed: #{tar_err}") unless status.success?
       listing.to_s
     end
@@ -1106,13 +1195,17 @@ module Gori
     def self.extract_tar(archive : String, dest_dir : String) : Nil
       assert_safe_tar_listing(list_tar_entries(archive))
       tar_err = IO::Memory.new
-      status = Process.run("tar", ["xzf", archive, "-C", dest_dir],
-        output: Process::Redirect::Close, error: tar_err)
+      status = io_guard("could not run tar") do
+        Process.run("tar", ["xzf", archive, "-C", dest_dir],
+          output: Process::Redirect::Close, error: tar_err)
+      end
       raise Error.new("tar extract failed: #{tar_err}") unless status.success?
     end
 
     LIB_BACKUP_SUFFIX  = ".gori-old."
     LIB_STAGING_SUFFIX = ".gori-new."
+    # Sibling temp atomic_install renames over the target (see sweep_install_leftovers).
+    INSTALL_TMP_PREFIX = ".gori-update."
 
     # Replace lib/ only at a verified-safe destination. Stages to a temp name then renames.
     #
@@ -1124,7 +1217,7 @@ module Gori
       raise Error.new("refusing to install lib/ at unsafe path: #{lib_dst}") if forbidden_lib_destination?(lib_dst)
 
       parent = File.dirname(lib_dst)
-      Dir.mkdir_p(parent)
+      io_guard("could not create #{parent} for the bundled lib/") { Dir.mkdir_p(parent) }
 
       # Half-copied staging trees are always garbage, so they go unconditionally.
       # Backups do NOT: if a previous run died between renaming lib/ aside and
@@ -1270,7 +1363,8 @@ module Gori
     # Post-download integrity gate: non-empty, matches the size the release
     # advertised, and matches its sha256 when the API supplied a digest. The
     # digest is absent on the redirect fallback, where verify_sha256! no-ops.
-    private def self.verify_download!(dest : String, asset : Asset, got : Int64, io : IO) : Nil
+    private def self.verify_download!(dest : String, asset : Asset, got : Int64, io : IO, *,
+                                      announce_skip : Bool = false) : Nil
       raise Error.new("downloaded asset is empty: #{asset.name}") unless got > 0
       if asset.size > 0 && got != asset.size
         raise Error.new("downloaded size mismatch for #{asset.name}: expected #{asset.size} bytes, got #{got}")
@@ -1278,6 +1372,13 @@ module Gori
       if expected_sha = parse_sha256_digest(asset.digest)
         io.puts "Verifying sha256 checksum"
         verify_sha256!(dest, expected_sha, asset.name)
+      elsif announce_skip
+        # Said HERE rather than beside the "resolved via redirect" note, because
+        # only here is `asset` the one that actually came down. download_asset
+        # can swap in the version-less alias, which carries its own SHA256SUMS
+        # entry — so the note used to be read off an asset that was never
+        # installed and could claim a skip for a download it then verified.
+        io.puts "Note: #{asset.name} has no SHA256SUMS entry in this release, so sha256 verification is skipped."
       end
     end
 
@@ -1358,9 +1459,6 @@ module Gori
       if via_redirect
         io.puts "Note: the GitHub release API was unavailable (rate limit or outage);"
         io.puts "      resolved #{display_version(release.tag_name)} from #{RELEASES_LATEST_URL} instead."
-        unless parse_sha256_digest(asset.digest)
-          io.puts "      #{display_version(release.tag_name)} publishes no SHA256SUMS, so sha256 verification is skipped."
-        end
       end
 
       io.puts "Updating #{display_version(VERSION)} → #{display_version(ver)}"
@@ -1370,7 +1468,7 @@ module Gori
       with_tempdir("gori-dl-") do |dir|
         started = Time.instant
         dest, asset, got = download_asset(release, asset, dir, io, force_progress: force_progress)
-        verify_download!(dest, asset, got, io)
+        verify_download!(dest, asset, got, io, announce_skip: via_redirect)
         io.puts "Downloaded #{format_size(got)} in #{format_duration(started.elapsed)}"
         install_from_download(dest, target_path, asset_is_archive?(asset.name))
       end
@@ -1414,7 +1512,9 @@ module Gori
             tool = cmd.split.first
             if Process.find_executable(tool)
               io.puts "Running: #{cmd}"
-              status = Process.run(cmd, shell: true, output: io, error: err)
+              status = io_guard("could not run #{cmd}") do
+                Process.run(cmd, shell: true, output: io, error: err)
+              end
               unless status.success?
                 raise Error.new("#{cmd} failed (exit #{status.exit_code})")
               end
@@ -1422,8 +1522,16 @@ module Gori
               io.puts "(#{tool} not found on PATH — run the command above yourself)"
             end
           else
-            io.puts "Re-run with --exec to run the command above automatically." if cmd
+            io.puts "Re-run with --exec to run the command above automatically."
           end
+        elsif exec_package_commands
+          # pacman/deb/rpm/nix deliberately carry no single auto-runnable command
+          # (which of them is right depends on the AUR helper / how nix installed
+          # it, and the others need sudo). That left `--exec` printing NOTHING
+          # about itself on those channels, so it read as having run something.
+          io.puts ""
+          io.puts "(--exec has nothing to run on the #{channel.to_s.downcase} channel: " \
+                  "the upgrade needs a privileged or interactive command, so run one of the lines above yourself.)"
         end
       else
         io.puts action[:message]

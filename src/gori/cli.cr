@@ -1029,6 +1029,12 @@ module Gori
           exit 0
         end
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        # `gori update` takes no positional arguments, and `--exec` is its only
+        # flag — so a `--` separator has nothing legitimate to protect. Without
+        # this, `gori update -- --exec` parsed clean and silently dropped the
+        # flag, and `gori update whatever` ran a full self-update on a typo. Same
+        # failure, same guard, as `gori wizard` / `gori tutorial`.
+        p.unknown_args { |rest, after| reject_extra_args("update", rest, after, p) }
       end
       parser.parse(args)
       begin
