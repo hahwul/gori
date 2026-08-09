@@ -29,7 +29,17 @@ module Gori::Oast
         resp = http.request("GET", "#{base_url}/api/bin/#{session.correlation_id}/req/shift")
         break if resp.status == 404 # bin drained
         break unless resp.status == 200
-        it = to_interaction(parse_json(resp.body))
+        # Each shift has ALREADY removed this request from the bin server-side, so a raise on a
+        # malformed body (a proxy error page or a rate-limit HTML served with a 200) would discard
+        # every interaction shifted so far THIS cycle — unrecoverably, since the bin no longer
+        # holds them. Keep what parsed and stop; the poller drains the remainder next cycle.
+        # (parse_time already guards the timestamp field for the same reason; this guards the body
+        # parse sitting above it.)
+        it = begin
+          to_interaction(parse_json(resp.body))
+        rescue
+          break
+        end
         out << it if it
       end
       out

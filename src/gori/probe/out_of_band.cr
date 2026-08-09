@@ -69,11 +69,12 @@ module Gori
         getter session_id : Int64
 
         # nil when this project has no OAST session to mint from — the ordinary state, and the
-        # reason every OAST rule plans nothing rather than erroring. The NEWEST session wins:
-        # sessions accumulate across a project's life and only the most recent one is plausibly
-        # still being polled, so an older row would mint payloads whose callbacks nobody reads.
+        # reason every OAST rule plans nothing rather than erroring. The most-recently-POLLED
+        # session wins (see pick_session): sessions accumulate across a project's life, and the one
+        # a listener is actively polling is where a callback will be read — not necessarily the
+        # newest row, which may have been registered and then stopped.
         def self.build(store : Store) : StoreMinter?
-          rec = store.oast_sessions.last?
+          rec = pick_session(store.oast_sessions)
           return nil unless rec
           kind = Oast::ProviderKind.parse?(rec.kind)
           return nil unless kind
@@ -83,6 +84,17 @@ module Gori
           new(provider, session)
         rescue DB::Error | SQLite3::Exception
           nil
+        end
+
+        # The session a fresh payload should mint against: the one something is actually polling.
+        # A live TUI listener heartbeats `last_poll_at` every cycle, so the most-recently-polled
+        # session is the live one — not necessarily the newest row, which may have been registered
+        # and then stopped (its correlation id dead, a payload minted against it never calling
+        # home). A session never polled (no listener yet, or a row from before heartbeating) carries
+        # a null last_poll_at and loses to any polled session; among equals the newest id wins.
+        private def self.pick_session(sessions : Array(Store::OastSessionRecord)) : Store::OastSessionRecord?
+          return nil if sessions.empty?
+          sessions.max_by { |s| {s.last_poll_at || Int64::MIN, s.id} }
         end
 
         def initialize(@provider : Oast::Provider, @session : Oast::Session)

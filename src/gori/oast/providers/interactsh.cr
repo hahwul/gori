@@ -70,9 +70,16 @@ module Gori::Oast
       data.each do |item|
         b64 = item.as_s?
         next unless b64
-        plaintext = decrypt_interaction(session, aes_key, Base64.decode(b64))
-        next unless plaintext
-        out << to_interaction(parse_json(plaintext))
+        # One malformed item must not sink the batch: interactsh delivers a whole poll at once and
+        # marks it consumed server-side, so a raise out of Base64.decode / parse_json here would
+        # drop the siblings that decoded fine. Skip the bad item; keep the good ones.
+        begin
+          plaintext = decrypt_interaction(session, aes_key, Base64.decode(b64))
+          next unless plaintext
+          out << to_interaction(parse_json(plaintext))
+        rescue
+          next
+        end
       end
       out
     end

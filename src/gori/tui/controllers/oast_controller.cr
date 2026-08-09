@@ -26,6 +26,13 @@ module Gori::Tui
     DRAIN_CAP     = 512
     POLL_INTERVAL = 5.seconds
 
+    # How often a live listener re-stamps its session's `last_poll_at` — the cross-process liveness
+    # signal the probe OOB minter reads (Oast::StoreMinter). Coarser than POLL_INTERVAL on purpose:
+    # it only needs to keep a live session ranked above a stopped one, not to be precise, and a
+    # live-but-idle listener draws no callbacks, so this heartbeat is the ONLY thing keeping its row
+    # ahead of a newer, stopped session.
+    SESSION_HEARTBEAT = 30.seconds
+
     # Ring cap on the in-memory callback window. A per-project result buffer fed by a NETWORK
     # PEER must have a cap or an eviction policy: unlike every other result list in this layer,
     # growth here is paced by the PROVIDER, not the operator. An interact.sh-class domain
@@ -134,6 +141,7 @@ module Gori::Tui
       @ordered_cache_key = nil.as({Int32, String, Int32}?)
       @filtered_cache = nil.as(Array(CbRow)?)
       @filtered_cache_key = nil.as({Int32, String, Int32}?)
+      @last_session_heartbeat = Time.instant # gate for the last_poll_at heartbeat (see SESSION_HEARTBEAT)
       reload
     end
 
@@ -1231,7 +1239,23 @@ module Gori::Tui
         inserted = true
       end
       reanchor_callback_selection(sel_key) if inserted && sel_key
+      heartbeat_active_sessions
       applied
+    end
+
+    # Keep each live session's `last_poll_at` fresh so the probe OOB minter (Oast::StoreMinter)
+    # can tell a session that is being polled from one that was started and stopped. Runs off-tab
+    # too — drain_events is called every tick regardless of focus — which is the point: you start
+    # a listener here, switch tabs, and a probe scan still mints against it. Throttled to
+    # SESSION_HEARTBEAT and skipped entirely when nothing is listening, so an idle project writes
+    # nothing. Does not mark the tick `applied`: it changes no on-screen state.
+    private def heartbeat_active_sessions : Nil
+      return if @listeners.empty?
+      now = Time.instant
+      return if now - @last_session_heartbeat < SESSION_HEARTBEAT
+      @last_session_heartbeat = now
+      store = @host.session.store
+      @listeners.each { |l| store.touch_oast_session(l.session.id) if l.active? }
     end
 
     # Move @cb_sel back onto the callback identified by `key` after live inserts shifted the
@@ -1305,6 +1329,9 @@ module Gori::Tui
         @listeners << listener
         @seen[id] ||= Set(String).new
         @session_label[id] = reg.provider_label
+        # Mark the session live NOW so a probe scan in the ≤SESSION_HEARTBEAT window before the
+        # first heartbeat still mints against it rather than an older polled session.
+        @host.session.store.touch_oast_session(id)
         if reg.want_payload
           deliver_payload(reg.provider.generate_payload(reg.session))
         elsif reg.resumed

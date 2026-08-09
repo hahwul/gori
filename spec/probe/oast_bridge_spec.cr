@@ -167,6 +167,20 @@ describe Gori::Probe::OutOfBand do
     end
   end
 
+  it "mints against the most-recently-polled session, not merely the newest row" do
+    oob_store do |store|
+      old_id = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corrold", "s", nil, nil)
+      new_id = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corrnew", "s", nil, nil)
+      # With neither session polled yet, the newest row wins (the old default).
+      Gori::Probe::OutOfBand::StoreMinter.build(store).not_nil!.session_id.should eq(new_id)
+      # But once the OLDER session is the one being polled (a live listener's heartbeat), the
+      # minter follows it — so its payloads land where a callback will actually be read, instead
+      # of against the newer row that was started and stopped.
+      store.touch_oast_session(old_id)
+      Gori::Probe::OutOfBand::StoreMinter.build(store).not_nil!.session_id.should eq(old_id)
+    end
+  end
+
   it "leaves an unanswered probe outstanding (no callback ⇒ no finding)" do
     oob_store do |store|
       store.insert_probe_oast_probe("tok-lonely", "tok-lonely.oast.example", 7_i64, "ssrf_oast",

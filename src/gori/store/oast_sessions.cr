@@ -74,9 +74,14 @@ module Gori
       }
     end
 
-    def touch_oast_session(id : Int64, last_poll_at : Int64) : Nil
+    # Stamp a session's last_poll_at = now. The TUI OAST controller calls this while a listener is
+    # live (at register/resume and on a periodic heartbeat), making last_poll_at a cross-process
+    # liveness signal: `OutOfBand::StoreMinter.build` mints OOB probe payloads against the
+    # most-recently-polled session rather than merely the newest row, which may have been started
+    # and then stopped (its correlation id dead, its payloads unable to call home).
+    def touch_oast_session(id : Int64) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE oast_sessions SET last_poll_at=? WHERE id=?", last_poll_at, id)
+        c.exec("UPDATE oast_sessions SET last_poll_at=? WHERE id=?", now_us, id)
         nil
       }
     end

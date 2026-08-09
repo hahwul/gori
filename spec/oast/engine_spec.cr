@@ -76,6 +76,21 @@ private class RecordingHttp < FakeHttp
   end
 end
 
+# A shift-sequenced Http: each call pops the next scripted {status, body}. postbin polls by
+# destructively shifting the bin one request at a time, so this models a bin that returns good
+# requests and then a malformed body (a proxy or rate-limit page served with a 200).
+private class SeqHttp < O::Http
+  def initialize(@responses : Array(Tuple(Int32, String)))
+  end
+
+  def request(method : String, url : String,
+              headers : Hash(String, String) = {} of String => String,
+              body : String? = nil) : O::Http::Response
+    status, body_str = @responses.shift? || {404, ""}
+    O::Http::Response.new(status, body_str)
+  end
+end
+
 describe Gori::Oast do
   describe O::RsaKeyPair do
     it "generates a 2048 key and exports a valid SPKI PEM that round-trips" do
@@ -286,6 +301,21 @@ describe Gori::Oast do
       results.first.method.should eq("GET")
       results.first.source_ip.should eq("10.0.0.1")
       results.first.unique_id.empty?.should be_false
+    end
+  end
+
+  describe O::Postbin do
+    # Regression: a malformed body on a LATER shift must not discard the interactions already
+    # shifted off the bin this cycle. The shifts are destructive server-side, so a raise out of
+    # poll would lose them for good.
+    it "keeps the interactions already shifted when a later shift returns a malformed body" do
+      provider = O::Postbin.new("https://postb.in")
+      session = O::Session.new(1_i64, O::ProviderKind::Postbin, "https://postb.in", "binid", "", token: "binid")
+      good = ->(id : String) { {200, {"reqId" => id, "method" => "GET", "path" => "/#{id}"}.to_json} }
+      http = SeqHttp.new([good.call("a"), good.call("b"), {200, "<html>rate limited</html>"}])
+      results = provider.poll(http, session) # must NOT raise
+      results.size.should eq(2)
+      results.map(&.unique_id).should eq(["a", "b"])
     end
   end
 
