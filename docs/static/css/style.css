@@ -32,12 +32,16 @@
      zones and the light grain, --ring-lo the ink the depth scrim and dark
      grain pull toward, --ring-sh the planet's shadow on the sheet and the
      sheet's shadow on the planet, --ring-glow the light the tubes spill
-     into the page (halo, near-rim sweep, comet dots, limb aura). */
+     into the page (halo, near-rim sweep, comet dots, gold dust). */
   --ring-base: #d4b276;
   --ring-hi: #f7e9bd;
   --ring-lo: #060a12;
   --ring-sh: #030509;
   --ring-glow: #ffe9a8;
+  /* The planet's own lift off the ring sheet. Lengths live with .ring-core;
+     only the colour flips, so the cream theme gets a warm shadow instead of
+     a near-black smudge. */
+  --ring-core-shadow: rgb(2 3 9 / 0.6);
   --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
   --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
   --header-bg: rgb(9 11 18 / 0.82);
@@ -85,17 +89,29 @@
   --accent-strong: #8a5d0a;
   --accent-ink: #fbf7ee;
   --grad-gold-leaf: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 52%, #6f4e12 76%, #cba43e 100%);
-  --grad-logo: linear-gradient(135deg, #c5a45a 0%, #b08d3f 55%, #8a6a28 100%);
+  /* On paper the gold-leaf ramp turns to tarnished bronze: same hue, a third
+     of the chroma, and dark enough that the wordmark clears AA against the
+     cream (the old #b08d3f sat at 3.0:1). The lightest stop leads the 135deg
+     sweep, so 4.9:1 there is the floor for the whole mark. */
+  --grad-logo: linear-gradient(135deg, #776d57 0%, #524a3a 55%, #332f26 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
-  /* On paper the values invert: the base is the deep readable gold, the
-     highlight a lighter warm gold rather than near-white, and the shading
-     colours are warm browns -- the dark theme's near-blacks would print as
-     soot on the cream. */
-  --ring-base: #ad8126;
-  --ring-hi: #cda23e;
-  --ring-lo: #4b3a1e;
-  --ring-sh: #3a2d18;
-  --ring-glow: #e6b23c;
+  /* On paper the values invert: the base is the deep readable tone, the
+     highlight a lighter one rather than near-white, and the shading colours
+     are warm browns -- the dark theme's near-blacks would print as soot on
+     the cream. The whole ramp is the same tarnished bronze as --grad-logo,
+     because a saturated gold band bleeds a yellow wash into the page: the
+     halo composites at half alpha, so #e6b23c landed on the cream as butter.
+     What matters when retuning is the ordering, not the hex: --ring-hi must
+     stay lighter than --ring-base (the bright core has to read bright),
+     --ring-sh deeper than --ring-lo, and --ring-glow a step above
+     --ring-base -- the near-rim sweep lays it over the band at alpha 0.2 and
+     vanishes if the two share a value. */
+  --ring-base: #6f6550;
+  --ring-hi: #8d8266;
+  --ring-lo: #2e2a21;
+  --ring-sh: #241f18;
+  --ring-glow: #8a7c5a;
+  --ring-core-shadow: rgb(46 42 33 / 0.3);
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
   --header-bg: rgb(250 249 247 / 0.82);
@@ -950,7 +966,7 @@ kbd {
    planet's lifted shadow falls across the far bands behind it, which is
    exactly where a planet's shadow belongs. */
 .ring-core {
-  filter: drop-shadow(0 5px 13px rgb(2 3 9 / 0.6));
+  filter: drop-shadow(0 5px 13px var(--ring-core-shadow));
 }
 
 .ring-core-rim {
