@@ -91,3 +91,49 @@ describe Gori::Paths do
     end
   end
 end
+
+# `Gori::Error` is the project's EXPECTED-error type, and `CLI.run` rescues exactly that to
+# print one actionable line — anything else reaches the top of the process as a Crystal
+# backtrace. `Paths.ensure_dirs` is the FIRST thing `gori tutorial` and `gori wizard` do, so a
+# $GORI_HOME that cannot be created met the operator with eleven frames of Dir#mkdir_p before
+# either command had drawn anything.
+describe Gori::Paths do
+  describe ".ensure_dir failure reporting" do
+    it "reports an unwritable parent as a Gori::Error, not a File::Error" do
+      with_tmp_dir do |dir|
+        locked = File.join(dir, "locked")
+        Dir.mkdir(locked, 0o500) # readable + traversable, NOT writable
+        begin
+          ex = expect_raises(Gori::Error) do
+            Gori::Paths.ensure_dir(File.join(locked, "gori"))
+          end
+          # …and it still names the path, which is the whole point of raising it here rather
+          # than letting the first write downstream report it.
+          ex.message.to_s.should contain("gori")
+        ensure
+          File.chmod(locked, 0o700) # so the tmp dir can be torn down
+        end
+      end
+    end
+
+    # The pre-existing conversion, unchanged by the one above: File::AlreadyExistsError covers
+    # BOTH "another instance won the race" and "a plain FILE occupies this path", and only the
+    # second is an error — so it must not be swallowed by the new File::Error arm.
+    it "still reports a file in the directory's place" do
+      with_tmp_dir do |dir|
+        occupied = File.join(dir, "notes.txt")
+        File.write(occupied, "")
+        ex = expect_raises(Gori::Error) { Gori::Paths.ensure_dir(occupied) }
+        ex.message.to_s.should contain("not a directory")
+      end
+    end
+
+    # And the benign race still is one: a directory that already exists is a no-op, not a raise.
+    it "does not raise when the directory is already there" do
+      with_tmp_dir do |dir|
+        Gori::Paths.ensure_dir(dir)
+        Gori::Paths.ensure_dir(dir)
+      end
+    end
+  end
+end

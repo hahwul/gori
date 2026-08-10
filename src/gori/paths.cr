@@ -139,6 +139,21 @@ module Gori
       rescue File::AlreadyExistsError
         # created concurrently by another instance — it exists now, at DIR_MODE already
         ours = false
+      rescue ex : File::Error
+        # Every OTHER way mkdir can fail is one the operator can act on: a $GORI_HOME that is
+        # unwritable or on a read-only mount, a full disk, a stale NFS handle. Gori::Error is
+        # this project's EXPECTED-error type, and `CLI.run` rescues exactly that to print one
+        # actionable line; anything else reaches the top of the process as a Crystal
+        # backtrace. `Paths.ensure_dirs` is the FIRST thing `gori tutorial` and `gori wizard`
+        # do, so a read-only home met an operator with eleven frames of Dir#mkdir_p before
+        # either command had drawn anything.
+        #
+        # Same reasoning as the `path exists and is not a directory` raise below, and the same
+        # place to apply it — while the path is still in hand, rather than however far
+        # downstream the first write happens to be. Every ensure_dirs caller inherits it: the
+        # eight in cli.cr, App#initialize, and Settings.save (whose blanket rescue already
+        # swallows this, unchanged).
+        raise Gori::Error.new(ex.message.presence || "cannot create directory: #{path}")
       end
       # mkdir_p raises AlreadyExists for BOTH "another instance won the race" and "a plain
       # FILE occupies this path", and only the first is benign. Say which, here, while the
