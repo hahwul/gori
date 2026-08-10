@@ -61,7 +61,7 @@ install_aria = "gori 설치"
 install_pick_aria = "설치 방법 선택"
 install_copy = "설치 명령 복사"
 
-hero_art_alt = "gori 마크: gori 아트워크 원반을 감싸고 서로 엮인 세 개의 고리"
+hero_art_alt = "gori 마크: gori 아트워크 원반 주위를 서로 엇갈려 도는 두 개의 넓은 고리"
 showcase_alt = "터미널에서 실행 중인 gori의 History 탭. 캡처된 HTTP 플로우가 시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간과 함께 나열되어 있습니다."
 showcase_note = "클라이언트가 보내는 모든 요청은 <strong>History</strong>에 플로우로 쌓이며, 한 번의 키 입력으로 Repeater, Fuzzer, 이슈로 넘어갑니다."
 

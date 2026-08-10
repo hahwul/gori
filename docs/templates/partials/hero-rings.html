@@ -1,0 +1,642 @@
+{# The hero mark: three broad translucent rings crossing around the
+   official art disc -- an armillary, not a Saturn. Generated geometry: each
+   ring is a flat annular sheet in its own plane (disjoint radii), its band
+   structure a radial opacity profile used as a luminance mask; the painter's
+   over/under order at every crossing is derived from the sheets' linear
+   depth fields, and repaints are weighted by the other ring's mask so no
+   translucent paint is ever split along a visible edge. The stylesheet owns
+   all colour and motion.
+   Re-generate (tools/hero-rings/build.py) rather than edit by hand. #}
+<figure class="hero-art">
+  <svg class="hero-rings" viewBox="0 0 240 240" role="img" aria-label="{{ "home.hero_art_alt" | t }}">
+    <defs>
+      <radialGradient id="rgBands0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="119">
+        <stop offset="0.8109" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8134" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.816" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8185" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.821" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8235" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8261" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8286" stop-color="#fff" stop-opacity="0.007"/>
+        <stop offset="0.8311" stop-color="#fff" stop-opacity="0.038"/>
+        <stop offset="0.8336" stop-color="#fff" stop-opacity="0.091"/>
+        <stop offset="0.8361" stop-color="#fff" stop-opacity="0.157"/>
+        <stop offset="0.8387" stop-color="#fff" stop-opacity="0.226"/>
+        <stop offset="0.8412" stop-color="#fff" stop-opacity="0.287"/>
+        <stop offset="0.8437" stop-color="#fff" stop-opacity="0.324"/>
+        <stop offset="0.8462" stop-color="#fff" stop-opacity="0.328"/>
+        <stop offset="0.8487" stop-color="#fff" stop-opacity="0.328"/>
+        <stop offset="0.8513" stop-color="#fff" stop-opacity="0.339"/>
+        <stop offset="0.8538" stop-color="#fff" stop-opacity="0.35"/>
+        <stop offset="0.8563" stop-color="#fff" stop-opacity="0.357"/>
+        <stop offset="0.8588" stop-color="#fff" stop-opacity="0.379"/>
+        <stop offset="0.8613" stop-color="#fff" stop-opacity="0.435"/>
+        <stop offset="0.8639" stop-color="#fff" stop-opacity="0.506"/>
+        <stop offset="0.8664" stop-color="#fff" stop-opacity="0.538"/>
+        <stop offset="0.8689" stop-color="#fff" stop-opacity="0.515"/>
+        <stop offset="0.8714" stop-color="#fff" stop-opacity="0.478"/>
+        <stop offset="0.8739" stop-color="#fff" stop-opacity="0.46"/>
+        <stop offset="0.8765" stop-color="#fff" stop-opacity="0.461"/>
+        <stop offset="0.879" stop-color="#fff" stop-opacity="0.473"/>
+        <stop offset="0.8815" stop-color="#fff" stop-opacity="0.494"/>
+        <stop offset="0.884" stop-color="#fff" stop-opacity="0.516"/>
+        <stop offset="0.8866" stop-color="#fff" stop-opacity="0.529"/>
+        <stop offset="0.8891" stop-color="#fff" stop-opacity="0.54"/>
+        <stop offset="0.8916" stop-color="#fff" stop-opacity="0.562"/>
+        <stop offset="0.8941" stop-color="#fff" stop-opacity="0.584"/>
+        <stop offset="0.8966" stop-color="#fff" stop-opacity="0.581"/>
+        <stop offset="0.8992" stop-color="#fff" stop-opacity="0.551"/>
+        <stop offset="0.9017" stop-color="#fff" stop-opacity="0.527"/>
+        <stop offset="0.9042" stop-color="#fff" stop-opacity="0.529"/>
+        <stop offset="0.9067" stop-color="#fff" stop-opacity="0.541"/>
+        <stop offset="0.9092" stop-color="#fff" stop-opacity="0.543"/>
+        <stop offset="0.9118" stop-color="#fff" stop-opacity="0.536"/>
+        <stop offset="0.9143" stop-color="#fff" stop-opacity="0.528"/>
+        <stop offset="0.9168" stop-color="#fff" stop-opacity="0.515"/>
+        <stop offset="0.9193" stop-color="#fff" stop-opacity="0.496"/>
+        <stop offset="0.9218" stop-color="#fff" stop-opacity="0.478"/>
+        <stop offset="0.9244" stop-color="#fff" stop-opacity="0.46"/>
+        <stop offset="0.9269" stop-color="#fff" stop-opacity="0.434"/>
+        <stop offset="0.9294" stop-color="#fff" stop-opacity="0.403"/>
+        <stop offset="0.9319" stop-color="#fff" stop-opacity="0.333"/>
+        <stop offset="0.9345" stop-color="#fff" stop-opacity="0.282"/>
+        <stop offset="0.937" stop-color="#fff" stop-opacity="0.287"/>
+        <stop offset="0.9395" stop-color="#fff" stop-opacity="0.28"/>
+        <stop offset="0.942" stop-color="#fff" stop-opacity="0.272"/>
+        <stop offset="0.9445" stop-color="#fff" stop-opacity="0.325"/>
+        <stop offset="0.9471" stop-color="#fff" stop-opacity="0.342"/>
+        <stop offset="0.9496" stop-color="#fff" stop-opacity="0.332"/>
+        <stop offset="0.9521" stop-color="#fff" stop-opacity="0.321"/>
+        <stop offset="0.9546" stop-color="#fff" stop-opacity="0.313"/>
+        <stop offset="0.9571" stop-color="#fff" stop-opacity="0.31"/>
+        <stop offset="0.9597" stop-color="#fff" stop-opacity="0.308"/>
+        <stop offset="0.9622" stop-color="#fff" stop-opacity="0.311"/>
+        <stop offset="0.9647" stop-color="#fff" stop-opacity="0.314"/>
+        <stop offset="0.9672" stop-color="#fff" stop-opacity="0.283"/>
+        <stop offset="0.9697" stop-color="#fff" stop-opacity="0.22"/>
+        <stop offset="0.9723" stop-color="#fff" stop-opacity="0.148"/>
+        <stop offset="0.9748" stop-color="#fff" stop-opacity="0.087"/>
+        <stop offset="0.9773" stop-color="#fff" stop-opacity="0.039"/>
+        <stop offset="0.9798" stop-color="#fff" stop-opacity="0.007"/>
+        <stop offset="0.9824" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9849" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9874" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9899" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9924" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.995" stop-color="#fff" stop-opacity="0"/>
+      </radialGradient>
+      <mask id="rgMask0" maskUnits="userSpaceOnUse" x="-125" y="-125" width="250" height="250">
+        <circle cx="0" cy="0" r="119" fill="url(#rgBands0)"/>
+      </mask>
+      <radialGradient id="rgHi0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="119">
+        <stop class="rs-hi" offset="0.8326" stop-opacity="0.004"/>
+        <stop class="rs-hi" offset="0.8508" stop-opacity="0.039"/>
+        <stop class="rs-hi" offset="0.8689" stop-opacity="0.184"/>
+        <stop class="rs-hi" offset="0.884" stop-opacity="0.389"/>
+        <stop class="rs-hi" offset="0.8992" stop-opacity="0.5"/>
+        <stop class="rs-hi" offset="0.9143" stop-opacity="0.389"/>
+        <stop class="rs-hi" offset="0.9294" stop-opacity="0.184"/>
+        <stop class="rs-hi" offset="0.9476" stop-opacity="0.039"/>
+        <stop class="rs-hi" offset="0.9657" stop-opacity="0.004"/>
+      </radialGradient>
+      {# The halo: the band's glow as a plain radial gradient (no mask, no
+         blur), so it costs nothing to re-raster when the rings turn. Its
+         radius reaches past where the glow dies to zero, so the gradient's
+         pad region never shows as a faint square. #}
+      <radialGradient id="rgGlow0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="123.6">
+        <stop class="rs-glow" offset="0.9175" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9215" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9256" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9296" stop-opacity="0.002"/>
+        <stop class="rs-glow" offset="0.9337" stop-opacity="0.007"/>
+        <stop class="rs-glow" offset="0.9377" stop-opacity="0.025"/>
+        <stop class="rs-glow" offset="0.9417" stop-opacity="0.07"/>
+        <stop class="rs-glow" offset="0.9458" stop-opacity="0.16"/>
+        <stop class="rs-glow" offset="0.9498" stop-opacity="0.292"/>
+        <stop class="rs-glow" offset="0.9539" stop-opacity="0.426"/>
+        <stop class="rs-glow" offset="0.9579" stop-opacity="0.498"/>
+        <stop class="rs-glow" offset="0.962" stop-opacity="0.466"/>
+        <stop class="rs-glow" offset="0.966" stop-opacity="0.349"/>
+        <stop class="rs-glow" offset="0.9701" stop-opacity="0.209"/>
+        <stop class="rs-glow" offset="0.9741" stop-opacity="0.101"/>
+        <stop class="rs-glow" offset="0.9782" stop-opacity="0.039"/>
+        <stop class="rs-glow" offset="0.9822" stop-opacity="0.012"/>
+        <stop class="rs-glow" offset="0.9862" stop-opacity="0.003"/>
+        <stop class="rs-glow" offset="0.9903" stop-opacity="0.001"/>
+        <stop class="rs-glow" offset="0.9943" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9984" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="rgDepth0" gradientUnits="userSpaceOnUse" x1="0" y1="-119" x2="0" y2="119">
+        <stop class="rs-lo" offset="0" stop-opacity="0.496"/>
+        <stop class="rs-lo" offset="0.42" stop-opacity="0.238"/>
+        <stop class="rs-lo" offset="0.5" stop-opacity="0.134"/>
+        <stop class="rs-lo" offset="0.66" stop-opacity="0.029"/>
+        <stop class="rs-lo" offset="1" stop-opacity="0"/>
+      </linearGradient>
+      {# The near rim of the tube catching the light: a glow that rises
+         toward the front horizon, so a spinning band brightens as it comes
+         round to the front. #}
+      <linearGradient id="rgLume0" gradientUnits="userSpaceOnUse" x1="0" y1="-119" x2="0" y2="119">
+        <stop class="rs-glow" offset="0" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.5" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.7" stop-opacity="0.05"/>
+        <stop class="rs-glow" offset="0.86" stop-opacity="0.12"/>
+        <stop class="rs-glow" offset="1" stop-opacity="0.2"/>
+      </linearGradient>
+      <radialGradient id="rgAo0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="112"
+                      gradientTransform="scale(1 3.333)">
+        <stop class="rs-sh" offset="0.55" stop-opacity="0.4"/>
+        <stop class="rs-sh" offset="0.67" stop-opacity="0.16"/>
+        <stop class="rs-sh" offset="0.83" stop-opacity="0.05"/>
+        <stop class="rs-sh" offset="1" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="rgCast0" gradientUnits="userSpaceOnUse" cx="10.2" cy="27" r="108"
+                      gradientTransform="scale(1 3.333)">
+        <stop class="rs-sh" offset="0.55" stop-opacity="0.38"/>
+        <stop class="rs-sh" offset="0.76" stop-opacity="0.14"/>
+        <stop class="rs-sh" offset="1" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="rgBands1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="94">
+        <stop offset="0.8245" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8277" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8309" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.834" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8372" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8404" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.8436" stop-color="#fff" stop-opacity="0.002"/>
+        <stop offset="0.8468" stop-color="#fff" stop-opacity="0.037"/>
+        <stop offset="0.85" stop-color="#fff" stop-opacity="0.103"/>
+        <stop offset="0.8532" stop-color="#fff" stop-opacity="0.183"/>
+        <stop offset="0.8564" stop-color="#fff" stop-opacity="0.261"/>
+        <stop offset="0.8596" stop-color="#fff" stop-opacity="0.332"/>
+        <stop offset="0.8628" stop-color="#fff" stop-opacity="0.378"/>
+        <stop offset="0.866" stop-color="#fff" stop-opacity="0.393"/>
+        <stop offset="0.8691" stop-color="#fff" stop-opacity="0.417"/>
+        <stop offset="0.8723" stop-color="#fff" stop-opacity="0.463"/>
+        <stop offset="0.8755" stop-color="#fff" stop-opacity="0.51"/>
+        <stop offset="0.8787" stop-color="#fff" stop-opacity="0.531"/>
+        <stop offset="0.8819" stop-color="#fff" stop-opacity="0.537"/>
+        <stop offset="0.8851" stop-color="#fff" stop-opacity="0.551"/>
+        <stop offset="0.8883" stop-color="#fff" stop-opacity="0.562"/>
+        <stop offset="0.8915" stop-color="#fff" stop-opacity="0.56"/>
+        <stop offset="0.8947" stop-color="#fff" stop-opacity="0.559"/>
+        <stop offset="0.8979" stop-color="#fff" stop-opacity="0.577"/>
+        <stop offset="0.9011" stop-color="#fff" stop-opacity="0.603"/>
+        <stop offset="0.9043" stop-color="#fff" stop-opacity="0.613"/>
+        <stop offset="0.9074" stop-color="#fff" stop-opacity="0.611"/>
+        <stop offset="0.9106" stop-color="#fff" stop-opacity="0.614"/>
+        <stop offset="0.9138" stop-color="#fff" stop-opacity="0.619"/>
+        <stop offset="0.917" stop-color="#fff" stop-opacity="0.615"/>
+        <stop offset="0.9202" stop-color="#fff" stop-opacity="0.596"/>
+        <stop offset="0.9234" stop-color="#fff" stop-opacity="0.569"/>
+        <stop offset="0.9266" stop-color="#fff" stop-opacity="0.533"/>
+        <stop offset="0.9298" stop-color="#fff" stop-opacity="0.492"/>
+        <stop offset="0.933" stop-color="#fff" stop-opacity="0.463"/>
+        <stop offset="0.9362" stop-color="#fff" stop-opacity="0.455"/>
+        <stop offset="0.9394" stop-color="#fff" stop-opacity="0.441"/>
+        <stop offset="0.9426" stop-color="#fff" stop-opacity="0.349"/>
+        <stop offset="0.9457" stop-color="#fff" stop-opacity="0.32"/>
+        <stop offset="0.9489" stop-color="#fff" stop-opacity="0.307"/>
+        <stop offset="0.9521" stop-color="#fff" stop-opacity="0.311"/>
+        <stop offset="0.9553" stop-color="#fff" stop-opacity="0.369"/>
+        <stop offset="0.9585" stop-color="#fff" stop-opacity="0.35"/>
+        <stop offset="0.9617" stop-color="#fff" stop-opacity="0.291"/>
+        <stop offset="0.9649" stop-color="#fff" stop-opacity="0.219"/>
+        <stop offset="0.9681" stop-color="#fff" stop-opacity="0.143"/>
+        <stop offset="0.9713" stop-color="#fff" stop-opacity="0.074"/>
+        <stop offset="0.9745" stop-color="#fff" stop-opacity="0.021"/>
+        <stop offset="0.9777" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9809" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.984" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9872" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9904" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.9936" stop-color="#fff" stop-opacity="0"/>
+      </radialGradient>
+      <mask id="rgMask1" maskUnits="userSpaceOnUse" x="-125" y="-125" width="250" height="250">
+        <circle cx="0" cy="0" r="94" fill="url(#rgBands1)"/>
+      </mask>
+      <radialGradient id="rgHi1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="94">
+        <stop class="rs-hi" offset="0.8466" stop-opacity="0.004"/>
+        <stop class="rs-hi" offset="0.8632" stop-opacity="0.039"/>
+        <stop class="rs-hi" offset="0.8798" stop-opacity="0.184"/>
+        <stop class="rs-hi" offset="0.8936" stop-opacity="0.389"/>
+        <stop class="rs-hi" offset="0.9074" stop-opacity="0.5"/>
+        <stop class="rs-hi" offset="0.9213" stop-opacity="0.389"/>
+        <stop class="rs-hi" offset="0.9351" stop-opacity="0.184"/>
+        <stop class="rs-hi" offset="0.9517" stop-opacity="0.039"/>
+        <stop class="rs-hi" offset="0.9683" stop-opacity="0.004"/>
+      </radialGradient>
+      {# The halo: the band's glow as a plain radial gradient (no mask, no
+         blur), so it costs nothing to re-raster when the rings turn. Its
+         radius reaches past where the glow dies to zero, so the gradient's
+         pad region never shows as a faint square. #}
+      <radialGradient id="rgGlow1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="97.6">
+        <stop class="rs-glow" offset="0.9094" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9139" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9183" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9228" stop-opacity="0.002"/>
+        <stop class="rs-glow" offset="0.9272" stop-opacity="0.007"/>
+        <stop class="rs-glow" offset="0.9316" stop-opacity="0.025"/>
+        <stop class="rs-glow" offset="0.9361" stop-opacity="0.07"/>
+        <stop class="rs-glow" offset="0.9405" stop-opacity="0.16"/>
+        <stop class="rs-glow" offset="0.945" stop-opacity="0.292"/>
+        <stop class="rs-glow" offset="0.9494" stop-opacity="0.426"/>
+        <stop class="rs-glow" offset="0.9538" stop-opacity="0.498"/>
+        <stop class="rs-glow" offset="0.9583" stop-opacity="0.466"/>
+        <stop class="rs-glow" offset="0.9627" stop-opacity="0.349"/>
+        <stop class="rs-glow" offset="0.9672" stop-opacity="0.209"/>
+        <stop class="rs-glow" offset="0.9716" stop-opacity="0.101"/>
+        <stop class="rs-glow" offset="0.976" stop-opacity="0.039"/>
+        <stop class="rs-glow" offset="0.9805" stop-opacity="0.012"/>
+        <stop class="rs-glow" offset="0.9849" stop-opacity="0.003"/>
+        <stop class="rs-glow" offset="0.9893" stop-opacity="0.001"/>
+        <stop class="rs-glow" offset="0.9938" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.9982" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="rgDepth1" gradientUnits="userSpaceOnUse" x1="0" y1="-94" x2="0" y2="94">
+        <stop class="rs-lo" offset="0" stop-opacity="0.444"/>
+        <stop class="rs-lo" offset="0.42" stop-opacity="0.214"/>
+        <stop class="rs-lo" offset="0.5" stop-opacity="0.12"/>
+        <stop class="rs-lo" offset="0.66" stop-opacity="0.026"/>
+        <stop class="rs-lo" offset="1" stop-opacity="0"/>
+      </linearGradient>
+      {# The near rim of the tube catching the light: a glow that rises
+         toward the front horizon, so a spinning band brightens as it comes
+         round to the front. #}
+      <linearGradient id="rgLume1" gradientUnits="userSpaceOnUse" x1="0" y1="-94" x2="0" y2="94">
+        <stop class="rs-glow" offset="0" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.5" stop-opacity="0"/>
+        <stop class="rs-glow" offset="0.7" stop-opacity="0.05"/>
+        <stop class="rs-glow" offset="0.86" stop-opacity="0.12"/>
+        <stop class="rs-glow" offset="1" stop-opacity="0.2"/>
+      </linearGradient>
+      <radialGradient id="rgAo1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="112"
+                      gradientTransform="scale(1 1.923)">
+        <stop class="rs-sh" offset="0.55" stop-opacity="0.4"/>
+        <stop class="rs-sh" offset="0.67" stop-opacity="0.16"/>
+        <stop class="rs-sh" offset="0.83" stop-opacity="0.05"/>
+        <stop class="rs-sh" offset="1" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="rgCast1" gradientUnits="userSpaceOnUse" cx="12.5" cy="-6.6" r="108"
+                      gradientTransform="scale(1 1.923)">
+        <stop class="rs-sh" offset="0.55" stop-opacity="0.38"/>
+        <stop class="rs-sh" offset="0.76" stop-opacity="0.14"/>
+        <stop class="rs-sh" offset="1" stop-opacity="0"/>
+      </radialGradient>
+      <clipPath id="rgHp01"><rect x="0" y="-400" width="800" height="800" transform="translate(120 120) rotate(57.71)"/></clipPath>
+      <clipPath id="rgHm01"><rect x="0" y="-400" width="800" height="800" transform="translate(120 120) rotate(237.71)"/></clipPath>
+      <clipPath id="rgNear"><rect x="-125" y="0" width="250" height="125"/></clipPath>
+      <clipPath id="rgDiscLip"><circle cx="120" cy="120" r="62.3"/></clipPath>
+      <clipPath id="rgDisc"><circle cx="120" cy="120" r="62"/></clipPath>
+      {# Fades the planet's shadow out as a sheet comes round into the
+         light, so the shadow needs no hard half-plane cut of its own. #}
+      <linearGradient id="rgFadeY" gradientUnits="userSpaceOnUse" x1="0" y1="-10" x2="0" y2="4">
+        <stop offset="0" stop-color="#fff"/>
+        <stop offset="1" stop-color="#000"/>
+      </linearGradient>
+      <mask id="rgShadowFade" maskUnits="userSpaceOnUse" x="-125" y="-125" width="250" height="250">
+        <rect x="-125" y="-125" width="250" height="250" fill="url(#rgFadeY)"/>
+      </mask>
+      <linearGradient id="rgSheen" gradientUnits="userSpaceOnUse"
+                      x1="58" y1="58" x2="182" y2="182">
+        <stop class="ring-s0" offset="0"/>
+        <stop class="ring-s1" offset="0.42"/>
+        <stop class="ring-s2" offset="1"/>
+      </linearGradient>
+      <filter id="rgSoft"><feGaussianBlur stdDeviation="1.7"/></filter>
+      {# The traffic dots' glow, baked into a gradient fill: a filter here
+         would re-blur every moving dot every frame. #}
+      <radialGradient id="rgNodeGlow">
+        <stop class="rs-glow" offset="0" stop-opacity="1"/>
+        <stop class="rs-glow" offset="0.4" stop-opacity="0.8"/>
+        <stop class="rs-glow" offset="0.72" stop-opacity="0.28"/>
+        <stop class="rs-glow" offset="1" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+
+    {# Gold dust strewn along the ring planes and loosely around them. #}
+    <g class="ring-dust">
+      <circle cx="78.3" cy="99.9" r="0.64" opacity="0.39"/>
+      <circle cx="124.2" cy="146.7" r="0.47" opacity="0.31"/>
+      <circle cx="154.5" cy="138.6" r="0.8" opacity="0.3"/>
+      <circle cx="12.5" cy="164.6" r="0.48" opacity="0.31"/>
+      <circle cx="160.6" cy="139.7" r="0.74" opacity="0.39"/>
+      <circle cx="187.1" cy="78.6" r="0.62" opacity="0.19"/>
+      <circle cx="195.1" cy="124" r="0.76" opacity="0.37"/>
+      <circle cx="80.7" cy="93.1" r="0.45" opacity="0.14"/>
+      <circle cx="31.2" cy="155" r="0.42" opacity="0.22"/>
+      <circle cx="40.4" cy="118.8" r="0.47" opacity="0.37"/>
+      <circle cx="220.9" cy="87.3" r="0.34" opacity="0.09"/>
+      <circle cx="175.4" cy="83.9" r="0.69" opacity="0.27"/>
+      <circle cx="87.5" cy="164.2" r="0.31" opacity="0.13"/>
+      <circle cx="39.1" cy="151.1" r="0.76" opacity="0.16"/>
+      <circle cx="181.1" cy="124.4" r="0.65" opacity="0.23"/>
+      <circle cx="37.7" cy="117.5" r="0.74" opacity="0.41"/>
+      <circle cx="75.4" cy="105.1" r="0.56" opacity="0.14"/>
+      <circle cx="223.6" cy="92.6" r="0.69" opacity="0.14"/>
+      <circle cx="114.6" cy="153.2" r="0.68" opacity="0.26"/>
+      <circle cx="27.8" cy="122.1" r="0.52" opacity="0.35"/>
+      <circle cx="189.6" cy="84" r="0.81" opacity="0.33"/>
+      <circle cx="196.7" cy="122.3" r="0.64" opacity="0.39"/>
+      <circle cx="50" cy="164.3" r="0.78" opacity="0.35"/>
+      <circle cx="213.6" cy="81.7" r="0.66" opacity="0.15"/>
+      <circle cx="89.8" cy="91.5" r="0.65" opacity="0.32"/>
+      <circle cx="157.3" cy="147" r="0.84" opacity="0.41"/>
+      <circle cx="53.4" cy="53.4" r="0.48" opacity="0.39"/>
+      <circle cx="180.2" cy="124.7" r="0.35" opacity="0.23"/>
+      <circle cx="58.1" cy="52.1" r="0.57" opacity="0.09"/>
+      <circle cx="162.1" cy="108.6" r="0.74" opacity="0.14"/>
+      <circle cx="55" cy="123.8" r="0.38" opacity="0.13"/>
+      <circle cx="49.5" cy="58.5" r="0.76" opacity="0.31"/>
+      <circle cx="193.3" cy="158.2" r="0.82" opacity="0.11"/>
+      <circle cx="104.8" cy="164.8" r="0.46" opacity="0.33"/>
+      <circle cx="97.2" cy="58.1" r="0.76" opacity="0.27"/>
+      <circle cx="70.9" cy="132.1" r="0.76" opacity="0.39"/>
+      <circle cx="109.7" cy="174.5" r="0.83" opacity="0.26"/>
+      <circle cx="76.7" cy="63.8" r="0.59" opacity="0.25"/>
+      <circle cx="89.8" cy="67.7" r="0.83" opacity="0.26"/>
+      <circle cx="40.3" cy="94.9" r="0.61" opacity="0.25"/>
+      <circle cx="120.9" cy="76.3" r="0.6" opacity="0.22"/>
+      <circle cx="204.9" cy="168.6" r="0.45" opacity="0.24"/>
+      <circle cx="147.1" cy="181" r="0.75" opacity="0.39"/>
+      <circle cx="53.5" cy="75.8" r="0.41" opacity="0.29"/>
+      <circle cx="183" cy="147" r="0.73" opacity="0.09"/>
+      <circle cx="117.7" cy="166.2" r="0.68" opacity="0.19"/>
+      <circle cx="53.3" cy="115" r="0.36" opacity="0.33"/>
+      <circle cx="149.7" cy="183.1" r="0.44" opacity="0.15"/>
+      <circle cx="59.8" cy="62.4" r="0.51" opacity="0.22"/>
+      <circle cx="66.1" cy="68.8" r="0.41" opacity="0.29"/>
+      <circle cx="97" cy="57.9" r="0.77" opacity="0.29"/>
+      <circle cx="177.5" cy="124.8" r="0.71" opacity="0.36"/>
+      <circle cx="193.4" cy="76.3" r="0.47" opacity="0.39"/>
+      <circle cx="146.2" cy="229.9" r="0.79" opacity="0.13"/>
+      <circle cx="127.7" cy="217.6" r="0.44" opacity="0.11"/>
+      <circle cx="167.5" cy="48.9" r="0.73" opacity="0.12"/>
+      <circle cx="27.9" cy="174.8" r="0.31" opacity="0.15"/>
+      <circle cx="67.9" cy="22" r="0.83" opacity="0.12"/>
+      <circle cx="3.1" cy="116.5" r="0.58" opacity="0.31"/>
+      <circle cx="147.8" cy="178.6" r="0.36" opacity="0.09"/>
+      <circle cx="23.4" cy="92.4" r="0.61" opacity="0.13"/>
+      <circle cx="153" cy="184.4" r="0.76" opacity="0.42"/>
+      <circle cx="188" cy="91.4" r="0.33" opacity="0.4"/>
+      <circle cx="5.9" cy="143.6" r="0.48" opacity="0.24"/>
+      <circle cx="23.8" cy="112.1" r="0.63" opacity="0.08"/>
+      <circle cx="82.9" cy="20.9" r="0.4" opacity="0.23"/>
+      <circle cx="113.6" cy="39.3" r="0.41" opacity="0.14"/>
+      <circle cx="49.3" cy="115.2" r="0.79" opacity="0.35"/>
+      <circle cx="85.3" cy="19.4" r="0.65" opacity="0.22"/>
+      <circle cx="37.9" cy="69.6" r="0.84" opacity="0.35"/>
+      <circle cx="113.4" cy="227.4" r="0.71" opacity="0.34"/>
+      <circle cx="157.6" cy="45.7" r="0.79" opacity="0.38"/>
+      <circle cx="80" cy="26" r="0.72" opacity="0.22"/>
+      <circle cx="107.3" cy="57.7" r="0.49" opacity="0.24"/>
+      <circle cx="211.8" cy="125.2" r="0.65" opacity="0.29"/>
+      <circle cx="134.4" cy="228.6" r="0.67" opacity="0.19"/>
+      <circle cx="63.4" cy="44.5" r="0.59" opacity="0.21"/>
+      <circle cx="229.8" cy="119.9" r="0.69" opacity="0.34"/>
+    </g>
+
+    {# The sheets behind the planet, woven back to front, then the
+       planet's own shadow across whatever lies behind it. #}
+    <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+      <rect x="-123.6" y="-123.6" width="247.2" height="247.2" fill="url(#rgGlow0)"/>
+    </g>
+    <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+      <g mask="url(#rgMask0)">
+        <rect x="-119" y="-119" width="238" height="238" class="ring-fill"/>
+        <rect x="-119" y="-119" width="238" height="238" fill="url(#rgHi0)"/>
+        <rect x="-119" y="-119" width="238" height="238" fill="url(#rgDepth0)"/>
+        <rect x="-119" y="-119" width="238" height="238" fill="url(#rgLume0)"/>
+      </g>
+    </g>
+    <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+      <g class="ring-grain ring-grain-r0">
+        <circle class="rg-anchor" cx="-119" cy="-119" r="0.01" fill="none"/>
+        <circle class="rg-anchor" cx="119" cy="119" r="0.01" fill="none"/>
+        <path class="rg-d" stroke-width="1.34" opacity="0.052" d="M-104.2 22.8A106.6 106.6 0 0 1 -40.9 -98.5"/>
+        <path class="rg-d" stroke-width="1.01" opacity="0.032" d="M-74.7 -79.5A109.1 109.1 0 0 1 99.4 -45"/>
+        <path class="rg-d" stroke-width="0.67" opacity="0.021" d="M36.6 -93.2A100.1 100.1 0 0 1 86.5 50.4"/>
+        <path class="rg-d" stroke-width="0.61" opacity="0.029" d="M-107.9 -19.4A109.6 109.6 0 0 1 -78.5 -76.5"/>
+        <path class="rg-d" stroke-width="0.62" opacity="0.024" d="M-99.3 22.9A101.9 101.9 0 0 1 -51 -88.2"/>
+        <path class="rg-d" stroke-width="1.11" opacity="0.027" d="M-113.7 0.2A113.7 113.7 0 0 1 10.9 -113.2"/>
+        <path class="rg-d" stroke-width="1.4" opacity="0.04" d="M106.7 -2.9A106.7 106.7 0 0 1 -40.2 98.8"/>
+        <path class="rg-d" stroke-width="0.78" opacity="0.021" d="M-27 108A111.3 111.3 0 0 1 -84.3 72.7"/>
+        <path class="rg-d" stroke-width="1.28" opacity="0.025" d="M-85 73.5A112.3 112.3 0 0 1 -10.1 -111.9"/>
+        <path class="rg-d" stroke-width="0.77" opacity="0.016" d="M96.2 -60.8A113.8 113.8 0 0 1 82.4 78.5"/>
+        <path class="rg-d" stroke-width="1.22" opacity="0.02" d="M-12.4 99A99.7 99.7 0 0 1 -69.3 71.7"/>
+        <path class="rg-l" stroke-width="0.95" opacity="0.05" d="M77 70.5A104.5 104.5 0 0 1 -10.2 104"/>
+        <path class="rg-l" stroke-width="0.98" opacity="0.016" d="M44 90.1A100.2 100.2 0 0 1 -85.9 51.6"/>
+        <path class="rg-l" stroke-width="0.94" opacity="0.036" d="M72.5 78.1A106.5 106.5 0 0 1 -82.6 67.3"/>
+        <path class="rg-l" stroke-width="0.63" opacity="0.025" d="M-12.5 99.7A100.5 100.5 0 0 1 -72.1 -70"/>
+        <path class="rg-l" stroke-width="1.03" opacity="0.023" d="M27.6 109.6A113 113 0 0 1 -91.5 66.3"/>
+        <path class="rg-l" stroke-width="0.56" opacity="0.027" d="M113.7 -7.7A113.9 113.9 0 0 1 79.3 81.8"/>
+        <path class="rg-l" stroke-width="0.7" opacity="0.052" d="M-29.6 98.8A103.1 103.1 0 0 1 -81.4 63.2"/>
+        <path class="rg-l" stroke-width="0.65" opacity="0.023" d="M-80.5 -59.5A100 100 0 0 1 21.4 -97.7"/>
+        <path class="rg-l" stroke-width="1.09" opacity="0.127" d="M-95.2 -48.2A106.6 106.6 0 0 1 -88.3 -59.8"/>
+        <path class="rg-l" stroke-width="1.26" opacity="0.054" d="M42 -92.6A101.7 101.7 0 0 1 48.2 -89.6"/>
+        <path class="rg-l" stroke-width="1.28" opacity="0.071" d="M33.5 96.2A101.9 101.9 0 0 1 20.3 99.8"/>
+      </g>
+      <g mask="url(#rgMask0)">
+        <rect x="-119" y="-119" width="238" height="238" fill="url(#rgDepth0)" opacity="0.6"/>
+      </g>
+    </g>
+    <g clip-path="url(#rgHm01)">
+      <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+        <g mask="url(#rgMask0)">
+          <g transform="matrix(0.5878 2.6967 -0.4207 1.0188 1.23 12.27)" filter="url(#rgSoft)" opacity="0.18">
+            <g mask="url(#rgMask1)">
+              <rect x="-94" y="-94" width="188" height="188" class="ring-cast-fill"/>
+            </g>
+          </g>
+        </g>
+      </g>
+    </g>
+    <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+      <rect x="-97.6" y="-97.6" width="195.2" height="195.2" fill="url(#rgGlow1)"/>
+    </g>
+    <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+      <g mask="url(#rgMask1)">
+        <rect x="-94" y="-94" width="188" height="188" class="ring-fill"/>
+        <rect x="-94" y="-94" width="188" height="188" fill="url(#rgHi1)"/>
+        <rect x="-94" y="-94" width="188" height="188" fill="url(#rgDepth1)"/>
+        <rect x="-94" y="-94" width="188" height="188" fill="url(#rgLume1)"/>
+      </g>
+    </g>
+    <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+      <g class="ring-grain ring-grain-r1">
+        <circle class="rg-anchor" cx="-94" cy="-94" r="0.01" fill="none"/>
+        <circle class="rg-anchor" cx="94" cy="94" r="0.01" fill="none"/>
+        <path class="rg-d" stroke-width="0.94" opacity="0.031" d="M71.6 54.7A90.2 90.2 0 0 1 31.8 84.4"/>
+        <path class="rg-d" stroke-width="1.26" opacity="0.031" d="M-72.3 -50.1A88 88 0 0 1 4.1 -87.9"/>
+        <path class="rg-d" stroke-width="0.66" opacity="0.04" d="M11 80.8A81.5 81.5 0 0 1 -79.5 18"/>
+        <path class="rg-d" stroke-width="0.82" opacity="0.034" d="M78 -44.6A89.8 89.8 0 0 1 84.9 29.3"/>
+        <path class="rg-d" stroke-width="0.74" opacity="0.033" d="M-57.6 62.3A84.8 84.8 0 0 1 -65.8 -53.5"/>
+        <path class="rg-d" stroke-width="1.31" opacity="0.028" d="M80.4 -9.9A81 81 0 0 1 2.8 81"/>
+        <path class="rg-d" stroke-width="0.71" opacity="0.042" d="M85.7 19.2A87.8 87.8 0 0 1 64.8 59.3"/>
+        <path class="rg-d" stroke-width="1.37" opacity="0.026" d="M89.7 12.1A90.5 90.5 0 0 1 -16.6 89"/>
+        <path class="rg-l" stroke-width="0.69" opacity="0.057" d="M85.3 -0.3A85.3 85.3 0 0 1 69.5 49.5"/>
+        <path class="rg-l" stroke-width="1.04" opacity="0.058" d="M-7 -85.8A86.1 86.1 0 0 1 85.7 7.7"/>
+        <path class="rg-l" stroke-width="0.71" opacity="0.033" d="M-35.3 -81.8A89.1 89.1 0 0 1 88.5 10.1"/>
+        <path class="rg-l" stroke-width="0.97" opacity="0.027" d="M58.9 -68.1A90 90 0 0 1 71.6 54.5"/>
+        <path class="rg-l" stroke-width="0.85" opacity="0.04" d="M-67.4 -55A87 87 0 0 1 -22 -84.2"/>
+        <path class="rg-l" stroke-width="1.03" opacity="0.057" d="M-11.9 -86.4A87.2 87.2 0 0 1 75.3 -43.9"/>
+        <path class="rg-l" stroke-width="1.08" opacity="0.079" d="M46.6 -75.1A88.4 88.4 0 0 1 50.4 -72.6"/>
+        <path class="rg-l" stroke-width="1.14" opacity="0.052" d="M-87.9 10.6A88.6 88.6 0 0 1 -88.4 4.8"/>
+      </g>
+      <g mask="url(#rgMask1)">
+        <rect x="-94" y="-94" width="188" height="188" fill="url(#rgDepth1)" opacity="0.6"/>
+      </g>
+    </g>
+    <g clip-path="url(#rgHp01)">
+      <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+        <g mask="url(#rgMask1)">
+          <g mask="url(#rgMask1)">
+            <g transform="matrix(0.5878 -1.5558 0.2427 0.3391 3.7 2.24)" filter="url(#rgSoft)" opacity="0.18">
+              <g mask="url(#rgMask0)">
+                <rect x="-119" y="-119" width="238" height="238" class="ring-cast-fill"/>
+              </g>
+            </g>
+          </g>
+          <g transform="matrix(0.5878 -1.5558 0.2427 0.3391 0 0)">
+          <g mask="url(#rgMask0)">
+            <rect x="-119" y="-119" width="238" height="238" class="ring-fill"/>
+            <rect x="-119" y="-119" width="238" height="238" fill="url(#rgHi0)"/>
+            <rect x="-119" y="-119" width="238" height="238" fill="url(#rgDepth0)"/>
+            <rect x="-119" y="-119" width="238" height="238" fill="url(#rgLume0)"/>
+          </g>
+          </g>
+        </g>
+      </g>
+    </g>
+    <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+      <g mask="url(#rgShadowFade)">
+        <g mask="url(#rgMask0)">
+          <rect x="-125" y="-125" width="250" height="250" fill="url(#rgAo0)"/>
+          <rect x="-125" y="-125" width="250" height="250" fill="url(#rgCast0)"/>
+        </g>
+      </g>
+    </g>
+    <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+      <g mask="url(#rgShadowFade)">
+        <g mask="url(#rgMask1)">
+          <rect x="-125" y="-125" width="250" height="250" fill="url(#rgAo1)"/>
+          <rect x="-125" y="-125" width="250" height="250" fill="url(#rgCast1)"/>
+        </g>
+      </g>
+    </g>
+    <g class="ring-nodes ring-nodes-back">
+      <circle class="ring-node rn-r0 rn-t0" r="3.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r0 rn-t1" r="2.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r0 rn-t2" r="2.0" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r0 rn-t3" r="1.5" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t0" r="3.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t1" r="2.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t2" r="2.0" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t3" r="1.5" fill="url(#rgNodeGlow)"/>
+    </g>
+
+    {# The planet. Not in any ring group: the art holds still while the
+       rings turn around it. The near bands' shadow falls across its face,
+       displaced from the bands toward the lower right. #}
+    <g class="ring-core">
+      <circle cx="120" cy="120" r="62" fill="#0a0a0b"/>
+      <g clip-path="url(#rgDisc)">
+        <image class="ring-core-art" href="{{ base_url }}/images/wallpaper.webp"
+               x="46.8" y="46.8" width="146.3" height="146.3"
+               preserveAspectRatio="xMidYMid slice"/>
+        <g class="ring-cast" filter="url(#rgSoft)" opacity="0.5">
+          <g transform="translate(3 5)">
+            <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+              <g clip-path="url(#rgNear)">
+                <rect x="-125" y="-125" width="250" height="250" class="ring-cast-fill" mask="url(#rgMask0)"/>
+              </g>
+            </g>
+            <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+              <g clip-path="url(#rgNear)">
+                <rect x="-125" y="-125" width="250" height="250" class="ring-cast-fill" mask="url(#rgMask1)"/>
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+      <circle cx="120" cy="120" r="62" fill="url(#rgSheen)"/>
+      <circle class="ring-core-rim" cx="120" cy="120" r="61.6"/>
+    </g>
+
+    {# The near halves again, in front, only across the planet's face --
+       woven in the same order as behind. #}
+    <g clip-path="url(#rgDiscLip)">
+      <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+        <g clip-path="url(#rgNear)">
+          <g mask="url(#rgMask0)">
+            <rect x="-119" y="-119" width="238" height="238" class="ring-fill"/>
+            <rect x="-119" y="-119" width="238" height="238" fill="url(#rgHi0)"/>
+            <rect x="-119" y="-119" width="238" height="238" fill="url(#rgDepth0)"/>
+            <rect x="-119" y="-119" width="238" height="238" fill="url(#rgLume0)"/>
+          </g>
+        </g>
+      </g>
+    </g>
+    <g clip-path="url(#rgHm01)">
+      <g transform="translate(120 120) rotate(-16) scale(1 0.3)">
+        <g clip-path="url(#rgNear)">
+          <g mask="url(#rgMask0)">
+            <g transform="matrix(0.5878 2.6967 -0.4207 1.0188 1.23 12.27)" filter="url(#rgSoft)" opacity="0.18">
+              <g mask="url(#rgMask1)">
+                <rect x="-94" y="-94" width="188" height="188" class="ring-cast-fill"/>
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+    </g>
+    <g clip-path="url(#rgDiscLip)">
+      <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+        <g clip-path="url(#rgNear)">
+          <g mask="url(#rgMask1)">
+            <rect x="-94" y="-94" width="188" height="188" class="ring-fill"/>
+            <rect x="-94" y="-94" width="188" height="188" fill="url(#rgHi1)"/>
+            <rect x="-94" y="-94" width="188" height="188" fill="url(#rgDepth1)"/>
+            <rect x="-94" y="-94" width="188" height="188" fill="url(#rgLume1)"/>
+          </g>
+        </g>
+      </g>
+    </g>
+    <g clip-path="url(#rgHp01)">
+      <g transform="translate(120 120) rotate(38) scale(1 0.52)">
+        <g clip-path="url(#rgNear)">
+        <g mask="url(#rgMask1)">
+            <g mask="url(#rgMask1)">
+              <g transform="matrix(0.5878 -1.5558 0.2427 0.3391 3.7 2.24)" filter="url(#rgSoft)" opacity="0.18">
+                <g mask="url(#rgMask0)">
+                  <rect x="-119" y="-119" width="238" height="238" class="ring-cast-fill"/>
+                </g>
+              </g>
+            </g>
+          <g transform="matrix(0.5878 -1.5558 0.2427 0.3391 0 0)">
+            <g clip-path="url(#rgNear)">
+            <g mask="url(#rgMask0)">
+              <rect x="-119" y="-119" width="238" height="238" class="ring-fill"/>
+              <rect x="-119" y="-119" width="238" height="238" fill="url(#rgHi0)"/>
+              <rect x="-119" y="-119" width="238" height="238" fill="url(#rgDepth0)"/>
+              <rect x="-119" y="-119" width="238" height="238" fill="url(#rgLume0)"/>
+            </g>
+            </g>
+          </g>
+        </g>
+        </g>
+      </g>
+    </g>
+    <g class="ring-nodes ring-nodes-front">
+      <circle class="ring-node rn-r0 rn-t0" r="3.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r0 rn-t1" r="2.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r0 rn-t2" r="2.0" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r0 rn-t3" r="1.5" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t0" r="3.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t1" r="2.6" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t2" r="2.0" fill="url(#rgNodeGlow)"/>
+      <circle class="ring-node rn-r1 rn-t3" r="1.5" fill="url(#rgNodeGlow)"/>
+    </g>
+  </svg>
+</figure>

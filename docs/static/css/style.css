@@ -27,15 +27,17 @@
      (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
   --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
-  /* Hero-knot palette. The ribbons' colour is computed per quad from two
-     baked numbers (--d depth, --s glint) mixed across these three points:
-     far side of a turn, near side, and the glint itself. The shadow strip
-     runs over the disc art as well as the page, so it is a translucent
-     dark rather than the page colour. */
-  --knot-far: color-mix(in oklab, var(--accent) 30%, var(--bg));
-  --knot-near: #e9cf8d;
-  --knot-hi: #fdf3cf;
-  --knot-cut: rgb(4 6 12 / 0.5);
+  /* Hero-ring palette. The bands are one base colour seen through a
+     generated transparency mask; --ring-hi is the warm wash over the bright
+     zones and the light grain, --ring-lo the ink the depth scrim and dark
+     grain pull toward, --ring-sh the planet's shadow on the sheet and the
+     sheet's shadow on the planet, --ring-glow the light the tubes spill
+     into the page (halo, near-rim sweep, comet dots, limb aura). */
+  --ring-base: #d4b276;
+  --ring-hi: #f7e9bd;
+  --ring-lo: #060a12;
+  --ring-sh: #030509;
+  --ring-glow: #ffe9a8;
   --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
   --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
   --header-bg: rgb(9 11 18 / 0.82);
@@ -85,14 +87,15 @@
   --grad-gold-leaf: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 52%, #6f4e12 76%, #cba43e 100%);
   --grad-logo: linear-gradient(135deg, #c5a45a 0%, #b08d3f 55%, #8a6a28 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
-  /* On paper the ramp inverts: near is the deep readable gold, the glint is
-     a lighter warm gold rather than near-white, and the far side keeps
-     enough accent not to wash into the cream. The shadow is a warm tone at
-     a low alpha -- at the dark theme's it would print as a black outline. */
-  --knot-far: color-mix(in oklab, var(--accent) 55%, var(--bg));
-  --knot-near: #96660d;
-  --knot-hi: #c99b32;
-  --knot-cut: rgb(75 58 30 / 0.18);
+  /* On paper the values invert: the base is the deep readable gold, the
+     highlight a lighter warm gold rather than near-white, and the shading
+     colours are warm browns -- the dark theme's near-blacks would print as
+     soot on the cream. */
+  --ring-base: #ad8126;
+  --ring-hi: #cda23e;
+  --ring-lo: #4b3a1e;
+  --ring-sh: #3a2d18;
+  --ring-glow: #e6b23c;
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
   --header-bg: rgb(250 249 247 / 0.82);
@@ -850,11 +853,11 @@ kbd {
   display: block;
 }
 
-/* The hero mark: the same three-ring weave the logo carries, drawn around a
-   disc of the official art. Geometry and the over/under order are generated
-   (see partials/hero-knot.html); everything below is only paint and motion.
-   The rings reach the edge of the box, so the box stays under 100% of the
-   column, which .home-main would otherwise clip. */
+/* The hero mark: a ringed planet -- the official art disc circled by a
+   Saturn-like sheet of translucent ring bands. Geometry, band structure and
+   grain are generated (see tools/hero-rings/build.py); everything below is
+   only paint and motion. The sheet reaches the edge of its box, so the box
+   stays under 100% of the column, which .home-main would otherwise clip. */
 .hero-art {
   justify-self: center;
   width: min(94%, 44rem);
@@ -862,113 +865,131 @@ kbd {
   margin: 0;
 }
 
-.hero-knot {
+.hero-rings {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-/* The whole weave turns as one rigid piece. Rotating in the picture plane is
-   the only motion that leaves the painted depth order still correct, so the
-   knot can move without the crossings ever going wrong. */
-.knot-spin {
-  transform-box: view-box;
+/* The band sheet's base colour. Structure and translucency come from the
+   generated mask, so this fill is the whole of the bands' own colour; the
+   gradients painted over it are washes of --ring-hi and --ring-lo. */
+.ring-fill {
+  fill: var(--ring-base);
+}
+
+.rs-hi {
+  stop-color: var(--ring-hi);
+}
+
+.rs-lo {
+  stop-color: var(--ring-lo);
+}
+
+.rs-sh {
+  stop-color: var(--ring-sh);
+}
+
+.rs-glow {
+  stop-color: var(--ring-glow);
+}
+
+/* The near bands' shadow across the planet's face. */
+.ring-cast-fill {
+  fill: var(--ring-sh);
+}
+
+/* The light each tube spills into the page behind it: a blurred copy of the
+   band, and the loose dust hanging around the system. */
+.ring-glow-fill {
+  fill: var(--ring-glow);
+}
+
+.ring-dust {
+  fill: var(--ring-glow);
+}
+
+/* Orbiting grain: light and dark streaks of ring material. Width and
+   opacity are baked per streak; the mask trims them to the bands. */
+.rg-l {
+  fill: none;
+  stroke: var(--ring-hi);
+}
+
+.rg-d {
+  fill: none;
+  stroke: var(--ring-lo);
+}
+
+/* The grain groups spin about the ring centre (motion block). Their
+   fill-box centre IS that centre -- each group carries two zero-size anchor
+   dots at opposite corners of its square to guarantee it -- so the spin
+   cannot wobble. */
+.ring-grain {
+  transform-box: fill-box;
   transform-origin: 50% 50%;
 }
 
-/* The soft strip under each ribbon chunk: an outline of the ribbon padded on
-   both sides. Where a ribbon crosses another it reads as the cast shadow that
-   separates them; along open stretches it is a contact-shadow edge that lifts
-   the gold off the page and the disc art. Each chunk's opacity attribute
-   scales it down toward the far side. */
-.knot-sh {
-  fill: var(--knot-cut);
-}
-
-/* A ribbon quad. --d and --s are baked by the generator: --d is depth
-   brightness (0% far side of the turn, 100% near), --s the specular glint.
-   Colour is mixed here rather than baked so it follows the theme; oklab
-   keeps the dark end of the ramp gold instead of muddy. Each quad is
-   stroked in its own fill colour: the half-unit outline swallows the
-   antialiased boundary between neighbours, which otherwise reads as a
-   hairline across the ribbon at every seam. */
-.knot-q {
-  --d: 0%;
-  --s: 0%;
-  --knot-mix: var(--accent);
-  fill: var(--knot-mix);
-  stroke: var(--knot-mix);
-  stroke-width: 0.5;
-  stroke-linejoin: round;
-}
-
-@supports (color: color-mix(in oklab, red 10%, blue)) {
-  .knot-q {
-    --knot-mix: color-mix(in oklab, var(--knot-hi) var(--s),
-                color-mix(in oklab, var(--knot-near) var(--d), var(--knot-far)));
-  }
-}
-
-.knot-s0 {
+.ring-s0 {
   stop-color: rgb(var(--scrim-rgb));
   stop-opacity: 0.28;
 }
 
-.knot-s1 {
+.ring-s1 {
   stop-color: rgb(var(--scrim-rgb));
   stop-opacity: 0;
 }
 
-.knot-s2 {
+.ring-s2 {
   stop-color: rgb(var(--accent-rgb));
   stop-opacity: 0.12;
 }
 
 /* Filter lengths are user units here, not CSS pixels: the viewBox is 240
-   wide, so 13 is roughly the 40px lift the rest of the page uses. */
-.knot-core {
+   wide, so 13 is roughly the 40px lift the rest of the page uses. The
+   planet's lifted shadow falls across the far bands behind it, which is
+   exactly where a planet's shadow belongs. */
+.ring-core {
   filter: drop-shadow(0 5px 13px rgb(2 3 9 / 0.6));
 }
 
-.knot-core-rim {
+.ring-core-rim {
   fill: none;
   stroke: rgb(var(--accent-rgb) / 0.28);
   stroke-width: 0.8;
 }
 
-/* Request traffic riding the rings: per ring a head and three trail dots
-   fading behind it, a comet circling the loop. Every dot exists twice, once
+/* Request traffic riding the ring lanes: per lane a head and three trail
+   dots fading behind it, a comet on orbit. Every dot exists twice, once
    behind the disc and once in front; the motion block gives the two copies
-   complementary opacity windows, so a lap truly passes behind the core
+   complementary opacity windows, so a lap truly passes behind the planet
    rather than fading near it. They are placed by offset-path alone and so
-   only exist where that is supported — otherwise they would pile up at the
+   only exist where that is supported -- otherwise they would pile up at the
    origin. Statically (no motion) only the three front heads show, parked at
-   their rings' near horizons. */
-.knot-node {
+   their lanes' horizons. */
+.ring-node {
   display: none;
   opacity: 0;
-  fill: var(--knot-hi);
-  filter: drop-shadow(0 0 2.6px rgb(var(--accent-rgb) / 0.95));
 }
 
-.knot-nodes-front .kn-t0 {
+.ring-nodes-front .rn-t0 {
   opacity: 1;
 }
 
-.kn-t1 {
+.rn-t1 {
   fill-opacity: 0.55;
 }
 
-.kn-t2 {
+.rn-t2 {
   fill-opacity: 0.3;
 }
 
-.kn-t3 {
+.rn-t3 {
   fill-opacity: 0.16;
 }
 
 @supports (offset-path: path("M0 0L1 1")) {
-  .knot-node {
+  .ring-node {
     display: block;
     /* fill-box, so the anchor riding the path is the dot's own centre and
        not the middle of the viewBox. */
@@ -977,34 +998,27 @@ kbd {
     offset-rotate: 0deg;
   }
 
-  /* Generated with the ribbons: the full ellipse of each ring. --dur/--ph
-     set each ring's lap time and phase; --step spaces the trail dots along
-     the lap (negative on the reversed ring, so the trail still trails). */
-  .kn-r0 {
-    --dur: 21s;
-    --ph: -21s;
-    --step: 0.45s;
-    offset-path: path("M233 120A113 64.8 0 0 1 7 120A113 64.8 0 0 1 233 120");
-  }
-
-  .kn-r1 {
-    --dur: 29s;
-    --ph: -11s;
-    --step: 0.62s;
-    offset-path: path("M176.5 217.9A113 64.8 60 0 1 63.5 22.1A113 64.8 60 0 1 176.5 217.9");
-  }
-
-  .kn-r2 {
-    --dur: 37s;
+  /* Generated with the sheet: each lane's projected ellipse. --dur/--ph
+     set the lap time and phase; --step spaces the trail dots along the
+     lap. All three lanes run prograde, with the grain. */
+  .rn-r0 {
+    --dur: 40s;
     --ph: -25s;
-    --step: -0.8s;
-    offset-path: path("M63.5 217.9A113 64.8 120 0 1 176.5 22.1A113 64.8 120 0 1 63.5 217.9");
+    --step: 0.75s;
+    offset-path: path("M223.8 90.2A108 32.4 -16 0 1 16.2 149.8A108 32.4 -16 0 1 223.8 90.2");
   }
 
-  .kn-t0 { --k: 0; }
-  .kn-t1 { --k: 1; }
-  .kn-t2 { --k: 2; }
-  .kn-t3 { --k: 3; }
+  .rn-r1 {
+    --dur: 28s;
+    --ph: -11s;
+    --step: 0.6s;
+    offset-path: path("M187.4 172.6A85.5 44.5 38 0 1 52.6 67.4A85.5 44.5 38 0 1 187.4 172.6");
+  }
+
+  .rn-t0 { --k: 0; }
+  .rn-t1 { --k: 1; }
+  .rn-t2 { --k: 2; }
+  .rn-t3 { --k: 3; }
 }
 
 /* --- Showcase: a real terminal capture floating under the hero --------- */
@@ -2853,38 +2867,50 @@ html.search-lock body {
     animation: hero-rise 760ms cubic-bezier(0.16, 1, 0.3, 1) 160ms backwards;
   }
 
-  .knot-core-art {
+  .ring-core-art {
     animation: quiet-drift 16s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
     transform-box: fill-box;
     transform-origin: 74% 45%;
   }
 
-  /* One slow turn of the whole weave. Three-fold symmetry means it reads as
-     repeating every third of a lap, so the lap itself can be long. */
-  .knot-spin {
-    animation: knot-turn 66s linear infinite;
+  /* Ring material on orbit: the grain groups turn inside the squashed ring
+     plane -- a rotation of the flat sheet about its own axis, the one
+     motion the baked projection keeps honest -- with the inner bands
+     faster than the outer, as orbits are. The bands' base gradient is
+     rotationally symmetric, so only the grain and the traffic show the
+     turn, which is why it can be this slow and still read.
+
+     will-change promotes each spinning group to its own compositor layer,
+     so the turn runs on the GPU instead of re-rasterizing the whole SVG --
+     the static bands, halos and planet paint once and are reused. It sits
+     here, inside the no-reduced-motion block, so a static page never pays
+     the layer memory. */
+  .ring-grain-r0 {
+    animation: ring-turn 110s linear infinite;
+    will-change: transform;
   }
 
-  /* The traffic: each dot rides its ring's ellipse, phased by --ph and
+  .ring-grain-r1 {
+    animation: ring-turn 70s linear infinite;
+    will-change: transform;
+  }
+
+  /* The traffic: each dot rides its lane's ellipse, phased by --ph and
      spaced along the lap by --k * --step, which is what strings the trail
-     out behind its head. The lap's first half is the near half of the ring
-     (the path starts at a near horizon), so the front copies hold opacity
+     out behind its head. The lap's first half is the near half of the lane
+     (the path starts at a horizon), so the front copies hold opacity
      through 0-50% and the back copies through 50-100% — the comet passes
-     behind the disc, it does not fade near it. All phases are negative so
-     no dot ever sits waiting at its start point. */
-  .knot-node {
+     behind the planet, it does not fade near it. All phases are negative
+     so no dot ever sits waiting at its start point. */
+  .ring-node {
     animation:
-      knot-ride var(--dur) linear infinite,
-      knot-front var(--dur) linear infinite;
+      ring-ride var(--dur) linear infinite,
+      ring-front var(--dur) linear infinite;
     animation-delay: calc(var(--ph) + var(--k) * var(--step));
   }
 
-  .knot-nodes-back .knot-node {
-    animation-name: knot-ride, knot-back;
-  }
-
-  .kn-r2 {
-    animation-direction: reverse;
+  .ring-nodes-back .ring-node {
+    animation-name: ring-ride, ring-back;
   }
 
   .path-ring:hover::before,
@@ -3129,7 +3155,7 @@ html.search-lock body {
   }
 }
 
-@keyframes knot-turn {
+@keyframes ring-turn {
   from {
     transform: rotate(0deg);
   }
@@ -3138,7 +3164,7 @@ html.search-lock body {
   }
 }
 
-@keyframes knot-ride {
+@keyframes ring-ride {
   from {
     offset-distance: 0%;
   }
@@ -3151,7 +3177,7 @@ html.search-lock body {
    the half in front of the disc and the second half the one behind it. The
    front and back node copies each hold their own half and hand over at the
    horizons; the back copies also run dimmer, light falling off with depth. */
-@keyframes knot-front {
+@keyframes ring-front {
   0% {
     opacity: 0;
   }
@@ -3165,7 +3191,7 @@ html.search-lock body {
   }
 }
 
-@keyframes knot-back {
+@keyframes ring-back {
   0%,
   50% {
     opacity: 0;

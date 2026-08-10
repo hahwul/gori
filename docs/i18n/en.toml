@@ -61,7 +61,7 @@ install_aria = "Install gori"
 install_pick_aria = "Choose an install method"
 install_copy = "Copy install command"
 
-hero_art_alt = "The gori mark: three rings woven through one another around a disc of the gori artwork"
+hero_art_alt = "The gori mark: two broad translucent rings crossing around a disc of the gori artwork"
 showcase_alt = "gori History tab in the terminal, listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration"
 showcase_note = "Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Repeater, the Fuzzer, or an issue."
 
