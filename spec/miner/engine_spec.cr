@@ -131,6 +131,49 @@ private class MultiLocationBackend < F::Backend
   end
 end
 
+# Records, per send, how many of the run's CANDIDATE names the query carried — the size of
+# the bucket that request tested. Baseline's raw probe carries none and its control probe
+# carries only bogus `zz…` names, so neither pollutes the count. Grows the body for `magic`,
+# so exactly one name is positive and the bisection follows a single, deterministic path
+# whose bucket sizes reveal the branch factor. Used to pin `Engine#split`.
+private class RecordingBucketBackend < F::Backend
+  getter origin : F::Origin
+  getter counts = [] of Int32
+
+  def initialize(@origin : F::Origin, @candidates : Set(String), @magic : String)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    params = query_params(bytes)
+    @counts << params.keys.count { |k| @candidates.includes?(k) }
+    body = "BASELINE BODY CONTENT"
+    body += " XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" if params.has_key?(@magic)
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+
+  private def query_params(bytes : Bytes) : Hash(String, String)
+    pairs = Hash(String, String).new
+    line = String.new(bytes).lines.first? || ""
+    target = line.split(' ')[1]? || ""
+    qi = target.index('?')
+    return pairs unless qi
+    target[(qi + 1)..].split('&').each do |pair|
+      k, _, v = pair.partition('=')
+      pairs[k] = v unless k.empty?
+    end
+    pairs
+  end
+
+  # The largest bucket tested AFTER the initial full bucket — i.e. the widest second-generation
+  # sub-bucket the split produced. Smaller means a wider (shallower) split.
+  def widest_split : Int32
+    initial = @counts.max
+    @counts.reject { |c| c == initial || c.zero? }.max? || 0
+  end
+end
+
 private def mine(backend : F::Backend, names : Array(String), config : M::Config) : Array(M::Finding)
   base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
   engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: config)
@@ -176,6 +219,52 @@ describe Gori::Miner::Engine do
     raise "expected a finding for 'debug'" unless debug
     debug.evidence.should eq(M::Evidence::Length)
     findings.size.should eq(1)
+  end
+
+  it "isolates EVERY hidden parameter when a whole bucket is positive, for no more requests" do
+    # Two guarantees for the densest case (every name positive → the bucket fully expands to
+    # singletons):
+    #   1. correctness — an off-by-one in the slice arithmetic would drop or double a name and
+    #      silently miss it, so assert not one of the ten is lost.
+    #   2. budget — a wider split must never send MORE probes than binary would, or a run under
+    #      `--max-requests` would exhaust its cap sooner and find fewer (a false negative). The
+    #      pruning tree has ~K·b/(b−1) nodes, so 4-ary sends FEWER here, never more.
+    names = (1..10).map { |i| "grow#{i}" }
+    build = ->(conc : Int32) do
+      c = cfg
+      c.bucket_size[M::Location::Query] = 16 # one initial bucket holds all 10
+      c.concurrency = conc
+      backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), grow: names)
+      findings = mine(backend, names, c)
+      {findings.map(&.name).sort, backend.sent}
+    end
+    binary_names, binary_sent = build.call(2)
+    wide_names, wide_sent = build.call(4) # split ≠ binary
+    wide_names.should eq(names.sort)      # every one still isolated…
+    binary_names.should eq(names.sort)
+    wide_sent.should be <= binary_sent # …and the wider split never costs more requests
+  end
+
+  it "splits a positive bucket wider as concurrency rises (shallower bisection tree)" do
+    # The mine's critical path is the bisection DEPTH, so a positive bucket is split into
+    # `min(concurrency, BISECT_MAX_WAYS)` sub-buckets, not always two — filling idle workers to
+    # trade the run's spare throughput for a shorter path. A serial/paced run keeps the binary
+    # tree it had. Observe it through the widest second-generation bucket: wider split → smaller.
+    names = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    cands = names.to_set
+    build = ->(conc : Int32) do
+      c = cfg
+      c.bucket_size[M::Location::Query] = 8 # all eight in one initial bucket
+      c.concurrency = conc
+      backend = RecordingBucketBackend.new(F::Origin.new("http", "h", 80), cands, "d")
+      mine(backend, names, c)
+      backend.widest_split
+    end
+    # concurrency 2 bisects [8]→[4,4]; concurrency 4 splits [8]→[2,2,2,2].
+    binary = build.call(2)
+    wide = build.call(4)
+    binary.should eq(4)
+    wide.should be < binary
   end
 
   it "finds nothing when no parameter influences the response" do

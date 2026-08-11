@@ -12,11 +12,12 @@ module Gori::Miner
   # count against `--max-requests`) lives with the send seam it wraps: Fuzz::CappedBackend.
 
   # Drives a parameter-mining run: calibrate a baseline, then for each location stuff
-  # candidate names into buckets, diff vs baseline, and BINARY-SEARCH each interesting
-  # bucket to isolate the responsible name. Concurrency = ONE work queue for the whole run,
-  # drained by a bounded worker pool: every location's buckets go in together and a
-  # bisection's halves are pushed straight back, so nothing waits on a round barrier or on
-  # another location finishing. See `drain`.
+  # candidate names into buckets, diff vs baseline, and BISECT each interesting bucket
+  # (into up to `BISECT_MAX_WAYS` sub-buckets, not just two — see `split`) to isolate the
+  # responsible name. Concurrency = ONE work queue for the whole run, drained by a bounded
+  # worker pool: every location's buckets go in together and a bisection's children are
+  # pushed straight back, so nothing waits on a round barrier or on another location
+  # finishing. See `drain`.
   #
   # Single-threaded fiber scheduler (no -Dpreview_mt): plain ivar increments and array
   # appends never yield mid-op, so the counters and per-round outcome array need no locks.
@@ -25,6 +26,15 @@ module Gori::Miner
     include Gori::Pacing
 
     MAX_CONCURRENCY = 100
+
+    # Upper bound on the bisection branch factor — how many sub-buckets a positive bucket is
+    # split into to isolate the responsible name (see `split`). 4 halves the tree DEPTH vs a
+    # binary bisection and never costs more probes (measured: equal when a bucket holds ≤1
+    # positive, −6%…−11% as it fills, because the pruning tree over K names has K·b/(b−1)
+    # nodes — fewer as b grows). Higher than 4 keeps shrinking the count but the depth returns
+    # flatten, so 4 is the knee. The effective factor is `min(this, concurrency)`, so a run
+    # with fewer workers than this never splits wider than it can fill.
+    BISECT_MAX_WAYS = 4
 
     # Per-request growth ceiling for the Json location. A JSON candidate is injected into EVERY
     # object node, so a deeply-nested body could otherwise balloon one request to megabytes; this
@@ -307,11 +317,48 @@ module Gori::Miner
         record_finding(confirmed) if confirmed
         mark_done(1)
       else
-        mid = remaining.size // 2
-        children << Task.new(task.location, remaining[0...mid])
-        children << Task.new(task.location, remaining[mid..])
+        split(remaining).each { |slice| children << Task.new(task.location, slice) }
       end
       children
+    end
+
+    # Partition a positive bucket into `bisect_ways` roughly-equal contiguous sub-buckets to
+    # search next, instead of the two halves a strict binary bisection would.
+    #
+    # A mine is LATENCY-bound and its critical path is this tree's DEPTH: isolating one name
+    # in a K-bucket takes ~log_b(K) sequential round trips at branch factor b, and — since the
+    # tail of a bisection is only 1-2 tasks wide — that chain is a floor no amount of
+    # concurrency can lower (see `drain`: at concurrency 40 the pool sat ~half idle waiting on
+    # it). Widening the split lowers the floor: log₄ is half of log₂.
+    #
+    # It buys the depth WITHOUT costing requests. To isolate a lone positive, a b-way split
+    # sends `b` probes at each of `log_b(K)` levels = `b·log_b(K)` = `2·log₂(K)` for b∈{2,4} —
+    # the same count a binary search sends, in wider, shallower waves. When a bucket holds
+    # SEVERAL positives it recurses into several children, but the total still falls, not
+    # rises: the pruning tree over K names has ~K·b/(b−1) nodes (2K binary, ~1.33K at b=4), so
+    # a dense bucket costs FEWER probes under 4-ary (measured −6%…−11% at ≥8 positives per
+    # 128). Under `--max-requests` that means 4-ary reaches full coverage inside the same
+    # budget a binary run would — it never finds fewer. That is why `BISECT_MAX_WAYS` caps b
+    # for DEPTH returns, not to bound a request cost that only shrinks.
+    #
+    # Tied to `@concurrency` on purpose, floored at 2: widening past the worker count cannot
+    # help — the extra pieces just queue — so a serial/paced run (concurrency 1-2) keeps the
+    # exact binary tree it had, request-for-request, and only a run with idle workers to fill
+    # splits wider. That also keeps the split neutral for a SATURATED pool, whose wall clock is
+    # its request count over its worker count regardless of how the tree branches.
+    private def split(names : Array(String)) : Array(Array(String))
+      ways = @concurrency.clamp(2, BISECT_MAX_WAYS)
+      k = {names.size, ways}.min
+      base = names.size // k
+      extra = names.size % k
+      slices = Array(Array(String)).new(k)
+      start = 0
+      k.times do |i|
+        len = base + (i < extra ? 1 : 0)
+        slices << names[start, len]
+        start += len
+      end
+      slices
     end
 
     # Re-test an isolated name alone with fresh canaries; Confirmed only if it
