@@ -40,9 +40,16 @@ gori run issues --db /path/to/project.db --format json
 
 The JSON that `gori run` emits is a stable, documented shape meant to be parsed, not eyeballed. Four rules make it pipe cleanly:
 
-**STDOUT is data, STDERR is diagnostics.** Warnings, counts, notes, and `wrote <path>` confirmations go to STDERR, so `gori run … | jq` never has to filter chatter out of its input.
+**STDOUT is data, STDERR is diagnostics.** Warnings, counts, notes, and export confirmations go to STDERR, so `gori run … | jq` never has to filter chatter out of its input.
 
-**`--format` picks the shape.** Most subcommands take `text` (default) or `json`; some add `jsonl`, `raw`, `har`, `paths`, or `markdown`. Streaming subcommands — `capture`, `history`, `fuzz`, `mine`, `discover` — emit **one JSON object per line** under `--format json`, with `jsonl` accepted as an explicit alias for the same thing. Nothing buffers the whole run in memory.
+**`--format` picks the shape.** Most subcommands take `text` (default) or `json`; some add `jsonl`, `raw`, `har`, `paths`, or `markdown`. Where a run streams, the two JSON shapes differ and the difference is worth knowing:
+
+| Subcommand | `--format json` | `--format jsonl` |
+|------------|-----------------|------------------|
+| `capture`, `history` | One JSON object per line | Alias for `json` — same output |
+| `fuzz`, `mine`, `discover` | Buffered; one JSON array at the end | One object per line, as each result lands |
+
+Reach for `jsonl` when you want to consume a long sweep while it runs, and `json` when you want one document at the end.
 
 **Exit codes are meaningful.**
 

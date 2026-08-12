@@ -96,7 +96,14 @@ gori run <subcommand> [verb] [options]
 
 #### 출력 계약 {#output-contract}
 
-STDOUT은 데이터를 나릅니다. 경고, 개수, `wrote <path>` 확인 메시지는 STDERR로 가므로 파이프가 깨끗하게 유지됩니다. 스트리밍 서브커맨드(`capture`, `history`, `fuzz`, `mine`, `discover`)는 `--format json`에서 한 줄에 JSON 객체 하나씩 내보내며, `jsonl`을 명시적 별칭으로 받습니다. 읽는 쪽이 파이프를 먼저 닫아도(`… | head`) 조용히 `0`으로 끝납니다.
+STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시지는 STDERR로 가므로 파이프가 깨끗하게 유지됩니다. 읽는 쪽이 파이프를 먼저 닫아도(`… | head`) 조용히 `0`으로 끝납니다.
+
+실행이 스트리밍되는 곳에서는 `json`과 `jsonl`의 형태가 늘 같지는 않습니다.
+
+| 서브커맨드 | `--format json` | `--format jsonl` |
+|-----------|-----------------|------------------|
+| `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭 — 출력 동일 |
+| `fuzz`, `mine`, `discover` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
 
 | 종료 코드 | 의미 |
 |-----------|------|

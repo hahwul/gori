@@ -96,7 +96,14 @@ Read subcommands open the store directly and never take the capture lock, so the
 
 #### Output contract
 
-STDOUT carries data; warnings, counts, and `wrote <path>` confirmations go to STDERR, so a pipe stays clean. Streaming subcommands — `capture`, `history`, `fuzz`, `mine`, `discover` — emit one JSON object per line under `--format json`, with `jsonl` accepted as an explicit alias. A reader that closes the pipe early (`… | head`) exits `0` quietly.
+STDOUT carries data; warnings, counts, and export confirmations go to STDERR, so a pipe stays clean. A reader that closes the pipe early (`… | head`) exits `0` quietly.
+
+Where a run streams, `json` and `jsonl` are not always the same shape:
+
+| Subcommand | `--format json` | `--format jsonl` |
+|------------|-----------------|------------------|
+| `capture`, `history` | One JSON object per line | Alias for `json` — same output |
+| `fuzz`, `mine`, `discover` | Buffered; one JSON array at the end | One object per line, as each result lands |
 
 | Exit code | Meaning |
 |-----------|---------|

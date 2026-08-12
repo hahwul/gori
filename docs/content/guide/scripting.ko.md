@@ -40,9 +40,16 @@ gori run issues --db /path/to/project.db --format json
 
 `gori run`이 뱉는 JSON은 눈으로 보라고 만든 게 아니라 파싱하라고 만든, 안정적이고 문서화된 형태입니다. 다음 네 가지 규칙이 파이프를 깔끔하게 유지합니다.
 
-**STDOUT은 데이터, STDERR은 진단.** 경고, 개수, 안내, `wrote <path>` 확인 메시지는 모두 STDERR로 갑니다. 그래서 `gori run … | jq`는 입력에서 잡담을 걸러낼 필요가 없습니다.
+**STDOUT은 데이터, STDERR은 진단.** 경고, 개수, 안내, 내보내기 확인 메시지는 모두 STDERR로 갑니다. 그래서 `gori run … | jq`는 입력에서 잡담을 걸러낼 필요가 없습니다.
 
-**`--format`이 형태를 정합니다.** 대부분의 서브커맨드는 `text`(기본)와 `json`을 받고, 일부는 `jsonl`, `raw`, `har`, `paths`, `markdown`을 더합니다. 스트리밍 서브커맨드(`capture`, `history`, `fuzz`, `mine`, `discover`)는 `--format json`에서 **한 줄에 JSON 객체 하나씩** 내보내며, `jsonl`은 같은 동작의 명시적 별칭입니다. 실행 전체를 메모리에 쌓아두지 않습니다.
+**`--format`이 형태를 정합니다.** 대부분의 서브커맨드는 `text`(기본)와 `json`을 받고, 일부는 `jsonl`, `raw`, `har`, `paths`, `markdown`을 더합니다. 실행이 길게 이어지는 곳에서는 두 JSON 형태가 다르고, 그 차이를 알아둘 만합니다.
+
+| 서브커맨드 | `--format json` | `--format jsonl` |
+|-----------|-----------------|------------------|
+| `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭 — 출력 동일 |
+| `fuzz`, `mine`, `discover` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+
+긴 스윕을 진행 중에 소비하려면 `jsonl`을, 끝에 문서 하나를 받으려면 `json`을 씁니다.
 
 **종료 코드에 의미가 있습니다.**
 
