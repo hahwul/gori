@@ -2,6 +2,7 @@ require "db"
 require "sqlite3"
 require "log"
 require "json"
+require "./media_type"
 require "./store/models"
 require "./store/safe_regexp"
 require "./store/schema"
@@ -999,12 +1000,20 @@ module Gori
       args << (unsent ? 1 : 0)
       args << (req.short_circuited? ? 1 : 0)
       args << req.advisory
+      # Lifted off the head at CAPTURE time, beside the response's `content_type`. `Proto`
+      # classifies a flow's application protocol from the content type and had only the
+      # response's, so a gRPC call was gRPC exactly when it SUCCEEDED — a Pending one, an
+      # aborted one, and one answered with a proxy's `text/html` 502 all read as plain HTTP,
+      # which is the set an operator is looking through. `QL.proto_cond` compiles `proto:` to
+      # SQL against this table, so the fact has to be a COLUMN or the label and the filter drift.
+      args << MediaType.of(req.head)
       res = conn.exec(
         "INSERT INTO flows " \
         "(created_at, scheme, host, port, method, target, http_version, " \
         " sni, alpn, tls_version, request_head, request_body, request_size, state, " \
-        " h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, advisory, fts_dirty) " \
-        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,1)", args: args)
+        " h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, advisory, " \
+        " request_content_type, fts_dirty) " \
+        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,1)", args: args)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
       # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
@@ -1240,9 +1249,10 @@ module Gori
       content_type = rs.read(String?)
       short_circuited = rs.read(Int32) != 0
       advisory = rs.read(String?)
+      request_content_type = rs.read(String?)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type,
-        short_circuited, advisory)
+        short_circuited, advisory, request_content_type)
     end
 
     # Column order MUST match EVENT_COLS.

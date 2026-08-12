@@ -340,6 +340,26 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # `Proto` is the single source of truth the PROTO column and the QL `proto:` filter both
+  # defer to, and it read only the RESPONSE's content type — so a gRPC call showed as GRPC
+  # exactly when it SUCCEEDED. A still-Pending one, and one answered by a proxy's `text/html`
+  # 502, both printed HTTPS, and those are the rows an operator is scanning for.
+  it "prints GRPCS for a gRPC call the response never confirmed" do
+    tmp_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/svc/M", http_version: "HTTP/2",
+        head: "POST /svc/M HTTP/2\r\nHost: api.test\r\nContent-Type: application/grpc\r\n\r\n".to_slice,
+        body: nil))
+      view = HistoryView.new
+      view.reload(store)
+
+      backend = MemoryBackend.new(120, 6)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 6))
+      backend.contains?("GRPCS").should be_true
+    end
+  end
+
   # Every decode pane is keyed on a request or response BODY, and a 101 flow has neither — its
   # bytes live in the ws_messages table. So a GraphQL SUBSCRIPTION, which is how every real
   # GraphQL subscription runs, showed up as raw JSON in MESSAGES with no GRAPHQL pane offered

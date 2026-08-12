@@ -82,7 +82,11 @@ module Gori
       row = Store::FlowRow.new(
         row_id, 0_i64, scheme, method, host, port, target,
         status, size, Store::FlowState::Complete,
-        body.try(&.size.to_i64), record.response_duration_us, content_type)
+        body.try(&.size.to_i64), record.response_duration_us, content_type,
+        # The REQUEST's type too, like a captured row carries since V14 — `Proto.classify`
+        # reads it, and a synthetic row that left it nil would classify a gRPC repeater send
+        # as plain HTTP whenever the response came back without the type (an error, a proxy).
+        request_content_type: MediaType.of(req_head_bytes))
 
       Store::FlowDetail.new(
         row,

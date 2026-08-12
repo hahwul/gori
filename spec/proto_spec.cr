@@ -3,26 +3,50 @@ require "./spec_helper"
 describe Gori::Proto do
   describe ".classify" do
     it "classifies a 101 upgrade as WebSocket (status wins over any type)" do
-      Gori::Proto.classify(101, nil).should eq(Gori::Proto::Kind::Ws)
-      Gori::Proto.classify(101, "application/grpc").should eq(Gori::Proto::Kind::Ws)
+      Gori::Proto.classify(101, nil, nil).should eq(Gori::Proto::Kind::Ws)
+      Gori::Proto.classify(101, "application/grpc", nil).should eq(Gori::Proto::Kind::Ws)
     end
 
     it "classifies gRPC by Content-Type, including +proto and grpc-web variants" do
-      Gori::Proto.classify(200, "application/grpc").should eq(Gori::Proto::Kind::Grpc)
-      Gori::Proto.classify(200, "application/grpc+proto").should eq(Gori::Proto::Kind::Grpc)
-      Gori::Proto.classify(200, "application/grpc-web+proto").should eq(Gori::Proto::Kind::Grpc)
-      Gori::Proto.classify(200, "APPLICATION/GRPC").should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(200, "application/grpc", nil).should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(200, "application/grpc+proto", nil).should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(200, "application/grpc-web+proto", nil).should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(200, "APPLICATION/GRPC", nil).should eq(Gori::Proto::Kind::Grpc)
     end
 
     it "classifies SSE by Content-Type, tolerating charset params" do
-      Gori::Proto.classify(200, "text/event-stream").should eq(Gori::Proto::Kind::Sse)
-      Gori::Proto.classify(200, "text/event-stream; charset=utf-8").should eq(Gori::Proto::Kind::Sse)
+      Gori::Proto.classify(200, "text/event-stream", nil).should eq(Gori::Proto::Kind::Sse)
+      Gori::Proto.classify(200, "text/event-stream; charset=utf-8", nil).should eq(Gori::Proto::Kind::Sse)
     end
 
     it "treats everything else — including a pending/typeless flow — as HTTP" do
-      Gori::Proto.classify(200, "text/html").should eq(Gori::Proto::Kind::Http)
-      Gori::Proto.classify(nil, nil).should eq(Gori::Proto::Kind::Http)
-      Gori::Proto.classify(200, nil).should eq(Gori::Proto::Kind::Http)
+      Gori::Proto.classify(200, "text/html", nil).should eq(Gori::Proto::Kind::Http)
+      Gori::Proto.classify(nil, nil, nil).should eq(Gori::Proto::Kind::Http)
+      Gori::Proto.classify(200, nil, nil).should eq(Gori::Proto::Kind::Http)
+    end
+
+    # gRPC is a content type BOTH sides send, and reading only the response's meant a gRPC
+    # call was classified as gRPC exactly when it SUCCEEDED — the failed and pending ones,
+    # which are the ones an operator is looking through, read as plain HTTP.
+    it "classifies gRPC from the REQUEST's type when the response has none or the wrong one" do
+      Gori::Proto.classify(nil, nil, "application/grpc").should eq(Gori::Proto::Kind::Grpc)         # still pending
+      Gori::Proto.classify(502, "text/html", "application/grpc").should eq(Gori::Proto::Kind::Grpc) # a proxy error page
+      Gori::Proto.classify(200, nil, "application/grpc-web+proto").should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(nil, nil, "APPLICATION/GRPC; charset=utf-8").should eq(Gori::Proto::Kind::Grpc)
+    end
+
+    it "still lets the 101 handshake win over a gRPC request type" do
+      Gori::Proto.classify(101, nil, "application/grpc").should eq(Gori::Proto::Kind::Ws)
+    end
+
+    # A request cannot declare that its RESPONSE is a stream — `text/event-stream` on a
+    # request would be an Accept, not a Content-Type — so SSE stays response-only.
+    it "does not read SSE off the request type" do
+      Gori::Proto.classify(200, "text/html", "text/event-stream").should eq(Gori::Proto::Kind::Http)
+    end
+
+    it "leaves an ordinary request type alone" do
+      Gori::Proto.classify(200, "text/html", "application/json").should eq(Gori::Proto::Kind::Http)
     end
   end
 

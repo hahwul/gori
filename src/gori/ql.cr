@@ -265,9 +265,9 @@ module Gori
       end
     end
 
-    # proto: classifies a flow by application protocol WITHOUT a stored column —
-    # WS is the 101 upgrade handshake, gRPC/SSE are read off the response
-    # Content-Type, and http is everything else. Mirrors Gori::Proto.classify (the
+    # proto: classifies a flow by application protocol with no column of its OWN —
+    # WS is the 101 upgrade handshake, gRPC is read off EITHER side's Content-Type, SSE off
+    # the response's, and http is everything else. Mirrors Gori::Proto.classify (the
     # render-side source of truth). The LIKE patterns are constant literals (no user
     # data), so they are inlined; the gRPC/SSE clauses carry an explicit NOT-NULL
     # guard so `http` can negate them NULL-safely — a pending/typeless flow (NULL
@@ -275,8 +275,14 @@ module Gori
     # unknown value (proto:foo) drops the term, like a bad status: (never matches
     # all). `websocket` is an alias for `ws`, and `wss`/`grpcs`/`sses`/`https` add the
     # transport the operator named — the spellings the PROTO column prints.
-    GRPC_SQL = "(content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%')"
-    SSE_SQL  = "(content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%')"
+    # BOTH sides: gRPC is a content type the request sends too, and a call answered with a
+    # proxy's `text/html` 502 — or not answered at all — is still a gRPC call. Matches
+    # `Proto.classify`'s own two-sided test; `request_content_type` is NULL on a row captured
+    # before the V14 column, which the NOT-NULL guard makes a clean no-match (so `-proto:grpc`
+    # keeps it, as it always did).
+    GRPC_SQL = "((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
+               "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%'))"
+    SSE_SQL = "(content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%')"
 
     private def self.proto_cond(value : String) : {String, Array(DB::Any)}?
       # The TLS spellings the History PROTO column prints (`WSS`/`GRPCS`/`SSES`/`HTTPS`) are

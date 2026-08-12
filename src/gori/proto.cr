@@ -88,13 +88,31 @@ module Gori
       !!content_type.try { |ct| ct.lstrip.downcase.starts_with?("application/grpc") }
     end
 
-    # Classify a flow from its response status + Content-Type. The 101 handshake
-    # wins first (a WebSocket upgrade carries no content type); otherwise gRPC and
-    # SSE are read off the Content-Type; everything else — including a still-pending
-    # flow with no status/type yet — is plain HTTP. Mirrors QL.proto_cond.
-    def self.classify(status : Int32?, content_type : String?) : Kind
+    # Classify a flow from its status and the content types of BOTH sides. The 101 handshake
+    # wins first (a WebSocket upgrade carries no content type); otherwise gRPC and SSE are read
+    # off the content type; everything else — including a still-pending flow with no status or
+    # type yet — is plain HTTP. Mirrors QL.proto_cond.
+    #
+    # ## Why the REQUEST type is read, and only for gRPC
+    #
+    # gRPC is a content type BOTH sides send, and this used to look only at the response's — so
+    # a gRPC call was classified as gRPC exactly when it SUCCEEDED. A still-Pending one has no
+    # response at all; an aborted one never got a type; one answered by a proxy's `text/html`
+    # 502 has the wrong one. All three read as plain HTTP in the PROTO column and were missed
+    # by `proto:grpc`, and all three are calls an operator is specifically looking for. The
+    # request said `application/grpc` — the call IS gRPC, whatever came back.
+    #
+    # SSE deliberately stays response-only: `text/event-stream` on a request would be an
+    # `Accept`, not a Content-Type, and a request cannot declare that its RESPONSE is a stream.
+    #
+    # `request_content_type` is a REQUIRED parameter, not an optional one with a nil default:
+    # a caller that has a `FlowRow` has this field, and a default would let a surface silently
+    # keep answering the old way — which is the drift this module exists to prevent. NULL is
+    # still allowed and means "not recorded" (a row captured before the V14 column existed), in
+    # which case the answer is exactly what it was before.
+    def self.classify(status : Int32?, content_type : String?, request_content_type : String?) : Kind
       return Kind::Ws if status == 101
-      return Kind::Grpc if grpc?(content_type)
+      return Kind::Grpc if grpc?(content_type) || grpc?(request_content_type)
       return Kind::Sse if Sse.sse?(content_type)
       Kind::Http
     end

@@ -943,7 +943,32 @@ module Gori
           SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13]
+      # The REQUEST's declared Content-Type, beside the response's (`content_type`).
+      #
+      # `Gori::Proto` classifies a flow's application protocol with no column of its own — it
+      # reads WS off the 101 status and gRPC/SSE off the content type — and the only content
+      # type on the row was the RESPONSE's. So a gRPC call classified as gRPC exactly when it
+      # SUCCEEDED: a still-Pending one, an aborted one, and one answered with a proxy's
+      # `text/html` 502 all read as plain HTTP in the PROTO column and were missed by
+      # `proto:grpc`. Those are the calls an operator is looking for.
+      #
+      # A column and not a re-parse of `request_head` at read time, because `QL.proto_cond`
+      # compiles `proto:` to SQL against this table: a label derived from bytes the query
+      # cannot see is precisely the drift `Proto` exists to prevent, and a `LIKE` over the head
+      # BLOB would be both unindexable and the substring-matching this classification was fixed
+      # to stop doing.
+      #
+      # Rows written before this migration keep NULL, and NULL means "not recorded" — not
+      # "none". They classify exactly as they did before. gori does NOT backfill by guessing
+      # at the stored heads: this column holds what the request DECLARED, and writing a value
+      # into it that no capture produced would put uncaptured data in the store. Every DECODE
+      # surface reads the head directly and is unaffected either way; what a pre-V14 row
+      # cannot have is the PROTO label and the `proto:` filter for a failed gRPC call.
+      V14 = [
+        "ALTER TABLE flows ADD COLUMN request_content_type TEXT",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

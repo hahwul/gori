@@ -288,11 +288,16 @@ describe Gori::QL do
     f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
   end
 
-  it "compiles proto: without stored columns (ws=101, grpc/sse by Content-Type)" do
+  # gRPC reads BOTH sides' Content-Type: it is a type the request sends too, and a call
+  # answered with a proxy's `text/html` 502 — or not answered at all — is still a gRPC call.
+  # `Proto.classify` makes the same two-sided test, which is the point of this whole module:
+  # the label the column prints and the value the filter matches cannot drift.
+  it "compiles proto: with no column of its own (ws=101, grpc either side, sse by response)" do
     Gori::QL.parse("proto:ws").sql.should eq("(status = 101)")
     Gori::QL.parse("proto:websocket").sql.should eq("(status = 101)") # alias
     Gori::QL.parse("proto:grpc").sql.should eq(
-      "((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%'))")
+      "(((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
+      "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')))")
     Gori::QL.parse("proto:sse").sql.should eq(
       "((content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%'))")
     Gori::QL.parse("proto:ws").args.should be_empty
@@ -301,7 +306,8 @@ describe Gori::QL do
   it "compiles proto:http as a NULL-safe negation (pending/typeless flows count as http)" do
     Gori::QL.parse("proto:http").sql.should eq(
       "((status IS NULL OR status <> 101) " \
-      "AND NOT (content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') " \
+      "AND NOT ((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
+      "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')) " \
       "AND NOT (content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%'))")
   end
 
@@ -317,7 +323,8 @@ describe Gori::QL do
   it "compiles the transport spellings the PROTO column prints as protocol AND scheme" do
     Gori::QL.parse("proto:wss").sql.should eq("((status = 101) AND scheme = 'https')")
     Gori::QL.parse("proto:grpcs").sql.should eq(
-      "(((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%')) " \
+      "((((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
+      "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:sses").sql.should eq(
       "(((content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%')) " \

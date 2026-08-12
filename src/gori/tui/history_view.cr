@@ -1891,7 +1891,7 @@ module Gori::Tui
         marked = @marks.includes?(row.id)
         # PROTO is classified here rather than at its own column below, because Colormarker
         # needs it to build the match subject and classifying twice per row per frame is waste.
-        kind = Proto.classify(row.status, row.content_type)
+        kind = Proto.classify(row.status, row.content_type, row.request_content_type)
         mark = color_for(row, kind)
         base = if selected
                  focused ? Theme.accent_bg : Theme.selection_dim

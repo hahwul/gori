@@ -137,7 +137,7 @@ module Gori
     end
 
     def match(row : Store::FlowRow) : Store::ColorRule?
-      match(row, Proto.classify(row.status, row.content_type))
+      match(row, Proto.classify(row.status, row.content_type, row.request_content_type))
     end
 
     # --- editing (persists, then refreshes the snapshot) ---------------------------------
@@ -397,7 +397,7 @@ module Gori
         subject = InterceptFilter::Subject.new(
           method: row.method, host: row.host, target: row.target,
           scheme: row.scheme, status: row.status,
-          proto: Proto.classify(row.status, row.content_type))
+          proto: Proto.classify(row.status, row.content_type, row.request_content_type))
         next unless filter.matches?(subject)
         matched += 1
         painted += 1 unless ahead.any?(&.matches?(subject))

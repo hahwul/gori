@@ -122,10 +122,15 @@ module Gori
       # Newline-separated when more than one applies (request- and response-direction
       # advisories can land on one flow). NULL — not "" — when there is nothing to say.
       getter advisory : String?
+      # The REQUEST's declared Content-Type. NULL means "not recorded" — a row captured before
+      # the column existed — NOT "the request declared none"; `Proto.classify` treats it as
+      # unknown and falls back to what it always read. See the V14 migration.
+      getter request_content_type : String?
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
-                     @content_type = nil, @short_circuited = false, @advisory = nil)
+                     @content_type = nil, @short_circuited = false, @advisory = nil,
+                     @request_content_type = nil)
       end
 
       # The advisory as a list of statements, empty when there is none.
