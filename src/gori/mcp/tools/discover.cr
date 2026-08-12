@@ -170,7 +170,9 @@ module Gori
       private def run_discover_job(djob : DiscoverJob, engine : Discover::Engine) : Nil
         base_ts = Time.utc.to_unix * 1_000_000
         engine.run { |ev| drain_discover_event(djob, ev, base_ts) }
+        flush_discover_persist(djob) # the tail of the last partial batch
       rescue ex
+        flush_discover_persist(djob) # a crashed run still keeps what it already found
         Log.error(exception: ex) { "discover job #{djob.id} crashed" }
         djob.error_msg ||= ex.message || "internal discover job error"
       ensure
@@ -225,8 +227,24 @@ module Gori
           djob.truncated = true
         end
         pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size, exchange)
-        store.insert_import_batch([{pair.request, pair.response}])
+        djob.persist_buf << {pair.request, pair.response}
+        flush_discover_persist(djob) if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH
       rescue
+      end
+
+      # One transaction per batch instead of one per finding. Each `insert_import_batch` is a
+      # BLOCKING round-trip to the store writer, and it runs on the drain fiber — so at one
+      # per finding a fast crawl spent the drain waiting, filled the engine's 256-slot event
+      # channel, and parked every worker on `@events.send`. Mirrors the TUI's
+      # `DiscoverController#flush_persist`, which has batched since it was written.
+      DISCOVER_PERSIST_BATCH = 64
+
+      private def flush_discover_persist(djob : DiscoverJob) : Nil
+        return if djob.persist_buf.empty?
+        store.insert_import_batch(djob.persist_buf)
+        djob.persist_buf.clear
+      rescue
+        djob.persist_buf.clear # a store failure must not wedge the crawl or grow forever
       end
 
       private def discover_status(h) : Result

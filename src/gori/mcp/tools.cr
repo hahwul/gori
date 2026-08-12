@@ -474,6 +474,11 @@ module Gori
         property stats : Discover::RunStats? = nil
         property error_msg : String? = nil
         getter results = [] of Discover::Finding
+        # Findings waiting to be written as flows. The TUI has always batched these
+        # (`DiscoverController#queue_persist`); MCP wrote one transaction per finding, and
+        # every one of those blocks the drain fiber on the store writer's reply — which
+        # back-pressures the engine's 256-slot event channel and stalls every crawl worker.
+        getter persist_buf = [] of {Store::CapturedRequest, Store::CapturedResponse?}
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil
