@@ -60,7 +60,11 @@ module Gori::Fuzz
     def self.residual(request : Bytes) : Int32
       body = body(request)
       return 0 unless body && !body.empty?
-      Proxy::H2::Grpc.scan(body)[1]
+      # `scan_body`: grpc-web-text carries its frames base64-encoded, so scanning the raw
+      # bytes reports a residual for a perfectly well-framed request — which made
+      # `framed_template?` false and turned the whole gRPC verdict OFF for every grpc-web-text
+      # sweep, silently.
+      Proxy::H2::Grpc.scan_body(header(request, "content-type"), body)[1]
     end
 
     # A template whose gRPC framing a payload can INVALIDATE: it declares a gRPC

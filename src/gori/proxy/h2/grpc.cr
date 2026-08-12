@@ -1,3 +1,6 @@
+require "base64"
+require "../../media_type"
+
 module Gori::Proxy::H2
   # gRPC framing over HTTP/2 (https://grpc.io). A gRPC call is an h2 stream whose
   # content-type is `application/grpc*`; its DATA payload is a sequence of
@@ -15,7 +18,62 @@ module Gori::Proxy::H2
     record Message, compressed : Bool, data : Bytes, trailer : Bool = false
 
     def self.grpc?(content_type : String?) : Bool
-      !!content_type.try(&.lstrip.downcase.starts_with?("application/grpc")) # media types are case-insensitive
+      !!MediaType.essence(content_type).try(&.starts_with?("application/grpc"))
+    end
+
+    # `application/grpc-web-text[+proto]` — the grpc-web variant for clients that cannot carry
+    # binary (an `XMLHttpRequest` reading `responseText`, or any environment where the body
+    # must survive as text). The FRAMING is identical; the whole framed stream is base64 on
+    # the wire, so `scan` run over the raw body finds a length prefix built out of base64
+    # characters and reports either nothing or nonsense — which reads exactly like "this is
+    # not gRPC" for a body whose content-type says it is.
+    def self.web_text?(content_type : String?) : Bool
+      e = MediaType.essence(content_type) || return false
+      e == "application/grpc-web-text" || e == "application/grpc-web-text+proto"
+    end
+
+    # The FRAMED bytes behind a body: the body itself for native gRPC and binary grpc-web,
+    # the base64 decode for grpc-web-text. Returns the original bytes when a `-text` body does
+    # not decode — P7: a body that will not decode is still shown, and `scan`'s residual then
+    # says the framing failed rather than the view silently emptying.
+    def self.framed_bytes(content_type : String?, body : Bytes) : Bytes
+      return body unless web_text?(content_type)
+      decode_web_text(body) || body
+    end
+
+    # `scan` over `framed_bytes` — what every surface that deframes a captured body wants.
+    def self.scan_body(content_type : String?, body : Bytes) : {Array(Message), Int32}
+      scan(framed_bytes(content_type, body))
+    end
+
+    PAD = '='.ord.to_u8
+
+    # base64-decode a grpc-web-text body. Decoded in PADDING-DELIMITED chunks rather than in
+    # one call: each HTTP chunk (and, on the response side, the trailer frame) is encoded
+    # independently and arrives with its own `=` padding, so the wire body is a CONCATENATION
+    # of complete base64 documents — `Base64.decode` over the join either raises or yields
+    # garbage from the first interior pad onward. nil when any chunk fails to decode.
+    def self.decode_web_text(body : Bytes) : Bytes?
+      return nil if body.empty?
+      io = IO::Memory.new
+      start = 0
+      i = 0
+      while i < body.size
+        unless body[i] == PAD
+          i += 1
+          next
+        end
+        while i < body.size && body[i] == PAD # consume the whole padding run
+          i += 1
+        end
+        io.write(Base64.decode(String.new(body[start, i - start])))
+        start = i
+      end
+      io.write(Base64.decode(String.new(body[start, body.size - start]))) if start < body.size
+      out = io.to_slice
+      out.empty? ? nil : out
+    rescue
+      nil
     end
 
     # gRPC status codes (https://grpc.io/docs/guides/status-codes/). 0 = OK; the

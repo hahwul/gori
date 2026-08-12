@@ -1,5 +1,6 @@
 require "json"
 require "uri"
+require "./media_type"
 
 module Gori
   # Parses the GraphQL operation a flow carries — a POST JSON body
@@ -21,18 +22,25 @@ module Gori
     # attacks (batching abuse / rate-limit bypass, persisted-query allowlist bypass, upload
     # mutations, content-type confusion).
     #
+    # `Urlencoded` joined them late for the same reason: a `query=…&variables=…` body is what
+    # express-graphql and Yoga accept alongside JSON, and it is the first thing reached for
+    # when a JSON content-type is filtered — so the shape most likely to be a bypass attempt
+    # was the shape gori showed as an ordinary form POST.
+    #
     # The distinction is not cosmetic: it decides whether the Repeater may RE-ENCODE the
     # request from the edited pane. `display`/`recompose` round-trip an operationName + query
-    # + variables triple, which is a faithful inverse for Json and Query and for nothing else
-    # — so the other four are projections only. See `editable?`.
+    # + variables triple, which is a faithful inverse for Json, Query and Urlencoded (all three
+    # store the triple as three named slots) and for nothing else — so the remaining four are
+    # projections only. See `editable?`.
     enum Form
-      Json      # POST {"query": …}
-      Query     # GET ?query=…
-      Batch     # POST [{"query": …}, …]
-      Persisted # POST {"extensions":{"persistedQuery":{…}}} — no document on the wire
-      Multipart # multipart/form-data upload mutation (GraphQL multipart request spec)
-      Document  # Content-Type: application/graphql — the body IS the document
-      Invalid   # GraphQL-carrying by Content-Type / body shape, but it did not parse
+      Json       # POST {"query": …}
+      Query      # GET ?query=…
+      Urlencoded # POST application/x-www-form-urlencoded: query=…&variables=…
+      Batch      # POST [{"query": …}, …]
+      Persisted  # POST {"extensions":{"persistedQuery":{…}}} — no document on the wire
+      Multipart  # multipart/form-data upload mutation (GraphQL multipart request spec)
+      Document   # Content-Type: application/graphql — the body IS the document
+      Invalid    # GraphQL-carrying by Content-Type / body shape, but it did not parse
     end
 
     record Op,
@@ -47,8 +55,8 @@ module Gori
       # framing failure.
       note : String? = nil do
       # Whether `display(op)` → edit → `recompose` can put the operator's edit back into the
-      # exact request it came from. True ONLY for the two shapes that round-trip: a plain
-      # POST JSON body and a GET `?query=`.
+      # exact request it came from. True ONLY for the three shapes that round-trip: a plain
+      # POST JSON body, a GET `?query=`, and a `query=…` urlencoded body.
       #
       # For the rest the display text is a rendering, not an inverse — re-encoding a batch
       # from it would collapse the array into one object, a persisted query has no document
@@ -56,7 +64,7 @@ module Gori
       # a request the operator did not write is worse than showing a read-only pane, so the
       # projection exists and the re-encode does not.
       def editable? : Bool
-        form.json? || form.query?
+        form.json? || form.query? || form.urlencoded?
       end
     end
 
@@ -71,7 +79,7 @@ module Gori
     # strength of a misdetection. A GET carrying a stray body still falls through, which is
     # what the fallback was written for.
     def from_flow(target : String, req_head : Bytes?, req_body : Bytes?) : Op?
-      ct = content_type(req_head)
+      ct = MediaType.of(req_head)
       if (b = req_body) && !b.empty?
         if b.size <= MAX_BODY
           if op = from_body(b, ct)
@@ -88,10 +96,30 @@ module Gori
       from_query(target)
     end
 
-    # A body that opens as a GraphQL envelope: `{"query":` or a batch's `[{"query":`, with the
-    # whitespace either side that a pretty-printed client emits. Anchored, and only the first
-    # bytes are examined, so an ordinary JSON body that merely CONTAINS the word never matches.
-    ENVELOPE_RE = /\A\s*\[?\s*\{\s*"query"\s*:/
+    # A body that opens as a GraphQL envelope: `{"query":` / `{"operationName":`, or a batch's
+    # `[{"query":`, with the whitespace either side that a pretty-printed client emits.
+    # Anchored, and only the first bytes are examined, so an ordinary JSON body that merely
+    # CONTAINS the word never matches.
+    #
+    # `operationName` is in here because it is what the dominant client actually puts first:
+    # Apollo Client serialises `{"operationName":…,"variables":…,"query":…}`, so a
+    # `"query"`-only anchor recognised the envelope of every client EXCEPT the one most
+    # requests come from — and the anchor is only ever consulted for a body that failed to
+    # parse, i.e. a truncated or mangled envelope, which is the request most worth reporting.
+    # `variables`/`extensions` are deliberately NOT accepted alone: neither is GraphQL-specific
+    # enough to claim an unparseable REST body.
+    ENVELOPE_RE = /\A\s*\[?\s*\{\s*"(?:query|operationName)"\s*:/
+
+    # Whether the body's first bytes open as that envelope. Public because it is also the
+    # cheap gate a caller needs BEFORE deciding to parse: `Pretty` sniffs bodies whose
+    # content-type says nothing (`text/plain`, absent — the two a JSON-content-type filter is
+    # bypassed with) and must not pay a megabyte-sized JSON parse for every one of them.
+    def envelope_head?(body : Bytes?) : Bool
+      b = body || return false
+      return false if b.empty?
+      head = String.new(b[0, {b.size, 256}.min]).scrub
+      ENVELOPE_RE.matches?(head.lchop('\u{FEFF}'))
+    end
 
     # Why a GraphQL-carrying request did not parse, or nil when it is not GraphQL-carrying at
     # all (an ordinary REST body, which must keep getting no GraphQL section).
@@ -100,18 +128,11 @@ module Gori
     # opens as the envelope. A `multipart/form-data` POST is NOT enough on its own — that is
     # every ordinary file upload — so it qualifies only once its `operations` part is present.
     private def unparsed_reason(body : Bytes, content_type : String?) : String?
-      folded = (content_type || "").downcase
       over = body.size > MAX_BODY
-      if folded.starts_with?("application/graphql")
-        return over ? too_big : "Content-Type is application/graphql but the body carries no selection set"
+      if declared = declared_reason(body, content_type, over)
+        return declared
       end
-      if folded.starts_with?("multipart/form-data")
-        boundary = multipart_boundary(content_type || "") || return nil
-        return nil unless multipart_part(body, boundary, "operations")
-        return over ? too_big : "the multipart `operations` part is not a valid GraphQL envelope"
-      end
-      head = String.new(body[0, {body.size, 256}.min]).scrub
-      return nil unless ENVELOPE_RE.matches?(head.lchop('\u{FEFF}'))
+      return nil unless envelope_head?(body)
       return too_big if over
       # It opens as an envelope — but "opens like one" is not "is one". A body that PARSES as
       # JSON and was still rejected is an ordinary REST call carrying a string `query` field
@@ -119,6 +140,27 @@ module Gori
       # only a body that does not parse is the truncated/mangled envelope worth reporting.
       return nil if json?(String.new(body))
       "the body opens as a GraphQL envelope but is not valid JSON"
+    end
+
+    # The half of `unparsed_reason` the CONTENT-TYPE decides: a request that declared itself
+    # GraphQL and did not parse. nil means "the header did not claim it" — the caller then
+    # falls back to the body's own shape. (Falling through is safe for the multipart branch
+    # too: a multipart body opens with its boundary, never with a JSON envelope.)
+    private def declared_reason(body : Bytes, content_type : String?, over : Bool) : String?
+      case essence = MediaType.essence(content_type)
+      when "application/graphql"
+        over ? too_big : "Content-Type is application/graphql but the body carries no selection set"
+      when "application/graphql+json", "application/graphql-response+json"
+        # A content-type whose ONLY meaning is "this is GraphQL". Nothing else needs to hold:
+        # whatever the body turned out to be, the request says it is a GraphQL envelope and
+        # failed, and saying so is the point.
+        over ? too_big : "Content-Type is #{essence} but the body is not a valid GraphQL envelope"
+      else
+        return nil unless MediaType.multipart?(content_type)
+        boundary = MediaType.boundary(content_type) || return nil
+        return nil unless multipart_part(body, boundary, "operations")
+        over ? too_big : "the multipart `operations` part is not a valid GraphQL envelope"
+      end
     end
 
     private def too_big : String
@@ -131,56 +173,67 @@ module Gori
     # GraphQL-over-HTTP spec's other request form) and a multipart upload mutation could
     # never be GraphQL: neither body is JSON.
     def from_body(body : Bytes, content_type : String?) : Op?
-      ct = content_type || ""
-      # The MEDIA TYPE is case-insensitive; a PARAMETER value is not — `boundary=----X` and
-      # `boundary=----x` delimit different bodies, so only the type is folded for the match
-      # and `from_multipart` gets the original spelling.
-      folded = ct.downcase
-      return from_document(String.new(body)) if folded.starts_with?("application/graphql")
-      return from_multipart(body, ct) if folded.starts_with?("multipart/form-data")
-      from_json(String.new(body))
-    end
-
-    # The `Content-Type` header VALUE off a request head (media type + parameters), or nil.
-    # `from_flow` has always been handed the head and, before the shapes above, never had a
-    # reason to look at it.
-    private def content_type(req_head : Bytes?) : String?
-      head = req_head || return nil
-      String.new(head).each_line do |raw|
-        line = raw.chomp
-        break if line.empty? # the blank line ends the head
-        idx = line.index(':') || next
-        return line[(idx + 1)..].strip if line[0...idx].strip.compare("content-type", case_insensitive: true) == 0
+      # Dispatch on the ESSENCE (media type, folded, parameters dropped), never on a prefix
+      # of the raw value. `application/graphql` is a prefix of `application/graphql+json` and
+      # of `application/graphql-response+json` — the two types a spec-conformant client sends
+      # a perfectly ordinary JSON ENVELOPE under — so a `starts_with?` test fed those bodies
+      # to the raw-document parser, which dutifully reported the whole JSON blob as the
+      # "query" in a form nothing can re-encode. The request was GraphQL, the Repeater opened
+      # it as a plain raw tab, and the pane showed an unparsed envelope.
+      #
+      # The multipart branch still gets the ORIGINAL spelling: a `boundary` parameter's value
+      # is case-sensitive even though its media type is not.
+      case MediaType.essence(content_type)
+      when "application/graphql"
+        from_document(String.new(body))
+      when "application/x-www-form-urlencoded"
+        from_urlencoded(String.new(body))
+      else
+        return from_multipart(body, content_type || "") if MediaType.multipart?(content_type)
+        from_json(String.new(body))
       end
-      nil
     end
 
     # `Content-Type: application/graphql` — the body IS the document, no JSON envelope
     # (GraphQL-over-HTTP). The `{` test is the same selection-set check the JSON path uses.
+    #
+    # The JSON envelope is tried FIRST, because clients mislabel this one constantly (it is
+    # the type people reach for when they mean "GraphQL", and servers accept the envelope
+    # under it): a body that parses as an envelope is an envelope whatever the header claims,
+    # and reporting it as a raw document would cost the operator the editable pane. A genuine
+    # GraphQL document is never valid JSON — its field names are unquoted — so this cannot
+    # steal a real `application/graphql` body.
     private def from_document(body : String) : Op?
+      if op = from_json(body)
+        return op
+      end
       doc = strip(body)
       return nil unless doc.includes?('{')
       Op.new(nil, doc, nil, Form::Document)
+    end
+
+    # `Content-Type: application/x-www-form-urlencoded` — `query=…&variables=…&operationName=…`,
+    # the form body express-graphql / graphql-yoga accept alongside JSON. Same three named
+    # slots as the GET binding, so `from_query`'s parser is reused verbatim and the shape
+    # round-trips (see `recompose_form`).
+    private def from_urlencoded(body : String) : Op?
+      # Cheap gate before decoding every param: `Pretty` runs this on EVERY urlencoded body it
+      # renders, and an ordinary login form should not pay a full percent-decode of its fields
+      # to be told it is not GraphQL. A param merely ENDING in `query` also passes here — this
+      # only decides whether to look, `from_params` decides the answer.
+      return nil unless body.includes?("query=")
+      op = from_params(www_form(strip(body))) || return nil
+      Op.new(op.operation, op.query, op.variables, Form::Urlencoded)
     end
 
     # A GraphQL multipart request (the `operations`/`map`/`0…` upload convention): the
     # `operations` part carries the ordinary JSON envelope, so parse that and keep the form
     # so nothing tries to re-encode the multipart body from the pane.
     private def from_multipart(body : Bytes, content_type : String) : Op?
-      boundary = multipart_boundary(content_type) || return nil
+      boundary = MediaType.boundary(content_type) || return nil
       ops = multipart_part(body, boundary, "operations") || return nil
       op = from_json(ops) || return nil
       Op.new(op.operation, op.query, op.variables, Form::Multipart)
-    end
-
-    # `boundary=…` off a multipart Content-Type, quoted or bare. The parameter NAME is
-    # case-insensitive; its VALUE is not (`----X` and `----x` delimit different bodies).
-    BOUNDARY_RE = /boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i
-
-    private def multipart_boundary(content_type : String) : String?
-      m = BOUNDARY_RE.match(content_type) || return nil
-      v = m[1]? || m[2]? || return nil
-      v.empty? ? nil : v
     end
 
     # The body of the multipart part named `name`, as text. Deliberately minimal: only the
@@ -219,14 +272,22 @@ module Gori
     # persisted query, which by definition sends no document at all. `json.as_h?` used to
     # reject the first and the `query` requirement the second, so neither was ever GraphQL.
     def from_json(body : String) : Op?
-      json = JSON.parse(strip(body))
+      from_json_any(JSON.parse(strip(body)))
+    rescue
+      nil
+    end
+
+    # The same sniff over an ALREADY-PARSED body. Exists so `Pretty` — which parses the JSON
+    # once and pretty-prints it when it is not GraphQL — can ask THIS module the question
+    # instead of carrying its own answer. It carried one, and the two drifted: Pretty knew
+    # only the single `{"query":…}` object, so a batched or persisted-query body was
+    # recognised by the decoded pane and pretty-printed as anonymous JSON right next to it.
+    def from_json_any(json : JSON::Any) : Op?
       if arr = json.as_a?
         return from_batch(arr)
       end
       h = json.as_h? || return nil
       single_op(h)
-    rescue
-      nil
     end
 
     # One JSON envelope object → its op. Returns nil for an object that is neither a
@@ -283,17 +344,32 @@ module Gori
     # A GET `?query=…&operationName=…&variables=…` request.
     def from_query(target : String) : Op?
       idx = target.index('?') || return nil
+      from_params(www_form(target[(idx + 1)..]))
+    rescue
+      nil
+    end
+
+    # `k=v&k=v` → a decoded map. ONE parser for the two bindings that use this grammar — a
+    # GET query string and an `x-www-form-urlencoded` body are the same syntax, and a second
+    # copy is a second set of edge cases (a valueless key, a `%`-sequence that will not
+    # decode) for the two to disagree about.
+    private def www_form(s : String) : Hash(String, String)
       params = {} of String => String
-      target[(idx + 1)..].split('&').each do |pair|
+      s.split('&').each do |pair|
         k, sep, v = pair.partition('=')
         params[k] = (URI.decode_www_form(v) rescue v) unless sep.empty?
       end
+      params
+    end
+
+    # The op carried by a decoded `{query, operationName, variables}` param map, in the
+    # `Form::Query` shape; `from_urlencoded` re-stamps the form. Same selection-set guard as
+    # the JSON path, so `?query=shoes` stays an ordinary search request.
+    private def from_params(params : Hash(String, String)) : Op?
       q = params["query"]? || return nil
       return nil unless q.includes?('{')
       vars = params["variables"]?.try { |v| (JSON.parse(v).to_pretty_json rescue v) }
       Op.new(params["operationName"]?, q.strip, vars, Form::Query)
-    rescue
-      nil
     end
 
     # The display text for a parsed op: an operationName header, the query, and the
@@ -413,8 +489,26 @@ module Gori
       parts.join('&')
     end
 
-    # Where a flow carries its op: :body (a POST JSON body that parses as GraphQL), :query
-    # (a GET `?query=…`), or :none. Drives which side the Repeater re-encode targets.
+    # Re-encode the edited DECODED pane back into an `x-www-form-urlencoded` BODY.
+    #
+    # Delegates rather than duplicates: a form body and a query string are the same grammar
+    # (`k=v&k=v`, `application/x-www-form-urlencoded` values), so the in-place replacement
+    # `recompose_query` already performs — managed params rewritten where they stand, every
+    # other param keeping its position and its exact spelling — is the correct write on both
+    # sides. A second copy would be a second place for the escaping rules to drift, on the two
+    # bindings whose only difference is which half of the request they live in.
+    def recompose_form(orig_body : String, decoded_text : String) : String
+      recompose_query(orig_body, decoded_text)
+    end
+
+    # Where a flow carries its op: `:body` (a POST JSON body that parses as GraphQL),
+    # `:form_body` (an `x-www-form-urlencoded` body), `:query` (a GET `?query=…`), or
+    # `:none`. Drives which side — and in which GRAMMAR — the Repeater re-encode targets.
+    #
+    # `:form_body` is its own answer rather than a flavour of `:body` because the two are not
+    # the same write: `:body` recomposes a JSON object, `:form_body` rewrites `k=v` pairs.
+    # Answering `:body` for a form-encoded request would replace the operator's form body
+    # with JSON while the Content-Type still said urlencoded — a request they never wrote.
     #
     # `:none` is the answer for every shape `display` renders but `recompose` cannot invert
     # (batch, persisted, multipart, raw document — see `Op#editable?`). It has to exist:
@@ -423,9 +517,13 @@ module Gori
     # whose payload is in the body. Either one sends a request the operator never wrote, on
     # the strength of a projection.
     def location(req_body : Bytes?, req_head : Bytes? = nil) : Symbol
-      op = ((b = req_body) && !b.empty? && b.size <= MAX_BODY) ? from_body(b, content_type(req_head)) : nil
+      op = ((b = req_body) && !b.empty? && b.size <= MAX_BODY) ? from_body(b, MediaType.of(req_head)) : nil
       return :query unless op # no body op at all — the GET `?query=` binding
-      op.editable? ? :body : :none
+      case op.form
+      when .json?       then :body
+      when .urlencoded? then :form_body
+      else                   :none
+      end
     end
 
     # `# operationName:` is ALSO a valid GraphQL source comment, so the same disambiguation the

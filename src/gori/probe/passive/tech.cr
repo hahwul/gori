@@ -17,6 +17,13 @@ module Gori
         private GRAPHQL_PATH = "/graphql".to_slice
         private JSON_CT      = "json".to_slice
         private QUERY_KEY    = %("query").to_slice
+        # The two request families the JSON gate below excludes by construction, and which a
+        # GraphQL API accepts just as happily: the raw-document / `+json` content-types, and a
+        # `query=…` urlencoded body. Both are what a JSON-content-type filter is bypassed with,
+        # so the endpoint least likely to be fingerprinted was the one being attacked.
+        private GRAPHQL_CT  = "graphql".to_slice
+        private FORM_CT     = "x-www-form-urlencoded".to_slice
+        private QUERY_PARAM = "query=".to_slice
 
         def info : RuleInfo
           RuleInfo.new("tech", "Technology fingerprints",
@@ -117,9 +124,10 @@ module Gori
           # a multi-KB query string, and downcasing it — plus the Content-Type — allocated a full
           # copy of each on every flow just to run two case-insensitive substring tests.
           return true if AsciiBytes.contains_ci?(ctx.req.target.to_slice, GRAPHQL_PATH)
-          return false unless req_ct && AsciiBytes.contains_ci?(req_ct.to_slice, JSON_CT)
+          ct = req_ct || return false
           body = ctx.detail.request_body
           return false unless body
+          return other_ct_graphql?(ct, body) unless AsciiBytes.contains_ci?(ct.to_slice, JSON_CT)
           # 8 KB truncated mid-JSON on real GraphQL requests (a sizeable `variables` object),
           # which then fails JSON.parse and mis-classified them as non-GraphQL; allow up to 256 KB.
           capped = body[0, {body.size, 256 * 1024}.min]
@@ -146,6 +154,20 @@ module Gori
           doc = q.lstrip
           doc.starts_with?('{') || doc.starts_with?("query") || doc.starts_with?("mutation") ||
             doc.starts_with?("subscription") || doc.starts_with?("fragment")
+        end
+
+        # The non-JSON GraphQL request families, decided by `Gori::Graphql` rather than by a
+        # second hand-rolled shape check — it already knows every shape a real API exposes, and
+        # a fingerprint that disagreed with the decoded pane about what GraphQL is would be the
+        # same drift this predicate's JSON branch was written to avoid. Byte prefilters first so
+        # an ordinary form POST never reaches the parser.
+        private def other_ct_graphql?(ct : String, body : Bytes) : Bool
+          ctb = ct.to_slice
+          capped = body[0, {body.size, 256 * 1024}.min]
+          return false unless AsciiBytes.contains_ci?(ctb, GRAPHQL_CT) ||
+                              (AsciiBytes.contains_ci?(ctb, FORM_CT) &&
+                              AsciiBytes.contains_ci?(capped, QUERY_PARAM))
+          !Graphql.from_body(capped, ct).nil?
         end
 
         # Client-side framework/library fingerprints from the response BODY (headers rarely

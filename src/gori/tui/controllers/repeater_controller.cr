@@ -413,10 +413,23 @@ module Gori::Tui
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
-    # A gRPC request flow: an HTTP/2 call whose request content-type is application/grpc.
+    # A gRPC request flow: one whose REQUEST content-type is `application/grpc*`.
+    #
+    # Two things used to narrow this, and both of them hid real gRPC:
+    #
+    #   * `http_version == "HTTP/2"`. gRPC-Web is gRPC framing over HTTP/1.1 — it is what every
+    #     browser client speaks, so the gRPC gori is most likely to see through a proxy was
+    #     precisely the gRPC that opened as a plain raw tab: no deframed transcript, no
+    #     hex-editable payload, no grpc-status. `Proto`'s PROTO column and the QL `proto:`
+    #     filter both called it GRPC at the same time; only the Repeater disagreed.
+    #   * a substring search for `"content-type: application/grpc"` over the whole head, which
+    #     both missed the (legal) `Content-Type:application/grpc` with no space and would have
+    #     matched the text appearing inside some other header's value.
+    #
+    # `MediaType.of` + `Grpc.grpc?` is what the four headless surfaces already use, so this
+    # asks the same question the rest of gori answers.
     private def grpc_flow?(detail : Store::FlowDetail) : Bool
-      detail.http_version == "HTTP/2" &&
-        String.new(detail.request_head).downcase.includes?("content-type: application/grpc")
+      Proxy::H2::Grpc.grpc?(MediaType.of(detail.request_head))
     end
 
     # A SAML message the REQUEST carries (POST form body or Redirect query) — the only
@@ -440,6 +453,21 @@ module Gori::Tui
     private def graphql_op(detail : Store::FlowDetail) : Graphql::Op?
       op = Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
       op if op && op.editable?
+    end
+
+    # What to say about a GraphQL request that opened as an ORDINARY raw tab. nil for a flow
+    # that is not GraphQL at all (the overwhelmingly common case — no note).
+    #
+    # The read-only shapes send exactly right and are shown decoded everywhere gori merely
+    # DISPLAYS them, but the Repeater is where the operator asks "did you see that this is
+    # GraphQL?" — and a plain tab with the ordinary status line answers no. It is the same
+    # complaint the parse-failure note fixed on the display side: silence about a shape gori
+    # recognised is byte-identical to not having recognised it.
+    private def graphql_raw_note(detail : Store::FlowDetail) : String?
+      op = Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
+      return nil if op.nil? || op.editable?
+      return "graphql: parse failed (#{op.note}) — sending the bytes as captured · " if op.form.invalid?
+      "graphql #{op.form.to_s.downcase}: no faithful re-encode, sending the bytes as captured · "
     end
 
     # ^T is context-sensitive: a decode tab or WS tab toggles the envelope/decoded split;
@@ -1340,7 +1368,7 @@ module Gori::Tui
       else
         view.load(detail)
         @repeaters << RepeaterTab.new(view, id, persist_new_repeater(view, id))
-        @host.status("repeater: #{view.summary} — type to edit · ^R send · ^N new · ^1-9 switch · esc back")
+        @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ^1-9 switch · esc back")
       end
       @current_repeater_idx = @repeaters.size - 1
       @host.goto_tab(:repeater)

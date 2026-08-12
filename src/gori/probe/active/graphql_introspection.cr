@@ -42,6 +42,12 @@ module Gori
         GRAPHQL_PATH = "/graphql".to_slice
         JSON_CT      = "json".to_slice
         QUERY_KEY    = "\"query\"".to_slice
+        # The two request families the JSON gate excludes and a GraphQL API still accepts: the
+        # raw-document / `+json` content-types, and a `query=…` urlencoded body. Same widening
+        # as `Passive::Tech#graphql?` — the two predicates are deliberately the same predicate.
+        GRAPHQL_CT  = "graphql".to_slice
+        FORM_CT     = "x-www-form-urlencoded".to_slice
+        QUERY_PARAM = "query=".to_slice
 
         # The minimal introspection document, as a GET query value (URL-encoded braces) and a POST
         # JSON body. `{__schema{queryType{name}}}` — enough to force the `"__schema":{` result
@@ -127,8 +133,18 @@ module Gori
           return false if body.nil? || body.empty?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           ct = req.headers.get?("Content-Type")
-          return false unless ct && AsciiBytes.contains_ci?(ct.to_slice, JSON_CT)
+          return false unless ct
           capped = body[0, {body.size, 256 * 1024}.min]
+          # The non-JSON families are decided by `Gori::Graphql` — it already knows every shape
+          # a real API exposes, and a second hand-rolled check here would be one more place for
+          # the answer to drift from the decoded pane's.
+          ctb = ct.to_slice
+          unless AsciiBytes.contains_ci?(ctb, JSON_CT)
+            return false unless AsciiBytes.contains_ci?(ctb, GRAPHQL_CT) ||
+                                (AsciiBytes.contains_ci?(ctb, FORM_CT) &&
+                                AsciiBytes.contains_ci?(capped, QUERY_PARAM))
+            return !Graphql.from_body(capped, ct).nil?
+          end
           return false unless AsciiBytes.contains_ci?(capped, QUERY_KEY)
           q = begin
             JSON.parse(String.new(capped).scrub).as_h?.try(&.["query"]?).try(&.as_s?)

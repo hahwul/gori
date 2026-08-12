@@ -193,9 +193,13 @@ module Gori::Tui
       # from @grpc_body; the response pane shows a deframed gRPC transcript + status.
       # Session-only like WS (db_id nil) — the binary body can't round-trip the text store.
       @grpc_mode = false
-      @grpc_body = Bytes.empty # the pristine framed request message(s), sent verbatim
-      @grpc_msg_count = 0      # deframed message count of @grpc_body (immutable → computed once)
-      @grpc_req_residual = 0   # …and the tail of @grpc_body that is NOT a complete frame
+      @grpc_body = Bytes.empty # the pristine WIRE request body, sent verbatim
+      @grpc_msg_count = 0      # deframed message count of the body (immutable → computed once)
+      @grpc_req_residual = 0   # …and the tail that is NOT a complete frame
+      # `application/grpc-web-text`: the frames are base64 ON THE WIRE. @grpc_body stays the
+      # captured (encoded) bytes — deframing decodes first, and a reframed payload is
+      # re-encoded on the way out, so the two never mix.
+      @grpc_web_text = false
       # A SINGLE-message gRPC call (the unary common case) is reframable: its payload is
       # hex-editable (^X) and the 5-byte length prefix is recomputed on send. A 0- or
       # multi-message body isn't (boundaries are prefix-defined) — it stays verbatim.
@@ -1010,18 +1014,28 @@ module Gori::Tui
       @grpc_mode = true
       @ws_http_only = false # in lockstep with @ws_mode below — a gRPC tab holds no handshake
       @ws_mode = false
-      @http2 = true # gRPC is HTTP/2
+      # The flow's OWN transport, not a constant. gRPC-Web is gRPC framing over HTTP/1.1, and
+      # forcing h2 here re-sent a captured h1 call over a protocol its origin may not speak —
+      # while the tab was only reachable for h2 flows, `true` was merely redundant; now that
+      # grpc-web opens too, it would be a lie about the request.
+      @http2 = detail.http_version == "HTTP/2"
       @grpc_body = detail.request_body || Bytes.empty
+      @grpc_web_text = Proxy::H2::Grpc.web_text?(Gori::MediaType.of(detail.request_head))
       # `scan`, not `messages`: the residual is the REQUEST side of the same report. A capture
       # whose length prefix over-claims used to count as "0 messages" and be described in the
       # transcript as `→ sent 0 request messages (10b)` — the byte count and the message count
       # disagreeing, with nothing saying why.
-      msgs, @grpc_req_residual = Proxy::H2::Grpc.scan(@grpc_body)
+      #
+      # Deframed off `framed`, which is `@grpc_body` itself except for grpc-web-text, where
+      # the frames are base64 on the wire. `@grpc_body` stays the CAPTURED bytes — it is what
+      # a non-reframable tab re-sends verbatim (P7).
+      framed = grpc_framed_body
+      msgs, @grpc_req_residual = Proxy::H2::Grpc.scan(framed)
       @grpc_msg_count = msgs.size
       # Reframable only when the body is EXACTLY one clean message: then a hex edit of the
       # payload can be re-length-prefixed unambiguously. (A partial trailing frame would
       # leave msgs shorter than the wire, so require the framing to be lossless too.)
-      if msgs.size == 1 && Proxy::H2::Grpc.frame(msgs[0].compressed, msgs[0].data) == @grpc_body
+      if msgs.size == 1 && Proxy::H2::Grpc.frame(msgs[0].compressed, msgs[0].data) == framed
         @grpc_reframable = true
         @grpc_compressed = msgs[0].compressed
         @grpc_payload = msgs[0].data
@@ -1301,11 +1315,19 @@ module Gori::Tui
       # declines to open them split; this is the second gate, because `refresh_decoded` can
       # move a tab into one of those shapes mid-edit and a re-encode from a projection is a
       # request the operator never wrote.
-      return env if @graphql_location == :none
-      if @graphql_location == :query # GET: rewrite the request-line query (no body), like SAML Redirect
+      case @graphql_location
+      when :none # see above
+        env
+      when :query # GET: rewrite the request-line query (no body), like SAML Redirect
         lines = env.split('\n')
         lines[0] = graphql_query_line(lines[0], @decoded.text) if lines[0]?
         lines.join('\n')
+      when :form_body
+        # A `query=…&variables=…` urlencoded body: the same grammar as the GET binding, so it
+        # is rewritten in the same way — NOT recomposed as JSON, which would leave a JSON body
+        # under a Content-Type still declaring urlencoded.
+        sep = env.index("\n\n") || return env
+        "#{env[0, sep]}\n\n#{Graphql.recompose_form(env[(sep + 2)..], @decoded.text)}"
       else # POST: recompose the JSON body, preserving other fields
         sep = env.index("\n\n") || return env
         "#{env[0, sep]}\n\n#{Graphql.recompose(env[(sep + 2)..], @decoded.text)}"
@@ -1371,19 +1393,46 @@ module Gori::Tui
         n -= 1
       end
       body = grpc_send_body
-      io = IO::Memory.new(n + body.size + 4)
-      io.write(raw[0, n])
-      io << "\r\n\r\n"
+      head = String.new(raw[0, n])
+      # Over HTTP/1.1 (gRPC-Web) the body is delimited by Content-Length, not by a DATA frame
+      # with END_STREAM — so a reframed payload that changed size leaves a header the origin
+      # will read as the message boundary, and the call hangs or is cut. h2 keeps the header
+      # untouched, exactly as before. Honours the Auto-Content-Length toggle: a deliberate
+      # desync is a test, and turning the toggle off is how the operator asks for one.
+      head = sync_cl_head(head, body.size) if !@http2 && @auto_content_length
+      io = IO::Memory.new(head.bytesize + body.size + 4)
+      io << head << "\r\n\r\n"
       io.write(body)
       io.to_slice
     end
 
-    # The framed message body to send: a reframable call re-length-prefixes the live
-    # payload (hex buffer if editing, else the stored payload); everything else is verbatim.
+    # Rewrite an existing Content-Length in a CRLF- or LF-terminated head to `size`. Absent
+    # header → unchanged (adding one is a decision about framing the operator did not make).
+    # The sibling of `sync_cl_text`, which takes a whole LF-joined envelope and measures the
+    # body it already contains; a gRPC tab holds only the HEAD, and its body is built after.
+    private def sync_cl_head(head : String, size : Int32) : String
+      eol = head.includes?("\r\n") ? "\r\n" : "\n"
+      lines = head.split(eol)
+      idx = lines.index(&.lstrip.downcase.starts_with?("content-length:")) || return head
+      lines[idx] = "Content-Length: #{size}"
+      lines.join(eol)
+    end
+
+    # The captured request body with grpc-web-text's base64 removed — the bytes `scan`
+    # deframes. Identity for native gRPC and binary grpc-web.
+    private def grpc_framed_body : Bytes
+      return @grpc_body unless @grpc_web_text
+      Proxy::H2::Grpc.decode_web_text(@grpc_body) || @grpc_body # P7: undecodable → show as captured
+    end
+
+    # The message body to send, IN WIRE FORM: a reframable call re-length-prefixes the live
+    # payload (hex buffer if editing, else the stored payload) and re-applies grpc-web-text's
+    # base64; everything else is the captured body verbatim.
     private def grpc_send_body : Bytes
       return @grpc_body unless @grpc_reframable
       payload = (h = @req_hex_edit) ? h.to_bytes : @grpc_payload
-      Proxy::H2::Grpc.frame(@grpc_compressed, payload)
+      framed = Proxy::H2::Grpc.frame(@grpc_compressed, payload)
+      @grpc_web_text ? Base64.strict_encode(framed).to_slice : framed
     end
 
     # A lone line of exactly this (trimmed) splits the editor into the requests a "send
@@ -5009,7 +5058,11 @@ module Gori::Tui
     # already reports it; this is the pane that shows the same response.
     private def grpc_response_rows(result : Repeater::Result) : Array({String, Color})
       rows = [] of {String, Color}
-      msgs, residual = Proxy::H2::Grpc.scan(result.body || Bytes.empty)
+      # Keyed on the RESPONSE's own content-type: a grpc-web-text reply is base64 on the wire
+      # (and a server may answer `-text` to a binary request), so the framing lives one decode
+      # below the bytes.
+      msgs, residual = Proxy::H2::Grpc.scan_body(Gori::MediaType.of(result.head),
+        result.body || Bytes.empty)
       if msgs.empty? && residual == 0
         rows << {"← (no complete gRPC messages)", Theme.muted}
       else

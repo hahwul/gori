@@ -225,4 +225,49 @@ describe Gori::Pretty do
       formatted.lines.size.should be > 1 # actually reflowed
     end
   end
+
+  # Pretty used to carry its OWN idea of what a GraphQL body is — a hand-rolled
+  # `{"query": …}` object check — beside the decoded pane's. The two drifted exactly as
+  # duplicated detectors do: a batched request was GraphQL to the pane and anonymous JSON to
+  # the `p` toggle, on the same flow, on the same screen. It now asks `Gori::Graphql`.
+  describe "GraphQL — one detector, shared with the decoded pane" do
+    envelope = %({"operationName":"Me","variables":{"a":1},"query":"query Me { me { id } }"})
+
+    it "renders the shapes it never knew: batch and persisted query" do
+      res = pretty("application/json", %([{"query":"{a}"},{"query":"{b}"}])).not_nil!
+      res.note.should eq("pretty: graphql (batch)")
+      text(res).should contain("# batch of 2 operations")
+
+      res = pretty("application/json", %({"extensions":{"persistedQuery":{"sha256Hash":"h"}}})).not_nil!
+      res.note.should eq("pretty: graphql (persisted)")
+    end
+
+    it "renders a urlencoded GraphQL body as the document, not as anonymous fields" do
+      res = pretty("application/x-www-form-urlencoded", "query=query+Me+%7B+me+%7D&variables=%7B%7D").not_nil!
+      res.note.should eq("pretty: graphql (urlencoded)")
+      res.kind.should eq(:graphql)
+      text(res).should contain("query Me { me }")
+    end
+
+    it "still renders an ordinary form body as fields" do
+      pretty("application/x-www-form-urlencoded", "user=a&pass=b").not_nil!.note.should contain("pretty: form")
+    end
+
+    it "finds an envelope hiding under a content-type that does not describe it" do
+      # text/plain and a missing Content-Type are the two standard JSON-content-type filter
+      # bypasses, and both were shown as raw bytes.
+      pretty("text/plain", envelope).not_nil!.note.should eq("pretty: graphql (json)")
+      Gori::Pretty.format("POST /g HTTP/1.1\r\n\r\n".to_slice, envelope.to_slice)
+        .not_nil!.note.should eq("pretty: graphql (json)")
+    end
+
+    it "leaves an ordinary body under an unknown content-type alone (the sniff is anchored)" do
+      pretty("text/plain", %({"page":2,"query":"shoes"})).should be_nil
+      pretty("application/octet-stream", "just some text").should be_nil
+    end
+
+    it "keeps a REST JSON body on the plain JSON path" do
+      pretty("application/json", %({"query":"shoes","page":2})).not_nil!.note.should eq("pretty: json")
+    end
+  end
 end

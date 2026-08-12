@@ -2652,7 +2652,7 @@ module Gori::Tui
       if (body && !body.empty?) && grpc_body?(head)
         ls = Highlight.message(head, nil, request)
         ls << Highlight::Line.new
-        ls.concat(wrap(grpc_lines(body)))
+        ls.concat(wrap(grpc_lines(MediaType.of(head), body)))
         return DetailView.new(ls, EMPTY_BODY, :text, trailer, binary: true)
       end
 
@@ -2729,9 +2729,12 @@ module Gori::Tui
       head
     end
 
+    # A gRPC message by its own Content-Type — the same question `Proto`'s PROTO column, the
+    # QL `proto:` filter and the Repeater all ask, asked the same way. The substring search it
+    # replaces missed the (legal) `Content-Type:application/grpc` with no space after the
+    # colon, and could match the text inside another header's value.
     private def grpc_body?(head : Bytes?) : Bool
-      return false unless head
-      String.new(head).downcase.includes?("content-type: application/grpc")
+      Proxy::H2::Grpc.grpc?(MediaType.of(head))
     end
 
     # Renders a gRPC body as framed messages with a hex preview (protobuf is
@@ -2742,8 +2745,10 @@ module Gori::Tui
     # than arrived rendered here as "(no complete gRPC messages)" with no byte count —
     # indistinguishable from a body that simply is not gRPC, while `gori run show
     # --format json` reported it in full.
-    private def grpc_lines(body : Bytes) : Array(String)
-      msgs, residual = Proxy::H2::Grpc.scan(body)
+    private def grpc_lines(content_type : String?, body : Bytes) : Array(String)
+      # `scan_body`: a grpc-web-text body carries its frames base64-encoded, so scanning the
+      # raw bytes finds a length prefix made of base64 characters and reports nothing.
+      msgs, residual = Proxy::H2::Grpc.scan_body(content_type, body)
       note = Proxy::H2::Grpc.framing_error(residual)
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
       lines = [] of String

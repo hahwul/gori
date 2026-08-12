@@ -123,4 +123,64 @@ describe Gori::Proxy::H2::Grpc do
       Grpc.messages(f).first.trailer.should be_true
     end
   end
+
+  # `application/grpc-web-text` is grpc-web for clients that cannot carry binary: the FRAMING
+  # is identical, but the whole framed stream is base64 on the wire. Scanning the raw bytes
+  # therefore reads a length prefix built out of base64 characters and reports nothing —
+  # which every surface renders as "no complete gRPC messages", i.e. exactly what a body that
+  # is not gRPC at all looks like.
+  describe "grpc-web-text (base64 framing)" do
+    it "recognises the type, and only that type" do
+      Grpc.web_text?("application/grpc-web-text").should be_true
+      Grpc.web_text?("application/grpc-web-text+proto; charset=utf-8").should be_true
+      Grpc.web_text?("application/grpc-web+proto").should be_false
+      Grpc.web_text?("application/grpc").should be_false
+      Grpc.web_text?(nil).should be_false
+    end
+
+    it "deframes a base64 body that raw scanning cannot see" do
+      wire = Base64.strict_encode(framed("hello")).to_slice
+      Grpc.scan(wire)[0].should be_empty # the bug: base64 text is not framing
+      msgs, residual = Grpc.scan_body("application/grpc-web-text", wire)
+      residual.should eq(0)
+      String.new(msgs.first.data).should eq("hello")
+    end
+
+    # Each HTTP chunk (and the trailer frame) is base64-encoded INDEPENDENTLY, so the wire
+    # body is a concatenation of separately-padded base64 documents. One `Base64.decode` over
+    # the join yields garbage from the first interior pad onward.
+    it "decodes padding-delimited chunks that a single decode would corrupt" do
+      wire = (Base64.strict_encode(framed("hello")) +
+              Base64.strict_encode(trailer_frame("grpc-status: 0\r\n"))).to_slice
+      msgs, residual = Grpc.scan_body("application/grpc-web-text", wire)
+      residual.should eq(0)
+      msgs.size.should eq(2)
+      String.new(msgs[0].data).should eq("hello")
+      msgs[1].trailer.should be_true
+      Grpc.trailer_headers(msgs[1].data)["grpc-status"].should eq("0")
+    end
+
+    # P7: a body that will not decode is still shown as it arrived, and the residual then
+    # says the framing failed — never an empty view.
+    it "falls back to the raw bytes when a -text body does not decode" do
+      Grpc.framed_bytes("application/grpc-web-text", "!!!not base64!!!".to_slice)
+        .should eq("!!!not base64!!!".to_slice)
+    end
+
+    it "leaves a binary body untouched" do
+      body = framed("hello")
+      Grpc.framed_bytes("application/grpc+proto", body).should eq(body)
+      Grpc.scan_body("application/grpc+proto", body)[0].size.should eq(1)
+    end
+  end
+
+  # `grpc?` is what the Repeater, the PROTO column, the QL filter and every headless
+  # projection ask. Parameters and spacing must not change the answer.
+  it "reads the media type through its parameters" do
+    Grpc.grpc?("application/grpc-web+proto").should be_true
+    Grpc.grpc?("APPLICATION/GRPC; charset=utf-8").should be_true
+    Grpc.grpc?("  application/grpc  ").should be_true
+    Grpc.grpc?("application/grpc-web-text").should be_true
+    Grpc.grpc?("text/plain").should be_false
+  end
 end

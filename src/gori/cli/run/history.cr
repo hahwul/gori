@@ -408,8 +408,10 @@ module Gori
       # (P7) — this was only the report the operator reads.
       private def self.emit_grpc_messages_json(j : JSON::Builder, head : Bytes?, body : Bytes?) : Nil
         return if head.nil? || body.nil? || body.empty?
-        return unless Proxy::H2::Grpc.grpc?(content_type_of(head))
-        msgs, residual = Proxy::H2::Grpc.scan(body)
+        ct = MediaType.of(head)
+        return unless Proxy::H2::Grpc.grpc?(ct)
+        # `scan_body`: grpc-web-text carries the frames base64-encoded on the wire.
+        msgs, residual = Proxy::H2::Grpc.scan_body(ct, body)
         return if msgs.empty? && residual == 0
         j.field "grpc_messages" do
           j.object do
@@ -454,17 +456,6 @@ module Gori
             end
           end
         end
-      end
-
-      # Content-Type value from a message head (case-insensitive name, any spacing
-      # after the colon). Nil when the head has no Content-Type line.
-      private def self.content_type_of(head : Bytes) : String?
-        String.new(head).each_line do |line|
-          colon = line.index(':') || next
-          next unless line[0, colon].strip.downcase == "content-type"
-          return line[(colon + 1)..].strip
-        end
-        nil
       end
 
       # "→ out" (client→server) / "← in" (server→client). Text frames print their

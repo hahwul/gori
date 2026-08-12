@@ -1,4 +1,5 @@
 require "./proxy/codec/content_decode"
+require "./media_type"
 
 module Gori
   # Parses a Server-Sent Events (`text/event-stream`) body into discrete events.
@@ -35,15 +36,11 @@ module Gori
     # True when a response head declares a text/event-stream body. Resolves the
     # Content-Type value (case-insensitive name, any/no space after the colon, charset
     # params) and reuses sse? — the single source of truth all surfaces call, instead
-    # of each doing a brittle `includes?("content-type: text/event-stream")` scan.
+    # of each doing a brittle `includes?("content-type: text/event-stream")` scan. The scan
+    # itself is `MediaType.of` — the one every body decoder now shares, and the one that stops
+    # at the blank line ending the head instead of reading on into the body.
     def self.event_stream?(head : Bytes?) : Bool
-      return false unless head
-      String.new(head).each_line do |line|
-        colon = line.index(':') || next
-        next unless line[0, colon].strip.downcase == "content-type"
-        return sse?(line[(colon + 1)..])
-      end
-      false
+      sse?(MediaType.of(head))
     end
 
     # The events of an event-stream RESPONSE: content-decode (de-chunk/inflate) the

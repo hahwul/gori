@@ -2,6 +2,8 @@ require "json"
 require "uri"
 require "base64"
 require "mime/multipart"
+require "./graphql"
+require "./media_type"
 
 module Gori
   # Display-only body pretty-printer. Sits BETWEEN the transform layer
@@ -44,20 +46,27 @@ module Gori
       return nil if body.size > MAX_PRETTY
 
       str = String.new(body)
-      ct = media_type(head) # original case (boundary is case-sensitive), params kept
+      ct = MediaType.of(head) # original case (boundary is case-sensitive), params kept
       ctl = ct.try(&.downcase)
 
       # Content sniffs FIRST — JWT/GraphQL masquerade under generic content-types.
       if r = try_jwt(str)
         return r
       end
-      if ctl && ctl.includes?("json")
-        return try_json_or_graphql(str)
-      end
-      return try_form(str) if ctl && ctl.includes?("x-www-form-urlencoded")
-      return try_multipart(body, ct) if ctl && ct && ctl.starts_with?("multipart/")
+      return try_json_or_graphql(str) if MediaType.json?(ct)
+      # A urlencoded body can be a GraphQL request (`query=…&variables=…`, the form
+      # express-graphql and Yoga accept beside JSON). Rendering it as an anonymous field list
+      # loses the document; ask the GraphQL parser first and fall back to the field list.
+      return try_graphql_body(body, ct) || try_form(str) if MediaType.form_urlencoded?(ct)
+      return try_multipart(body, ct) if ct && MediaType.multipart?(ct)
       return try_xml(str) if ctl && ctl.includes?("xml")
       return try_html(str) if ctl && ctl.includes?("html")
+      # Last: a GraphQL body under a content-type that does not describe it — `text/plain`,
+      # none at all (both of which servers accept and both of which are the standard
+      # JSON-content-type filter bypass), or the raw `application/graphql` document. Gated on
+      # a cheap byte sniff so an ordinary unknown-type body still costs one regex, not a
+      # 1 MiB JSON parse.
+      return try_graphql_body(body, ct) if graphql_sniffable?(body, ct)
       nil
     rescue
       nil # last-resort net: Pretty must never raise into the render path
@@ -65,16 +74,11 @@ module Gori
 
     # ---- content-type ------------------------------------------------------
 
-    private def media_type(head : Bytes?) : String?
-      return nil unless head
-      String.new(head).each_line do |line|
-        l = line.chomp    # drops a trailing \r\n / \n / \r
-        break if l.empty? # end of the header block
-        if l.size >= 13 && l[0, 13].downcase == "content-type:"
-          return l[13..].strip
-        end
-      end
-      nil
+    # Worth handing to the GraphQL parser despite a content-type that claims nothing: the raw
+    # document type, or a body that OPENS as the envelope (`Graphql.envelope_head?`, the same
+    # anchored first-256-bytes test the decoded pane uses to report a mangled envelope).
+    private def graphql_sniffable?(body : Bytes, ct : String?) : Bool
+      MediaType.essence(ct) == "application/graphql" || Graphql.envelope_head?(body)
     end
 
     # ---- JSON --------------------------------------------------------------
@@ -105,31 +109,31 @@ module Gori
 
     # ---- GraphQL (operationName + un-escaped query + pretty variables) ------
 
-    # GraphQL envelope over an ALREADY-PARSED body (no second parse). Same guards as the old
-    # try_graphql minus the JSON.parse; nil for any non-GraphQL object/array/scalar so the
-    # caller falls through to plain JSON pretty-printing.
+    # GraphQL envelope over an ALREADY-PARSED body (no second parse).
+    #
+    # `Gori::Graphql` answers the shape question, and this file no longer carries its own
+    # opinion about it. It used to — a hand-rolled `{"query": …}` object check — and the two
+    # drifted exactly as duplicated detectors do: a batched request and a persisted query
+    # were GraphQL to the decoded pane and anonymous JSON to the `p` toggle beside it, on the
+    # same flow, on the same screen. `display` is likewise the pane's own renderer, so the
+    # two views of one body cannot disagree about its text either.
     private def graphql_from(json : JSON::Any) : Result?
-      h = json.as_h?
-      return nil unless h
-      q = h["query"]?.try(&.as_s?)
-      return nil unless q
-      # A GraphQL document always has a selection set, so the query string contains
-      # a '{'. Requiring it avoids hijacking ordinary REST bodies that happen to have
-      # a string "query" field (e.g. {"query":"shoes","page":2}) — which would hide
-      # their other fields — and rejects an empty/whitespace query (blank output).
-      return nil unless q.includes?('{')
-      text = String.build do |io|
-        if op = h["operationName"]?.try(&.as_s?)
-          io << "# operationName: " << op << "\n\n"
-        end
-        io << q.strip
-        if (vars = h["variables"]?) && !vars.raw.nil?
-          io << "\n\n# variables\n" << vars.to_pretty_json
-        end
-      end
+      result_for(Graphql.from_json_any(json))
+    end
+
+    # The same, for a body Pretty has NOT already parsed — a urlencoded `query=…`, a raw
+    # `application/graphql` document, or an envelope under a content-type that hides it.
+    private def try_graphql_body(body : Bytes, ct : String?) : Result?
+      result_for(Graphql.from_body(body, ct), String.new(body))
+    end
+
+    private def result_for(op : Graphql::Op?, original : String? = nil) : Result?
+      return nil unless op
+      text = Graphql.display(op)
+      return nil if text.empty? || text == original # nothing was reflowed → show raw
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
-      Result.new(ob, "pretty: graphql", :graphql)
+      Result.new(ob, "pretty: graphql (#{op.form.to_s.downcase})", :graphql)
     end
 
     # ---- JWT (reuses Decoder::Codecs.jwt_decode) ---------------------------

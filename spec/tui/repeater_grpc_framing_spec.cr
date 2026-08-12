@@ -148,3 +148,67 @@ describe "RepeaterView gRPC framing failure" do
     end
   end
 end
+
+# gRPC-Web is gRPC framing over HTTP/1.1 — what every browser client speaks, so it is the
+# gRPC a proxy sees most. The Repeater gated its whole gRPC mode on `http_version == "HTTP/2"`
+# and on a substring search of the head, so a grpc-web call opened as a plain raw tab: no
+# deframed transcript, no hex-editable payload, no grpc-status — while the History PROTO
+# column and the QL `proto:` filter both called the same flow GRPC.
+describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
+  def_web = ->(store : Gori::Store, ct : String, body : Bytes) do
+    head = "POST /svc/M HTTP/1.1\r\nHost: api.test\r\nContent-Type:#{ct}\r\nContent-Length: #{body.size}\r\n\r\n"
+    id = store.insert_flow(Gori::Store::CapturedRequest.new(
+      created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+      method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
+      head: head.to_slice, body: body))
+    view = RepeaterView.new
+    view.load_grpc(store.get_flow(id).not_nil!)
+    view
+  end
+
+  it "keeps the flow's own transport instead of forcing h2" do
+    grpc_tmp_store do |store|
+      view = def_web.call(store, "application/grpc-web+proto", Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41])
+      view.grpc_mode?.should be_true
+      view.http2?.should be_false # forcing h2 would re-send it over a protocol the origin may not speak
+      view.grpc_msg_count.should eq(1)
+      view.grpc_reframable?.should be_true
+    end
+  end
+
+  # Over h1 the body is delimited by Content-Length, not by a DATA frame with END_STREAM, so
+  # a reframed payload that changed size leaves a header the origin reads as the message
+  # boundary — the call hangs or is cut. (h2 keeps the header untouched, as before.)
+  it "resyncs Content-Length to the body it actually sends" do
+    grpc_tmp_store do |store|
+      body = Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]
+      head = "POST /svc/M HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/grpc-web\r\nContent-Length: 999\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
+        head: head.to_slice, body: body))
+      view = RepeaterView.new
+      view.load_grpc(store.get_flow(id).not_nil!)
+      wire = String.new(view.request_bytes)
+      sep = wire.index("\r\n\r\n").not_nil!
+      declared = wire[0, sep].lines.find(&.downcase.starts_with?("content-length:")).not_nil!
+        .split(':')[1].strip.to_i
+      declared.should eq(body.size)
+    end
+  end
+
+  # grpc-web-text carries the frames base64-encoded. Scanning the raw body finds a length
+  # prefix made of base64 characters, so the tab reported "0 messages" for a perfectly ordinary
+  # unary call — and a reframed payload has to go back out re-encoded, not as raw binary.
+  it "deframes a grpc-web-text body and re-encodes what it sends" do
+    grpc_tmp_store do |store|
+      wire = Base64.strict_encode(Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]).to_slice
+      view = def_web.call(store, "application/grpc-web-text", wire)
+      view.grpc_msg_count.should eq(1)
+      view.grpc_reframable?.should be_true
+      sent = view.request_bytes
+      sep = String.new(sent).index("\r\n\r\n").not_nil!
+      String.new(sent[(sep + 4)..]).should eq(String.new(wire)) # round-trips as base64, not raw binary
+    end
+  end
+end

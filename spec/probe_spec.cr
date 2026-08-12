@@ -976,6 +976,36 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
+  # The fingerprint's content-type gate was `json`, so a GraphQL request under the raw-document
+  # type or as a urlencoded body was not GraphQL to it — the two shapes a JSON-content-type
+  # filter is bypassed with, on an endpoint whose path does not say `/graphql`.
+  it "fingerprints GraphQL under the content-types the JSON gate excluded" do
+    with_store do |store|
+      doc = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/gw",
+        method: "POST", req_headers: "Content-Type: application/graphql\r\n",
+        req_body: "query Me { me { id } }", content_type: nil)
+      codes_of(doc).should contain("tech_graphql")
+
+      form = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/gw",
+        method: "POST", req_headers: "Content-Type: application/x-www-form-urlencoded\r\n",
+        req_body: "query=query+Me+%7B+me+%7D&variables=%7B%7D", content_type: nil)
+      codes_of(form).should contain("tech_graphql")
+    end
+  end
+
+  it "keeps an ordinary form POST out of the GraphQL fingerprint" do
+    with_store do |store|
+      login = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/login",
+        method: "POST", req_headers: "Content-Type: application/x-www-form-urlencoded\r\n",
+        req_body: "user=a&pass=b", content_type: nil)
+      codes_of(login).should_not contain("tech_graphql")
+      search = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/search",
+        method: "POST", req_headers: "Content-Type: application/x-www-form-urlencoded\r\n",
+        req_body: "query=shoes&page=2", content_type: nil) # a `query=` param is not a document
+      codes_of(search).should_not contain("tech_graphql")
+    end
+  end
+
   it "does not fingerprint an ordinary JSON POST with no query field as GraphQL" do
     with_store do |store|
       plain = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/orders",

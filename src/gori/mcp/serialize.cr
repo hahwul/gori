@@ -378,8 +378,12 @@ module Gori
       def self.emit_grpc_messages(j : JSON::Builder, field_name : String,
                                   head : Bytes?, body : Bytes?) : Nil
         return if head.nil? || body.nil? || body.empty?
-        return unless Proxy::H2::Grpc.grpc?(grpc_content_type(head))
-        msgs, residual = Proxy::H2::Grpc.scan(body)
+        ct = MediaType.of(head)
+        return unless Proxy::H2::Grpc.grpc?(ct)
+        # `scan_body`: grpc-web-text carries the frames base64-encoded, so scanning the raw
+        # bytes finds a length prefix built out of base64 characters — an agent reading this
+        # would be told a gRPC call had no messages.
+        msgs, residual = Proxy::H2::Grpc.scan_body(ct, body)
         return if msgs.empty? && residual == 0
         j.field field_name do
           j.object do
@@ -427,17 +431,6 @@ module Gori
         cut = data.size > GRPC_BYTES_MAX
         j.field "bytes", Base64.strict_encode(cut ? data[0, GRPC_BYTES_MAX] : data)
         j.field "bytes_truncated", true if cut
-      end
-
-      # Content-Type value from a message head (case-insensitive name, any spacing after the
-      # colon), nil when there is none.
-      private def self.grpc_content_type(head : Bytes) : String?
-        String.new(head).scrub.each_line do |line|
-          idx = line.index(':') || next
-          next unless line[0, idx].strip.compare("content-type", case_insensitive: true) == 0
-          return line[(idx + 1)..].strip
-        end
-        nil
       end
 
       WS_MSGS_MAX    =  500 # cap WS messages serialised for an LLM client

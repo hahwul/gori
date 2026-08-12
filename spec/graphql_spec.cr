@@ -2,6 +2,11 @@ require "./spec_helper"
 
 private alias GQL = Gori::Graphql
 
+# a request head carrying just the given Content-Type.
+private def ct_head(ct : String) : Bytes
+  "POST /graphql HTTP/1.1\r\nContent-Type: #{ct}\r\n\r\n".to_slice
+end
+
 # round-trip helper: display then parse back.
 private def round_trip(op : GQL::Op) : {String?, String, String?}
   GQL.parse_display(GQL.display(op))
@@ -402,9 +407,11 @@ describe Gori::Graphql do
   # wrote, on the strength of a projection. This guards the decision that only the two
   # invertible shapes are editable, and that the other four re-encode nothing at all.
   describe "the re-encode gate" do
-    it "marks only the two invertible shapes editable" do
+    it "marks only the three invertible shapes editable" do
       GQL.from_json(%({"query":"{ me }"})).not_nil!.editable?.should be_true
       GQL.from_query("p?query=%7Bme%7D").not_nil!.editable?.should be_true
+      form_head = "POST /g HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n".to_slice
+      GQL.from_flow("/g", form_head, "query=%7Bme%7D".to_slice).not_nil!.editable?.should be_true
       GQL.from_json(%([{"query":"{a}"}])).not_nil!.editable?.should be_false
       GQL.from_json(%({"extensions":{"persistedQuery":{"sha256Hash":"h"}}})).not_nil!.editable?.should be_false
     end
@@ -483,6 +490,97 @@ describe Gori::Graphql do
     # `from_body` is unchanged, so the Repeater re-encode target never becomes :body for one.
     it "leaves the re-encode gate answering :query for an unparseable body" do
       GQL.location(%({"query":"{broken}",).to_slice).should eq(:query)
+    end
+  end
+
+  # The GraphQL-over-HTTP spec's own media types are `application/graphql+json` and
+  # `application/graphql-response+json`, and BOTH begin with `application/graphql` — the type
+  # whose body is a raw document. A `starts_with?` dispatch therefore fed the two ordinary
+  # JSON envelopes to the document parser, which reported the whole JSON blob as the "query"
+  # in `Form::Document` — a shape nothing can re-encode, so the Repeater opened it as a plain
+  # raw tab. A GraphQL request looked like an ordinary request, which is the bug.
+  describe "content-type dispatch — the +json suffix is not the document type" do
+    body = %({"query":"query Me { me { id } }","operationName":"Me","variables":{"a":1}})
+
+    it "reads application/graphql+json as the JSON envelope" do
+      op = GQL.from_flow("/graphql", ct_head("application/graphql+json"), body.to_slice).not_nil!
+      op.form.should eq(GQL::Form::Json)
+      op.operation.should eq("Me")
+      op.query.should eq("query Me { me { id } }")
+      op.editable?.should be_true
+      GQL.location(body.to_slice, ct_head("application/graphql+json")).should eq(:body)
+    end
+
+    it "reads application/graphql-response+json, charset and all, as the JSON envelope" do
+      head = ct_head("application/graphql-response+json; charset=utf-8")
+      GQL.from_flow("/graphql", head, body.to_slice).not_nil!.form.should eq(GQL::Form::Json)
+    end
+
+    it "folds the media type but keeps reading a genuine application/graphql document" do
+      head = ct_head("Application/GraphQL")
+      op = GQL.from_flow("/graphql", head, "{ me { id } }".to_slice).not_nil!
+      op.form.should eq(GQL::Form::Document)
+    end
+
+    # Clients mislabel this one constantly — it is the type reached for when someone means
+    # "GraphQL" — and a body that parses as an envelope is an envelope whatever the header says.
+    it "prefers the envelope when application/graphql carries JSON anyway" do
+      op = GQL.from_flow("/graphql", ct_head("application/graphql"), body.to_slice).not_nil!
+      op.form.should eq(GQL::Form::Json)
+      op.query.should eq("query Me { me { id } }")
+    end
+  end
+
+  # `query=…&variables=…` under `application/x-www-form-urlencoded` is what express-graphql and
+  # Yoga accept beside JSON — and it is the first thing reached for when a JSON content-type is
+  # filtered, so the shape most likely to be a bypass attempt was the one shown as an ordinary
+  # form POST with no GraphQL anywhere.
+  describe "the urlencoded request body" do
+    head = "POST /graphql HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n".to_slice
+    body = "query=query+Me+%7B+me+%7D&variables=%7B%22a%22%3A1%7D&operationName=Me"
+
+    it "parses it into the same triple as the JSON and GET bindings" do
+      op = GQL.from_flow("/graphql", head, body.to_slice).not_nil!
+      op.form.should eq(GQL::Form::Urlencoded)
+      op.operation.should eq("Me")
+      op.query.should eq("query Me { me }")
+      op.variables.not_nil!.should contain(%("a": 1))
+    end
+
+    it "re-encodes into the BODY's own grammar, not JSON" do
+      GQL.location(body.to_slice, head).should eq(:form_body)
+      out = GQL.recompose_form("page=2&query=%7Bold%7D&sig=abc", "query New { x }")
+      out.should eq("page=2&query=query+New+%7B+x+%7D&sig=abc") # rewritten IN PLACE
+    end
+
+    it "keeps an ordinary form POST out of it (selection-set guard)" do
+      GQL.from_flow("/search", head, "query=shoes&page=2".to_slice).should be_nil
+      GQL.from_flow("/login", head, "user=a&pass=b".to_slice).should be_nil
+    end
+  end
+
+  # The anchored envelope test only ever runs on a body that FAILED to parse — a truncated or
+  # mangled envelope. Anchoring it on `"query"` alone recognised every client except the
+  # dominant one: Apollo Client serialises operationName first.
+  describe "the envelope anchor" do
+    head = "POST /gql HTTP/1.1\r\nContent-Type: application/json\r\n\r\n".to_slice
+
+    it "reports a truncated envelope whose first key is operationName" do
+      body = %({"operationName":"Me","variables":{},"query":"query Me { me { i).to_slice
+      op = GQL.from_flow("/gql", head, body).not_nil!
+      op.form.should eq(GQL::Form::Invalid)
+    end
+
+    it "reports any unparseable body under a content-type that only means GraphQL" do
+      gql_json = "POST /gql HTTP/1.1\r\nContent-Type: application/graphql+json\r\n\r\n".to_slice
+      op = GQL.from_flow("/gql", gql_json, "<<binary garbage>>".to_slice).not_nil!
+      op.form.should eq(GQL::Form::Invalid)
+      op.note.not_nil!.should contain("application/graphql+json")
+    end
+
+    it "does not claim an unparseable REST body that merely opens with variables/extensions" do
+      GQL.from_flow("/api", head, %({"extensions":{"a":1},).to_slice).should be_nil
+      GQL.from_flow("/api", head, %({"variables":{"a":1},).to_slice).should be_nil
     end
   end
 end
