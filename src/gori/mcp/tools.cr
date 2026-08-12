@@ -479,6 +479,7 @@ module Gori
         # every one of those blocks the drain fiber on the store writer's reply — which
         # back-pressures the engine's 256-slot event channel and stalls every crawl worker.
         getter persist_buf = [] of {Store::CapturedRequest, Store::CapturedResponse?}
+        property persist_at : Time::Instant = Time.instant # last flush; see DISCOVER_PERSIST_INTERVAL
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil

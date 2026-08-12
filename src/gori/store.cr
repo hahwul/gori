@@ -236,8 +236,13 @@ module Gori
       # catches exactly this), and copying just the `.db` loses the tail. gori's close path
       # depends on the pool closing every connection to get SQLite's last-connection
       # checkpoint, and that only holds at 1. Raise this only with that fixed first.
+      # `max_pool_size` is bounded BECAUSE of `cache_size`: crystal-db's default is unlimited,
+      # and 64 MiB is a per-CONNECTION ceiling, so N concurrent readers (the TUI render fiber,
+      # the writer, the probe passive and catch-up fibers, a second `gori mcp` process) could
+      # each claim one. Eight caps the worst case at ~512 MiB instead of unbounded, and is
+      # well past the handful of readers gori actually runs at once.
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000" \
-            "&cache_size=-64000"
+            "&cache_size=-64000&max_pool_size=8"
       refuse_non_database(path)
       # Announce that this process has the database open, for as long as it is (see OpenLock).
       # Taken BEFORE `DB.open` so the window in which a peer could delete the file out from

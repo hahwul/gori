@@ -75,6 +75,14 @@ module Gori::Tui
       # buffer content changes — not on every render frame. @styled_kind tracks
       # which highlight symbol it was built for.
       @styled = nil.as(Highlight::Windowed?)
+      # One-entry memo over `Windowed#line_at`. Under WRAP one logical line becomes N visual
+      # rows and the draw loop asks for the same `li` once per row, and `line_at` re-runs the
+      # body tokenizer every time — so a 4 KB minified JSON line filling a 40-row pane was 40
+      # identical tokenisations per frame, where the old eager array cost nothing on a frame
+      # that changed no text. Consecutive rows share `li`, so one slot is all it takes.
+      # Cleared with @styled, whose identity is what makes the memo valid.
+      @styled_line_li = -1
+      @styled_line = nil.as(Highlight::Line?)
       @styled_kind = nil.as(Symbol?)
       @styled_rev = Theme.revision
       @styled_env_rev = Env.highlight_rev
@@ -1350,7 +1358,7 @@ module Gori::Tui
           # from spans instead. (Unwrapped editors keep the legacy order below, where a
           # highlighted line wins and the preedit shows only through the caret glyph.)
           Highlight.draw(screen, cx0, rect.y + i, preedit_spans(line, a, b), width: cw)
-        elsif styled && li < styled.total && (sl = styled.line_at(li))
+        elsif styled && (sl = styled_line(styled, li))
           Highlight.draw(screen, cx0, rect.y + i, Highlight.slice_chars(sl, a, b), width: cw)
         else
           if composing
@@ -1971,6 +1979,17 @@ module Gori::Tui
 
     # The highlight overlay for `kind` (:request/:response), cached until the
     # buffer content changes — so a held editor isn't re-tokenised 20×/sec.
+    # The styled line at `li`, memoised for the run of visual rows that share it (see
+    # @styled_line_li). Returns nil past the end so callers fall back to plain text.
+    private def styled_line(w : Highlight::Windowed, li : Int32) : Highlight::Line?
+      return nil unless 0 <= li < w.total
+      return @styled_line if @styled_line_li == li && @styled_line
+      line = w.line_at(li)
+      @styled_line_li = li
+      @styled_line = line
+      line
+    end
+
     # WINDOWED: the head is styled eagerly, the body kept raw and styled per VISIBLE line.
     #
     # This used to hand back a fully-styled array, and every mutation nils the memo — so each
@@ -1995,6 +2014,8 @@ module Gori::Tui
       @styled_kind = kind
       @styled_rev = Theme.revision
       @styled_env_rev = env_rev
+      @styled_line_li = -1
+      @styled_line = nil
       @styled =
         if kind == :markdown
           Highlight.eager_window(Highlight.markdown(@lines))
@@ -2072,7 +2093,7 @@ module Gori::Tui
                                     cr : Array({Int32, Int32}), cw : Int32,
                                     a : Int32 = 0, b : Int32 = -1) : Nil
       b = line.size if b < 0
-      base = Highlight.slice_chars((styled && li < styled.total ? styled.line_at(li) : nil) || [Highlight::Span.new(line, Theme.text)], a, b)
+      base = Highlight.slice_chars((styled ? styled_line(styled, li) : nil) || [Highlight::Span.new(line, Theme.text)], a, b)
       local = a == 0 ? cr : cr.compact_map do |(ra, rb)|
         lo = {ra, a}.max - a
         hi = {rb, b}.min - a
@@ -2090,7 +2111,7 @@ module Gori::Tui
                               line : String, styled : Highlight::Windowed?, cw : Int32) : Nil
       if @reveal
         Highlight.draw(screen, cx0, y, Highlight.slice_left(Reveal.styled(line, false, cw + @xscroll), @xscroll), width: cw)
-      elsif styled && li < styled.total && (sl = styled.line_at(li))
+      elsif styled && (sl = styled_line(styled, li))
         Highlight.draw(screen, cx0, y, Highlight.slice_left(sl, @xscroll), width: cw)
       elsif li == @cy && !@preedit.empty?
         cx = @cx.clamp(0, line.size)

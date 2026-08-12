@@ -228,7 +228,10 @@ module Gori
         end
         pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size, exchange)
         djob.persist_buf << {pair.request, pair.response}
-        flush_discover_persist(djob) if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH
+        if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH ||
+           Time.instant - djob.persist_at >= DISCOVER_PERSIST_INTERVAL
+          flush_discover_persist(djob)
+        end
       rescue
       end
 
@@ -239,7 +242,16 @@ module Gori
       # `DiscoverController#flush_persist`, which has batched since it was written.
       DISCOVER_PERSIST_BATCH = 64
 
+      # …and a TIME bound, because size alone is the wrong axis. The TUI twin batches by TICK
+      # — `DiscoverController#drain_events` calls `flush_persist if applied` every ~50 ms — so
+      # its findings are queryable almost at once. Batching on count ALONE meant a crawl that
+      # found fewer than 64 endpoints and then kept running left every one of them out of the
+      # store for the whole run: `discover_results` reported them while `list_sitemap` /
+      # `list_history` / `get_flow` could not see them.
+      DISCOVER_PERSIST_INTERVAL = 250.milliseconds
+
       private def flush_discover_persist(djob : DiscoverJob) : Nil
+        djob.persist_at = Time.instant # stamped even when empty: this is the FLUSH clock
         return if djob.persist_buf.empty?
         store.insert_import_batch(djob.persist_buf)
         djob.persist_buf.clear

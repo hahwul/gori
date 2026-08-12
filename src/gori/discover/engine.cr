@@ -123,13 +123,6 @@ module Gori::Discover
     @pools : Hash(String, Repeater::ConnPool)?
     @keep_alive : Bool
     @idle_conns : Int32
-    # Counters carried over from pools the LRU has evicted. `pool_stats` sums the live map,
-    # so without these an evicted pool's handshakes would simply disappear from the run's
-    # connection line — the report would understate the work the run actually did.
-    @evicted_dialed = 0_i64
-    @evicted_reused = 0_i64
-    @evicted_stale = 0_i64
-    @evicted_unpooled = false
 
     # `keep_alive` reuses one HTTP/1.1 connection across many sends per origin (see
     # `Repeater::ConnPool`). It is the single largest cost of a run against a remote origin:
@@ -174,10 +167,10 @@ module Gori::Discover
     def pool_stats : PoolStats?
       pools = @pools
       return nil unless pools
-      dialed = @evicted_dialed
-      reused = @evicted_reused
-      stale = @evicted_stale
-      pooling = !@evicted_unpooled
+      dialed = 0_i64
+      reused = 0_i64
+      stale = 0_i64
+      pooling = true
       pools.each_value do |p|
         dialed += p.dialed
         reused += p.reused
@@ -230,27 +223,24 @@ module Gori::Discover
       pools = @pools
       return nil unless pools
       key = "#{scheme}://#{host}:#{port}"
-      if existing = pools.delete(key)
-        pools[key] = existing # re-insert = most-recently-used (Hash keeps insertion order)
+      if existing = pools[key]?
         return existing
       end
-      # EVICT the least-recently-used rather than refusing to pool at all. The cap is an fd
-      # bound and stays exactly what it was; what changes is that crossing it no longer turns
-      # keep-alive off for the REST of the run. A crawl that reaches a fifth origin — a
-      # host+subdomains boundary, a multi-host include — used to dial per send from then on,
-      # for every origin including the four it had already pooled, and said nothing about it.
-      if pools.size >= MAX_POOLS
-        oldest = pools.first_key
-        if dropped = pools.delete(oldest)
-          # Carry its accounting forward BEFORE closing, or the run's connection line loses
-          # every handshake this origin paid.
-          @evicted_dialed += dropped.dialed
-          @evicted_reused += dropped.reused
-          @evicted_stale += dropped.stale_retries
-          @evicted_unpooled = true unless dropped.pooling?
-          dropped.close_all # release its parked sockets, not just the map slot
-        end
-      end
+      # NOT an LRU. Evicting the least-recently-used pool to make room looks like the obvious
+      # fix for the cliff below, and it was tried and reverted: `close_all` runs SSL_shutdown
+      # on a parked TLS socket, which is a WRITE and so a fiber yield point — landing one
+      # between this lookup and the insert below, which the whole method depends on not
+      # having (see the note above). It also orphans any socket a worker has checked OUT,
+      # since eviction can only drain the idle list, and with several origins interleaved
+      # across up to 80 workers it thrashes: every new-origin send evicts the pool the next
+      # send needs, so origins that used to keep their sockets pay a close plus a redial.
+      # Doing it properly needs ConnPool to report in-flight checkouts.
+      #
+      # So past the cap a new origin dials per send, which is what every origin did before
+      # keep-alive existed. The cost is real (a crawl crossing a host+subdomains or multi-host
+      # boundary loses pooling for the origins past the fourth) and is the price of the fd
+      # bound MAX_POOLS exists to hold.
+      return nil if pools.size >= MAX_POOLS
       pool = Repeater::ConnPool.new(scheme, host, port, @verify, @sni, @timeout,
         @overrides, @idle_conns)
       pools[key] = pool

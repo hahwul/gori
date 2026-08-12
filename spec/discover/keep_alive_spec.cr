@@ -104,36 +104,18 @@ describe "Discover keep-alive" do
   end
 
   # A crawl derives URLs on several in-scope hosts, so the pool is per ORIGIN — but each one
-  # parks up to `idle_conns` sockets, so the MAP is capped (an fd bound). Past the cap the
-  # least-recently-used pool is EVICTED, not refused: the cap used to mean the fifth origin
-  # got no pool AND every origin after it dialled per send for the rest of the run, silently.
-  # Same host, distinct ports = distinct origins.
-  it "evicts the least-recently-used pool past MAX_POOLS instead of giving up on keep-alive" do
+  # parks up to `idle_conns` sockets, so the map is capped and origins past it dial per send
+  # (which is what every origin did before). Same host, distinct ports = distinct origins.
+  it "pools per origin and falls back to dial-per-send past MAX_POOLS" do
     origins = Array.new(D::Sender::MAX_POOLS + 1) { KeepAliveOrigin.new }
     s = sender(true)
     origins.each do |o|
       2.times { s.fetch("http", "127.0.0.1", o.port, "/a") }
     end
-    # EVERY origin reused its socket, including the one past the cap — the fifth evicts the
-    # first, which by then is done with. Under the old rule this origin dialled twice.
-    origins.each(&.connections.should(eq(1)))
-    s.pool_stats.not_nil!.reused.should eq((D::Sender::MAX_POOLS + 1).to_i64)
-    s.close
-    origins.each(&.close)
-  end
-
-  # The fd bound is the POINT of the cap, so eviction has to close what it drops rather than
-  # just forgetting the map entry — otherwise a crawl over many origins leaks a socket per
-  # evicted pool and the cap stops meaning anything.
-  it "closes the evicted pool's parked sockets" do
-    origins = Array.new(D::Sender::MAX_POOLS + 1) { KeepAliveOrigin.new }
-    s = sender(true)
-    origins.each { |o| 2.times { s.fetch("http", "127.0.0.1", o.port, "/a") } }
-    # origins[0] was evicted when origins.last arrived. Its socket is gone, so coming back to
-    # it dials afresh rather than handing back a socket nobody is holding open.
-    before = origins[0].connections
-    s.fetch("http", "127.0.0.1", origins[0].port, "/again")
-    origins[0].connections.should eq(before + 1)
+    # The first MAX_POOLS each reused their socket; the last one got no pool at all.
+    origins[0, D::Sender::MAX_POOLS].each(&.connections.should(eq(1)))
+    origins.last.connections.should eq(2)
+    s.pool_stats.not_nil!.reused.should eq(D::Sender::MAX_POOLS.to_i64)
     s.close
     origins.each(&.close)
   end

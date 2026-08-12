@@ -219,7 +219,10 @@ module Gori::Proxy::Codec::Http1
     while pos < size
       nl = raw.index(0x0a_u8, pos)
       stop = nl || size
-      # The line EXCLUDES the LF and KEEPS a trailing CR, matching String#each_line.
+      # The line excludes the LF and keeps a trailing CR. `String#each_line` chomps `\r\n`,
+      # so the two differ there — harmlessly, because both `strip` (the blank test) and the
+      # no-arg `split` (the tokenizer) treat that CR as whitespace either way. The corpus in
+      # spec/outbound_spec.cr covers the CR-bearing shapes for exactly this reason.
       line = String.new(raw[pos, stop - pos])
       return line.split[1]? || "/" unless line.strip.empty?
       break unless nl

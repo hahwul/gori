@@ -37,3 +37,23 @@ end
   per = (Time.instant - t).total_milliseconds / n
   puts "buffer #{kb.to_s.rjust(3)} KB (#{lines} lines): #{per.round(3)} ms per keystroke+frame"
 end
+
+# SCROLLING a WRAPPED pane over long lines. Under wrap one logical line becomes N visual
+# rows, and the draw loop asks for the same line index once per row — so a windowed
+# `line_at` without a memo re-tokenises the same line N times per frame, which the old
+# eager array never did. This case exists to keep that from regressing again.
+puts ""
+long_body = (%({"k":"#{"v" * 4000}"}) + "\n") * 40
+text = "POST /x HTTP/1.1\r\nContent-Type: application/json\r\n\r\n#{long_body}"
+ta = TextArea.new(text)
+ta.wrap = true
+backend = MemoryBackend.new(100, 40)
+rect = Rect.new(0, 0, 100, 40)
+ta.render(Screen.new(backend), rect, cursor: false, highlight: :request)
+t = Time.instant
+n = 30
+n.times do
+  ta.move(1, 0) # scroll, NO buffer mutation: the styled memo must survive this
+  ta.render(Screen.new(backend), rect, cursor: false, highlight: :request)
+end
+puts "wrapped scroll over 4 KB lines: #{((Time.instant - t).total_milliseconds / n).round(3)} ms per frame"

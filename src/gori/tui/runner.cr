@@ -899,7 +899,11 @@ module Gori::Tui
       @tick_errors << now
       ::Log.error(exception: ex) { "TUI tick raised (#{@tick_errors.size}/#{TICK_ERROR_LIMIT} in #{TICK_ERROR_WINDOW})" }
       return false if @tick_errors.size >= TICK_ERROR_LIMIT
-      @toast = "recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})"
+      # `status`, not a bare `@toast =`: `status_line` only prefers a toast over the
+      # companion's bubble when `@toast_at` is fresher than `@companion.bubble_at`, so
+      # assigning the message without its timestamp lost the race to any bubble Miss Ring
+      # happened to be holding — and the breaker's one operator-visible signal never showed.
+      status("recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})")
       # The frame that raised is half-drawn, so force a full repaint rather than a cell diff
       # against a screen state no complete render ever produced.
       @resized = true
