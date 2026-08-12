@@ -10,8 +10,7 @@
 #
 # Build: crystal build bench/resource_meter_bench.cr -o bin/resource_meter_bench --release
 require "benchmark"
-require "../src/gori/tui"
-require "../src/gori/settings"
+require "../src/gori"
 
 include Gori::Tui
 

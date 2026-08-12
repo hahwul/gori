@@ -5,7 +5,7 @@
 #
 # Build: crystal build bench/real_frame_bench.cr -o bin/real_frame_bench --release
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

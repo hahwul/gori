@@ -11,7 +11,7 @@
 # Build: crystal build bench/fuzz_view_frame_bench.cr -o bin/fuzz_view_frame_bench --release
 # Run:   bin/fuzz_view_frame_bench
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 require "../spec/support/memory_backend"
 
 include Gori::Tui

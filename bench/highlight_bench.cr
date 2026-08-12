@@ -5,7 +5,7 @@
 # Build: crystal build bench/highlight_bench.cr -o bin/highlight_bench --release
 # Run:   bin/highlight_bench
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

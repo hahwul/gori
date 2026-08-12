@@ -9,7 +9,7 @@
 #
 # Build: crystal build bench/buffered_frame_bench.cr -o bin/buffered_frame_bench --release
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

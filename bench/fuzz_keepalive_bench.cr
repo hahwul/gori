@@ -29,8 +29,7 @@ module Gori
   class Error < Exception; end
 end
 
-require "../src/gori/fuzz"
-require "../src/gori/outbound"
+require "../src/gori"
 
 alias F = Gori::Fuzz
 

@@ -5,7 +5,7 @@
 # Build: crystal build bench/screen_cell_bench.cr -o bin/screen_cell_bench --release
 # Run:   bin/screen_cell_bench
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

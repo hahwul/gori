@@ -1,4 +1,4 @@
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

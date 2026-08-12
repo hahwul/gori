@@ -7,7 +7,7 @@
 # Build: crystal build bench/store_bench.cr -o bin/store_bench --release
 # Run:   BENCH_MAX=100000 bin/store_bench
 require "benchmark"
-require "../src/gori/store"
+require "../src/gori"
 
 include Gori
 

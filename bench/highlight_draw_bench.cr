@@ -9,7 +9,7 @@
 # Build: crystal build bench/highlight_draw_bench.cr -o bin/highlight_draw_bench --release
 # Run:   bin/highlight_draw_bench
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

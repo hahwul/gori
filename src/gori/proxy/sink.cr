@@ -11,8 +11,11 @@ module Gori::Proxy
     # Fill in the response (or error) for an existing flow.
     abstract def on_response(resp : Store::CapturedResponse) : Nil
     # Record a captured WebSocket message for a flow (post-101). `shape` is the frame
-    # header the payload arrived in (V7); it defaults so a sink double that does not care
-    # about framing — and every pre-V7 caller — needs no change.
+    # header the payload arrived in (V7); the default spares every CALLER from passing it.
+    # It does NOT spare an implementor: Crystal matches an abstract def by its full parameter
+    # list, so a sink that omits `shape` no longer satisfies this and fails to compile. Two
+    # bench sinks were left behind exactly that way, and because CI does not build `bench/`
+    # (see .github/workflows/ci.yml) nothing said so until someone tried to run one.
     abstract def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                                shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
 

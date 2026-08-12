@@ -15,7 +15,7 @@ module Gori
   class Error < Exception; end
 end
 
-require "../src/gori/probe/passive"
+require "../src/gori"
 
 # A realistic non-GraphQL JSON POST body — an ordinary API payload. The GraphQL classifier
 # has to decide "not GraphQL" for every one of these.

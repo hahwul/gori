@@ -8,7 +8,7 @@
 # Build: crystal build bench/companion_draw_bench.cr -o bin/companion_draw_bench --release
 # Run:   bin/companion_draw_bench
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 require "../spec/support/memory_backend"
 
 include Gori::Tui

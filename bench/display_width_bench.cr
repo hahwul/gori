@@ -8,7 +8,7 @@
 # Build: crystal build bench/display_width_bench.cr -o bin/display_width_bench --release
 # Run:   bin/display_width_bench
 require "benchmark"
-require "../src/gori/tui"
+require "../src/gori"
 
 include Gori::Tui
 

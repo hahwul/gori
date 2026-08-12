@@ -4,7 +4,7 @@
 # Build: crystal build bench/sitemap_bench.cr -o bin/sitemap_bench --release
 # Run:   bin/sitemap_bench
 require "benchmark"
-require "../src/gori/sitemap"
+require "../src/gori"
 
 # N distinct endpoints /users/<id>/profile — all siblings under /users, the shape that
 # collides in Node#child before group_sequences! folds them.

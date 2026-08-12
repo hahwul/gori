@@ -1,4 +1,4 @@
-require "../src/gori/store"
+require "../src/gori"
 
 def time_ms(reps : Int32, & : ->) : Float64
   2.times { yield }

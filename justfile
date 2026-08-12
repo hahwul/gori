@@ -108,6 +108,23 @@ version-check:
 version-update:
     crystal run scripts/version_update.cr
 
+# Type-check every harness in bench/ without generating code.
+#
+# AGENTS.md says "measure, don't guess" and points at these harnesses, but nothing built
+# them: `just check` only FORMATS bench/, and CI runs build + spec + docker. 17 of the 43
+# had rotted silently — most of them by requiring a subtree (`src/gori/tui`) that stopped
+# being self-contained, two by drifting off an interface that grew a parameter. Run this
+# after touching anything a harness reaches into.
+[group('benchmark')]
+benchmark-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fail=0
+    for f in bench/*.cr; do
+      crystal build "$f" -o /dev/null --no-codegen 2>/dev/null || { echo "BROKEN: $f"; fail=1; }
+    done
+    [ $fail -eq 0 ] && echo "all bench harnesses build"
+
 # Build (release) and run the end-to-end proxy benchmark harness.
 [group('benchmark')]
 benchmark:
