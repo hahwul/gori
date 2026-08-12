@@ -162,6 +162,17 @@ module Gori
         "gq#{Random::Secure.hex(4)}"
       end
 
+      # `n` canaries from ONE CSPRNG draw. `fresh` costs a `getrandom` syscall per call, and
+      # the miner mints one canary per candidate NAME — a bucket is 64 by default and up to
+      # 1024 (`Config#bucket`), so a single bucket send was up to 1024 syscalls before a byte
+      # went on the wire. Still `Random::Secure`, deliberately: a guessable canary produces a
+      # false reflection, which is a correctness property of the miner and not a knob.
+      def self.fresh_batch(n : Int32) : Array(String)
+        return [] of String if n <= 0
+        raw = Random::Secure.random_bytes(4 * n)
+        Array(String).new(n) { |i| "gq#{raw[i * 4, 4].hexstring}" }
+      end
+
       # A random name that almost certainly does not exist — for the per-location
       # baseline control (does the app react to ANY unknown param here?).
       def self.bogus_name : String

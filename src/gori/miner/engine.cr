@@ -278,7 +278,8 @@ module Gori::Miner
     private def process_bucket(task : Task) : Array(Task)
       # One {name, canary} pair per candidate — the SAME array feeds the injector and the
       # detector (decide), so no per-bucket name→canary / canary→name hashes are built.
-      pairs = task.names.map { |n| {n, Canary.fresh} }
+      canaries = Canary.fresh_batch(task.names.size) # one CSPRNG draw for the whole bucket
+      pairs = task.names.map_with_index { |n, i| {n, canaries[i]} }
       # `apply_with_spans` (not `apply`): the spans mark the INJECTED candidate names/values
       # so the send seam protects them from session-binding expansion. Without this a `$NAME`
       # a param wordlist carries — or an injected byte colliding with a bound name — expands

@@ -25,9 +25,9 @@ module Gori::Miner
     def self.probe(raw : Repeater::Result) : Probe
       decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
       body = decoded || raw.body || Bytes.empty
+      words, lines = count_metrics(body)
       metrics = Fuzz::Metrics.new(
-        raw.response.try(&.status), body.size.to_i64,
-        count_words(body), count_lines(body), raw.duration_us)
+        raw.response.try(&.status), body.size.to_i64, words, lines, raw.duration_us)
       # One scan of body + head collects every canary-shaped token, replacing both the K
       # per-candidate `includes?` passes AND the two `String.new(...).scrub` allocations the
       # old body_text/head_text strings required (they fed only `reflects?`).
@@ -66,24 +66,25 @@ module Gori::Miner
 
     # Word count over decoded bytes, allocation-free (whitespace transitions) — lifted
     # from Fuzz::Matcher (private there) to avoid a second decode pass.
-    private def self.count_words(body : Bytes) : Int32
-      count = 0
+    # Words and lines in ONE pass over the body, which is what `Fuzz::Matcher#count_metrics`
+    # already does — this module kept two separate walks long after its twin merged them, so
+    # a mine paid three full scans of every response body (words, lines, canaries) where two
+    # were enough. Identical answers: same whitespace set, same word-start rule, and `\n` is
+    # counted on the same byte both loops already tested for.
+    private def self.count_metrics(body : Bytes) : {Int32, Int32}
+      words = 0
+      lines = 0
       in_word = false
       body.each do |b|
         if b == 0x20_u8 || b == 0x09_u8 || b == 0x0a_u8 || b == 0x0d_u8
           in_word = false
+          lines += 1 if b == 0x0a_u8
         elsif !in_word
           in_word = true
-          count += 1
+          words += 1
         end
       end
-      count
-    end
-
-    private def self.count_lines(body : Bytes) : Int32
-      n = 0
-      body.each { |b| n += 1 if b == 0x0a_u8 }
-      n
+      {words, lines}
     end
   end
 end
