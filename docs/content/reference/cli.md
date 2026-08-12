@@ -111,7 +111,7 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | `1` | Error — a failed send, an unreadable project, a mutation that could not be applied |
 | `3` | `run fuzz --fail-if-no-matches` completed but nothing matched |
 
-A fuzz run that matched nothing *and* errored on every send exits `1`, not `3`, so "no findings" stays distinguishable from "never reached the target".
+Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
 
 ### run capture
 
@@ -473,8 +473,10 @@ gori run oast listen --provider webhook.site --once --json
 ```bash
 gori run oast providers                                  # tokens print as [REDACTED]
 gori run oast providers add --name lab --kind custom-http --host https://oast.lab.internal
-gori run oast providers enable lab
+gori run oast providers enable p_1
 ```
+
+`enable`, `disable`, `update` and `delete` take the provider **id** (`p_1`, or a bare `1`), not its display name — `add` prints the id it assigned, and `list` shows it.
 
 | Option | Description |
 |--------|-------------|

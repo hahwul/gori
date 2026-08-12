@@ -111,7 +111,7 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | `1` | 오류 — 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경 |
 | `3` | `run fuzz --fail-if-no-matches`가 완료했지만 매칭이 없음 |
 
-매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz 실행은 `3`이 아니라 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다.
+`--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다.
 
 ### run capture {#run-capture}
 
@@ -473,8 +473,10 @@ gori run oast listen --provider webhook.site --once --json
 ```bash
 gori run oast providers                                  # 토큰은 [REDACTED]로 출력
 gori run oast providers add --name lab --kind custom-http --host https://oast.lab.internal
-gori run oast providers enable lab
+gori run oast providers enable p_1
 ```
+
+`enable`, `disable`, `update`, `delete`는 표시 이름이 아니라 프로바이더 **id**(`p_1` 또는 그냥 `1`)를 받습니다. `add`가 부여한 id를 출력하고, `list`에도 나옵니다.
 
 | Option | Description |
 |--------|-------------|
