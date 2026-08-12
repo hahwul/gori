@@ -462,6 +462,54 @@ describe Gori::Outbound do
       Gori::Outbound.request_target("\r\nPOST  /a/b\tHTTP/1.1\r\n").should eq("/a/b")          # blank line + irregular ws
     end
 
+    # CHARACTERISATION. The Bytes overload stopped copying the whole message into a String
+    # (a 50 KB POST paid a 50 KB copy per send just to read its first line), so the two
+    # overloads no longer share an implementation top to bottom. This is a SCOPE-GATE input:
+    # a divergence between them is not a perf regression, it is a gate bypass — the same
+    # shape AGENTS.md records as having recurred three times (#390/#394/#397). Every row must
+    # answer identically through both, whatever the bytes are.
+    it "answers identically through the String and Bytes overloads on hostile input" do
+      corpus = [
+        "GET /a HTTP/1.1\r\nHost: h\r\n\r\n",
+        "GET  /a HTTP/1.1\r\n",            # doubled space
+        "GET\t/a\tHTTP/1.1\r\n",           # tabs
+        "GET \t /a  HTTP/1.1\r\n",         # mixed whitespace run
+        "\r\nGET /a HTTP/1.1\r\n",         # leading blank (CRLF)
+        "\nGET /a HTTP/1.1\r\n",           # leading blank (bare LF)
+        "\r\n\r\n\r\nGET /a HTTP/1.1\r\n", # several leading blanks
+        "   \r\nGET /a HTTP/1.1\r\n",      # whitespace-only first line
+        "\rGET /a HTTP/1.1\r\n",           # bare CR line
+        "GET /a HTTP/1.1",                 # no trailing newline at all
+        "GET",                             # one token, no target
+        "GET ",                            # trailing space, empty second token
+        " ",                               # a single space: blank throughout
+        "",                                # empty
+        "\r\n",                            # blank only
+        "\n\n\n",                          # blanks only
+        "garbage",
+        "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",     # the h2 preface
+        "GET http://other.test/p HTTP/1.1\r\n", # absolute-form
+        "GET /a?q=1&r=%20 HTTP/1.1\r\n",        # query + percent-encoding
+        "GET / a HTTP/1.1\r\n",                 # NBSP inside the target (Unicode whitespace)
+        "GET /a HTTP/1.1\r\n",                  # NBSP as the separator
+        "GET /café HTTP/1.1\r\n",               # non-ASCII target
+      ]
+      corpus.each do |raw|
+        Gori::Outbound.request_target(raw.to_slice)
+          .should eq(Gori::Outbound.request_target(raw)), "diverged on #{raw.inspect}"
+      end
+
+      # Invalid UTF-8 cannot round-trip through a String literal, so it gets its own rows.
+      [
+        Bytes[0x47, 0x45, 0x54, 0x20, 0xff, 0xfe, 0x20, 0x48], # "GET \xff\xfe H"
+        Bytes[0xff, 0x0d, 0x0a, 0x47, 0x45, 0x54, 0x20, 0x2f], # invalid first line, then "GET /"
+        Bytes[0x00, 0x20, 0x2f, 0x61],                         # NUL as the method
+      ].each do |raw|
+        Gori::Outbound.request_target(raw)
+          .should eq(Gori::Outbound.request_target(String.new(raw))), "diverged on #{raw.inspect}"
+      end
+    end
+
     it "keeps the scope gate honest against a doubled-space request line" do
       with_scope do |scope, _store|
         scope.add("include", "host", "acme.test")

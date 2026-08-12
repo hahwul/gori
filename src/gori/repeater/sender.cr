@@ -180,8 +180,11 @@ module Gori
         bindings = Gori::Env.layer.as?(Gori::Bindings)
         return unless bindings
         return if result.error
-        line = String.new(request).each_line.first? || ""
-        parts = line.split
+        # First line only (NOT `request_target_line`, which deliberately scans past blank
+        # lines — this is evidence for an extract rule, not the scope gate's verdict). Read
+        # off the slice so a large body is not copied into a String to look at its head.
+        nl = request.index(0x0a_u8)
+        parts = String.new(request[0, nl || request.size]).split
         subject = Gori::InterceptFilter::Subject.new(
           method: parts[0]? || "GET", host: @host, target: parts[1]? || "/",
           scheme: @scheme, status: result.response.try(&.status))

@@ -201,12 +201,35 @@ module Gori::Proxy::Codec::Http1
   #
   # The no-arg `split` collapses whitespace RUNS and drops empty parts, so a doubled space or a
   # tab recovers the real target; a line with no target (or an all-blank input) degrades to "/".
-  def self.request_target_line(text : String) : String
-    text.each_line do |line|
-      next if line.strip.empty? # skip a leading blank / whitespace-only line (incl. a bare "\r")
-      return line.split[1]? || "/"
+  # Bytes is the real implementation and String delegates, because the callers on the active
+  # send path hold `Bytes` — and `String.new(bytes)` there copied the WHOLE message (head and
+  # body both) on every send, for a 50 KB POST a 50 KB copy per request, to read one line.
+  # `String#to_slice` is an O(1) view of the string's own bytes, so the delegation is free.
+  #
+  # Only the CANDIDATE LINE becomes a String, never the message. That is deliberate rather
+  # than a byte-level re-implementation of the tokenizer: `strip` and the no-arg `split` are
+  # Unicode-aware (U+00A0 and friends count as whitespace), so an ASCII-only byte scan would
+  # answer differently for a request line carrying one — and this feeds the SCOPE GATE, where
+  # a divergence is a bypass, not a rounding error. Building one line per blank prefix costs
+  # nothing: real input has zero or one. `spec/outbound_spec.cr` pins the two overloads
+  # against each other over a hostile corpus for exactly this reason.
+  def self.request_target_line(raw : Bytes) : String
+    pos = 0
+    size = raw.size
+    while pos < size
+      nl = raw.index(0x0a_u8, pos)
+      stop = nl || size
+      # The line EXCLUDES the LF and KEEPS a trailing CR, matching String#each_line.
+      line = String.new(raw[pos, stop - pos])
+      return line.split[1]? || "/" unless line.strip.empty?
+      break unless nl
+      pos = nl + 1
     end
     "/"
+  end
+
+  def self.request_target_line(text : String) : String
+    request_target_line(text.to_slice)
   end
 
   def self.parse_response_head(raw : Bytes) : RawResponse

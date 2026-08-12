@@ -293,7 +293,7 @@ module Gori
     # shape AGENTS.md flags as thrice-recurring (#390/#394/#397). `Outbound` keeps these two
     # names because ~20 active-send call sites and `spec/outbound_spec.cr` speak them.
     def self.request_target(bytes : Bytes) : String
-      Proxy::Codec::Http1.request_target_line(String.new(bytes))
+      Proxy::Codec::Http1.request_target_line(bytes)
     end
 
     def self.request_target(text : String) : String
