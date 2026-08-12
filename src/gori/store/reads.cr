@@ -116,7 +116,13 @@ module Gori
         host, method, target) do |rs|
         return rs.read(Int64) if rs.move_next
       end
-      @db.query("SELECT id, target FROM flows WHERE host = ? AND method = ? AND instr(target, '://') > 0 ORDER BY (status IS NOT NULL) DESC, id DESC",
+      # Capped like its sibling `flow_id_for_url` (URL_LOOKUP_SCAN_CAP), which was capped and
+      # this was not. It normalises each row in Crystal until one matches, so on a
+      # plaintext-HTTP-heavy host — where absolute-form targets are the norm — it walked every
+      # row that host ever produced, on the TUI fiber, for a keypress. The ORDER BY puts
+      # answered flows and the newest first, so the representative is in the first handful if
+      # it is anywhere; scanning past that was finding nothing, slowly.
+      @db.query("SELECT id, target FROM flows WHERE host = ? AND method = ? AND instr(target, '://') > 0 ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT #{URL_LOOKUP_SCAN_CAP}",
         host, method) do |rs|
         rs.each do
           id = rs.read(Int64)

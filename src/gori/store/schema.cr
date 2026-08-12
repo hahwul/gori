@@ -968,7 +968,23 @@ module Gori
         "ALTER TABLE flows ADD COLUMN request_content_type TEXT",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14]
+      # Both triage lists are read WHOLE and sorted by the same shape, and neither sort had an
+      # index: `Store#probe_issues` is `ORDER BY severity DESC, last_seen DESC` and
+      # `Store#issues` is `ORDER BY severity DESC, created_at DESC`, so SQLite sorted the
+      # entire table every time. `probe_issues` is the one that grows without bound — its rows
+      # are (code × host), so a crawl across thousands of hosts reaches hundreds of thousands
+      # — and the Probe tab re-runs that query on every `probe_generation` bump, which during
+      # an active scan is essentially every tick.
+      #
+      # Index only; the queries are unchanged. Capping them with LIMIT is a VISIBLE change (a
+      # security tool that drops findings has to say so, on three surfaces) and belongs in its
+      # own commit.
+      V15 = [
+        "CREATE INDEX IF NOT EXISTS idx_probe_issues_triage ON probe_issues (severity DESC, last_seen DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_issues_triage ON issues (severity DESC, created_at DESC)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

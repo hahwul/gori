@@ -17,6 +17,7 @@ module Gori
         selector = ""
         count = 500
         concurrency = 1
+        keep_alive = true
         rate : Float64? = nil
         throttle : Int32? = nil
         timeout : Time::Span? = nil
@@ -51,6 +52,7 @@ module Gori
           p.on("--jsonpath=EXPR", "Extract the token from a JSON body path ($.a.b[0])") { |v| set_loc.call(Sequencer::ExtractKind::JsonPath, v) }
           p.on("--count=N", "Target number of tokens to collect (default 500)") { |v| count = parse_count(v, "--count") }
           p.on("--concurrency=N", "Parallel requests (default 1 — session tokens are often stateful)") { |v| concurrency = parse_count(v, "--concurrency") }
+          p.on("--no-keep-alive", "Dial a fresh connection for every sample (default: reuse one)") { keep_alive = false }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
           p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v, "--throttle") }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
@@ -127,6 +129,7 @@ module Gori
         config.timeout = timeout
         config.retries = retries
         config.max_requests = max_requests
+        config.keep_alive = keep_alive
         options = Sequencer::PlanOptions.new(bytes,
           # A `--flow` request is CAPTURED; --request/stdin is a draft the operator authored.
           # See `Sequencer::PlanOptions#evidence?`.

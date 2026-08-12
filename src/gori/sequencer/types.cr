@@ -129,6 +129,13 @@ module Gori
       property max_requests : Int64? # hard cap on real sends (Fuzz::CappedBackend)
       property manual_tokens : Array(String)
       property notify : NotifyMode
+      # Reuse ONE connection across the run's samples (see `Plan.build`). On by default, and
+      # the escape hatch matters more here than anywhere else in gori: this tool's output is a
+      # statistical claim about how an origin generates tokens, so an origin whose session
+      # issuance is connection-bound — connection-oriented auth, a gateway pinning a session
+      # to a socket — would have its answer shaped by the transport. `--no-keep-alive` lets
+      # the operator re-take the sample over fresh connections and compare.
+      property? keep_alive : Bool
 
       # Upper bound on collection to avoid runaway (a wrong descriptor extracts
       # nothing, so a goal counted by hits would never terminate). Any of goal,
@@ -140,7 +147,8 @@ module Gori
                      @goal = 500, @concurrency = 1, @rps = nil, @throttle_ms = nil,
                      @jitter_ms = 0, @timeout = nil, @retries = 1,
                      @retry_pause = 500.milliseconds, @max_requests = nil,
-                     @manual_tokens = [] of String, @notify = NotifyMode::WhenDone)
+                     @manual_tokens = [] of String, @notify = NotifyMode::WhenDone,
+                     @keep_alive = true)
       end
 
       # A safety ceiling on real sends: an explicit cap, else twice the goal so a

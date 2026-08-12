@@ -195,7 +195,7 @@ module Gori::Sequencer
       # `Engine#orchestrate` closes the backend, which is what releases the parked sockets.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
-        evidence: options.evidence?, keep_alive: true, idle_conns: config.concurrency)
+        evidence: options.evidence?, keep_alive: config.keep_alive?, idle_conns: config.concurrency)
       new(engine: Engine.new(request, options.http2?, sender, config), config: config,
         origin: origin, request: request,
         request_target: Gori::Outbound.request_target(request), http2: options.http2?)

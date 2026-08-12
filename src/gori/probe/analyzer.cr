@@ -533,7 +533,12 @@ module Gori
         row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = detail.http_version.starts_with?("HTTP/2")
-        sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
+        # Keep-alive for the same reason `Active.analyze` has it: this one sender carries the
+        # rule's PRIMARY probe, then its followups (a differential rule sends baseline vs `\`
+        # vs `\\`), then its pipeline group — several requests to one origin, sequentially, so
+        # `idle_conns: 1` is the whole need. Closed in the ensure below.
+        sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT,
+          keep_alive: true, idle_conns: 1)
         # The WHOLE probe is captured evidence plus this rule's own canary — see
         # `Fuzz::Backend.all_verbatim` for why nothing in it is eligible for session-binding
         # expansion. This loop is the TWIN of the one in `Active.analyze`: same plans, same
@@ -591,6 +596,10 @@ module Gori
       rescue ex
         emit_active_error(detail.row.host, ex.message || "error")
         nil
+      ensure
+        # Release the parked socket whatever happened above — a rule that raises must not
+        # leak an fd per execution. After every rescue: `ensure` has to be the last clause.
+        sender.try(&.close)
       end
 
       # --- out-of-band (OAST) ------------------------------------------------------------

@@ -122,3 +122,32 @@ describe "keep-alive across the non-sweep senders" do
     sender.pool.should be_nil
   end
 end
+
+describe "the Sequencer's keep-alive escape hatch" do
+  # The Sequencer's output is a statistical claim about how an origin GENERATES tokens, so
+  # the transport is not neutral: an origin whose session issuance is connection-bound would
+  # have its verdict shaped by socket reuse. `--no-keep-alive` lets the operator re-take the
+  # sample over fresh connections and compare, the way `gori run fuzz`/`mine`/`discover`
+  # already allow. On by default — the 500-handshake case above is the normal one.
+  it "dials per sample when keep_alive is off" do
+    with_origin do |origin|
+      config = Q::Config.new(mode: Q::Mode::LiveReplay,
+        token_loc: Q::TokenLoc.cookie("SID"), goal: 5, concurrency: 1)
+      config.retries = 0
+      config.timeout = 5.seconds
+      config.keep_alive = false
+      plan = Q::Plan.build(Q::PlanOptions.new(
+        "GET /login HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        target: "http://127.0.0.1:#{origin.port}", config: config, verify: false),
+        ungated_outbound)
+      plan.engine.run { }
+
+      origin.requests.should eq(5)
+      origin.connections.should eq(5) # one dial per sample, which is the whole point
+    end
+  end
+
+  it "is on by default" do
+    Q::Config.new.keep_alive?.should be_true
+  end
+end
