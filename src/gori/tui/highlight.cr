@@ -76,8 +76,13 @@ module Gori::Tui
         return empty if bytes.empty?
         starts = Array(Int32).new
         starts << 0
-        bytes.each_with_index do |b, i|
-          starts << (i + 1) if b == 0x0A_u8
+        # `Slice#index(byte, offset)` is memchr; the byte-at-a-time loop this replaces ran
+        # one iteration per body byte, so opening a 10 MB response walked 10M times in
+        # Crystal. Same result, and the scan is now the libc one.
+        pos = 0
+        while nl = bytes.index(0x0A_u8, pos)
+          starts << (nl + 1)
+          pos = nl + 1
         end
         new(bytes, starts, nil)
       end
