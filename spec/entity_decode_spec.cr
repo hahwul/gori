@@ -33,6 +33,20 @@ describe Gori::Entity do
     bytes.should eq("not gzip at all".to_slice)
     projected.should be_false # nothing claims a faithful round-trip over bytes it could not decode
   end
+
+  # The cap is what the JWT pane relies on: it decodes at most `MAX_SCAN + 1` bytes, because
+  # `scan_body` refuses a body over `MAX_SCAN` anyway and inflating further only pulls a
+  # decompression bomb into memory to throw away. So a tiny gzip that would balloon to
+  # megabytes must stop at the cap, not the 32 MiB default.
+  it "honours max_out — a bomb inflates only to the cap, not its full size" do
+    huge = "A" * (4 * 1024 * 1024)
+    io = IO::Memory.new
+    Compress::Gzip::Writer.open(io) { |g| g << huge }
+    head = req_head("Content-Type: text/plain", "Content-Encoding: gzip")
+    bytes, decoded = Gori::Entity.of(head, io.to_slice, 64 * 1024)
+    decoded.should be_true
+    bytes.not_nil!.size.should be <= 64 * 1024 # stopped at the cap, did not inflate to 4 MiB
+  end
 end
 
 describe "the decode panes over an encoded body" do

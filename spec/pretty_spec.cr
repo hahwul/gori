@@ -269,5 +269,13 @@ describe Gori::Pretty do
     it "keeps a REST JSON body on the plain JSON path" do
       pretty("application/json", %({"query":"shoes","page":2})).not_nil!.note.should eq("pretty: json")
     end
+
+    # The gate is `MediaType.json?`, which is a permissive substring on "json" — so the vendor
+    # spellings that carry ordinary JSON without a `+json` suffix still pretty-print. The
+    # strict-suffix version dropped every `application/x-amz-json` body (all AWS API traffic),
+    # which is the display half of the same "gori did not notice this is JSON" family.
+    it "pretty-prints a vendor json type with no +json suffix (AWS)" do
+      pretty("application/x-amz-json-1.1", %({"a":1,"b":[1,2]})).not_nil!.note.should eq("pretty: json")
+    end
   end
 end

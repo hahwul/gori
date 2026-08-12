@@ -128,6 +128,10 @@ module Gori::Tui
       # subscriptions-transport-ws). A subscription's document never touches a request body,
       # so the same pane has to be fed from the transcript for a WebSocket flow.
       @detail_graphql_ws = [] of GraphqlWs::Frame
+      # The ws message COUNT @detail_graphql_ws was last built from, so a 101 detail left open
+      # during a live socket re-parses the transcript only when it actually GREW, not on every
+      # refresh poke. −1 = never built / a different flow.
+      @graphql_ws_len = -1
       @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       # Scroll anchor: a (logical line, visual sub-row) pair rather than a flat visual-row
@@ -900,6 +904,7 @@ module Gori::Tui
       @detail_jwts = [] of Jwt::Found
       @detail_graphql = nil
       @detail_graphql_ws = [] of GraphqlWs::Frame
+      @graphql_ws_len = -1
       @detail_form = nil
       @decoded_id = nil
       @detail_hex_bytes = nil
@@ -943,28 +948,36 @@ module Gori::Tui
       unless detail
         @detail_saml, @detail_jwts, @detail_graphql, @detail_form = nil, [] of Jwt::Found, nil, nil
         @detail_graphql_ws = [] of GraphqlWs::Frame
+        @graphql_ws_len = -1
         @decoded_id = nil
         return
       end
-      # A Complete, non-101 flow's bytes are immutable, so re-decoding the SAME flow on a
-      # refresh poll (which still re-runs for h2 flows, to pick up frames) just re-scans
-      # unchanged — possibly multi-MiB — bodies. Skip it; a pending/streaming flow's bytes
-      # still grow, so it re-decodes each poll (id stays nil-guarded until Complete).
-      if @decoded_id == detail.row.id && detail.row.state.complete? && detail.row.status != 101
-        return
+      # The HANDSHAKE panes (SAML / JWT / GraphQL body / PARAMS) read the request/response
+      # bytes, which are immutable once captured — INCLUDING a 101 flow, whose handshake never
+      # grows even though its message transcript does. So they re-decode only when the FLOW
+      # changes or its own bytes are still arriving (a pending non-101 flow). Re-scanning a
+      # multi-MiB body on every refresh poke bought nothing; the 101 exclusion that used to sit
+      # here forced exactly that, because it made the whole method re-run for a WebSocket.
+      if @decoded_id != detail.row.id || (!detail.row.state.complete? && detail.row.status != 101)
+        tgt = detail.row.target
+        rh, rb = detail.request_head, detail.request_body
+        sh, sb = detail.response_head, detail.response_body
+        @detail_saml = Saml.from_flow(tgt, rh, rb, sh, sb)
+        @detail_jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
+        @detail_graphql = Graphql.from_flow(tgt, rh, rb)
+        @detail_form = FormData.from_flow(tgt, rh, rb)
+        @decoded_id = detail.row.state.complete? ? detail.row.id : nil
+        @graphql_ws_len = -1 # the flow changed → force the transcript pane to rebuild below
       end
-      tgt = detail.row.target
-      rh, rb = detail.request_head, detail.request_body
-      sh, sb = detail.response_head, detail.response_body
-      @detail_saml = Saml.from_flow(tgt, rh, rb, sh, sb)
-      @detail_jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
-      @detail_graphql = Graphql.from_flow(tgt, rh, rb)
-      # A 101 flow's GraphQL lives in the message transcript, not in a body — `load_detail_logs`
-      # has already filled @detail_ws (it calls this method last), so the window the pane reads
-      # is exactly the window the MESSAGES pane shows.
-      @detail_graphql_ws = GraphqlWs.from_messages(@detail_ws || [] of Store::WsMessage)
-      @detail_form = FormData.from_flow(tgt, rh, rb)
-      @decoded_id = detail.row.state.complete? ? detail.row.id : nil
+      # The WS GraphQL pane is the one derived from a GROWING source, so it alone tracks the
+      # transcript length: a busy socket left open re-parses its frames only when the window
+      # actually gained rows, not on every poll. `load_detail_logs` fills @detail_ws before
+      # this runs, so the count here is the same window the MESSAGES pane shows.
+      ws = @detail_ws || [] of Store::WsMessage
+      if @graphql_ws_len != ws.size
+        @detail_graphql_ws = GraphqlWs.from_messages(ws)
+        @graphql_ws_len = ws.size
+      end
     end
 
     # The synthetic log panes (FRAMES / EVENTS) and the decoded-protocol panes render

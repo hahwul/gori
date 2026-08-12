@@ -52,19 +52,31 @@ module Gori
       essence(of(head))
     end
 
-    # Whether the type's syntax is JSON: `application/json`, any `+json` structured-syntax
-    # suffix (RFC 6839 — `application/graphql+json`, `application/vnd.api+json`,
-    # `application/graphql-response+json`), or a vendor type whose subtype is literally
-    # `json` (`text/json`).
+    # Whether the type is worth handing to a JSON reader — the PERMISSIVE gate, deliberately
+    # not the precise dispatch. `application/json`, every `+json` structured-syntax suffix
+    # (`application/graphql+json`, `application/vnd.api+json`), `text/json`, AND the vendor
+    # spellings that carry ordinary JSON without the suffix: AWS's `application/x-amz-json-1.1`,
+    # `application/x-ndjson`, anything with `json` in the subtype. A substring match, because
+    # the readers this gates (Pretty's pretty-print, the Highlighter's colouring, the
+    # Minimizer's key extraction) all `JSON.parse` and fall back to raw on failure — so a false
+    # positive costs one failed parse, while a false negative (the old strict-suffix test
+    # dropped every `x-amz-json` body) loses the feature on a whole class of real API traffic.
+    #
+    # This is NOT the axis `Graphql.from_body` dispatches on: THAT needs `essence` and an
+    # EXACT match, because `application/graphql` (a raw document) is a prefix of
+    # `application/graphql+json` (a JSON envelope) and the two route to different parsers.
+    # Precision belongs to dispatch; permissiveness belongs to "is it worth trying".
     def json?(value : String?) : Bool
-      e = essence(value) || return false
-      e == "application/json" || e.ends_with?("+json") || e.ends_with?("/json")
+      folded = value.try(&.downcase) || return false
+      folded.includes?("json")
     end
 
-    # `application/x-www-form-urlencoded` — matched on the SUBTYPE so the `text/…` and
-    # vendor-prefixed spellings servers accept are not read as some other syntax.
+    # Worth reading as `x-www-form-urlencoded` — PERMISSIVE like `json?`, a substring over the
+    # folded value so a `; charset=` parameter or a comma-joined content type (a standard
+    # parser-differential probe) still matches. The precise `essence == …` dispatch stays in
+    # the callers that re-encode.
     def form_urlencoded?(value : String?) : Bool
-      !!essence(value).try(&.ends_with?("x-www-form-urlencoded"))
+      !!value.try(&.downcase.includes?("x-www-form-urlencoded"))
     end
 
     # Any `multipart/*` (the GraphQL upload spec and every ordinary file upload are

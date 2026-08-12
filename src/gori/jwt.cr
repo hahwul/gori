@@ -51,8 +51,13 @@ module Gori
       # The ENTITIES, not the wire bodies. The response side is the point: real API responses
       # are gzip/br compressed almost always, so scanning the stored bytes meant the pane whose
       # whole job is finding tokens was off for the majority of responses that carry one.
-      scan_body("request body", Entity.bytes(req_head, req_body)) { |loc, tok| add.call(loc, tok) }
-      scan_body("response body", Entity.bytes(resp_head, resp_body)) { |loc, tok| add.call(loc, tok) }
+      #
+      # Capped at `MAX_SCAN + 1`, NOT the 32 MiB decode default: `scan_body` refuses a body
+      # over `MAX_SCAN` anyway, so decoding further only inflates a bomb into memory to throw
+      # it away. The `+ 1` lets the size guard still see "larger than the cap" rather than a
+      # value clamped to exactly the cap.
+      scan_body("request body", Entity.bytes(req_head, req_body, MAX_SCAN + 1)) { |loc, tok| add.call(loc, tok) }
+      scan_body("response body", Entity.bytes(resp_head, resp_body, MAX_SCAN + 1)) { |loc, tok| add.call(loc, tok) }
       found
     end
 

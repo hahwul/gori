@@ -1,5 +1,6 @@
 require "json"
 require "./graphql"
+require "./ascii_bytes"
 require "./store/models"
 
 module Gori
@@ -31,8 +32,17 @@ module Gori
   module GraphqlWs
     extend self
 
-    MAX_FRAME  = 1 * 1024 * 1024 # skip a pathological frame rather than parse it
-    MAX_FRAMES = 500             # cap the ops one transcript contributes to a pane
+    MAX_FRAME   = 1 * 1024 * 1024 # skip a pathological frame rather than parse it
+    MAX_FRAMES  =  500            # cap the ops one transcript contributes to a pane
+    MAX_EXAMINE = 4000            # cap the frames JSON-PARSED before giving up (see from_messages)
+
+    # The ASCII substring every GraphQL frame carries, case-folded: a `"query":` document, or
+    # a persisted query (`persistedQuery` — its `Query` matches case-insensitively). A frame
+    # without it cannot be an operation, so the byte scan below skips its `JSON.parse` — which
+    # matters because this runs on the WHOLE transcript, every refresh poll, for an open 101
+    # detail (a busy socket's frame log grows without bound). `next`/`data` result frames,
+    # `ping`, `connection_ack` and an unrelated JSON protocol all lack it and cost only the scan.
+    QUERY_NEEDLE = "query".to_slice
 
     # One frame that carries an operation. `index` is 1-based within the message list the
     # caller passed, so a pane can point at the frame in the transcript beside it.
@@ -51,10 +61,17 @@ module Gori
     # would report gori's diagnostics as the application's traffic.
     def from_messages(msgs : Array(Store::WsMessage)) : Array(Frame)
       frames = [] of Frame
+      examined = 0 # frames actually JSON-parsed — the cost this backstops
       msgs.each_with_index do |m, i|
-        break if frames.size >= MAX_FRAMES
+        break if frames.size >= MAX_FRAMES || examined >= MAX_EXAMINE
         next unless m.text? && !m.notice?
         next if m.payload.empty? || m.payload.size > MAX_FRAME
+        # The byte prefilter FIRST, so a transcript of thousands of non-GraphQL frames costs a
+        # cheap scan each and no parse. A frame full of `"query"` that never parses as an op
+        # (a chat message carrying a `query` field) is bounded by the examine counter, so a
+        # hostile / dense transcript cannot pin the render loop reparsing on every poll.
+        next unless AsciiBytes.contains_ci?(m.payload, QUERY_NEEDLE)
+        examined += 1
         parsed = from_frame(m.payload) || next
         frames << Frame.new(i + 1, m.direction, parsed[0], parsed[1], parsed[2])
       end

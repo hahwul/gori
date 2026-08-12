@@ -94,6 +94,26 @@ describe Gori::GraphqlWs do
     it "is empty for a socket that carries no GraphQL (no pane is offered)" do
       GW.from_messages([frame(%({"event":"tick","v":1})), frame("hello")]).should be_empty
     end
+
+    # This runs on the WHOLE transcript, every refresh poll, for an open 101 detail — and a
+    # busy socket's frame log grows without bound. A cheap ASCII prefilter (the "query"
+    # substring every operation carries) keeps a wall of result frames from each costing a
+    # JSON.parse, so the op is still found however deep it sits.
+    it "finds the op after thousands of non-GraphQL frames without parsing them all" do
+      msgs = Array.new(5000) { |i| frame(%({"type":"next","payload":{"data":{"n":#{i}}}}), direction: "in") }
+      msgs << frame(sub_frame) # the one that matters, past the prefilter's reach for the noise
+      ops = GW.from_messages(msgs)
+      ops.size.should eq(1)
+      ops.first.index.should eq(5001)
+    end
+
+    # The backstop for the other shape: frames that DO contain "query" but never parse as an
+    # op (a chat protocol with a `query` text field). The prefilter passes them, so the
+    # examine counter has to cap the parses, or a dense transcript pins the render loop.
+    it "stops parsing after the examine cap when frames carry a non-document query field" do
+      msgs = Array.new(GW::MAX_EXAMINE + 500) { frame(%({"query":"free text, no selection set"})) }
+      GW.from_messages(msgs).should be_empty # none is an op; the point is it returns, bounded
+    end
   end
 
   describe ".display / .summary" do

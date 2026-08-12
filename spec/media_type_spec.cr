@@ -57,16 +57,28 @@ describe Gori::MediaType do
       MT.json?("text/json").should be_true
     end
 
+    # PERMISSIVE on purpose — a substring gate, not the precise dispatch. The strict
+    # suffix-only version dropped `application/x-amz-json-1.1` (every AWS API call) and
+    # `application/x-ndjson`, and the readers this gates all JSON.parse and fall back to raw,
+    # so a false positive is free while a false negative loses the feature on real traffic.
+    it "accepts the vendor json spellings that carry no +json suffix" do
+      MT.json?("application/x-amz-json-1.1").should be_true
+      MT.json?("application/x-amz-json-1.0").should be_true
+      MT.json?("application/x-ndjson").should be_true
+      MT.json?("APPLICATION/JSON").should be_true # folded
+    end
+
     it "rejects the raw document type and unrelated types" do
-      MT.json?("application/graphql").should be_false
+      MT.json?("application/graphql").should be_false # no "json" — a raw document, not JSON syntax
       MT.json?("text/plain").should be_false
       MT.json?(nil).should be_false
     end
   end
 
   describe ".form_urlencoded? / .multipart? / .boundary" do
-    it "matches urlencoded on its subtype, through parameters" do
+    it "matches urlencoded through parameters and a comma-joined type (a parser-differential probe)" do
       MT.form_urlencoded?("application/x-www-form-urlencoded; charset=utf-8").should be_true
+      MT.form_urlencoded?("application/x-www-form-urlencoded, application/json").should be_true
       MT.form_urlencoded?("application/json").should be_false
     end
 

@@ -385,6 +385,37 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # The WS transcript re-decodes only when its message COUNT grows (a busy socket left open
+  # would otherwise re-parse its whole frame log on every refresh poll). The cache must still
+  # pick up a NEW subscription frame — proving it invalidates on growth, not that it goes stale.
+  it "picks up a new subscription frame on refresh (count-keyed cache invalidates)" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/graphql", 101)
+      store.insert_ws_message(id, "out", 1,
+        %({"id":"1","type":"subscribe","payload":{"query":"subscription A { a }"}}).to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      2.times { view.toggle_pane } # land on GRAPHQL
+
+      backend = MemoryBackend.new(100, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+      backend.contains?("subscription A").should be_true
+
+      # A second operation arrives; a refresh poke must rebuild the transcript pane.
+      store.insert_ws_message(id, "out", 1,
+        %({"id":"2","type":"subscribe","payload":{"query":"subscription B { b }"}}).to_slice)
+      view.refresh_detail(store)
+
+      backend2 = MemoryBackend.new(100, 16)
+      view.render_detail(Screen.new(backend2), Rect.new(0, 0, 100, 16))
+      backend2.contains?("subscription A").should be_true
+      backend2.contains?("subscription B").should be_true
+      backend2.contains?("2 operations over websocket").should be_true
+    end
+  end
+
   it "does not offer a GRAPHQL pane for a socket carrying ordinary JSON" do
     tmp_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
