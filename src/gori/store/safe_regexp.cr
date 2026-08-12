@@ -78,6 +78,10 @@ module Gori
     # Register the safe `regexp` on every connection of `db` (existing + future). The
     # driver has already registered its own `regexp` in Connection#initialize; calling
     # create_function with the same name+arity replaces it on that connection.
+    # Standalone installer, for a handle that needs nothing else from a connection (specs,
+    # one-off tools). `Store.open` does NOT call this: `setup_connection` ASSIGNS its block
+    # rather than appending, so the Store folds this into its single
+    # `Store.configure_connections` block instead of calling both and losing one.
     def self.install(db : DB::Database) : Nil
       db.setup_connection do |conn|
         conn.as?(SQLite3::Connection).try(&.gori_install_safe_regexp)

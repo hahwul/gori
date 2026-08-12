@@ -220,7 +220,24 @@ module Gori
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
                   probe_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT) : Store
-      url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
+      # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
+      # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
+      # means every unindexed History filter re-reads pages off disk with almost no reuse —
+      # and `flows` rows carry the request/response BLOBs inline, so those pages are large
+      # (see the measurement in schema.cr's index comments).
+      #
+      # `max_idle_pool_size` is deliberately LEFT at crystal-db's default of 1, even though
+      # raising it would stop the pool rebuilding connections under concurrent readers (each
+      # new one re-runs this pragma set plus `create_function` for the byte-safe REGEXP).
+      # Measured at 4: a raw pool write alongside the writer fiber's own held connection left
+      # `#close` unable to checkpoint, so the db file stayed at 4096 bytes with a 1 MB `-wal`
+      # beside it — no data lost, SQLite replays it on the next open, but the main file then
+      # understates the project, `Compact` reclaims nothing (spec/store/compact_spec.cr
+      # catches exactly this), and copying just the `.db` loses the tail. gori's close path
+      # depends on the pool closing every connection to get SQLite's last-connection
+      # checkpoint, and that only holds at 1. Raise this only with that fixed first.
+      url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000" \
+            "&cache_size=-64000"
       refuse_non_database(path)
       # Announce that this process has the database open, for as long as it is (see OpenLock).
       # Taken BEFORE `DB.open` so the window in which a peer could delete the file out from
@@ -248,9 +265,7 @@ module Gori
       # this was the one sibling without it.
       begin
         harden_permissions(path)
-        # Make REGEXP byte-safe on every connection before any query runs (so a binary
-        # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
-        SafeRegexp.install(db)
+        configure_connections(db)
         Schema.migrate!(db)
       rescue ex
         db.close rescue nil
@@ -259,6 +274,34 @@ module Gori
       end
       # Past this point the Store owns the pool and closes it in #close.
       new(db, events, probe_events, retention_flows, open_lock: open_lock)
+    end
+
+    # Memory-mapped read window. The default is 0 — every read is a `read()` syscall — and
+    # gori's workload is read-heavy and mostly-append, which is the shape mmap is for. Not a
+    # URL parameter: crystal-sqlite3's `Options` knows only busy_timeout, cache_size,
+    # foreign_keys, journal_mode, synchronous and wal_autocheckpoint, so this one is issued
+    # per connection below.
+    MMAP_SIZE = 256 * 1024 * 1024
+
+    # THE one place a fresh pool connection is configured.
+    #
+    # crystal-db's `setup_connection` ASSIGNS its block (`@setup_connection = proc` in
+    # db/database.cr) rather than appending, so a second caller silently REPLACES the first.
+    # Splitting this in two would therefore have dropped whichever ran earlier — and the
+    # earlier one is what makes REGEXP byte-safe, so a `body~` scan over a binary body would
+    # have started crashing again with nothing to point at. Anything a new connection needs
+    # belongs in this block, not in a second `setup_connection` call.
+    #
+    # `Store::Compact` deliberately does NOT come through here: it opens its own handle
+    # (`compact_url`), which is also why its `VACUUM` never runs against an mmap'd file.
+    private def self.configure_connections(db : DB::Database) : Nil
+      db.setup_connection do |conn|
+        next unless sqlite = conn.as?(SQLite3::Connection)
+        # Byte-safe REGEXP before any query runs, so a binary body can't crash a
+        # `body~`/`header~` scan or a regex scope rule. See SafeRegexp.
+        sqlite.gori_install_safe_regexp
+        sqlite.exec("PRAGMA mmap_size = #{MMAP_SIZE}")
+      end
     end
 
     # The 16-byte header every SQLite database file starts with: 15 ASCII bytes plus the
