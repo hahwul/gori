@@ -192,11 +192,19 @@ module Gori::Fuzz
     # the probe/analyzer paths, whose buffers are handled at their own call sites.
     getter? evidence : Bool
 
-    # `keep_alive` reuses one connection across many sends (see ConnPool) — the sweep
-    # senders (Fuzzer) opt in; the one-shot senders (Repeater minimize, Probe active) have
-    # nothing to amortise and leave it off. `idle_conns` bounds the parked sockets and
-    # should be the run's concurrency: one per worker fiber is the most that can ever be
-    # checked out at once, so a larger pool would only hold dead sockets open.
+    # `keep_alive` reuses one connection across many sends (see ConnPool). `idle_conns` bounds
+    # the parked sockets and should be the run's concurrency: one per worker fiber is the most
+    # that can ever be checked out at once, so a larger pool would only hold dead sockets open.
+    #
+    # This comment used to say the "one-shot senders (Repeater minimize, Probe active) have
+    # nothing to amortise", and every caller believed it. None of them is one-shot: a minimize
+    # is a greedy bisection firing up to `Minimize::SEND_CAP` candidates at one origin, Probe
+    # Active drives every rule's probes through ONE sender, and the Sequencer re-sends the same
+    # captured request `--count` times (default 500) at a default concurrency of 1. All three
+    # now opt in. The rule is not "one-shot vs sweep" — it is simply whether more than one
+    # request goes to the same origin, and a caller that closes the backend when it is done.
+    #
+    # Whoever turns it on OWNS calling `close`, or the parked sockets outlive the run.
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,

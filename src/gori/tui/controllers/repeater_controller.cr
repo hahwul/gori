@@ -1663,11 +1663,14 @@ module Gori::Tui
       # regardless. This is the most exposed of the three minimize surfaces because a live TUI
       # holds bound bindings continuously, which is the normal state and not the exceptional
       # one. See `Fuzz::Sender#evidence?`.
+      # Keep-alive — see the CLI twin in `cli/run/repeater_minimize.cr` for why a sequential
+      # bisection is precisely the shape that pays for it. Closed in the fiber's ensure below.
       backend = Fuzz::CappedBackend.new(
         Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, view.http2?,
           !@host.session.config.insecure_upstream?,
           view.sni_override.try { |s| Env.expand(s).presence }, timeout: 10.seconds,
-          overrides: @host.session.host_overrides, evidence: evidence),
+          overrides: @host.session.host_overrides, evidence: evidence,
+          keep_alive: true, idle_conns: 1),
         Repeater::Minimize::SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
@@ -1687,6 +1690,8 @@ module Gori::Tui
       rescue ex
         events.send({view, Repeater::Minimize::Report.new(
           text, [] of Repeater::Minimize::Removed, 0, true, "minimize failed: #{ex.message}")})
+      ensure
+        backend.close # release the keep-alive pool's parked socket
       end
     end
 

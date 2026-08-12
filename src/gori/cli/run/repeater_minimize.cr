@@ -74,18 +74,27 @@ module Gori
         # above — see `Fuzz::Sender#evidence?`. Without it `--verbatim` stopped `$KEY`
         # expansion and then let the session-binding pass substitute a live token into the
         # captured body of every one of up to SEND_CAP probes.
+        # Keep-alive: a minimize is a greedy bisection that fires up to SEND_CAP candidate
+        # requests at ONE origin, one after another. It is sequential by construction, so
+        # `idle_conns: 1` is the whole need — but sequential is exactly why the handshakes
+        # dominated: nothing else was in flight to hide them behind.
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
             !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
-            overrides: host_overrides, evidence: verbatim),
+            overrides: host_overrides, evidence: verbatim,
+            keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
         meter = STDERR.tty?
-        report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) do |progress|
-          if meter
-            STDERR.print "\r[minimize] #{progress.done}/#{progress.total} candidates"
-            STDERR.flush
+        report = begin
+          Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) do |progress|
+            if meter
+              STDERR.print "\r[minimize] #{progress.done}/#{progress.total} candidates"
+              STDERR.flush
+            end
           end
+        ensure
+          backend.close # release the parked socket even if the run raises
         end
         STDERR.print "\r\e[K" if meter
         outbound.close

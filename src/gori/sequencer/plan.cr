@@ -183,9 +183,19 @@ module Gori::Sequencer
       # request re-sent. Substituting a `$id` in that capture makes the entropy report a
       # statement about a request the operator never captured — measured at 5 tainted sends
       # out of 6 on `gori run sequence <flow> --bind-from <flow>`.
+      # Keep-alive. The Sequencer is the single worst offender in gori for handshakes: every
+      # one of `--count` samples (default 500) is the SAME captured request re-sent, to the
+      # same origin, at a default concurrency of 1 — so it was paying 500 sequential TCP +
+      # TLS handshakes to collect 500 tokens. `idle_conns` is the concurrency because that is
+      # the most sockets that can be checked out at once (see `Fuzz::Sender#initialize`).
+      #
+      # Safe for the verdict this tool produces: `ConnPool` refuses to park a socket whose
+      # request or response was not cleanly framed, so a reused connection carries the same
+      # bytes a fresh one would. It is also excluded on h2, which frames its own connection.
+      # `Engine#orchestrate` closes the backend, which is what releases the parked sockets.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
-        evidence: options.evidence?)
+        evidence: options.evidence?, keep_alive: true, idle_conns: config.concurrency)
       new(engine: Engine.new(request, options.http2?, sender, config), config: config,
         origin: origin, request: request,
         request_target: Gori::Outbound.request_target(request), http2: options.http2?)

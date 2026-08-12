@@ -87,13 +87,20 @@ module Gori
         # measured at 12 copies of the token across 6 sends of one `minimize_repeater
         # {verbatim: true}` call, with the tool reporting a clean minimization. See
         # `Fuzz::Sender#evidence?`.
+        # Keep-alive — see the CLI twin in `cli/run/repeater_minimize.cr`. The three minimize
+        # surfaces build the same stack, so they get the same transport.
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, rec.http2?,
             @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
-            overrides: HostOverrides.load(store), evidence: verbatim),
+            overrides: HostOverrides.load(store), evidence: verbatim,
+            keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
-        report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }
+        report = begin
+          Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }
+        ensure
+          backend.close # release the parked socket even if the run raises
+        end
 
         applied = false
         if apply && !report.aborted && !report.removed.empty?

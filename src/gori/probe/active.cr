@@ -149,10 +149,18 @@ module Gori
         http2 = detail.http_version.starts_with?("HTTP/2")
         # Fuzz::Sender gates itself, so it is never double-wrapped; only an injected
         # backend needs GatedBackend to reach the same decision.
+        #
+        # Keep-alive, because this ONE sender then serves the whole RULES loop below — every
+        # rule's primary probe, its followups and its pipeline, all to the same origin. The
+        # comment on `Fuzz::Sender#initialize` used to file Probe Active under "nothing to
+        # amortise"; that was written for a one-shot sender and is the opposite of what this
+        # loop does. `idle_conns: 1` because the loop is sequential: one socket is the most
+        # that can ever be checked out. Closed in the ensure below.
         sender = if base = backend
                    Fuzz::GatedBackend.new(base, outbound).as(Fuzz::Backend)
                  else
-                   Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout)
+                   Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
+                     keep_alive: true, idle_conns: 1)
                  end
 
         # Send-refusal reasons already reported for THIS flow (see the `result.ok?` branch).
@@ -215,6 +223,11 @@ module Gori
           end
         end
         out
+      ensure
+        # Release the keep-alive pool's parked socket. In the ensure so a rule that escapes
+        # the per-rule rescue above still cannot leak an fd. A no-op on the injected-backend
+        # path, whose `close` is empty.
+        sender.try(&.close)
       end
     end
   end

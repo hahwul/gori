@@ -119,6 +119,11 @@ module Gori::Sequencer
       @events.send(ErrorEvent.new(ex.message || "sequencer error"))
       @events.send(DoneEvent.new(@collected, @sent, @state.stopped?, wire_requests))
     ensure
+      # Release the keep-alive pool's parked sockets (see `Plan.build`). In the `ensure` so a
+      # stopped or raising run leaks no fd — the same standard `Fuzz::Engine` and
+      # `Discover::Engine` hold. A no-op for manual mode (no backend) and for the
+      # connection-per-send doubles, whose `close` is empty by default.
+      @backend.try(&.close)
       @events.close
     end
 
