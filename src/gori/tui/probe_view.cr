@@ -71,6 +71,13 @@ module Gori::Tui
       @scope = scope
     end
 
+    # How many rows the list is currently showing. The Runner reads it across a reload to
+    # decide whether the frame needs a FULL terminal repaint or can ride the cell diff —
+    # only a row appearing or disappearing can leave a stale tail behind.
+    def row_count : Int32
+      @issues.size
+    end
+
     def reload(store : Store) : Nil
       @all = store.probe_issues
       @mode = store.probe_mode

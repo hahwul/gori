@@ -510,9 +510,14 @@ module Gori::Tui
             if (pgen = @session.store.probe_generation) != last_probe_gen
               last_probe_gen = pgen
               if @active_tab == :probe
-                probe_controller.refresh_from_store
+                # Force a FULL terminal sync only when the row COUNT moved. That is the case
+                # the cell diff cannot cover — a removed row leaves a stale tail. A row whose
+                # contents merely changed is exactly what the diff is for, and during an
+                # active scan `probe_generation` bumps on every committed write, so the
+                # unconditional version was repainting the whole screen up to 20 times a
+                # second and bypassing both diff layers to do it.
+                @resized = true if probe_controller.refresh_from_store
                 dirty = true
-                @resized = true
               end
             end
             # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
@@ -978,11 +983,21 @@ module Gori::Tui
       end
     end
 
+    # Per-tick ceiling on captured-flow events applied to History, matching the cap every
+    # other controller already has (`DRAIN_CAP` in the fuzzer/sequencer/oast/discover
+    # controllers). This drain was the only uncapped one, and it issues a `store.flow_row`
+    # SELECT per event ON THE UI FIBER — with `Session`'s 1024-deep channel, one tick could
+    # therefore fire up to 1024 SQLite round-trips before the frame was allowed to render.
+    # Anything left over is drained on the next tick, 50 ms later.
+    FLOW_DRAIN_CAP = 512
+
     private def drain_events : Bool
       drained = false
-      while event = nonblocking_event
+      n = 0
+      while n < FLOW_DRAIN_CAP && (event = nonblocking_event)
         history_controller.view.on_event(event, @session.store)
         drained = true
+        n += 1
       end
       # Probe analyzer events (issues persisted / reflections found) — coalesced to one
       # list reload per tick inside the controller; drives a redraw when anything landed.

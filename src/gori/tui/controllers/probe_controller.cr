@@ -270,10 +270,15 @@ module Gori::Tui
 
     # Re-query the issue list from the store. Called from on_enter, data_version
     # soft-sync, IssueEvent drain, and Runner's per-tick Store#probe_generation poll.
-    def refresh_from_store : Nil
+    # Returns whether the number of listed rows CHANGED. The caller uses that to decide
+    # between a full terminal repaint and the cell diff: a row added or removed can leave a
+    # stale tail the diff will not repair, but a row whose contents merely changed cannot.
+    def refresh_from_store : Bool
       store = @host.session.store
+      before = @probe.row_count
       @probe.reload(store)
       @rules.reload(store)
+      @probe.row_count != before
     end
 
     # Drain the analyzer's events (called each main-loop tick from the Runner).
