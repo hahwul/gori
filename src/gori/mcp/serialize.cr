@@ -359,7 +359,7 @@ module Gori
           emit_ws_messages(j, ws_msgs)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body)
           emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body)
-          emit_decoded(j, detail)
+          emit_decoded(j, detail, ws_msgs)
         end
       end
 
@@ -518,11 +518,12 @@ module Gori
       # Decoded-protocol projections (SAML / JWT / GraphQL / form params), bounded for
       # LLM use. Shares one emitter with `gori run show --format json` (DecodedView) so
       # the two surfaces never diverge; here every side is scanned and clipped.
-      def self.emit_decoded(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+      def self.emit_decoded(j : JSON::Builder, detail : Store::FlowDetail,
+                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
         DecodedView.emit_json(j, target: detail.row.target,
           req_head: detail.request_head, req_body: detail.request_body,
           resp_head: detail.response_head, resp_body: detail.response_body,
-          clip: DECODE_TEXT_MAX)
+          clip: DECODE_TEXT_MAX, ws_messages: ws_msgs)
       end
 
       SSE_EVENTS_MAX =  500 # cap events serialised for an LLM client

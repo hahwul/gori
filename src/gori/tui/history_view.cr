@@ -121,9 +121,13 @@ module Gori::Tui
       @detail_sse = false # response is a text/event-stream → offer the EVENTS pane
       # Decoded protocol projections, parsed once per opened flow (no DB table) — each
       # drives an optional detail pane like EVENTS. nil/empty ⇒ the pane isn't offered.
-      @detail_saml = nil.as(Saml::Doc?)              # SAMLRequest/Response → SAML pane
-      @detail_jwts = [] of Jwt::Found                # located JWTs → JWT pane
-      @detail_graphql = nil.as(Graphql::Op?)         # GraphQL operation → GRAPHQL pane
+      @detail_saml = nil.as(Saml::Doc?)      # SAMLRequest/Response → SAML pane
+      @detail_jwts = [] of Jwt::Found        # located JWTs → JWT pane
+      @detail_graphql = nil.as(Graphql::Op?) # GraphQL operation → GRAPHQL pane
+      # …and the operations a 101 flow carries in its FRAMES (graphql-transport-ws /
+      # subscriptions-transport-ws). A subscription's document never touches a request body,
+      # so the same pane has to be fed from the transcript for a WebSocket flow.
+      @detail_graphql_ws = [] of GraphqlWs::Frame
       @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       # Scroll anchor: a (logical line, visual sub-row) pair rather than a flat visual-row
@@ -895,6 +899,7 @@ module Gori::Tui
       @detail_saml = nil
       @detail_jwts = [] of Jwt::Found
       @detail_graphql = nil
+      @detail_graphql_ws = [] of GraphqlWs::Frame
       @detail_form = nil
       @decoded_id = nil
       @detail_hex_bytes = nil
@@ -937,6 +942,7 @@ module Gori::Tui
     private def decode_protocols(detail : Store::FlowDetail?) : Nil
       unless detail
         @detail_saml, @detail_jwts, @detail_graphql, @detail_form = nil, [] of Jwt::Found, nil, nil
+        @detail_graphql_ws = [] of GraphqlWs::Frame
         @decoded_id = nil
         return
       end
@@ -953,6 +959,10 @@ module Gori::Tui
       @detail_saml = Saml.from_flow(tgt, rh, rb, sh, sb)
       @detail_jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
       @detail_graphql = Graphql.from_flow(tgt, rh, rb)
+      # A 101 flow's GraphQL lives in the message transcript, not in a body — `load_detail_logs`
+      # has already filled @detail_ws (it calls this method last), so the window the pane reads
+      # is exactly the window the MESSAGES pane shows.
+      @detail_graphql_ws = GraphqlWs.from_messages(@detail_ws || [] of Store::WsMessage)
       @detail_form = FormData.from_flow(tgt, rh, rb)
       @decoded_id = detail.row.state.complete? ? detail.row.id : nil
     end
@@ -1691,11 +1701,11 @@ module Gori::Tui
     # (sse) → FRAMES (intercepted h2). ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
       panes = [:request, :response]
-      panes << :saml if @detail_saml           # decoded SAML XML (request/response)
-      panes << :jwt unless @detail_jwts.empty? # located + decoded JWT(s)
-      panes << :graphql if @detail_graphql     # parsed GraphQL operation
-      panes << :params if @detail_form         # decoded form/multipart params
-      panes << :events if @detail_sse          # parsed SSE events (text/event-stream response)
+      panes << :saml if @detail_saml                                     # decoded SAML XML (request/response)
+      panes << :jwt unless @detail_jwts.empty?                           # located + decoded JWT(s)
+      panes << :graphql if @detail_graphql || !@detail_graphql_ws.empty? # parsed GraphQL operation (body or WS frames)
+      panes << :params if @detail_form                                   # decoded form/multipart params
+      panes << :events if @detail_sse                                    # parsed SSE events (text/event-stream response)
       panes << :frames if @detail_frames
       panes
     end
@@ -2832,7 +2842,7 @@ module Gori::Tui
         case @detail_pane
         when :saml    then (doc = @detail_saml) ? saml_detail_lines(doc) : nil
         when :jwt     then @detail_jwts.empty? ? nil : jwt_detail_lines(@detail_jwts)
-        when :graphql then (op = @detail_graphql) ? graphql_detail_lines(op) : nil
+        when :graphql then graphql_pane_lines
         when :params  then (f = @detail_form) ? form_detail_lines(f) : nil
         end
       lines ? DetailView.new(lines, EMPTY_BODY, :text, EMPTY_LINES) : nil
@@ -2887,9 +2897,21 @@ module Gori::Tui
       tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
     end
 
-    private def graphql_detail_lines(op : Graphql::Op) : Array(Highlight::Line)
+    # The GRAPHQL pane: the request body's operation, the transcript's operations, or both —
+    # a 101 flow has no body to decode and an HTTP flow has no frames, so in practice exactly
+    # one of the two is populated. nil only when neither is (the pane was not offered).
+    private def graphql_pane_lines : Array(Highlight::Line)?
+      op = @detail_graphql
+      ws = @detail_graphql_ws
+      return nil if op.nil? && ws.empty?
       lines = [] of Highlight::Line
-      append_styled(lines, Graphql.display(op), :graphql)
+      append_styled(lines, Graphql.display(op), :graphql) if op
+      unless ws.empty?
+        lines << Highlight::Line.new unless lines.empty?
+        lines << derived_header(GraphqlWs.summary(ws))
+        lines << Highlight::Line.new
+        append_styled(lines, GraphqlWs.display(ws), :graphql)
+      end
       lines
     end
 

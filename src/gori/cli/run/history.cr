@@ -324,7 +324,7 @@ module Gori
             events.each_with_index { |e, i| puts sse_event_text(e, i) }
           end
         end
-        print_decoded_text(detail, req, resp)
+        print_decoded_text(detail, req, resp, ws_msgs)
       end
 
       # Parsed SSE events when the response is a text/event-stream, else nil. Like
@@ -348,7 +348,8 @@ module Gori
       # request/response so `gori run show` surfaces the same decodes as the TUI. Scans
       # only the side(s) the `req`/`resp` flags include (so --request-only doesn't leak
       # a response-side token); the query is request-side, so it's gated under `req`.
-      private def self.print_decoded_text(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+      private def self.print_decoded_text(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                          ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
         tgt = req ? detail.row.target : ""
         rh, rb = req ? detail.request_head : nil, req ? detail.request_body : nil
         sh, sb = resp ? detail.response_head : nil, resp ? detail.response_body : nil
@@ -378,6 +379,15 @@ module Gori
           end
           puts CLI::Output.term_safe_multiline(Graphql.display(op).scrub)
         end
+        # A subscription's document travels in a FRAME, not in a body — so the section that
+        # names the flow's GraphQL has to be fed from the transcript for a 101 flow, or a
+        # WebSocket carrying GraphQL prints exactly what one carrying none prints.
+        ws_ops = GraphqlWs.from_messages(ws_msgs)
+        unless ws_ops.empty?
+          puts ""
+          puts CLI::Output.term_safe("=== GRAPHQL over WEBSOCKET (#{GraphqlWs.summary(ws_ops)}) ===")
+          puts CLI::Output.term_safe_multiline(GraphqlWs.display(ws_ops).scrub)
+        end
         if fields = FormData.from_flow(tgt, rh, rb)
           puts ""
           puts "=== PARAMS (#{fields.size}) ==="
@@ -389,10 +399,12 @@ module Gori
       # `form_params` onto the open flow object via the shared DecodedView emitter (so
       # CLI and MCP stay in lockstep). Scans only the req/resp-included side(s); unclipped
       # (a script can read whole values, unlike the LLM-bounded MCP path).
-      private def self.emit_decoded_json(j : JSON::Builder, detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+      private def self.emit_decoded_json(j : JSON::Builder, detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                         ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
         DecodedView.emit_json(j, target: req ? detail.row.target : "",
           req_head: req ? detail.request_head : nil, req_body: req ? detail.request_body : nil,
-          resp_head: resp ? detail.response_head : nil, resp_body: resp ? detail.response_body : nil)
+          resp_head: resp ? detail.response_head : nil, resp_body: resp ? detail.response_body : nil,
+          ws_messages: ws_msgs)
       end
 
       # Schema-less protobuf tree for an application/grpc body. Framed by
@@ -485,7 +497,7 @@ module Gori
             # capture failure's text quotes bytes the origin sent (a malformed status line, a
             # header the codec refused), so it is captured data — see `Output.json_captured`.
             CLI::Output.json_captured(j, "error", detail.error)
-            emit_decoded_json(j, detail, req, resp)
+            emit_decoded_json(j, detail, req, resp, ws_msgs)
             if req
               j.field "request" do
                 j.object do

@@ -340,6 +340,50 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # Every decode pane is keyed on a request or response BODY, and a 101 flow has neither — its
+  # bytes live in the ws_messages table. So a GraphQL SUBSCRIPTION, which is how every real
+  # GraphQL subscription runs, showed up as raw JSON in MESSAGES with no GRAPHQL pane offered
+  # at all: the same "gori did not notice this is GraphQL" the HTTP side had, one transport over.
+  it "offers the GRAPHQL pane for a subscription carried in WebSocket frames" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/graphql", 101)
+      store.insert_ws_message(id, "out", 1, %({"type":"connection_init","payload":{}}).to_slice)
+      store.insert_ws_message(id, "out", 1,
+        (%({"id":"1","type":"subscribe","payload":{"operationName":"OnMessage",) +
+         %("query":"subscription OnMessage { messageAdded { id } }"}})).to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      2.times { view.toggle_pane } # REQUEST → MESSAGES → GRAPHQL (the pane list gained it)
+
+      backend = MemoryBackend.new(100, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+      backend.contains?("operation over websocket").should be_true
+      backend.contains?("frame #2 subscribe id=1").should be_true
+      backend.contains?("messageAdded").should be_true
+    end
+  end
+
+  it "does not offer a GRAPHQL pane for a socket carrying ordinary JSON" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      store.insert_ws_message(id, "out", 1, %({"type":"search","payload":{"query":"shoes"}}).to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      # Only REQUEST and MESSAGES exist, so two toggles come back to REQUEST — a GRAPHQL pane
+      # would have made this land somewhere else and would print its header.
+      3.times do
+        view.toggle_pane
+        backend = MemoryBackend.new(100, 12)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 12))
+        backend.contains?("operation over websocket").should be_false
+      end
+    end
+  end
+
   it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
     tmp_store do |store|
       add_flow(store, "GET", "/api", 200)
