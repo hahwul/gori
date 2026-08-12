@@ -21,9 +21,10 @@ gori를 다루는 심화 가이드입니다. TUI의 각 탭은 하나의 목적�
 - **[Sequencer](/ko/guide/sequencer/)**: 세션·CSRF 토큰의 무작위성을 평가합니다.
 - **[OAST](/ko/guide/oast/)**: 아웃오브밴드 콜백을 잡아 블라인드 취약점을 확인합니다.
 
-**자동화**:
+**자동화** — 같은 엔진을 터미널 없이 돌리는 길:
 
-- **[MCP Server](/ko/guide/mcp/)**: AI 에이전트나 스크립트로 gori를 구동합니다.
+- **[Scripting](/ko/guide/scripting/)**: `gori run`으로 헤드리스 구동. 파이프라인과 CI를 위한 경로입니다.
+- **[MCP Server](/ko/guide/mcp/)**: Model Context Protocol로 프로젝트를 AI 에이전트에게 넘깁니다.
 
 **커스터마이즈**:
 

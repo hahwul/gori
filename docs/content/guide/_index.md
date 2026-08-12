@@ -21,9 +21,10 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[Sequencer](/guide/sequencer/)**: grade the randomness of session and CSRF tokens.
 - **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
 
-**Automation**:
+**Automation** — the same engines without a terminal in front of them:
 
-- **[MCP Server](/guide/mcp/)**: drive gori from an AI agent or script.
+- **[Scripting](/guide/scripting/)**: drive gori headless with `gori run`, for pipelines and CI.
+- **[MCP Server](/guide/mcp/)**: hand the project to an AI agent over the Model Context Protocol.
 
 **Customize**:
 

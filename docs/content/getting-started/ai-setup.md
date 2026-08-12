@@ -4,7 +4,7 @@ description = "Connect an AI agent to gori over MCP: install the server into you
 weight = 30
 +++
 
-gori has three entry points over one project and one engine: `gori` (the TUI, for you), `gori run` (the headless CLI, for scripts), and `gori mcp` (the [MCP server](/guide/mcp/), for AI agents). This page is the AI path. It gets an agent connected to a gori project and running its first request.
+gori has three entry points over one project and one engine: `gori` (the TUI, for you), `gori run` (the headless CLI, for [scripts](/guide/scripting/)), and `gori mcp` (the [MCP server](/guide/mcp/), for AI agents). This page is the AI path. It gets an agent connected to a gori project and running its first request.
 
 There is no chat window inside the TUI. You bring your own model and client; gori exposes the project over a clean tool interface, and the agent reads your traffic and drives the same tools you do. For the full tool catalog and deeper topics (live intercept, the design rationale), see the [MCP Server guide](/guide/mcp/).
 

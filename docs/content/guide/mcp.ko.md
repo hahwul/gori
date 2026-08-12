@@ -1,7 +1,7 @@
 +++
 title = "MCP 서버"
 description = "Model Context Protocol을 통해 AI 에이전트나 스크립트로 gori를 구동합니다."
-weight = 80
+weight = 85
 
 [extra]
 group = "자동화"
@@ -170,10 +170,11 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 
-gori는 의도적으로 도구 내 AI 챗을 두지 않습니다. 지능은 도구 바깥, 곧 MCP로 접근할 수 있는 곳에 있습니다. 덕분에 모델을 직접 고를 수 있고, 트래픽이 의도치 않은 곳으로 흘러가지 않으며, 동일한 인터페이스가 스크립트와 에이전트 양쪽을 모두 지원합니다. `gori run`은 비대화형 경로를, MCP는 대화형 에이전트 경로를 담당합니다.
+gori는 의도적으로 도구 내 AI 챗을 두지 않습니다. 지능은 도구 바깥, 곧 MCP로 접근할 수 있는 곳에 있습니다. 덕분에 모델을 직접 고를 수 있고, 트래픽이 의도치 않은 곳으로 흘러가지 않으며, 동일한 인터페이스가 스크립트와 에이전트 양쪽을 모두 지원합니다. [`gori run`](/ko/guide/scripting/)은 비대화형 경로를, MCP는 대화형 에이전트 경로를 담당합니다.
 
 ## 다음 단계 {#next-steps}
 
 - [AI 설정](/ko/getting-started/ai-setup/): 에이전트를 연결하고 첫 요청을 구동하는 단계별 안내
+- [Scripting](/ko/guide/scripting/): 또 하나의 자동화 경로 — 파이프라인과 CI를 위한 `gori run`
 - [CLI Reference](/ko/reference/cli/): 전체 `gori mcp` 플래그
 - [Query Language](/ko/reference/query-language/): 에이전트가 필터링에 사용하는 문법

@@ -1,7 +1,7 @@
 +++
 title = "MCP Server"
 description = "Drive gori from an AI agent or script over the Model Context Protocol."
-weight = 80
+weight = 85
 
 [extra]
 group = "Automation"
@@ -170,10 +170,11 @@ Tools run one at a time, in the order they arrive — a fuzz or a slow `send_req
 
 ## Why an MCP Seam
 
-gori deliberately has no in-tool AI chat. The intelligence lives outside the tool, reachable through MCP. That means you choose the model, your traffic isn't shipped anywhere you didn't intend, and the same interface serves scripts and agents alike. `gori run` covers the non-interactive path; MCP covers the interactive-agent path.
+gori deliberately has no in-tool AI chat. The intelligence lives outside the tool, reachable through MCP. That means you choose the model, your traffic isn't shipped anywhere you didn't intend, and the same interface serves scripts and agents alike. [`gori run`](/guide/scripting/) covers the non-interactive path; MCP covers the interactive-agent path.
 
 ## Next Steps
 
 - [AI Setup](/getting-started/ai-setup/): a step-by-step walkthrough to connect an agent and drive its first request
+- [Scripting](/guide/scripting/): the other automation path — `gori run` for pipelines and CI
 - [CLI Reference](/reference/cli/): full `gori mcp` flags
 - [Query Language](/reference/query-language/): the syntax agents use to filter
