@@ -796,4 +796,52 @@ describe Gori::Tui::SitemapView do
       store.sitemap_tags.has_key?({"acme.test", "/api"}).should be_false
     end
   end
+
+  # The view's own tree walks (expand-state snapshot/reapply, the tag prune, and the
+  # flatten in visible_rows) used to recurse one native stack frame per path segment, like
+  # the Sitemap transforms before them. `reload` drives all of them, so one deep capture
+  # covers the set. See spec/sitemap_depth_spec.cr for the measured overflow depths and why
+  # this fixture is 2_000 rather than something dramatic: the tree itself is quadratic in
+  # depth (1.6 GB at 20k), so a fixture deep enough to overflow these particular walks costs
+  # gigabytes. What this pins is that a deep tree still renders correctly end to end.
+  it "reloads, prunes and flattens a deep tree without overflowing the stack" do
+    tmp_store do |store|
+      deep = String.build { |io| 2_000.times { |i| io << "/s" << i } }
+      capture(store, "deep.test", "GET", deep)
+      capture(store, "deep.test", "GET", "/shallow")
+      store.set_sitemap_tag("deep.test", "/s0", "keepme")
+
+      view = SitemapView.new
+      view.reload(store) # collect_expand_state + reapply_expand_state + visible_rows/collect
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("deep.test").should be_true
+      b.contains?("s0").should be_true
+
+      # Positive tag prune (keep_for_tags?): the tagged branch survives WHOLE, so the
+      # segments below the tagged node are still there. Asserted on `s1` rather than on the
+      # sibling's absence: `/s0`'s 2000-row subtree pushes `shallow` off a 20-row viewport
+      # either way, so "shallow is not on screen" would pass without the prune running.
+      view.start_query
+      "tag:keepme".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("s0").should be_true
+      b.contains?("s1").should be_true
+
+      # Negative tag prune (exclude_for_tags?): the mirror image — and here the sibling IS
+      # a real signal, because `shallow` can only reach the viewport once the deep subtree
+      # ahead of it has actually been dropped.
+      view.cancel_query # Esc: drops the positive filter
+      view.start_query
+      "-tag:keepme".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("shallow").should be_true
+      b.contains?("s0").should be_false
+    end
+  end
 end

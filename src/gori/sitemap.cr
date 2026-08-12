@@ -37,6 +37,19 @@ module Gori
     # text renderer and the JSON discriminator both have to tell the two apart.
     TEMPLATE_LABELS = {"{uuid}", "{hex}", "{date}"}
 
+    # Most path segments a single target contributes to the tree. Beyond this the target is
+    # cut and the node it lands on is flagged `truncated` (see `add`, which carries the
+    # measured memory curve that makes this necessary).
+    #
+    # The bound is on the DERIVED tree, never on the capture: the flow keeps its target
+    # byte-exact and History renders it in full (P7). What a deeper target loses is only its
+    # tail's separate nodes in this projection — the endpoint still appears, at the cut path.
+    #
+    # 128 is far past anything real (public APIs sit under ~30 segments) and still keeps the
+    # adversarial case bounded: `Store::SITEMAP_MAX` caps the query at 10k endpoints, so even
+    # 10k targets sharing no prefix at all cost megabytes here rather than gigabytes.
+    MAX_DEPTH = 128
+
     # One tree node: a host (depth 0) or a path segment. Besides the structural
     # fields the builder always sets (label/children/methods/path), it carries
     # presentation state that consumers populate: `expanded`/`in_scope` (TUI render
@@ -71,6 +84,11 @@ module Gori
       # endpoint, so putting them there would inflate every host's path count, and the
       # flat `paths` output would start emitting synthetic rows.
       property fold_methods : Array(String)
+      # This node is where a target deeper than `Sitemap::MAX_DEPTH` segments was cut, so
+      # its `path` is a PREFIX of the captured target rather than the whole of it, and its
+      # methods are those of one or more deeper endpoints folded onto it. Display-only — the
+      # captured request is untouched and History still shows the target verbatim (P7).
+      property truncated : Bool
 
       # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —
       # a path-param explosion (thousands of `/users/<id>` siblings under one parent) made
@@ -89,6 +107,7 @@ module Gori
         @grouped = false
         @fold_parent = nil
         @fold_methods = [] of String
+        @truncated = false
       end
 
       # The durable key for a fold node (nil on a real node). FOLD_SEP can't occur in a
@@ -162,6 +181,17 @@ module Gori
         node = host_node.child(leaf)
         node.path = suffix.empty? ? "/" : "/#{suffix}"
       else
+        # MEASURED, and the reason MAX_DEPTH exists: every node stores its FULL path from
+        # the root (`Node#path`, the durable tag key), so both this loop's `acc` and the
+        # tree's memory are QUADRATIC in segment count. Sitemap.build alone, no walker:
+        # 109 MB at 5k segments, 404 MB at 10k, 1.6 GB at 20k, 6.6 GB at 40k, 28 GB at 80k,
+        # OOM-killed at 160k — reachable from ONE captured or imported request, and long
+        # before any traversal runs out of stack.
+        # The query rode onto the LAST segment above, so a cut target drops its query with
+        # the tail it belonged to. That is the same loss as the rest of the tail, and the
+        # `truncated` flag is what tells the operator the path is a prefix.
+        truncated = segments.size > MAX_DEPTH
+        segments = segments[0, MAX_DEPTH] if truncated
         acc = ""
         node = host_node
         segments.each do |seg|
@@ -169,6 +199,9 @@ module Gori
           node = node.child(seg)
           node.path = acc # idempotent on revisits; the durable tag key
         end
+        # Sticky: another target may reach this same node without being truncated itself,
+        # and the node's path is a prefix either way once one of them was cut.
+        node.truncated = true if truncated
       end
       node.methods << method unless node.methods.includes?(method)
     end
@@ -192,16 +225,18 @@ module Gori
     # Hosts are matched by their label; deeper nodes by their stamped `path`.
     def self.stamp_tags!(hosts : Array(Node), tags : Hash({String, String}, String)) : Nil
       return if tags.empty?
-      hosts.each { |h| stamp_node_tags(h, h.label, tags) }
-    end
-
-    private def self.stamp_node_tags(node : Node, host : String, tags : Hash({String, String}, String)) : Nil
-      # A fold is synthetic: its `path` is "" and so is a HOST row's, so without this
-      # guard a host tag would stamp onto every fold under it. Not reachable today
-      # (tags stamp before folding at both call sites) — this keeps that ordering from
-      # being load-bearing, since CLI text/JSON emit `tag` with no `grouped` guard.
-      node.tag = node.grouped ? nil : tags[{host, node.path}]?
-      node.children.each { |c| stamp_node_tags(c, host, tags) }
+      hosts.each do |h|
+        host = h.label
+        # Iterative (see post_order): the old `stamp_node_tags` recursed one frame per tree
+        # level and overflowed the native stack on a pathologically deep path. Each node's
+        # tag depends only on its OWN (host, path), so visit order is irrelevant here.
+        #
+        # A fold is synthetic: its `path` is "" and so is a HOST row's, so without this
+        # guard a host tag would stamp onto every fold under it. Not reachable today
+        # (tags stamp before folding at both call sites) — this keeps that ordering from
+        # being load-bearing, since CLI text/JSON emit `tag` with no `grouped` guard.
+        post_order(h) { |n| n.tag = n.grouped ? nil : tags[{host, n.path}]? }
+      end
     end
 
     # Visit every node in `root`'s subtree exactly once, each node AFTER its whole subtree
@@ -214,7 +249,12 @@ module Gori
     # `children.each { recurse }; <body>` order. A transform may therefore reshape a node's
     # OWN children when yielded (wrap them in a fold): its descendants are already done, and
     # the new fold node is not in the collected list, so it is never re-visited.
-    private def self.post_order(root : Node, & : Node ->) : Nil
+    #
+    # PUBLIC because the same ceiling applies to the TUI's own tree walks
+    # (`Tui::SitemapView`'s expand-state snapshot/reapply), and a second copy of this
+    # work-list next to them is the shape that left five of these walkers recursive after
+    # the first fix. One home.
+    def self.post_order(root : Node, & : Node ->) : Nil
       order = [root]
       i = 0
       while i < order.size
@@ -402,8 +442,12 @@ module Gori
     # # of captured endpoints under a node: descendant nodes carrying ≥1 method
     # (= distinct (host, path) pairs, incl. folder-with-methods nodes like /api/users).
     def self.endpoint_count(node : Node) : Int32
-      n = node.methods.empty? ? 0 : 1
-      node.children.each { |c| n += endpoint_count(c) }
+      # Iterative (see post_order): the old recursion spent one frame per tree level and
+      # overflowed the native stack on a pathologically deep path — and unlike the fold
+      # passes this one runs on EVERY sitemap reload (SitemapView#reload, `gori run sitemap`),
+      # so it was the likeliest of the seven walkers to actually be hit.
+      n = 0
+      post_order(node) { |x| n += 1 unless x.methods.empty? }
       n
     end
 
@@ -415,15 +459,24 @@ module Gori
       hosts.each { |h| apply_expand_depth_node!(h, 0, depth) }
     end
 
-    private def self.apply_expand_depth_node!(node : Node, node_depth : Int32, depth : Int32) : Nil
-      if node.grouped
-        node.expanded = false
-      elsif depth < 0
-        node.expanded = true
-      else
-        node.expanded = node_depth < depth
+    # Explicit stack rather than `post_order`, because this walk threads state DOWN
+    # (`node_depth`) instead of combining results up, and post_order carries no depth. Each
+    # node's verdict depends only on its own depth, so the visit order is irrelevant — but
+    # the native recursion this replaces overflowed the stack on a pathologically deep path,
+    # and like `endpoint_count` it runs on EVERY sitemap reload.
+    private def self.apply_expand_depth_node!(root : Node, root_depth : Int32, depth : Int32) : Nil
+      stack = [{root, root_depth}]
+      while entry = stack.pop?
+        node, node_depth = entry
+        if node.grouped
+          node.expanded = false
+        elsif depth < 0
+          node.expanded = true
+        else
+          node.expanded = node_depth < depth
+        end
+        node.children.each { |c| stack << {c, node_depth + 1} }
       end
-      node.children.each { |c| apply_expand_depth_node!(c, node_depth + 1, depth) }
     end
   end
 end

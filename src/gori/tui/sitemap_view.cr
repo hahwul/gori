@@ -162,31 +162,35 @@ module Gori::Tui
     # Snapshot expanded? for every non-leaf node keyed by (host, expand_key).
     private def collect_expand_state : Hash({String, String}, Bool)
       state = {} of {String, String} => Bool
-      @hosts.each { |h| walk_collect_expand(h, h.label, state) }
-      state
-    end
-
-    private def walk_collect_expand(node : Node, host : String, state : Hash({String, String}, Bool)) : Nil
-      # A fold is KEYED, not skipped. apply_expand_depth! re-collapses every fold on every
-      # reload (~1.3x/sec during capture), so without a durable key a fold the user opened
-      # could never stay open — and with id folding that means whole subtrees are unreadable.
-      if (k = expand_key(node)) && !node.leaf?
-        state[{host, k}] = node.expanded
+      # Iterative via Sitemap.post_order: the recursion these two walks used to do spent one
+      # frame per tree level and overflowed the native stack (SIGSEGV) on a single
+      # pathologically deep captured/imported path. Both visit every node independently, so
+      # post-order vs pre-order makes no difference to the result.
+      @hosts.each do |h|
+        host = h.label
+        # A fold is KEYED, not skipped. apply_expand_depth! re-collapses every fold on every
+        # reload (~1.3x/sec during capture), so without a durable key a fold the user opened
+        # could never stay open — and with id folding that means whole subtrees are unreadable.
+        Sitemap.post_order(h) do |n|
+          if (k = expand_key(n)) && !n.leaf?
+            state[{host, k}] = n.expanded
+          end
+        end
       end
-      node.children.each { |c| walk_collect_expand(c, host, state) }
+      state
     end
 
     private def reapply_expand_state(prev : Hash({String, String}, Bool)) : Nil
       return if prev.empty?
-      @hosts.each { |h| walk_reapply_expand(h, h.label, prev) }
-    end
-
-    private def walk_reapply_expand(node : Node, host : String, prev : Hash({String, String}, Bool)) : Nil
-      if (k = expand_key(node)) && !node.leaf?
-        key = {host, k}
-        node.expanded = prev[key] if prev.has_key?(key)
+      @hosts.each do |h|
+        host = h.label
+        Sitemap.post_order(h) do |n|
+          if (k = expand_key(n)) && !n.leaf?
+            key = {host, k}
+            n.expanded = prev[key] if prev.has_key?(key)
+          end
+        end
       end
-      node.children.each { |c| walk_reapply_expand(c, host, prev) }
     end
 
     # Index of the row whose (host, expand_key) matches `target`, or nil if gone. Folds
@@ -281,22 +285,52 @@ module Gori::Tui
 
     # Returns true if `node` survives; prunes non-surviving children in place. `inside`
     # = an ancestor already matched all positives ⇒ keep the whole subtree.
-    private def keep_for_tags?(node : Node, positives : Array(String), inside : Bool) : Bool
-      within = inside || tag_has_all?(node, positives)
-      kept_child = false
-      node.children.select! do |c|
-        keep = keep_for_tags?(c, positives, within)
-        kept_child ||= keep
-        keep
+    #
+    # Two explicit passes rather than native recursion (see `Sitemap.post_order` for the
+    # SIGSEGV this class of walk caused): this one threads `within` DOWN and combines
+    # `kept_child` UP, which no single-direction work-list expresses. Pass 1 collects nodes
+    # parent-before-child with their `within`; pass 2 walks that list in REVERSE, so every
+    # node is pruned only after its whole subtree — exactly the order the recursion had.
+    # `verdict` is keyed by Node identity (`Sitemap::Node` overrides neither `==` nor
+    # `hash`, so Hash falls back to reference equality).
+    private def keep_for_tags?(root : Node, positives : Array(String), inside : Bool) : Bool
+      order = [{root, inside || tag_has_all?(root, positives)}]
+      i = 0
+      while i < order.size
+        node, within = order[i]
+        node.children.each { |c| order << {c, within || tag_has_all?(c, positives)} }
+        i += 1
       end
-      within || kept_child
+
+      verdict = {} of Node => Bool
+      i = order.size - 1
+      while i >= 0
+        node, within = order[i]
+        kept_child = false
+        node.children.select! do |c|
+          keep = verdict[c]
+          kept_child ||= keep
+          keep
+        end
+        verdict[node] = within || kept_child
+        i -= 1
+      end
+      verdict[root]
     end
 
     # Returns true if `node`'s subtree should be dropped (it carries a negative tag);
     # otherwise prunes any dropped descendants in place.
-    private def exclude_for_tags?(node : Node, negatives : Array(String)) : Bool
-      return true if tag_has_any?(node, negatives)
-      node.children.reject! { |c| exclude_for_tags?(c, negatives) }
+    #
+    # Iterative for the same reason as `keep_for_tags?`. A node that matches is dropped
+    # whole and never descended into, so this is just "reject matching children, then
+    # descend into the survivors" — no verdict has to travel back up.
+    private def exclude_for_tags?(root : Node, negatives : Array(String)) : Bool
+      return true if tag_has_any?(root, negatives)
+      stack = [root]
+      while node = stack.pop?
+        node.children.reject! { |c| tag_has_any?(c, negatives) }
+        node.children.each { |c| stack << c }
+      end
       false
     end
 
@@ -855,8 +889,15 @@ module Gori::Tui
       # the pane's right BORDER and pushed label_end off-screen, so draw_cluster's
       # collision checks dropped this row's tag memo AND method chips. It's now clipped
       # (with an ellipsis) before whichever right column the row has.
-      lx = screen.text(lx0, y, node.label, label_color(host, node), bg, width: label_width(rect, node, host, lx0))
+      lx = screen.text(lx0, y, row_label(node), label_color(host, node), bg, width: label_width(rect, node, host, lx0))
       draw_cluster(screen, rect, node, host, y, bg, lx)
+    end
+
+    # The drawn label. A node that a target deeper than `Sitemap::MAX_DEPTH` was cut onto
+    # gets a visible marker: its `path` is only a PREFIX of the captured target, so without
+    # this the row reads as an ordinary leaf and the operator has no way to tell.
+    private def row_label(node : Node) : String
+      node.truncated ? "#{node.label} …+depth" : node.label
     end
 
     # The label's max width: it stops before the tag column (when the node carries a
@@ -1177,13 +1218,27 @@ module Gori::Tui
     # whether `node` has a following sibling: when it does, descendants draw a `│` at
     # `node`'s level (bit `depth`) so the branch reads as continuing. `host` is the depth-0
     # ancestor's label, carried down so every row knows its host without a back-walk.
+    # Explicit stack rather than native recursion (see `Sitemap.post_order`): this walk is
+    # PRE-order and threads depth + the guide bitmask DOWN, so children are pushed in
+    # REVERSE and popped left-to-right, which reproduces the recursion's row order exactly.
+    # It only descends into EXPANDED nodes — but the factory-default expand depth is "fully
+    # expanded" (`Sitemap.apply_expand_depth!`, depth < 0), so on a default install this
+    # walks the whole tree and was a live stack-overflow path like the other seven.
     private def collect(node : Node, depth : Int32, guides : UInt64, has_next : Bool,
                         rows : Array(VisibleRow), host : String) : Nil
-      rows << VisibleRow.new(node, depth, guides, host)
-      return unless node.expanded
-      child_guides = has_next ? (guides | (1_u64 << depth)) : guides
-      last = node.children.size - 1
-      node.children.each_with_index { |child, i| collect(child, depth + 1, child_guides, i < last, rows, host) }
+      stack = [{node, depth, guides, has_next}]
+      while entry = stack.pop?
+        n, d, g, hn = entry
+        rows << VisibleRow.new(n, d, g, host)
+        next unless n.expanded
+        child_guides = hn ? (g | (1_u64 << d)) : g
+        last = n.children.size - 1
+        i = last
+        while i >= 0
+          stack << {n.children[i], d + 1, child_guides, i < last}
+          i -= 1
+        end
+      end
     end
 
     private def ensure_visible(total : Int32, h : Int32) : Nil

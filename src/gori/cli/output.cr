@@ -576,23 +576,46 @@ module Gori
         end
       end
 
+      # Explicit work-list, not recursion (see `Sitemap.post_order`): this walk spent one
+      # native stack frame per path segment, and a single pathologically deep captured or
+      # imported path overflowed it — SIGSEGV, which no rescue can catch. `gori run sitemap`
+      # is named in that comment as one of the two surfaces, but only the tree TRANSFORMS
+      # were converted; these three output walkers were left recursive.
+      #
+      # Children are pushed in REVERSE so they pop left-to-right, which reproduces the
+      # recursion's line order exactly. Note the output itself stays inherently quadratic in
+      # depth (each level's guide prefix is 3 chars longer than its parent's) — that is a
+      # property of the tree FORMAT, not of the traversal, and a big tree legitimately
+      # produces a big listing. What changes here is that it can no longer kill the process.
       private def self.sitemap_text_children(node : Sitemap::Node, prefix : String, io : IO) : Nil
-        last = node.children.size - 1
-        node.children.each_with_index do |child, i|
-          io << prefix << (i == last ? "└─ " : "├─ ")
+        stack = [] of {Sitemap::Node, String, Bool}
+        push_text_children(stack, node, prefix)
+        while entry = stack.pop?
+          child, pfx, is_last = entry
+          io << pfx << (is_last ? "└─ " : "├─ ")
           sitemap_node_label(child, io)
           io << '\n'
           # A folded numeric group renders collapsed (its values stay in the chip),
           # matching the TUI default. An ID fold instead descends into ONE representative
           # child, so route structure BELOW the id (/users/{uuid}/orders) survives — the
           # ids are noise, but what hangs off them is the report's whole point.
-          nested = prefix + (i == last ? "   " : "│  ")
+          nested = pfx + (is_last ? "   " : "│  ")
           if child.template?
             rep = child.children.find { |c| !c.children.empty? }
-            sitemap_text_children(rep, nested, io) if rep
+            push_text_children(stack, rep, nested) if rep
           elsif !child.grouped
-            sitemap_text_children(child, nested, io)
+            push_text_children(stack, child, nested)
           end
+        end
+      end
+
+      private def self.push_text_children(stack : Array({Sitemap::Node, String, Bool}),
+                                          parent : Sitemap::Node, prefix : String) : Nil
+        last = parent.children.size - 1
+        i = last
+        while i >= 0
+          stack << {parent.children[i], prefix, i == last}
+          i -= 1
         end
       end
 
@@ -605,6 +628,9 @@ module Gori
         elsif !node.methods.empty?
           io << "  [" << term_safe(node.methods.join(' ')) << ']'
         end
+        # Say it rather than silently showing a short path: this node's `path` is a PREFIX
+        # of a target that ran past Sitemap::MAX_DEPTH segments.
+        io << "  … +depth (truncated)" if node.truncated
         if t = node.tag
           io << "  # " << term_safe(t)
         end
@@ -623,9 +649,18 @@ module Gori
         end
       end
 
-      private def self.sitemap_host_paths(node : Sitemap::Node, host : String, io : IO) : Nil
-        io << term_safe(node.methods.join(',')) << "  " << term_safe(host) << term_safe(node.path) << '\n' unless node.methods.empty?
-        node.children.each { |c| sitemap_host_paths(c, host, io) }
+      # Iterative for the same reason as `sitemap_text_children`. Children are pushed in
+      # REVERSE so they pop left-to-right, preserving the recursion's line order.
+      private def self.sitemap_host_paths(root : Sitemap::Node, host : String, io : IO) : Nil
+        stack = [root]
+        while node = stack.pop?
+          io << term_safe(node.methods.join(',')) << "  " << term_safe(host) << term_safe(node.path) << '\n' unless node.methods.empty?
+          i = node.children.size - 1
+          while i >= 0
+            stack << node.children[i]
+            i -= 1
+          end
+        end
       end
 
       # The endpoint tree as JSON: an array of host objects, each `{host, endpoints,
@@ -672,7 +707,9 @@ module Gori
         io << '}'
       end
 
-      private def self.sitemap_node_json(io : IO, node : Sitemap::Node) : Nil
+      # Everything a node object emits BEFORE its "children" array — split out so the walk
+      # below can be iterative. The caller closes the object (and the array, if any).
+      private def self.sitemap_node_json_open(io : IO, node : Sitemap::Node) : Nil
         io << '{'
         io << %("label":)
         term_safe(node.label).to_json(io)
@@ -703,18 +740,47 @@ module Gori
           io << %(,"tag":)
           term_safe(t).to_json(io)
         end
-        sitemap_children_json(io, node)
-        io << '}'
+        # `path` here is a PREFIX of the captured target — see Sitemap::MAX_DEPTH. Emitted
+        # so a consumer can tell a real leaf from a cut one instead of trusting the path.
+        io << %(,"truncated":true) if node.truncated
       end
 
+      # Iterative for the same reason as `sitemap_text_children`. Unlike the text walks this
+      # one has to emit AFTER a node's subtree too (the closing `]}`), so the work-list is a
+      # union: a Node means "open this node", a String is literal bytes to emit. The closer
+      # is pushed BEFORE the children so it pops after them, and `push_json_children` interleaves
+      # the sibling commas — together that reproduces the recursion's bytes exactly.
       private def self.sitemap_children_json(io : IO, node : Sitemap::Node) : Nil
         return if node.children.empty?
         io << %(,"children":[)
-        node.children.each_with_index do |c, i|
-          io << ',' if i > 0
-          sitemap_node_json(io, c)
+        stack = [] of Sitemap::Node | String
+        push_json_children(stack, node)
+        while item = stack.pop?
+          if item.is_a?(String)
+            io << item
+            next
+          end
+          sitemap_node_json_open(io, item)
+          if item.children.empty?
+            io << '}'
+          else
+            io << %(,"children":[)
+            stack << "]}"
+            push_json_children(stack, item)
+          end
         end
         io << ']'
+      end
+
+      # Push `parent`'s children so they POP in order, with a comma before every one but the
+      # first (pushed after the node it follows, since the stack reverses everything).
+      private def self.push_json_children(stack : Array(Sitemap::Node | String), parent : Sitemap::Node) : Nil
+        i = parent.children.size - 1
+        while i >= 0
+          stack << parent.children[i]
+          stack << "," if i > 0
+          i -= 1
+        end
       end
 
       def self.human_size(bytes : Int64) : String

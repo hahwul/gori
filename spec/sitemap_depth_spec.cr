@@ -29,10 +29,87 @@ describe Gori::Sitemap do
       hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
       hosts.each { |h| Gori::Sitemap.group_sequences!(h) }
 
-      # Distinct, non-id, non-numeric segments → nothing folds; the literal chain survives.
+      # The rest of the module's tree walks, converted later for the same reason. These are
+      # cheaper per frame than the two folds above and do NOT overflow at this depth (see
+      # the measured table below), so what this pins is that they still produce the right
+      # answer on a deep tree — the overflow guard here is the two folds.
+      tags = { {"deep.test", "/seg0"} => "memo" } # note the space: {{ starts a macro
+      hosts.each { |h| Gori::Sitemap.stamp_tags!([h], tags) }
+      Gori::Sitemap.apply_expand_depth!(hosts, -1)
+      Gori::Sitemap.endpoint_count(hosts.first).should eq(1) # only the leaf carries a method
+      hosts.first.children.first.tag.should eq("memo")
+      hosts.first.children.first.expanded.should be_true
+
+      # Distinct, non-id, non-numeric segments → nothing folds; the literal chain survives,
+      # cut at MAX_DEPTH (see the memory curve below — a 20k-segment target used to cost
+      # 1.6 GB of tree). The endpoint is still THERE, just at the cut path and flagged.
+      leaf = deepest_leaf(hosts.first)
+      leaf.label.should eq("seg#{Gori::Sitemap::MAX_DEPTH - 1}")
+      leaf.methods.should eq(["GET"])
+      leaf.truncated.should be_true
+      leaf.path.should eq(String.build { |io| Gori::Sitemap::MAX_DEPTH.times { |i| io << "/seg" << i } })
+    end
+
+    it "leaves a target at or under MAX_DEPTH untouched and unflagged" do
+      depth = Gori::Sitemap::MAX_DEPTH
+      target = String.build { |io| depth.times { |i| io << "/seg" << i } }
+      hosts = Gori::Sitemap.build([{"deep.test", "GET", target}])
+
       leaf = deepest_leaf(hosts.first)
       leaf.label.should eq("seg#{depth - 1}")
-      leaf.methods.should eq(["GET"])
+      leaf.path.should eq(target) # the whole target, not a prefix
+      leaf.truncated.should be_false
+    end
+
+    it "folds several over-deep targets onto the same cut node and keeps every verb" do
+      a = String.build { |io| 500.times { |i| io << "/seg" << i } }
+      b = String.build { |io| 400.times { |i| io << "/seg" << i } } # shares the cut prefix
+      hosts = Gori::Sitemap.build([{"h", "GET", a}, {"h", "POST", b}])
+
+      leaf = deepest_leaf(hosts.first)
+      leaf.truncated.should be_true
+      leaf.methods.sort.should eq(["GET", "POST"]) # neither endpoint is dropped, only merged
+    end
+
+    # MEASURED (Crystal 1.21, debug build — the mode `crystal spec` uses), so the next person
+    # does not have to re-derive which of these walks is worth a deep fixture:
+    #
+    #   Sitemap.build alone, no walker at all:  109 MB @5k · 404 MB @10k · 1.6 GB @20k ·
+    #                                           6.6 GB @40k · 28 GB @80k · OOM-killed @160k
+    #   old recursive keep_for_tags?         :  SIGSEGV at 40k (survives 20k)
+    #   old recursive SitemapView#collect    :  SIGSEGV at 80k (survives 40k)
+    #   old recursive endpoint_count / stamp_tags! / apply_expand_depth! / sitemap_host_paths
+    #   / sitemap_children_json              :  survive 80k — the tree exhausts memory first
+    #
+    # Two consequences worth keeping in mind before "strengthening" this file:
+    #
+    # 1. `Sitemap.build` itself is QUADRATIC in path depth, because every node stores its
+    #    full path from the root (`Node#path`, the durable key for a path tag). That is the
+    #    dominant limit — one captured request 20k segments deep costs 1.6 GB before any
+    #    walker runs — and no traversal rewrite touches it.
+    # 2. A fixture deep enough to catch a reintroduced recursion in the CHEAP walkers would
+    #    therefore cost gigabytes, which is why this file does not have one. Their guard is
+    #    the code comment at each site, not a spec.
+    it "walks a deep tree in every CLI output format without overflowing the stack" do
+      # Depth chosen for OUTPUT size, not stack: the text tree's guide prefix grows 3 chars
+      # per level and the JSON nests a full path per node, so both are quadratic in depth —
+      # at 40k `sitemap_text` already raises IO::EOFError by exceeding IO::Memory's 2 GB cap.
+      depth = 2_000
+      target = String.build do |io|
+        depth.times { |i| io << "/s" << i }
+      end
+      hosts = Gori::Sitemap.build([{"deep.test", "GET", target}])
+      hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+
+      cut = Gori::Sitemap::MAX_DEPTH - 1
+      Gori::CLI::Output.sitemap_text(hosts).should contain("s#{cut}")
+      Gori::CLI::Output.sitemap_json(hosts).should contain(%("label":"s#{cut}"))
+
+      # Truncation is SAID, not silently shown as a short path, in every format.
+      Gori::CLI::Output.sitemap_text(hosts).should contain("truncated")
+      Gori::CLI::Output.sitemap_json(hosts).should contain(%("truncated":true))
+      prefix = String.build { |io| Gori::Sitemap::MAX_DEPTH.times { |i| io << "/s" << i } }
+      Gori::CLI::Output.sitemap_paths(hosts).should eq("GET  deep.test#{prefix}\n")
     end
 
     it "still folds id classes and numeric runs correctly after the rewrite" do
