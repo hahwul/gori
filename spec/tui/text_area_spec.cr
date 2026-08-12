@@ -680,6 +680,18 @@ describe Gori::Tui::TextArea do
     it "stays hidden when the caret isn't on an env token" do
       render_peek("k=$TOKEN", 1, false, true).contains?("s3cr3t-value").should be_false
     end
+
+    it "previews a value that is not valid UTF-8 instead of taking the TUI down" do
+      # A binding value comes off the WIRE and an env var can be set from argv, so this
+      # string is not guaranteed valid UTF-8 — and PCRE2 RAISES on such a subject rather
+      # than failing to match. The preview collapses whitespace with a regex, on the render
+      # path, where there is no rescue between here and Runner#run: one bound response byte
+      # ended the session. Scrubbed rather than refused, because a preview is display-only.
+      Gori::Settings.env_vars = [{"TOKEN", String.new(Bytes[0x61, 0xff, 0xfe, 0x62])}]
+      row = render_peek("k=$TOKEN", 4, false, true).row(1)
+      row.strip.should_not be_empty # a peek was drawn (cf. the unregistered-$KEY case above)
+      row.valid_encoding?.should be_true
+    end
   end
 
   describe "right-border scroll gauge (opt-in)" do

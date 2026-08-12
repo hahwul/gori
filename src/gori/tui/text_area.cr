@@ -2286,7 +2286,16 @@ module Gori::Tui
     # session cookie. `mask_preview` shows enough to tell two tokens apart and no more.
     private def env_value_preview(v : String, masked : Bool = false) : String
       return Bindings.mask_preview(v) if masked
-      s = v.gsub(/\s+/, " ").strip
+      # This string is NOT guaranteed valid UTF-8: a binding value came off the wire, and an
+      # env var can be set from argv (`gori run project env set`). PCRE2 RAISES on such a
+      # subject rather than failing to match, and this runs on the render path, where there
+      # is no rescue between here and `Runner#run` — so one bound response byte took the TUI
+      # down while the operator was typing a `$KEY`.
+      #
+      # SCRUBBED, not refused, because unlike `searchable?` above the result is display-only
+      # and never written back into the buffer — the same split `fuzz/matcher.cr` takes. The
+      # `valid_encoding?` guard keeps the common path allocation-free (scrub always rebuilds).
+      s = (v.valid_encoding? ? v : v.scrub).gsub(/\s+/, " ").strip
       s.size > 20 ? "#{s[0, 19]}…" : s
     end
 

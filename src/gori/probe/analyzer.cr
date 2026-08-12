@@ -173,10 +173,10 @@ module Gori
         @running = true
         # Re-arm durable hard-deletes before any passive/active fiber can upsert.
         load_suppressions
-        spawn(name: "gori-probe") { passive_loop }
-        spawn(name: "gori-probe-active") { active_loop }
-        spawn(name: "gori-probe-catchup") { catch_up_loop }
-        spawn(name: "gori-probe-oob") { oob_loop }
+        spawn(name: "gori-probe") { supervise("passive analysis") { passive_loop } }
+        spawn(name: "gori-probe-active") { supervise("active scan") { active_loop } }
+        spawn(name: "gori-probe-catchup") { supervise("catch-up scan") { catch_up_loop } }
+        spawn(name: "gori-probe-oob") { supervise("OAST poll") { oob_loop } }
         # Project already in an actively-probing mode (persisted) — probe recent in-scope History
         # now, not only traffic that arrives after this open.
         arm_active_backfill if @mode.probes_actively?
@@ -262,23 +262,29 @@ module Gori
         return if active_degraded?
         opts = Active::Options.new(allow_unsafe: allow_unsafe, oob: @oob)
         spawn(name: "gori-probe-active-manual") do
-          found = 0
-          errored = false
-          Active::RULES.each do |rule|
-            break if @stopped
-            next if Probe.rule_disabled?(rule.info.id, @disabled)
-            plan = rule.plan(detail, opts)
-            next unless plan
-            if wrote = execute_active(rule, plan, detail, repeater_id: repeater_id, notify: notify)
-              found += wrote
-            else
-              errored = true # send failure already posted its own error notification
+          # `rule.plan` runs hostile captured bytes through every rule's parser, so a rule bug
+          # raises here — the headless twin already isolates each rule for exactly this reason
+          # (see `Active.analyze`). Supervised as a whole because a manual scan is one-shot:
+          # there is no loop left to keep alive, only an operator waiting for an answer.
+          supervise("manual active scan") do
+            found = 0
+            errored = false
+            Active::RULES.each do |rule|
+              break if @stopped
+              next if Probe.rule_disabled?(rule.info.id, @disabled)
+              plan = rule.plan(detail, opts)
+              next unless plan
+              if wrote = execute_active(rule, plan, detail, repeater_id: repeater_id, notify: notify)
+                found += wrote
+              else
+                errored = true # send failure already posted its own error notification
+              end
             end
-          end
-          # Always mode wants a "done, nothing found" note — but only for a scan that actually
-          # completed cleanly (WhenFound/Off stay quiet; a real finding or an error already posted).
-          if notify.always? && found == 0 && !errored && !@stopped
-            emit(CompleteEvent.new(detail.row.host, "active scan on #{detail.row.host}: no issues"))
+            # Always mode wants a "done, nothing found" note — but only for a scan that actually
+            # completed cleanly (WhenFound/Off stay quiet; a real finding or an error already posted).
+            if notify.always? && found == 0 && !errored && !@stopped
+              emit(CompleteEvent.new(detail.row.host, "active scan on #{detail.row.host}: no issues"))
+            end
           end
         end
       end
@@ -452,7 +458,7 @@ module Gori
         return if @stopped
         return unless @mode.probes_actively?
         return unless @running # queue consumer must be up (start) or about to be (set_mode mid-session)
-        spawn(name: "gori-probe-active-backfill") { active_backfill }
+        spawn(name: "gori-probe-active-backfill") { supervise("active backfill") { active_backfill } }
       end
 
       private def active_backfill : Nil
@@ -669,6 +675,28 @@ module Gori
         else
         end
       rescue Channel::ClosedError
+      end
+
+      # Every long-lived analyzer fiber runs under this. An unrescued raise inside a `spawn`
+      # block kills ONLY that fiber, and Crystal prints it to STDERR — which under the TUI is
+      # the alternate screen (#411). So the failure was invisible twice over: the screen got
+      # garbled, and the subsystem was silently gone with nothing else noticing.
+      #
+      # `catch_up_loop` is the sharpest case. It is the only thing that re-scans flows the
+      # lossy passive channel dropped, so losing it means captured traffic quietly stops being
+      # analysed for the rest of the session — a security tool reporting "no issues" because
+      # its scanner died is the worst failure mode available to it.
+      #
+      # Logged to <GORI_HOME>/gori.log (bound by `App#run_tui`, so it lands in a file rather
+      # than on the screen) AND surfaced as an ErrorEvent, so the operator hears it from the
+      # tray instead of inferring it from findings that never arrive. Silent once `stop` has
+      # run: teardown closes the very channels these loops are parked on.
+      private def supervise(what : String, &) : Nil
+        yield
+      rescue ex
+        return if @stopped
+        ::Log.error(exception: ex) { "probe #{what} fiber died" }
+        emit(ErrorEvent.new("Probe #{what} stopped: #{ex.message} — see gori.log"))
       end
 
       # Bound a seen-set to `cap` by dropping its oldest entries (Set keeps insertion order).

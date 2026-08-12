@@ -1566,8 +1566,19 @@ module Gori::Tui
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
+      started = Time.instant
       spawn(name: "gori-repeater") do
-        result = plan.send
+        result = begin
+          plan.send
+        rescue ex
+          # `Repeater::Engine.send` rescues its own transport failures, so anything escaping
+          # here is a bug — and an unrescued raise in `spawn` kills just this fiber while
+          # printing to STDERR, which under the TUI is the alternate screen (#411). The pane
+          # would then sit there having said "sending…" with no answer ever arriving. Hand
+          # the failure back as an errored Result, which the pane already knows how to show.
+          ::Log.error(exception: ex) { "repeater send fiber died" }
+          Repeater::Engine.error(ex.message || "repeater send error", started)
+        end
         # Non-blocking hand-off: if the user already left the project the channel is
         # orphaned, so drop the late result instead of blocking this fiber forever.
         select
@@ -1701,6 +1712,13 @@ module Gori::Tui
         when results.send({view, result})
         else
         end
+      rescue ex
+        # Logged rather than handed back as a synthetic result: `WsEngine::Result` aggregates
+        # a whole frame exchange, so fabricating one would put a shape on screen that no send
+        # produced. The `ensure` below already un-wedges the pane; what this adds is that the
+        # bug reaches gori.log instead of STDERR, which under the TUI is the alternate screen
+        # (#411) — a garbled display was the only sign a send fiber had died.
+        ::Log.error(exception: ex) { "ws repeater send fiber died" }
       ensure
         view.inflight = false
       end
@@ -1750,6 +1768,11 @@ module Gori::Tui
         when results.send({view, labeled})
         else
         end
+      rescue ex
+        # See the ws sibling above for why this logs instead of synthesising a result: a group
+        # send already fills in its own per-request failures (Repeater::Engine marks the ones
+        # it skipped), so anything escaping to here is a bug, not a transport outcome.
+        ::Log.error(exception: ex) { "repeater group send fiber died" }
       ensure
         view.inflight = false
       end

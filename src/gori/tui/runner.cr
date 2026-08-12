@@ -266,6 +266,9 @@ module Gori::Tui
       @body_h = 24                  # last body rect height (captured at render); drives PageUp/Down step size
       @title_text = nil.as(String?) # last string emitted as the terminal-window title (memo; see sync_terminal_title)
       @title_written = false        # have we ever written a title? gates the neutral restore on leave when the pref is "off"
+      # Timestamps of raises absorbed by the run loop, trimmed to TICK_ERROR_WINDOW — the
+      # circuit breaker behind `absorb_tick_error`.
+      @tick_errors = [] of Time::Instant
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -442,158 +445,181 @@ module Gori::Tui
       @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
         loop do
-          ev = @term.poll_event(50)
-          dirty = false
-          if ev
-            handle(ev)
-            dirty = true
-            # Drain any input already queued behind `ev` in the SAME tick, then
-            # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
-            # repeat, or (under the terminal's alternate-scroll mode) a mouse wheel
-            # fed as a run of ↑/↓ keys. Handling one event per rendered frame let the
-            # burst back up: the view crept one step per frame and kept moving after
-            # the user stopped. Draining applies the whole burst before the frame, so
-            # scrolling tracks the input. Bounded so an infinitely-held key can't
-            # starve the render / async-channel drains below.
-            keys_drained = drain_burst
-            @companion.wake_on_input # any key/click re-arms Miss Ring's idle clock
-            # Tell the stall guard how DENSE this tick was: only a burst means the paste is
-            # still streaming. Key events only — see `PasteStall#saw`.
-            @paste_stall.saw(Time.instant, keys_drained)
-          end
-          # A bracketed paste is bounded by its end marker, and a marker that never arrives
-          # leaves this loop swallowing every keystroke — see `PasteStall`.
-          if @paste_newline.pasting? && @paste_stall.stalled?(Time.instant)
-            dirty = true if end_stalled_paste
-          end
-          dirty = true if drain_events # always drains; true if anything arrived
-          if repeater_controller.drain_results
-            search_recompute # a ^F over a now-updated response keeps fresh hits
-            dirty = true
-          end
-          dirty = true if fuzzer_controller.drain_events
-          dirty = true if miner_controller.drain_events
-          dirty = true if oast_controller.drain_events
-          dirty = true if sequencer_controller.drain_events
-          dirty = true if discover_controller.drain_events
-          if (rev = @session.interceptor.revision) != last_rev
-            last_rev = rev
-            dirty = true
-          end
-          if (wf = @session.store.write_failures) != last_wf
-            last_wf = wf
-            dirty = true
-          end
-          # Probe list live refresh: Store#probe_generation increments after every
-          # committed probe_issues write (upsert/delete/status). Poll every tick —
-          # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
-          # Reload the (full-table SELECT + filter) list ONLY when Probe is the active tab:
-          # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
-          # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
-          # `last_probe_gen` still advances so returning to Probe doesn't reload redundantly.
-          # When Probe is visible, force a full terminal sync (not just cell-diff) so a
-          # new/removed row cannot stick as a stale paint.
-          if (pgen = @session.store.probe_generation) != last_probe_gen
-            last_probe_gen = pgen
-            if @active_tab == :probe
-              probe_controller.refresh_from_store
+          # Absorb a raise from THIS tick instead of letting it end the process. The loop
+          # below is session-scoped: it holds unsaved Repeater/Fuzzer buffers and an
+          # indefinitely-held intercept queue (P4), so an IndexError on one frame discarding
+          # all of that is not surfacing a bug, it is destroying the operator's evidence.
+          # `absorb_tick_error` logs the trace, toasts, and trips a breaker if the same tick
+          # keeps failing — at which point this re-raises and the old behaviour resumes.
+          #
+          # Wrapped in place rather than extracted so the `last_*` cursors above survive the
+          # error: a recovered tick carries on from where it was instead of re-running every
+          # poll and reload from scratch.
+          begin
+            ev = @term.poll_event(50)
+            dirty = false
+            if ev
+              handle(ev)
               dirty = true
-              @resized = true
+              # Drain any input already queued behind `ev` in the SAME tick, then
+              # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
+              # repeat, or (under the terminal's alternate-scroll mode) a mouse wheel
+              # fed as a run of ↑/↓ keys. Handling one event per rendered frame let the
+              # burst back up: the view crept one step per frame and kept moving after
+              # the user stopped. Draining applies the whole burst before the frame, so
+              # scrolling tracks the input. Bounded so an infinitely-held key can't
+              # starve the render / async-channel drains below.
+              keys_drained = drain_burst
+              @companion.wake_on_input # any key/click re-arms Miss Ring's idle clock
+              # Tell the stall guard how DENSE this tick was: only a burst means the paste is
+              # still streaming. Key events only — see `PasteStall#saw`.
+              @paste_stall.saw(Time.instant, keys_drained)
             end
-          end
-          # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
-          # second gori process) commits. Own captures/saves bump it too — soft-sync
-          # in apply_external_change must not full-restore session UI every poll.
-          now = Time.instant
-          if now - last_dv_poll >= DV_POLL_INTERVAL
-            last_dv_poll = now
-            if (dv = @session.store.data_version) != last_dv
-              last_dv = dv
-              apply_external_change
+            # A bracketed paste is bounded by its end marker, and a marker that never arrives
+            # leaves this loop swallowing every keystroke — see `PasteStall`.
+            if @paste_newline.pasting? && @paste_stall.stalled?(Time.instant)
+              dirty = true if end_stalled_paste
+            end
+            dirty = true if drain_events # always drains; true if anything arrived
+            if repeater_controller.drain_results
+              search_recompute # a ^F over a now-updated response keeps fresh hits
               dirty = true
             end
-            # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
-            # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
-            # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
-            # changed (revision), but refresh the tiny bridge heartbeat every cadence so liveness
-            # stays current. The command drain (Phase 2) runs here too, before the republish.
-            if @session.capturing_lock_held?
-              ic = @session.interceptor
-              # Order (per plan): drain+apply agent commands, THEN re-mirror the (now-updated)
-              # queue, THEN refresh the heartbeat. forward/drop bump revision, so a drained
-              # command triggers the snapshot republish below in the same tick.
-              dirty = true if drain_intercept_commands
-              dirty = true if reap_stale_holds
-              if (prev = ic.revision) != last_pub_rev
-                last_pub_rev = prev
-                publish_intercept_snapshot(ic) # queue changed → re-mirror held rows
-                publish_intercept_bridge(ic)   # and refresh config/heartbeat immediately
-                last_bridge_pub = now
-              elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
-                publish_intercept_bridge(ic) # periodic liveness heartbeat (throttled)
-                last_bridge_pub = now
+            dirty = true if fuzzer_controller.drain_events
+            dirty = true if miner_controller.drain_events
+            dirty = true if oast_controller.drain_events
+            dirty = true if sequencer_controller.drain_events
+            dirty = true if discover_controller.drain_events
+            if (rev = @session.interceptor.revision) != last_rev
+              last_rev = rev
+              dirty = true
+            end
+            if (wf = @session.store.write_failures) != last_wf
+              last_wf = wf
+              dirty = true
+            end
+            # Probe list live refresh: Store#probe_generation increments after every
+            # committed probe_issues write (upsert/delete/status). Poll every tick —
+            # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
+            # Reload the (full-table SELECT + filter) list ONLY when Probe is the active tab:
+            # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
+            # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
+            # `last_probe_gen` still advances so returning to Probe doesn't reload redundantly.
+            # When Probe is visible, force a full terminal sync (not just cell-diff) so a
+            # new/removed row cannot stick as a stale paint.
+            if (pgen = @session.store.probe_generation) != last_probe_gen
+              last_probe_gen = pgen
+              if @active_tab == :probe
+                probe_controller.refresh_from_store
+                dirty = true
+                @resized = true
               end
             end
+            # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
+            # second gori process) commits. Own captures/saves bump it too — soft-sync
+            # in apply_external_change must not full-restore session UI every poll.
+            now = Time.instant
+            if now - last_dv_poll >= DV_POLL_INTERVAL
+              last_dv_poll = now
+              if (dv = @session.store.data_version) != last_dv
+                last_dv = dv
+                apply_external_change
+                dirty = true
+              end
+              # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
+              # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
+              # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
+              # changed (revision), but refresh the tiny bridge heartbeat every cadence so liveness
+              # stays current. The command drain (Phase 2) runs here too, before the republish.
+              if @session.capturing_lock_held?
+                ic = @session.interceptor
+                # Order (per plan): drain+apply agent commands, THEN re-mirror the (now-updated)
+                # queue, THEN refresh the heartbeat. forward/drop bump revision, so a drained
+                # command triggers the snapshot republish below in the same tick.
+                dirty = true if drain_intercept_commands
+                dirty = true if reap_stale_holds
+                if (prev = ic.revision) != last_pub_rev
+                  last_pub_rev = prev
+                  publish_intercept_snapshot(ic) # queue changed → re-mirror held rows
+                  publish_intercept_bridge(ic)   # and refresh config/heartbeat immediately
+                  last_bridge_pub = now
+                elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
+                  publish_intercept_bridge(ic) # periodic liveness heartbeat (throttled)
+                  last_bridge_pub = now
+                end
+              end
+            end
+            # Animate the bottom-bar background-job spinner: while any job runs, advance the
+            # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
+            # CPU at zero when nothing is running.
+            if (@jobs.any_active? || repeater_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
+              last_spin = now
+              @spinner_frame &+= 1
+              dirty = true
+            end
+            # Statusline: drain a finished script result and (re-)launch on its interval.
+            # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
+            dirty = true if @statusline.tick(now)
+            # Resource meter: re-sample CPU/RSS on its own interval. Like the clock below, it
+            # only reports true when the RENDERED string changes, so a parked gori doesn't
+            # repaint on a timer just to redraw the same "CPU 0%".
+            dirty = true if @resource.tick(now)
+            # TLS passthrough: announce hosts bypassed since the last tick. Before the Companion, so
+            # a bypass notice reaches her on the same frame it is pushed.
+            dirty = true if drain_passthrough_notices
+            # Miss Ring: advance the animation beat and pick up new notifications. Like the
+            # resource meter above she reports dirty ONLY when the drawn sprite/bubble
+            # changes, and stops reporting at all once she dozes off (Companion::SLEEP_AFTER).
+            # Placed after every controller drain, so a note pushed this tick is announced
+            # on THIS frame rather than the next.
+            #
+            # TICKED UNCONDITIONALLY, but her dirty is gated on her actually being ON SCREEN.
+            # #render_companion drops her outright under any overlay, the space menu and a body
+            # editor (see #companion_visible?), and Companion.place drops her again on a terminal too
+            # short for her — in every one of those states her `changed` verdict would buy a
+            # full frame rebuild that paints not one different cell. Left ungated that is ~1
+            # wasted render/second for as long as a modal is up, and for as long as you keep
+            # typing in an editor (every keystroke pokes her, so she never dozes there). The
+            # tick itself still has to run or the frame she comes back with would be stale.
+            dirty = true if @companion.tick(now) && companion_on_screen?
+            # Debounced QL filter: fire the deferred search once typing has paused.
+            dirty = true if history_controller.flush_query_reload_if_due(now)
+            dirty = true if sitemap_controller.flush_query_reload_if_due(now)
+            # Tick the top-bar clock: dirty only when the displayed minute changes, so the
+            # idle loop wakes once a minute to repaint rather than every second.
+            if (clock = clock_label) != last_clock
+              last_clock = clock
+              dirty = true
+            end
+            # Record what the user is currently viewing (active tab / focus / selection) to
+            # the project store so a separate `gori mcp` process can report it via
+            # get_current_context. Throttled + diffed so idle focus never churns the WAL.
+            ident = ui_state_identity
+            if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
+              @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
+              last_ui_ident = ident
+              last_ui_write = now
+            end
+            render if dirty
+          rescue ex : Gori::Error
+            # gori's own errors keep their designed exit: `CLI.run` rescues these and aborts
+            # with the operator-facing message, which is a deliberate answer, not a crash.
+            raise ex
+          rescue ex
+            raise ex unless absorb_tick_error(ex)
           end
-          # Animate the bottom-bar background-job spinner: while any job runs, advance the
-          # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
-          # CPU at zero when nothing is running.
-          if (@jobs.any_active? || repeater_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
-            last_spin = now
-            @spinner_frame &+= 1
-            dirty = true
-          end
-          # Statusline: drain a finished script result and (re-)launch on its interval.
-          # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
-          dirty = true if @statusline.tick(now)
-          # Resource meter: re-sample CPU/RSS on its own interval. Like the clock below, it
-          # only reports true when the RENDERED string changes, so a parked gori doesn't
-          # repaint on a timer just to redraw the same "CPU 0%".
-          dirty = true if @resource.tick(now)
-          # TLS passthrough: announce hosts bypassed since the last tick. Before the Companion, so
-          # a bypass notice reaches her on the same frame it is pushed.
-          dirty = true if drain_passthrough_notices
-          # Miss Ring: advance the animation beat and pick up new notifications. Like the
-          # resource meter above she reports dirty ONLY when the drawn sprite/bubble
-          # changes, and stops reporting at all once she dozes off (Companion::SLEEP_AFTER).
-          # Placed after every controller drain, so a note pushed this tick is announced
-          # on THIS frame rather than the next.
-          #
-          # TICKED UNCONDITIONALLY, but her dirty is gated on her actually being ON SCREEN.
-          # #render_companion drops her outright under any overlay, the space menu and a body
-          # editor (see #companion_visible?), and Companion.place drops her again on a terminal too
-          # short for her — in every one of those states her `changed` verdict would buy a
-          # full frame rebuild that paints not one different cell. Left ungated that is ~1
-          # wasted render/second for as long as a modal is up, and for as long as you keep
-          # typing in an editor (every keystroke pokes her, so she never dozes there). The
-          # tick itself still has to run or the frame she comes back with would be stale.
-          dirty = true if @companion.tick(now) && companion_on_screen?
-          # Debounced QL filter: fire the deferred search once typing has paused.
-          dirty = true if history_controller.flush_query_reload_if_due(now)
-          dirty = true if sitemap_controller.flush_query_reload_if_due(now)
-          # Tick the top-bar clock: dirty only when the displayed minute changes, so the
-          # idle loop wakes once a minute to repaint rather than every second.
-          if (clock = clock_label) != last_clock
-            last_clock = clock
-            dirty = true
-          end
-          # Record what the user is currently viewing (active tab / focus / selection) to
-          # the project store so a separate `gori mcp` process can report it via
-          # get_current_context. Throttled + diffed so idle focus never churns the WAL.
-          ident = ui_state_identity
-          if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
-            @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
-            last_ui_ident = ident
-            last_ui_write = now
-          end
-          render if dirty
           break unless @outcome == :running
         end
       ensure
-        # NOT a stop_all_jobs backstop: a raise out of this loop is not caught between here
+        # NOT a stop_all_jobs backstop: a raise that gets THIS far is not caught between here
         # and `CLI.run`, so it ends the PROCESS (`abort` for a Gori::Error, a backtrace for
         # anything else) and the engine fibers die with it. `leave_project` / `quit!` are
         # the only exits that hand the terminal back with fibers still able to send.
+        #
+        # Only two kinds now reach here: a `Gori::Error` (a deliberate operator-facing abort)
+        # and a raise that tripped the tick breaker. Everything else is absorbed per tick by
+        # `absorb_tick_error`, precisely so one bad frame stops destroying the unsaved buffers
+        # and the held intercept queue this loop owns.
         #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
@@ -845,6 +871,35 @@ module Gori::Tui
     # Per-tick cap on coalesced printable-char events (a paste). Large enough that a
     # typical paste applies in one render tick; still bounds a pathological stream.
     CHAR_DRAIN_CAP = 65_536
+
+    # The tick-error circuit breaker: this many absorbed raises inside this window and the
+    # next one is re-raised instead. Absorbing forever would turn a persistently-broken
+    # render into an unusable, endlessly-toasting session that still refuses to exit — worse
+    # than the crash, because the operator cannot even read the error. Three in ten seconds
+    # is "the same tick is failing every frame" rather than "one hostile row went past".
+    TICK_ERROR_LIMIT  = 3
+    TICK_ERROR_WINDOW = 10.seconds
+
+    # Absorb one tick's raise: log the full trace, tell the operator where it went, and say
+    # whether the loop may continue. Returns false once the breaker trips, and the caller
+    # re-raises — which unwinds through `run`'s ensure and `App#run_tui`'s, so the terminal
+    # is handed back and the backtrace lands on the REAL stderr rather than in the alternate
+    # screen (#411). Nothing new is needed for that: it is the path a raise already took.
+    #
+    # The trace goes to <GORI_HOME>/gori.log, which `App#run_tui` binds before entering the
+    # alt screen, so logging here cannot garble the display it is reporting about.
+    private def absorb_tick_error(ex : Exception) : Bool
+      now = Time.instant
+      @tick_errors.reject! { |t| now - t > TICK_ERROR_WINDOW }
+      @tick_errors << now
+      ::Log.error(exception: ex) { "TUI tick raised (#{@tick_errors.size}/#{TICK_ERROR_LIMIT} in #{TICK_ERROR_WINDOW})" }
+      return false if @tick_errors.size >= TICK_ERROR_LIMIT
+      @toast = "recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})"
+      # The frame that raised is half-drawn, so force a full repaint rather than a cell diff
+      # against a screen state no complete render ever produced.
+      @resized = true
+      true
+    end
 
     # A plain printable char (a paste/typed character), as opposed to a nav/control
     # key. Coalesced generously in the input drain so a paste doesn't force a

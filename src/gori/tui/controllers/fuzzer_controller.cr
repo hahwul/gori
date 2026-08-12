@@ -1083,6 +1083,14 @@ module Gori::Tui
           end
           engine.stop if v.stop_requested?
         end
+      rescue ex
+        # An unrescued raise in a `spawn` block kills only this fiber and prints to STDERR,
+        # which under the TUI is the alternate screen (#411) — so a bug in run/calibrate used
+        # to garble the display AND leave the run looking merely stalled. The engine already
+        # reports its own setup/generation failures this way (Fuzz::Engine), so reuse that
+        # channel rather than inventing a second way to say the same thing.
+        ::Log.error(exception: ex) { "fuzz run fiber died" }
+        events.send({v, Fuzz::ErrorEvent.new(ex.message || "fuzz run error")})
       ensure
         v.finish_run # backstop — the drain's Done also clears it + shows the summary
       end
