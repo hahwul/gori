@@ -190,6 +190,7 @@ module Gori::Tui
       @sorted_cache_rev = -1_i64
       @sorted_cache_sort = :index
       @sorted_cache_matched = false
+      @sorted_cache_at = Time.instant # see SORT_REFRESH
       @progress = nil.as(Fuzz::Progress?)
       @run_total = nil.as(Int64?)
       @job_id = 0
@@ -1551,10 +1552,37 @@ module Gori::Tui
       sorted_results[@sel]?
     end
 
+    # How often the sorted view may be rebuilt WHILE A RUN IS STREAMING. See `sorted_results`.
+    SORT_REFRESH = 250.milliseconds
+
+    # The memo keys on @results_rev, which bumps on EVERY appended result, so during a live
+    # run it never hit and the rebuild below ran once per frame. Measured at RESULT_CAP (5000
+    # rows): sort_by(:status) 615µs / 2.54MB per call, sort_by(:length) 378µs / 2.54MB,
+    # matched-only select 49µs / 502kB — against a whole results-pane frame of ~239µs
+    # (bench/fuzz_view_frame_bench.cr). At 20 fps that is ~50 MB/s of garbage, and the
+    # allocation is the part that matters (AGENTS.md: allocation-shaped wins are real, CPU
+    # micro-optimisations usually are not).
+    #
+    # Throttled rather than maintained incrementally: results also RING-EVICT at RESULT_CAP,
+    # so keeping a sorted array correct means three mutation sites staying in sync — the same
+    # trade the matched_count note above declined. A sorted list of a streaming run
+    # re-ordering 20 times a second is unreadable anyway; four times is plenty.
+    #
+    # The throttle applies only when the view COPIES. With the default `:index` and no
+    # matched-only filter `rows` IS @results, so the cached array is the live one, new rows
+    # appear with no rebuild at all, and there is nothing to go stale. A shape change (the
+    # operator cycling the sort) misses the key outright and rebuilds on the next frame.
+    private def reusable_sorted_cache : Array(Fuzz::Result)?
+      c = @sorted_cache
+      return nil unless c && @sorted_cache_sort == @sort && @sorted_cache_matched == @matched_only
+      return c if @sorted_cache_rev == @results_rev
+      return c if @running && copies_results? && Time.instant - @sorted_cache_at < SORT_REFRESH
+      nil
+    end
+
     private def sorted_results : Array(Fuzz::Result)
-      if (c = @sorted_cache) && @sorted_cache_rev == @results_rev &&
-         @sorted_cache_sort == @sort && @sorted_cache_matched == @matched_only
-        return c
+      if cached = reusable_sorted_cache
+        return cached
       end
       rows = @matched_only ? @results.select(&.matched?) : @results
       sorted =
@@ -1569,7 +1597,15 @@ module Gori::Tui
       @sorted_cache_rev = @results_rev
       @sorted_cache_sort = @sort
       @sorted_cache_matched = @matched_only
+      @sorted_cache_at = Time.instant
       sorted
+    end
+
+    # Does the current view shape COPY @results, or hand it back as-is? `:index` with no
+    # matched-only filter is the identity, and an identity needs neither a rebuild nor a
+    # throttle — this is what keeps the default view perfectly live.
+    private def copies_results? : Bool
+      @sort != :index || @matched_only
     end
 
     # --- target editing ------------------------------------------------------

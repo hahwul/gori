@@ -16,6 +16,54 @@ private def loaded_fuzzer : FuzzerView
   view
 end
 
+describe "FuzzerView sorted-view throttle" do
+  # The memo keys on @results_rev, which bumps per appended result, so a live run rebuilt the
+  # sorted view on EVERY frame. Measured at RESULT_CAP: sort_by(:status) is 615µs and 2.54 MB
+  # per call, against a ~239µs whole frame — ~50 MB/s of garbage at 20 fps. Rebuilds are now
+  # capped at SORT_REFRESH while a run streams.
+  it "reuses the sorted view between rebuilds while a run is streaming" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    view.cycle_sort # :index -> :status, which is the shape that COPIES
+    view.append_result(fuzz_result(0, 500, 10))
+    view.selected_result.try(&.status).should eq(500) # builds and stamps the cache
+
+    # 200 sorts ahead of 500, so an unthrottled rebuild would surface it immediately.
+    view.append_result(fuzz_result(1, 200, 20))
+    view.selected_result.try(&.status).should eq(500)
+
+    # Ending the run drops the throttle: the next read rebuilds and the row appears.
+    view.finish_run
+    view.selected_result.try(&.status).should eq(200)
+  end
+
+  it "keeps the default index view perfectly live, with no throttle at all" do
+    # `:index` with no matched-only filter hands back @results ITSELF rather than a copy, so
+    # there is nothing to rebuild and nothing to go stale — the reason the throttle is gated
+    # on `copies_results?` instead of just on @running.
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    view.append_result(fuzz_result(0, 500, 10))
+    view.selected_result.try(&.status).should eq(500)
+    view.append_result(fuzz_result(1, 200, 20))
+    view.result_count.should eq(2)
+    view.selected_result.try(&.status).should eq(500) # index order: the first row is still row 0
+  end
+
+  it "rebuilds at once when the operator changes the sort mid-run" do
+    # The throttle must not swallow an OPERATOR action: a keypress that changes the view
+    # shape has to show its result on the next frame, not up to SORT_REFRESH later.
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    view.cycle_sort # :status
+    view.append_result(fuzz_result(0, 500, 10))
+    view.append_result(fuzz_result(1, 200, 20))
+    view.selected_result.try(&.status).should eq(200)
+    view.cycle_sort # :length — a different shape, so the cache key misses immediately
+    view.selected_result.try(&.length).should eq(10)
+  end
+end
+
 # A view with its RESULT detail open on a three-line response body — two marker words on
 # separate lines, so a hit-test that lands a row off is visible in what gets copied.
 private def detail_open_fuzzer : FuzzerView
