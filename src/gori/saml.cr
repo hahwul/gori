@@ -2,6 +2,7 @@ require "base64"
 require "compress/deflate"
 require "uri"
 require "./pretty"
+require "./entity"
 
 module Gori
   # Decodes the SAML message a flow carries. SAML travels base64-encoded (and, for
@@ -31,14 +32,26 @@ module Gori
       binding : Symbol,      # :post (base64) | :redirect (deflate+base64)
       location : Symbol,     # :body | :query | :response
       relay_state : String?, # the RelayState param (url-decoded) carried alongside, if any
-      xml : String           # decoded (+inflated) XML — raw, not yet pretty-printed
+      xml : String,          # decoded (+inflated) XML — raw, not yet pretty-printed
+      # The message was read out of a DECODED entity: the stored body was chunked or
+      # content-encoded (`Gori::Entity`). Display is then a projection of bytes the request
+      # does not literally carry, so the Repeater must not splice an edited assertion back
+      # into an envelope that still holds the wire form — see `RepeaterController#saml_request_doc`.
+      projected : Bool = false
 
     # Detect + decode the SAML message a flow carries, or nil if none. Priority:
     # request body (HTTP-POST binding) → request query (HTTP-Redirect binding) →
     # response body (an IdP auto-POST HTML form returning the SAMLResponse to the SP).
     def from_flow(target : String, req_head : Bytes?, req_body : Bytes?,
                   resp_head : Bytes?, resp_body : Bytes?) : Doc?
-      from_request(target, req_body) || from_response_html(resp_body)
+      # The ENTITIES, not the wire bodies. The response side is an IdP auto-POST HTML form —
+      # HTML is compressed in real traffic essentially always, so the whole SP-side half of a
+      # SAML flow was invisible; the request side goes the same way for a chunked POST.
+      req, req_projected = Entity.of(req_head, req_body, MAX_XML)
+      if doc = from_request(target, req)
+        return req_projected ? doc.copy_with(projected: true) : doc
+      end
+      from_response_html(Entity.bytes(resp_head, resp_body, MAX_XML))
     end
 
     # The request side: a form body (HTTP-POST) then the URL query (HTTP-Redirect).

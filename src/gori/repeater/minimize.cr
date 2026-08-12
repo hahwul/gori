@@ -1,5 +1,6 @@
 require "json"
 require "./engine"
+require "../media_type"
 require "../env"
 require "../fuzz/engine"
 require "../fuzz/matcher"
@@ -309,7 +310,12 @@ module Gori::Repeater
       # otherwise a deliberately-wrong CL (a smuggling/CL.TE probe) would be clobbered.
       if has_body && auto_cl && !body.empty?
         ct = (header_value(head_lines, "content-type") || "").downcase
-        if ct.includes?("application/json") || (ct.empty? && looks_json?(body))
+        # `MediaType.json?`, not `includes?("application/json")`: that substring is absent from
+        # every `+json` structured-syntax type — `application/graphql+json`,
+        # `application/vnd.api+json` — so the minimizer skipped the body of exactly the
+        # requests whose bodies are worth shrinking, and (the ct being non-empty) the
+        # `looks_json?` fallback never ran either.
+        if MediaType.json?(ct) || (ct.empty? && looks_json?(body))
           json_keys(body).each { |k| out << json_candidate(k) }
         elsif ct.includes?("x-www-form-urlencoded") || (ct.empty? && looks_form?(body))
           form_segments(body).each { |seg| out << form_candidate(seg) }

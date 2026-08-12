@@ -438,7 +438,11 @@ module Gori::Tui
     private def saml_request_doc(detail : Store::FlowDetail) : Saml::Doc?
       doc = Saml.from_flow(detail.row.target, detail.request_head, detail.request_body,
         detail.response_head, detail.response_body)
-      doc if doc && doc.location != :response
+      # `projected` too: a chunked / content-encoded body decodes for DISPLAY, but the
+      # envelope this tab would edit still holds the wire form, so splicing a re-encoded
+      # assertion into it produces a request the origin cannot read. Read-only pane, ordinary
+      # raw tab — the same call `Graphql::Op#editable?` makes.
+      doc if doc && doc.location != :response && !doc.projected
     end
 
     # The GraphQL operation a request carries (POST JSON body or GET ?query=), or nil —
@@ -467,6 +471,10 @@ module Gori::Tui
       op = Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
       return nil if op.nil? || op.editable?
       return "graphql: parse failed (#{op.note}) — sending the bytes as captured · " if op.form.invalid?
+      # `projected` first: naming the FORM would say "graphql json", which reads as "gori has
+      # no editor for a JSON envelope" — the true reason is that the pane is a decode of a body
+      # the envelope still carries compressed or chunked.
+      return "graphql #{op.form.to_s.downcase} (decoded from the chunked/compressed body — read-only) · " if op.projected
       "graphql #{op.form.to_s.downcase}: no faithful re-encode, sending the bytes as captured · "
     end
 

@@ -243,6 +243,28 @@ describe Gori::Repeater::Minimize do
     report.removed.map(&.label).should contain("drop")
   end
 
+  # The gate was `ct.includes?("application/json")`, and that substring is absent from every
+  # `+json` structured-syntax type — `application/graphql+json`, `application/vnd.api+json`.
+  # The content-type being non-empty, the `looks_json?` fallback did not run either, so the
+  # minimizer silently skipped the body of exactly the requests worth shrinking.
+  it "minimizes a body under a `+json` structured-syntax content-type" do
+    text = [
+      "POST /j HTTP/1.1",
+      "Host: h",
+      "X-Keep: yes",
+      "Cookie: sid=abc123",
+      "Content-Type: application/graphql+json; charset=utf-8",
+      "Content-Length: 19",
+      "",
+      %({"keep":1,"drop":2}),
+    ].join("\n")
+
+    report = minimize(JsonOrigin.new, text, auto_cl: true)
+    report.aborted.should be_false
+    report.removed.map(&.label).should contain("drop")
+    report.minimized_text.should contain(%("keep":1))
+  end
+
   it "byte-splices a JSON key without re-encoding: dup keys, `\\/`, and `1.50` survive verbatim" do
     # The old `JSON.parse(body).to_json` candidate canonicalized the operator's authored bytes
     # (collapsed the duplicate `dup`, unescaped `\/`→`/`, reformatted `1.50`→`1.5`) in BOTH the

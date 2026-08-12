@@ -1,6 +1,7 @@
 require "json"
 require "uri"
 require "./media_type"
+require "./entity"
 
 module Gori
   # Parses the GraphQL operation a flow carries — a POST JSON body
@@ -53,10 +54,17 @@ module Gori
       # "not GraphQL" is byte-identical to the answer for an ordinary REST call, and the
       # request most worth looking at is the malformed one. Same treatment gRPC got for a
       # framing failure.
-      note : String? = nil do
+      note : String? = nil,
+      # The op was read out of a DECODED entity — the stored body was chunked or content-
+      # encoded (`Gori::Entity`). The pane is then a projection of bytes the request does not
+      # literally carry, so it is display-only however invertible its shape is: recomposing
+      # plain JSON into an envelope whose head still declares `Content-Encoding: gzip` sends a
+      # request the origin cannot read.
+      projected : Bool = false do
       # Whether `display(op)` → edit → `recompose` can put the operator's edit back into the
-      # exact request it came from. True ONLY for the three shapes that round-trip: a plain
-      # POST JSON body, a GET `?query=`, and a `query=…` urlencoded body.
+      # exact request it came from. True ONLY for the three shapes that round-trip — a plain
+      # POST JSON body, a GET `?query=`, a `query=…` urlencoded body — and only when the bytes
+      # shown are the bytes sent (see `projected`).
       #
       # For the rest the display text is a rendering, not an inverse — re-encoding a batch
       # from it would collapse the array into one object, a persisted query has no document
@@ -64,7 +72,7 @@ module Gori
       # a request the operator did not write is worse than showing a read-only pane, so the
       # projection exists and the re-encode does not.
       def editable? : Bool
-        form.json? || form.query? || form.urlencoded?
+        !projected && (form.json? || form.query? || form.urlencoded?)
       end
     end
 
@@ -80,19 +88,24 @@ module Gori
     # what the fallback was written for.
     def from_flow(target : String, req_head : Bytes?, req_body : Bytes?) : Op?
       ct = MediaType.of(req_head)
-      if (b = req_body) && !b.empty?
+      # The ENTITY, not the wire body: a gzip'd or chunked GraphQL POST is still a GraphQL
+      # POST, and reading the wire form found neither an envelope nor a reason — the pane
+      # simply was not offered, which is the answer an ordinary REST call gets. `projected`
+      # then keeps the re-encode off bytes the envelope still holds compressed.
+      entity, projected = Entity.of(req_head, req_body, MAX_BODY)
+      if (b = entity) && !b.empty?
         if b.size <= MAX_BODY
           if op = from_body(b, ct)
-            return op
+            return projected ? op.copy_with(projected: true) : op
           end
         end
         # It did not parse. If the request is GraphQL-CARRYING by its Content-Type or by the
         # shape of its body, report the failure instead of deleting the view.
         if reason = unparsed_reason(b, ct)
-          return Op.new(nil, "", nil, Form::Invalid, reason)
+          return Op.new(nil, "", nil, Form::Invalid, reason, projected)
         end
       end
-      return nil if (b = req_body) && !b.empty? && body_bearing?(req_head)
+      return nil if (b = entity) && !b.empty? && body_bearing?(req_head)
       from_query(target)
     end
 
@@ -517,8 +530,13 @@ module Gori
     # whose payload is in the body. Either one sends a request the operator never wrote, on
     # the strength of a projection.
     def location(req_body : Bytes?, req_head : Bytes? = nil) : Symbol
-      op = ((b = req_body) && !b.empty? && b.size <= MAX_BODY) ? from_body(b, MediaType.of(req_head)) : nil
+      entity, projected = Entity.of(req_head, req_body, MAX_BODY)
+      op = ((b = entity) && !b.empty? && b.size <= MAX_BODY) ? from_body(b, MediaType.of(req_head)) : nil
       return :query unless op # no body op at all — the GET `?query=` binding
+      # A decoded entity is a projection (see `Op#projected`): the envelope holds the wire
+      # bytes, so there is no side to write an edit back into. Second gate for the same
+      # decision `editable?` makes, because `refresh_decoded` can move a tab onto one.
+      return :none if projected
       case op.form
       when .json?       then :body
       when .urlencoded? then :form_body
