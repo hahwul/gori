@@ -74,7 +74,7 @@ module Gori::Tui
       # Cached syntax-highlight overlay (1:1 with @lines), rebuilt only when the
       # buffer content changes — not on every render frame. @styled_kind tracks
       # which highlight symbol it was built for.
-      @styled = nil.as(Array(Highlight::Line)?)
+      @styled = nil.as(Highlight::Windowed?)
       @styled_kind = nil.as(Symbol?)
       @styled_rev = Theme.revision
       @styled_env_rev = Env.highlight_rev
@@ -1350,7 +1350,7 @@ module Gori::Tui
           # from spans instead. (Unwrapped editors keep the legacy order below, where a
           # highlighted line wins and the preedit shows only through the caret glyph.)
           Highlight.draw(screen, cx0, rect.y + i, preedit_spans(line, a, b), width: cw)
-        elsif styled && (sl = styled[li]?)
+        elsif styled && li < styled.total && (sl = styled.line_at(li))
           Highlight.draw(screen, cx0, rect.y + i, Highlight.slice_chars(sl, a, b), width: cw)
         else
           if composing
@@ -1971,14 +1971,38 @@ module Gori::Tui
 
     # The highlight overlay for `kind` (:request/:response), cached until the
     # buffer content changes — so a held editor isn't re-tokenised 20×/sec.
-    private def highlighted(kind : Symbol) : Array(Highlight::Line)
+    # WINDOWED: the head is styled eagerly, the body kept raw and styled per VISIBLE line.
+    #
+    # This used to hand back a fully-styled array, and every mutation nils the memo — so each
+    # typed character re-tokenised the whole buffer, twice for a request (`from_lines` maps
+    # the lines, then maps them again through `with_env_tokens`). Measured on
+    # bench/text_area_keystroke_bench.cr, per keystroke including the frame:
+    #
+    #     1 KB /    31 lines   0.039 ms
+    #    64 KB / 1,644 lines   1.04  ms
+    #   512 KB / 13,113 lines  5.53  ms
+    #
+    # i.e. linear in buffer size on the path an operator holds a key down in (Repeater,
+    # Fuzzer, Intercept, Rewriter, JWT). Windowed, it is linear in the ~40 rows on screen.
+    #
+    # Markdown stays eager and is wrapped: its syntax spans lines (a fenced block opened
+    # above the viewport changes how the visible ones read), so styling a window of it in
+    # isolation would be wrong rather than merely slower.
+    private def highlighted(kind : Symbol) : Highlight::Windowed
       cached = @styled
       env_rev = Env.highlight_rev
       return cached if cached && @styled_kind == kind && @styled_rev == Theme.revision && @styled_env_rev == env_rev
       @styled_kind = kind
       @styled_rev = Theme.revision
       @styled_env_rev = env_rev
-      @styled = kind == :markdown ? Highlight.markdown(@lines) : Highlight.from_lines(@lines, kind == :request, literal: @env_literal_names)
+      @styled =
+        if kind == :markdown
+          Highlight.eager_window(Highlight.markdown(@lines))
+        else
+          request = kind == :request
+          Highlight.from_lines_windowed(@lines, request,
+            env_tokens: request, literal: @env_literal_names)
+        end
     end
 
     private def ensure_visible(h : Int32) : Nil
@@ -2044,11 +2068,11 @@ module Gori::Tui
     # The conceal ranges are re-based onto the row before `Highlight.conceal` sees them:
     # that function indexes the LINE it is given, and the line it is given here is the row.
     private def draw_concealed_line(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
-                                    line : String, styled : Array(Highlight::Line)?,
+                                    line : String, styled : Highlight::Windowed?,
                                     cr : Array({Int32, Int32}), cw : Int32,
                                     a : Int32 = 0, b : Int32 = -1) : Nil
       b = line.size if b < 0
-      base = Highlight.slice_chars((styled && styled[li]?) || [Highlight::Span.new(line, Theme.text)], a, b)
+      base = Highlight.slice_chars((styled && li < styled.total ? styled.line_at(li) : nil) || [Highlight::Span.new(line, Theme.text)], a, b)
       local = a == 0 ? cr : cr.compact_map do |(ra, rb)|
         lo = {ra, a}.max - a
         hi = {rb, b}.min - a
@@ -2063,10 +2087,10 @@ module Gori::Tui
     # the line by @xscroll display columns so the caret's neighbourhood is visible,
     # then reuse the normal drawers (which handle right truncation + the … ellipsis).
     private def draw_scrolled(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
-                              line : String, styled : Array(Highlight::Line)?, cw : Int32) : Nil
+                              line : String, styled : Highlight::Windowed?, cw : Int32) : Nil
       if @reveal
         Highlight.draw(screen, cx0, y, Highlight.slice_left(Reveal.styled(line, false, cw + @xscroll), @xscroll), width: cw)
-      elsif styled && (sl = styled[li]?)
+      elsif styled && li < styled.total && (sl = styled.line_at(li))
         Highlight.draw(screen, cx0, y, Highlight.slice_left(sl, @xscroll), width: cw)
       elsif li == @cy && !@preedit.empty?
         cx = @cx.clamp(0, line.size)

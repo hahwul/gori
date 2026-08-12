@@ -765,3 +765,56 @@ describe Gori::Tui::Highlight do
     end
   end
 end
+
+# The editor (Repeater/Fuzzer/Intercept/Rewriter) moved from styling the WHOLE buffer on
+# every keystroke to styling only the visible rows — measured on
+# bench/text_area_keystroke_bench.cr at 5.53 ms -> 0.098 ms per keystroke on a 512 KB
+# buffer. That is a rendering change, so the gate is that it paints the SAME thing: the
+# windowed path must agree with the eager one line for line, span for span, colour for
+# colour, including the `$KEY` overlay a request gets.
+describe "Highlight.from_lines_windowed vs from_lines" do
+  fixtures = {
+    "json request with an env token" => {
+      ["POST /api/$VER/items HTTP/1.1", "Host: h", "Content-Type: application/json", "",
+       %({"a": 1, "b": "$TOKEN", "c": [true, null]}), %({"tail": "x"})],
+      true,
+    },
+    "response with an html body" => {
+      ["HTTP/1.1 200 OK", "Content-Type: text/html", "", "<b>hi</b>", "<i>there</i>"],
+      false,
+    },
+    "head only, no separator" => {
+      ["GET /x HTTP/1.1", "Host: h"],
+      true,
+    },
+    "separator but empty body" => {
+      ["GET /x HTTP/1.1", "Host: h", ""],
+      true,
+    },
+  }
+
+  fixtures.each do |name, (src, request)|
+    it "agrees with the eager path on #{name}" do
+      literal = Set{"VER"} # one name the buffer ships literally, so the overlay has both cases
+      eager = Highlight.from_lines(src, request, literal: literal)
+      win = Highlight.from_lines_windowed(src, request, env_tokens: request, literal: literal)
+
+      win.total.should eq(eager.size)
+      eager.each_with_index do |line, i|
+        got = win.line_at(i)
+        got.map(&.text).should eq(line.map(&.text)), "text differs on line #{i} of #{name}"
+        got.map(&.fg).should eq(line.map(&.fg)), "colour differs on line #{i} of #{name}"
+        got.map(&.attr).should eq(line.map(&.attr)), "attr differs on line #{i} of #{name}"
+      end
+    end
+  end
+
+  it "leaves the env overlay OFF for the read-only windowed callers" do
+    # `env_tokens` is opt-in rather than derived from `request`, so Intercept's held-bytes
+    # view keeps rendering exactly as it did before the editor started sharing this path.
+    src = ["POST /api/$VER/x HTTP/1.1", "Host: h", "", "body $TOKEN"]
+    plain = Highlight.from_lines_windowed(src, true)
+    overlaid = Highlight.from_lines_windowed(src, true, env_tokens: true)
+    plain.line_at(0).map(&.fg).should_not eq(overlaid.line_at(0).map(&.fg))
+  end
+end

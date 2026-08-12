@@ -128,15 +128,26 @@ module Gori::Tui
     # off-screen lines, and never allocates a String per off-screen line on open.
     # `head` includes the blank head/body separator, so the styled output is
     # `head ++ body.map { body_styled }` — identical to `message`.
-    record Windowed, head : Array(Line), body : BodyLines, kind : Symbol do
+    # `env_tokens` applies the `$KEY` overlay per line, the way `from_lines` applies it to the
+    # whole array for a request. It is opt-IN rather than derived from `request`, so the
+    # read-only windowed callers that never had the overlay keep rendering exactly as they do.
+    record Windowed, head : Array(Line), body : BodyLines, kind : Symbol,
+      env_tokens : Bool = false, literal : Set(String)? = nil do
       def total : Int32
         head.size + body.size
       end
 
       # The styled line at absolute index `i` (head pre-styled, body styled lazily).
       def line_at(i : Int32) : Line
-        i < head.size ? head[i] : Highlight.body_styled(body[i - head.size], kind)
+        line = i < head.size ? head[i] : Highlight.body_styled(body[i - head.size], kind)
+        env_tokens ? Highlight.with_env_tokens(line, literal) : line
       end
+    end
+
+    # Wrap an already-styled array so a caller that must style eagerly (markdown, whose
+    # syntax spans lines) can hand back the same type as the windowed paths.
+    def self.eager_window(lines : Array(Line)) : Windowed
+      Windowed.new(lines, BodyLines.empty, :text)
     end
 
     # `kind` overrides the content-type-derived styling (used by Pretty when its
@@ -269,19 +280,20 @@ module Gori::Tui
     # held bytes): the head (start line + headers + the blank separator) is styled
     # eagerly, the body kept RAW + styled per visible line — so a multi-MiB held
     # body doesn't freeze the UI on selection.
-    def self.from_lines_windowed(all : Array(String), request : Bool) : Windowed
+    def self.from_lines_windowed(all : Array(String), request : Bool,
+                                 env_tokens : Bool = false, literal : Set(String)? = nil) : Windowed
       sep = all.index("")
       kind = body_kind(content_type_in(all))
       if sep.nil?
         head = all.map_with_index { |raw, i| i == 0 ? start_line(raw, request) : header_line(raw) }
-        return Windowed.new(head, BodyLines.empty, kind)
+        return Windowed.new(head, BodyLines.empty, kind, env_tokens, literal)
       end
       head = [] of Line
       all.each_with_index do |raw, i|
         break if i > sep
         head << (i == 0 ? start_line(raw, request) : (i == sep ? blank : header_line(raw)))
       end
-      Windowed.new(head, BodyLines.from_array(all[(sep + 1)..]), kind)
+      Windowed.new(head, BodyLines.from_array(all[(sep + 1)..]), kind, env_tokens, literal)
     end
 
     # --- Markdown (Notes / Project description) ------------------------------
