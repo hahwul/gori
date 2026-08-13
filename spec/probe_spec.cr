@@ -2530,9 +2530,56 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       hit = dets.find { |d| d.code == "secret_in_ws" }.not_nil!
       hit.evidence.should eq("AWS access key id")
       hit.evidence.not_nil!.should_not contain(secret)
-      # binary frames are ignored
-      bin = [Gori::Store::WsMessage.new(2_i64, detail.row.id, nil, 1_i64, "in", 2, secret.to_slice)]
-      Gori::Probe::Passive.analyze(detail, bin).map(&.code).should_not contain("secret_in_ws")
+    end
+  end
+
+  # Binary frames used to be skipped, and a spec asserted that without recording why. protobuf /
+  # msgpack / CBOR over WebSocket is the mainstream encoding for realtime APIs and a token rides
+  # in such a frame as an ordinary ASCII string field, so skipping them was a plain false negative
+  # on the transport this rule exists for. No deframing is involved: the patterns are ASCII vendor
+  # prefixes, and the projection maps every non-printable byte to a space.
+  it "flags a secret embedded in a BINARY WebSocket frame" do
+    with_store do |store|
+      head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      secret = "AKIAIOSFODNN7EXAMPLE"
+      # A protobuf-ish frame: field tags and lengths around an ASCII string field.
+      payload = Bytes.new(secret.bytesize + 6)
+      payload[0] = 0x0a_u8; payload[1] = secret.bytesize.to_u8
+      secret.to_slice.copy_to(payload.to_unsafe + 2, secret.bytesize)
+      payload[secret.bytesize + 2] = 0x10_u8
+      payload[secret.bytesize + 3] = 0xff_u8 # invalid UTF-8, so the text path would have mangled it
+      payload[secret.bytesize + 4] = 0x00_u8
+      payload[secret.bytesize + 5] = 0x80_u8
+      bin = [Gori::Store::WsMessage.new(2_i64, detail.row.id, nil, 1_i64, "in", 2, payload)]
+      hit = Gori::Probe::Passive.analyze(detail, bin).find { |d| d.code == "secret_in_ws" }.not_nil!
+      hit.evidence.should eq("AWS access key id")
+      hit.evidence.not_nil!.should_not contain(secret)
+    end
+  end
+
+  it "does not scan control frames or gori's own advisory rows" do
+    with_store do |store|
+      head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      secret = "AKIAIOSFODNN7EXAMPLE"
+      # opcode 8 = close: a control frame carries no application payload.
+      close = [Gori::Store::WsMessage.new(3_i64, detail.row.id, nil, 1_i64, "in", 8, secret.to_slice)]
+      Gori::Probe::Passive.analyze(detail, close).map(&.code).should_not contain("secret_in_ws")
+    end
+  end
+
+  it "finds nothing in a binary frame that carries no credential shape" do
+    with_store do |store|
+      head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      noise = Bytes.new(4096) { |i| ((i * 37) % 256).to_u8 }
+      Gori::Probe::Passive.analyze(detail, [
+        Gori::Store::WsMessage.new(4_i64, detail.row.id, nil, 1_i64, "in", 2, noise),
+      ]).map(&.code).should_not contain("secret_in_ws")
     end
   end
 
