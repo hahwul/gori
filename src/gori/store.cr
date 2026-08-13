@@ -249,6 +249,17 @@ module Gori
       # catches exactly this), and copying just the `.db` loses the tail. gori's close path
       # depends on the pool closing every connection to get SQLite's last-connection
       # checkpoint, and that only holds at 1. Raise this only with that fixed first.
+      # MEASURED, so nobody re-proposes it: a COVERING INDEX over every column `SELECT_ROW`
+      # reads was tried on top of this and reverted. It is genuinely used (EXPLAIN QUERY PLAN
+      # says `SCAN flows USING COVERING INDEX`), but on the worst case it exists for — a filter
+      # matching almost nothing, so SQLite cannot stop early — it bought 7.5 ms -> 6.5 ms at
+      # 100k rows with 8 KB bodies, for 3% off sustained INSERT throughput and ~20 MB per 100k
+      # rows. The reason it pays so little is the line below: with a 64 MiB page cache the
+      # table pages are already resident, so the overflow-chain traversal the index was meant
+      # to avoid is not what the query was spending its time on. The two genuinely slow filters
+      # (`header:` 164 ms, `body:` LIKE 452 ms) scan the BLOBs themselves and no projection
+      # index can touch them.
+      #
       # `max_pool_size` is bounded BECAUSE of `cache_size`: crystal-db's default is unlimited,
       # and 64 MiB is a per-CONNECTION ceiling, so N concurrent readers (the TUI render fiber,
       # the writer, the probe passive and catch-up fibers, a second `gori mcp` process) could
