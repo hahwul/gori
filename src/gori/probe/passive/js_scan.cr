@@ -49,7 +49,16 @@ module Gori
           {/\bhistory\.state\b/, "history.state"},
           {/\b(?:e|ev|evt|event|msg|message)\.data\b/, "postMessage data"},
           {/\b(?:localStorage|sessionStorage)\.getItem\b/, "web storage"},
-          {/\bURLSearchParams\b/, "URLSearchParams"},
+          # No `URLSearchParams` entry, deliberately. It was here and it is DOMINATED: the
+          # source↔sink window is bounded by BOUNDS (';' '{' '}' '\n'), so a constructor in an
+          # earlier statement was never reachable, and every in-statement TAINTED construction
+          # already carries its own listed source — `new URLSearchParams(location.search)`,
+          # `(window.location.search)`, `(location.hash.slice(1))` all match location.search /
+          # location.hash right beside it. There is no one-liner where the bare identifier is the
+          # only source token AND the flow is tainted, so it contributed zero unique findings.
+          # What it did contribute is a false pair on ordinary SPA code:
+          # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
+          # navigation — reported as DOM-XSS against the `location assignment` sink below.
         ] of {Regex, String}
 
         # HTML/JS execution sinks. Each keys on a distinctive identifier so PCRE's first-byte
@@ -65,7 +74,10 @@ module Gori
           {/\bnew\s+Function\s*\(/, "Function"},
           {/\bset(?:Timeout|Interval)\s*\(/, "setTimeout/setInterval"},
           {/\bdangerouslySetInnerHTML\b/, "dangerouslySetInnerHTML"},
-          {/\.html\s*\(/, "jQuery.html()"},
+          # `(?!\))` keeps the ARGUMENT-LESS form out: `$(el).html()` READS the markup, it does not
+          # write it — the same distinction the `(?!=)` guards above draw between `=` and `==`.
+          # `\s*` before it so a newline-wrapped argument still counts as a sink.
+          {/\.html\s*\(\s*(?!\))/, "jQuery.html()"},
           # Navigation sinks. A tainted navigation target is how `javascript:`-URL XSS and
           # client-side open redirect both land, and neither is reachable through the HTML/eval
           # sinks above. The bare-`location` form deliberately also matches `document.location =`

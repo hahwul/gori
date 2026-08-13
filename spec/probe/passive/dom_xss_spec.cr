@@ -157,6 +157,23 @@ describe Gori::Probe::Passive::DomXss do
         dom(store, body: html_script("if (el.innerHTML == location.hash) { warn() }")).should be_empty
       end
     end
+
+    it "does not flag an argument-less .html() (a getter, not a sink)" do
+      with_store do |store|
+        # `$(el).html()` READS markup. The sink needs something written INTO it, which is what
+        # the (?!\)) guard asks for — the same read-vs-write distinction as innerHTML's (?!=).
+        dom(store, body: html_script("var cur = location.hash + $('#out').html()")).should be_empty
+      end
+    end
+
+    it "does not flag a URLSearchParams built from untainted input" do
+      with_store do |store|
+        # `URLSearchParams` was a source in its own right, so this benign, extremely common line
+        # paired it with the `location assignment` sink. The identifier says nothing about where
+        # the data came from; a genuinely tainted construction names its own source instead.
+        dom(store, body: html_script("location.href = \"/x?\" + new URLSearchParams(form)")).should be_empty
+      end
+    end
   end
 
   # (5) source/sink only inside a string or comment does NOT flag (client_code is stripped).
