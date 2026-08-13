@@ -64,8 +64,13 @@ module Gori
       NO_DISABLED = Set(String).new
       NO_CUSTOM   = [] of CustomRule
 
-      # `disabled` holds RuleInfo#id values the operator switched off in the Rules sub-tab (skipped
-      # here); `custom` are the merged global+project user match rules, run after the built-ins.
+      # `disabled` records the operator's DEVIATION FROM DEFAULT, not a plain "off" list, so it is
+      # read through `Probe.rule_disabled?` — the same helper the active path, the analyzer and the
+      # headless scan use. A bare `disabled.includes?` was correct only by accident: membership
+      # FLIPS meaning for `DEFAULT_DISABLED_RULES` ids, and today every one of those is an ACTIVE
+      # rule, so no passive rule reached the branch where the two disagree. The first default-OFF
+      # passive rule would have shipped silently dead for the operator who enabled it.
+      # `custom` are the merged global+project user match rules, run after the built-ins.
       # A SHORT-CIRCUITED flow is refused outright (#511): gori wrote that response itself from
       # a Match&Replace stub, so every passive rule here would be reading the operator's own
       # bytes and reporting them as a property of the target. That is the `probe-rule-fp-review`
@@ -79,7 +84,7 @@ module Gori
         return [] of Detection if detail.row.short_circuited?
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
-        RULES.each { |r| r.check(ctx, acc) unless disabled.includes?(r.info.id) }
+        RULES.each { |r| r.check(ctx, acc) unless Probe.rule_disabled?(r.info.id, disabled) }
         custom.each(&.check(ctx, acc))
         acc
       end
@@ -92,7 +97,7 @@ module Gori
         return [] of Detection if ws_messages.empty? || detail.row.short_circuited?
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
-        WS_RULES.each { |r| r.check(ctx, acc) unless disabled.includes?(r.info.id) }
+        WS_RULES.each { |r| r.check(ctx, acc) unless Probe.rule_disabled?(r.info.id, disabled) }
         acc
       end
     end

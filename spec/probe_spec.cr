@@ -1969,6 +1969,31 @@ describe "Gori::Probe::Active::NextjsActionNoAuth" do
     end
   end
 
+  # `Http1.parse_headers` builds a header VALUE with a bare `String.new`, so a non-UTF-8 byte in a
+  # probe response's Location made `LOGIN_PATH.matches?` raise. That raise was caught by
+  # `detections`' method-level rescue, which returns NO detections — so the whole rule went silent
+  # on that host rather than crashing. Both directions are pinned: the suppression still works, and
+  # a genuine bypass is still reported.
+  it "still judges a redirect target carrying a non-UTF-8 byte" do
+    with_store do |store|
+      flow = action_flow.call(store, action_headers, 200, priv)
+      plan = probe.plan(flow, unsafe).not_nil!
+
+      # An auth route with a stray byte → control still held, still suppressed.
+      bad_login = Gori::Repeater::Result.new(
+        "HTTP/1.1 200 OK\r\nLocation: /auth/\xFFx\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64)
+      probe.detections(plan, bad_login, flow).should be_empty
+
+      # A non-auth Location with a stray byte → nothing suppresses, the bypass is reported.
+      # This is the case that produced no detection at all before the scrub.
+      bad_other = Gori::Repeater::Result.new(
+        "HTTP/1.1 200 OK\r\nLocation: /assets/\xFF.bin\r\n\r\n".to_slice, priv.to_slice, nil, 1_i64)
+      dets = probe.detections(plan, bad_other, flow)
+      dets.size.should eq(1)
+      dets.first.code.should eq("nextjs_action_no_auth")
+    end
+  end
+
   it "does not flag when the authenticated baseline had no body to compare against" do
     with_store do |store|
       # An empty-bodied 200 (or a 204) authenticated action: there is no privileged payload to
@@ -4055,6 +4080,29 @@ describe "Gori::Probe::Scan rules config parity" do
       after = Gori::Probe::Scan.scan_flows(store, ids, active: false)
       after.count { |d| d.code == "secret_in_url" }.should eq(0)
     end
+  end
+
+  # `probe_disabled_rules` stores the operator's DEVIATION FROM DEFAULT, so membership FLIPS
+  # meaning for `DEFAULT_DISABLED_RULES` ids — which is why `Probe.rule_disabled?` exists and why
+  # issue.cr claims the flip lives in exactly ONE place. `Passive.analyze` and `analyze_ws` had
+  # drifted to a bare `disabled.includes?`. It was inert only because every default-OFF id today is
+  # an ACTIVE rule, so no passive rule ever reached the branch where the two disagree; the first
+  # default-OFF passive rule would have shipped silently dead for the operator who enabled it.
+  #
+  # No behavioural spec can pin this while `DEFAULT_DISABLED_RULES` has no passive member, so the
+  # pin is structural — the same shape as spec/tui/color_semantics_spec.cr, which re-derives a rule
+  # by grepping source rather than by exercising a case that does not exist yet.
+  it "gates every probe rule through Probe.rule_disabled?, never a bare set lookup" do
+    root = File.join(__DIR__, "..", "src", "gori", "probe")
+    offenders = [] of String
+    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+      File.read(path).lines.each_with_index do |line, i|
+        next if line.lstrip.starts_with?('#') # a comment may name the old shape; code may not
+        next unless line.matches?(/\bdisabled\.includes\?\(/)
+        offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
+      end
+    end
+    offenders.should be_empty
   end
 
   it "runs the operator's custom match rules in a headless passive scan" do

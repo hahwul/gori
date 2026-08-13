@@ -170,9 +170,16 @@ module Gori
         # calls redirect() (X-Action-Redirect, delivered on a 2xx), and a plain Location, against a
         # login/auth path pattern. Only the redirect TARGET is inspected (a header, not the body),
         # so a privileged payload that merely links to /login can't over-suppress a real finding.
+        #
+        # scrub: `Http1.parse_headers` builds a header VALUE with a bare `String.new` (no scrub),
+        # so a non-UTF-8 byte in a probe response's Location makes the PCRE raise — and here that
+        # raise is swallowed by `detections`' method-level rescue, which returns no detections at
+        # all. The failure is therefore not a crash but this whole rule going SILENT on that host.
+        # The sibling test below (AUTH_FAIL) already scrubs; LOGIN_PATH is ASCII, so this is
+        # lossless. (cf. cors.cr)
         private def control_redirected?(resp : Proxy::Codec::RawResponse) : Bool
           {resp.headers.get?("X-Action-Redirect"), resp.headers.get?("Location")}.any? do |v|
-            v && LOGIN_PATH.matches?(v)
+            v && LOGIN_PATH.matches?(v.scrub)
           end
         end
 
