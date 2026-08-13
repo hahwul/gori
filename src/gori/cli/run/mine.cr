@@ -221,6 +221,11 @@ module Gori
         end
         findings = [] of Miner::Finding
         had_error = false
+        # `--format json` buffers every finding and prints once after the drain, so a bare
+        # SIGINT threw the whole mine away. Stopping the engine makes `engine.run` return
+        # normally and the emit below covers the interrupted path too.
+        interrupted = Run.install_interrupt_trap("mine-interrupt",
+          "interrupted — stopping and emitting what was found…") { engine.stop }
         engine.run do |ev|
           case ev
           when Miner::BaselineEvent then mine_baseline(ev)
@@ -231,6 +236,8 @@ module Gori
           end
         end
         puts CLI::Output.mine_array_json(findings) if format == :json
+        # Before `mine_all_refused?` — see `Run.report_interrupted` for why the order matters.
+        Run.report_interrupted(findings.size, "finding", "emitted") if interrupted.call
         exit 1 if had_error
         exit 1 if mine_all_refused?(engine, findings.size)
       end

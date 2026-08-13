@@ -247,6 +247,11 @@ module Gori
         had_error = false
         subject = Sequencer::Present::Subject.new(
           descriptor: loc.label, origin: "#{scheme}://#{host}:#{port}", mode: "live replay")
+        # A collection can run for a long time and the report is only emitted after the drain,
+        # so a bare SIGINT discarded every token collected so far. Stopping the engine makes
+        # `engine.run` return normally and the report below covers the interrupted path too.
+        interrupted = Run.install_interrupt_trap("sequence-interrupt",
+          "interrupted — stopping and reporting on what was collected…") { engine.stop }
         engine.run do |ev|
           case ev
           when Sequencer::SampleEvent
@@ -259,6 +264,8 @@ module Gori
           end
         end
         emit_sequence_report(Sequencer::Stats.analyze(tokens), format, subject)
+        # Before the all-refused check below — see `Run.report_interrupted`.
+        Run.report_interrupted(tokens.size, "token", "collected") if interrupted.call
         exit 1 if had_error
         # Collecting NO token because every replay was refused is a failure, not a clean
         # "0 collected" — `had_error` only fires on an orchestration raise. Gated on

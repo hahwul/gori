@@ -278,6 +278,11 @@ module Gori
         shown = 0
         had_error = false
         buffer = [] of Fuzz::Result
+        # `--format json` buffers every row and prints once after the drain, so a bare SIGINT
+        # threw the whole sweep away. Stopping the engine instead makes `engine.run` return
+        # normally, and the emit below then covers the interrupted path too.
+        interrupted = Run.install_interrupt_trap("fuzz-interrupt",
+          "interrupted — stopping and emitting what completed…") { engine.stop }
         engine.run do |ev|
           case ev
           when Fuzz::ProgressEvent then fuzz_progress(ev, total)
@@ -293,6 +298,9 @@ module Gori
           end
         end
         puts CLI::Output.fuzz_array_json(buffer) if format == :json
+        # Before the exit rules below, which would otherwise report a cut-short run as a plain
+        # "no matches". See `Run.report_interrupted`.
+        Run.report_interrupted(shown, "row", "emitted") if interrupted.call
         exit 1 if had_error
         exit 3 if fail_if_no_matches && matched == 0
         # A run where NOTHING matched and every send errored (target down, scope-blocked, TLS
