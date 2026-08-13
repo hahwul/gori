@@ -186,6 +186,19 @@ module Gori
     RETENTION_UNLIMITED = 0
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
+
+    # Newest `events` rows kept. This is the ONE table in the schema with no cleanup path at
+    # all: `oast_callbacks` and `fuzz_runs` are deleted with their session, `intercept_commands`
+    # is wiped by `clear_intercept_state!` at every capture start, and `flows` has retention —
+    # events were only ever inserted. Fourteen call sites write them (job lifecycle, agent
+    # actions, binding warnings), so a long-lived project accumulates them for as long as it
+    # is used, and nothing ever gave the rows back.
+    #
+    # A COUNT rather than an age: the reader is a forward cursor
+    # (`events_after(since_id, limit)`), so what an agent tailing the feed needs is that recent
+    # rows are still there, not that any particular day is. 50k is far past what any session
+    # produces — these are lifecycle rows, not per-request — and keeps the table at a few MB.
+    EVENTS_RETENTION = 50_000
     # Ids per statement when a batch write binds an `IN (?,?,…)` list. SQLite caps bound
     # parameters at SQLITE_MAX_VARIABLE_NUMBER, which is 999 on anything built before 3.32 —
     # so a set larger than that does not merely run slower, the statement RAISES and the whole
@@ -394,6 +407,7 @@ module Gori
                    @probe_events : Channel(FlowEvent)? = nil,
                    @retention_flows : Int32 = RETENTION_DEFAULT,
                    @prune_interval : Int32 = PRUNE_INTERVAL,
+                   @events_retention : Int32 = EVENTS_RETENTION,
                    @open_lock : OpenLock? = nil)
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
       @done = Channel(Nil).new
@@ -810,6 +824,11 @@ module Gori
       # Still on the prune cadence (once per PRUNE_INTERVAL inserts), so a project that never
       # inserts another flow heals only via `compact` — which reaps the same rows.
       reap_unattributed_h2_frames(conn)
+      # BEFORE the retention early-return, for the reason the reap above is: `events` growth
+      # has nothing to do with the FLOW cap, and the surface that writes the most of them —
+      # the MCP server — opens with RETENTION_UNLIMITED, so gating this on `@retention_flows`
+      # would exempt exactly the case it exists for.
+      trim_events(conn)
       return if @retention_flows <= 0
       # Served by the primary key: a rightmost-leaf descending scan of @retention_flows rows.
       oldest_kept = conn.query_one?(
@@ -873,6 +892,24 @@ module Gori
       conn.exec("DELETE FROM h2_frames WHERE conn_id NOT IN (SELECT id FROM h2_connections)")
     rescue ex
       ::Log.warn { "unattributed h2-frame reap failed (will retry): #{ex.message}" } # gori.log (#411)
+    end
+
+    # Keep the newest EVENTS_RETENTION rows. Shaped like the flows sweep — find the oldest
+    # survivor by walking the primary key backwards, then delete strictly below it — so the
+    # common case (already under the cap) costs one indexed lookup and no delete at all.
+    #
+    # `id` is AUTOINCREMENT, so it is monotonic and never reused: deleting below a cutoff can
+    # never take a row a reader's watermark has not already passed.
+    private def trim_events(conn : DB::Connection) : Nil
+      oldest_kept = conn.query_one?(
+        "SELECT MIN(id) FROM (SELECT id FROM events ORDER BY id DESC LIMIT ?)",
+        @events_retention, as: Int64?)
+      return unless oldest_kept
+      cutoff = oldest_kept - 1
+      return if cutoff <= 0
+      conn.exec("DELETE FROM events WHERE id <= ?", cutoff)
+    rescue ex
+      ::Log.warn { "event-log trim failed (will retry): #{ex.message}" } # gori.log (#411)
     end
 
     # One gori.log line per sweep that actually removed history, naming the setting that
