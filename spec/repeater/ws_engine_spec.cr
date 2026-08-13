@@ -210,6 +210,22 @@ describe Gori::Repeater::WsEngine do
     received.includes?(0xFE_u8).should be_true
   end
 
+  # `head_lines` pops trailing blank lines, so an empty (or all-blank) editor yields `[]` and
+  # the header walk's `lines[1..]` raised IndexError. That raise landed AFTER the dial, so the
+  # operator got "Index out of bounds" for a connection gori had already opened. The request
+  # line right above it already synthesizes `GET / HTTP/1.1` for exactly this case; the send
+  # must now fail (or succeed) on the ORIGIN's answer, not on an internal index error.
+  it "synthesizes a handshake for an empty or blank request instead of raising IndexError" do
+    [Bytes.new(0), "\r\n".to_slice, "\n".to_slice].each do |head|
+      port = start_ws_origin(echo: false)
+      result = WsEngine.send(head, [] of WsEngine::OutMsg,
+        scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+      (result.error || "").should_not contain("Index out of bounds")
+      result.upgraded?.should be_true
+      result.close_code.should eq(1000)
+    end
+  end
+
   describe ".upgrade_request?" do
     it "matches the Upgrade: websocket header case-insensitively with flexible spacing" do
       WsEngine.upgrade_request?("GET /ws HTTP/1.1\r\nUpgrade: websocket\r\n\r\n").should be_true

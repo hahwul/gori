@@ -617,5 +617,50 @@ describe Gori::Miner::Engine do
       stopped = run.call(4)
       stopped.should be < full
     end
+
+    it "does not open with calibration when the stop landed before the run fiber started" do
+      # `start` spawns; the caller (the TUI publishes the engine before the fiber ticks) can
+      # stop it in between. Calibration is real requests at the target, so the mine must not
+      # open with the stability wave nobody is waiting for any more.
+      backend = StopAtBackend.new(F::Origin.new("http", "h", 80), %w(alpha))
+      engine = M::Engine.new("GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false,
+        names: %w(alpha beta), backend: backend, config: cfg)
+      stopped = nil.as(Bool?)
+      engine.stop
+      engine.run { |ev| stopped = ev.stopped if ev.is_a?(M::DoneEvent) }
+      backend.sent.should eq(0)
+      stopped.should be_true
+    end
+  end
+
+  # `Inject.inject_query` bails UNMODIFIED on a request line that is not METHOD SP TARGET SP
+  # VERSION — rebuilding it from the split would collapse `GET  /a HTTP/1.1` into a single
+  # space, rewriting bytes the operator handed gori (P7), so the bail is right. What was wrong
+  # was downstream: the engine sent whatever came back — here, the BASELINE request — saw no
+  # residual signal, and took the `kind.none?` branch that calls the whole bucket clean. 100%
+  # progress, found 0, errors 0, exit 0: a false negative dressed as a clean bill of health.
+  describe "a location that can inject nothing" do
+    it "reports the bucket inconclusive instead of calling its names clean" do
+      names = %w(alpha beta gamma delta)
+      backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), reflect: ["alpha"])
+      # A raw space in the target: `Codec::Http1` flags the line malformed? and keeps the
+      # octets, so a captured flow — or a hand-written `--request` file — carries it verbatim.
+      base = "GET /search?q=hello world HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: cfg)
+      progress = nil.as(M::Progress?)
+      findings = [] of M::Finding
+      engine.run do |ev|
+        findings << ev.finding if ev.is_a?(M::FindingEvent)
+        progress = ev.progress if ev.is_a?(M::DoneEvent)
+      end
+
+      findings.should be_empty
+      progress.not_nil!.errors.should be > 0
+      engine.first_error.to_s.should contain("nothing could be injected")
+      # The 2 stability rounds + 1 control probe of calibration, and not one bucket send:
+      # re-sending the baseline as if it were a probe is exactly what produced the false
+      # clean verdict.
+      backend.sent.should eq(3)
+    end
   end
 end

@@ -40,8 +40,15 @@ module Gori::Oast
     end
 
     # The payload host (interactsh server host, or the provider's callback host).
+    #
+    # `URI.parse` RAISES on an authority it cannot frame — a bare IPv6 host (`fd00::1:9000`),
+    # a typo'd port (`:8O80`) — so the `||` below only ever guarded a nil return, never the
+    # raise. A custom-http provider registers with no network round-trip, so an operator's
+    # unparseable endpoint is persisted verbatim and this getter is on the resume picker's
+    # render path: the raise reached the TUI tick loop and the third open killed the process.
+    # Rescue and fall back to the raw string, like `FlowRequest.parse_target` already does.
     def host : String
-      URI.parse(@server_url).host || @server_url
+      (URI.parse(@server_url).host rescue nil) || @server_url
     end
   end
 end

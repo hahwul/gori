@@ -125,6 +125,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run decoder list: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run decoder list: missing value for #{f}" }
         end
         parser.parse(args)
 

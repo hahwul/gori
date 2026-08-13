@@ -777,8 +777,8 @@ module Gori::Tui
     end
 
     # Per-tick ceiling on captured-flow events applied to History, matching the cap every
-    # other controller already has (`DRAIN_CAP` in the fuzzer/sequencer/oast/discover
-    # controllers). This drain was the only uncapped one, and it issues a `store.flow_row`
+    # other controller already has (`DRAIN_CAP` in the fuzzer/sequencer/oast/discover/probe
+    # controllers). It issues a `store.flow_row`
     # SELECT per event ON THE UI FIBER — with `Session`'s 1024-deep channel, one tick could
     # therefore fire up to 1024 SQLite round-trips before the frame was allowed to render.
     # Anything left over is drained on the next tick, 50 ms later.

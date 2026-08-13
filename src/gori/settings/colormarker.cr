@@ -85,8 +85,9 @@ module Gori::Settings
     self.colormarker_rules = parse_colormarker_rules(node["rules"]?)
     self.colormarker_colors = parse_colormarker_colors(node["colors"]?)
     stored = node["next_rule_id"]?.try(&.as_i64?) || 0_i64
-    # Never go BACKWARDS from the ids actually present, whatever the file says.
-    self.colormarker_next_rule_id = {stored, (colormarker_rules.max_of?(&.id) || 0_i64) + 1, 1_i64}.max
+    # Never go BACKWARDS from the ids actually present, whatever the file says. Saturating at
+    # the top for the same reason the rewriter's counter is — see `next_id_after` there.
+    self.colormarker_next_rule_id = {stored, next_id_after(colormarker_rules.max_of?(&.id) || 0_i64), 1_i64}.max
   end
 
   # Tolerant custom-colour parse, same spirit as the rule parser: a non-array (or absent) node
@@ -179,7 +180,7 @@ module Gori::Settings
   def self.add_colormarker_rule(match_filter : String, color : String, style : String,
                                 name : String = "", enabled : Bool = true) : Int64
     id = colormarker_next_rule_id
-    self.colormarker_next_rule_id = id + 1
+    self.colormarker_next_rule_id = next_id_after(id) # saturating — see `next_id_after`
     self.colormarker_rules = colormarker_rules + [ColormarkerRule.new(id, enabled, name, match_filter, color, style)]
     save ? id : 0_i64
   end

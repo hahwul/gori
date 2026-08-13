@@ -76,13 +76,24 @@ module Gori::Discover
       statuses = ok.compact_map(&.status).to_set
       fps = ok.map(&.simhash)
       rt = uniform_redirect(ok)
+      # ORDER IS LOAD-BEARING: the sample-size floor is tested FIRST, ahead of both elevated
+      # kinds. Each of them relaxes `hit?` on the strength of AGREEMENT between the bogus
+      # probes — `WildcardRedirect` trusts one funnel target and scores `redir_div`,
+      # `WildcardOk` earns the raised `fp_weight` — yet `ok` is only what survived
+      # `f.error.nil?`, and both tests pass trivially on a single sample (`cohesive?` returns
+      # true below 2 fingerprints, `uniform_redirect` finds one target unanimous). So two
+      # probes flaking on an ordinary timeout or reset left ONE response awarding a weight
+      # that the cohesion it names was never measured for, and against a dynamic miss page
+      # that turned every wordlist entry into a 0.55 finding — the storm the `echoes` flag
+      # exists to stop, arriving by the other door. `Uncalibratable` reports nothing there,
+      # which is what its enum comment already promises for a baseline this thin.
       kind =
-        if rt
+        if ok.size < 2
+          BaselineKind::Uncalibratable
+        elsif rt
           BaselineKind::WildcardRedirect
         elsif statuses == Set{200} && cohesive?(fps, distance)
           BaselineKind::WildcardOk
-        elsif ok.size < 2
-          BaselineKind::Uncalibratable
         else
           BaselineKind::Normal
         end
@@ -114,7 +125,9 @@ module Gori::Discover
       # `fp_novel` earns the weight `status_div` carries on a wildcard-200 baseline that does
       # NOT echo, and stays a corroborating signal everywhere else. The asymmetry is the kind's
       # whole meaning: `WildcardOk` is assigned only when the bogus probes came back 200 AND
-      # proved COHESIVE (`build`), a stricter calibration than `Normal` is ever held to —
+      # proved COHESIVE with each other (`build`, which tests its sample-size floor ahead of
+      # the kind, so this weight can never rest on a cohesion test that short-circuited on a
+      # single surviving probe), a stricter calibration than `Normal` is ever held to —
       # `Normal` needs two non-erroring probes and no cohesion at all — so on that baseline
       # "outside the cluster" is a calibrated verdict rather than a hint, and status has
       # nothing left to say. On an ECHOING one the cluster proves nothing, so the weight and
@@ -153,10 +166,14 @@ module Gori::Discover
       {hit, (conf * penalty).clamp(0.0, 1.0)}
     end
 
-    # All bogus probes redirected to ONE normalized target ⇒ a login/funnel wildcard.
+    # All bogus probes redirected to ONE normalized target ⇒ a login/funnel wildcard. "All"
+    # means at least two: one probe is unanimous with itself, and `build` stores this as the
+    # baseline's `redirect_target`, where `hit?` scores every non-matching Location at +0.30.
+    # `build` already routes a single-sample baseline to `Uncalibratable`; this keeps the
+    # field it carries from claiming a funnel the probes never agreed on.
     private def self.uniform_redirect(fetched : Array(Fetched)) : String?
       redirs = fetched.compact_map { |f| f.redirect_to.try { |l| normalize_redirect(l) } }
-      return nil if redirs.empty? || redirs.size < fetched.size
+      return nil if redirs.size < 2 || redirs.size < fetched.size
       redirs.uniq.size == 1 ? redirs.first : nil
     end
 

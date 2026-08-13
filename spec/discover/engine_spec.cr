@@ -241,6 +241,22 @@ describe Gori::Discover::Engine do
     bf.should_not contain("http://t/other")
   end
 
+  # A redirect `Location` is the ONE link source that reaches `Url.resolve` unscrubbed — the
+  # other four all come out of `Extract`, which scrubs before anything meets PCRE2. `resolve`
+  # tested the scheme with a Regex, and PCRE2 raises ArgumentError on invalid UTF-8, so a
+  # Latin-1 relative Location unwound the ORCHESTRATOR fiber: the run ended on a terminal
+  # "Regex match error" with no Done, discarding every outcome still in flight.
+  it "finishes a run whose redirect Location is a relative, not-valid-UTF-8 path" do
+    cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 2, concurrency: 1, retries: 0)
+    loc = String.new(Bytes[0x63, 0x61, 0x66, 0xe9, 0x2f, 0x78]) # "caf\xE9/x"
+    backend = RouteBackend.new(->(t : String) do
+      t == "/" ? make(302, "", location: loc) : html("an ordinary page")
+    end)
+    kinds, messages = terminal_of(D::Engine.new("http://t/", [] of String, backend, cfg))
+    messages.should be_empty
+    kinds.last.should eq(:done)
+  end
+
   it "stops a /user/{n} link farm via template folding" do
     cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 5, max_pages: 1000,
       template_saturation: 20, concurrency: 2, retries: 0)

@@ -334,13 +334,36 @@ module Gori::Discover
       abs_path =
         if h.starts_with?('/')
           normalize_path(h)
-        elsif lower.matches?(/\A[a-z][a-z0-9+.-]*:/)
+        elsif scheme_prefixed?(lower)
           return nil # some other scheme (ftp:, ws:, …)
         else
           normalize_path(dir_path(base.path) + h)
         end
       url = "#{origin(base)}#{abs_path}"
       hq ? "#{url}?#{hq}" : url
+    end
+
+    # Allocation- and PCRE-free stand-in for `\A[a-z][a-z0-9+.-]*:`, gated for the same reason
+    # `fold_segment` gates its four patterns behind `ascii_only?`: a Regex on invalid UTF-8
+    # raises ArgumentError out of PCRE2. `resolve` is the one link entry point that sees
+    # REMOTE-chosen bytes — a 3xx `Location` reaches it straight off the wire, unscrubbed,
+    # while every page-derived href came through `Extract`, which scrubs — and `downcase`
+    # keeps a lone Latin-1 octet intact, so `caf\xE9/x` used to raise here. That raise lands on
+    # discover's orchestrator fiber, which ends the whole run instead of dropping one link.
+    # The scheme class is pure ASCII, so the byte scan is exact.
+    private def self.scheme_prefixed?(s : String) : Bool
+      bytes = s.to_slice
+      return false if bytes.empty?
+      return false unless 0x61_u8 <= bytes[0] <= 0x7a_u8
+      i = 1
+      while i < bytes.size
+        b = bytes[i]
+        return true if b == 0x3a_u8 # ':'
+        return false unless (0x61_u8 <= b <= 0x7a_u8) || (0x30_u8 <= b <= 0x39_u8) ||
+                            b == 0x2b_u8 || b == 0x2e_u8 || b == 0x2d_u8 # '+' '.' '-'
+        i += 1
+      end
+      false
     end
 
     # Collapse "." and ".." segments (RFC 3986 §5.2.4, simplified). Preserves a leading and

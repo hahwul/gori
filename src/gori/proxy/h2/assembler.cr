@@ -68,6 +68,14 @@ module Gori::Proxy::H2
       # after it nothing distinguished a trailer from a real response header. Recorded here
       # so the stored head can say which is which — see HeadCodec::TRAILER_MARKER.
       getter trailer_names = [] of String
+      # Membership index for `trailer_names`, which stays an ordered Array because
+      # `HeadCodec::TRAILER_MARKER` joins the names in arrival order. Deduping with
+      # `Array#includes?` is a linear scan, so one legal 1 MiB trailer block (~174k
+      # distinct names still under the cumulative MAX_HEADER_LIST cap at
+      # `finish_header_block`) cost O(N^2) String compares — ~40s of uninterruptible
+      # CPU inside `@mutex`, which on Crystal's single-threaded scheduler freezes the
+      # TUI, every other connection and the Store writer fiber (P6).
+      getter trailer_seen = Set(String).new
     end
 
     private class Stream
@@ -324,7 +332,7 @@ module Gori::Proxy::H2
         # Remember WHICH names these are before they lose their identity in the merge —
         # after the concat a `grpc-status` that arrived in a trailer reads exactly like one
         # sent in the response head, and for gRPC the trailer is the call's real status.
-        decoded.each { |(n, _)| side.trailer_names << n unless side.trailer_names.includes?(n) }
+        decoded.each { |(n, _)| side.trailer_names << n if side.trailer_seen.add?(n) }
         existing.concat(decoded)
       else
         # First block, OR a status-bearing response block. An interim 1xx (100/103)
@@ -336,7 +344,9 @@ module Gori::Proxy::H2
         side.header_bytes = added
         # A final status block REPLACES an interim one, so anything recorded as a trailer
         # against the interim head belongs to a head that no longer exists.
+        # Both halves, or the index would keep suppressing a name for a head that is gone.
         side.trailer_names.clear
+        side.trailer_seen.clear
       end
     ensure
       # Always reset, even if decode raised (feed rescues HPACK/framing errors and

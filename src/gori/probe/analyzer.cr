@@ -239,7 +239,20 @@ module Gori
         opts = Active::Options.new(allow_unsafe: opts.allow_unsafe, aggressive: opts.aggressive, oob: @oob)
         Active::RULES.compact_map do |rule|
           next if Probe.rule_disabled?(rule.info.id, @disabled)
-          next unless rule.dedup_key(detail, opts)
+          # Per-rule isolation, like every sibling that runs rule code over captured bytes
+          # (`Active.analyze` rescues each rule, `run_active_now` supervises the loop). A gate
+          # parses hostile captured bytes, so a rule bug raises here — and this one is called
+          # bare from the TUI's synchronous key path, where the run loop's catch-all kills the
+          # process on the third raise in ten seconds. An estimate is advisory: a rule that
+          # cannot decide is omitted, not fatal.
+          applies =
+            begin
+              !rule.dedup_key(detail, opts).nil?
+            rescue ex
+              ::Log.debug(exception: ex) { "probe: #{rule.info.id} estimate gate raised" }
+              false
+            end
+          next unless applies
           ActiveEstimate.new(rule.info, rule.requests_per_flow)
         end
       end

@@ -443,8 +443,14 @@ module Gori
         present?(h, field) ? (str(h, field) || "") : current
       end
 
+      # The same contract for an integer column, bounded in Int64 BEFORE it is narrowed to the
+      # store's Int32: `.to_i32` is checked, so `{"pos_start": 5000000000}` used to
+      # OverflowError past the INVALID_ARGUMENT arm at `Tools#call` and come back INTERNAL for
+      # the caller's own argument. The floor is Int32::MIN rather than 0 so `current` — an
+      # already-stored value this method must be able to pass through untouched — can never be
+      # the thing that raises.
       private def keep_int(h, field : String, current : Int32) : Int32
-        (present?(h, field) ? int(h, field) : current.to_i64).try(&.to_i32) || 0
+        bounded_int_arg(h, field, current.to_i64, min: Int32::MIN.to_i64, max: Int32::MAX.to_i64).to_i
       end
 
       # The enabled state the caller asked for, or nil when they omitted the field. Called
@@ -478,8 +484,9 @@ module Gori
         kind = extract_kind_arg(h, Gori::ExtractKind::Cookie)
         return kind if kind.is_a?(Result)
         selector = str(h, "selector") || ""
-        pos_start = (int(h, "pos_start") || 0_i64).to_i32
-        pos_end = (int(h, "pos_end") || 0_i64).to_i32
+        # Bounded in Int64 before the narrowing, for the reason spelled out at `keep_int`.
+        pos_start = bounded_int_arg(h, "pos_start", 0_i64, min: Int32::MIN.to_i64, max: Int32::MAX.to_i64).to_i
+        pos_end = bounded_int_arg(h, "pos_end", 0_i64, min: Int32::MIN.to_i64, max: Int32::MAX.to_i64).to_i
         if bad = extract_range_error(kind, pos_start, pos_end)
           return bad
         end

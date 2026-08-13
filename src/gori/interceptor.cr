@@ -167,10 +167,17 @@ module Gori
     # Lives here rather than in `H2::StreamGate` because two callers need the same answer: the
     # gate splits the bytes it is about to encode, and the settle surface has to know whether an
     # edit added a body to a head-only hold BEFORE it acks the edit as applied.
+    #
+    # The scan runs over the BYTES. `String#index` counts CHARACTERS, and the number it returns
+    # is used here as an offset INTO `bytes` — so one non-ASCII character in an edited head
+    # (`x-test: café`, a UTF-8 cookie) put the boundary a byte short of the real blank line, and
+    # a head-only edit with no body at all came back reporting one: `Item#refuse_edit` then
+    # refused an edit the operator could not fix except by deleting the character. Held bytes
+    # are not guaranteed to be valid UTF-8 either, which is why `Gori::AsciiBytes` stays
+    # byte-level for the same kind of question.
     def self.split_edit(bytes : Bytes) : {Bytes, Bool}
-      text = String.new(bytes)
-      crlf = text.index("\r\n\r\n")
-      lf = text.index("\n\n")
+      crlf = byte_index(bytes, "\r\n\r\n".to_slice)
+      lf = byte_index(bytes, "\n\n".to_slice)
       idx =
         if crlf && (lf.nil? || crlf < lf)
           crlf + 4
@@ -179,6 +186,25 @@ module Gori
         end
       return {bytes, false} unless idx
       {bytes[0, idx], idx < bytes.size}
+    end
+
+    # First byte offset of `needle` in `hay`, or nil. `"...".to_slice` on a literal points at
+    # static data, so this allocates nothing.
+    #
+    # Guarded on the first byte before comparing the rest: a head is read by
+    # `Codec::Http1.read_head`, which permits up to 256 KiB, and `split_edit` scans it twice —
+    # so a `Slice#==` (a memcmp call) at every offset would be a quarter-million calls per
+    # lookup on the interceptor's synchronous path. Both needles start with CR or LF, which
+    # almost no offset does.
+    private def self.byte_index(hay : Bytes, needle : Bytes) : Int32?
+      first = needle[0]
+      limit = hay.size - needle.size
+      i = 0
+      while i <= limit
+        return i if hay[i] == first && hay[i, needle.size] == needle
+        i += 1
+      end
+      nil
     end
 
     @direction : Direction

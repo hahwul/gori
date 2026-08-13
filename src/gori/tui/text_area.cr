@@ -491,6 +491,45 @@ module Gori::Tui
       place_at_offset(caret)
     end
 
+    # `set_text`/`replace_all` for a transform that was COMPUTED over `#text` — the CR-free
+    # LF projection — and must not be allowed to write that projection back.
+    #
+    # Every in-buffer transform (the §/¦ marking helpers, ^F replace-all) has to be handed
+    # `#text`, because every offset it works from — `#cursor_offset`, a cached marked span, a
+    # search match — indexes THAT string; handing it wire text would shift each offset by one
+    # per CRLF line and edit the wrong span. But `set_text`/`replace_all` re-derive `@eols`
+    # through `split_wire`, so writing the result straight back resets every terminator in the
+    # buffer to `\n` and a captured body's CRLFs are gone before anything is sent — with
+    # auto-Content-Length resyncing DOWN behind the loss, so nothing on screen says the
+    # request changed. That is the `set_text` comment's own failure, reintroduced one layer up.
+    #
+    # These transforms only ever insert or delete characters WITHIN a line (^F's query and
+    # replacement cannot hold a newline — `handle_search_key` drops control chars), so the
+    # line count is invariant and the terminators can simply be put back. Lifted from
+    # `FuzzerView#restore_wire_eols`, which is the same guard around the same five helpers;
+    # the fallback is its fallback too — better a buffer that lost its CRLFs than one whose
+    # terminators were reattached to the wrong lines.
+    def set_text_keeping_eols(lf_text : String) : Nil
+      set_text(with_wire_eols(lf_text))
+    end
+
+    # ditto, for the transforms that must stay ONE undoable edit (marker strip).
+    def replace_all_keeping_eols(lf_text : String, caret : Int32) : Nil
+      replace_all(with_wire_eols(lf_text), caret)
+    end
+
+    private def with_wire_eols(lf_text : String) : String
+      return lf_text if @eols.all? { |e| e == "\n" || e.empty? } # nothing to restore
+      parts = lf_text.split('\n')
+      return lf_text unless parts.size == @eols.size
+      String.build do |io|
+        parts.each_with_index do |p, i|
+          io << p
+          io << @eols[i]
+        end
+      end
+    end
+
     def insert_newline : Nil
       push_undo
       cut_selection # ↵ over a selection replaces it with the break — see `insert`
@@ -1283,7 +1322,11 @@ module Gori::Tui
       n = 0
       swapped = text.gsub(search_regex(query)) { n += 1; replacement }
       return 0 if n == 0
-      replace_all(swapped, cursor_offset)
+      # `swapped` is the LF projection: writing it back would flatten every CRLF the capture
+      # carried in its BODY, and this editor is the one the Repeater and the Intercept hold
+      # a real request in. `cursor_offset` indexes that same projection, so the gsub has to
+      # run over `text` — the terminators go back on afterwards. See `set_text_keeping_eols`.
+      replace_all_keeping_eols(swapped, cursor_offset)
       n
     end
 

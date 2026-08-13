@@ -118,7 +118,14 @@ module Gori::Proxy::Tls
         value = r.take(size)
         return nil unless value
         next unless kind == SNI_HOST_NAME
-        name = String.new(value)
+        # scrub: `value` is raw ClientHello bytes from an unauthenticated peer, and PCRE2 RAISES
+        # `ArgumentError: UTF-8 error` on an invalid-UTF-8 subject rather than not matching —
+        # which would break this function's contract that PARSING never raises, and cost the
+        # transparent listener the kernel-original-destination fallback below it (#528). The two
+        # sibling matches on the same attacker-supplied authority already scrub for this exact
+        # reason (`CertBuilder.safe_san?`, `CertBuilder.ipv6?`). U+FFFD is outside the charset,
+        # so a scrubbed name is rejected here — the designed graceful outcome, never a raise.
+        name = String.new(value).scrub
         # A name gori is going to mint a certificate for and dial: reject anything that is not
         # a plausible DNS name rather than passing odd bytes into the cert builder and the
         # scope gate. Also drops the empty-SNI case.

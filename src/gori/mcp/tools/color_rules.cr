@@ -278,7 +278,14 @@ module Gori
         if reason = Gori::Colormarker.unusable_reason(filter)
           return err(reason, "INVALID_ARGUMENT", field: "when")
         end
-        limit = (int(h, "limit") || Gori::Colormarker::PREVIEW_SCAN.to_i64).to_i.clamp(1, 5000)
+        # Clamp in Int64, THEN narrow: `.to_i` is checked, so clamping after it meant
+        # `{"limit": 10000000000}` — the "no limit" number an LLM reaches for — OverflowError'd
+        # past the INVALID_ARGUMENT arm at `Tools#call` and came back INTERNAL, telling the
+        # agent the server was broken instead of its argument. Still a CLAMP and not
+        # `bounded_int_arg`: this argument has always been forgiving at both ends, and `0` is
+        # the other spelling of "no limit" an agent reaches for — turning that into a hard
+        # INVALID_ARGUMENT would be a second, opposite way to fail the same call.
+        limit = (int(h, "limit") || Gori::Colormarker::PREVIEW_SCAN.to_i64).clamp(1_i64, 5000_i64).to_i
         existing = Gori::Colormarker.merged(store)
         pv = Gori::Colormarker.preview(store, filter, existing, limit)
         Result.new(JSON.build do |j|

@@ -38,8 +38,11 @@ module Gori::Oast
       {"Authorization" => "Secret #{@token}"}
     end
 
+    # Same hazard as `Session#host`: `URI.parse` raises (not returns nil) on an authority it
+    # cannot frame, and `base_url` is whatever endpoint the operator typed — `normalize_endpoint`
+    # only prepends a scheme. Fall back to the raw string rather than raising mid-payload.
     private def payload_host : String
-      URI.parse(base_url).host || base_url
+      (URI.parse(base_url).host rescue nil) || base_url
     end
 
     private def to_interaction(ev : JSON::Any) : Interaction?

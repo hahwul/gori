@@ -348,7 +348,7 @@ module Gori::Repeater
         return nil unless idx
         colon = hl[idx].index(':').not_nil!
         prefix = hl[idx][0...colon]
-        crumbs = hl[idx][(colon + 1)..].strip.split(/;\s*/).reject(&.empty?)
+        crumbs = cookie_crumbs(hl[idx])
         crumbs.delete(crumb)
         if crumbs.empty?
           hl.delete_at(idx)
@@ -636,8 +636,22 @@ module Gori::Repeater
       REMOVABLE_HEADERS.includes?(dn) || REMOVABLE_PREFIXES.any? { |p| dn.starts_with?(p) }
     end
 
+    # Split on a Char, never a Regexp: `text` is the request head loaded verbatim from the
+    # store (P7), so a latin-1 or binary cookie value reaches PCRE2 and Crystal's binding
+    # raises `ArgumentError: UTF-8 error` — before any network I/O, and unrescued on the
+    # `gori run repeater minimize` path. `String#split(Char)` and `#strip` both slice bytes,
+    # so the crumbs round-trip exactly and `--apply`'s stored minimized_text stays byte-exact.
+    # `cookie_candidate`'s removal proc calls this too, so the two cannot drift apart again.
+    #
+    # `lstrip` per crumb and NOT `strip`, because the regex this replaces was `/;\s*/`: it ate
+    # the whitespace AFTER a semicolon and none before one. Stripping both ends would rewrite a
+    # crumb the capture carried as `sid=abc ` into `sid=abc`, and `cookie_candidate` rebuilds
+    # the header by joining the survivors with "; " — so that byte would silently leave the
+    # request the operator asked gori to minimize, which is the one thing this method must not
+    # do. A trailing space inside a cookie value is a parser-differential payload, not noise.
     private def self.cookie_crumbs(line : String) : Array(String)
-      (c = line.index(':')) ? line[(c + 1)..].strip.split(/;\s*/).reject(&.empty?) : [] of String
+      return [] of String unless c = line.index(':')
+      line[(c + 1)..].strip.split(';').map(&.lstrip).reject(&.empty?)
     end
 
     private def self.query_segments(request_line : String?) : Array(String)

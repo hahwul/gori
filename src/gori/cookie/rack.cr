@@ -16,7 +16,7 @@ module Gori
       extend self
 
       DIGEST  = OpenSSL::Algorithm::SHA1
-      HEX_SIG = /\A[0-9a-fA-F]{40}\z/ # HMAC-SHA1 hex digest
+      SIG_LEN = 40 # hex of an HMAC-SHA1 digest
 
       record Parsed,
         data : String,     # base64 (standard alphabet) of the marshalled session
@@ -26,14 +26,28 @@ module Gori
       # base64 blob that merely contains "--" from being misread as Rack.
       def looks_like?(s : String) : Bool
         idx = s.rindex("--") || return false
-        HEX_SIG.matches?(s[(idx + 2)..])
+        hex_sig?(s[(idx + 2)..])
+      end
+
+      # Byte-level, Regex-free: a cookie is bytes lifted verbatim off the wire and need not be
+      # valid UTF-8, and PCRE2 RAISES `ArgumentError: UTF-8 error` on an invalid byte instead of
+      # not matching — which took `gori run cookie` down with a backtrace on a session cookie
+      # carrying one, and broke `Cookie.verify`'s "false on a structural parse failure too"
+      # contract. `Gori::Url` and `Gori::AsciiBytes` stay byte-level over wire bytes for the
+      # same reason. `rindex` returns a CHAR index, so the caller must keep char-slicing —
+      # `byte_slice` there would cut a multi-byte character in half.
+      private def hex_sig?(tail : String) : Bool
+        b = tail.to_slice
+        return false unless b.size == SIG_LEN
+        b.all? { |c| (0x30_u8 <= c <= 0x39_u8) || (0x41_u8 <= c <= 0x46_u8) || (0x61_u8 <= c <= 0x66_u8) }
       end
 
       def parse(cookie : String) : Parsed
         s = cookie.strip
         idx = s.rindex("--") || raise CookieError.new("not a Rack cookie (missing --signature)")
         sig = s[(idx + 2)..]
-        raise CookieError.new("not a Rack cookie (signature is not a 40-char hex HMAC-SHA1)") unless HEX_SIG.matches?(sig)
+        raise CookieError.new("not a Rack cookie (signature is not a 40-char hex HMAC-SHA1)") unless hex_sig?(sig)
+        # `downcase` is safe here only because the tail is now proven pure ASCII hex.
         Parsed.new(s[0...idx], sig.downcase)
       end
 

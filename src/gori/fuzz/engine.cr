@@ -535,6 +535,9 @@ module Gori::Fuzz
     # A failed/empty calibration is non-fatal — auto_calibrate then simply suppresses
     # nothing.
     def calibrate_baseline : Nil
+      # A stop that landed before the run fiber's first tick (the TUI publishes `v.engine`
+      # before spawning, so ^X can arrive here) must not open with a burst of real sends.
+      return if @state == State::Stopped
       wanted = CALIBRATION_SAMPLES
       if (cap = @config.max_requests) && cap > 0
         room = cap - 1
@@ -544,6 +547,12 @@ module Gori::Fuzz
       samples = [] of BaselineSample
       interval = pace_interval
       @generator.calibration_requests(wanted).each do |bytes, payload_len|
+        # `stop` only sets the flag and pokes @wake, which this loop never waits on, so the
+        # remaining samples used to go out one by one AFTER the operator asked to stop — and
+        # `pace` below widens that window to a full rate interval each (at rps 0.2, ~25s of
+        # trailing sends under "stopping…"). `dispatch_loop` re-reads the flag every job for
+        # the same reason; this is the same check at the phase that runs BEFORE it.
+        break if @state == State::Stopped
         # Calibration samples are real requests at the target, sent before `start`'s dispatch
         # loop exists — so without this they were the one burst that ignored `--rate` outright.
         pace(interval)

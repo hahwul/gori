@@ -258,7 +258,15 @@ module Gori
       start, stop = span
       current = String.new(head[start, stop - start]).to_i64?
       return head unless current
-      shifted = {current + delta, 0_i64}.max.to_s
+      # SATURATING, in Int128, because `current` is an operator-authored number: `to_i64?`
+      # refuses a literal wider than 64 bits but returns `Int64::MAX` / `Int64::MIN` happily,
+      # and Crystal's checked `+` then raised OverflowError out of the send — on `gori run
+      # repeater` that is a raw backtrace, since `CLI.dispatch` rescues only `Gori::Error`.
+      # `Content-Length: 9223372036854775807` and its negative twin ARE probes, so raising on
+      # them is the one outcome this method's contract rules out (everything it cannot shift,
+      # it leaves byte-exact). The lower bound is the `{…, 0_i64}.max` this replaces; delta is
+      # an Int32, so the Int128 sum cannot itself overflow.
+      shifted = (current.to_i128 + delta).clamp(0_i128, Int64::MAX.to_i128).to_i64.to_s
       buf = IO::Memory.new(head.size + shifted.bytesize)
       buf.write(head[0, start])
       buf << shifted

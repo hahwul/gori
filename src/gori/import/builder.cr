@@ -123,12 +123,30 @@ module Gori
       # dropping the bad entry exactly like a bad host). Only CR/LF/NUL: a header VALUE may
       # legally contain a horizontal tab (RFC 7230 §3.2 field-value), so bytes that merely
       # break a value without forging a boundary are left alone.
-      HEADER_INJECT = /[\r\n\x00]/
+      #
+      # A byte SET and not a Regex, and there is deliberately no Regex spelling of it left to
+      # reach for. A header value a THIRD-PARTY HAR recorded (Chrome, Burp) can carry a raw
+      # obs-text octet — RFC 7230 field-value is VCHAR / obs-text %x80-FF, and a Latin-1
+      # filename in a `Content-Disposition` is the everyday one — and PCRE2 raises
+      # `ArgumentError: UTF-8 error` on an invalid-UTF-8 subject rather than not matching.
+      # Every import parser's bare per-entry rescue caught that and dropped the entry SILENTLY,
+      # so an obs-text header cost the whole flow. `Issues::Export.scrub_only` names the same
+      # hazard from the writing side. These three are ASCII, so `inject_bytes?` answers exactly
+      # the same question for every subject and cannot raise; the bytes are never sanitised,
+      # only rejected.
+      HEADER_INJECT = StaticArray[0x0d_u8, 0x0a_u8, 0x00_u8]
+
+      # Whether `s` carries any of them. The one home for the question — matching
+      # HEADER_INJECT with a Regex is what raised, so it is not expressible any more.
+      def self.inject_bytes?(s : String) : Bool
+        s.each_byte { |b| return true if HEADER_INJECT.includes?(b) }
+        false
+      end
 
       # Reject any header whose name/value could forge a message boundary (see HEADER_INJECT).
       def self.reject_header_injection!(headers : Headers) : Nil
         headers.each do |k, v|
-          raise Gori::Error.new("invalid header (control character): #{k.inspect}") if k.matches?(HEADER_INJECT) || v.matches?(HEADER_INJECT)
+          raise Gori::Error.new("invalid header (control character): #{k.inspect}") if inject_bytes?(k) || inject_bytes?(v)
         end
       end
 
@@ -137,7 +155,7 @@ module Gori
       # CR/LF/NUL bytes. (`host` is cleaned by HOST_INVALID; `target` is intentionally NOT —
       # a control byte there is the operator's payload, replayed byte-exact. See DESIGN.md §7.)
       def self.reject_inject!(field : String, label : String) : Nil
-        raise Gori::Error.new("invalid #{label} (control character): #{field.inspect}") if field.matches?(HEADER_INJECT)
+        raise Gori::Error.new("invalid #{label} (control character): #{field.inspect}") if inject_bytes?(field)
       end
 
       # The `Host` header value for a stored request, per RFC 7230 §5.4.
@@ -313,7 +331,14 @@ module Gori
         loop do
           size, pos = chunk_size(body, pos) || return truncated && pos > 0
           return pos == body.size || trailer_only?(body, pos) if size == 0
-          return truncated && pos > 0 if pos + size + 2 > body.size
+          # Bounds-check by SUBTRACTION, never `pos + size + 2`: `chunk_size` accepts any hex
+          # up to Int32::MAX, so a size line of `7fffffff` — a canonical chunk-size-overflow
+          # smuggling payload, exactly what an operator imports a HAR to preserve — made that
+          # checked Int32 add raise OverflowError, and the per-entry rescue in `Import::Har`
+          # turned gori's own arithmetic into a silently skipped entry. `Codec::Body
+          # .chunked_complete?` already states the rule: a chunk declaring more data than is
+          # here is unprovable framing, so say so rather than overflow.
+          return truncated && pos > 0 if size > body.size - pos - 2
           return false unless body[pos + size] == 0x0d_u8 && body[pos + size + 1] == 0x0a_u8
           pos += size + 2
         end

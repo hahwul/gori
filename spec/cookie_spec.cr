@@ -188,6 +188,35 @@ describe Gori::Cookie do
       value = RACK.split("--").first
       Gori::Cookie::Rack.forge(value, SECRET).should eq(RACK) # same value+secret → same cookie
     end
+
+    # A cookie is bytes lifted verbatim off the wire, so the tail after "--" need not be valid
+    # UTF-8. The hex-tail test used to be a Regex, and PCRE2 RAISES on an invalid byte instead
+    # of not matching — `gori run cookie` died with a Crystal backtrace, and `verify`'s "false
+    # on a structural parse failure too" contract went with it. Rack is tested FIRST by
+    # `detect`, so this reached every caller before the byte-safe Django/Flask predicates ran.
+    it "answers, rather than raising, on a signature tail that is not valid UTF-8" do
+      bad = "sess--" + "0" * 39 + String.new(Bytes[0xFF])
+      Gori::Cookie.detect(bad).should be_nil
+      Gori::Cookie.verify(bad, SECRET).should be_false
+      expect_raises(Gori::Cookie::CookieError, /unrecognized cookie format/) do
+        Gori::Cookie.decode(bad)
+      end
+      expect_raises(Gori::Cookie::CookieError, /unrecognized cookie format/) do
+        Gori::Cookie.crack(bad, ["a", SECRET])
+      end
+      # Pinned to rack, the parse failure is still a CookieError, not an ArgumentError.
+      expect_raises(Gori::Cookie::CookieError, /40-char hex/) do
+        Gori::Cookie.decode(bad, "rack")
+      end
+    end
+
+    # The byte-level hex test has to keep the Regex's exact charset and length.
+    it "keeps the 40-hex tail rule, either case and that length only" do
+      Gori::Cookie.detect("v--" + "AbCdEf0123" * 4).should eq("rack")
+      Gori::Cookie.detect("v--" + "0" * 39).should be_nil
+      Gori::Cookie.detect("v--" + "0" * 41).should be_nil
+      Gori::Cookie.detect("v--" + "g" * 40).should be_nil
+    end
   end
 
   describe ".crack" do

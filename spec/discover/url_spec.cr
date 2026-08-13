@@ -156,6 +156,32 @@ describe Gori::Discover::Url do
       U.resolve(base, "   ").should be_nil
     end
 
+    # A 3xx `Location` is the one href that reaches `resolve` straight off the wire — every
+    # page-derived link came through `Extract`, which scrubs. The scheme test used to be a
+    # Regex, and PCRE2 raises ArgumentError on invalid UTF-8; `downcase` keeps a lone Latin-1
+    # octet intact, so this href raised instead of resolving. It runs on discover's
+    # orchestrator fiber, so the raise ended the whole run.
+    it "resolves a relative href that is not valid UTF-8 instead of raising out of PCRE2" do
+      base = U.parse("http://h/app/index.html").not_nil!
+      href = String.new(Bytes[0x63, 0x61, 0x66, 0xe9, 0x2f, 0x78]) # "caf\xE9/x"
+      href.valid_encoding?.should be_false
+      U.resolve(base, href).should eq("http://h/app/#{href}")
+      # The absolute-path form took a byte-safe branch and always worked — the control that
+      # says this is about the scheme test, not about the href being odd.
+      U.resolve(base, "/#{href}").should eq("http://h/#{href}")
+    end
+
+    it "still refuses a scheme-prefixed href with the byte scan the Regex used to do" do
+      base = U.parse("http://h/p").not_nil!
+      U.resolve(base, "ftp://h/x").should be_nil
+      U.resolve(base, "svn+ssh://h/x").should be_nil
+      U.resolve(base, "view-source:http://h/x").should be_nil
+      # Not a scheme: the class stops at the first byte outside [a-z0-9+.-], so the ':' in a
+      # query or a path segment must not make a relative href look absolute.
+      U.resolve(base, "c?x=a:b").should eq("http://h/c?x=a:b")
+      U.resolve(base, "2fa:x").should eq("http://h/2fa:x") # a scheme cannot start with a digit
+    end
+
     # SUSPECTED BUG: resolve() checks the absolute-URL prefix case-sensitively
     # (h.starts_with?("http://")), so an uppercase scheme falls through to the
     # "some other scheme" branch and returns nil. HTML/URL schemes are

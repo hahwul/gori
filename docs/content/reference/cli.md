@@ -110,6 +110,7 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | `0` | Success |
 | `1` | Error — a failed send, an unreadable project, a mutation that could not be applied |
 | `3` | `run fuzz --fail-if-no-matches` completed but nothing matched |
+| `130` | Interrupted by SIGINT/SIGTERM — `fuzz`, `mine`, `discover` and `sequence` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
 

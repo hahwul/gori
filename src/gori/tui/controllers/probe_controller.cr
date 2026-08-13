@@ -18,6 +18,13 @@ module Gori::Tui
     # The two fixed sub-tabs: the scan results/mode view, and the rule-management view.
     SUBTABS = ["Findings", "Rules"]
 
+    # Per-tick ceiling on analyzer events applied on the render fiber, matching every sibling
+    # drain (fuzzer/miner/sequencer/discover/oast controllers, and Runner's FLOW_DRAIN_CAP).
+    # This one was uncapped, and the per-event body yields at `insert_event`, so the analyzer
+    # could refill its 256-slot channel mid-loop and keep one tick going indefinitely.
+    # Whatever is left over is drained on the next tick, 50 ms later.
+    DRAIN_CAP = 512
+
     def initialize(host : Host)
       super(host)
       @probe = ProbeView.new
@@ -286,14 +293,26 @@ module Gori::Tui
     # (channel events can be dropped when the buffer is full). Still refresh here so a
     # delivered IssueEvent never leaves the in-memory view behind. Returns true when
     # anything was drained (forces a redraw — badge/status even if Probe is not focused).
+    #
+    # The list reload is coalesced to ONE per drain and gated on Probe being the active tab,
+    # because `refresh_from_store` is a full-table `probe_issues` SELECT plus filter — the
+    # same cost the Runner's probe_generation poll already refuses to pay off-tab, for the
+    # reason its comment gives ("repainting the whole screen up to 20 times a second" during
+    # a scan). Per-event it was worse still: the reload ran once per IssueEvent, on the render
+    # fiber, which is exactly what probe/event.cr's contract already says it must not do
+    # ("the controller coalesces them into a single list reload per frame"). Off-tab is caught
+    # up by `on_enter` — the only way into the Probe tab is `focus_tab`, which runs it.
     def drain_events : Bool
       drained = false
+      needs_refresh = false
+      n = 0
       events = @host.session.probe.events
-      while ev = nonblocking_event(events)
+      while n < DRAIN_CAP && (ev = nonblocking_event(events))
+        n += 1
         drained = true
         case ev
         when Probe::IssueEvent
-          refresh_from_store
+          needs_refresh = true
           if summary = ev.summary
             # #124: log to the AI event feed regardless of the human notification.
             @host.session.store.insert_event("probe", "issue_found", "success", "Probe: #{summary}", goto_tab: "probe")
@@ -315,6 +334,7 @@ module Gori::Tui
           @host.status("Probe: #{ev.message}") if Settings.notify_toast?
         end
       end
+      refresh_from_store if needs_refresh && @host.active_tab == :probe
       drained
     end
 

@@ -203,6 +203,13 @@ module Gori::Fuzz
     def size : Int64?
       base = @chars.size.to_i64
       return 0_i64 if base == 0
+      # A one-symbol charset is one string per length, and it has to be answered in closed
+      # form: with `base == 1` the overflow guard below reads `pw > Int64::MAX // 1`, which
+      # can never fire, so the inner loop runs its full `len` iterations and the walk costs
+      # ~max²/2 — pure integer arithmetic with no yield point, which on the single-threaded
+      # scheduler froze the whole process (an MCP `brute a:1-100000000` takes weeks, and the
+      # server's ping/cancel reader fiber never runs again). P6: counting must not stall.
+      return (@max.to_i64 - @min.to_i64 + 1) if base == 1
       total = 0_i64
       (@min..@max).each do |len|
         pw = 1_i64

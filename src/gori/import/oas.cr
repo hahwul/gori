@@ -62,7 +62,14 @@ module Gori
       private def self.server_base(spec : JSON::Any) : String
         servers = spec["servers"]?
         if servers && (arr = servers.as_a?) && (first = arr[0]?)
-          url = first["url"]?.to_s
+          # `servers: ["https://api.example.com"]` is a common YAML shorthand but not the
+          # OpenAPI shape, and `as_a?` proves only that the ELEMENT exists, not that it is an
+          # object. `JSON::Any#[]?(String)` raises a raw Exception on a non-Hash raw, and this
+          # call sits outside the per-operation rescue below — so the operator got a Crystal
+          # backtrace. Shape-guard it the way `paths_h` above does, for the same reason.
+          first_h = first.as_h? || raise Gori::Error.new(
+            %(OpenAPI servers[0] is not an object — write `- url: "https://api.example.com"`))
+          url = first_h["url"]?.to_s
           raise Gori::Error.new("OpenAPI spec has no servers[0].url") if url.empty?
           # A relative server URL ("/v3", "./v3", "../v3", "v3") has no host authority:
           # every generated request would prepend "https://" onto it, either yielding an

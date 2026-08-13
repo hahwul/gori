@@ -625,6 +625,35 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
       # No blank line at all: the whole thing is the head.
       Gori::Interceptor.split_edit("GET / HTTP/2".to_slice)[1].should be_false
     end
+
+    # The boundary indexes BYTES. Scanning a String counted CHARACTERS, so one non-ASCII
+    # character in the head put the split a byte short of the blank line: the head came back
+    # truncated mid-separator and a body-less edit reported a body — which is how `refuse_edit`
+    # below came to reject an h2 edit whose only sin was a UTF-8 header value.
+    it "counts BYTES, so a non-ASCII header value does not shift the boundary" do
+      ["\r\n", "\n"].each do |eol|
+        raw = "GET / HTTP/2#{eol}x-test: café#{eol}#{eol}".to_slice
+        head, body = Gori::Interceptor.split_edit(raw)
+        head.size.should eq(raw.size) # the WHOLE thing is the head
+        body.should be_false
+      end
+      # ...and the same head with a body still splits at the real separator.
+      head, body = Gori::Interceptor.split_edit("POST / HTTP/2\r\nx-test: café\r\n\r\nBODY".to_slice)
+      String.new(head).should eq("POST / HTTP/2\r\nx-test: café\r\n\r\n")
+      body.should be_true
+    end
+
+    # Held bytes are wire bytes and need not decode as UTF-8; the split must not care.
+    it "splits bytes that are not valid UTF-8 at all" do
+      io = IO::Memory.new
+      io.write "GET / HTTP/2\r\nx-b: ".to_slice
+      io.write Bytes[0xFF, 0xFE]
+      io.write "\r\n\r\nB".to_slice
+      raw = io.to_slice
+      head, body = Gori::Interceptor.split_edit(raw)
+      head.size.should eq(raw.size - 1)
+      body.should be_true
+    end
   end
   # R3-F1/F2, the surface half. `refuse_edit` is what every surface that offers an edit asks
   # BEFORE it decides, because the settle side can only discard — and discarding after an ack
@@ -658,6 +687,10 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         # RFC 9113 §8.1.1 probe, not a body.
         item.refuse_edit("POST /edited HTTP/2\r\nHost: h\r\ncontent-length: 3\r\n\r\n".to_slice)
           .should be_nil
+        # ...and so is a head carrying a non-ASCII header value, which the char-vs-byte split
+        # used to report as a body the operator could only clear by deleting the character.
+        item.refuse_edit("GET /edited HTTP/2\r\nHost: h\r\nx-test: café\r\n\r\n".to_slice).should be_nil
+        item.refuse_edit("GET /edited HTTP/2\nHost: h\nx-test: café\n\n".to_slice).should be_nil
       end
     end
 

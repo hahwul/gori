@@ -2335,7 +2335,7 @@ module Gori::Tui
       # anchor — restoring the raw cursor could land inside a now-longer hidden chain.
       anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
       if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
-        @editor.set_text(updated)
+        @editor.set_text_keeping_eols(updated)
         @editor.place_at_offset(anchor) # back into the marker (set_text reset it) → tooltip stays up
         @dirty = true
       end
@@ -2371,6 +2371,13 @@ module Gori::Tui
     # renders through its chain on send). All delegate to the shared Fuzz::Template helpers.
     # Each of the three that CREATES a marker also declares the buffer a template — see
     # `markers_live?` for why an evidence tab needs to be told.
+    #
+    # They write back through `set_text_keeping_eols`, never plain `set_text`: the Template
+    # helpers take (and must take) `@editor.text`, the CR-free LF projection every offset here
+    # indexes, and a plain `set_text` of that result would store the projection — flattening
+    # the capture's body CRLFs before the tab has sent anything, with auto-CL resyncing the
+    # shortened length behind it. That is exactly what `edit_buffer_text` documents for ^E,
+    # and the Fuzzer's identical five helpers have wrapped it in `restore_wire_eols` all along.
     def auto_mark : String
       return mark_hint unless markable?
       # `Fuzz::Template.auto_mark` is a documented no-op once the text holds ANY `§`, so on a
@@ -2379,7 +2386,7 @@ module Gori::Tui
       # Name that instead of doing it silently.
       return "the capture's own § would become markers and auto-mark adds none — ^T marks at the cursor" if literal_markers?
       declare_markers
-      @editor.set_text(Fuzz::Template.auto_mark(@editor.text))
+      @editor.set_text_keeping_eols(Fuzz::Template.auto_mark(@editor.text))
       @dirty = true
       n = Fuzz::Template.parse(@editor.text).position_count
       "auto-marked #{n} position#{n == 1 ? "" : "s"}"
@@ -2392,7 +2399,7 @@ module Gori::Tui
       return "no word at the cursor — place it on a token (or auto-mark)" if after == before
       note = adopted_literals_note
       declare_markers
-      @editor.set_text(after)
+      @editor.set_text_keeping_eols(after)
       @dirty = true
       msg = Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
       "#{msg}#{note}"
@@ -2419,7 +2426,7 @@ module Gori::Tui
     def clear_marks : String
       return mark_hint unless markable?
       return literal_marker_hint unless markers_live?
-      @editor.set_text(Fuzz::Template.clear_markers(@editor.text))
+      @editor.set_text_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
       @markers_declared = false # back to a buffer with no markers of its own
       invalidate_marker_caches
       @dirty = true
@@ -3453,7 +3460,9 @@ module Gori::Tui
     def strip_marker_span(span : {Int32, Int32}) : Nil
       return unless @focus == :request
       new_text, caret = Fuzz::Template.strip_marker(@editor.text, span)
-      @editor.replace_all(new_text, caret)
+      # LF projection in, terminators back on — see the marking-helpers note above; the
+      # `replace_all` variant so this stays ONE undoable edit and the caret survives.
+      @editor.replace_all_keeping_eols(new_text, caret)
       mark_req_edit
     end
 

@@ -33,6 +33,22 @@ private def plain_connect_block : Bytes
   ])
 end
 
+# A trailing HEADERS block of `count` DISTINCT literal-without-indexing fields with empty
+# values — the cheapest legal way for an origin to hand the assembler a big trailer-name list
+# (9 wire bytes each here), and small enough per field that the whole block stays under
+# MAX_HEADER_BLOCK and its decoded size under the cumulative MAX_HEADER_LIST cap.
+private def distinct_trailer_block(count : Int32) : Bytes
+  io = IO::Memory.new
+  count.times do |i|
+    name = "t%05d" % i
+    io.write_byte(0x00_u8) # literal w/o indexing, new name
+    io.write_byte(name.bytesize.to_u8)
+    io << name
+    io.write_byte(0x00_u8) # empty value
+  end
+  io.to_slice
+end
+
 # Records emitted flows (decoded projection) without a DB.
 private class RecSink < Gori::Proxy::FlowSink
   getter requests = [] of Gori::Store::CapturedRequest
@@ -321,6 +337,56 @@ describe Gori::Proxy::H2::Assembler do
     assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
       hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
     String.new(sink.requests.first.head).should_not contain("X-Gori-Trailers")
+  end
+
+  # Trailer names used to be deduped with `Array#includes?`, a linear scan per field, so a
+  # block of N distinct names cost N^2/2 String compares — one legal 1 MiB block (~174k
+  # names, still under both the per-block and the cumulative cap) measured 39s. That runs
+  # inside the Assembler mutex with no IO, so on Crystal's single-threaded scheduler the TUI,
+  # every other connection and the Store writer fiber got no turn for the whole of it (P6).
+  it "records a large trailer block without a quadratic dedupe scan" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "grpc.test", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
+
+    block = distinct_trailer_block(60_000)
+    block.size.should be < Gori::Proxy::H2::Assembler::MAX_HEADER_BLOCK # accepted whole
+    elapsed = Time.measure do
+      assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, block))
+    end
+    elapsed.should be < 10.seconds # was: minutes, all of it inside the mutex
+
+    assembler.feed("in", data_frame(1_u32, Frame::END_STREAM, ""))
+    head = String.new(sink.responses.first.head)
+    head.should contain("X-Gori-Trailers: t00000, t00001") # the marker keeps arrival order…
+    head.should contain("t59999")                          # …and still names every one
+  end
+
+  # The membership index has to be cleared with the array it indexes. A final status block
+  # REPLACES an interim 1xx head, taking that head's trailer names with it; an index that
+  # remembered `grpc-status` from the discarded head would silently suppress it from the real
+  # trailer's marker line.
+  it "still names a trailer whose name was already recorded against a replaced interim head" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "grpc.test", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    # Interim 100, then a trailer recorded against it.
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS,
+      Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "100"}])))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS,
+      Gori::Proxy::H2::HPACK::Encoder.new.encode([{"grpc-status", "0"}])))
+    # The real response replaces the interim head, then carries its own grpc-status trailer.
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
+    assembler.feed("in", data_frame(1_u32, 0_u8, "msg"))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      Gori::Proxy::H2::HPACK::Encoder.new.encode([{"grpc-status", "13"}])))
+
+    head = String.new(sink.responses.first.head)
+    head.should contain("grpc-status: 13")
+    head.should contain("X-Gori-Trailers: grpc-status")
   end
 
   it "captures a server push (PUSH_PROMISE → promised-stream flow + response)" do

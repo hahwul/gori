@@ -90,9 +90,28 @@ module Gori
     BOUNDARY_RE = /boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i
 
     def boundary(value : String?) : String?
-      m = BOUNDARY_RE.match(value || return nil) || return nil
+      # Total on purpose. `of` scrubs, but two probe callers hand us a header value read
+      # straight off the wire (`Http1.parse_headers` builds values with a bare `String.new`,
+      # and obs-text 0x80-0xFF is legal there), and PCRE RAISES on the first illegal byte
+      # instead of not matching — which took out a whole flow's passive+active scan. Scrub the
+      # SUBJECT the way secret_in_url and cors already do before their match. The boundary
+      # grammar is ASCII, so every well-formed value comes back byte-identical.
+      # `valid_encoding?` first rather than an unconditional `scrub`, the rule `Export::Har.text`
+      # states and measures (~9µs against ~130µs on 40 KB): `scrub` returns `self` for a valid
+      # string, but only after walking it.
+      raw = value || return nil
+      valid = raw.valid_encoding?
+      m = BOUNDARY_RE.match(valid ? raw : raw.scrub) || return nil
       v = m[1]? || m[2]? || return nil
-      v.empty? ? nil : v
+      return nil if v.empty?
+      # The scrub is safe for FINDING the boundary and not for returning it. Every caller
+      # (`Graphql.from_body`, twice) uses this string to split the captured body BYTES, so a
+      # token whose own illegal octet became U+FFFD is a delimiter that appears nowhere in
+      # them — worse than admitting there is none, because the caller would go looking. Gated
+      # on the value being invalid in the first place, so a boundary that really does contain
+      # U+FFFD (valid UTF-8, and legal in the token) still comes back.
+      return nil if !valid && v.includes?(Char::REPLACEMENT)
+      v
     end
   end
 end

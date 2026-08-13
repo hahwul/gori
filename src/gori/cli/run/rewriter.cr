@@ -73,6 +73,7 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run rewriter extract: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter extract: missing value for #{f}" }
         end
         parser.parse(args)
         refuse_list_leftovers(leftover, "rewriter extract", "add, rm/delete, enable, disable")
@@ -208,6 +209,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter extract #{verb}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter extract #{verb}: missing value for #{f}" }
         end
         rest = [] of String
         parser.unknown_args { |before, after| rest = before + after }
@@ -235,6 +237,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter bindings: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter bindings: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -528,6 +531,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter rm: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter rm: missing value for #{f}" }
         end
         positional = [] of String
         parser.unknown_args { |before, after| positional = before + after }
@@ -580,6 +584,7 @@ module Gori
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter #{action}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter #{action}: missing value for #{f}" }
         end
         positional = [] of String
         parser.unknown_args { |before, after| positional = before + after }
@@ -660,6 +665,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter preview: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter preview: missing value for #{f}" }
         end
         parser.parse(args)
 

@@ -1167,6 +1167,57 @@ describe "WebSocket through the proxy (end-to-end)" do
     sink.ws.should contain({"in", "ping"})
   end
 
+  it "relays client frames when the 101 also carries Content-Type: text/event-stream" do
+    # `Content-Type` on a 101 is purely origin-chosen, and `relax_for_streaming_response` read it
+    # as "this is an SSE stream" — which spawns a client-abort watcher parked on `@io.read`. The
+    # 101 branch then hands `@io` to `WS::Relay` instead of closing it (closing is what ends that
+    # watcher everywhere else), so two fibers read the same client socket and the already-parked
+    # watcher swallowed every client->server byte into its scratch buffer for the tunnel's whole
+    # lifetime: the origin below never saw the frame.
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    got = Channel(String).new(1)
+    spawn do
+      conn = origin.accept
+      conn.read_timeout = 5.seconds
+      Gori::Proxy::Codec::Http1.read_head(conn) # the upgrade GET
+      conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+              "Content-Type: text/event-stream\r\n\r\n"
+      conn.flush
+      frame = Gori::Proxy::WS.read_frame(conn).not_nil!
+      got.send(String.new(frame.payload))
+      conn.write(Bytes[0x81_u8, frame.payload.size.to_u8]) # unmasked echo
+      conn.write(frame.payload)
+      conn.flush
+    rescue ex
+      got.send("origin-err:#{ex.class}") rescue nil
+    end
+
+    ws_chan = Channel(Nil).new(4)
+    sink = IntegSink.new(ws_chan)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n" \
+              "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
+              "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    client.flush
+    String.new(Gori::Proxy::Codec::Http1.read_head(client).not_nil!).should contain("101")
+
+    client.write(masked_frame("ping"))
+    client.flush
+    # The origin — not just the client — must see it: a swallowed frame reports origin-err here.
+    receive_within(got).should eq("ping")
+    echoed = Gori::Proxy::WS.read_frame(client).not_nil!
+    String.new(echoed.payload).should eq("ping")
+
+    client.close
+    proxy.stop
+    origin.close rescue nil
+  end
+
   it "strips the client's permessage-deflate offer from the handshake it relays (#518)" do
     # Without the strip the origin accepts the extension, both peers compress, and every
     # frame WS::Relay captures is a deflate stream stored as if it were the message. The

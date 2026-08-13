@@ -339,6 +339,16 @@ describe SettingsView do
       Gori::Settings.upstream_rules = [Gori::Settings::UpstreamRule.new("*", "http", "p.test:1")]
       v.reload(:network)
       SettingsView::NETWORK_FIELDS[row].readonly.should be_true
+
+      # Forward-delete is the third edit verb, and the one that used to be missing the guard.
+      # ← on a non-bool/non-choice row falls through to move_cursor, which pulls the caret off
+      # end-of-line and so defeats delete's only other brake (`cursor >= size`) — Del then ate a
+      # character out of the live "1 rule" summary and flipped `dirty?`, which paints a spurious
+      # "● unsaved" on the Network subheader and blocks the first esc for an edit nobody made.
+      row.times { v.move_field(1) }
+      v.toggle_or_move(-1)
+      v.delete
+      v.dirty?.should be_false
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.upstream_rules = prev

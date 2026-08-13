@@ -87,6 +87,40 @@ describe Gori::Discover::Calibrate do
     end
   end
 
+  # The same storm as the `echoes` case above, arriving by the other door: `calibrate_probes`
+  # is 3, and two of them flaking (a timeout, a reset) used to leave ONE response deciding the
+  # kind — `cohesive?` and `uniform_redirect` are both unanimous with a single sample, so a
+  # lone 200 was promoted to WildcardOk and every wordlist entry against a dynamic miss page
+  # came back a finding at 0.55, over the default 0.5 floor. An errored probe shrinks the
+  # sample; it must not shorten the calibration.
+  describe "a directory where only ONE calibration probe came back" do
+    soft = Gori::Discover::Fingerprint.simhash("the soft 404 body that comes back for everything".to_slice)
+    real = Gori::Discover::Fingerprint.simhash("a completely different real page about accounts".to_slice)
+
+    it "is Uncalibratable rather than WildcardOk, and reports nothing on a 200-everything dir" do
+      base = C.build("http://h/",
+        [fetched(200, 1000, soft), fetched(nil, 0, err: "timeout"), fetched(nil, 0, err: "reset")], 3)
+      base.kind.should eq(C::BaselineKind::Uncalibratable)
+      # Content divergence is all a 200-everything origin can offer, and on one sample it is
+      # not evidence — `Uncalibratable` trusts status only, so this whole sweep stays quiet.
+      C.hit?(base, fetched(200, 1010, real))[0].should be_false
+    end
+
+    it "is Uncalibratable rather than WildcardRedirect, and claims no funnel target" do
+      base = C.build("http://h/",
+        [fetched(302, 0, loc: "/login"), fetched(nil, 0, err: "timeout"), fetched(nil, 0, err: "reset")], 3)
+      base.kind.should eq(C::BaselineKind::Uncalibratable)
+      base.redirect_target.should be_nil # one probe is unanimous with itself; that is not a funnel
+    end
+
+    it "still calibrates normally once two probes survive (the control)" do
+      base = C.build("http://h/",
+        [fetched(200, 1000, soft), fetched(200, 1000, soft), fetched(nil, 0, err: "reset")], 3)
+      base.kind.should eq(C::BaselineKind::WildcardOk)
+      C.hit?(base, fetched(200, 1010, real))[0].should be_true
+    end
+  end
+
   it "is uncalibratable when every bogus probe errored, and never fabricates a hit from no signal" do
     base = C.build("http://h/", [fetched(nil, 0, err: "connect failed")], 3)
     base.kind.should eq(C::BaselineKind::Uncalibratable)

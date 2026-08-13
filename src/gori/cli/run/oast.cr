@@ -318,11 +318,14 @@ module Gori
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--json", "Emit each callback as a JSON line (same shape as MCP)") { json = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          # This was the ONE parser of 74 under src/gori/cli/ missing these, so OptionParser's
-          # default raised straight past `Run.dispatch` (rescues IO::Error) and `CLI.run`
-          # (rescues Gori::Error) to `main`, printing a Crystal backtrace — the form cli.cr's own
-          # top-level rescue calls "the least usable there is". `gori run oast listen --bogus`
-          # already did it; narrowing the global version scan just routed `--version` there too.
+          # Without these, OptionParser's default raises straight past `Run.dispatch` (rescues
+          # IO::Error) and `CLI.run` (rescues Gori::Error) to `main`, printing a Crystal
+          # backtrace — the form cli.cr's own top-level rescue calls "the least usable there
+          # is". `gori run oast listen --bogus` already did it; narrowing the global version
+          # scan just routed `--version` there too. This parser was fixed first and read as the
+          # only one; a later sweep found eleven more parsers taking a `=VALUE` flag with no
+          # `missing_option`, so the invariant is now pinned by a source grep over every parser
+          # under src/gori/cli/ (spec/cli/run/option_parser_missing_option_spec.cr).
           p.invalid_option { |f| abort "gori run oast listen: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast listen: missing value for #{f}" }
         end

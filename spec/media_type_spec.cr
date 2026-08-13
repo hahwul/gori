@@ -88,5 +88,18 @@ describe Gori::MediaType do
       MT.boundary(%(multipart/form-data; BOUNDARY="a;b")).should eq("a;b")
       MT.boundary("application/json").should be_nil
     end
+
+    # The two probe call sites reach `boundary` with a header value read straight off the wire
+    # (`Http1.parse_headers` builds values with a bare `String.new`), and PCRE RAISES on the
+    # first illegal byte instead of not matching — one such Content-Type silently voided a whole
+    # flow's passive scan and killed the TUI's active-scan estimate.
+    it "does not raise on a boundary carrying invalid UTF-8" do
+      ct = "multipart/form-data; boundary=graphql" + String.new(Bytes[0xFF_u8])
+      MT.multipart?(ct).should be_true
+      # Nil, not a raise: a boundary with an illegal byte cannot delimit the body anyway.
+      MT.boundary(ct).should be_nil
+      # A well-formed value is unchanged by the scrub.
+      MT.boundary("multipart/form-data; boundary=graphql-9").should eq("graphql-9")
+    end
   end
 end

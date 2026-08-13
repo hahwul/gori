@@ -149,6 +149,9 @@ module Gori::Proxy
       # request by `strip_ws_extension_offer`, read by the 101 path: an acceptance is only
       # gori's to remove when gori is the reason nothing was offered. See `WS::Handshake`.
       @ws_offer_stripped = false
+      # One-shot: has this connection already logged an intercept hold that failed open because
+      # the declared body was over the ceiling? See `warn_hold_oversize`.
+      @warned_hold_oversize = false
     end
 
     # The address every upstream dial on THIS connection is pinned to, or nil when nothing
@@ -414,9 +417,11 @@ module Gori::Proxy
       # the captured target the Scope SQL filter sees — see `gate_target` above for the one
       # case they part company) only when intercept + Scope are both on, so the common
       # capture-only path spends nothing here.
+      # A body whose DECLARED length is over the hold ceiling fails open (see the predicate) and
+      # falls through to the streaming path below, byte-exact.
       if (ic = @interceptor) && ic.intercepts_request?(
            method: sent_req.method, host: host, target: gate_target, scheme: scheme,
-           head: sent_head)
+           head: sent_head) && holdable_body_size?(req_framing, req_len, "request")
         return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
           created_at, started, req_framing, req_len)
       end
@@ -761,10 +766,13 @@ module Gori::Proxy
       # + can test `status:`. Match the CONDITION against `sent_req` (the rewritten/edited
       # request that was captured + scope-gated), not the original `req`, so a `method:`/`path:`
       # rule that holds the request also holds its response when M&R changed the request line.
+      # A body whose DECLARED length is over the hold ceiling fails open the same way the
+      # request hold does (see `holdable_body_size?`) and streams below, byte-exact.
       if (ic = @interceptor) && ic.intercepts_response?(
            method: sent_req.method, host: host, target: Codec::Http1.gate_target(sent_req),
            scheme: scheme, status: resp.status, head: sent_resp_head) &&
-         !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101
+         !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101 &&
+         holdable_body_size?(resp_framing, resp_len, "response")
         return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
@@ -1099,8 +1107,20 @@ module Gori::Proxy
     # closes the connection without ever marking the flow — it sits in History as
     # "waiting for response…" forever. Treat a reset the same as a graceful EOF (nil)
     # so the caller's existing "no response from upstream" handling covers it too.
+    #
+    # The read is bounded the same way the CLIENT head read is (`handle_request` above, and the
+    # sibling `Repeater::Engine#read_response_head`): a slowloris ORIGIN dripping the response
+    # head one byte at a time keeps resetting the per-read `io_timeout` armed in
+    # `acquire_and_send`, so without a total head-assembly deadline this fiber, the client fd,
+    # the upstream fd and one of `Server`'s MAX_CONNECTIONS permits are pinned for as long as
+    # the origin cares to trickle (P6). `read_head_deadlined` restores the socket's baseline
+    # read_timeout in its own ensure, so the body read that follows is untouched, and
+    # `underlying_socket` returning nil (a non-socket IO) keeps the original loop. The
+    # IO::TimeoutError it raises is caught below as a nil head — the caller's existing
+    # "no response from upstream" path, so no new failure mode.
     private def safe_read_head(io : IO) : Bytes?
-      Codec::Http1.read_head(io)
+      Codec::Http1.read_head(io,
+        deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(io))
     rescue
       nil
     end
@@ -1219,6 +1239,13 @@ module Gori::Proxy
     # Returns whether it relaxed — the caller then streams with a concurrent client-abort watcher
     # (an un-timed upstream read can't otherwise notice a gone client) and won't keep-alive after.
     private def relax_for_streaming_response(resp : Codec::RawResponse, resp_framing : Codec::BodyFraming, upstream : IO) : Bool
+      # A 101 is not a stream, whatever Content-Type the ORIGIN put beside it: `handle_response`
+      # hands @io to `WS::Relay.run` / `Pump.blind_tunnel` instead of closing it, so a relaxed
+      # stream's client-abort watcher — which the guard below relies on `run`'s close to end
+      # (see the comment at the `if relaxed` exit) — would stay parked on `@io.read` and eat the
+      # tunnel's client→server bytes into its scratch buffer. The 101 branch relaxes both legs
+      # itself. Mirrors the `status != 101` the two other `sse?` gates already carry.
+      return false if resp.status == 101
       return false unless resp_framing.close_delimited? || sse?(resp)
       SocketTuning.relax(@io)
       SocketTuning.relax(upstream)
@@ -1778,12 +1805,46 @@ module Gori::Proxy
     # Only gates KNOWN-length (Content-Length) bodies; a chunked body has no declared size
     # to check here and still buffers (bounded only by the peer) — capping that streams a
     # follow-up.
+    #
+    # The intercept HOLD shares it (`holdable_body_size?`): it buffers a whole entity for the
+    # same reason and with the same consequence if it is not bounded.
     MAX_REWRITE_BODY = 16 * 1024 * 1024 # 16 MiB
 
     # Whether a body of this framing/declared-length is small enough to buffer + rewrite.
     # Chunked/unknown-length has no size to gate on, so it isn't blocked here.
     private def rewritable_body_size?(framing : Codec::BodyFraming, len : Int64) : Bool
       !framing.length? || len <= MAX_REWRITE_BODY
+    end
+
+    # Whether an intercept HOLD may buffer a body of this framing/declared-length. A hold reads
+    # the whole entity up front so the human can see and edit it (`Codec::Body.read_complete`,
+    # no `max_bytes`), so without this a multi-GB declared upload/download grows the proxy heap
+    # by its whole size — and does it BEFORE `@sink.on_request`, so the eventual raise loses the
+    # flow from History entirely. Past the ceiling the hold FAILS OPEN: the message is not held
+    # and takes the existing zero-buffer streaming path byte-exact (P6/P7). That is the same
+    # disposition the h2 half of this feature already has (`H2::StreamGate#fail_open` past
+    # `MAX_DEFERRED_BYTES`), and it is the right one — capping the READ instead would truncate
+    # the very upload the operator wanted to edit. Reuses the M&R ceiling rather than inventing
+    # a second one: both answer "is this entity small enough to hold in memory?".
+    #
+    # Only KNOWN-length bodies are gated, exactly as `MAX_REWRITE_BODY` documents — a chunked
+    # body declares no size here and still buffers.
+    private def holdable_body_size?(framing : Codec::BodyFraming, len : Int64, direction : String) : Bool
+      return true if rewritable_body_size?(framing, len)
+      warn_hold_oversize(direction, len)
+      false
+    end
+
+    # Once per connection. Intercept is ON and this message never appeared in the queue, so the
+    # operator has to be told why rather than left waiting on a hold that will not come
+    # (modelled on `H2::StreamGate#warn_overflow`, which says the same thing for h2).
+    private def warn_hold_oversize(direction : String, len : Int64) : Nil
+      return if @warned_hold_oversize
+      @warned_hold_oversize = true
+      ::Log.warn do
+        "intercept: #{direction} body declares #{len} bytes, over the #{MAX_REWRITE_BODY}-byte " \
+        "hold ceiling — forwarding it unheld"
+      end
     end
 
     # Whether the buffered response-body path applies: SOMETHING needs the whole entity, the

@@ -346,6 +346,18 @@ describe F::PayloadSet do
     bf.each { |v| vals << v }
     vals.should eq(["1", "2", "11", "12", "21", "22"])
   end
+
+  it "counts a one-symbol charset in closed form instead of walking it" do
+    # `base == 1` makes the overflow guard (`pw > Int64::MAX // base`) unreachable, so the
+    # count walked `len` steps per length — ~max²/2 of yield-free integer arithmetic. At
+    # max 1e8 that is weeks, on the single-threaded scheduler, before any send: this example
+    # simply does not RETURN without the short-circuit (MCP `brute a:1-100000000`).
+    F::BruteForce.new("a", 1, 100_000_000).size.should eq(100_000_000_i64)
+    F::BruteForce.new("a", 3, 5).size.should eq(3) # "aaa", "aaaa", "aaaaa"
+    vals = [] of String
+    F::BruteForce.new("a", 1, 3).each { |v| vals << v }
+    vals.should eq(["a", "aa", "aaa"])
+  end
 end
 
 describe F::Generator do
@@ -676,6 +688,51 @@ describe F::Engine do
     results, _ = drain(engine)
     results.size.should eq(1)
     backend.sent.should eq(1)
+  end
+
+  # ^X during auto-calibration reaches the engine (`FuzzerView#request_stop`), and until now
+  # it stopped only the sweep: `calibrate_baseline` never read the flag, so the remaining
+  # CALIBRATION_SAMPLES went out one at a time — and since calibration honours `--rate`, at
+  # rps 0.2 that is ~25s of real requests trailing out under "stopping…". Measured against an
+  # UNSTOPPED run of the same setup, the shape `stop during a bucket's fan-out` uses, so the
+  # example says "stopping cuts calibration short" and cannot be satisfied by tuning.
+  it "stops sending calibration samples when the run is stopped mid-calibration" do
+    run = ->(stop_at : Int32?) do
+      set = F::PayloadSet.new(F::InlineList.new(["only"]))
+      cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, auto_calibrate: true)
+      gen = F::Generator.new(base, [set], cfg)
+      engine = nil.as(F::Engine?)
+      n = 0
+      backend = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
+        n += 1
+        engine.try(&.stop) if stop_at && n == stop_at
+        ok_result(200, "x")
+      end
+      # Bound to a non-nilable local as well: `engine` has to stay `F::Engine?` for the
+      # backend block that closes over it (it is called before the assignment happens).
+      eng = F::Engine.new(gen, F::Matcher.new(auto_calibrate: true), backend, cfg)
+      engine = eng
+      eng.calibrate_baseline
+      backend.sent
+    end
+
+    full = run.call(nil)
+    full.should eq(F::Engine::CALIBRATION_SAMPLES) # the phase really does send a burst
+
+    run.call(1).should eq(1) # the stop landed on the first sample; the other five stayed home
+  end
+
+  it "sends no calibration sample at all when the stop landed before the run started" do
+    # The TUI publishes `v.engine` before spawning the run fiber, so ^X can arrive between
+    # the two — calibration must not open with a burst nobody is waiting for any more.
+    set = F::PayloadSet.new(F::InlineList.new(["only"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, auto_calibrate: true)
+    gen = F::Generator.new(base, [set], cfg)
+    backend = FakeBackend.new(F::Origin.new("http", "h", 80)) { |_b| ok_result(200, "x") }
+    engine = F::Engine.new(gen, F::Matcher.new(auto_calibrate: true), backend, cfg)
+    engine.stop
+    engine.calibrate_baseline
+    backend.sent.should eq(0)
   end
 
   it "enforces max_requests as a hard cap on real sends (retries count)" do

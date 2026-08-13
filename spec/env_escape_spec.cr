@@ -223,6 +223,31 @@ describe "Gori::Env — the $$ escape" do
     end
   end
 
+  # A Content-Length at the Int64 edge is a standard integer-overflow probe, so it arrives on
+  # this path as the payload — and Crystal's `+` is CHECKED, so shifting it raised OverflowError
+  # out of the send. `gori run repeater` has no rescue for that (`CLI.dispatch` catches only
+  # `Gori::Error`), so it died with a raw backtrace before any I/O. Saturating keeps the
+  # method's contract: it shifts what it can and never raises.
+  it "saturates rather than overflowing a Content-Length at the Int64 edge" do
+    with_env(declared: ["id"], bound: {"id" => "V"}) do
+      # The `$$` escape SHORTENS the body by one, and needs no bindings at all — which is why
+      # the negative twin is reachable from a request file alone.
+      wire = "POST /g HTTP/1.1\r\nHost: h\r\nContent-Length: -9223372036854775808\r\n\r\n$$id"
+      out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+      out.should end_with("\r\n\r\n$id")
+      out.should contain("Content-Length: 0") # the lower bound this always had
+    end
+  end
+
+  it "saturates a Content-Length at Int64::MAX when a binding GROWS the body" do
+    with_env(declared: ["id"], bound: {"id" => "0123456789"}) do
+      wire = "POST /g HTTP/1.1\r\nHost: h\r\nContent-Length: 9223372036854775807\r\n\r\n$id"
+      out = String.new(Gori::Env.expand_bindings(wire.to_slice))
+      out.should end_with("\r\n\r\n0123456789")
+      out.should contain("Content-Length: 9223372036854775807")
+    end
+  end
+
   # An EVIDENCE path interprets nothing, so it unescapes nothing: a `$$` in captured bytes is
   # two bytes the origin sent, not an escape the operator typed.
   it "is left alone on an evidence path, which expands nothing at all" do

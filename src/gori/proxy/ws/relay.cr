@@ -1,6 +1,7 @@
 require "./frame"
 require "./message_gate"
 require "../sink"
+require "../socket_tuning"
 require "../head_rewriter"
 require "../../interceptor"
 
@@ -122,9 +123,29 @@ module Gori::Proxy::WS
     # 20-30 s ping timer is waiting for (RFC 6455 §5.5.2/§5.5.3) — the exact liveness failure
     # `MessageGate`'s header exists to prevent. Past this many, exactness is given up for that
     # message: everything parked is written out at once and the rest of the message's control
-    # frames overtake it as they always did. §5.5 caps a control payload at 125 bytes, so this
-    # bounds the parked bytes too.
+    # frames overtake it as they always did.
     MAX_PARKED_CONTROLS = 8
+
+    # The largest a §5.5-compliant control frame can be ON THE WIRE: 125 payload bytes plus
+    # the 2-byte header, plus the 4-byte masking key a client→server frame carries (§5.3).
+    # `@parked` holds `ctl.raw`, which is the whole frame — so a ceiling derived from the
+    # PAYLOAD cap alone would fire at seven fully compliant PINGs and make
+    # MAX_PARKED_CONTROLS unreachable for max-size frames.
+    MAX_CONTROL_FRAME_BYTES = 125 + 2 + 4
+
+    # ... and the same ceiling in BYTES, which the count alone does not give.
+    #
+    # §5.5 caps a control payload at 125 bytes, and this constant used to be documented as
+    # bounding the parked bytes for free because of it. It does not: `forward_control`
+    # deliberately does NOT enforce that cap (a peer that advertises more gets its frame
+    # relayed, not its tunnel killed — P7, and see the comment there), so a peer that opens a
+    # message with `TEXT fin=0` and then sends eight 16 MiB PINGs parks a second copy of all
+    # of them — ~128 MiB per direction, outside the MAX_MESSAGE budget that bounds `@buffer`
+    # and `@raw`. Crossing this takes exactly the same disposition as crossing the count:
+    # warn once, write everything parked out ahead of the message, and let this frame and
+    # every later one overtake. Which bytes reach the wire is unchanged; only where they sit
+    # relative to the message's fragments is.
+    MAX_PARKED_BYTES = MAX_PARKED_CONTROLS * MAX_CONTROL_FRAME_BYTES
 
     # The direction column every notice row is written on, and it is NOT the direction the
     # notice is about.
@@ -211,6 +232,22 @@ module Gori::Proxy::WS
           warn_close_deadline(out_gate, in_gate)
         end
       end
+      # Every write below happens BEFORE the two `close` calls, and this tunnel's socket
+      # timeouts were cleared on the way in (`SocketTuning.relax` in ClientConn) so an idle
+      # WebSocket is not reaped — which leaves `close` as the only escape hatch for a blocked
+      # write, and it is sequenced after. A held message is up to MAX_MESSAGE with up to
+      # MessageGate::MAX_DEFERRED_BYTES queued behind it, far past any socket buffer, so an
+      # origin that stopped reading pins this fiber, both pump fibers, both fds and one of the
+      # server's connection slots forever — the fd-exhaustion shape `Pump.blind_tunnel`'s
+      # comment cross-closes to avoid, reached here through the teardown writes instead.
+      # Re-arm a bounded timeout so a stalled peer RAISES: `MessageGate#write_message` and
+      # `AssemblingPump#flush_at_teardown` already rescue a failed write into the "could not be
+      # delivered" disposition, and the closes below then run normally. Armed after the
+      # decision window and not before it, because `arm` sets the READ timeout too — a
+      # surviving pump tripping at exactly CLOSE_TIMEOUT would land in `observed` as a peer
+      # `Reset` that never happened.
+      SocketTuning.arm(client, CLOSE_TIMEOUT)
+      SocketTuning.arm(upstream, CLOSE_TIMEOUT)
       # Resolve both hold queues BEFORE the sockets go. `MessageGate#close` runs from the
       # pump's `ensure`, which is only reached because the two lines below unblocked its
       # read — so a message released there is written to a socket that is already gone. This
@@ -493,9 +530,11 @@ module Gori::Proxy::WS
     # An object rather than a method because it carries per-message state across frames (the
     # assembly buffer, the message opcode, whether the message has fallen back to byte-exact
     # forwarding) — and because `Relay.run` has to reach that state at teardown, while the
-    # sockets are still open (`flush_at_teardown`). One instance per pump fiber, so
-    # nothing here is shared and nothing is locked — the GATE owns the only shared state,
-    # because a wait fiber writes through it.
+    # sockets are still open (`flush_at_teardown`). One instance per pump fiber — and that
+    # last clause is what makes the state shared anyway, because `Relay.run` reaches it from
+    # its OWN fiber while this pump is still reading frames. `@in_frame` is what keeps those
+    # two out of each other's way; the GATE owns the other shared state, because a wait fiber
+    # writes through it.
     #
     # The invariant it keeps: gori's own framing is used ONLY for a message a rule or the
     # operator actually changed. Everything else — binary messages nobody edited, oversized
@@ -523,14 +562,39 @@ module Gori::Proxy::WS
       # armed — even one whose condition matched nothing. Individual frame bytes survived
       # that; the SEQUENCE did not, and the sequence is the §5.4 question.
       #
-      # Bounded by MAX_PARKED_CONTROLS, and only ever populated while this message is still
-      # un-rewritten and un-held: `park_control?` declines on the passthrough path (whose
-      # frames are already on the wire, so the order is kept for free) and `emit_message`
-      # hands them to the gate the moment a hold actually parks the message.
+      # Bounded by MAX_PARKED_CONTROLS and MAX_PARKED_BYTES, and only ever populated while
+      # this message is still un-rewritten and un-held: `park_control?` declines on the
+      # passthrough path (whose frames are already on the wire, so the order is kept for free)
+      # and `emit_message` hands them to the gate the moment a hold actually parks the message.
       @parked = [] of {Int32, Bytes}
+      # What `@parked` currently holds, in bytes. Tracked rather than summed because
+      # `park_control?` asks on every control frame; it is reset wherever `@parked` is emptied.
+      @parked_bytes = 0
       @parked_overflowed = false
       @in_bypass = false # the gate's lock is already held, so writes must not re-take it
       @torn_down = false # `flush_at_teardown` has run; there is nothing left to owe the wire
+      # Whether this pump is part-way through one frame — set for the whole of `step`, which is
+      # everything below the header read: the assembly state (`@buffer`, `@raw`, `@shape`,
+      # `@parked`) and every write to `@dst`. It exists because `Relay.run` reaches
+      # `flush_at_teardown` from ITS OWN fiber while this pump's fiber is alive and mid-message.
+      # Without the guard the teardown flush yields mid-flush (`@sink.on_ws_message`, a store
+      # round-trip; a `@dst.write` that hits EAGAIN; `MessageGate#settle`'s own `Fiber.yield`),
+      # the pump appends the fragment that just arrived, and then the flush's `reset_buffer`
+      # wipes it — the fragment reaching neither the wire nor a row, or the message re-emitted
+      # with its already-flushed leading frames duplicated.
+      #
+      # A plain Bool and not a Mutex, deliberately: gori runs on the single-threaded cooperative
+      # scheduler (AGENTS.md §3), so a flag set and cleared with no yield between is exact — and
+      # a Mutex here DEADLOCKS. `step` blocks in `WS.read_body`'s `read_fully?` waiting for a
+      # payload the peer may never finish, so a lock taken across it is held indefinitely;
+      # `Relay.run` would then block in `flush_at_teardown` and never reach the two `close`
+      # calls that are the only thing able to unblock that read (a socket's `read_timeout`
+      # armed AFTER a fiber has parked does not fire — measured). One truncated frame from
+      # either peer would pin both fds, all three fibers, and one of the server's connection
+      # slots forever. So the teardown flush never waits: it skips a pump that is mid-frame and
+      # lets that pump's own `ensure` flush after the close, where a failed write is already
+      # accounted as teardown loss.
+      @in_frame = false
       @scratch : Bytes
       # The V7 frame-shape accumulator and this direction's ping/pong capture budget. Both
       # pumps have to record identical facts about identical bytes, or an operator's finding
@@ -544,26 +608,25 @@ module Gori::Proxy::WS
         @scratch = Bytes.new(STREAM_CHUNK)
       end
 
+      # What `run` does with one frame, once `step` has handled it.
+      enum Step
+        Continue # keep reading
+        Stop     # end of stream, a truncated frame, or this pump is already torn down
+        Closed   # a CLOSE frame was relayed: the clean half of the §7.1.1 handshake
+      end
+
       # Same contract as `Relay.pump`: HOW this direction ended (see `Ending`).
       def run : Ending
         ending = Ending::Eof
         loop do
           h = WS.read_header(@src) || break
-          unless h.data?
-            break unless forward_control(h)
-            if h.close?
-              ending = Ending::Close
-              break
-            end
-            next
+          case step(h)
+          when Step::Closed
+            ending = Ending::Close
+            break
+          when Step::Stop
+            break
           end
-          start_message(h.opcode) if h.opcode != OP_CONT
-          if h.len > WS::MAX_FRAME
-            break unless forward_oversized(h)
-            next
-          end
-          frame = WS.read_body(@src, h) || break
-          handle_data(frame)
         end
         ending
       rescue
@@ -576,6 +639,34 @@ module Gori::Proxy::WS
         # open — `Relay.run` is parked on `done.receive`); a no-op for the other one, which
         # `run` has already flushed. Either way `flush_at_teardown` runs exactly once.
         flush_at_teardown
+      end
+
+      # One frame, marked `@in_frame` for its whole length (see the declaration) — the body read
+      # included, because a frame is not a unit until its payload is in hand and letting the
+      # teardown flush run between a header and its own body is the same interleave. The wait
+      # that costs is the HEADER read, and that one stays outside: it is where this fiber parks
+      # between frames, and a flush is exactly what should be allowed to happen there.
+      private def step(h : WS::Header) : Step
+        # `Relay.run` has already flushed this pump and is about to close both sockets. What
+        # this loop assembles from here reaches neither the wire nor a row — the flush that
+        # would have put it out has run, and `@torn_down` has disabled the `ensure`'s — so the
+        # direction ends here instead, leaving the bytes on the peer's socket rather than
+        # swallowing them into a buffer nobody will flush.
+        return Step::Stop if @torn_down
+        @in_frame = true
+        unless h.data?
+          return Step::Stop unless forward_control(h)
+          return h.close? ? Step::Closed : Step::Continue
+        end
+        start_message(h.opcode) if h.opcode != OP_CONT
+        if h.len > WS::MAX_FRAME
+          return forward_oversized(h) ? Step::Continue : Step::Stop
+        end
+        frame = WS.read_body(@src, h) || return Step::Stop
+        handle_data(frame)
+        Step::Continue
+      ensure
+        @in_frame = false
       end
 
       # Everything this pump is still WITHHOLDING — a half-assembled message's fragments and
@@ -606,8 +697,17 @@ module Gori::Proxy::WS
       # holds — so what was missing is the sentence saying it never got out. `MessageGate`'s
       # `write_message` states the same contract from the other side ("a `ws_messages` row is
       # gori's claim that the peer saw these bytes"), and a refusal has to name itself.
+      # Called from TWO fibers: this pump's own `ensure`, and `Relay.run`'s teardown while this
+      # pump is still reading. `@in_frame` decides which of them gets to do it — see its
+      # declaration for why that is a flag and not a lock.
       def flush_at_teardown : Nil
         return if @torn_down
+        # Mid-frame: this pump owns the assembly state right now, and half of it is on the
+        # stack of a `step` that has not returned. Leave it alone — `Relay.run` closes the
+        # sockets immediately after this, which ends that `step`, and the `ensure` below its
+        # loop then runs this again from the fiber that does own the state. What is owed goes
+        # out there or is reported by `warn_teardown_loss`; it is never silently dropped.
+        return if @in_frame
         @torn_down = true
         # Snapshotted BEFORE the attempt: `flush_parked` empties `@parked` ahead of its own
         # write, so after a raise there is nothing left to count.
@@ -705,17 +805,24 @@ module Gori::Proxy::WS
       # is no assembling message to interleave it with, when this message's own wire bytes
       # are gone anyway (passthrough, or past the raw cap — in both cases the fragments are
       # already on the wire, so arrival order is preserved by writing straight through), and
-      # once MAX_PARKED_CONTROLS have piled up.
+      # once MAX_PARKED_CONTROLS frames or MAX_PARKED_BYTES bytes have piled up.
       private def park_control?(ctl : WS::Frame) : Bool
         return false if @passthrough || !@raw_kept || @raw.size == 0
+        # A message that never ends must not sit on the peer's PONG, and it must not pin the
+        # proxy's heap either. Either ceiling gives up exactness for this message, says so
+        # once, and lets this frame and every later one overtake.
         if @parked.size >= MAX_PARKED_CONTROLS
-          # A message that never ends must not sit on the peer's PONG. Give up exactness for
-          # this message, say so once, and let this frame and every later one overtake.
-          warn_parking_ceiling
+          warn_parking_ceiling("more than #{MAX_PARKED_CONTROLS} control frames")
+          flush_parked
+          return false
+        end
+        if @parked_bytes + ctl.raw.size > MAX_PARKED_BYTES
+          warn_parking_ceiling("more than #{MAX_PARKED_BYTES} bytes of control frames")
           flush_parked
           return false
         end
         @parked << {@raw.size, ctl.raw.dup}
+        @parked_bytes += ctl.raw.size
         true
       end
 
@@ -726,6 +833,7 @@ module Gori::Proxy::WS
         return if @parked.empty?
         bytes = parked_bytes
         @parked.clear
+        @parked_bytes = 0
         return unless bytes
         if (gate = @gate) && !@in_bypass
           gate.write_control(bytes)
@@ -773,10 +881,15 @@ module Gori::Proxy::WS
       # same "controls, then the message" ordering whether the interleave was preserved or
       # given up. Once per direction per socket, like the warn and like `MAX_CONTROL_CAPTURE`'s
       # marker — its POSITION in the stream is what names the message it applies to.
-      private def warn_parking_ceiling : Nil
+      #
+      # `crossed` names WHICH ceiling gave way — the count or the byte total — because the two
+      # answer different operator questions ("my peer is pinging in a loop" vs "my peer is
+      # sending control frames §5.5 says cannot exist"), and the sentence is the only place
+      # that can say so.
+      private def warn_parking_ceiling(crossed : String) : Nil
         return if @parked_overflowed
         @parked_overflowed = true
-        note = "more than #{MAX_PARKED_CONTROLS} control frames arrived between the fragments " \
+        note = "#{crossed} arrived between the fragments " \
                "of one #{side} message; they were forwarded ahead of it so the peer's ping " \
                "timer still sees a reply. The frames are byte-exact; their position relative " \
                "to that message's fragments is not"
@@ -991,6 +1104,7 @@ module Gori::Proxy::WS
           # the one invariant this pump exists to keep.
           write_direct(interleaved_raw)
           @parked.clear
+          @parked_bytes = 0
         elsif @buffer.size > 0
           flush_parked # re-framed: nowhere to put them but in front
           write_direct(WS.encode(@opcode, @buffer.to_slice, mask: @mask, fin: false))
@@ -1077,6 +1191,7 @@ module Gori::Proxy::WS
         # Whoever ended the message has already disposed of these (written them through, or
         # handed them to the gate); the offsets they carry belong to a buffer that is gone.
         @parked.clear
+        @parked_bytes = 0
       end
     end
 

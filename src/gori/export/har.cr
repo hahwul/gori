@@ -62,6 +62,15 @@ module Gori
       # on STDERR, so the caveat is visible without opening the file.
       TRUNCATED_MARK = "gori: body truncated at the capture cap"
 
+      # The head's counterpart to TRUNCATED_MARK. A captured HEAD is not UTF-8: RFC 7230's
+      # field-value is VCHAR / obs-text (%x80-FF), so a Latin-1 `Content-Disposition` filename
+      # or an h2 pseudo-header is stored as raw octets and `Codec::Http1.parse_headers` keeps
+      # them that way on purpose (P7). A HAR is JSON and JSON is UTF-8 (RFC 8259), and unlike a
+      # BODY there is no lossless escape hatch for a head — `emit_body` can fall back to
+      # base64, a header name cannot — so those octets become U+FFFD here. That is a real loss,
+      # so it is named on the entry rather than left silent (#488/#489/#491).
+      SCRUBBED_MARK = "gori: invalid UTF-8 in the captured head replaced with U+FFFD; the store keeps the original bytes"
+
       # gori records one round-trip duration, not a phase breakdown, so `send`/`receive`
       # are the spec's own "not applicable" (-1) rather than a fabricated 0, and `time`
       # stays equal to the sum of the non-negative timings as §timings requires.
@@ -83,6 +92,7 @@ module Gori
         property no_response = 0
         property incomplete = 0
         property truncated = 0
+        property scrubbed = 0
 
         def skipped : Int32
           websocket + no_response + incomplete
@@ -106,6 +116,11 @@ module Gori
             verb = truncated == 1 ? "entry carries" : "entries carry"
             msgs << "#{truncated} #{verb} a body truncated at the capture cap " \
                     "(marked in the HAR: bodySize/content.size is the true wire size, plus a comment)"
+          end
+          if scrubbed > 0
+            verb = scrubbed == 1 ? "entry carries" : "entries carry"
+            msgs << "#{scrubbed} #{verb} a head with invalid UTF-8 replaced by U+FFFD: JSON must be UTF-8 and " \
+                    "HAR has no base64 escape for a head (marked in the HAR by a comment); the store keeps the raw bytes"
           end
           msgs
         end
@@ -163,7 +178,7 @@ module Gori
                       when Skip::NoResponse then report.no_response += 1
                       when Skip::Incomplete then report.incomplete += 1
                       else
-                        entry(j, detail)
+                        report.scrubbed += 1 if entry(j, detail)
                         report.written += 1
                         report.truncated += 1 if detail.request_body_truncated? || detail.response_body_truncated?
                       end
@@ -178,16 +193,18 @@ module Gori
       end
 
       # One entry object. The caller must have checked `skip_reason` first; a flow with no
-      # response head emits nothing rather than a response-less entry.
-      def self.entry(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+      # response head emits nothing rather than a response-less entry. Returns true when the
+      # head had to be scrubbed on the way into the document (see `text` / SCRUBBED_MARK).
+      def self.entry(j : JSON::Builder, detail : Store::FlowDetail) : Bool
         resp_head = detail.response_head
-        return unless resp_head
+        return false unless resp_head
         row = detail.row
         req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
         resp = Proxy::Codec::Http1.parse_response_head(resp_head)
         version = detail.http_version.presence || "HTTP/1.1"
         req_body_size = wire_body_size(request_total(row), detail.request_head, detail.request_body)
         resp_body_size = wire_body_size(row.response_size, resp_head, detail.response_body)
+        scrubbed = lossy_head?(row, req, resp, version)
 
         j.object do
           j.field "startedDateTime", iso_micros(row.created_at)
@@ -196,9 +213,9 @@ module Gori
             j.object do
               # The start-line is the truth (P7): a lowercase or non-standard method is the
               # operator's, and `row.method` is the upcased projection of it.
-              j.field "method", req.method.presence || row.method
-              j.field "url", row.url
-              j.field "httpVersion", version
+              j.field "method", text(req.method.presence || row.method)
+              j.field "url", text(row.url)
+              j.field "httpVersion", text(version)
               j.field "cookies" { request_cookies(j, req.headers) }
               j.field "headers" { headers(j, req.headers) }
               j.field "queryString" { query_string(j, row.target) }
@@ -211,23 +228,23 @@ module Gori
           j.field "response" do
             j.object do
               j.field "status", row.status || resp.status
-              j.field "statusText", resp.reason
+              j.field "statusText", text(resp.reason)
               # The RESPONSE's own version, not the request's. `detail.http_version` is the
               # request column (flow_mapper), so an origin answering HTTP/1.0 to an HTTP/1.1
               # request exported as HTTP/1.1 and re-imported with its response head rewritten
               # — and 1.0 vs 1.1 is semantically load-bearing (no default keep-alive). The
               # truth was already parsed two lines up, from `resp.raw_head`, which is stored
               # verbatim.
-              j.field "httpVersion", resp.version.presence || version
+              j.field "httpVersion", text(resp.version.presence || version)
               j.field "cookies" { response_cookies(j, resp.headers) }
               j.field "headers" { headers(j, resp.headers) }
-              j.field "redirectURL", resp.headers.get?("location") || ""
+              j.field "redirectURL", text(resp.headers.get?("location") || "")
               j.field "headersSize", resp_head.size
               j.field "bodySize", resp_body_size
               j.field "content" do
                 j.object do
                   j.field "size", resp_body_size
-                  j.field "mimeType", row.content_type || resp.headers.get?("content-type") || ""
+                  j.field "mimeType", text(row.content_type || resp.headers.get?("content-type") || "")
                   emit_body(j, detail.response_body)
                   if note = body_note(detail.response_body, resp_body_size, detail.response_body_truncated?)
                     j.field "comment", note
@@ -251,12 +268,52 @@ module Gori
           # ORIGIN invented this request in a PUSH_PROMISE" — the second especially, since
           # a HAR reader has no other way to tell a pushed entry from one the client sent.
           # See `Store::FlowRow#advisory`.
+          # A scrubbed head rides the same field: `advisories` is a fresh array per call, so
+          # appending here cannot leak back into the row.
           advisories = row.advisories
+          advisories << SCRUBBED_MARK if scrubbed
           j.field "comment", advisories.join("\n") unless advisories.empty?
         end
+        scrubbed
       end
 
       # --- fields ------------------------------------------------------------
+
+      # Every head-derived string in this document goes through here. HAR is JSON and JSON is
+      # UTF-8 (RFC 8259); a captured head is neither, so an obs-text octet written straight
+      # through produced a file `jq`, Python and DevTools all reject — and that gori itself
+      # could not read back, because `Import::Builder`'s guard ran PCRE2 over it and the
+      # per-entry rescue then dropped the whole flow. See SCRUBBED_MARK for why U+FFFD is the
+      # lesser loss here and base64 (the BODY's escape hatch, `emit_body`) is not on offer.
+      #
+      # `valid_encoding?` before `scrub`, the same order and for the same measured reason as
+      # `emit_body`: scrub costs ~130µs on a valid 40 KB string against ~9µs for the check, so
+      # the overwhelmingly common clean head pays only the check.
+      private def self.text(s : String) : String
+        s.valid_encoding? ? s : s.scrub
+      end
+
+      # Would any of this entry's head-derived text lose bytes to `text`? Asked once up front
+      # so the entry `comment` can name the substitution instead of leaving it silent; it reads
+      # exactly the sources `text` guards.
+      private def self.lossy_head?(row : Store::FlowRow, req : Proxy::Codec::RawRequest,
+                                   resp : Proxy::Codec::RawResponse, version : String) : Bool
+        return true unless row.url.valid_encoding? && row.target.valid_encoding?
+        # `row.method` and not just `req.method`: `entry` writes `req.method.presence ||
+        # row.method`, so a head with no parseable start-line token falls back to the column,
+        # and checking only the parsed half let such an entry be scrubbed with no comment and
+        # no `report.scrubbed`. Every string `text()` touches has to be answered here.
+        return true unless req.method.valid_encoding? && row.method.valid_encoding?
+        return true unless resp.reason.valid_encoding?
+        return true unless version.valid_encoding? && resp.version.valid_encoding?
+        return true if (ct = row.content_type) && !ct.valid_encoding?
+        {req.headers, resp.headers}.each do |list|
+          list.each do |h|
+            return true unless h.name.valid_encoding? && h.value.valid_encoding?
+          end
+        end
+        false
+      end
 
       # Wire order, duplicates kept, original casing kept. HAR's `headers` is the only
       # place the message's own header block survives, and it is what `Import::Har` reads
@@ -265,8 +322,8 @@ module Gori
         j.array do
           list.each do |h|
             j.object do
-              j.field "name", h.name
-              j.field "value", h.value
+              j.field "name", text(h.name)
+              j.field "value", text(h.value)
             end
           end
         end
@@ -277,7 +334,10 @@ module Gori
       # different string than the one that was sent, and `queryString` is a derived view
       # anyway — the URL is what imports back.
       private def self.query_string(j : JSON::Builder, target : String) : Nil
-        q = target.index('?').try { |i| target[(i + 1)..] } || ""
+        # Scrub BEFORE splitting, not after: the split below indexes by CHARACTER, and char
+        # arithmetic over an invalid-UTF-8 target is not the arithmetic the caller meant.
+        s = text(target)
+        q = s.index('?').try { |i| s[(i + 1)..] } || ""
         j.array do
           next if q.empty?
           q.split('&') do |pair|
@@ -299,7 +359,9 @@ module Gori
         j.array do
           list.each do |h|
             next unless h.name.compare("cookie", case_insensitive: true) == 0
-            h.value.split(';') do |pair|
+            # Scrub the whole value once, before it is split: this is a derived view of the
+            # same header `headers` already wrote through `text`, and the pieces must agree.
+            text(h.value).split(';') do |pair|
               name, _, value = pair.partition('=')
               name = name.strip
               next if name.empty?
@@ -319,7 +381,7 @@ module Gori
         j.array do
           list.each do |h|
             next unless h.name.compare("set-cookie", case_insensitive: true) == 0
-            parts = h.value.split(';')
+            parts = text(h.value).split(';')
             name, _, value = (parts[0]? || "").partition('=')
             name = name.strip
             next if name.empty?
@@ -350,7 +412,7 @@ module Gori
         return if body.nil? || body.empty?
         j.field "postData" do
           j.object do
-            j.field "mimeType", list.get?("content-type") || ""
+            j.field "mimeType", text(list.get?("content-type") || "")
             emit_body(j, body)
             if note = body_note(body, wire_size, truncated)
               j.field "comment", note

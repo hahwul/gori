@@ -147,7 +147,15 @@ module Gori
           handshake, keys = build_handshake(upgrade_request, keep_key)
           upstream.write(handshake)
           upstream.flush
-          head = Proxy::Codec::Http1.read_head(upstream)
+          # Bounded like every other origin head read (`Engine.read_response_head`, and
+          # `ClientConn#safe_read_head` on the proxy path): the per-read `io_timeout` armed on
+          # the dial is reset by every byte, so an origin dripping its 101 handshake one byte at
+          # a time pins this fiber for as long as it cares to trickle. `underlying_socket`
+          # returns nil for an IO with no settable socket, in which case the deadline is skipped
+          # and the behaviour is unchanged.
+          head = Proxy::Codec::Http1.read_head(upstream,
+            deadline: Proxy::SocketTuning::HEAD_DEADLINE,
+            timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
           # `Engine.no_response_error`, not a local copy of the sentence: a plain `ws://` target
           # behind a proxy that answers the CONNECT and then closes without relaying anything is
           # the same shape as the h1 repeater's clean-EOF case, and a hand-duplicated string here
@@ -469,7 +477,12 @@ module Gori
         io = IO::Memory.new(head.size + 64)
         req_line = lines.empty? ? "GET / HTTP/1.1" : String.new(lines[0])
         io << (Repeater::FlowRequest.rewrite_request_line(req_line) || req_line) << "\r\n"
-        lines[1..].each do |line|
+        # `skip(1)`, not `lines[1..]`: `head_lines` pops trailing blanks, so an empty or
+        # all-blank editor yields `[]` and the Range index raises IndexError. That raise
+        # landed AFTER the dial, so the operator got "Index out of bounds" for a connection
+        # gori had already opened. The line above already declares the intent — synthesize a
+        # request line and let the origin answer — and this negated it.
+        lines.skip(1).each do |line|
           next if line.empty?
           name = header_name(line)
           next if name == "sec-websocket-extensions"

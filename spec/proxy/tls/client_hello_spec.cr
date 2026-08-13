@@ -107,6 +107,21 @@ describe Gori::Proxy::Tls::ClientHello do
       consumed.size.should eq(hello.size)
     end
 
+    # An invalid-UTF-8 byte inside the SNI value used to escape peek_sni as an ArgumentError out
+    # of PCRE2, which the accept fiber's blanket rescue turned into a dropped connection — the
+    # one thing this function's contract says cannot happen, and it cost the transparent
+    # listener its kernel-original-destination fallback (#528).
+    it "is nil, not an exception, for an SNI value that is not valid UTF-8" do
+      hello = real_client_hello("zzqqzzqq.test")
+      needle = "zzqqzzqq.test".to_slice
+      at = (0..(hello.size - needle.size)).find { |i| hello[i, needle.size] == needle }
+      at.should_not be_nil
+      hello[at.not_nil! + 4] = 0xFF_u8 # one raw byte PCRE2 refuses to decode
+      sni, consumed = ClientHello.peek_sni(IO::Memory.new(hello))
+      sni.should be_nil
+      consumed.size.should eq(hello.size) # still replayable, so the caller can fall back
+    end
+
     # The genuine no-SNI case (an old client, or one that simply omits the extension). A
     # transparent listener has to cope with having no name at all, so this must be nil rather
     # than an error — hand-built, because a modern OpenSSL will not produce it.

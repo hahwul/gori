@@ -421,6 +421,56 @@ describe Gori::Export::Har do
     end
   end
 
+  # A captured HEAD is not UTF-8: RFC 7230's field-value is VCHAR / obs-text (%x80-FF), and a
+  # Latin-1 filename in a `Content-Disposition` is the everyday source of one. Written straight
+  # through, those octets produced a document jq / Python / DevTools all reject — and one gori
+  # could not read back either: `Import::Builder`'s guard ran PCRE2 over the invalid value,
+  # raised, and `Import::Har`'s per-entry rescue dropped the WHOLE flow as "skipped". Unlike a
+  # body there is no base64 escape for a head, so the substitution is made and NAMED.
+  describe "a head carrying obs-text" do
+    obs_req = "GET /items?a=1&b HTTP/1.1\r\nHost: shop.test\r\nX-Note: caf\xe9\r\n\r\n"
+    obs_resp = "HTTP/1.1 200 caf\xe9\r\nContent-Type: text/html\r\n" \
+               "Content-Disposition: attachment; filename=\"caf\xe9.pdf\"\r\nContent-Length: 9\r\n\r\n"
+
+    it "writes a valid-UTF-8 document and says the head was scrubbed" do
+      with_store do |store|
+        har, report = export([capture_flow(store, req_head: obs_req, resp_head: obs_resp)])
+        har.valid_encoding?.should be_true
+        report.written.should eq(1)
+        report.scrubbed.should eq(1)
+        report.notes.any?(&.includes?("U+FFFD")).should be_true
+
+        entry = JSON.parse(har)["log"]["entries"][0]
+        entry["comment"].as_s.should contain(Gori::Export::Har::SCRUBBED_MARK)
+        entry["response"]["statusText"].as_s.should eq("caf\uFFFD")
+        cd = entry["response"]["headers"].as_a
+          .find { |h| h["name"].as_s == "Content-Disposition" }.not_nil!
+        cd["value"].as_s.should contain("caf\uFFFD.pdf")
+      end
+    end
+
+    it "still imports back as one flow instead of vanishing into the skipped count" do
+      with_store do |store|
+        har, _ = export([capture_flow(store, req_head: obs_req, resp_head: obs_resp)])
+        back = reimport(har)
+        back.row.status.should eq(200)
+        String.new(back.request_head).should contain("X-Note: caf\uFFFD\r\n")
+      end
+    end
+
+    it "leaves a clean head alone — no substitution, no count, no comment" do
+      with_store do |store|
+        # A VALID multi-byte value is not obs-text and must survive byte-exact; only the
+        # `valid_encoding?` check runs on it (scrub is ~130µs on a valid 40 KB string).
+        har, report = export([capture_flow(store,
+          req_head: "GET /items?a=1&b HTTP/1.1\r\nHost: shop.test\r\nX-Note: café\r\n\r\n")])
+        report.scrubbed.should eq(0)
+        har.should contain("café")
+        JSON.parse(har)["log"]["entries"][0].as_h.has_key?("comment").should be_false
+      end
+    end
+  end
+
   describe "flows with no HAR representation" do
     it "skips a WebSocket flow and says so, rather than emitting the handshake alone" do
       with_store do |store|

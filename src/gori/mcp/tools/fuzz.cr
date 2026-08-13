@@ -559,11 +559,20 @@ module Gori
         v.as_i64? || v.as_s?.try(&.to_i64?)
       end
 
-      # Clamp a length to Int32 so an absurd value from the object form can't
-      # OverflowError past the clean-error handler (the run is still capped by
-      # FUZZ_MAX_REQUESTS regardless).
+      # Clamp a brute-force length so an absurd value can't OverflowError past the
+      # clean-error handler (the run is still capped by FUZZ_MAX_REQUESTS regardless).
+      #
+      # The ceiling is a real length, not Int32::MAX: `BruteIterator` allocates an odometer
+      # of `min` slots up front, so `{"charset":"ab","min":2147483647}` was an 8.6 GB
+      # `Array.new` on the job fiber — and a length that large is never a payload anyone
+      # meant to send. "try every string" is exactly what an agent emits, so bound it here,
+      # at the strict surface, rather than trusting the budget guard: FUZZ_MAX_REQUESTS caps
+      # how MANY payloads are sent, never how long one is. 4096 leaves the one legitimate
+      # long-length shape (a single-character charset used as padding) intact.
+      BRUTE_MAX_LEN = 4096
+
       private def clamp_brute_len(n : Int64) : Int32
-        n.clamp(0_i64, Int64.new(Int32::MAX)).to_i
+        n.clamp(0_i64, BRUTE_MAX_LEN.to_i64).to_i
       end
 
       # numbers set: the compact "FROM-TO[:STEP]" string OR a structured object
@@ -605,10 +614,12 @@ module Gori
         charset, _, lens = s.rpartition(':')
         raise FuzzArgError.new("invalid brute '#{s}' (use CHARSET:MIN-MAX)") if charset.empty? || lens.empty?
         min_s, _, max_s = lens.partition('-')
-        min = min_s.to_i?
-        max = max_s.empty? ? min : max_s.to_i?
+        min = min_s.to_i64?
+        max = max_s.empty? ? min : max_s.to_i64?
         raise FuzzArgError.new("invalid brute lengths '#{lens}'") unless min && max
-        Fuzz::BruteForce.new(charset, min, max)
+        # Same clamp as the object form: the string form is the shape an agent reaches for
+        # first ("a:1-100000000"), and it used to go into BruteForce raw.
+        Fuzz::BruteForce.new(charset, clamp_brute_len(min), clamp_brute_len(max))
       end
 
       private def fuzz_matcher(h) : Fuzz::Matcher
@@ -739,7 +750,7 @@ module Gori
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
           s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
           s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
-          s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}))
+          s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. A payload containing a raw space, CRLF, or other characters unsafe in the position it's marking (a query/body param value has no encoding applied by default — auto-mark finds the position but does NOT encode for it) will otherwise corrupt the request line/framing instead of reaching the app. Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))
           s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16"): for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message))
           s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))

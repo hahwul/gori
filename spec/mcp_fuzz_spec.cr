@@ -123,6 +123,50 @@ describe "MCP fuzz tools" do
     end
   end
 
+  # "try every string" is exactly what an agent emits, and both halves of it used to be
+  # unbounded: a one-symbol charset made counting the set O(max²) of yield-free arithmetic
+  # (the whole process froze — before the scope gate, before the budget guard, with the
+  # server's ping/cancel reader fiber starved), and a huge `min` made BruteIterator allocate
+  # an odometer of that many slots (8.6 GB at Int32::MAX). Lengths are clamped here, at the
+  # strict surface: FUZZ_MAX_REQUESTS caps how MANY payloads go out, never how long one is.
+  it "clamps brute-force lengths so a huge one can neither freeze nor OOM the server" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "allow_unscoped" => true,
+        "max_requests"   => 1, # the clamped set is still 4096 candidates — don't send them
+      }
+      # The string form, the shape an agent reaches for first. Without the clamp this call
+      # does not RETURN: counting "a" × 1e8 takes weeks.
+      s = call_json(tools, "fuzz_start", base.merge({"payloads" => [{"brute" => "a:1-100000000"}]}).to_json)
+      s["total"].as_i.should eq(4096)
+      # The object form's `min` is what BruteIterator allocates up front.
+      o = call_json(tools, "fuzz_start",
+        base.merge({"payloads" => [{"brute" => {"charset" => "ab", "min" => 2147483647}}]}).to_json)
+      o["job_id"].as_s.should_not be_empty
+
+      # Both jobs stop themselves at the 1-request cap; drain them so the store closes clean.
+      # ASSERTED, not best-effort: falling through on timeout would let `with_store` close the
+      # DB under a live job fiber, whose next write then hits a closed SQLite handle — an
+      # intermittent failure landing in some unrelated example. The ceiling is generous
+      # (12 s) because a loaded runner still has to walk the clamped 4096-candidate set.
+      [s["job_id"].as_s, o["job_id"].as_s].each do |id|
+        settled = false
+        600.times do
+          if call_json(tools, "fuzz_status", %({"job_id":#{id.to_json}}))["status"].as_s != "running"
+            settled = true
+            break
+          end
+          sleep 0.02.seconds
+        end
+        settled.should be_true
+      end
+    end
+  end
+
   # A built-in preset (issue #566) is selectable as a payload SOURCE, composes with a
   # second set, and merges an optional user file — the same model the CLI/TUI use.
   it "accepts a built-in preset as a payload set, and merges a user file" do

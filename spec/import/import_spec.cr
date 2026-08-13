@@ -374,6 +374,28 @@ describe Gori::Import do
     end
   end
 
+  # `servers: ["https://api.example.com"]` is a common YAML shorthand and not the OpenAPI
+  # shape. `as_a?` proves the ELEMENT exists, not that it is an object, and
+  # `JSON::Any#[]?(String)` raises a raw `Exception` on a non-Hash — which `cmd_import`
+  # (`rescue ex : Gori::Error`) and the deliberately narrow top-level rescue both let through,
+  # so the operator got a Crystal backtrace. `server_base` runs before the per-operation
+  # rescue, so nothing else caught it either.
+  it "raises a clean Gori::Error when OpenAPI servers[0] is not an object" do
+    [%("https://api.example.com"), "42", "[]", "null"].each do |element|
+      oas = File.tempname("gori", ".json")
+      begin
+        File.write(oas, %({"servers":[#{element}],"paths":{"/users":{"get":{}}}}))
+        with_store do |store|
+          expect_raises(Gori::Error, /servers\[0\] is not an object/) do
+            Gori::Import.import_file(store, :oas, oas)
+          end
+        end
+      ensure
+        File.delete?(oas)
+      end
+    end
+  end
+
   it "reports the skipped count (not the opaque 'no flows found') when every OpenAPI operation is malformed" do
     oas = File.tempname("gori", ".json")
     begin
@@ -838,6 +860,32 @@ describe Gori::Import::Builder do
     head.should contain("X-Foo: a\tb")
   end
 
+  # The boundary guard used to be a PCRE match, and PCRE2 RAISES `ArgumentError: UTF-8 error`
+  # on an invalid-UTF-8 subject. A header value carrying obs-text (RFC 7230 field-value =
+  # VCHAR / obs-text %x80-FF — a Latin-1 `Content-Disposition` filename is the everyday one)
+  # therefore blew up inside the guard, and every import parser's bare per-entry rescue turned
+  # that into a SILENTLY dropped entry: a third-party HAR lost the whole flow to a legal header.
+  it "passes an obs-text header value through instead of raising inside the boundary guard" do
+    headers = Gori::Import::Builder::Headers.new
+    headers << {"Content-Disposition", "attachment; filename=\"caf\xe9.pdf\""}
+    head = Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1",
+      scheme: "http", host: "h.test", port: 80, headers: headers, body: nil)
+    # Byte-exact, never sanitised (P7): the guard REJECTS a boundary byte, it never repairs one.
+    head.should eq("GET / HTTP/1.1\r\nHost: h.test\r\n" \
+                   "Content-Disposition: attachment; filename=\"caf\xe9.pdf\"\r\n\r\n".to_slice)
+  end
+
+  it "still rejects CR/LF/NUL when the same value also carries obs-text" do
+    headers = Gori::Import::Builder::Headers.new
+    headers << {"X-Foo", "caf\xe9\r\nX-Injected: evil"}
+    expect_raises(Gori::Error, /control character/) do
+      Gori::Import::Builder.request_head("GET", "/", "HTTP/1.1", scheme: "http", host: "h.test", port: 80, headers: headers, body: nil)
+    end
+    expect_raises(Gori::Error, /control character/) do
+      Gori::Import::Builder.response_head("HTTP/1.1", 200, "caf\xe9\x00", Gori::Import::Builder::Headers.new, nil)
+    end
+  end
+
   it "rejects a host containing a space (non-URL garbage), consistent with bad-scheme skips" do
     expect_raises(Gori::Error, /bad host/) do
       Gori::Import::Builder.endpoint("not a url at all")
@@ -1141,6 +1189,64 @@ describe Gori::Import::Builder do
         0_i64, "http://h.test/big", "GET", empty, nil, "HTTP/1.1", 200, "OK",
         headers, "5\r\nhello\r\n5\r\nwor".to_slice, "text/plain", nil, nil, nil)
       String.new(pair.response.not_nil!.head).should_not contain("Transfer-Encoding")
+    end
+  end
+
+  # A chunk-size line near 2^31 is the canonical chunk-size-overflow smuggling payload —
+  # exactly the byte pattern an operator imports a HAR to preserve. The walk bounds-checked
+  # with `pos + size + 2`, a CHECKED Int32 add, so gori's OWN arithmetic raised OverflowError
+  # and the per-entry rescue reported the entry as `skipped`: `7ffffff0` imported and the
+  # byte-identical `7fffffff` vanished. `Codec::Body.chunked_complete?` already subtracts.
+  describe "a chunk-size line near Int32::MAX" do
+    it "answers the walk instead of overflowing on it" do
+      headers = Gori::Import::Builder::Headers.new
+      headers << {"Transfer-Encoding", "chunked"}
+      # `ffffffff` is refuted as a trigger (to_i? returns nil); leading zeros still reach
+      # Int32::MAX, so the padded form has to be pinned too.
+      %w[7ffffffe 7fffffff 000000007fffffff].each do |hex|
+        body = "#{hex}\r\nabc".to_slice
+        head = String.new(Gori::Import::Builder.request_head("POST", "/a", "HTTP/1.1",
+          scheme: "https", host: "x.test", port: 443, headers: headers, body: body))
+        # The declared chunk is larger than the bytes present, so the body does not back the
+        # framing — the same answer `7ffffff0` already got, which is the point.
+        head.should_not contain("Transfer-Encoding")
+        head.should contain("Content-Length: #{body.size}\r\n")
+      end
+    end
+
+    it "keeps the framing when the source says the body was TRUNCATED, like any other size" do
+      headers = Gori::Import::Builder::Headers.new
+      headers << {"Transfer-Encoding", "chunked"}
+      empty = Gori::Import::Builder::Headers.new
+      pair = Gori::Import::Builder.complete_flow(
+        0_i64, "http://h.test/big", "GET", empty, nil, "HTTP/1.1", 200, "OK",
+        headers, "5\r\nhello\r\n7fffffff\r\nwor".to_slice, "text/plain", nil, nil, 5_000_i64)
+      head = String.new(pair.response.not_nil!.head)
+      head.should contain("Transfer-Encoding: chunked\r\n")
+      head.should_not contain("Content-Length")
+    end
+
+    it "imports the HAR entry rather than counting it as skipped" do
+      har = File.tempname("gori", ".har")
+      begin
+        File.write(har, <<-JSON)
+          {"log":{"entries":[
+            {"startedDateTime":"2026-06-01T12:00:00.000Z","time":1,
+             "request":{"method":"POST","url":"https://x.test/a","httpVersion":"HTTP/1.1",
+               "headers":[{"name":"Transfer-Encoding","value":"chunked"}],
+               "postData":{"mimeType":"text/plain","text":"7fffffff\\r\\nabc"}},
+             "response":{"status":200,"statusText":"OK","httpVersion":"HTTP/1.1","headers":[],
+               "content":{"size":0,"mimeType":"text/plain"}}}
+          ]}}
+          JSON
+        with_store do |store|
+          result = Gori::Import.import_file(store, :har, har)
+          result.count.should eq(1)
+          result.skipped.should eq(0)
+        end
+      ensure
+        File.delete?(har)
+      end
     end
   end
 

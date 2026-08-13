@@ -724,6 +724,53 @@ describe Gori::Settings do
     end
   end
 
+  # A section that RAISES is a different degradation from an unparseable file: `load_raw` and
+  # `load_root` both succeeded, so the file-shaped `load_degraded?` test answered false while
+  # every section below the raise sat at its factory default — and the next save (a tab
+  # toggle, the update-check stamp, `gori settings import`) wrote that half-document over the
+  # operator's real file, which is the #594 loss. The base is no defence: a section that never
+  # loaded is either absent from `serialize` or holds a default, so the 3-way merge drops it
+  # either way. The only safe answer is to refuse the write until a load gets through.
+  #
+  # A top-level ARRAY reproduces it at the very first section — `JSON::Any#[]?` raises on a
+  # non-object, the same coercion `object_section` was written for.
+  it "refuses to write back a settings file it could only half read" do
+    dir = File.tempname("gori-settings-partial")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    sink = IO::Memory.new
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.warning_io = sink
+      Gori::Settings.reset_load_warning_guard
+      original = %([{"theme":"dracula"}])
+      File.write(Gori::Settings.path, original)
+
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_true
+      Gori::Settings.load_warning.not_nil!.should contain(Gori::Settings.path)
+      sink.to_s.should contain("will not overwrite") # and it SAYS so, like the corrupt path
+
+      Gori::Settings.save.should be_false
+      File.read(Gori::Settings.path).should eq(original) # byte-unchanged
+
+      # Cleared by the next load that gets all the way through, so the refusal never outlives
+      # the file that caused it.
+      File.write(Gori::Settings.path, %({"theme":"goridark"}))
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_false
+      Gori::Settings.load_warning.should be_nil
+      Gori::Settings.save.should be_true
+    ensure
+      Gori::Settings.warning_io = nil # spec_helper's default: never on the suite's STDERR
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   # Preserving the file was only half of it: the fallback to defaults was SILENT, so a
   # hand-edited comma reset the bind address, the upstream connection rules and the TLS
   # pass-through list with the only trace a `.corrupt` sibling nobody was told to look for.
@@ -1255,6 +1302,58 @@ describe Gori::Settings do
       FileUtils.rm_rf(dir)
       Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
       Gori::Settings.colormarker_next_rule_id = 1_i64
+    end
+  end
+
+  # `max(id) + 1` on a hand-edited `"id": 9223372036854775807` is CHECKED arithmetic, so it
+  # raised OverflowError inside apply_sections — the third door into the #594 room `int_field`
+  # and `object_section` each closed one of: everything below the raising section kept its
+  # factory default, load's blanket rescue said nothing, and the next save wrote the result
+  # over the operator's file. Both parsers and both mint sites saturate now.
+  it "keeps reading a settings file past a rule id at the Int64 ceiling" do
+    dir = File.tempname("gori-settings-idceiling")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+      Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
+      Gori::Settings.confirm_quit = false
+
+      File.write(Gori::Settings.path, %({"rewriter":{"rules":[\
+{"id":9223372036854775807,"enabled":true,"name":"top","pattern":"x"}]},\
+"colormarker":{"rules":[{"id":9223372036854775807,"when":"status:500","color":"red"}]},\
+"general":{"confirm_quit":true}}))
+      Gori::Settings.load
+
+      # `general` is parsed AFTER both of those, so it is the canary for "apply_sections ran
+      # to the end". Before the fix it sat at its default here.
+      Gori::Settings.confirm_quit?.should be_true
+      Gori::Settings.load_degraded?.should be_false
+
+      # The rules themselves survive — only the unusable id is renumbered, the same answer a
+      # duplicate id gets, because a counter cannot be advanced past Int64::MAX.
+      Gori::Settings.rewriter_rules.map(&.name).should eq(["top"])
+      Gori::Settings.rewriter_rules.first.id.should_not eq(Int64::MAX)
+      Gori::Settings.colormarker_rules.size.should eq(1)
+      Gori::Settings.colormarker_rules.first.id.should_not eq(Int64::MAX)
+
+      # And a counter read straight off the file at the ceiling must not raise at the MINT
+      # site either (`next_rule_id` parses fine on its own, so nothing else bounds it).
+      Gori::Settings.rewriter_next_rule_id = Int64::MAX
+      Gori::Settings.add_rewriter_rule("request", "head", "X-Trace", "on",
+        "set_header", "literal", "", "", "").should eq(Int64::MAX)
+      Gori::Settings.rewriter_next_rule_id.should eq(Int64::MAX)
+      Gori::Settings.colormarker_next_rule_id = Int64::MAX
+      Gori::Settings.add_colormarker_rule("status:404", "red", "full").should eq(Int64::MAX)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+      Gori::Settings.rewriter_next_rule_id = 1_i64
+      Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
+      Gori::Settings.colormarker_next_rule_id = 1_i64
+      Gori::Settings.confirm_quit = Gori::Settings::DEFAULT_CONFIRM_QUIT
     end
   end
 

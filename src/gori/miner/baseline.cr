@@ -38,7 +38,14 @@ module Gori::Miner
       reflects_all : Hash(Location, Bool),
       warning : String?
 
-    def initialize(@backend : Fuzz::Backend, @base : Bytes, @config : Config)
+    # `stopped` is the engine's stop flag, read before every calibration probe. Calibration is
+    # real requests at the target and it runs entirely inside one `calibrate` call, so without
+    # it a ^X / `mine_stop` that lands after `orchestrate`'s own pre-flight check keeps the whole
+    # stability + control wave going — the operator asked gori to stop touching the target and it
+    # kept touching it. Defaults to "never stopped" so a caller that has no engine (specs, the
+    # one-shot calibrate paths) is unchanged.
+    def initialize(@backend : Fuzz::Backend, @base : Bytes, @config : Config,
+                   @stopped : Proc(Bool) = -> { false })
     end
 
     def calibrate(locations : Array(Location)) : Report
@@ -55,6 +62,7 @@ module Gori::Miner
       # from, so the answer must not depend on which fiber finished first.
       slots = Array(Probe?).new(rounds, nil)
       in_parallel(rounds) do |i|
+        next if @stopped.call
         raw = @backend.send(@base)
         slots[i] = Fingerprint.probe(raw) if raw.error.nil?
       end
@@ -81,6 +89,7 @@ module Gori::Miner
       reflects_all = Hash(Location, Bool).new
       signals = Array({Bool, Bool}?).new(locations.size, nil)
       in_parallel(locations.size) do |i|
+        next if @stopped.call
         signals[i] = control_signals(locations[i], base, length_tol, words_tol, lines_tol)
       end
       locations.each_with_index do |loc, i|

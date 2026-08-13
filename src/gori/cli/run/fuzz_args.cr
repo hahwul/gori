@@ -9,7 +9,11 @@ module Gori
         # A plain `partition('-')` splits on the FIRST hyphen, so a negative FROM
         # (e.g. `-10--5`) would leave an empty `from_s`. Match both bounds — each
         # optionally signed — so negative ranges (common in offset/ID fuzzing) work.
-        m = range_part.match(/\A(-?\d+)-(-?\d+)\z/)
+        # .scrub before the match: argv is unvalidated OS bytes and PCRE2 raises
+        # "Regex match error: UTF-8 error" rather than failing to match, which escaped to
+        # `main` (see `split_ql_negations` in ../run.cr). U+FFFD matches no digit class, so a
+        # junk byte still ends at the abort below, with the raw `v` in the message.
+        m = range_part.scrub.match(/\A(-?\d+)-(-?\d+)\z/)
         from = m.try(&.[1].to_i64?)
         to = m.try(&.[2].to_i64?)
         abort "gori run fuzz: invalid --numbers '#{v}' (use FROM-TO[:STEP])" unless from && to

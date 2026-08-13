@@ -107,8 +107,40 @@ private class DeadOrigin < F::Backend
   end
 end
 
+# Answers 200 only when the raw request bytes still carry the FF FE pair — a byte-wise
+# scan, never `String#includes?`, so the check itself can't launder the invalid bytes.
+private class ByteSensitiveOrigin < F::Backend
+  getter origin : F::Origin = F::Origin.new("http", "h", 80)
+  getter sent = 0
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    ok = contains_ff_fe?(bytes)
+    body = ok ? "the full user record body goes here" : "no"
+    head = "HTTP/1.1 #{ok ? 200 : 403} X\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    r = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, r, 1000_i64)
+  end
+
+  private def contains_ff_fe?(b : Bytes) : Bool
+    return false if b.size < 2
+    (0..b.size - 2).any? { |i| b[i] == 0xFF_u8 && b[i + 1] == 0xFE_u8 }
+  end
+end
+
+private def contains_bytes?(text : String, needle : Bytes) : Bool
+  hay = text.to_slice
+  return false if needle.size > hay.size
+  (0..hay.size - needle.size).any? { |i| hay[i, needle.size] == needle }
+end
+
 # LF→CRLF wire form; the fake origins don't validate Content-Length, so no resync needed.
 private RESOLVE = ->(t : String) { t.gsub("\n", "\r\n").to_slice }
+
+# Identity resolve for the invalid-UTF-8 fixture. `RESOLVE` above uses `gsub` with a ONE-byte
+# needle, which Crystal routes through the char-walking path and which therefore rewrites
+# invalid bytes to U+FFFD — it would destroy the very bytes that test is about.
+private IDENTITY_RESOLVE = ->(t : String) { t.to_slice }
 
 private def minimize(backend : F::Backend, text : String, auto_cl : Bool = false) : Min::Report
   Min.run(text, auto_cl: auto_cl, resolve: RESOLVE, backend: backend) { |_| }
@@ -203,6 +235,34 @@ describe Gori::Repeater::Minimize do
     report.minimized_text.should contain("sid=abc123")
     report.minimized_text.should_not contain("junk")
     report.minimized_text.should_not contain("trash")
+  end
+
+  # A Cookie value can legitimately carry bytes that are not valid UTF-8 — a latin-1 token, a
+  # binary session id, an operator's own byte-level payload — and MCP's `request_base64` exists
+  # precisely to seed one. The crumb splitter used a Regexp, so PCRE2 raised
+  # `ArgumentError: UTF-8 error` during candidate ENUMERATION, before a single request went
+  # out, and `gori run repeater minimize` has no rescue above it.
+  it "enumerates and removes cookie crumbs when the Cookie value is not valid UTF-8" do
+    io = IO::Memory.new
+    io << "GET /p HTTP/1.1\nHost: h\nCookie: sid="
+    io.write(Bytes[0xFF, 0xFE])
+    io << "; junk=1"
+    text = String.new(io.to_slice)
+    text.valid_encoding?.should be_false
+
+    origin = ByteSensitiveOrigin.new
+    report = Min.run(text, auto_cl: false, resolve: IDENTITY_RESOLVE, backend: origin) { |_| }
+
+    report.aborted.should be_false
+    origin.sent.should be > 0
+    # the cosmetic crumb was reachable at all (it wasn't, before: the enumeration raised)
+    report.removed.map(&.label).should contain("junk")
+    contains_bytes?(report.minimized_text, "junk=1".to_slice).should be_false
+    # and the load-bearing crumb comes back BYTE-EXACT: `--apply` persists minimized_text (P7)
+    contains_bytes?(report.minimized_text, Bytes[0xFF, 0xFE]).should be_true
+    contains_bytes?(report.minimized_text, "sid=".to_slice).should be_true
+    # U+FFFD never appears: nothing on this path may launder the operator's bytes
+    contains_bytes?(report.minimized_text, Bytes[0xEF, 0xBF, 0xBD]).should be_false
   end
 
   it "removes an unused body param and re-lengths, keeping a load-bearing one (auto-CL on)" do

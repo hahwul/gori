@@ -54,6 +54,7 @@ module Gori
           p.on("--format=FMT", "text (default) | json") { |v| format = v == "json" ? :json : :text }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker color list: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run colormarker color list: missing value for #{f}" }
         end
         parser.parse(args)
         colors = Settings.colormarker_colors
@@ -371,6 +372,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker rm: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run colormarker rm: missing value for #{f}" }
         end
         positional = [] of String
         parser.unknown_args { |before, after| positional = before + after }
@@ -423,6 +425,7 @@ module Gori
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker #{action}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run colormarker #{action}: missing value for #{f}" }
         end
         positional = [] of String
         parser.unknown_args { |before, after| positional = before + after }
@@ -497,6 +500,7 @@ module Gori
           p.on("--down", "Give the rule lower precedence") { dir = 1 }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker move: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run colormarker move: missing value for #{f}" }
         end
         positional = [] of String
         parser.unknown_args { |before, after| positional = before + after }

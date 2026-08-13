@@ -304,6 +304,28 @@ describe Gori::Oast do
     end
   end
 
+  # Twin of `Session#host`: `payload_host` parses whatever endpoint the operator typed
+  # (`normalize_endpoint` only prepends a scheme), and `URI.parse` RAISES on an authority it
+  # cannot frame instead of returning nil. Minting a payload must degrade to the raw string,
+  # not blow up mid-generation.
+  describe "Boast#payload_host" do
+    it "falls back to the raw base_url when URI.parse raises on a bad authority" do
+      {"fd00::1:9000", "collector.local:8O80/events", "a:99999999999999999999"}.each do |host|
+        provider = O::Boast.new(host, "sec")
+        session = O::Session.new(1_i64, O::ProviderKind::Boast, host, "boastid", "sec", token: "sec")
+        payload = provider.generate_payload(session)
+        payload.should end_with("https://#{host}")
+      end
+    end
+
+    it "still uses the parsed host for a well-formed endpoint" do
+      provider = O::Boast.new("https://odiss.eu:2096/events", "sec")
+      session = O::Session.new(1_i64, O::ProviderKind::Boast, "https://odiss.eu:2096/events",
+        "boastid", "sec", token: "sec")
+      provider.generate_payload(session).should end_with(".odiss.eu")
+    end
+  end
+
   describe O::CustomHttp do
     it "parses a tolerant JSON list and hashes a dedup id when absent" do
       provider = O::CustomHttp.new("https://my.oast.example/log")

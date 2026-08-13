@@ -74,7 +74,19 @@ module Gori::Settings
     stored = node["next_rule_id"]?.try(&.as_i64?) || 0_i64
     # Never go BACKWARDS from the ids actually present, whatever the file says: a hand-edited
     # (or truncated) counter must not be able to mint a duplicate id.
-    self.rewriter_next_rule_id = {stored, (rewriter_rules.max_of?(&.id) || 0_i64) + 1, 1_i64}.max
+    self.rewriter_next_rule_id = {stored, next_id_after(rewriter_rules.max_of?(&.id) || 0_i64), 1_i64}.max
+  end
+
+  # One past `highest`, SATURATING. Crystal's `+` is checked, so a hand-edited (or imported)
+  # `"id": 9223372036854775807` made this expression raise OverflowError — inside
+  # `apply_sections`, where a raise abandons every section below it and `load`'s blanket rescue
+  # swallows it. That is the same #594 room `int_field` and `object_section` (settings.cr) each
+  # closed a door into; this is the arithmetic one, and it is why those two rescue rather than
+  # let a value's range decide how much of the file gets read. Saturating can hand out an id
+  # that is already taken, which costs an ambiguous by-id edit at the very top of the Int64
+  # range; raising costs the operator every section below `rewriter`.
+  private def self.next_id_after(highest : Int64) : Int64
+    highest == Int64::MAX ? highest : highest + 1
   end
 
   # Tolerant global-rule parse: a non-array (or absent) node keeps the current value; entries
@@ -117,9 +129,14 @@ module Gori::Settings
   # already-taken id is replaced with one past everything seen so far: two rules sharing an id
   # would make every by-id mutation ambiguous, and dropping the entry would silently lose a
   # rule the operator wrote. (Zero is not a valid id — see `rewriter_next_rule_id`.)
+  #
+  # `Int64::MAX` is renumbered the same way, for the same reason a duplicate is: it is the one
+  # id no counter can be advanced past, so keeping it would make the next mint ambiguous
+  # anyway. The rule itself is kept either way — see `next_id_after` for what raising here
+  # would have cost.
   private def self.claim_id(id : Int64?, seen : Set(Int64)) : Int64
-    return id if id && id > 0 && seen.add?(id)
-    fresh = (seen.max? || 0_i64) + 1
+    return id if id && id > 0 && id < Int64::MAX && seen.add?(id)
+    fresh = next_id_after(seen.max? || 0_i64)
     seen << fresh
     fresh
   end
@@ -166,7 +183,10 @@ module Gori::Settings
                              op : String, match_kind : String, name : String, host : String,
                              body_file : String, enabled : Bool = true) : Int64
     id = rewriter_next_rule_id
-    self.rewriter_next_rule_id = id + 1
+    # Saturating, because the counter itself is parsed from the file (`next_rule_id`) and a
+    # bare `+ 1` on an `Int64::MAX` one raises out of an operator's "add rule" — see
+    # `next_id_after`.
+    self.rewriter_next_rule_id = next_id_after(id)
     self.rewriter_rules = rewriter_rules + [RewriterRule.new(id, enabled, name, target, part,
       pattern, replacement, op, match_kind, host, body_file)]
     save ? id : 0_i64

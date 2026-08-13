@@ -46,7 +46,12 @@ module Gori
         # outright. Folding is the one an agent wants for a long response: it keeps the
         # changes readable in place without claiming the message had nothing else in it.
         diff = if context
-                 Repeater::Diff.fold(full_diff, context.to_i)
+                 # Clamp in Int64 before narrowing. The guard above only rejects a NEGATIVE
+                 # context, so `{"context": 5000000000}` reached a checked `.to_i` and
+                 # OverflowError'd past the INVALID_ARGUMENT arm at `Tools#call`, coming back
+                 # INTERNAL for the caller's own argument. A context at or past the diff's
+                 # length folds nothing, so the ceiling is exact, not an approximation.
+                 Repeater::Diff.fold(full_diff, context.clamp(0_i64, full_diff.size.to_i64).to_i)
                elsif changes_only
                  full_diff.reject { |dl| dl.kind == Repeater::DiffKind::Same }.map { |dl| Repeater::Diff::Folded.new(dl, 0) }
                else

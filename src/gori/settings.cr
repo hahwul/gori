@@ -58,6 +58,19 @@ module Gori
     # #508 are written around, reached through the base rather than through a write-back.
     @@loaded_raw : String? = nil
 
+    # `load` read a file but could not finish applying it: some section raised and every
+    # section BELOW it is sitting at its factory default. While this is set, `save` refuses —
+    # a document assembled from half the operator's file and half the factory defaults must
+    # never be written back over the real one, whatever the merge would do with it.
+    #
+    # A separate flag rather than a nil base, because the base protects nothing here: with
+    # base = the raw text, an abandoned section is either absent from `serialize` (chosen nil
+    # → dropped) or holds a default (!= base → "mine wins"), so the 3-way merge deletes the
+    # same sections it would delete with no base at all. The only safe answer is not to write.
+    # Contrast the unparseable-file path (`load_root`), where nothing was applied from disk at
+    # all and the next save is a deliberate clean write.
+    @@load_partial = false
+
     # An explicit settings file for THIS process (`gori --config PATH`), overriding both
     # $GORI_CONFIG and the default under GORI_HOME. Set once from CLI.run before any
     # subcommand dispatch, so every surface — TUI, `gori run`, `gori mcp` — reads the same
@@ -86,16 +99,31 @@ module Gori
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
       @@loaded_raw = nil
+      @@load_partial = false
       @@load_warning = nil # cleared here, not in load_root, so a file that is fixed OR removed drops it
       raw = load_raw
       return unless raw # no file yet / unreadable — first run, keep defaults
       root = load_root(raw)
       return unless root # present but unparseable — kept a .corrupt copy, keep defaults
-      # Set before `apply_sections` so a section that raises partway still leaves SOME base
-      # behind (a nil base skips the merge entirely, which would let this process's full
-      # state overwrite the file).
-      @@loaded_raw = raw
-      apply_sections(root)
+      begin
+        apply_sections(root)
+      rescue
+        # A malformed individual section — keep whatever loaded so far, and remember that this
+        # is only HALF the operator's file: every section below the raising line is at its
+        # factory default now, so `save` must not write this state back (see `@@load_partial`).
+        # Say so as well, on the same channel `load_root` uses: the silent version of this was
+        # the #594 data loss, where `gori settings import` reported success while replacing a
+        # live config with defaults.
+        #
+        # Scoped to `apply_sections` ALONE, not to the whole method. `serialize` and
+        # `migrate_legacy_sections` below run only after every section applied, so a raise
+        # there leaves nothing at a default — latching the flag for those would refuse every
+        # save for the rest of the process over a file that was read in full.
+        @@load_partial = true
+        note_load_warning("settings: #{path} could not be read in full — the sections gori did " \
+                          "not reach are at their factory defaults, so this run will not overwrite that file")
+        return
+      end
       # Re-base on our OWN serialization of what we just read, the same rule `save` applies
       # to `mine`. See `@@loaded_raw` for why the raw text cannot be the base.
       @@loaded_raw = serialize
@@ -112,7 +140,12 @@ module Gori
       # save. Migrating after makes it a genuine change, which is what it is.
       migrate_legacy_sections(root)
     rescue
-      # a malformed individual section — keep whatever loaded so far
+      # `serialize` or `migrate_legacy_sections` raised. Every section from disk is already
+      # applied by here, so the in-memory state is whole and `save` stays allowed — a
+      # re-base that could not be computed only costs the merge its base, which is the same
+      # position a first run is in. Swallowed, as it was before the partial-load guard
+      # existed; `@@loaded_raw` staying nil already reports it through `load_degraded?`.
+      nil
     end
 
     # Read each top-level section of a parsed settings document into the class properties.
@@ -244,18 +277,22 @@ module Gori
       nil
     end
 
-    # A settings file EXISTS but this process could not use it, so every section is sitting at
-    # its factory default AND the 3-way merge has no base — meaning the next `save` writes those
-    # defaults over the operator's file. Only meaningful after a `load`.
+    # A settings file EXISTS but this process could not use it, so sections are sitting at their
+    # factory defaults — meaning an export writes those defaults out under the operator's name.
+    # Only meaningful after a `load`.
     #
-    # Deliberately NOT `load_warning != nil`. That covers one of the two ways in: `load_root`'s
+    # Two ways in, and the PARTIAL one is the newer: a section that raised leaves everything
+    # below it at defaults while `load_raw` and `load_root` both succeeded, so the file-shaped
+    # test below answers false for it (see `@@load_partial`).
+    #
+    # Deliberately NOT `load_warning != nil`. That covers one of the other ways in: `load_root`'s
     # rescue (present but unparseable) sets the warning, but `load_raw`'s rescue above sets
     # nothing and swallows every READ failure — EACCES on a settings.json left root-owned by a
     # `sudo gori`, a `--config` pointing at a directory, a transient I/O error. A guard keyed on
     # the warning therefore misses exactly the cases that leave no trace at all, which is how
     # `gori settings import` still replaced a live config with defaults and reported success.
     def self.load_degraded? : Bool
-      @@loaded_raw.nil? && File.exists?(path)
+      @@load_partial || (@@loaded_raw.nil? && File.exists?(path))
     end
 
     # Why the last load fell back to defaults, or nil when it did not. Read by the TUI to
@@ -314,12 +351,18 @@ module Gori
         s << "settings: #{path} is not valid JSON — using defaults for this run"
         s << "; your file is preserved at #{path}.corrupt" if kept
       end
-      @@load_warning = warning
-      unless @@load_warning_emitted
-        @@load_warning_emitted = true
-        @@warning_io.try(&.puts(warning))
-      end
+      note_load_warning(warning)
       nil
+    end
+
+    # Record the reason and put it on the warning io at most once — shared with `load`'s rescue
+    # so a PARTIAL read is announced on exactly the channel an unparseable file already was,
+    # rather than being the one degraded outcome that says nothing.
+    private def self.note_load_warning(warning : String) : Nil
+      @@load_warning = warning
+      return if @@load_warning_emitted
+      @@load_warning_emitted = true
+      @@warning_io.try(&.puts(warning))
     end
 
     # load_bool over a Hash (the layout object), same false-preserving semantics as load_bool.
@@ -342,6 +385,12 @@ module Gori
     # Persist the current values. Never raises into the caller (a failed write must
     # not crash the TUI); returns whether it succeeded.
     def self.save : Bool
+      # The last load only got HALF this file in, so what is in memory is the operator's
+      # sections down to the raise and factory defaults after it. Writing that back is the
+      # #594 loss with a different door: the merge cannot recover a section it never read
+      # (see `@@load_partial`), so refuse instead — reported like any other failed write,
+      # which the callers already handle.
+      return false if @@load_partial
       Paths.ensure_dirs
       # With --config / $GORI_CONFIG the file can live outside GORI_HOME, whose directory
       # ensure_dirs above does not create. The temp+rename below would fail on a missing

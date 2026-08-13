@@ -59,6 +59,9 @@ module Gori::Miner
     @backend : Fuzz::CappedBackend
     @report : Baseline::Report?
     @seen : Set({Location, String})
+    # Locations whose injector returned no spans at all — see `process_bucket`. One entry per
+    # location, so the "nothing could be injected" verdict is reported once and not per bucket.
+    @uninjectable : Set(Location)
     @found : Int32
     @errors : Int64
     @names_done : Int64
@@ -111,6 +114,7 @@ module Gori::Miner
       @events = Channel(Event).new(256)
       @report = nil
       @seen = Set({Location, String}).new
+      @uninjectable = Set(Location).new
       @found = 0
       @errors = 0_i64
       @names_done = 0_i64
@@ -170,7 +174,22 @@ module Gori::Miner
 
     private def orchestrate : Nil
       @names_total = total_names
-      report = Baseline.new(@backend, @base, @config).calibrate(@config.locations)
+      # `stop` can land before this fiber's first tick (`start` spawns, the caller keeps the
+      # engine and the TUI's ^X reaches it immediately) — and calibration is real requests at
+      # the target, so opening with the stability wave would be a burst dispatched entirely
+      # after the operator asked to stop. `drain` re-reads the flag for the same reason.
+      if @state.stopped?
+        @events.send(DoneEvent.new(snapshot, true))
+        return
+      end
+      report = Baseline.new(@backend, @base, @config, -> { @state.stopped? }).calibrate(@config.locations)
+      # A stop that landed DURING calibration, which the check above cannot catch: the predicate
+      # handed to `Baseline` kept the remaining probes off the wire, so `report` describes a wave
+      # that never finished. Publishing it would claim a baseline was established.
+      if @state.stopped?
+        @events.send(DoneEvent.new(snapshot, true))
+        return
+      end
       @report = report
       @events.send(BaselineEvent.new(report.stable, report.warning))
 
@@ -308,6 +327,28 @@ module Gori::Miner
       # a param wordlist carries — or an injected byte colliding with a bound name — expands
       # to the live credential and leaves gori for the target, the run reporting `0 errors`.
       bytes, spans = Inject.apply_with_spans(@base, task.location, pairs, @config.add_content_length_when_missing?)
+      # Nothing was injected, so this location cannot carry candidates in THIS request — e.g.
+      # a request line that is not METHOD SP TARGET SP VERSION, which `inject_query` bails on
+      # unmodified rather than rewrite the operator's bytes (P7, and it is right to). Sending
+      # anyway would put the baseline request back on the wire, see no residual signal, and
+      # fall into the `kind.none?` branch below, which calls every untested name clean: the
+      # worst possible failure mode, a false negative that looks like a clean bill of health
+      # (`Fuzz::Backend#blocked` names it, and `skipped_names` was added for the same class of
+      # invisible coverage loss). `valid_names_for` already pre-filters per location, so an
+      # empty span list never means "these particular names were rejected".
+      if spans.empty? && !task.names.empty?
+        # Counted ONCE per location, not once per bucket. The fact is a property of the
+        # location and this request — every one of that location's buckets bails identically —
+        # so incrementing per bucket would report a 4000-name wordlist as thousands of errors
+        # and let a reader (and the CLI's exit-code logic) read one malformed request line as
+        # that many failed sends.
+        if @uninjectable.add?(task.location)
+          @errors += 1
+          @first_error ||= "#{task.location.label}: nothing could be injected into this request"
+        end
+        mark_done(task.names.size) # keep the bar monotonic; this bucket is inconclusive
+        return [] of Task
+      end
       raw = send_with_retries(bytes, spans)
       if err = raw.error
         # A max-requests cap refusal isn't a network error — don't let it inflate @errors.

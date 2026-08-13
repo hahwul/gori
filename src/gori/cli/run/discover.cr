@@ -238,15 +238,15 @@ module Gori
         # SIGINT/SIGTERM lands here too (see the trap above) since Engine#stop makes the run end
         # like any other — so this one flush covers the normal, error, AND interrupted paths.
         flush_discover(store, pending) unless no_store
-        report_discover_interrupt(findings, no_store) if interrupted.call
         puts CLI::Output.discover_array_json(findings) if format == :json
+        # `Run.report_interrupted` (exit 130) rather than the local reporter this used to call:
+        # that one only wrote to STDERR and returned, so a Ctrl-C'd crawl fell through to a
+        # plain exit 0 and a scripted `gori run discover … && ./triage.sh` treated a truncated
+        # run as a finished one. Emitting the buffered JSON first, then the interrupt, matches
+        # fuzz.cr / mine.cr / sequence.cr — and it goes BEFORE `exit 1 if had_error` for the
+        # ordering reason interrupt.cr spells out.
+        Run.report_interrupted(findings.size, "finding", no_store ? "collected" : "saved") if interrupted.call
         exit 1 if had_error
-      end
-
-      private def self.report_discover_interrupt(findings : Array(Discover::Finding), no_store : Bool) : Nil
-        verb = no_store ? "collected" : "saved"
-        plural = findings.size == 1 ? "" : "s"
-        STDERR.puts "interrupted — #{findings.size} finding#{plural} #{verb}"
       end
 
       private def self.flush_discover(store : Store,

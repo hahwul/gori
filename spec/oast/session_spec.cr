@@ -109,5 +109,24 @@ describe O::Session do
     it "returns the raw value for a bare multibyte host with no scheme" do
       custom_session("안녕.example").host.should eq("안녕.example")
     end
+
+    # A custom-http provider registers with NO network round-trip, so whatever authority the
+    # operator typed is persisted verbatim and re-read every time the resume picker renders.
+    # `URI.parse` RAISES (it does not return nil) on an authority it cannot frame, and that
+    # raise reached the TUI tick loop — three opens inside 10s killed the process.
+    it "falls back to the raw server_url when URI.parse RAISES on a bad authority" do
+      # unbracketed IPv6 + port -> URI::Error "bad port"
+      custom_session("https://fd00::1:9000").host.should eq("https://fd00::1:9000")
+      # a typo'd port (letter O for zero) -> URI::Error "bad port"
+      custom_session("https://collector.local:8O80/log").host
+        .should eq("https://collector.local:8O80/log")
+      # a port that does not fit an Int32 -> OverflowError, not URI::Error
+      custom_session("https://a:99999999999999999999").host
+        .should eq("https://a:99999999999999999999")
+    end
+
+    it "still parses the BRACKETED IPv6 form (the rescue does not swallow a good parse)" do
+      custom_session("https://[fd00::1]:9000").host.should_not be_empty
+    end
   end
 end

@@ -2334,6 +2334,67 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # The complement of the paste repairs above: a request that arrived WITH its CRLFs must keep
+  # them. Every §/¦ helper is handed `@editor.text` — the CR-free projection its offsets index —
+  # and used to push that projection straight back through `set_text`, so the marking chord the
+  # status line advertises flattened the capture's body before the tab had sent anything.
+  # `edit_buffer_text` documents the same loss for ^E; `FuzzerView#restore_wire_eols` has guarded
+  # the identical five helpers all along. Non-multipart on purpose: `request_bytes` restores CRLF
+  # delimiters only for multipart, so a smuggling payload has nothing else standing behind it.
+  describe "marking keeps a captured request's wire terminators" do
+    smuggle = "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: 45\r\n\r\n" \
+              "0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: h.test\r\n\r\n"
+
+    seed = -> {
+      view = RepeaterView.new
+      view.restore("http://h.test", smuggle, false, false) # auto-CL off: the desync is the test
+      view.focus_pane(:request)
+      view
+    }
+
+    it "^A auto-mark leaves the bytes alone (it writes back even on its no-op)" do
+      view = seed.call
+      view.auto_mark
+      view.request_text.count('\r').should eq(smuggle.count('\r'))
+      String.new(view.request_bytes).should eq(smuggle) # markers render to their own defaults
+    end
+
+    it "^K mark_word marks the token and nothing else" do
+      view = seed.call
+      view.goto_request_line(1)
+      view.mark_word.should contain("marked position")
+      view.request_text.should eq(smuggle.sub("POST /x", "§POST§ /x"))
+      String.new(view.request_bytes).should eq(smuggle)
+    end
+
+    it "clear-marks puts the buffer back byte for byte" do
+      view = seed.call
+      view.goto_request_line(1)
+      view.mark_word
+      view.clear_marks.should contain("cleared")
+      view.request_text.should eq(smuggle)
+      String.new(view.request_bytes).should eq(smuggle)
+    end
+
+    it "the marker-strip confirm keeps the terminators" do
+      view = seed.call
+      view.goto_request_line(1)
+      view.mark_word
+      view.strip_marker_span({0, 6}) # §POST§, char span like the sibling spec above
+      view.request_text.should eq(smuggle)
+    end
+
+    it "the ^Y chain commit keeps the terminators" do
+      view = seed.call
+      view.goto_request_line(1)
+      view.mark_word
+      view.focus_chain_pane.should be_nil # caret is inside the marker it just made
+      "md5".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.commit_chain_pane
+      view.request_text.should eq(smuggle.sub("POST /x", "§POST¦md5§ /x"))
+    end
+  end
+
   describe "pretty_print_request" do
     it "pretty-prints JSON request body in-place and preserves markers" do
       view = RepeaterView.new

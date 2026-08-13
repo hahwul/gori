@@ -441,6 +441,67 @@ describe Gori::Tui::TextArea do
       ta.match_count("").should eq(0) # an empty query never matches
       ta.text.should eq("bar baz")
     end
+
+    # ^F replace-all reaches the Repeater's and the Intercept's request editors, and both send
+    # `wire_text`. The gsub has to run over `#text` (the offsets index it), so the terminators
+    # have to go back on afterwards — otherwise a captured multipart body came out bare-LF and
+    # auto-Content-Length resynced DOWN behind it.
+    it "keeps the buffer's wire terminators across a replace" do
+      wire = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n" \
+             "--B\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nadmin\r\n--B--\r\n"
+      ta = TextArea.new(wire)
+      ta.replace_matches("admin", "guest").should eq(1)
+      ta.wire_text.should eq(wire.sub("admin\r\n--B--", "guest\r\n--B--"))
+      ta.wire_text.count('\r').should eq(wire.count('\r'))
+    end
+
+    it "keeps a mixed-ending buffer's bare LFs bare" do
+      ta = TextArea.new("POST /x HTTP/1.1\r\nHost: h\r\n\r\n0\r\n\r\nGET /a HTTP/1.1\nHost: h\n")
+      ta.replace_matches("/a", "/b").should eq(1)
+      ta.wire_text.should eq("POST /x HTTP/1.1\r\nHost: h\r\n\r\n0\r\n\r\nGET /b HTTP/1.1\nHost: h\n")
+    end
+
+    it "is still one undo step, back to the wire bytes" do
+      wire = "a\r\nadmin\r\nb\n"
+      ta = TextArea.new(wire)
+      ta.replace_matches("admin", "root")
+      ta.wire_text.should eq("a\r\nroot\r\nb\n")
+      ta.undo
+      ta.wire_text.should eq(wire)
+    end
+  end
+
+  # Lifted from `FuzzerView#restore_wire_eols`: a transform computed over the LF projection
+  # (every offset it works from indexes that string) must not write the projection back.
+  describe "#set_text_keeping_eols / #replace_all_keeping_eols" do
+    it "reattaches the original terminators line for line" do
+      ta = TextArea.new("h1\r\nh2\r\n\r\nbo\r\ndy")
+      ta.set_text_keeping_eols("h1\nh2X\n\nbo\ndy")
+      ta.wire_text.should eq("h1\r\nh2X\r\n\r\nbo\r\ndy")
+    end
+
+    it "keeps the caret and one undo step through the replace_all form" do
+      ta = TextArea.new("a\r\nbb\r\nc\r\n")
+      ta.replace_all_keeping_eols("a\nbXb\nc\n", 4)
+      ta.wire_text.should eq("a\r\nbXb\r\nc\r\n")
+      ta.cursor_offset.should eq(4)
+      ta.undo
+      ta.wire_text.should eq("a\r\nbb\r\nc\r\n")
+    end
+
+    # Only a line-count change could reattach terminators to the WRONG lines; better a buffer
+    # that lost its CRLFs than one whose body boundaries moved.
+    it "falls back to the LF text unchanged when the line count moved" do
+      ta = TextArea.new("a\r\nb\r\n")
+      ta.set_text_keeping_eols("a\nb\nc\n")
+      ta.wire_text.should eq("a\nb\nc\n")
+    end
+
+    it "is a no-op on a buffer that had no CRs to restore" do
+      ta = TextArea.new("a\nb\n")
+      ta.set_text_keeping_eols("a\nbX\n")
+      ta.wire_text.should eq("a\nbX\n")
+    end
   end
 
   describe "#home / #end_of_line" do

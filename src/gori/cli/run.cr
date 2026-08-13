@@ -663,7 +663,13 @@ module Gori
       private def self.split_ql_negations(args : Array(String)) : {Array(String), Array(String)}
         neg = [] of String
         rest = [] of String
-        args.each { |a| a.matches?(/\A-[A-Za-z]+[:~]/) ? (neg << a) : (rest << a) }
+        # Classify on a scrubbed copy: argv comes from the OS unvalidated, and PCRE2 raises
+        # "Regex match error: UTF-8 error" on a non-UTF-8 subject — `gori run history $'\xff'`
+        # backtraced out of `main`, since neither `Run.dispatch` nor `CLI.run` rescues
+        # ArgumentError. Same remedy as `read_token_list` in ./run/sequence.cr. `scrub` returns
+        # self for valid UTF-8, and it is `a` (not `a.scrub`) that is kept, so the operator's
+        # query bytes reach QL exactly as typed.
+        args.each { |a| a.scrub.matches?(/\A-[A-Za-z]+[:~]/) ? (neg << a) : (rest << a) }
         {neg, rest}
       end
 
@@ -759,7 +765,11 @@ module Gori
 
       # "30s" / "5m" / "1h" / bare seconds → a Time::Span.
       private def self.parse_duration(v : String) : Time::Span
-        m = v.match(/\A(\d+)(s|m|h)?\z/)
+        # .scrub for the same reason as `split_ql_negations` above: `--for $'\xff'` is a
+        # PCRE2 UTF-8 error, not a match failure, and it escaped to `main`. A scrubbed byte
+        # is U+FFFD, which no digit class accepts, so junk still lands on the abort below —
+        # which keeps printing the raw `v` the operator typed.
+        m = v.scrub.match(/\A(\d+)(s|m|h)?\z/)
         abort "gori run: invalid duration '#{v}' (use e.g. 30s, 5m, 1h)" unless m
         # .to_i? (not .to_i): the regex permits arbitrarily many digits, so a value
         # like 99999999999999999999 would overflow Int32 and crash with an unhandled

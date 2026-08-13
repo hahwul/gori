@@ -482,8 +482,13 @@ module Gori::Tui
     # Forward-delete (the Del key): remove the character UNDER the caret, leaving the
     # caret where it is — the natural complement to backspace after ←/→ caret moves.
     # No-op on toggle/choice/action rows or with the caret already at end-of-line.
+    # `readonly_field?` belongs here for the same reason it does in `insert`/`backspace`:
+    # a display row must swallow EVERY edit. Without it a ← (which falls through to
+    # move_cursor on a non-bool/non-choice row) pulls the caret off end-of-line, defeating
+    # the `c >= v.size` brake below — so Del would chew up the live summary and flip
+    # `dirty?`, painting a spurious "● unsaved" for an edit the operator never made.
     def delete : Nil
-      return if bool_field? || choice_field? || opener_field?
+      return if bool_field? || choice_field? || opener_field? || readonly_field?
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       return if c >= v.size
