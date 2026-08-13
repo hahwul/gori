@@ -155,9 +155,14 @@ end
 # the shell never asked and a double-click read as two selects. Silent, and invisible from the
 # controller alone.
 describe "Runner double-click dispatch" do
+  # Mouse routing lives in `tui/runner/mouse.cr`, which reopens Runner — so the method body
+  # sits one level shallower than it did inside `runner.cr`'s `module Gori::Tui`. Anchor the
+  # terminator on the two-space `end` that file actually has; a stale four-space anchor
+  # matches nothing and `not_nil!` turns the whole guard into an error instead of a failure.
+  mouse_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "mouse.cr"))
+
   it "does not require drag support" do
-    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
-    body = src[/private def dispatch_double_click.*?\n    end/m].not_nil!
+    body = mouse_src[/private def dispatch_double_click.*?\n  end/m].not_nil!
     body.should_not contain("drag_press_target?")
     body.should contain("double_click_target?")
   end
@@ -165,9 +170,8 @@ describe "Runner double-click dispatch" do
   it "keeps the same context rejections as the drag tier" do
     # Both must refuse the space menu, the pickers and the bottom prompts. Shared, so they
     # cannot drift: the whole point of splitting them was to change ONE of the two questions.
-    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
-    src[/private def drag_press_target?.*?\n    end/m].not_nil!.should contain("pointer_capture_elsewhere?")
-    src[/private def double_click_target?.*?\n    end/m].not_nil!.should contain("pointer_capture_elsewhere?")
+    mouse_src[/private def drag_press_target?.*?\n  end/m].not_nil!.should contain("pointer_capture_elsewhere?")
+    mouse_src[/private def double_click_target?.*?\n  end/m].not_nil!.should contain("pointer_capture_elsewhere?")
   end
 end
 
