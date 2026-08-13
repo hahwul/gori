@@ -77,6 +77,38 @@ jobs:
       # a dependency bump for a formatting change nobody here made.
       - name: Check formatting
         run: crystal tool format --check src spec bench scripts
+  benchmarks:
+    # Type-checks every harness in `bench/`. Nothing ran them before: `format` above only
+    # FORMATS bench/, and the other jobs build `src` and run `spec` — so a harness could rot
+    # for months and the first sign would be someone reaching for it mid-investigation.
+    # Seventeen of them had. AGENTS.md points at these for "measure, don't guess", and a
+    # measurement tool that does not compile is worse than none: it turns a decision that
+    # should be made on numbers into one made on a plausible story.
+    #
+    # `--no-codegen`, so this checks that they still describe the API they measure without
+    # paying for optimised binaries — 26s for the whole directory on a cold cache. They are
+    # NOT executed: several want a loopback origin or a seeded multi-GB database, and their
+    # run times are measured in minutes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          # One version, not the build matrix, for the same reason `format` pins one: the
+          # harnesses compile against the same `src` the matrix already builds twice, so a
+          # second version here would re-test the compiler rather than this repo.
+          crystal: 1.21.0
+      - name: Install native link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
+      - name: Install dependencies
+        run: shards install
+      - name: Type-check bench harnesses
+        # The same script `just benchmark-check` runs, so local and CI cannot drift apart
+        # (and this job needs no `just` on the runner).
+        run: scripts/bench_check.sh
   # Still no ameba job. The backlog is down from 965 findings to 641, but 248 of the
   # remainder are Metrics/CyclomaticComplexity in the TUI — splitting those methods is a
   # real refactor, not lint cleanup, and `.ameba.yml` already records the decision to

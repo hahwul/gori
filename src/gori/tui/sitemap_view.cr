@@ -99,6 +99,19 @@ module Gori::Tui
     # Rebuild the tree from the store. Selection, scroll, and manual expand/collapse
     # are re-anchored by durable (host, path) keys so a data_version poll under live
     # capture does not jump the cursor to the top host every ~750ms.
+    #
+    # A FULL rebuild, deliberately, and measured before leaving it that way: the whole path —
+    # `sitemap_entries` (DISTINCT, capped at `Store::SITEMAP_MAX`), `Sitemap.build`, the two
+    # fold passes, tag stamping, expand-depth, the endpoint counts and the flatten — runs in
+    # ~6.4 ms at 100k flows with the tree at its 10k-endpoint cap. Against the 750 ms
+    # data_version cadence, and only while this tab is ACTIVE (`@tabs[@active_tab]` in
+    # Runner#apply_external_change), that is under 1% of a core. An incremental rebuild would
+    # trade that for cache-invalidation state across build, folding, tagging and expansion —
+    # the four things whose interaction the anchoring above already has to get right.
+    #
+    # Roughly two thirds of the 6.4 ms is the DISTINCT query, which scales with the FLOW table
+    # rather than the capped tree, so the number to watch is retention: at the 100k default it
+    # is what is quoted here. Re-measure before assuming it still holds if that default moves.
     def reload(store : Store) : Nil
       prev_sel = selection_anchor
       prev_scroll = @scroll
