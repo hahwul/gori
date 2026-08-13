@@ -89,3 +89,30 @@ describe "Store event-log retention" do
     end
   end
 end
+
+# The dismiss verbs report "dismissed N" to the operator, so N has to be EXACT. It used to be
+# produced by loading every probe_issues row (JSON-parsing `affected` on each) and counting in
+# Crystal — which is also why capping that read looked attractive and would have been wrong:
+# a LIMIT would have made this number quietly under-report what the dismiss just did.
+describe "Store#open_probe_issue_count" do
+  it "counts only OPEN findings, by code and by host, in SQL" do
+    events_store(50, 1000) do |store|
+      add = ->(code : String, host : String, status : Int32) do
+        store.@db.exec(
+          "INSERT INTO probe_issues (code, category, host, title, severity, status, hit_count, affected, first_seen, last_seen) " \
+          "VALUES (?, 'c', ?, 't', 2, ?, 1, '[]', 1, 1)", code, host, status)
+      end
+      add.call("secret_in_url", "a.test", Gori::Store::Status::Open.value)
+      add.call("secret_in_url", "b.test", Gori::Store::Status::Open.value)
+      add.call("secret_in_url", "c.test", Gori::Store::Status::Resolved.value) # not open
+      add.call("cors_wildcard", "a.test", Gori::Store::Status::Open.value)
+      add.call("cors_wildcard", "b.test", Gori::Store::Status::FalsePositive.value)
+
+      store.open_probe_issue_count(code: "secret_in_url").should eq(2) # the Resolved one is excluded
+      store.open_probe_issue_count(host: "a.test").should eq(2)
+      store.open_probe_issue_count(host: "b.test").should eq(1) # the FalsePositive one is excluded
+      store.open_probe_issue_count.should eq(3)                 # every open finding
+      store.open_probe_issue_count(code: "nope").should eq(0)
+    end
+  end
+end

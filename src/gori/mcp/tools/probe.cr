@@ -114,12 +114,12 @@ module Gori
         end
 
         if code
-          n = store.probe_issues.count { |i| i.code == code && i.status.open? }
+          n = store.open_probe_issue_count(code: code)
           return busy("dismiss NOT applied (store busy or unwritable); the findings are unchanged") unless store.dismiss_probe_by_code(code)
           return Result.new({"dismissed" => n, "code" => code}.to_json)
         end
         if host
-          n = store.probe_issues.count { |i| i.host == host && i.status.open? }
+          n = store.open_probe_issue_count(host: host)
           return busy("dismiss NOT applied (store busy or unwritable); the findings are unchanged") unless store.dismiss_probe_by_host(host)
           return Result.new({"dismissed" => n, "host" => host}.to_json)
         end

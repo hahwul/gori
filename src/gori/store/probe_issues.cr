@@ -255,6 +255,31 @@ module Gori
       Probe.tech_summary(probe_tech_rows.map { |(code, _, ev)| {code, ev} })
     end
 
+    # How many OPEN findings a dismiss is about to close, counted in SQL.
+    #
+    # Every caller of this used to be `probe_issues.count { … }` — which loads every row in
+    # the table, JSON-parsing `affected` on each one, to produce a single integer. That is the
+    # shape that makes `probe_issues` look like it needs a LIMIT; it does not, it needs the
+    # counting callers to stop asking for the rows. A LIMIT here would be worse than slow: the
+    # number is reported to the operator as "dismissed N", so a capped read would under-report
+    # what it just did.
+    #
+    # `code` and `host` mirror the two dismiss verbs exactly (`dismiss_probe_by_code` /
+    # `dismiss_probe_by_host`); passing neither counts every open finding.
+    def open_probe_issue_count(code : String? = nil, host : String? = nil) : Int32
+      conds = ["status = #{Status::Open.value}"]
+      args = [] of DB::Any
+      if code
+        conds << "code = ?"; args << code
+      end
+      if host
+        conds << "host = ?"; args << host
+      end
+      @db.scalar("SELECT COUNT(*) FROM probe_issues WHERE #{conds.join(" AND ")}", args: args).as(Int64).to_i
+    rescue
+      0 # never crash a dismiss over a read; the dismiss itself reports its own failure
+    end
+
     private def read_probe_issue(rs : DB::ResultSet) : ProbeIssue
       ProbeIssue.new(
         rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),

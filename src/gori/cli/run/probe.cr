@@ -247,11 +247,11 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           if c = code
-            n = store.probe_issues.count { |i| i.code == c && i.status.open? }
+            n = store.open_probe_issue_count(code: c)
             abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_code(c)
             puts "Dismissed #{n} open \"#{c}\" finding#{n == 1 ? "" : "s"}."
           elsif hst = host
-            n = store.probe_issues.count { |i| i.host == hst && i.status.open? }
+            n = store.open_probe_issue_count(host: hst)
             abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_host(hst)
             puts "Dismissed #{n} open finding#{n == 1 ? "" : "s"} on #{hst}."
           elsif iid = id

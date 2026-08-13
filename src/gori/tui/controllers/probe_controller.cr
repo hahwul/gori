@@ -448,7 +448,7 @@ module Gori::Tui
     # row this touches, and there is no cross-scope leak to guard against. Returns how many
     # were open beforehand, or 0 when the batch did not commit.
     def self.dismiss_open_by_host(store : Store, host : String) : Int32
-      n = store.probe_issues.count { |i| i.host == host && i.status.open? }
+      n = store.open_probe_issue_count(host: host)
       store.dismiss_probe_by_host(host) ? n : 0
     end
 
