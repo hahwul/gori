@@ -26,7 +26,7 @@ end
 
 # A TLS origin whose per-connection behaviour the caller scripts: what to write back (if
 # anything) and whether to hang up. Returns the CLIENT side of a live, handshaken socket.
-private def tls_socket(ca, *, greet : String? = nil, hangup : Bool = false, &)
+private def tls_socket(ca, *, greet : String? = nil, trailer : String? = nil, hangup : Bool = false, &)
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   ready = Channel(Nil).new(1)
@@ -37,6 +37,14 @@ private def tls_socket(ca, *, greet : String? = nil, hangup : Bool = false, &)
           sync_close: true)
         if g = greet
           ssl << g
+          ssl.flush
+        end
+        # A SECOND flush, so this lands as its own TLS record rather than being coalesced
+        # into the greeting's. That distinction is the whole point of the buffered-residue
+        # example: one record puts the leftover in OpenSSL's decrypted buffer, two put the
+        # second one's ciphertext in the underlying socket's buffer.
+        if t = trailer
+          ssl << t
           ssl.flush
         end
         ready.send(nil)
@@ -138,6 +146,38 @@ describe "ConnPool.checkout_state" do
     it "answers Closed when the peer hung up before the write" do
       with_ca do |ca|
         tls_socket(ca, hangup: true) { |io| settle(io, P::Checkout::Closed).should eq(P::Checkout::Closed) }
+      end
+    end
+
+    # The fourth place residue can hide, and the one the fast path was blind to: the
+    # UNDERLYING socket's own `IO::Buffered` read buffer, holding ciphertext that has been
+    # pulled off the fd but not yet decrypted.
+    #
+    # `OpenSSL::BIO.read_ex` reads through `bio.io.read` — the BUFFERED read — and
+    # `IO::Buffered#read` calls `fill_buffer` whenever the request is under half the buffer,
+    # pulling up to 8 KiB. OpenSSL asks for a 5-byte record header first, so reading the HEAD
+    # drags any already-arrived following record in with it. At that point `SSL_pending` is 0
+    # (record 2 is still ciphertext) and an fd peek is EAGAIN (the kernel buffer is drained) —
+    # so both of the fast path's checks say Clean while a whole response body is waiting.
+    #
+    # This is the body-past-Content-Length / HEAD-with-body desync the class header says the
+    # check exists to catch, and handing the socket out here frames the NEXT payload's response
+    # against these leftovers, silently, mid-sweep.
+    it "answers Residue for an undecrypted record in the UNDERLYING socket's read buffer" do
+      with_ca do |ca|
+        head = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+        # Two separate records, and the read below happens only after both have landed — so
+        # one `fill_buffer` takes both. Writing them as ONE record instead is what the existing
+        # residue example does, and it is why that one passes without this check: the leftover
+        # ends up in OpenSSL's decrypted buffer, where `SSL_pending` sees it.
+        tls_socket(ca, greet: head, trailer: "leftover body bytes") do |io|
+          sleep 150.milliseconds # let record 2 arrive before anything reads
+          buf = Bytes.new(head.bytesize)
+          io.read_fully(buf)
+          String.new(buf).should eq(head) # the head, and only the head, was consumed
+
+          P.checkout_state(io).should eq(P::Checkout::Residue)
+        end
       end
     end
   end

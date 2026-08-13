@@ -21,8 +21,10 @@ end
 # Crystal's LibSSL bindings, and it is the half of "is this TLS socket clean?" that an fd-level
 # peek structurally cannot answer: the record is already off the kernel socket. Present in every
 # OpenSSL and LibreSSL gori can link against (it predates SSL_has_pending, which is 1.1+ and
-# would also cover a buffered-but-undecrypted record — the fd peek below covers that instead,
-# so the older, universally available call is enough).
+# would also cover a buffered-but-undecrypted record — `gori_buffered_residue?` on the UNDERLYING
+# socket covers that instead, so the older, universally available call is enough. It is that
+# check and NOT the fd peek: once Crystal's buffered layer has pulled the bytes off the socket
+# the fd is empty, so a peek reports the connection idle).
 lib LibSSL
   fun ssl_pending = SSL_pending(handle : SSL) : Int
 end
@@ -444,26 +446,7 @@ module Gori::Repeater
       if io.is_a?(TCPSocket)
         peek_state(io)
       elsif io.is_a?(OpenSSL::SSL::Socket)
-        # TLS answers in two steps, and the ORDER is the whole design.
-        #
-        # 1. Decrypted bytes already inside OpenSSL are residue outright (`SSL_pending`), free.
-        # 2. Otherwise ask the fd whether ANYTHING is waiting. If the kernel buffer is empty
-        #    too, the socket is provably idle and this returns Clean without a read — the
-        #    common case, and what removes the ~1.6ms this branch used to cost every checkout.
-        #
-        # Only when bytes ARE waiting does it fall through to the timed read below. That step
-        # cannot be skipped: a peek sees bytes but not what they MEAN. A TLS 1.3 record
-        # carrying a NewSessionTicket has outer content type 0x17, exactly like application
-        # data — the real type is encrypted — so nothing short of letting OpenSSL decrypt it
-        # can tell a post-handshake message from a leftover response. Reading the content-type
-        # byte was tried and is wrong for TLS 1.3 for that reason.
-        return Checkout::Residue if io.gori_ssl_pending?
-        under = io.gori_underlying_io
-        if under.is_a?(TCPSocket) && peek_state(under) == Checkout::Clean
-          Checkout::Clean
-        else
-          drain_probe_state(io)
-        end
+        tls_checkout_state(io)
       elsif io.responds_to?(:read_timeout=) && io.responds_to?(:read_timeout)
         drain_probe_state(io)
       else
@@ -474,6 +457,39 @@ module Gori::Repeater
       # than Closed: a failed probe proves nothing about whether the peer closed, and Closed
       # is the answer that licenses re-sending a POST.
       Checkout::Residue
+    end
+
+    # The TLS half of `checkout_state`, in its own method because it is four ordered questions
+    # rather than one, and the ORDER is the whole design.
+    #
+    # 1. Decrypted bytes already inside OpenSSL are residue outright (`SSL_pending`), free.
+    # 2. Ciphertext Crystal's OWN buffered layer already pulled off the fd. `checkout_state`
+    #    asks the same question of THIS socket's plaintext buffer; this is the different buffer
+    #    underneath it, and neither `SSL_pending` nor the peek below can see it.
+    #    `OpenSSL::BIO.read_ex` reads through `bio.io.read` — the BUFFERED read — and
+    #    `IO::Buffered#read` calls `fill_buffer` whenever the request is under half the buffer,
+    #    pulling up to 8 KiB. OpenSSL asks for a 5-byte record header first, so EVERY record
+    #    read over-reads. `Socket#initialize` sets only `sync = true`, which is write-side;
+    #    read buffering stays on and gori never disables it. So an origin that flushes head and
+    #    body as two records leaves record 2 sitting here with `SSL_pending` at 0 (not decrypted
+    #    yet) and the fd peek at EAGAIN (kernel buffer already drained) — and without this step
+    #    the socket is handed out Clean and the next payload's response is framed against these
+    #    leftovers. Pinned by `spec/fuzz/conn_pool_checkout_spec.cr`.
+    # 3. Otherwise ask the fd whether ANYTHING is waiting. If the kernel buffer is empty too,
+    #    the socket is provably idle and this returns Clean without a read — the common case,
+    #    and what removes the ~1.6ms this branch used to cost every checkout.
+    # 4. Only when bytes ARE waiting does it fall through to the timed read. That step cannot
+    #    be skipped: a peek sees bytes but not what they MEAN. A TLS 1.3 record carrying a
+    #    NewSessionTicket has outer content type 0x17, exactly like application data — the real
+    #    type is encrypted — so nothing short of letting OpenSSL decrypt it can tell a
+    #    post-handshake message from a leftover response. Reading the content-type byte was
+    #    tried and is wrong for TLS 1.3 for that reason.
+    private def self.tls_checkout_state(io : OpenSSL::SSL::Socket) : Checkout
+      return Checkout::Residue if io.gori_ssl_pending?
+      under = io.gori_underlying_io
+      return Checkout::Residue if under.is_a?(IO::Buffered) && under.gori_buffered_residue?
+      return Checkout::Clean if under.is_a?(TCPSocket) && peek_state(under) == Checkout::Clean
+      drain_probe_state(io)
     end
 
     # A REUSED socket that failed BEFORE any response byte arrived. Per the contract at the
