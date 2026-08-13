@@ -673,6 +673,19 @@ module Gori
       else
         ::Log.error { "store writer fiber died mid-loop: #{ex.message} — further writes will be refused" }
         @writes.close rescue nil
+        # Closing only covers FUTURE senders. Two populations were still stranded: ops already
+        # sitting in the 1024-deep buffer, and the caller parked on `reply.receive` for one of
+        # them. Their per-op reply channels are neither closed nor written, so `rescue
+        # Channel::ClosedError` never fires and the fiber blocks forever — under the proxy that
+        # is a leaked ClientConn holding both sockets, per in-flight capture, with the flow left
+        # Pending. Answer them the same failure value the per-batch rollback would have.
+        #
+        # Draining AFTER the close is correct and deliberate: `Channel#receive_internal` checks
+        # the queue before `@closed`, so buffered ops are still delivered, while the close stops
+        # anything new from landing behind us.
+        while op = (@writes.receive? rescue nil)
+          fail_reply(op)
+        end
       end
     end
 
@@ -940,6 +953,12 @@ module Gori
       when ExecTask          then op.reply.send(0_i64)
       when ExecTaskChecked   then op.reply.send(false)
       when AbandonPending    then op.reply.send(0_i32)
+        # `IndexBatch` is answered unconditionally on the happy path (outside the rollback), so
+        # this branch was never needed while `fail_reply` ran only from the per-batch rescue.
+        # `writer_loop`'s drain-on-death now calls it for whatever is in the queue, and an
+        # `index_pending!` caller in that queue would otherwise park forever. `InsertH2Frame` is
+        # deliberately absent: it is the one WriteOp with no reply channel.
+      when IndexBatch then op.reply.send(0)
       end
     rescue
       # caller gone / channel closed — nothing to unblock

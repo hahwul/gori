@@ -115,3 +115,44 @@ describe Gori::Scope do
     end
   end
 end
+
+# The OTHER way the writer can strand a caller: it dies mid-loop rather than surviving a batch.
+# `writer_loop`'s rescue closes `@writes` so future senders take their `rescue
+# Channel::ClosedError` path, then drains whatever is still buffered through `fail_reply` — a
+# caller already parked on `reply.receive` for a queued op has no ClosedError to catch, so
+# without that drain it blocks forever (under the proxy: a leaked ClientConn holding both
+# sockets, per in-flight capture, with the flow left Pending).
+#
+# That drain is only as complete as `fail_reply`, and `fail_reply` is a `case` over the WriteOp
+# subtypes — a subtype added without a branch is answered by nobody and silently reintroduces
+# the hang. `IndexBatch` was exactly that: it had no branch, because until the drain existed
+# `fail_reply` ran only from the per-batch rescue, where index replies are answered elsewhere.
+#
+# A runtime example cannot reach this — killing the writer OUTSIDE its per-batch rescue means
+# raising from `await_op` or the connection release, neither of which a spec can inject without
+# a seam that would itself be the change. So pin it at the source: every WriteOp that HAS a
+# reply channel must appear in `fail_reply`.
+describe "Store#fail_reply" do
+  it "answers every WriteOp that has a reply channel" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "store.cr"))
+
+    # Subtypes that declare `getter reply`. Sliced BETWEEN `struct … < WriteOp` headers rather
+    # than matched with one regex per struct: a lazy `(?:.*?\n)*?` runs straight past its own
+    # struct into the next one's `getter reply` and credits a fire-and-forget op with a reply
+    # it does not have — which is how the first draft of this guard "proved" InsertH2Frame was
+    # uncovered. InsertH2Frame having no reply is the point; deriving it keeps that honest.
+    heads = [] of {String, Int32}
+    src.scan(/struct (\w+) < WriteOp/) { |m| heads << {m[1], m.end} }
+    with_reply = heads.each_with_index.compact_map do |(name, from), i|
+      to = heads[i + 1]?.try(&.[](1)) || src.size
+      src[from...to].includes?("getter reply :") ? name : nil
+    end.to_a
+    with_reply.should contain("IndexBatch")        # the one that was missing; guards the guard
+    with_reply.should_not contain("InsertH2Frame") # the fire-and-forget op; guards the slicing
+    with_reply.size.should be >= 8
+
+    body = src[/private def fail_reply\(op : WriteOp\) : Nil.*?\n    end/m].not_nil!
+    covered = body.scan(/when (\w+)/).map { |m| m[1] }
+    (with_reply - covered).should be_empty
+  end
+end
