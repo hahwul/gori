@@ -16,6 +16,19 @@ describe Gori::Tui::PaletteState do
     palette.selected_verb.try(&.id).should eq("app.quit")
   end
 
+  # The sandbox used to be reachable only from the Project NETWORK pane, so "is it Global?" is
+  # the whole feature: a verb registered in any other scope compiles, wires up, passes its
+  # verb_intents spec — and never appears here.
+  it "surfaces the sandbox toggle for a 'sandbox' query (the palette lists Global verbs only)" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+
+    "sandbox".each_char { |c| palette.append(c, ctx) }
+    palette.results.map(&.id).should contain("scope.toggle-sandbox")
+    palette.selected_verb.try(&.id).should eq("scope.toggle-sandbox") # and it ranks first
+  end
+
   it "moves the selection within results" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)

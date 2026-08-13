@@ -588,7 +588,10 @@ module Gori::Tui
         if !scope.sandbox?
           "sandbox OFF — all captured traffic passes through"
         elsif scope.include_count == 0
-          "⚠ sandbox ON but NO scope include rules — ALL traffic is blocked (add an include here, a)"
+          # Signpost the add path for where the toggle fired (mirrors toast_scope_state): 'a' on
+          # the Project scope pane itself, else point at the Project tab. The palette's
+          # scope.toggle-sandbox fires this from ANY tab, where "here, a" adds nothing.
+          @host.active_tab == :project ? "⚠ sandbox ON but NO scope include rules — ALL traffic is blocked (add an include here, a)" : "⚠ sandbox ON but NO scope include rules — ALL traffic is blocked (add one in the Project tab)"
         else
           "sandbox ON — only in-scope traffic passes; everything else is blocked"
         end

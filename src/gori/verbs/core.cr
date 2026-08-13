@@ -125,6 +125,15 @@ module Gori
         "scope.edit", "Edit scope rules", "Jump to the Project tab's scope rule editor",
         Verb::Scope::Global) { |ctx| ctx.scope_open; nil }
 
+      # Palette-only, deliberately: the sandbox was reachable ONLY from the Project NETWORK
+      # pane's row/click, so the one gate that BLOCKS traffic was the one policy you had to
+      # change tabs to reach. No chord — the bare-Global budget is `c`/`i`/`s` (see
+      # docs/guide/hotkeys), and a hard block gate has no business on a single keypress
+      # anyway; the palette entry keeps the empty-allowlist danger confirm in front of it.
+      r.register Verb::Definition.new(
+        "scope.toggle-sandbox", "Toggle sandbox", "Block every request the scope does not allow (hard containment gate)",
+        Verb::Scope::Global) { |ctx| ctx.scope_toggle_sandbox; nil }
+
       r.register Verb::Definition.new(
         "scope.add-host", "Add host to scope", "Add the selected/marked flows' hosts to the scope lens",
         # Batch-capable (#442): gates on the effective target set (marks if any, else the

@@ -674,6 +674,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:scope_toggle_lens)
   end
 
+  def scope_toggle_sandbox : Nil
+    rec(:scope_toggle_sandbox)
+  end
+
   property scope_has_rule : Bool = false
 
   def scope_add_rule : Nil

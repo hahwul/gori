@@ -81,6 +81,15 @@ describe "Gori::Verbs.register_core" do
       verb_intents(r, "scope.edit").should eq([:scope_open])
     end
 
+    it "exposes the sandbox gate to the palette as its own Global, chordless verb" do
+      verb = r["scope.toggle-sandbox"]
+      verb.scope.should eq(Gori::Verb::Scope::Global) # palette-visible
+      verb.chords.should be_empty                     # bare-Global budget is c/i/s; a block gate gets no keypress
+      verb_intents(r, "scope.toggle-sandbox").should eq([:scope_toggle_sandbox])
+      # Distinct intents: the lens filters the view, the sandbox blocks traffic.
+      verb_intents(r, "scope.toggle-lens").should_not contain(:scope_toggle_sandbox)
+    end
+
     it "gates scope.add-host on the History tab AND a selected flow" do
       verb = r["scope.add-host"]
       ctx = FakeExecContext.new # :history, nothing selected

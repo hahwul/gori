@@ -34,6 +34,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     project_controller.toast_scope_state
   end
 
+  # Toggle the sandbox from the palette — same path the Project NETWORK pane row/click takes,
+  # so the empty-allowlist danger confirm and the write-committed check apply here too. No
+  # reload: the sandbox changes what the proxy BLOCKS next, not what the current lists show.
+  def scope_toggle_sandbox : Nil
+    toggle_sandbox
+  end
+
   # Project SCOPE-pane rule editing (a/e/d + space menu → popup overlay).
   def scope_add_rule : Nil
     project_controller.scope_add_rule

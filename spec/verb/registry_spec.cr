@@ -628,6 +628,10 @@ private class FakeContext < ExecContext
     @calls << :scope_toggle_lens
   end
 
+  def scope_toggle_sandbox : Nil
+    @calls << :scope_toggle_sandbox
+  end
+
   def scope_add_rule : Nil
     @calls << :scope_add_rule
   end
