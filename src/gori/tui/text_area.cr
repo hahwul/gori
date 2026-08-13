@@ -101,7 +101,7 @@ module Gori::Tui
       # rendered line while kept verbatim in the buffer (so `to_bytes`/send are unchanged).
       # Empty for every editor except the Repeater/Fuzzer request editors, which hide the
       # `¦chain` segment of a §…§ marker (only `§value§` shows; the chain rides a tooltip +
-      # the ^Y overlay). All column math (caret, click, h-scroll, marker band) is remapped
+      # the ^Q overlay). All column math (caret, click, h-scroll, marker band) is remapped
       # to the concealed line; when empty the widget is byte-for-byte unchanged.
       @conceal_spans = [] of {Int32, Int32}
       # The FIXED end of an INSERT-mode selection ({cy, cx}), or nil when nothing is
@@ -1244,7 +1244,7 @@ module Gori::Tui
 
     # Inverse of cursor_offset: place the caret at a flat char offset into the LF-joined
     # buffer. Used to restore the caret to a §…§ marker after a set_text that rebuilt the
-    # buffer (e.g. committing the ^Y chain edit) so the marker tooltip keeps showing.
+    # buffer (e.g. committing the ^Q chain edit) so the marker tooltip keeps showing.
     def place_at_offset(offset : Int32) : Nil
       off = {offset, 0}.max
       cy = 0
@@ -1731,7 +1731,7 @@ module Gori::Tui
       cp = @chain_peek
       return false unless cp
       chain = @chain_peek_text
-      # An EMPTY chain draws the affordance only ("no chain yet · ^Y edit"), so it YIELDS to a
+      # An EMPTY chain draws the affordance only ("no chain yet · ^Q edit"), so it YIELDS to a
       # `$KEY` peek under the same caret: `§$HOST§` is an ordinary marker, and the resolved
       # value is a datum nothing else on screen shows, where the hint is a standing reminder
       # that will be there on the next keystroke too. A non-empty chain still wins — it reveals

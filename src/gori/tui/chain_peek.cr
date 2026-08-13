@@ -5,7 +5,7 @@ module Gori::Tui
   # A caret-anchored tooltip that reveals the CONCEALED `¦chain` of the §…§ marker under
   # the cursor — the read-time counterpart to inline concealment (only `§value§` is drawn
   # in the editor; the transform chain rides here). Modelled on EnvPeek: anchored at the
-  # caret cell, flipping above/below by available room. Adds a `^Y edit` affordance so the
+  # caret cell, flipping above/below by available room. Adds a `^Q edit` affordance so the
   # (otherwise hidden) edit path stays discoverable. The owning TextArea decides whether
   # the caret sits in a chained marker and feeds the chain via `set`; this holds only open
   # state + drawing.
@@ -14,7 +14,7 @@ module Gori::Tui
     @chain = ""
     @hint = DEFAULT_HINT
 
-    # What `^Y` opens is the same everywhere, so this is the floor — but the marker under the
+    # What `^Q` opens is the same everywhere, so this is the floor — but the marker under the
     # caret means different things per surface, and the Fuzzer chains `^O` onto it (a position
     # with no payload set produces nothing, which the chain alone never says). Owner-fed.
     DEFAULT_HINT = "^Q edit"
@@ -56,7 +56,7 @@ module Gori::Tui
     end
 
     # One tooltip row: a fill band, the accent ▸ chain glyph, the chain spec, then the
-    # muted `^Y edit` hint pushed to the right edge (mirrors an EnvComplete/EnvPeek row so
+    # muted `^Q edit` hint pushed to the right edge (mirrors an EnvComplete/EnvPeek row so
     # the peek reads as the same surface).
     private def draw_row(screen : Screen, x : Int32, y : Int32, w : Int32) : Nil
       bg = Theme.elevated

@@ -1096,7 +1096,7 @@ module Gori::Tui
     # signal set apart from the plain marker_fg. Uses focus_gold (NOT accent): in the
     # monochrome palettes accent == text_bright == marker_fg, so an accent § would be
     # invisible against the rest of the marker. focus_gold is a distinct, contrast-guarded
-    # gold in every palette, and reads as actionable (matches the ^Y edit affordance).
+    # gold in every palette, and reads as actionable (matches the ^Q edit affordance).
     def self.marker_accent : Color
       focus_gold
     end

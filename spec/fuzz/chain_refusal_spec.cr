@@ -8,7 +8,7 @@ private alias F = Gori::Fuzz
 # `Template#apply_chains` returns the payload verbatim when its chain does not run, arguing
 # that a streaming fuzz run has nowhere to surface a per-position error. That was written when
 # the only way to reach it was a typo. The saved-chain library added a class that is not a
-# typo: a name the operator saved, that the `^Y` autocomplete offers and `gori run decoder
+# typo: a name the operator saved, that the `^Q` autocomplete offers and `gori run decoder
 # list` prints as an ordinary converter, and that the library registered as an always-raising
 # step precisely so the failure would be VISIBLE. Reproduced on the wire: five marked
 # positions, three naming such a chain, all three carrying the plaintext payload under

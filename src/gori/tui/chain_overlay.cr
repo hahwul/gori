@@ -5,7 +5,7 @@ require "./chain_pane"
 require "../decoder"
 
 module Gori::Tui
-  # The ^Y chain editor: a centered modal that edits a §…§ marker's Decoder chain AND
+  # The ^Q chain editor: a centered modal that edits a §…§ marker's Decoder chain AND
   # previews how the marker's value transforms through it (value → each step → output).
   # Replaces the old bottom CHAIN split — the inline chain is concealed now, so the
   # editing surface became a focused popup that can show the wire result before you send.

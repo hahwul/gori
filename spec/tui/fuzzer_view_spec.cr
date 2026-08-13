@@ -217,7 +217,7 @@ describe Gori::Tui::FuzzerView do
     view.focus_chain_pane.should be_nil # in a marker → enters the pane
     view.chain_pane_active?.should be_true
     "rot13".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-    # While the chain is focused, the ^Y modal renders over the tab with a transform preview.
+    # While the chain is focused, the ^Q modal renders over the tab with a transform preview.
     b = MemoryBackend.new(120, 30)
     view.render(Screen.new(b), Rect.new(0, 0, 120, 30))
     grid = (0...30).map { |y| b.row(y) }.join("\n")
@@ -234,7 +234,7 @@ describe Gori::Tui::FuzzerView do
     grid2.should_not contain("§x¦rot13§")
   end
 
-  it "points a chain-less position at BOTH halves of its setup (^Y and the CONFIG pane)" do
+  it "points a chain-less position at BOTH halves of its setup (^Q and the CONFIG pane)" do
     # A marked position is only half a Fuzzer run: with no payload set in CONFIG the sweep
     # produces nothing, and the two halves live in different panes. The tooltip used to open
     # only for a marker that already HAD a `¦chain` — i.e. never on a freshly auto-marked
@@ -251,7 +251,7 @@ describe Gori::Tui::FuzzerView do
 
   # `template_scroll_view` used to bail on `template_insert?`, so the wheel died the moment `i`
   # was pressed — the same `unless insert?` the Repeater request pane shed, in the one other
-  # pane that had it. `chain_pane_active?` still bails: the ^Y sub-pane owns the wheel then.
+  # pane that had it. `chain_pane_active?` still bails: the ^Q sub-pane owns the wheel then.
   describe "#template_scroll_view" do
     seed = "GET /?x=1 HTTP/1.1\r\nHost: h\r\n" +
            (1..30).map { |i| "X-#{i}: TAG#{i}" }.join("\r\n") + "\r\n\r\n"
@@ -275,7 +275,7 @@ describe Gori::Tui::FuzzerView do
       end
     end
 
-    it "leaves the template alone while the ^Y CHAIN sub-pane owns the wheel" do
+    it "leaves the template alone while the ^Q CHAIN sub-pane owns the wheel" do
       view = FuzzerView.new
       view.load_request("https://h", "§x§ HTTP/1.1\r\nHost: h\r\n" + seed, false, "")
       view.focus_pane(:template)

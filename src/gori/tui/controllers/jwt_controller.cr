@@ -402,6 +402,12 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           ed.insert(c)
+          # The ninth caller of `report_replaced` — the eight siblings have had it since #583
+          # and this arm alone skipped it, so a printable over a ⇧arrow band here cut the band
+          # with no toast and no pointer at ^Z. That is the exact keystroke `^Y` exists to
+          # spare you (`y` is a literal character on this pane), and the footer now teaches
+          # the band that makes it reachable — so the loss has to announce itself.
+          report_replaced(ed.last_replaced)
           ed.set_preedit("")
           recompute_encode(s)
         end
@@ -740,24 +746,51 @@ module Gori::Tui
       end
     end
 
-    # The unified Copy verb: selection (INPUT read) or the focused pane's content.
+    # The unified Copy verb: the selection if one is live, else the focused pane's content.
+    #
+    # EVERY editable pane consults its band, not just INPUT-in-READ. `Runner#read_copy` routes
+    # `:jwt` straight here (no `read_selection_active?` branch like the other tabs get), so the
+    # selection-vs-all decision is this method's alone — and it used to make it for exactly one
+    # of the four editors. In INS on INPUT it copied `s.input.text`, the WHOLE token, while
+    # `jwt_selection_active?` was reporting the ⇧arrow band as live: the same "claims a
+    # selection, copies something else" split `RepeaterView#pane_selection?` documents. HEADER
+    # and PAYLOAD are always-typing TextAreas that grow a band the same way and were never
+    # asked at all.
     def jwt_copy : Nil
+      do_copy(jwt_copy_text)
+    end
+
+    # What the Copy verb would put on the clipboard, without writing it — split out from
+    # `jwt_copy` for the reason every sibling tab is already split this way (`RepeaterView`
+    # has `pane_copy_text`, the controller only copies + toasts): the decision above is worth
+    # asserting on its own, and `Clipboard.copy` writes OSC 52 straight to the tty.
+    #
+    # NOT the same as `jwt_selection_text`, which is the "Send selection to" payload and
+    # deliberately answers "" on the ENCODE panes — that flow lives in the space menu, which
+    # cannot be opened from a pane where space types a space.
+    def jwt_copy_text : String
       s = cur
-      text = case s.pane
-             when :input   then s.input_mode == InputMode::Read ? s.input_read.copy_text(s.input) : s.input.text
-             when :header  then s.header.text
-             when :payload then s.payload.text
-             when :secret  then s.secret
-             when :decoded then s.decoded
-             when :output  then s.output_ok? ? s.output : ""
-             when :attacks then (a = s.attacks[s.view.attacks_selected]?) ? a.token : ""
-             else               ""
-             end
-      do_copy(text)
+      case s.pane
+      when :input   then s.input_mode == InputMode::Read ? s.input_read.copy_text(s.input) : band_or_all(s.input)
+      when :header  then band_or_all(s.header)
+      when :payload then band_or_all(s.payload)
+      when :secret  then s.secret
+      when :decoded then s.decoded
+      when :output  then s.output_ok? ? s.output : ""
+      when :attacks then (a = s.attacks[s.view.attacks_selected]?) ? a.token : ""
+      else               ""
+      end
     end
 
     def jwt_copy_all : Nil
       jwt_copy
+    end
+
+    # An editor's ⇧arrow band, or its whole buffer when no band is live — "smart copy" stated
+    # once for the three panes that share it. `TextArea#selection_text` is nil rather than ""
+    # when there is no band, so this cannot silently copy an empty string over a full buffer.
+    private def band_or_all(ed : TextArea) : String
+      ed.selection_text || ed.text
     end
 
     private def do_copy(text : String, label : String? = nil) : Nil
@@ -806,8 +839,14 @@ module Gori::Tui
       s.input_read.select_line(s.input) if s.pane == :input && s.input_mode == InputMode::Read
     end
 
+    # Clears whichever of the pane's two selection models is the live one. It used to clear
+    # `input_read` unconditionally, so in INSERT — where the band lives on `s.input`, which is
+    # what `jwt_selection_active?` reads — the verb was a no-op on the one mode that now copies
+    # by band. Same INS/READ pair `jwt_copy_text` and `jwt_selection_active?` already split on.
     def jwt_clear_selection : Nil
-      cur.input_read.clear_selection if cur.pane == :input
+      s = cur
+      return unless s.pane == :input
+      s.input_mode == InputMode::Insert ? s.input.clear_selection : s.input_read.clear_selection
     end
 
     def body_hint(focus : Symbol) : String
@@ -827,7 +866,10 @@ module Gori::Tui
       case s.pane
       when :input
         if s.input_mode == InputMode::Insert
-          "type a JWT · esc read · ↓ decoded · #{lens} encode · ^L clear · ^N new · ↑ sub-tabs"
+          # The READ arm below advertises the band and `y`; INSERT kept the band and named
+          # neither it nor the key that copies it. `y` is a literal character while typing —
+          # and typing it over the band REPLACES it — so `^Y` is the copy this mode has.
+          "type a JWT · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} encode · ^L clear · ^N new · ↑ sub-tabs"
         else
           "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓ decoded · #{lens} encode · ^N new · esc sub-tabs"
         end
@@ -836,9 +878,17 @@ module Gori::Tui
       when :attacks
         "↑/↓ pick · ↵/#{y} copy token · space cmds · ↑-top decoded · #{lens} encode · esc sub-tabs"
       when :header, :payload
-        "type JSON · ↑/↓ move+cross · ^A alg · #{lens} decode · space cmds · esc sub-tabs"
+        # The ENCODE lens has no READ mode at all — its three panes always capture keys — so
+        # `^Y` is the ONLY copy here, and `space cmds` was a lie the moment it was written:
+        # `edit_json`/`edit_secret` insert a literal space (`handle_body_key` only defers
+        # ctrl/alt chords). Naming a menu that types a space instead of opening cost these
+        # strips the one token that had room to say which key copies.
+        "type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A alg · #{lens} decode · esc sub-tabs"
       when :secret
-        "type secret · ^A alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · space cmds · esc sub-tabs"
+        # Same trade as HEADER/PAYLOAD above, minus `⇧arrows select`: SECRET is a plain String
+        # + caret index (JwtSession#secret_cx), not a TextArea, so it has no band to grow.
+        # `^Y` still copies the whole field.
+        "type secret · ^Y copy · ^A alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs"
       when :output
         "↑/↓ scroll · #{y} copy token · space cmds · ^A alg · #{lens} decode · esc sub-tabs"
       else

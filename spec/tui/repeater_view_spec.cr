@@ -1263,10 +1263,10 @@ describe Gori::Tui::RepeaterView do
     # The request line renders §v§ (the ¦md5 hidden inline), never the full §v¦md5§.
     grid.should contain("§v§ HTTP/1.1")
     grid.should_not contain("§v¦md5§")
-    # ...but the caret tooltip reveals the concealed chain + the ^Y edit affordance.
+    # ...but the caret tooltip reveals the concealed chain + the ^Q edit affordance.
     grid.should contain("md5")         # chain shown in the tooltip
     grid.should contain("^Q edit")     # edit affordance
-    grid.should_not contain("PREVIEW") # the ^Y modal is NOT auto-shown
+    grid.should_not contain("PREVIEW") # the ^Q modal is NOT auto-shown
   end
 
   it "draws ^T:MARK only while the capture's § are INERT, never once they are live" do
@@ -1341,9 +1341,9 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
-  it "offers ^Y over a marker that has NO chain — the state with nothing else on screen" do
+  it "offers ^Q over a marker that has NO chain — the state with nothing else on screen" do
     # The tooltip used to open only for a marker that ALREADY had a `¦chain`, i.e. it explained
-    # the case the operator had already solved and stayed silent on the one they hadn't. ^Y is
+    # the case the operator had already solved and stayed silent on the one they hadn't. ^Q is
     # the sole way into the chain editor and appears on no border, so an unchained marker had
     # no path out of itself.
     view = RepeaterView.new
@@ -1398,7 +1398,7 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
-  it "opens the CHAIN modal (with a transform preview) only after ^Y" do
+  it "opens the CHAIN modal (with a transform preview) only after ^Q" do
     view = RepeaterView.new
     view.restore("https://a.test", "§v¦md5§ HTTP/1.1\nHost: a.test\n\n", false, false)
     view.focus_pane(:request)
@@ -2384,7 +2384,7 @@ describe Gori::Tui::RepeaterView do
       view.request_text.should eq(smuggle)
     end
 
-    it "the ^Y chain commit keeps the terminators" do
+    it "the ^Q chain commit keeps the terminators" do
       view = seed.call
       view.goto_request_line(1)
       view.mark_word

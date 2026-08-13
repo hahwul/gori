@@ -140,7 +140,12 @@ module Gori::Tui
           # `↹ text` and not `↹ pane`: Tab types a TAB here (a header value may hold one), the
           # same thing it does in the Repeater's request editor. The old wording promised a
           # focus move Tab has never made from an editor in INSERT.
-          "type · ⇧arrows select · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
+          #
+          # `^Y copy` sits right after the select token it completes: this footer already told
+          # you a band could be built here and then named no key that copies one. In INSERT the
+          # `y` the READ footer advertises is a literal character — and typing it over the band
+          # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
+          "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
         else
           "i/↵ edit · #{read_common} · #{marks} · ^O config · #{run} run · ↹ pane · esc tabs"
         end
@@ -294,7 +299,7 @@ module Gori::Tui
     end
 
     private def handle_escape(v : FuzzerView) : Nil
-      return v.discard_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → cancel + back (^Y again saves)
+      return v.discard_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → cancel + back (^Q again saves)
       if v.focus == :template && v.template_insert?
         v.exit_template_insert!
       elsif v.focus == :target && v.editing_sni?
@@ -308,7 +313,7 @@ module Gori::Tui
       end
     end
 
-    # ^Y: focus the CHAIN pane for the marker under the template cursor (again = save + back).
+    # ^Q: focus the CHAIN pane for the marker under the template cursor (again = save + back).
     def fuzz_focus_chain_pane : Nil
       return unless view = current_view
       if view.chain_pane_active?

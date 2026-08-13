@@ -369,11 +369,14 @@ module Gori::Tui
         # consumed: a caret motion, with or without a selection riding along
       else
         if (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
+          # Space included, deliberately: `Key::Space.to_char` is `' '` and `' '.control?` is
+          # false, so this arm claims it and types it. There used to be an `elsif key.space?`
+          # below opening the space menu — unreachable behind this branch, and correctly so:
+          # the sample is an HTTP message, which cannot be typed without spaces. The footer
+          # names no `space cmds` here for the same reason.
           ed.insert(c)
           report_replaced(ed.last_replaced) # a printable over a selection REPLACES it
           ed.set_preedit("")
-        elsif key.space? && !ev.ctrl? && !ev.alt?
-          @host.open_space_menu
         else
           return false
         end
@@ -545,24 +548,39 @@ module Gori::Tui
     # Same `Clipboard.copy` + status shape every other tab's copy verb uses, so the toast reads
     # the same and the OSC-52 truncation note is not re-derived here.
     def rewriter_copy : Nil
-      return unless @sub == :rules
+      sel, text = rewriter_copy_target
+      return if text.nil? # not a preview pane — the verb's gate should have caught it
+                # "nothing to copy" rather than a silent return: on the INPUT sample `^Y` is the ONLY
+                # copy and the footer names it, so an empty pane swallowing the chord reads as a dead
+                # key. Every sibling tab's `do_copy` answers here; this one returned.
+      return @host.status("nothing to copy") if text.empty?
+      written = Clipboard.copy(text)
+      note = Clipboard.note(written, text)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+    end
+
+    # What `rewriter_copy` would put on the clipboard and whether it is a selection, without
+    # writing it — the JWT half of this sweep grew `jwt_copy_text` for the same reason: the
+    # decision is worth asserting on its own, and `Clipboard.copy` writes OSC 52 to the tty.
+    # `nil` text = a focus that has no copy (the rule list).
+    #
+    # This is NOT `rewriter_selection_text`, which is the "Send selection to" payload and
+    # always narrows to the band; a copy with no band falls back to the whole pane.
+    def rewriter_copy_target : {Bool, String?}
+      return {false, nil} unless @sub == :rules
       case @focus
       when :preview_in
         # The editable sample. `^Y` is the only way to copy a selection here: in INS a bare `y`
         # is a literal character, and typing it REPLACES the selection.
         sel = @preview_input.selection?
-        text = sel ? (@preview_input.selection_text || "") : @preview_input.text
+        {sel, sel ? @preview_input.selection_text : @preview_input.text}
       when :preview_out
         sync_preview_out
         sel = @out.selection?
-        text = sel ? @out.copy_text : @out.copy_all
+        {sel, sel ? @out.copy_text : @out.copy_all}
       else
-        return
+        {false, nil}
       end
-      return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
 
     # True while the OUTPUT pane is the focused one — the `available:` gate for its read verbs.
@@ -803,7 +821,10 @@ module Gori::Tui
       end
       case @focus
       when :preview_in
-        "type sample HTTP · ↑ list · ↓/→ output · esc list"
+        # This pane is ALWAYS typing — there is no READ mode to fall back to — so `^Y` is not
+        # merely the INS spelling of copy here, it is the only one (`rewriter_copy`'s
+        # `:preview_in` arm says the same). The footer named neither the band nor the key.
+        "type sample HTTP · ⇧arrows select · ^Y copy · ↑ list · ↓/→ output · esc list"
       when :preview_out
         "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ← input · esc input"
       else

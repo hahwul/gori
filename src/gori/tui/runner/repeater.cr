@@ -131,7 +131,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_clear_marks
   end
 
-  # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
+  # ^Q: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
   # controller gates on the request pane + cursor-in-marker and toasts otherwise.
   def repeater_attach_chain : Nil
     repeater_controller.repeater_focus_chain_pane

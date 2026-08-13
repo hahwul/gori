@@ -588,7 +588,7 @@ module Gori::Tui
       @chain_focused && @focus == :template
     end
 
-    # ^Y: focus the CHAIN pane for the marker under the template cursor. Returns a hint
+    # ^Q: focus the CHAIN pane for the marker under the template cursor. Returns a hint
     # string when it can't (surfaced by the controller), nil on success.
     def focus_chain_pane : String?
       return "move to the TEMPLATE pane first (↹)" unless @focus == :template
@@ -1885,7 +1885,7 @@ module Gori::Tui
       template_read_move(dir * @editor.page_rows, 0, selecting: selecting)
     end
 
-    # `chain_pane_active?` still bails — the ^Y chain sub-pane owns the wheel while it is up,
+    # `chain_pane_active?` still bails — the ^Q chain sub-pane owns the wheel while it is up,
     # so scrolling the template underneath it would move a pane the operator is not in.
     # `template_insert?` does NOT, and that was the defect: the guard read the MODE, not the
     # pane, so the wheel died the moment `i` was pressed. Same reasoning as
@@ -2064,7 +2064,7 @@ module Gori::Tui
       return if top.h <= 0
       render_top(screen, top, focused)
       render_bottom(screen, bottom, focused) if bottom.h > 0
-      render_chain_overlay(screen, rect) if @chain_focused # centered ^Y modal ON TOP (replaces the old split)
+      render_chain_overlay(screen, rect) if @chain_focused # centered ^Q modal ON TOP (replaces the old split)
     end
 
     # The body's three horizontal bands — TARGET, the template/config row, and the
@@ -2091,12 +2091,12 @@ module Gori::Tui
       left = Rect.new(rect.x, rect.y, half, rect.h)
       right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
       tmpl_focused = focused && @focus == :template
-      render_template(screen, left, tmpl_focused && !@chain_focused) # dimmed while the ^Y modal owns focus
+      render_template(screen, left, tmpl_focused && !@chain_focused) # dimmed while the ^Q modal owns focus
       render_config(screen, right, focused && @focus == :config)
     end
 
-    # The ^Y chain editor modal over the whole tab, bound to the marker the cursor sat in
-    # when ^Y was pressed. Shows the value, the editable chain, and a live transform
+    # The ^Q chain editor modal over the whole tab, bound to the marker the cursor sat in
+    # when ^Q was pressed. Shows the value, the editable chain, and a live transform
     # preview. Keys route here via the controller (chain_pane_active?).
     private def render_chain_overlay(screen : Screen, area : Rect) : Nil
       value = Fuzz::Template.value_at(@editor.text, @chain_marker_cursor) || ""
@@ -2242,11 +2242,11 @@ module Gori::Tui
       marker_regions.each_with_index do |region, i|
         a, sep, close = region
         bg << {a, close + 1, Theme.marker_bg(i)} # band spans the whole marker; the conceal-aware paint skips hidden cells
-        conceal << {sep, close} if sep < close   # hide the ¦chain inline (kept in the buffer → tooltip + ^Y overlay)
+        conceal << {sep, close} if sep < close   # hide the ¦chain inline (kept in the buffer → tooltip + ^Q overlay)
       end
       @editor.bg_regions = bg
       @editor.conceal_spans = conceal
-      # A marker WITHOUT a chain gets the tooltip too (`""` → "no chain yet · ^Y edit · ^O
+      # A marker WITHOUT a chain gets the tooltip too (`""` → "no chain yet · ^Q edit · ^O
       # sets"). That is the state a freshly auto-marked template is in for every one of its
       # positions, i.e. the one an operator meets first and the one that used to say nothing.
       # nil (caret outside every marker) still draws nothing.
@@ -3064,7 +3064,7 @@ module Gori::Tui
       top_h = rest.h if rest.h < 6
       half = {(rest.w - 1) // 2, 1}.max
       left = Rect.new(rest.x, rest.y, half, top_h)
-      commit_chain_pane if @chain_focused # a click outside the ^Y modal commits + dismisses it
+      commit_chain_pane if @chain_focused # a click outside the ^Q modal commits + dismisses it
       inner = left.inset(1, 1)
       template_insert? ? @editor.click_to_cursor(inner, mx, my) : @template_read.click(@editor, inner, mx, my)
     end

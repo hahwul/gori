@@ -35,7 +35,13 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       reg = @host.session.registry
       if @intercept.editing?
-        "type to edit · ^R forward · ⇧↹/esc queue"
+        # `⇧arrows select · ^Y copy`: this editor is the one INS strip in the tree that named
+        # NEITHER, which is why the guard spec's "advertises a band, names no copy key" rule
+        # could not see it. Both are live — `handle_edit_key` routes ⇧arrows through
+        # `edit_motion_key`, and `intercept.copy` carries `^Y` on the wider `intercept_copyable?`
+        # gate precisely for this pane. Bare `y` is chordless here (the queue spends the
+        # letters) AND a literal character while typing, so `^Y` is the only copy there is.
+        "type to edit · ⇧arrows select · ^Y copy · ^R forward · ⇧↹/esc queue"
       elsif @intercept.querying?
         "type condition · ↹ complete · ↵ apply · esc clear"
       else

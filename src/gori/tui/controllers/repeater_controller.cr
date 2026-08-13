@@ -291,7 +291,14 @@ module Gori::Tui
       if v.request_hex?
         "gRPC payload hex — overtype 0-9a-f · Ins/Del length · ^X/esc exit · ^R send"
       elsif v.request_insert?
-        "type head/metadata · esc read · ↹ pane"
+        # `⇧arrows select · ^Y copy` for the same reason the plain-HTTP request footer names
+        # them (see #body_hint's `:request` arm): the band is buildable in INSERT and the `y` that
+        # copies it in READ is a literal character here — one that REPLACES the selection.
+        #
+        # `↹ text`, not `↹ pane`, for the same reason as well: `editor_captures_tab?` is
+        # `request_text_editing?`, which has no gRPC arm, so Tab splices a TAB into the
+        # head/metadata. The old token promised a focus move and silently corrupted a header.
+        "type head/metadata · ⇧arrows select · ^Y copy · esc read · ↹ text"
       else
         msg = v.grpc_reframable? ? "^X hex-edit payload · " : ""
         "i/↵ edit head · #{msg}⇧arrows select · y copy · space cmds · ↹ pane"
@@ -345,7 +352,7 @@ module Gori::Tui
         view.edit_undo
       elsif key.escape?
         if (view = current_view) && view.chain_pane_active?
-          view.discard_chain_pane # esc in the CHAIN pane → cancel + back to the request editor (^Y again saves)
+          view.discard_chain_pane # esc in the CHAIN pane → cancel + back to the request editor (^Q again saves)
         elsif (view = current_view) && view.focus == :target && view.editing_sni?
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?
@@ -396,7 +403,7 @@ module Gori::Tui
               "GraphQL query/vars"
             end
       mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
-      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · ↹ pane"
+      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · #{tab_token(v)}"
     end
 
     private def ws_hint(v : RepeaterView) : String
@@ -404,7 +411,17 @@ module Gori::Tui
       mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
       # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
       # nothing in the tab suggested a handshake could be sent as an ordinary request.
-      "#{mode} #{sub} · ^T switch · ^V http · ^G goto · ^F find · esc read · ↹ pane"
+      "#{mode} #{sub} · ^T switch · ^V http · ^G goto · ^F find · esc read · #{tab_token(v)}"
+    end
+
+    # What Tab actually does on the REQUEST column right now. In INSERT it types a TAB
+    # (`editor_captures_tab?` → `request_text_editing?` → `request_tab_insert`), and only in
+    # READ does it advance the pane ring — so a fixed `↹ pane` on a footer that serves both
+    # modes promised a focus move and instead spliced a tab into a header value. The
+    # plain-HTTP `:request` arm has said `↹ text` since it grew its own INSERT branch; these
+    # two (and gRPC) shared one string across the modes and kept the READ token.
+    private def tab_token(v : RepeaterView) : String
+      v.request_insert? ? "↹ text" : "↹ pane"
     end
 
     # The RESPONSE column's footer on a WS tab — the twin of `ws_hint`, naming the card being

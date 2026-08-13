@@ -25,8 +25,8 @@ describe "ConfirmDialog.affirmative?" do
   end
 
   it "refuses a modified Y — the chord the hint never advertises" do
-    # ^Y is live in the Repeater/Fuzzer panes (repeater.attach-chain), which is exactly where
-    # the marker-removal confirm appears.
+    # ^Y is live in the Repeater/Fuzzer panes — `repeater.copy`/`fuzzer.copy`, since #677 moved
+    # attach-chain to ^Q — which is exactly where the marker-removal confirm appears.
     ConfirmDialog.affirmative?(key(Termisu::Input::Key::LowerY, Termisu::Input::Modifier::Ctrl)).should be_false
     ConfirmDialog.affirmative?(key(Termisu::Input::Key::LowerY, Termisu::Input::Modifier::Alt)).should be_false
     ConfirmDialog.affirmative?(key(Termisu::Input::Key::UpperY, Termisu::Input::Modifier::Ctrl)).should be_false

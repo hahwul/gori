@@ -291,4 +291,49 @@ describe "Gori::Tui::RewriterController preview-input selection" do
       end
     end
   end
+
+  # The band the examples above build is copyable — `rewriter_copy` has always taken it — but
+  # the footer named neither the ⇧arrows nor the key. This pane never leaves INSERT, so the
+  # `y` its OUTPUT twin one column right advertises is, here, a literal character that
+  # REPLACES the band; `^Y` is the only copy it has, and now the only copy it names.
+  describe "the footer names the copy this pane actually has" do
+    it "advertises ⇧arrows select and ^Y, not the bare y of a READ pane" do
+      with_preview_focus do |ctl|
+        hint = ctl.body_hint(:body)
+        hint.should contain("⇧arrows select")
+        hint.should contain("^Y copy")
+      end
+    end
+
+    # Through `rewriter_copy_target` — the decision `rewriter_copy` actually makes — and NOT
+    # `rewriter_selection_text`, which is the "Send selection to" payload and derives the same
+    # answer separately. Asserting the send-selection getter here would have left the copy path
+    # free to drift on the one pane whose ^Y is its only copy.
+    it "copies the band it advertises" do
+      with_preview_focus do |ctl|
+        3.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
+        sel, text = ctl.rewriter_copy_target
+        sel.should be_true
+        text.should eq("GET")
+      end
+    end
+
+    it "falls back to the whole sample when no band is live" do
+      with_preview_focus do |ctl|
+        sel, text = ctl.rewriter_copy_target
+        sel.should be_false
+        text.should eq(ctl.@preview_input.text)
+      end
+    end
+
+    # The chord the footer names has to answer even with nothing to take, or it reads as
+    # unbound on a pane where it is the ONLY copy.
+    it "says so instead of going silent on an empty sample" do
+      with_preview_focus do |ctl|
+        ctl.@preview_input.set_text("")
+        ctl.rewriter_copy
+        ctl.@host.as(FakeHost).statuses.last.should eq("nothing to copy")
+      end
+    end
+  end
 end

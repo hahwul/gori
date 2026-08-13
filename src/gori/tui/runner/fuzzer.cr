@@ -60,7 +60,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     (v = fuzzer_controller.current_view) && (@toast = v.insert_marker)
   end
 
-  # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the template
+  # ^Q: jump focus DOWN into the visible CHAIN pane (the marker under the template
   # cursor). The controller gates on cursor-in-marker and toasts otherwise.
   def fuzz_attach_chain : Nil
     fuzzer_controller.fuzz_focus_chain_pane

@@ -2313,7 +2313,7 @@ module Gori::Tui
       @chain_focused && @focus == :request && !request_hex?
     end
 
-    # ^Y: drop focus into the CHAIN pane for the marker under the request cursor. Returns
+    # ^Q: drop focus into the CHAIN pane for the marker under the request cursor. Returns
     # a hint string when it can't (surfaced by the controller), nil on success.
     def focus_chain_pane : String?
       return "not available in hex edit" if request_hex?
@@ -2944,7 +2944,7 @@ module Gori::Tui
       # `switch_req_pane` can `set_text` an editor (commit/re-decode) and reset its caret.
       inner = request_sub_rect(rect, pane) || return
       switch_req_pane(pane)
-      commit_chain_pane if @chain_focused # a click outside the ^Y modal commits + dismisses it, then places the caret
+      commit_chain_pane if @chain_focused # a click outside the ^Q modal commits + dismisses it, then places the caret
       place_request_caret(inner, mx, my)
     end
 
@@ -4406,14 +4406,14 @@ module Gori::Tui
         render_request(screen, env, req_focused && @req_pane == :envelope)
         render_decoded(screen, dec, req_focused && @req_pane == :decoded)
       else
-        render_request(screen, left, req_focused && !@chain_focused) # dimmed while the ^Y modal owns focus
+        render_request(screen, left, req_focused && !@chain_focused) # dimmed while the ^Q modal owns focus
       end
       render_response(screen, right, focused && @focus == :response)
       render_chain_overlay(screen, rect) if @chain_focused # centered modal ON TOP (replaces the old split)
     end
 
-    # The ^Y chain editor: a centered modal over the whole tab, bound to the marker the
-    # cursor sat in when ^Y was pressed. Shows the marker's value, the editable chain, and
+    # The ^Q chain editor: a centered modal over the whole tab, bound to the marker the
+    # cursor sat in when ^Q was pressed. Shows the marker's value, the editable chain, and
     # a live transform preview. Keys route here via the controller (chain_pane_active?).
     private def render_chain_overlay(screen : Screen, area : Rect) : Nil
       value = Fuzz::Template.value_at(@editor.text, @chain_marker_cursor) || ""
@@ -4768,11 +4768,11 @@ module Gori::Tui
       marker_regions.each_with_index do |region, i|
         a, sep, close = region
         bg << {a, close + 1, Theme.marker_bg(i)} # band spans the whole marker; the conceal-aware paint skips hidden cells
-        conceal << {sep, close} if sep < close   # hide the ¦chain inline (kept in the buffer → tooltip + ^Y overlay)
+        conceal << {sep, close} if sep < close   # hide the ¦chain inline (kept in the buffer → tooltip + ^Q overlay)
       end
       @editor.bg_regions = bg
       @editor.conceal_spans = conceal
-      # A marker WITHOUT a chain gets the tooltip too (`""` → "no chain yet · ^Y edit"). The
+      # A marker WITHOUT a chain gets the tooltip too (`""` → "no chain yet · ^Q edit"). The
       # chain pane is reachable by exactly one key that appears nowhere on this pane, so the
       # state with no chain — the one where the operator has nothing on screen to work from —
       # was the state that said nothing at all, while a marker that already had one explained

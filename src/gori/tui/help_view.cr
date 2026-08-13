@@ -113,7 +113,11 @@ module Gori::Tui
         # NOT `y · O`. The `*.copy-all` verbs are gone — `Runner#read_copy` folds it into one
         # key: `y` copies the selection if there is one, else the whole pane. The row was
         # advertising an `O` that stopped existing when they merged.
-        Item.new("y", "copy the selection — or the whole pane when nothing is selected (READ)"),
+        #
+        # `y · ^Y`: the template editor grows a ⇧arrow band in INSERT too, where a bare `y`
+        # types a `y` over it. No verb id — see the JWT row for why the key column would
+        # otherwise drop the `^Y` this row exists to name.
+        Item.new("y · ^Y", "copy selection/pane — `y` in READ, ^Y in INS too"),
         Item.new("⇧arrows", "select text (line or char)"),
         Item.new("^A · ^K · ^T", "auto-mark params · mark word · mark point (manual §)"),
         # NOT `^U clear §` — that was wrong twice over: ^U is fuzz.pretty-template (the tab's
@@ -150,6 +154,17 @@ module Gori::Tui
         Item.new("^L", "clear the session", "jwt.clear"),
         Item.new("↹", "cycle INPUT → DECODED → ATTACKS (decode) / HEADER → PAYLOAD → SECRET → OUTPUT (encode)"),
         Item.new("i / ↵", "enter INS on an editable pane · esc back to READ"),
+        # The tab had no copy row at all, and it is the one tab where the ctrl form is not a
+        # convenience: HEADER/PAYLOAD/SECRET always capture keys, so `^Y` is their ONLY copy.
+        #
+        # NO verb id, unlike the Repeater's row and matching DECODER's `INPUT INS` below:
+        # `build_rows` REPLACES the key column with `binding_label`, which answers the PRIMARY
+        # chord — so passing `jwt.copy` would print a bare `y` next to a description whose whole
+        # point is that `y` types a `y` on three of these panes. Nothing is lost by the literal:
+        # a two-chord verb is not rebindable (`Hotkeys.rebindable?` is single-chord only), so
+        # there is no override for the column to follow.
+        Item.new("y · ^Y", "copy selection/pane — `y` in READ, ^Y while typing (ENCODE panes: ^Y only)"),
+        Item.new("⇧arrows", "select text in INPUT / HEADER / PAYLOAD (not SECRET — single-line field)"),
         Item.new("↑/↓ · ↵", "attacks: select · copy the selected payload"),
         Item.new("^N / ^W", "new / close a sub-tab"),
       ]},
@@ -213,6 +228,11 @@ module Gori::Tui
         Item.new("⇧J / ⇧K", "reorder within a scope — globals apply first, then project rules"),
         Item.new("[ / ]", "switch sub-tab: rules · extract · bindings"),
         Item.new("↓ past the list", "the editable preview sample, and the same message after the rules run"),
+        # NOT "y copies the OUTPUT · ^Y copies the INPUT": `rewriter.copy` is ONE verb with two
+        # chords, and `rewriter_copy` branches on the FOCUSED PANE, not on which chord fired —
+        # `^Y` on OUTPUT copies the OUTPUT. The real split is mode, not pane: the INPUT sample
+        # is always typing, so there `y` is a literal character and `^Y` is the only copy.
+        Item.new("preview", "⇧arrows select · y copy (OUTPUT) · ^Y copy while typing (INPUT sample)"),
       ]},
       {"COLORMARKER", [
         Item.new("a · ↵/e", "add a History row-colour rule · edit the selected one"),
