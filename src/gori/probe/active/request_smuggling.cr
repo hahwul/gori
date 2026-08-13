@@ -220,6 +220,17 @@ module Gori
         # baselines must have SENT cleanly, come back COMPLETE, and answer under BASE_FAST — a
         # failed, incomplete, or slow baseline cannot anchor a timing test, so every variant would
         # be a coin flip. Uses the SLOWER of the two, so a single fast fluke can't lower the bar.
+        #
+        # TRANSPORT NOTE. Probe Active runs on a keep-alive sender, and the two benign baselines
+        # are ordinary POSTs, so they ARE poolable: the first is a cold dial and the second rides
+        # the socket it parked. The variant probes are not — `ConnPool.reusable_request?` refuses
+        # a request whose framing is ambiguous, which is exactly what CL.TE / TE.CL / TE.TE are —
+        # so every timing probe still dials fresh, and `max` (effectively the cold first baseline)
+        # stays comparable to them. What the pooling DID cost is the twin's independence: the
+        # second baseline is now systematically the faster of the two, so it no longer
+        # cross-checks the first the way "measure-against-itself" intends. Both halves of that
+        # are pinned in spec/probe/request_smuggling_spec.cr, because loosening the pool's
+        # predicate would break the comparability silently.
         private def stable_baseline(results : Array(Repeater::Result)) : Int64?
           b1 = results[0]?
           b2 = results[1]?

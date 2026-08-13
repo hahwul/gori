@@ -475,3 +475,39 @@ describe Gori::Probe::Active::RequestSmuggling do
     end
   end
 end
+
+# This rule's timing verdict rests on every probe being measured the same way, and its plan
+# says so: "Two INDEPENDENT repeats of each variant's timing probe (fresh connection each)".
+# That used to be free, because Probe Active dialled per send. It now runs on a keep-alive
+# sender, and what keeps the premise true is that `ConnPool` REFUSES to park a socket that
+# carried an ambiguous framing — which is precisely what a CL.TE / TE.CL / TE.TE probe is.
+#
+# So the coupling is real but implicit: loosen `reusable_request?` and this rule silently
+# starts comparing a pooled probe against a dialled baseline, with no test failing. Pinned
+# here, next to the rule that depends on it, rather than only in the pool's own specs.
+describe "RequestSmuggling probes vs the keep-alive pool" do
+  it "never lets a timing probe share a connection" do
+    hdr = "h.test"
+    clte = ("POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 6\r\n" \
+            "Transfer-Encoding: chunked\r\n\r\n1\r\nZ\r\n").to_slice
+    tecl = ("POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 6\r\n" \
+            "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n").to_slice
+    tete = ("POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 6\r\n" \
+            "Transfer-Encoding: chunked\r\nTransfer-Encoding: identity\r\n\r\n1\r\nZ\r\n").to_slice
+
+    Gori::Repeater::ConnPool.reusable_request?(clte).should be_false
+    Gori::Repeater::ConnPool.reusable_request?(tecl).should be_false
+    Gori::Repeater::ConnPool.reusable_request?(tete).should be_false
+  end
+
+  it "does pool the benign baseline, which is why the two baselines are NOT interchangeable" do
+    # `stable_baseline` takes the SLOWER of the two so a fast fluke cannot lower the bar. The
+    # first is a cold dial and the second rides the socket it parked, so the second is
+    # systematically the faster one and `max` is effectively the first. The anchor stays
+    # comparable to the probes (both cold), but the twin no longer independently measures the
+    # same thing — read the note above `stable_baseline` before leaning on it.
+    hdr = "h.test"
+    benign = "POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 0\r\n\r\n".to_slice
+    Gori::Repeater::ConnPool.reusable_request?(benign).should be_true
+  end
+end
