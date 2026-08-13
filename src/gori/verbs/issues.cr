@@ -144,7 +144,6 @@ module Gori
       # from its plain chord — the key you'd press directly. severity/status keep their
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
-      in_issues_notes_read = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
       # `y` in READ, `^Y` in INS — see repeater.copy in verbs/history.cr.
       in_issues_notes_copy = ->(ctx : Verb::ExecContext) do
         ctx.issues_notes_read_mode? || (ctx.current_tab == :issues && ctx.editor_focused?)

@@ -182,7 +182,6 @@ module Gori
       # true for :desc, so the shared Keymap is never consulted there and a chord could
       # only ever be dead weight in the rebind editor. Mnemonic 'y' matches the key that
       # actually works in the pane.
-      in_project_desc_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :project && ctx.project_desc_read_mode? }
       # Bare `y` stays chordless here (ProjectController raw-dispatches it — see above), but
       # `^Y` IS registered: INS has no other way to reach Copy, and the raw dispatch only
       # covers READ. See repeater.copy in verbs/history.cr.

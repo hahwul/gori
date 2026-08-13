@@ -41,7 +41,6 @@ module Gori
         mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
-      in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       # `y` in READ, `^Y` in INS — one verb. See repeater.copy in verbs/history.cr for why
       # Copy is available while typing at all (an INS selection had no way to be copied).
       in_notes_copy = ->(ctx : Verb::ExecContext) do

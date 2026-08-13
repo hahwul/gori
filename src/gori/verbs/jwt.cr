@@ -31,7 +31,6 @@ module Gori
         Verb::Scope::Jwt, [Verb::Chord.new("l", ctrl: true)], available: in_jwt, mnemonic: 'k') { |ctx| ctx.jwt_clear; nil }
 
       # The single smart Copy (selection if any, else the focused pane) — chord 'y'.
-      in_jwt_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.jwt_read_mode? }
       # `^Y` used to be a hardcoded copy-all chord in JwtController; folded in here so the
       # INPUT/header/payload editors get the same key in INS, and so it is rebindable.
       in_jwt_copy = ->(ctx : Verb::ExecContext) do

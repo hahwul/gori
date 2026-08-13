@@ -2,6 +2,16 @@ require "../spec_helper"
 require "base64"
 
 describe Gori::Tui::Clipboard do
+  # `Clipboard.copy` reads `ENV["TMUX"]` itself, so inside tmux it APPENDS the DCS
+  # passthrough after the bare sequence's BEL — and `.rchop("\a")` then leaves that
+  # whole tail glued to the base64. Cut at the first BEL instead of the last, so the
+  # payload assertions read the bare sequence either way. AGENTS.md points TUI
+  # verification at tmux, so "run the suite from a tmux pane" is the normal case, not
+  # an exotic one.
+  bare_payload = ->(emitted : String) do
+    emitted.lchop("\e]52;c;").split('\a', 2).first
+  end
+
   it "builds an OSC 52 set-clipboard sequence (base64-encoded)" do
     Gori::Tui::Clipboard.osc52("hi there").should eq("\e]52;c;#{Base64.strict_encode("hi there")}\a")
   end
@@ -61,8 +71,7 @@ describe Gori::Tui::Clipboard do
     written = Gori::Tui::Clipboard.copy(big, io)
     written.should eq(65_535) # the largest multiple of 3 that fits under the cap
 
-    payload = io.to_s.lchop("\e]52;c;").rchop("\a")
-    String.new(Base64.decode(payload)).valid_encoding?.should be_true
+    String.new(Base64.decode(bare_payload.call(io.to_s))).valid_encoding?.should be_true
   end
 
   # Same silent drop from the other direction: a raw request/response dump is
@@ -73,8 +82,7 @@ describe Gori::Tui::Clipboard do
 
     io = IO::Memory.new
     Gori::Tui::Clipboard.copy(raw, io)
-    payload = io.to_s.lchop("\e]52;c;").rchop("\a")
-    String.new(Base64.decode(payload)).valid_encoding?.should be_true
+    String.new(Base64.decode(bare_payload.call(io.to_s))).valid_encoding?.should be_true
   end
 
   describe ".note" do

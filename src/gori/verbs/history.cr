@@ -593,7 +593,6 @@ module Gori
         "fuzz.toggle-sni", "Toggle SNI override", "Override the TLS SNI the whole sweep presents (dialed host unchanged)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("s", ctrl: true)],
         available: in_fuzzer, mnemonic: 'i', section: :target) { |ctx| ctx.fuzz_toggle_sni; nil }
-      in_fuzzer_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_read_mode? }
       in_fuzzer_copy = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :fuzzer && (ctx.fuzzer_read_mode? || ctx.editor_focused?)
       end

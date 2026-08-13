@@ -39,7 +39,6 @@ module Gori
         "decoder.clear", "Clear input + chain", "Clear the current input and chain spec",
         Verb::Scope::Decoder, [Verb::Chord.new("l", ctrl: true)], available: in_decoder, mnemonic: 'l', section: :input) { |ctx| ctx.decoder_clear; nil }
 
-      in_decoder_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.decoder_read_mode? }
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # `^Y` used to be a hardcoded copy-OUTPUT chord in DecoderController; it is folded in
       # here so INPUT's INS mode gets the same key, and so the chord is rebindable.
