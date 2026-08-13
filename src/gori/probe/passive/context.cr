@@ -204,6 +204,10 @@ module Gori
         @req_body_text_done = false
         @resp_head_text : String?
         @resp_head_text_done = false
+        @req_whole_text : String?
+        @req_whole_text_done = false
+        @resp_whole_text : String?
+        @resp_whole_text_done = false
 
         # Raw request head (request line + headers) as scrubbed text.
         def request_head_text : String
@@ -230,6 +234,29 @@ module Gori
           return @resp_head_text if @resp_head_text_done
           @resp_head_text_done = true
           @resp_head_text = @detail.response_head.try { |h| String.new(h).scrub }
+        end
+
+        # The "whole" region — head and body joined — memoized like every other region getter.
+        # It was built inside CustomRule instead, which meant a fresh head+body concatenation PER
+        # RULE per flow: an operator with ten whole-region rules copied a 64 KiB body ten times
+        # for one page. Nothing here changes what a rule sees; the join is byte-identical.
+        # Memoized separately per side because most rules ask for only one of them.
+        def request_whole_text : String?
+          return @req_whole_text if @req_whole_text_done
+          @req_whole_text_done = true
+          @req_whole_text = join_region(request_head_text, request_body_text)
+        end
+
+        def response_whole_text : String?
+          return @resp_whole_text if @resp_whole_text_done
+          @resp_whole_text_done = true
+          @resp_whole_text = join_region(response_head_text, body_text)
+        end
+
+        private def join_region(head : String?, body : String?) : String?
+          return body if head.nil?
+          return head if body.nil?
+          "#{head}\r\n#{body}"
         end
       end
     end

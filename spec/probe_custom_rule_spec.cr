@@ -277,3 +277,28 @@ describe "Gori::Probe::CustomRule evidence" do
     end
   end
 end
+
+describe "Gori::Probe::Passive::Context whole-region memo" do
+  it "joins head and body with CRLF, byte-identically to the per-rule build it replaced" do
+    with_store do |store|
+      ctx = Gori::Probe::Passive::Context.new(
+        flow(store, resp_head: "HTTP/1.1 200 OK\r\nX-A: 1\r\n\r\n", body: "BODY"))
+      ctx.response_whole_text.should eq("#{ctx.response_head_text}\r\n#{ctx.body_text}")
+    end
+  end
+
+  it "hands every rule the SAME string rather than rebuilding it per rule" do
+    with_store do |store|
+      ctx = Gori::Probe::Passive::Context.new(flow(store, body: "BODY"))
+      ctx.response_whole_text.not_nil!.same?(ctx.response_whole_text.not_nil!).should be_true
+    end
+  end
+
+  it "falls back to whichever side exists when the other is absent" do
+    with_store do |store|
+      ctx = Gori::Probe::Passive::Context.new(flow(store, body: nil))
+      ctx.response_whole_text.should eq(ctx.response_head_text) # no body → head alone
+      ctx.request_whole_text.should eq(ctx.request_head_text)   # GET, no request body
+    end
+  end
+end

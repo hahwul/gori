@@ -73,21 +73,15 @@ module Gori
           case region
           when "header" then ctx.request_head_text
           when "body"   then ctx.request_body_text
-          else               join(ctx.request_head_text, ctx.request_body_text)
+          else               ctx.request_whole_text
           end
         else
           case region
           when "header" then ctx.response_head_text
           when "body"   then ctx.body_text
-          else               join(ctx.response_head_text, ctx.body_text)
+          else               ctx.response_whole_text
           end
         end
-      end
-
-      private def join(head : String?, body : String?) : String?
-        return body if head.nil?
-        return head if body.nil?
-        "#{head}\r\n#{body}"
       end
 
       # Byte-safe match returning {matched?, evidence}. Text is pre-scrubbed; a bad user regex
@@ -104,6 +98,12 @@ module Gori
       # `pattern`, which every surface already shows next to the rule, so the field would be
       # pure duplication.
       private def match_evidence(text : String) : {Bool, String?}
+        # `SafeRegexp.compile` is a cache lookup, and precompiling the pattern at rule-LOAD time
+        # was measured and REJECTED: 0.98-1.16x over 2/16/112 KiB bodies with the shared cache
+        # being actively evicted (bench/probe_custom_rule_bench.cr). The cache is shared with the
+        # SQL `REGEXP` callback and clears wholesale at CACHE_MAX, so filter-box keystrokes really
+        # do evict operator patterns — but a PCRE2 compile is an order of magnitude cheaper than
+        # matching a body, so removing it buys nothing worth a field on this record.
         if kind == "regex"
           m = SafeRegexp.compile(pattern).match(text)
           return {false, nil} unless m
