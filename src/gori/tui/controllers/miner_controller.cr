@@ -524,6 +524,9 @@ module Gori::Tui
         @host.status(err || "can't mine")
         return
       end
+      # Hand the engine over BEFORE anything can be sent, so ^X reaches it even during the
+      # baseline calibration `orchestrate` runs ahead of the first event.
+      view.engine = engine
       view.begin_run
       view.job_id = @host.jobs.start(:miner, view.summary, goto: goto_for(view))
       events = @mine_events

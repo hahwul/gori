@@ -641,6 +641,9 @@ module Gori::Tui
         @host.status(err || "can't collect")
         return
       end
+      # Hand the engine over BEFORE anything can be sent, so ^X reaches it without waiting
+      # for the next event to come back through the run block.
+      view.engine = engine
       view.begin_run
       view.job_id = @host.jobs.start(:sequence, view.summary, goto: goto_for(view))
       events = @seq_events

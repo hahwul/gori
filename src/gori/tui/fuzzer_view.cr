@@ -831,12 +831,28 @@ module Gori::Tui
     end
 
     # --- run lifecycle -------------------------------------------------------
+
+    # The running engine, so ^X can reach it directly. Set by FuzzerController#start_run
+    # before the run fiber is spawned; mirrors `DiscoverRun#engine`, which is the one tab
+    # that already did this and the reason its stop is prompt.
+    property engine : Fuzz::Engine? = nil
+
     def stop_requested? : Bool
       @stop_requested
     end
 
+    # Stop NOW, not at the next event.
+    #
+    # The flag alone was reaching the engine only through `engine.stop if v.stop_requested?`
+    # inside the controller's `engine.run { }` block — so it took effect only when the next
+    # event arrived, and there are windows with no events at all. `calibrate_baseline` runs
+    # BEFORE `engine.run` is ever called, so a ^X during auto-calibrate stopped nothing: the
+    # remaining calibration requests went out and then a full sweep STARTED, after the
+    # operator had asked to stop. For a tool whose contract is that the operator decides what
+    # leaves the machine (P4), that is a correctness bug, not a latency one.
     def request_stop : Nil
       @stop_requested = true
+      @engine.try(&.stop)
     end
 
     def begin_run(total : Int64?) : Nil

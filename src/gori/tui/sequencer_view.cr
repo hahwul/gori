@@ -438,12 +438,21 @@ module Gori::Tui
       @running
     end
 
+    # The running engine, so ^X can reach it directly. Set by SequencerController before the
+    # run fiber is spawned; mirrors `DiscoverRun#engine`, the one tab whose stop was prompt.
+    property engine : Sequencer::Engine? = nil
+
     def stop_requested? : Bool
       @stop_requested
     end
 
+    # Stop NOW, not at the next event. The flag alone reached the engine only through
+    # `engine.stop if view.stop_requested?` inside the controller's `engine.run { }` block, so
+    # it took effect only once the next event arrived — and a collection whose samples are slow
+    # has long windows with none (P4: the operator decides what leaves the machine).
     def request_stop : Nil
       @stop_requested = true
+      @engine.try(&.stop)
     end
 
     def begin_run : Nil

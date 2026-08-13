@@ -309,12 +309,22 @@ module Gori::Tui
       @running
     end
 
+    # The running engine, so ^X can reach it directly. Set by MinerController before the run
+    # fiber is spawned; mirrors `DiscoverRun#engine`, the one tab whose stop was already prompt.
+    property engine : Miner::Engine? = nil
+
     def stop_requested? : Bool
       @stop_requested
     end
 
+    # Stop NOW, not at the next event. The flag alone reached the engine only through
+    # `engine.stop if view.stop_requested?` inside the controller's `engine.run { }` block, so
+    # it took effect only when the next event arrived. `Baseline#calibrate` runs before the
+    # first event and fires its probes concurrently when the run is unpaced — so a ^X there
+    # stopped nothing and the mine then started anyway (P4: the operator decides what leaves).
     def request_stop : Nil
       @stop_requested = true
+      @engine.try(&.stop)
     end
 
     def begin_run : Nil

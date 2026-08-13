@@ -1068,6 +1068,9 @@ module Gori::Tui
         return
       end
       save_current
+      # Hand the engine over BEFORE anything can be sent, so ^X reaches it even during
+      # calibration — which runs outside `engine.run` and so outside the in-loop stop check.
+      v.engine = engine
       v.begin_run(total)
       v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))
       events = @fuzz_events
