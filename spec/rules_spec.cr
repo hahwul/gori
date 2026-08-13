@@ -589,4 +589,45 @@ describe Gori::Rules do
       end
     end
   end
+
+  # The one place a rule's {target, part} pair is settled, and every surface that creates or
+  # previews a rule calls it — the TUI's Rewriter form, `gori run rewriter add|preview`, and
+  # the MCP `create_rule`/`preview_rule` tools. If a surface skipped it, a header op stored
+  # with `part: body` would be persisted as a body rule and cost every matching message a
+  # buffer-and-reframe on the proxy hot path, to do a header edit that reads the head.
+  describe ".normalize_shape" do
+    it "forces a header op onto the head, whatever part was asked for" do
+      [Gori::Store::RuleOp::AddHeader, Gori::Store::RuleOp::SetHeader,
+       Gori::Store::RuleOp::RemoveHeader].each do |op|
+        Gori::Rules.normalize_shape(op, Gori::Store::RuleTarget::Response,
+          Gori::Store::RulePart::Body)
+          .should eq({Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head})
+      end
+    end
+
+    # A header op keeps its SIDE — "strip Content-Security-Policy" is a response rule and
+    # "add X-Trace" a request one. Only the part is decided here.
+    it "leaves a header op's target alone" do
+      Gori::Rules.normalize_shape(Gori::Store::RuleOp::AddHeader,
+        Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws)
+        .should eq({Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head})
+    end
+
+    # A stub ANSWERS a request, so both halves are fixed: a response-side or body-part stub
+    # names a message that, by the time the rule fires, does not exist.
+    it "pins a short-circuit rule to the request head on both axes" do
+      Gori::Rules.normalize_shape(Gori::Store::RuleOp::ShortCircuit,
+        Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body)
+        .should eq({Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head})
+    end
+
+    it "passes a replace rule through untouched on every part, including ws" do
+      [Gori::Store::RulePart::Head, Gori::Store::RulePart::Body, Gori::Store::RulePart::Ws].each do |part|
+        [Gori::Store::RuleTarget::Request, Gori::Store::RuleTarget::Response].each do |target|
+          Gori::Rules.normalize_shape(Gori::Store::RuleOp::Replace, target, part)
+            .should eq({target, part})
+        end
+      end
+    end
+  end
 end

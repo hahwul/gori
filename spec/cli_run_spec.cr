@@ -5,14 +5,22 @@ require "json"
 #
 # MOVED to spec/cli/run/<subcommand>_spec.cr, mirroring src/gori/cli/run/:
 #   history · sitemap · notes · issues · links · decoder · jwt · compare · project · import
+#   · rewriter (incl. the `extract` sub-CRUD)
 #   plus spec/cli/run/replay_reconstruct_spec.cr — the P7 "never reject malformed input on
-#   replay" invariant over Repeater::FlowRequest's HOSTILE inputs.
+#   replay" invariant over Repeater::FlowRequest's HOSTILE inputs, and two seams that cut
+#   ACROSS subcommands: spec/cli/run/list_leftovers_spec.cr (the discarded-verb refusal all
+#   twelve list dispatchers share) and spec/cli/run/fuzz_args_spec.cr (the payload flag
+#   parsers `fuzz` and `discover` share).
+#
+# PARTLY moved: the active-sender subcommands whose pure ARGUMENT parsing does not wait on
+# the sender — spec/cli/run/probe_helpers_spec.cr covers `probe`'s flag parses and rule-id
+# decoding, while its scan stays below.
 #
 # STILL HERE, and why:
 #   • describe Gori::Repeater::FlowRequest — the WELL-FORMED reconstruct cases (absolute→
 #     origin rewrite, http2 flag, truncated-capture Content-Length/chunked re-frame).
 #   • describe Gori::CLI::Output — the probe group JSON/text rows. `gori run probe` is an
-#     active-sender subcommand, so its spec waits with the rest of them.
+#     active-sender subcommand, so the SCAN's spec waits with the rest of them.
 #   • describe Gori::Notes — the notes ENGINE (parse/serialize/load/title/line_count), not
 #     the `gori run notes` output; spec/cli/run/notes_spec.cr covers the CLI formatting.
 #   • The active-sender subcommands: repeater send (h1/WS), fuzz/mine/sequence host
