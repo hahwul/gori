@@ -54,7 +54,8 @@ module Gori::Fuzz
   # settings.json, all four surfaces resolve it through the same `Decoder.shared_registry`, and
   # the remedy (`gori run decoder list`, or the Decoder tab) is word-for-word the same
   # everywhere. So the builder writes the sentence once and every surface's EXISTING
-  # `Gori::Error` path carries it unchanged: `gori run fuzz` aborts with it (cli.cr:72), MCP
+  # `Gori::Error` path carries it unchanged: `gori run fuzz` aborts with it (`CLI.run`'s
+  # `rescue ex : Error`, cli.cr), MCP
   # codes it `INVALID_ARGUMENT` with the message intact (mcp/tools.cr:1644), the Fuzzer tab
   # shows it in place of the run. That also keeps the change inside the fuzz boundary — a new
   # `PlanError::Reason` member breaks the exhaustive `case … in` in six files outside it.
