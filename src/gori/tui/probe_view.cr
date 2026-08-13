@@ -78,6 +78,21 @@ module Gori::Tui
       @issues.size
     end
 
+    # Reads the WHOLE table, deliberately, and this is the one place it still hurts: at 250k
+    # findings (a wide crawl — the rows are (code x host)) a refresh is ~107 ms, and the
+    # Runner re-runs it on every `probe_generation` bump, which during an active scan is
+    # close to every tick.
+    #
+    # `Store#probe_issues_page` exists and MCP uses it, but a bounded read is not a drop-in
+    # here, because everything below `apply_filter` runs in Crystal over `@all`: the triage
+    # and scope lenses, `Probe::Filter`, and `recount`. Capping the read would make the
+    # severity tallies count the WINDOW rather than the set — the same "faster and wrong"
+    # shape that made a LIMIT the wrong answer for the dismiss counts — and a filter matching
+    # only rows outside the window would show nothing while the total said otherwise.
+    #
+    # Doing it properly means pushing the lenses, the filter and the tallies into SQL, which
+    # is a change to a query surface rather than to this view. Left whole until then: honest
+    # and slow beats fast and misleading on a triage list.
     def reload(store : Store) : Nil
       @all = store.probe_issues
       @mode = store.probe_mode

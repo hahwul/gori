@@ -76,15 +76,20 @@ module Gori
         return category if category.is_a?(Result)
 
         include_closed = bool_arg(h, "include_closed", false)
-        all = store.probe_issues(category.as(String?), str(h, "host").try(&.strip).presence,
-          severity_from(str(h, "severity")))
-        all = all.select(&.status.open?) unless include_closed
-
         req_off = int(h, "offset")
         req_lim = int(h, "limit")
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, 100, 500)
-        page = all[offset, limit]? || [] of Store::ProbeIssue
+        # Page and total in SQL. This used to read EVERY matching row, filter `status.open?`
+        # in Crystal (parsing each row's `affected` JSON on the way), and then slice a hundred
+        # out of it — so answering a default `probe_issues` call on a wide crawl materialised
+        # hundreds of thousands of rows to return 100. The emitted fields are unchanged: the
+        # `total`/`has_more` contract this tool already published is exactly what makes the
+        # bounded read safe here.
+        page, total = store.probe_issues_page(
+          category.as(String?), str(h, "host").try(&.strip).presence,
+          severity_from(str(h, "severity")),
+          open_only: !include_closed, limit: limit, offset: offset)
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { j.array { page.each { |i| Probe.issue_json(j, i) } } }
@@ -92,8 +97,8 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", all.size
-            j.field "has_more", offset + page.size < all.size
+            j.field "total", total
+            j.field "has_more", offset + page.size < total
             j.field "include_closed", include_closed
           end
         end)

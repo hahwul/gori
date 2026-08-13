@@ -100,8 +100,10 @@ module Gori
       (parts << incoming).join(", ")
     end
 
-    def probe_issues(category : String? = nil, host : String? = nil,
-                     min_severity : Severity? = nil) : Array(ProbeIssue)
+    # The WHERE fragment the three list/count entry points share, so a filter added to one
+    # cannot quietly not apply to the others.
+    private def probe_issue_where(category : String?, host : String?, min_severity : Severity?,
+                                  open_only : Bool) : {String, Array(DB::Any)}
       conds = [] of String
       args = [] of DB::Any
       if c = category
@@ -113,7 +115,17 @@ module Gori
       if ms = min_severity
         conds << "severity >= ?"; args << ms.value
       end
-      where = conds.empty? ? "" : " WHERE #{conds.join(" AND ")}"
+      conds << "status = #{Status::Open.value}" if open_only
+      {conds.empty? ? "" : " WHERE #{conds.join(" AND ")}", args}
+    end
+
+    # EVERY matching finding. Callers that MUTATE or EXPORT need this — a bulk dismiss that
+    # saw a capped list would report the number it closed as though it were the number that
+    # matched, and a report that dropped rows would be a security report with findings missing.
+    # Callers that merely DISPLAY should use `probe_issues_page` instead.
+    def probe_issues(category : String? = nil, host : String? = nil,
+                     min_severity : Severity? = nil) : Array(ProbeIssue)
+      where, args = probe_issue_where(category, host, min_severity, false)
       list = [] of ProbeIssue
       @db.query("SELECT #{PROBE_COLS} FROM probe_issues#{where} ORDER BY severity DESC, last_seen DESC",
         args: args) do |rs|
@@ -122,6 +134,31 @@ module Gori
       list
     rescue
       [] of ProbeIssue # never crash the run loop over a read
+    end
+
+    # One PAGE plus the true total, both decided in SQL.
+    #
+    # `probe_issues` grows as (code x host), so a wide crawl reaches hundreds of thousands of
+    # rows — and every row read parses its `affected` JSON. A caller that wanted a hundred of
+    # them was materialising all of them first, then slicing in Crystal. The page and the count
+    # are now two indexed queries (idx_probe_issues_triage backs the sort), and `total` stays
+    # exact, which is what lets a caller say "showing N of M" honestly rather than just
+    # stopping at N.
+    def probe_issues_page(category : String? = nil, host : String? = nil,
+                          min_severity : Severity? = nil, *,
+                          open_only : Bool = false, limit : Int32, offset : Int32 = 0) : {Array(ProbeIssue), Int32}
+      where, args = probe_issue_where(category, host, min_severity, open_only)
+      total = @db.scalar("SELECT COUNT(*) FROM probe_issues#{where}", args: args).as(Int64).to_i
+      list = [] of ProbeIssue
+      page_args = args.dup
+      page_args << limit.to_i64 << offset.to_i64
+      @db.query("SELECT #{PROBE_COLS} FROM probe_issues#{where} " \
+                "ORDER BY severity DESC, last_seen DESC LIMIT ? OFFSET ?", args: page_args) do |rs|
+        rs.each { list << read_probe_issue(rs) }
+      end
+      {list, total}
+    rescue
+      {[] of ProbeIssue, 0}
     end
 
     def get_probe_issue(id : Int64) : ProbeIssue?
