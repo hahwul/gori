@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
+require "./query_suggest"
 require "./overlay"
 require "../store"
 require "../colormarker"
@@ -279,7 +280,9 @@ module Gori::Tui
       # The wider pool: a colour rule accepts every History QL field, not just the ones a hold
       # gate can answer. Completing only the gate's list would have hidden `body:`/`size:` from
       # the one surface that had just learned to answer them.
-      InterceptFilter.suggestions(field.value, field.caret, hosts, Colormarker::USEFUL_FIELDS)
+      QuerySuggest.with_operators(
+        InterceptFilter.suggestions(field.value, field.caret, hosts, Colormarker::USEFUL_FIELDS),
+        FilterAst.token_at(field.value, field.caret))
     end
 
     private def host_prefix(field : TextField) : String
@@ -324,7 +327,7 @@ module Gori::Tui
       # complete, everywhere else it reports what the rule would paint.
       pv_y = box.bottom - 2
       if pv_y > first
-        band = @sel == ROW_WHEN ? completion_band : (@preview.empty? ? "" : "▶ #{@preview}")
+        band = @sel == ROW_WHEN ? completion_band(box.w - 4) : (@preview.empty? ? "" : "▶ #{@preview}")
         unless band.empty?
           screen.fill(Rect.new(box.x + 1, pv_y, box.w - 2, 1), Theme.panel)
           screen.text(box.x + 2, pv_y, band, Theme.muted, Theme.panel, width: box.w - 4)
@@ -334,12 +337,17 @@ module Gori::Tui
       # open modal (Runner#key_hints). See RewriterRuleOverlay#render for the whole argument.
     end
 
-    private def completion_band : String
+    private def completion_band(width : Int32) : String
       sugg = suggestions
-      return "↹ #{sugg.first(6).join("  ")}" unless sugg.empty?
-      # No candidates: name the fields. They are History's, exactly — the search bar's list is no
-      # longer a superset — so an operator who knows one bar knows this one.
-      "fields: #{Colormarker::USEFUL_FIELDS.join(": ")}:"
+      return QuerySuggest.line(sugg, Colormarker::FIELD_HELP_FOR_RULE) unless sugg.empty?
+      # No candidates: name the grammar, not just the fields. The old band listed `USEFUL_FIELDS`
+      # and nothing else, so the one thing a rule author most often wants — "paint everything
+      # EXCEPT" — was the one thing the band never mentioned.
+      # The LIVE band width, not `RULE_FORM_W`: `Overlay.rule_form_box` sizes the card as
+      # `{area.w - 4, RULE_FORM_W}.min`, so on a narrow terminal the constant overstates the room
+      # and the shrink stops early — leaving `-term excludes` past the right edge on exactly the
+      # surface where the mistake it prevents becomes a standing rule.
+      QuerySuggest.cold_hint(width: width)
     end
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil

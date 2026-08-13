@@ -155,6 +155,43 @@ module Gori
     # condition silently holds NOTHING, which reads as intercept being broken.
     PROTO_VAL = %w[ws http]
 
+    # What each field means AT A HOLD GATE — deliberately NOT `QL::FIELD_HELP`, even though the
+    # names and the grammar are shared. Three of these mean something materially different here,
+    # and a completion row that borrowed QL's wording would state the difference backwards:
+    #
+    #   status:  scopes the condition to RESPONSES (a request has no status, so the term makes
+    #            every request fail rather than comparing anything).
+    #   header:  the head of the message IN HAND — request head at the request gate, response head
+    #            at the response gate. There is no `req.`/`resp.` here because a gate only ever
+    #            stands on one leg; the leg IS the direction.
+    #   body:    the payload in hand, which per the class header is a WS message or an Extract
+    #            rule's response body — never an HTTP hold, where the gate is what decides whether
+    #            to buffer a body at all.
+    # MERGED over QL's rather than copied from it: five of the nine entries were byte-identical,
+    # so editing QL's `path` line would have updated History, Sitemap and the colour-rule band and
+    # silently left this bar saying the old thing — the exact drift the generated hints were built
+    # to end. What is written out is precisely the DELTA, which is also the documentation.
+    FIELD_HELP = QL::FIELD_HELP.merge({
+      "status" => "code/class — and scopes to RESPONSES only",
+      "proto"  => "http, or ws to opt WebSocket messages IN",
+      "header" => "head of the message in hand (this leg only)",
+      "body"   => "payload in hand — WS messages, extract rules",
+    })
+
+    # As a proc, built once: the bar draws this every frame while the condition is being edited,
+    # and an inline closure at the call site allocates one per frame.
+    FIELD_HELP_PROC = ->(f : String) { FIELD_HELP[f]? }
+
+    def self.field_help(name : String) : String?
+      FIELD_HELP[name]?
+    end
+
+    # The subset a one-row hint samples (see `QL::HINT_FIELDS` for why a hint samples at all).
+    # NOT `FIELDS.first(6)`, which would spend the row on `url:`/`scheme:` and cut exactly the two
+    # this gate is interesting for: `header:` is the only way to condition on a header, and `body:`
+    # arrived with the WebSocket hold.
+    HINT_FIELDS = %w[host path method status header body]
+
     # Tab-complete candidates for the token under `cx`: field names until a `:` is
     # typed, then that field's values. The grammar's punctuation is carried through by
     # FilterAst::Cursor, so `-ho` → `-host:` and `(ho` → `(host:`. `hosts` is the

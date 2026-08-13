@@ -80,6 +80,12 @@ module Gori
       Fields (use : for value match, ~ for regex):
         host path method scheme proto status size reqsize respsize dur header body url stub
 
+      Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
+      `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
+      and negate as usual (-resp.body:abcd). `res.` is accepted as a synonym of `resp.`, and
+      req.size/resp.size are synonyms of reqsize/respsize. Fields that only ever have one side
+      (host, method, status, …) take no prefix.
+
       Comparisons (status size reqsize respsize dur):
         status:>=500  size:>10000  dur:>=500  dur:<2s  (dur defaults to ms; suffix ms|s)
 
@@ -99,7 +105,14 @@ module Gori
       So `body:` can return NOTHING for content that is genuinely there — deep in a large
       body, or in a gzipped/binary one. `body~regex` scans the stored bytes instead, with no
       cap and no content-type rule, so it is the one to reach for when `body:` comes back
-      empty and you expected a hit. (`body:` is the fast path; `body~` is the complete one.)
+      empty and you expected a hit. (`body:` is the fast path; `body~` is the more complete one.)
+
+      NEITHER READS A COMPRESSED BODY. gori stores the WIRE form (DESIGN.md P7) and decompresses
+      only at display time, so `body:` skips a gzip/br/zstd body at index time and `body~` regexes
+      the compressed bytes. Most real response bodies are compressed, which matters most under
+      NEGATION: `-body:secret` and `-body~secret` both KEEP every compressed response, so a query
+      that comes back "clean" has not actually looked. Decode-aware matching lives on the Probe
+      custom rules (side/region + Content-Encoding decode), not here.
       A COLOUR RULE's `body:` is the complete one: a rule has to paint the row that just
       arrived, and the index lags capture, so create_color_rule scans the bytes instead. Same
       language, one deliberate difference — a colour rule can paint what this query misses.
@@ -193,7 +206,7 @@ module Gori
       bad = [] of String
       FilterAst.terms(FilterAst.parse(query)).each do |term|
         field, value, op = split_field(term.text) || next
-        next unless op == :regex && field.in?(REGEX_FIELDS)
+        next unless op == :regex && canonical(field).in?(REGEX_FIELDS)
         next if value.empty?
         bad << term.source unless valid_regex?(value)
       end
@@ -223,14 +236,145 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub]
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub
+      req.header resp.header req.body resp.body]
 
-    REGEX_FIELDS = %w[host path url header body]
+    REGEX_FIELDS = %w[host path url header body req.header resp.header req.body resp.body]
 
-    # The fields that read a message's CONTENT rather than its addressing — the two a surface
-    # can only answer with the bytes in hand (or a query that reads them). Named because
-    # "can this backend answer the term?" is asked at three surfaces and each was spelling the
-    # pair out for itself.
+    # A `req.`/`resp.` prefix picks ONE SIDE of a field that has two. `header:`/`body:` search the
+    # request AND the response, which is right for "find this string anywhere" and useless for the
+    # question an operator actually asks more often — did the SERVER send it? There was no way to
+    # say that at all: `size` was the only field with a side split, and it got one by growing two
+    # hand-written twins (`reqsize`/`respsize`) rather than a rule.
+    #
+    # The prefix is that rule, and it is deliberately spelled INSIDE the existing `field:value`
+    # token instead of as new grammar: `split_field` cuts at the first `:`/`~`, so `resp.body`
+    # arrives as an ordinary field name and the lexer, the parser, the syntax highlighting and
+    # Tab-completion all keep working untouched — `-resp.body:x` negates and `NOT (req.body:a OR
+    # resp.body:b)` groups exactly as they did before. The alternative (a Caido-style
+    # `resp.body.cont:"x"` grammar) would have bought the same expressiveness for a new operator
+    # vocabulary, the loss of boolean NOT, and a migration of every rule string already stored in
+    # `colormarker_rules.match_filter`.
+    #
+    # `res.` is accepted alongside `resp.` because the coin-flip between them fails SILENTLY:
+    # an unknown field free-texts the WHOLE token (see `field_cond`'s else), so `res.body:secret`
+    # returns nothing and reads as "no flow has that" rather than "you spelled the prefix the
+    # other way". Completion offers `resp.` only, so there is still one spelling to learn.
+    SIDES = {"req." => :req, "resp." => :resp, "res." => :resp}
+
+    # Spellings QL ACCEPTS but does not OFFER. Two groups, one reason each:
+    #
+    #   `res.*`      the `resp.` coin-flip above.
+    #   `req.size`   the namespace has to be uniform or it is a trap: someone who learns
+    #   `resp.size`  `resp.body` will try `resp.size`, and the honest answer is that it already
+    #                exists under an older name. Aliasing costs one line; letting it free-text
+    #                costs a query that silently matches nothing.
+    #
+    # Kept OUT of `FIELDS` so the completion pool stays one name per concept, and read through
+    # `known_field?` so a surface that VALIDATES fields (Colormarker's unknown-field refusal)
+    # cannot start rejecting a spelling that `field_cond` happily compiles.
+    FIELD_ALIASES = {
+      "res.header" => "resp.header", "res.body" => "resp.body",
+      "req.size" => "reqsize", "resp.size" => "respsize", "res.size" => "respsize",
+    }
+
+    # Does QL implement this field name? THE membership test — `FIELDS` alone is the pool a
+    # surface OFFERS, which is a strict subset of what it accepts.
+    def self.known_field?(name : String) : Bool
+      FIELDS.includes?(name) || FIELD_ALIASES.has_key?(name)
+    end
+
+    # One line per field, for the surfaces that TEACH this language rather than parse it — the
+    # completion row's description column and Help's Query page. Both used to be prose written
+    # by hand next to the widget, which is why `FILTER_HINT` and `QUERY_HINT` disagreed with each
+    # other and with `FIELDS` about what exists; a field is only really added when the thing that
+    # EXPLAINS it is added too, so the explanation lives beside the parser.
+    #
+    # Kept short on purpose: it renders in one terminal column beside a field name, so anything
+    # past ~46 characters is truncated rather than wrapped. Where a field has a bound that will
+    # bite (the `body:` index, `path:` including the query string), the line spends its budget
+    # naming the bound rather than restating the field name.
+    FIELD_HELP = {
+      "host"        => "server host — substring; host~ for regex",
+      "path"        => "path AND query string — substring",
+      "url"         => "scheme://host + path — substring",
+      "method"      => "exact method — GET POST PUT …",
+      "scheme"      => "exact — http or https",
+      "proto"       => "ws grpc sse http (+s = over TLS)",
+      "status"      => "code; classes (5xx) and >= <= compare",
+      "size"        => "request + response bytes — >10k <1M",
+      "reqsize"     => "request bytes only",
+      "respsize"    => "response bytes only",
+      "dur"         => "latency; ms unless suffixed — dur:>1.5s",
+      "header"      => "head bytes, BOTH sides — see req./resp.",
+      "body"        => "body via index: 8 KiB/side, no compressed",
+      "stub"        => "true = gori answered it, origin never saw it",
+      "req.header"  => "request head bytes only",
+      "resp.header" => "response head bytes only",
+      "req.body"    => "request body only",
+      "resp.body"   => "response body only",
+    }
+
+    # The fields the one-line hints SAMPLE, in the order that reads best on a bar. A hint gets one
+    # terminal row and `FIELDS` has eighteen entries, so something has to choose; choosing once
+    # here — with a spec pinning every entry against `FIELDS` — beats each widget choosing for
+    # itself in prose, which is exactly how three hint strings came to disagree about what exists.
+    # `resp.body` earns its slot because a prefix nobody has seen cannot be guessed, where `host:`
+    # would be typed by someone who never read a hint at all.
+    # Six, not eight, and that ceiling is load-bearing: a hint is ONE row, and it has to fit the
+    # field sample AND the operator tail inside 80 columns or the tail — the half a completion
+    # pool can never teach — is what the terminal truncates away. Six chips leaves room for
+    # `-term excludes` to survive the cut; the full list lives in Help's Query page.
+    #
+    # Ordered so a narrow surface sheds the GUESSABLE names first (`QuerySuggest.cold_hint` shrinks
+    # the sample from the tail): `resp.body` sits third because a prefix nobody has seen cannot be
+    # guessed, where `host:` gets typed by someone who never read a hint at all.
+    HINT_FIELDS = %w[host path resp.body status method header]
+
+    # `FIELD_HELP` for a name as the user spelled it (aliases inherit their canonical entry).
+    def self.field_help(name : String) : String?
+      FIELD_HELP[canonical(name)]?
+    end
+
+    # The places this language does something an operator would not predict. Every one of these
+    # is a way a query can look CLEAN while not having looked — the direction that matters on a
+    # security proxy, and the direction a field list can never warn about. They live here, beside
+    # the code that causes them, and Help's Query page renders them verbatim.
+    CAVEATS = [
+      {"compressed bodies", "body: skips them, body~ reads the gzip — neither matches"},
+      {"-body: on a big body", "the index stops at 8 KiB/side, so it KEEPS a deep hit"},
+      {"path: vs the query string", "path: matches both, so -path:x drops ?q=x too"},
+      {"-status: -dur: -respsize:", "a pending flow has NULL there and falls out of both"},
+      {"a dropped term broadens", "status:>=foo is ignored, not refused — use ql_explain"},
+      {"a bad regex matches nothing", "body~[ is a HARD error, never silently dropped"},
+    ]
+
+    # The grammar itself — everything that is NOT a field name, as {what you type, what it does}.
+    # The one place an operator can learn that `-` negates, since a field-name completion pool can
+    # never show it. Read by Help's Query page, so it cannot drift from the parser the way the
+    # hand-written hint strings did.
+    SYNTAX_HELP = [
+      {"host:acme status:5xx", "space = AND (both must hold)"},
+      {"host:a OR host:b", "OR; NOT > AND > OR, ( ) to group"},
+      {"-path:/static", "leading - excludes — so does NOT path:/static"},
+      {"NOT (host:cdn OR host:img)", "NOT negates a whole group"},
+      {"body~secret\\d+", "~ is regex; : is plain substring"},
+      {"status:>=500 dur:>1.5s", ">= <= > < = on status size dur"},
+      {"resp.body:token", "req. / resp. picks one side of body: header:"},
+      {"host:\"my host\"", "quotes keep spaces inside one term"},
+      {"login", "a bare word searches method, host and path"},
+    ]
+
+    # The fields that read a message's CONTENT rather than its addressing — the ones a surface can
+    # only answer with the bytes in hand (or a query that reads them). Named because "can this
+    # backend answer the term?" is asked at three surfaces and each was spelling the list out for
+    # itself.
+    #
+    # The `req.`/`resp.` spellings are deliberately NOT here. The one consumer
+    # (`Colormarker::ROW_FIELDS`) derives itself by SUBTRACTING this from `InterceptFilter::FIELDS`,
+    # which has no namespaced names to subtract — so a `resp.body:` rule already falls out of the
+    # row tier and lands on the store tier, which is where it belongs. Adding them would be a
+    # no-op that reads like a fix.
     CONTENT_FIELDS = %w[header body]
 
     # One field named by a query, and whether it was written with the regex operator.
@@ -284,20 +428,37 @@ module Gori
     private def self.field_cond(field : String, value : String, term : String,
                                 fts : Bool = true, body_max : Int32? = nil) : {String, Array(DB::Any)}?
       return nil if value.empty?
+      # Resolve an accepted-but-not-offered spelling to its canonical name FIRST, so every arm
+      # below (and `size_cond`'s own three-way switch) sees one name per concept.
+      field = FIELD_ALIASES.fetch(field, field)
       case field
-      when "host"                        then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "url"                         then {"#{URL_EXPR} LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "path"                        then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "method"                      then {"upper(method) = ?", [value.upcase] of DB::Any}
-      when "scheme"                      then {"scheme = ?", [value.downcase] of DB::Any}
-      when "proto"                       then proto_cond(value)
-      when "status"                      then status_cond(value)
-      when "size", "reqsize", "respsize" then size_cond(field, value)
-      when "dur"                         then duration_cond(value)
-      when "header"                      then header_cond(value)
-      when "body"                        then body_cond(value, fts, body_max)
-      when "stub"                        then stub_cond(value)
+      when "host"                                then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "url"                                 then {"#{URL_EXPR} LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "path"                                then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "method"                              then {"upper(method) = ?", [value.upcase] of DB::Any}
+      when "scheme"                              then {"scheme = ?", [value.downcase] of DB::Any}
+      when "proto"                               then proto_cond(value)
+      when "status"                              then status_cond(value)
+      when "size", "reqsize", "respsize"         then size_cond(field, value)
+      when "dur"                                 then duration_cond(value)
+      when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
+      when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
+      when "stub"                                then stub_cond(value)
       else
+        # A side prefix we OWN, on a field that has no side. `resp.status:200` is not a typo the
+        # way `hosst:x` is — it is a correct guess at a namespace this module advertises, made by
+        # someone the completion row and Help's Query page just taught `resp.body:`. Free-texting
+        # it (the fallback below, right for any other unknown field) searches method/host/target
+        # for the literal `resp.status:200`, matches nothing, and reports the query CLEAN — which
+        # is the exact "is it unsupported, or is the UI just not telling me?" question this
+        # namespace was added to answer, asked again one field over.
+        #
+        # Dropping is louder in every direction that matters: `analyze` lists the term under
+        # `ignored`, `ql_explain` and `strict:` name it, `reject_empty?` refuses a query that was
+        # ONLY this, and `Colormarker.unusable_reason` refuses a rule carrying one. It does
+        # broaden a surviving AND-chain, which this file elsewhere calls the dangerous direction —
+        # the difference is that this broaden is REPORTED and the old narrow-to-zero was silent.
+        return nil if side_prefixed?(field)
         # Unknown field — a typo (`hosst:x`) or a literal colon in a value (`time:12:00`):
         # free-text the WHOLE token (prefix included), not just the part after the ':'. This
         # mirrors regex_cond's fallback, searches what the user actually typed, and makes a
@@ -381,8 +542,34 @@ module Gori
     # bodyless flow has an empty FTS row, so it never matches and `-body:x`
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
     # values fall back to the NULL-safe BLOB LIKE scan.
+    # The body columns a `side` selects — both, or one. Named because `body_cond`,
+    # `body_literal_cond` and `body_regex_cond` each build their own clause and must not be able
+    # to disagree about what `resp.` means.
+    private def self.body_columns(side : Symbol?) : Array(String)
+      case side
+      when :req  then ["request_body"]
+      when :resp then ["response_body"]
+      else            ["request_body", "response_body"]
+      end
+    end
+
+    private def self.head_columns(side : Symbol?) : Array(String)
+      case side
+      when :req  then ["request_head"]
+      when :resp then ["response_head"]
+      else            ["request_head", "response_head"]
+      end
+    end
+
+    # The `flows_fts` column for one side. The index is `fts5(req, resp, …)` — the two sides were
+    # stored apart from the start (see `store/schema.cr`), so a side-scoped `body:` is a column
+    # filter on an index that already exists, not a new one.
+    private def self.fts_column(side : Symbol) : String
+      side == :req ? "req" : "resp"
+    end
+
     private def self.body_cond(value : String, fts : Bool = true,
-                               body_max : Int32? = nil) : {String, Array(DB::Any)}?
+                               body_max : Int32? = nil, side : Symbol? = nil) : {String, Array(DB::Any)}?
       value = value.chars.reject(&.control?).join # strip NUL/control chars (FTS/LIKE safety)
       # `field_cond`'s `return nil if value.empty?` runs BEFORE this strip, so a value made
       # only of control bytes survived that guard and arrived here as "". `like("")` is
@@ -411,15 +598,22 @@ module Gori
         # body, so the positive term still skips it and `NOT FALSE` keeps it under negation.
         conds = [] of String
         params = [] of DB::Any
+        cols = body_columns(side)
         case_permutations(value).each do |v|
-          conds << "COALESCE(instr(#{body_col("request_body", body_max)}, CAST(? AS BLOB)), 0) > 0"
-          conds << "COALESCE(instr(#{body_col("response_body", body_max)}, CAST(? AS BLOB)), 0) > 0"
-          params << v << v
+          cols.each do |col|
+            conds << "COALESCE(instr(#{body_col(col, body_max)}, CAST(? AS BLOB)), 0) > 0"
+            params << v
+          end
         end
         return {"(#{conds.join(" OR ")})", params}
       end
-      return body_literal_cond(value, body_max) unless fts
+      return body_literal_cond(value, body_max, side) unless fts
       phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
+      # An FTS5 COLUMN FILTER (`resp : "phrase"`) narrows the match to one indexed column. The
+      # column name is this module's own constant, never user input — the value stays inside the
+      # quoted phrase whose embedded quotes were doubled just above — so the term is still not an
+      # injection surface, and it stays a single bound `?`.
+      phrase = "#{fts_column(side)} : #{phrase}" if side
       {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
     end
 
@@ -433,11 +627,12 @@ module Gori
     # a body mixing binary and text is scanned whole. LIKE would have made `body:token` silently
     # miss what `body~token` finds — in a tool whose targets deliberately put NULs in bodies, and
     # in exactly the direction `body_cond`'s short-needle branch above already refused to fail.
-    private def self.body_literal_cond(value : String, body_max : Int32? = nil) : {String, Array(DB::Any)}
+    private def self.body_literal_cond(value : String, body_max : Int32? = nil,
+                                       side : Symbol? = nil) : {String, Array(DB::Any)}
       # Control characters are stripped by `body_cond` before this runs, so the escaped literal
       # can never carry a NUL of its own. `(?i)` because `body:` promises case-insensitive
       # matching where `body~` is case-SENSITIVE by default.
-      body_regex_cond("(?i)#{Regex.escape(value)}", body_max)
+      body_regex_cond("(?i)#{Regex.escape(value)}", body_max, side)
     end
 
     # Every upper/lower spelling of a one- or two-character needle, so a byte-wise `instr`
@@ -559,22 +754,24 @@ module Gori
     # trap `body_cond` already routed around. `instr` is case-SENSITIVE, so OR every case
     # permutation of a short needle; longer needles go through a case-insensitive literal
     # REGEXP, which SafeRegexp already makes NUL-transparent.
-    private def self.header_cond(value : String) : {String, Array(DB::Any)}?
+    private def self.header_cond(value : String, side : Symbol? = nil) : {String, Array(DB::Any)}?
       value = value.chars.reject(&.control?).join
       return nil if value.empty?
       if value.size < 3
         conds = [] of String
         params = [] of DB::Any
+        cols = head_columns(side)
         case_permutations(value).each do |v|
-          conds << "COALESCE(instr(request_head, CAST(? AS BLOB)), 0) > 0"
-          conds << "COALESCE(instr(response_head, CAST(? AS BLOB)), 0) > 0"
-          params << v << v
+          cols.each do |col|
+            conds << "COALESCE(instr(#{col}, CAST(? AS BLOB)), 0) > 0"
+            params << v
+          end
         end
         return {"(#{conds.join(" OR ")})", params}
       end
       pat = "(?i)#{Regex.escape(value)}"
       return {"0", [] of DB::Any} unless valid_regex?(pat)
-      header_regex_cond(pat)
+      header_regex_cond(pat, side)
     end
 
     # The `~` operator: case-sensitive regex (SQLite REGEXP, the same shard-provided
@@ -589,32 +786,77 @@ module Gori
       # fall back to a literal free-text search of the WHOLE token. This must happen BEFORE
       # the validity guard — otherwise `foo~[` (an unterminated char class) would compile to
       # the never-match clause instead of free-texting "foo~[".
+      # Same alias resolution `field_cond` does, and for the same reason: `res.body~x` must
+      # compile like `resp.body~x`, and `invalid_regex_terms` below canonicalises identically so
+      # the diagnosis cannot disagree with the compilation about which terms are regex terms.
+      field = canonical(field)
+      return regex_field_cond(field, value, body_max) if field.in?(REGEX_FIELDS)
+      # A side prefix we own on a field that has none — dropped, not free-texted; see `field_cond`.
+      return nil if side_prefixed?(field)
+      free_text(term)
+    end
+
+    # The clause for a `~` term on a field that HAS one. Split out of `regex_cond` so that method
+    # stays the three-way ROUTING decision (regex field / owned prefix / free text) and this one
+    # stays a flat dispatch: merged, the namespaced arms pushed the pair past the cyclomatic gate
+    # CI runs, and the two halves were never one thought anyway.
+    private def self.regex_field_cond(field : String, value : String,
+                                      body_max : Int32?) : {String, Array(DB::Any)}?
+      return nil if value.empty?
+      # An invalid pattern would raise inside the SQLite REGEXP callback, so validate up
+      # front and emit a never-matches clause instead.
+      return {"0", [] of DB::Any} unless valid_regex?(value)
       case field
-      when "host", "path", "url", "header", "body" # = REGEX_FIELDS
-        return nil if value.empty?
-        # An invalid pattern would raise inside the SQLite REGEXP callback, so validate up
-        # front and emit a never-matches clause instead.
-        return {"0", [] of DB::Any} unless valid_regex?(value)
-        case field
-        when "host"   then {"host REGEXP ?", [value] of DB::Any}
-        when "path"   then {"target REGEXP ?", [value] of DB::Any}
-        when "url"    then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
-        when "header" then header_regex_cond(value)
-        else               body_regex_cond(value, body_max)
-        end
-      else
-        free_text(term)
+      when "host"        then {"host REGEXP ?", [value] of DB::Any}
+      when "path"        then {"target REGEXP ?", [value] of DB::Any}
+      when "url"         then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
+      when "header"      then header_regex_cond(value)
+      when "req.header"  then header_regex_cond(value, :req)
+      when "resp.header" then header_regex_cond(value, :resp)
+      when "req.body"    then body_regex_cond(value, body_max, :req)
+      when "resp.body"   then body_regex_cond(value, body_max, :resp)
+      else                    body_regex_cond(value, body_max)
       end
+    end
+
+    # Does this unknown field wear a side prefix THIS MODULE advertises? The one place the
+    # prefix set is tested, so `field_cond` and `regex_cond` cannot start disagreeing about
+    # whether `resp.status:` is a reported mistake or a free-text word.
+    private def self.side_prefixed?(field : String) : Bool
+      SIDES.each_key.any? { |p| field.starts_with?(p) }
+    end
+
+    # Which side a canonical field name selects, or nil for the two-sided spelling. Lets the
+    # three `header` arms (and the three `body` ones) collapse into one apiece — six near-identical
+    # `when`s is how `field_cond` earns a complexity warning for saying nothing new.
+    private def self.side_of(field : String) : Symbol?
+      SIDES.each { |prefix, side| return side if field.starts_with?(prefix) }
+      nil
+    end
+
+    # An accepted spelling resolved to the one name the compilers switch on. Shared by
+    # `field_cond`, `regex_cond` and `invalid_regex_terms` so an alias cannot be understood by
+    # one of them and not the others.
+    private def self.canonical(field : String) : String
+      FIELD_ALIASES.fetch(field, field)
+    end
+
+    # `canonical`, public, for a surface that keeps its OWN help table over these names
+    # (`Colormarker::FIELD_HELP`) and must resolve `res.body` the way the compilers do.
+    def self.canonical_field(field : String) : String
+      canonical(field)
     end
 
     # NULL-guarded REGEXP over both body columns (a bodyless flow contributes no match,
     # so `-body~x` keeps it — same null-safety as the body: LIKE fallback above).
-    private def self.body_regex_cond(value : String, body_max : Int32? = nil) : {String, Array(DB::Any)}
-      req = body_col("request_body", body_max)
-      res = body_col("response_body", body_max)
-      {"((request_body IS NOT NULL AND CAST(#{req} AS TEXT) REGEXP ?) OR " \
-       "(response_body IS NOT NULL AND CAST(#{res} AS TEXT) REGEXP ?))",
-       [value, value] of DB::Any}
+    private def self.body_regex_cond(value : String, body_max : Int32? = nil,
+                                     side : Symbol? = nil) : {String, Array(DB::Any)}
+      params = [] of DB::Any
+      conds = body_columns(side).map do |col|
+        params << value
+        "(#{col} IS NOT NULL AND CAST(#{body_col(col, body_max)} AS TEXT) REGEXP ?)"
+      end
+      {"(#{conds.join(" OR ")})", params}
     end
 
     # A body column as the caller wants it READ: whole, or its first `body_max` bytes. The
@@ -628,10 +870,20 @@ module Gori
       body_max ? "substr(#{column}, 1, #{body_max.to_i})" : column
     end
 
-    private def self.header_regex_cond(value : String) : {String, Array(DB::Any)}
-      {"(CAST(request_head AS TEXT) REGEXP ? OR " \
-       "(response_head IS NOT NULL AND CAST(response_head AS TEXT) REGEXP ?))",
-       [value, value] of DB::Any}
+    private def self.header_regex_cond(value : String, side : Symbol? = nil) : {String, Array(DB::Any)}
+      params = [] of DB::Any
+      conds = head_columns(side).map do |col|
+        params << value
+        # `request_head` is BLOB NOT NULL, so it needs no guard; `response_head` is nullable and
+        # an unguarded REGEXP over NULL yields NULL, which SQLite's three-valued logic EXCLUDES
+        # under negation — that is how `-header:x` would silently drop every response-less flow.
+        if col == "response_head"
+          "(#{col} IS NOT NULL AND CAST(#{col} AS TEXT) REGEXP ?)"
+        else
+          "CAST(#{col} AS TEXT) REGEXP ?"
+        end
+      end
+      {"(#{conds.join(" OR ")})", params}
     end
 
     # A pattern must compile or the SQLite REGEXP callback raises (mirrors Scope.valid?).

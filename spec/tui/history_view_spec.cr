@@ -1087,6 +1087,38 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # ↵ with the dropdown open must be able to TERMINATE. Re-deriving candidates after a splice can
+  # hand back the token that was just completed — `method:GET` narrows the value pool to exactly
+  # `["method:GET"]` — so a popup that re-opens itself would make every ↵ re-splice the identical
+  # string and `stop_query` unreachable: the bar could not be left with Enter at all.
+  it "closes the dropdown when Enter completes, so the filter bar can still be exited" do
+    view = HistoryView.new
+    view.start_query
+    "met".each_char { |c| view.query_insert(c) }
+    view.popup_down # open it
+    view.popup_open?.should be_true
+
+    view.query_complete(close: true).should be_true
+    view.query.should eq("method:")
+    view.popup_open?.should be_false # ...so the NEXT ↵ reaches stop_query
+
+    # Tab is the chaining gesture and deliberately keeps it open: field → value in two presses.
+    view.popup_down
+    view.query_complete.should be_true
+    view.query.should eq("method:GET")
+    view.popup_open?.should be_true
+  end
+
+  it "Tab-completes an operator without eating the token's opening paren" do
+    # Candidates are spliced over the token's whole span, so a bare `OR` over `(O` would delete
+    # the paren and dissolve the group being typed.
+    view = HistoryView.new
+    view.start_query
+    "host:a (O".each_char { |c| view.query_insert(c) }
+    view.query_complete.should be_true
+    view.query.should eq("host:a (OR")
+  end
+
   it "Tab-completes method/scheme/status statically and host from the store" do
     tmp_store do |store|
       store.insert_flow(Gori::Store::CapturedRequest.new(

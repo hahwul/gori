@@ -477,6 +477,148 @@ describe "Gori::Store#search (QL)" do
     end
   end
 
+  # `header:`/`body:` search BOTH sides; `req.`/`resp.` picks one. The fast path is an FTS5
+  # COLUMN FILTER over `flows_fts(req, resp)` — a table that already stored the two sides apart —
+  # so these pin that the filter really scopes rather than being ignored by the MATCH parser,
+  # which would silently return the two-sided answer and look like it worked.
+  it "scopes header:/body: to one side with a req./resp. prefix" do
+    tmp_store do |store|
+      req_side = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
+        method: "POST", target: "/login", http_version: "HTTP/1.1",
+        head: "POST /login HTTP/1.1\r\nHost: acme.test\r\nX-Only-Req: 1\r\n\r\n".to_slice,
+        body: "csrf=secrettoken".to_slice))
+
+      resp_side = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "http", host: "acme.test", port: 80,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: resp_side, status: 200,
+        head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=1\r\n\r\n".to_slice,
+        body: "<input value=secrettoken>".to_slice))
+
+      quiet = capture(store, "acme.test", "GET", "/about", 200) # no body either side
+      store.flush                                               # body: reads the off-commit trigram index
+
+      ids = ->(q : String) { store.search(Gori::QL.parse(q), 50).map(&.id).sort }
+
+      # the two-sided spelling still finds both — the prefix ADDS a way to ask, it does not
+      # change what the old one answers
+      ids.call("body:secrettoken").should eq([req_side, resp_side].sort)
+
+      ids.call("req.body:secrettoken").should eq([req_side])
+      ids.call("resp.body:secrettoken").should eq([resp_side])
+      ids.call("res.body:secrettoken").should eq([resp_side]) # `res.` is a synonym of `resp.`
+
+      # a short needle takes the byte-wise `instr` path instead of the index — same scoping
+      ids.call("req.body:se").should eq([req_side])
+      ids.call("resp.body:se").should eq([resp_side])
+
+      # regex (`~`) scopes too, and reaches bytes the index does not
+      ids.call("req.body~secret[a-z]+").should eq([req_side])
+      ids.call("resp.body~secret[a-z]+").should eq([resp_side])
+
+      # heads: `X-Only-Req` is on the request, `Set-Cookie` on the response
+      ids.call("req.header:x-only-req").should eq([req_side])
+      ids.call("resp.header:x-only-req").should be_empty
+      ids.call("resp.header:set-cookie").should eq([resp_side])
+      ids.call("req.header:set-cookie").should be_empty
+      ids.call("resp.header~(?i)set-cookie").should eq([resp_side])
+
+      # NEGATION keeps the other side AND the flow with nothing on either — the NULL-safety the
+      # two-sided spelling already had must survive the column filter (an unguarded scoped clause
+      # would answer NULL for a response-less flow and SQLite would exclude it).
+      neg = ids.call("-resp.body:secrettoken")
+      neg.should contain(req_side)
+      neg.should contain(quiet)
+      neg.should_not contain(resp_side)
+
+      neg_head = ids.call("-resp.header:set-cookie")
+      neg_head.should contain(req_side) # response-less: kept, not dropped
+      neg_head.should contain(quiet)
+      neg_head.should_not contain(resp_side)
+
+      # and it composes with the grammar exactly like any other term
+      ids.call("NOT (req.body:secrettoken OR resp.body:secrettoken)").should eq([quiet])
+    end
+  end
+
+  it "accepts req./resp. size synonyms and reports namespaced fields as known" do
+    Gori::QL.parse("req.size:>100").sql.should eq(Gori::QL.parse("reqsize:>100").sql)
+    Gori::QL.parse("resp.size:>100").sql.should eq(Gori::QL.parse("respsize:>100").sql)
+    Gori::QL.parse("res.size:>100").sql.should eq(Gori::QL.parse("respsize:>100").sql)
+
+    # `FIELDS` is the pool a surface OFFERS; `known_field?` is what it ACCEPTS. A validating
+    # surface (Colormarker's unknown-field refusal) must read the wider one or it rejects a
+    # spelling QL compiles.
+    Gori::QL.known_field?("resp.body").should be_true
+    Gori::QL.known_field?("res.body").should be_true
+    Gori::QL.known_field?("req.size").should be_true
+    Gori::QL.known_field?("resp.host").should be_false # single-sided field takes no prefix
+    Gori::QL::FIELDS.should contain("resp.body")
+    Gori::QL::FIELDS.should_not contain("res.body") # accepted, deliberately not offered
+
+    # an invalid regex under an ALIAS is still reported — diagnosis canonicalises the way
+    # compilation does, or `res.body~[bad` would compile to the never-match clause unflagged
+    Gori::QL.invalid_regex_terms("res.body~[bad").should eq(["res.body~[bad"])
+  end
+
+  # Advertising a namespace invites guesses at the rest of it. `resp.status:` is not a typo the
+  # way `hsot:` is — it is someone applying the rule the hint row and Help page just taught them.
+  it "REPORTS a side prefix on a field that has no side, instead of free-texting it to zero" do
+    %w[resp.status:200 resp.code:200 req.method:POST res.host:acme].each do |q|
+      a = Gori::QL.analyze(q)
+      a.ignored.should eq([q]), "#{q} should be reported as dropped"
+      a.applied.should be_empty
+      a.clean?.should be_false # so `strict:` refuses it and ql_explain names it
+      # ...and a query that was ONLY this must not fall through to match-all.
+      Gori::QL.reject_empty?(q, Gori::QL.parse(q)).should be_true
+    end
+
+    # The `~` spelling takes the same path — diagnosis and compilation cannot disagree.
+    Gori::QL.analyze("resp.status~2..").ignored.should eq(["resp.status~2.."])
+
+    # An ordinary unknown field is UNCHANGED: it still free-texts the whole token, which makes a
+    # typo self-evident (it matches nothing real) and is behaviour other surfaces rely on.
+    Gori::QL.analyze("hsot:acme").applied.should eq(["hsot:acme"])
+    Gori::QL.analyze("time:12:00").applied.should eq(["time:12:00"])
+    # A bare word that merely STARTS with a prefix is free text, not a field at all.
+    Gori::QL.analyze("respond").applied.should eq(["respond"])
+  end
+
+  # The pin that makes "a field is added when its explanation is added" true rather than a wish.
+  # Every hint string that used to be written by hand beside a widget is generated from these two
+  # now, so a field with no entry would render as a blank description column somewhere.
+  describe "FIELD_HELP / SYNTAX_HELP" do
+    it "explains every field the completion pool offers, and nothing it does not" do
+      Gori::QL::FIELDS.each do |f|
+        Gori::QL::FIELD_HELP[f]?.should_not be_nil, "FIELD_HELP is missing `#{f}:`"
+      end
+      (Gori::QL::FIELD_HELP.keys - Gori::QL::FIELDS).should be_empty
+    end
+
+    it "resolves help through an alias, so an accepted spelling is never undocumented" do
+      Gori::QL.field_help("res.body").should eq(Gori::QL::FIELD_HELP["resp.body"])
+      Gori::QL.field_help("req.size").should eq(Gori::QL::FIELD_HELP["reqsize"])
+      Gori::QL.field_help("nope").should be_nil
+    end
+
+    it "keeps every line inside the one terminal column it renders in" do
+      Gori::QL::FIELD_HELP.each { |name, help| help.size.should be <= 46, "#{name}: too long" }
+      Gori::QL::SYNTAX_HELP.each { |(ex, why)| (ex.size + why.size).should be <= 78 }
+    end
+
+    it "documents the operators a field-name pool can never show" do
+      why = Gori::QL::SYNTAX_HELP.map { |(ex, _)| ex }.join(" ")
+      why.should contain("-")   # negation
+      why.should contain("OR")  # boolean
+      why.should contain("NOT") # group negation
+      why.should contain("~")   # regex
+      why.should contain("resp.")
+    end
+  end
+
   it "matches bodies, hosts and headers by regex (~), case-sensitively" do
     tmp_store do |store|
       secret = store.insert_flow(Gori::Store::CapturedRequest.new(

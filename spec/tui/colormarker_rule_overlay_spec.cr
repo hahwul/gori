@@ -175,11 +175,15 @@ describe ColormarkerRuleOverlay do
     4.times { ov.handle_key(key(Termisu::Input::Key::Down)) }
     backend = MemoryBackend.new(100, 20)
     ov.render(Screen.new(backend), Rect.new(0, 0, 100, 20))
-    # No token to complete yet, so the band names what this backend actually knows — the
-    # QL fields History's search bar accepts are a superset, and reaching for one is the
-    # likely mistake.
+    # No token to complete yet, so the band teaches the language: a sample of the fields this
+    # backend knows, and — the part the old band could never show — the operators. It listed
+    # `USEFUL_FIELDS` and nothing else, so "paint everything EXCEPT" was invisible on the surface
+    # where a standing rule makes that mistake permanent. The full field list moved to Help's
+    # Query page; `QuerySuggest.cold_hint`'s own spec pins the wording, this one pins that the
+    # band renders it.
     backend.contains?("host:").should be_true
-    backend.contains?("proto:").should be_true
+    backend.contains?("path:").should be_true
+    backend.contains?("-term excludes").should be_true
   end
 
   it "cancels on esc" do

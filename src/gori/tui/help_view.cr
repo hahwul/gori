@@ -2,10 +2,11 @@ require "./screen"
 require "./theme"
 require "./brand"
 require "../hotkeys"
+require "../ql"
 
 module Gori::Tui
-  # The Help tab: a scrollable keyboard + mouse cheat-sheet. Read-only —
-  # ↑/↓ (or the wheel) scroll; there's nothing to select. When constructed with a
+  # The Help tab: a scrollable keyboard + mouse cheat-sheet, a QL reference, and an About page.
+  # Read-only — ↑/↓ (or the wheel) scroll; there's nothing to select. When constructed with a
   # registry, rebindable rows resolve their key column through Hotkeys (same path
   # as the command palette) so a rebind is reflected here.
   class HelpView
@@ -65,7 +66,7 @@ module Gori::Tui
         Item.new("⇧I", "send the flow to the Fuzzer", "history.fuzz"),
         Item.new("⇧F", "create an issue", "issue.create"),
         Item.new("f", "follow newest", "history.toggle-follow"),
-        Item.new("/", "filter (query language)", "history.query"),
+        Item.new("/", "filter (query language — see the Query page)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
         Item.new("space → Y", "copy as… — urls · hosts · cURL · raw · req+res pair"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
@@ -281,14 +282,19 @@ module Gori::Tui
       end
     end
 
-    private def draw_row(screen : Screen, rect : Rect, y : Int32, row : Row) : Nil
+    # `key_w` is a parameter rather than the constant because the Query page's left column holds
+    # QL EXPRESSIONS, not key chords: `NOT (host:cdn OR host:img)` is 26 columns where the widest
+    # chord label is 20, and truncating an example query to `NOT (host:cdn OR ho…` would teach the
+    # syntax wrong. Same two-column row, one page's worth of extra room.
+    private def draw_row(screen : Screen, rect : Rect, y : Int32, row : Row,
+                         key_w : Int32 = KEY_W) : Nil
       case row.kind
       when :head
         screen.text(rect.x + 1, y, row.a, Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
       when :item
-        kw = {KEY_W, {rect.w - 3 - KEY_GAP, 1}.max}.min
+        kw = {key_w, {rect.w - 3 - KEY_GAP, 1}.max}.min
         screen.text(rect.x + 2, y, row.a, Theme.text_bright, width: kw)
-        dx = rect.x + 2 + KEY_W + KEY_GAP
+        dx = rect.x + 2 + key_w + KEY_GAP
         screen.text(dx, y, row.b, Theme.muted, width: {rect.right - dx - 1, 1}.max) if dx < rect.right - 1
         # :gap → blank line
       end
@@ -297,6 +303,76 @@ module Gori::Tui
     private def clamp_scroll(h : Int32) : Nil
       max = {@rows.size - h, 0}.max
       @scroll = @scroll.clamp(0, max)
+    end
+
+    # --- the "Query" sub-tab page ---------------------------------------------
+    # The QL reference, in the tab an operator is already in. It exists because the language had
+    # nowhere to be READ: a filter bar teaches one row at a time, `ql_reference` is an MCP tool
+    # for models, and the docs site is not open while you are looking at traffic. Help's own entry
+    # for `/` said "filter (query language)" and stopped there.
+    #
+    # Every row is BUILT from the parser's tables — `QL::SYNTAX_HELP`, `QL::FIELDS` +
+    # `QL::FIELD_HELP`, `QL::CAVEATS` — and none is written here. That is the whole point: a
+    # hand-authored copy of the field list is what `FILTER_HINT` and `QUERY_HINT` were, and they
+    # disagreed with `FIELDS` and with each other for long enough that an operator could not find
+    # `-term` on the two surfaces most likely to be asked for it.
+    QUERY_KEY_W = 28
+
+    # Its own offset, not `@scroll`: the two pages have different lengths, and sharing one would
+    # carry the cheat-sheet's position onto this page — where `at_top?` then answers about the
+    # wrong page and ↑ pops focus to the strip in the middle of a scroll.
+    @query_scroll : Int32 = 0
+
+    def query_move(delta : Int32) : Nil
+      @query_scroll = {@query_scroll + delta, 0}.max
+    end
+
+    def query_at_top? : Bool
+      @query_scroll == 0
+    end
+
+    def render_query(screen : Screen, rect : Rect) : Nil
+      return if rect.empty?
+      rows = query_rows
+      @query_scroll = @query_scroll.clamp(0, {rows.size - rect.h, 0}.max)
+      (0...rect.h).each do |i|
+        li = @query_scroll + i
+        break if li >= rows.size
+        draw_row(screen, rect, rect.y + i, rows[li], QUERY_KEY_W)
+      end
+    end
+
+    # Memoised per instance: the tables are constants, so this is the same list every time, and
+    # `render_query` runs on the draw path.
+    private def query_rows : Array(Row)
+      @query_rows ||= build_query_rows
+    end
+
+    @query_rows : Array(Row)? = nil
+
+    private def build_query_rows : Array(Row)
+      rows = [] of Row
+      rows << Row.new(:head, "SYNTAX", "")
+      QL::SYNTAX_HELP.each { |(example, meaning)| rows << Row.new(:item, example, meaning) }
+
+      # Fields in `FIELDS` order — the order completion offers them, so the page and the Tab key
+      # agree about what comes first.
+      rows << Row.new(:gap, "", "")
+      rows << Row.new(:head, "FIELDS  (: matches, ~ is regex)", "")
+      QL::FIELDS.each do |name|
+        rows << Row.new(:item, "#{name}:", QL::FIELD_HELP[name]? || "")
+      end
+
+      rows << Row.new(:gap, "", "")
+      rows << Row.new(:head, "ALSO ACCEPTED", "")
+      QL::FIELD_ALIASES.each do |from, to|
+        rows << Row.new(:item, "#{from}:", "= #{to}:")
+      end
+
+      rows << Row.new(:gap, "", "")
+      rows << Row.new(:head, "WORTH KNOWING", "")
+      QL::CAVEATS.each { |(what, why)| rows << Row.new(:item, what, why) }
+      rows
     end
 
     # --- the "About" sub-tab page ---------------------------------------------

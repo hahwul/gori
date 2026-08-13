@@ -1,6 +1,8 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./query_suggest"
+require "./suggest_popup"
 require "./traffic_empty_state"
 require "../settings"
 require "./highlight"
@@ -54,13 +56,23 @@ module Gori::Tui
     # spec below was written to catch cannot happen at all.
     QL_FIELDS  = QL::FIELDS
     METHOD_VAL = %w[GET POST PUT DELETE PATCH HEAD OPTIONS QUERY]
-    # Discoverability hints for the QL filter, kept loosely in sync with QL_FIELDS.
-    # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits
-    # on the suggestion row at a cold start (already editing, nothing to Tab-complete
-    # yet) and also spells out that bare words are a free-text search. Example values
-    # double as syntax cues.
-    FILTER_HINT = "/ filter  ·  host:  method:  status:>=500  proto:ws  path:  size:>10000  dur:>500  header:  body~regex"
-    QUERY_HINT  = "fields:  host:  method:  status:  proto:  path:  scheme:  size:  dur:  header:  body    ·    AND OR NOT ( ) combine  ·  or type words to search"
+    # Discoverability hints for the QL filter. Both are GENERATED from the field pool and the
+    # grammar's own operator list (`QuerySuggest`) rather than written out here: as prose they
+    # drifted from `QL_FIELDS` and from each other — this pair listed `AND OR NOT` and never `-`,
+    # while Intercept's listed both — so an operator looking for "everything EXCEPT" found nothing
+    # on the two surfaces most likely to be asked the question.
+    #
+    # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits on the
+    # suggestion row at a cold start (already editing, nothing to Tab-complete yet).
+    FILTER_HINT = QuerySuggest.idle_hint("/ filter")
+    QUERY_HINT  = QuerySuggest.cold_hint
+    # The editing bar's label. A constant because `render_query_popup` has to line the dropdown
+    # up under the token, which means knowing exactly how far the query text is indented.
+    QUERY_PREFIX = "filter › "
+    # The highlighter's field vocabulary. `QL.known_field?`, not `QL_FIELDS.includes?`: the pool
+    # is what Tab OFFERS and is a strict subset of what QL accepts, so testing against it would
+    # paint `res.body:` — which compiles perfectly — as a typo.
+    QL_KNOWN = ->(f : String) { QL.known_field?(f) }
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool
@@ -102,6 +114,8 @@ module Gori::Tui
       @suggest_store = nil.as(Store?)
       @host_suggest_prefix = nil.as(String?) # cache key (downcase prefix)
       @host_suggest_values = [] of String
+      # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
+      @popup = SuggestPopup.new
       @scope = nil.as(Scope?)
       # Colormarker (the row-colour lens). Nil until `set_colormarker` — every construction
       # site outside HistoryController leaves it nil, which is what makes the whole feature a
@@ -828,6 +842,7 @@ module Gori::Tui
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
       @querying = false
+      @popup.close
     end
 
     def cancel_query : Nil # Esc: clear the filter, leave edit mode
@@ -835,21 +850,57 @@ module Gori::Tui
       @query = ""
       @qcx = 0
       @preedit = ""
+      @popup.close
     end
 
     def query_insert(ch : Char) : Nil
       @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
       @qcx += 1
+      sync_popup
     end
 
     def query_backspace : Nil
       return if @qcx == 0
       @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
       @qcx -= 1
+      sync_popup
     end
 
     def query_move(d : Int32) : Nil
       @qcx = (@qcx + d).clamp(0, @query.size)
+      sync_popup
+    end
+
+    # --- the opt-in completion dropdown (`↓`) ---------------------------------
+    # The inline row stays the default; this is the roomier second view of the same candidates.
+    # See `SuggestPopup` for why it is opt-in rather than the primary shape.
+
+    def popup_open? : Bool
+      @popup.open?
+    end
+
+    # `↓`: open the dropdown, or move down inside it. Nil rather than Bool — the key is claimed
+    # either way, and an earlier Bool "so the key falls through" was a contract no controller
+    # honoured, which is worse than not offering one.
+    def popup_down : Nil
+      return @popup.move(1) if @popup.open?
+      @popup.set(query_suggestions)
+      @popup.open!
+    end
+
+    def popup_up : Nil
+      @popup.move(-1)
+    end
+
+    def popup_close : Nil
+      @popup.close
+    end
+
+    # Keep the candidate set in step with the query on every edit. The popup re-anchors its
+    # selection onto the same candidate when it survived, and shuts itself when the edit left
+    # nothing to show — an empty dropdown is a hole in the list for no content.
+    private def sync_popup : Nil
+      @popup.set(query_suggestions) if @popup.open?
     end
 
     # IME composing text, drawn (underlined) at the caret without touching the
@@ -858,13 +909,26 @@ module Gori::Tui
       @preedit = text
     end
 
-    # Tab-complete the current token to the first suggestion.
-    def query_complete : Bool
+    # Tab-complete the current token: to the SELECTED candidate when the dropdown is open,
+    # otherwise to the first — so a bar whose popup was never opened behaves exactly as before.
+    #
+    # `close` is what ↵ passes and ↹ does not, and it is load-bearing rather than cosmetic. With
+    # the dropdown open, re-deriving candidates after the splice can hand back a list containing
+    # the token that was just completed (`method:GET` narrows the value pool to exactly
+    # `["method:GET"]`), so the popup never shuts, ↵ re-splices the identical string forever, and
+    # `stop_query` becomes unreachable — the bar could not be left with Enter at all. ↹ keeps it
+    # open on purpose, because chaining field → value is the whole point of Tab.
+    def query_complete(close : Bool = false) : Bool
       sugg = query_suggestions
-      return false if sugg.empty?
+      pick = @popup.choice(sugg)
+      return false unless pick
       cur = FilterAst.token_at(@query, @qcx)
-      @query = "#{@query[0, cur.start]}#{sugg.first}#{@query[cur.stop..]}"
-      @qcx = cur.start + sugg.first.size
+      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
+      @qcx = cur.start + pick.size
+      # Completing consumes the choice: the token is now whole, so the old candidate set is
+      # stale. Re-derive it (a field completion opens a value list) and let `set` close the
+      # popup if that leaves nothing.
+      close ? @popup.close : (@popup.set(query_suggestions) if @popup.open?)
       true
     end
 
@@ -874,13 +938,18 @@ module Gori::Tui
     def query_suggestions : Array(String)
       cur = FilterAst.token_at(@query, @qcx)
       return [] of String if cur.core.empty?
-      if colon = cur.core.index(':')
-        field = cur.core[0...colon].downcase
-        prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
-        suggest_values(field, prefix).map { |s| "#{cur.prefix}#{s}" }
-      else
-        QL_FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}:" }
-      end
+      fields =
+        if colon = cur.core.index(':')
+          field = cur.core[0...colon].downcase
+          prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
+          suggest_values(field, prefix).map { |s| "#{cur.prefix}#{s}" }
+        else
+          QL_FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}:" }
+        end
+      # ...then the boolean operators, which no field pool can offer. The whole CURSOR, so an
+      # operator candidate carries the token's `(` the way a field one does. See
+      # `QuerySuggest::OPERATORS`.
+      QuerySuggest.with_operators(fields, cur)
     end
 
     # --- detail view ---------------------------------------------------------
@@ -1829,9 +1898,37 @@ module Gori::Tui
       render_preview_pane(screen, preview_rect, focused) if preview_rect
     end
 
+    # The list, then the `↓` dropdown OVER it. Split so the popup is drawn last unconditionally:
+    # the body below returns early on several paths (no rows, the empty-state card), and a
+    # dropdown that vanished exactly when the filter matched nothing would be missing from the
+    # one moment an operator is most likely to be fixing a query.
     private def render_list_body(screen : Screen, rect : Rect, focused : Bool, *,
                                  listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
+      render_list_rows(screen, rect, focused, listen: listen, capturing: capturing)
+      render_query_popup(screen, rect)
+    end
+
+    # Anchored under the suggestion row (so it never covers the inline hint it expands on) and
+    # bounded by the list, which is the only region it is allowed to occlude.
+    private def render_query_popup(screen : Screen, rect : Rect) : Nil
+      return unless @querying && @popup.open?
+      # `list_top`, not the row under the bar: the column header and its divider sit between the
+      # two, and a card straddling them reads as a rendering fault rather than a menu. The list
+      # is also the only region this is allowed to cover.
+      top = list_top(rect)
+      anchor_y = top - 1
+      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      # Anchored at the START of the query text, not at the token's offset within it.
+      # `Screen#input_line` scrolls its window horizontally once the query outgrows the bar, so
+      # `base + token.start` stops being the token's screen column on exactly the long queries
+      # where precision would matter — the card would drift right of what it completes and then
+      # clamp. A fixed anchor is always adjacent to the bar and never lies.
+      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, anchor_y, bounds)
+    end
+
+    private def render_list_rows(screen : Screen, rect : Rect, focused : Bool, *,
+                                 listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
       if @querying
@@ -2428,11 +2525,11 @@ module Gori::Tui
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
       if @querying
-        prefix = "filter › "
-        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
-        base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2,
-          colors: Highlight.filter_query(@query, Theme.text_bright))
+        screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
+        base = rect.x + 1 + QUERY_PREFIX.size
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
+          width: rect.w - QUERY_PREFIX.size - 2,
+          colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN))
         return
       end
 
@@ -2459,7 +2556,7 @@ module Gori::Tui
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter
@@ -2488,14 +2585,14 @@ module Gori::Tui
     private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
       sugg = query_suggestions
       unless sugg.empty?
-        screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
+        QuerySuggest.render(screen, rect.x + 1, y, rect.w - 2, sugg)
         return
       end
       # No live completions to Tab through. At a cold start (nothing typed yet, or the
       # cursor sits just after a space) show a standing hint so the query language is
       # discoverable from the moment `/` opens; on a non-empty token with no match stay
       # quiet — the user is deliberately free-texting a word.
-      return unless FilterAst.token_at(@query, @qcx).core.empty?
+      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
       screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: rect.w - 2)
     end
 

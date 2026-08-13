@@ -223,17 +223,26 @@ module Gori::Tui
     # `seps` must match what the BACKEND behind this bar actually splits on — only QL
     # implements `~`, so the four bars that don't pass `SEPS_FIELD` and `title~admin`
     # stays plain there, because that is how it will be matched (as free text).
+    # `known` is the backend's field vocabulary — see `FilterAst.spans`. Without it an
+    # unrecognised `hsot:` renders in the same confident blue as a real field, which is the one
+    # visible signal an operator has while typing, and it says the opposite of the truth.
     def self.filter_query(query : String, base : Color = Theme.text,
-                          seps : String = FilterAst::SEPS_FIELD_REGEX) : Array(Color)
+                          seps : String = FilterAst::SEPS_FIELD_REGEX,
+                          known : Proc(String, Bool)? = nil) : Array(Color)
       colors = Array(Color).new(query.size, base)
-      FilterAst.spans(query, seps).each do |span|
+      FilterAst.spans(query, seps, known).each do |span|
         fg = case span.kind
              in .operator? then Theme.syn_keyword
              in .paren?    then Theme.syn_keyword
              in .field?    then Theme.syn_header
-             in .value?    then Theme.text_bright
-             in .quote?    then Theme.syn_string
-             in .plain?    then base
+               # Deliberately the FREE-TEXT colour, not an error red: the token is not broken, it
+               # is being read as a plain word — which is precisely what the backend will do with
+               # it. Painting it as an error would overstate a `time:12:00` that the operator meant
+               # literally, while this just declines to promise a field match.
+             in .unknown_field? then Theme.muted
+             in .value?         then Theme.text_bright
+             in .quote?         then Theme.syn_string
+             in .plain?         then base
              end
         (span.start...(span.start + span.size)).each { |i| colors[i] = fg if i < colors.size }
       end

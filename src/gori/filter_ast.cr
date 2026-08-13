@@ -463,12 +463,13 @@ module Gori
     # --- syntax highlighting -------------------------------------------------
 
     enum SpanKind
-      Operator # AND / OR / NOT, and the `-` prefix (which means the same thing)
-      Paren    # a `(`/`)` that actually groups
-      Field    # the `host:` / `body~` prefix, separator included
-      Value    # what follows a field separator
-      Quote    # the `"` marks themselves
-      Plain    # a bare free-text word
+      Operator     # AND / OR / NOT, and the `-` prefix (which means the same thing)
+      Paren        # a `(`/`)` that actually groups
+      Field        # the `host:` / `body~` prefix, separator included
+      UnknownField # ...spelled like a field, but one the BACKEND does not implement
+      Value        # what follows a field separator
+      Quote        # the `"` marks themselves
+      Plain        # a bare free-text word
     end
 
     record Span, start : Int32, size : Int32, kind : SpanKind
@@ -489,7 +490,18 @@ module Gori
     SEPS_FIELD       = ":"
     SEPS_FIELD_REGEX = ":~"
 
-    def self.spans(query : String, seps : String = SEPS_FIELD_REGEX) : Array(Span)
+    # `known`, when given, is the backend's "do I implement this field name?" and it exists for
+    # exactly the reason `seps` does, one level down. `seps` already stops a bar painting an
+    # operator it does not run; this stops one painting a FIELD it does not have. `hsot:acme` is
+    # a typo whose whole token gets free-texted — it matches nothing real — and every bar
+    # rendered it in the same confident blue as `host:acme`, so the one visible signal said the
+    # query was fine. Naming a namespace made it worse: `resp.status:200` is a reasonable guess
+    # at a real prefix, and QL now DROPS it, while the bar still called it a field.
+    #
+    # Nil (the default) keeps the old behaviour for a caller that has no such predicate, so a
+    # backend opts in rather than being told what its vocabulary is.
+    def self.spans(query : String, seps : String = SEPS_FIELD_REGEX,
+                   known : Proc(String, Bool)? = nil) : Array(Span)
       acc = [] of Span
       lex(query).each do |lexeme|
         case lexeme.tok
@@ -498,7 +510,7 @@ module Gori
         when .and?, .or?, .not?
           acc << Span.new(lexeme.start, lexeme.size, SpanKind::Operator)
         else
-          word_spans(query, lexeme, acc, seps)
+          word_spans(query, lexeme, acc, seps, known)
         end
       end
       acc
@@ -520,7 +532,8 @@ module Gori
 
     # Sub-classify one word: an optional `-`, an optional `field:`/`field~` prefix, then
     # the remainder with any quote marks called out.
-    private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span), seps : String) : Nil
+    private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span), seps : String,
+                                known : Proc(String, Bool)? = nil) : Nil
       s = lexeme.start
       e = s + lexeme.size
       i = s
@@ -534,11 +547,17 @@ module Gori
 
       sep = field_sep(query, i, e, seps)
       if sep
-        acc << Span.new(i, sep - i + 1, SpanKind::Field)
+        # The name is matched case-INSENSITIVELY because `split_field` downcases before it
+        # dispatches: `HOST:x` compiles, so it must not be painted as a typo.
+        name = query[i...sep].downcase
+        real = known.nil? || known.call(name)
+        acc << Span.new(i, sep - i + 1, real ? SpanKind::Field : SpanKind::UnknownField)
         i = sep + 1
       end
 
-      kind = sep ? SpanKind::Value : SpanKind::Plain
+      # A value under an UNKNOWN field is not a value — the backend free-texts the whole token,
+      # so painting `acme` as a value in `hsot:acme` would claim a match nobody will perform.
+      kind = (sep && real) ? SpanKind::Value : SpanKind::Plain
       run = i
       while i < e
         if query[i] == '"'

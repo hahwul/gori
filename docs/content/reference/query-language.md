@@ -31,6 +31,27 @@ method:POST
 status:404
 ```
 
+### One side only: `req.` / `resp.`
+
+`header:` and `body:` search **both the request and the response**. Prefix either with `req.` or
+`resp.` to search one side.
+
+| Field | Meaning |
+| --- | --- |
+| `req.body` / `resp.body` | That side's body only |
+| `req.header` / `resp.header` | That side's head only |
+
+```text
+resp.body:secrettoken                 a token only the response carries
+resp.header:set-cookie                responses that set a cookie
+-resp.body:abcd                       responses whose body lacks abcd
+req.body~(?i)password                 regex over the request body only
+NOT (req.body:token OR resp.body:token)
+```
+
+`res.` is a synonym of `resp.`, and `req.size` / `resp.size` are synonyms of `reqsize` /
+`respsize`. Fields that only ever have one side (`host`, `method`, `status`, …) take no prefix.
+
 ## Status Classes
 
 `status:` accepts class shorthands:

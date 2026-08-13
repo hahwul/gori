@@ -141,13 +141,12 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       store = @host.session.store
+      return true if query_nav(key)
       case
-      when key.enter?     then flush_query_reload; @sitemap.stop_query
-      when key.escape?    then @query_reload_at = nil; @sitemap.cancel_query; @sitemap.reload(store)
+      when key.enter?     then query_enter
+      when key.escape?    then query_escape(store)
       when key.tab?       then (@sitemap.query_complete; schedule_query_reload)
       when key.backspace? then @sitemap.query_backspace; schedule_query_reload
-      when key.left?      then @sitemap.query_move(-1)
-      when key.right?     then @sitemap.query_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @sitemap.query_insert(c)
@@ -156,6 +155,42 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # Open dropdown ⇒ ↵ takes the highlighted candidate and shuts it; closed ⇒ apply and leave
+    # edit mode. Mirrors HistoryController exactly — one grammar, one set of gestures.
+    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` below rather than as
+    # four more arms in it: the dropdown's two keys pushed `handle_query_key` past the complexity
+    # gate CI runs, and "move something" is a different question from "what does this key do".
+    # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
+    # move a caret to — which is why they could be claimed without displacing anything.
+    private def query_nav(key) : Bool
+      case
+      when key.down?  then @sitemap.popup_down
+      when key.up?    then @sitemap.popup_up
+      when key.left?  then @sitemap.query_move(-1)
+      when key.right? then @sitemap.query_move(1)
+      else                 return false
+      end
+      true
+    end
+
+    private def query_enter : Nil
+      if @sitemap.popup_open?
+        @sitemap.query_complete(close: true)
+        schedule_query_reload
+      else
+        flush_query_reload
+        @sitemap.stop_query
+      end
+    end
+
+    # esc closes the dropdown first, so looking at the list never costs the typed query.
+    private def query_escape(store) : Nil
+      return @sitemap.popup_close if @sitemap.popup_open?
+      @query_reload_at = nil
+      @sitemap.cancel_query
+      @sitemap.reload(store)
     end
 
     # Called each run-loop tick: run the debounced filter reload if the deadline

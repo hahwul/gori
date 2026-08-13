@@ -366,13 +366,12 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       store = @host.session.store
+      return true if query_nav(key)
       case
-      when key.enter?     then flush_query_reload; @history.stop_query
-      when key.escape?    then @query_reload_at = nil; @history.cancel_query; @history.reload(store)
+      when key.enter?     then query_enter
+      when key.escape?    then query_escape(store)
       when key.tab?       then (@history.query_complete; schedule_query_reload)
       when key.backspace? then @history.query_backspace; schedule_query_reload
-      when key.left?      then @history.query_move(-1)
-      when key.right?     then @history.query_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @history.query_insert(c)
@@ -381,6 +380,44 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # ↵ with the dropdown open takes the highlighted candidate and SHUTS it — the same thing ↹
+    # does, except for the shutting, which is what lets the next ↵ reach `stop_query`. Closed, it
+    # is unchanged: apply the filter and leave edit mode.
+    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` below rather than as
+    # four more arms in it: the dropdown's two keys pushed `handle_query_key` past the complexity
+    # gate CI runs, and "move something" is a different question from "what does this key do".
+    # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
+    # move a caret to — which is why they could be claimed without displacing anything.
+    private def query_nav(key) : Bool
+      case
+      when key.down?  then @history.popup_down
+      when key.up?    then @history.popup_up
+      when key.left?  then @history.query_move(-1)
+      when key.right? then @history.query_move(1)
+      else                 return false
+      end
+      true
+    end
+
+    private def query_enter : Nil
+      if @history.popup_open?
+        @history.query_complete(close: true)
+        schedule_query_reload
+      else
+        flush_query_reload
+        @history.stop_query
+      end
+    end
+
+    # esc closes the DROPDOWN first and clears the filter only on a second press. Otherwise
+    # opening the list to look at it would cost the query you were part-way through typing.
+    private def query_escape(store) : Nil
+      return @history.popup_close if @history.popup_open?
+      @query_reload_at = nil
+      @history.cancel_query
+      @history.reload(store)
     end
 
     # Called from the run loop each tick: run a debounced filter reload if the

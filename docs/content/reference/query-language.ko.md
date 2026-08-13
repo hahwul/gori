@@ -31,6 +31,25 @@ method:POST
 status:404
 ```
 
+### 한쪽 방향만 보기: `req.` / `resp.`
+
+`header:`와 `body:`는 **요청과 응답을 모두** 뒤집니다. 한쪽만 보려면 `req.` 또는 `resp.`를 앞에 붙입니다.
+
+| 필드 | 뜻 |
+| --- | --- |
+| `req.body` / `resp.body` | 그 방향의 본문만 |
+| `req.header` / `resp.header` | 그 방향의 헤드만 |
+
+```text
+resp.body:secrettoken                 응답 본문에만 들어있는 토큰
+resp.header:set-cookie                쿠키를 내려주는 응답
+-resp.body:abcd                       응답 본문에 abcd가 없는 것
+req.body~(?i)password                 요청 본문 정규식(한쪽만)
+NOT (req.body:token OR resp.body:token)
+```
+
+`res.`는 `resp.`의 동의어이고, `req.size` / `resp.size`는 `reqsize` / `respsize`와 같습니다. 방향이 하나뿐인 필드(`host`, `method`, `status` 등)에는 접두사를 붙이지 않습니다.
+
 ## 상태 클래스 {#status-classes}
 
 `status:`는 클래스 약어를 받습니다:

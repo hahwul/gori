@@ -33,6 +33,44 @@ describe Gori::FilterAst do
     parse("((a OR b) c) OR d").should eq("(or (and (or a b) c) d)")
   end
 
+  # `seps` already stops a bar painting an OPERATOR it does not run; `known` is the same idea one
+  # level down for the field NAME. Without it `hsot:acme` renders in the same confident colour as
+  # `host:acme`, while the backend free-texts the whole token and matches nothing real — the one
+  # visible signal saying the opposite of the truth.
+  describe ".spans with a known-field predicate" do
+    private_known = ->(f : String) { f == "host" }
+
+    it "marks a field the backend does not implement, and its value with it" do
+      kinds = Gori::FilterAst.spans("hsot:acme", ":~", private_known).map { |s| {s.size, s.kind} }
+      kinds.should eq([{5, Gori::FilterAst::SpanKind::UnknownField},
+                       {4, Gori::FilterAst::SpanKind::Plain}])
+
+      # The VALUE goes plain too: the backend free-texts `hsot:acme` whole, so painting `acme`
+      # as a field's value would claim a match nobody performs.
+      real = Gori::FilterAst.spans("host:acme", ":~", private_known).map { |s| {s.size, s.kind} }
+      real.should eq([{5, Gori::FilterAst::SpanKind::Field},
+                      {4, Gori::FilterAst::SpanKind::Value}])
+    end
+
+    it "matches the name case-insensitively, the way the compilers do" do
+      # `split_field` downcases before dispatching, so `HOST:x` compiles and must not be a typo.
+      Gori::FilterAst.spans("HOST:x", ":~", private_known).first.kind
+        .should eq(Gori::FilterAst::SpanKind::Field)
+    end
+
+    it "keeps the negation and the grouping painted as operators regardless" do
+      kinds = Gori::FilterAst.spans("-hsot:x", ":~", private_known).map(&.kind)
+      kinds.first.should eq(Gori::FilterAst::SpanKind::Operator) # the `-`
+      kinds[1].should eq(Gori::FilterAst::SpanKind::UnknownField)
+    end
+
+    it "leaves every existing caller alone when no predicate is given" do
+      # Opt-in: a backend states its vocabulary, it is never assumed for it.
+      Gori::FilterAst.spans("hsot:acme").map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::Field, Gori::FilterAst::SpanKind::Value])
+    end
+  end
+
   it "treats NOT on a single term as identical to the - prefix" do
     parse("NOT host:cdn").should eq("-host:cdn")
     parse("-host:cdn").should eq("-host:cdn")

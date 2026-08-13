@@ -17,6 +17,63 @@ describe Gori::Tui::HelpView do
     backend.contains?("DECODER").should be_true # the Decoder tab cheat-sheet
   end
 
+  describe "the Query page" do
+    it "renders the whole language, built from the parser's own tables" do
+      view = HelpView.new
+      backend = MemoryBackend.new(100, 120)
+      view.render_query(Screen.new(backend), Rect.new(0, 0, 100, 120))
+
+      backend.contains?("SYNTAX").should be_true
+      backend.contains?("FIELDS").should be_true
+      backend.contains?("WORTH KNOWING").should be_true
+
+      # Every field QL offers, with its meaning — not a hand-kept subset. This is the page the
+      # one-row hints delegate to, so it is the one place that must be complete.
+      Gori::QL::FIELDS.each do |name|
+        backend.contains?("#{name}:").should be_true, "Query page is missing `#{name}:`"
+      end
+      backend.contains?(Gori::QL::FIELD_HELP["resp.body"]).should be_true
+
+      # ...the operators, which no field list can show...
+      backend.contains?("-path:/static").should be_true
+      backend.contains?("NOT (host:cdn OR host:img)").should be_true
+      # ...the spellings QL accepts but does not offer...
+      backend.contains?("res.body:").should be_true
+      # ...and the ways a query can look clean without having looked.
+      backend.contains?("compressed bodies").should be_true
+    end
+
+    it "fits every syntax example in the left column without ellipsis" do
+      # The column is widened past the cheat-sheet's KEY_W precisely so an example query is not
+      # truncated — `NOT (host:cdn OR ho…` would teach the syntax wrong.
+      Gori::QL::SYNTAX_HELP.each do |(example, _)|
+        example.size.should be <= HelpView::QUERY_KEY_W, "example too wide: #{example}"
+      end
+      Gori::QL::CAVEATS.each { |(what, _)| what.size.should be <= HelpView::QUERY_KEY_W }
+    end
+
+    it "scrolls independently of the Shortcuts page" do
+      # One shared offset would carry the cheat-sheet's position onto this page, where `at_top?`
+      # then answers about the wrong page and ↑ pops focus to the strip mid-scroll.
+      view = HelpView.new
+      view.move(40)
+      view.query_at_top?.should be_true
+      view.at_top?.should be_false
+
+      view.query_move(3)
+      view.query_at_top?.should be_false
+    end
+
+    it "clamps to the last screenful rather than scrolling into blank space" do
+      view = HelpView.new
+      view.query_move(10_000)
+      backend = MemoryBackend.new(100, 12)
+      view.render_query(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.contains?("WORTH KNOWING").should be_true # the last section is still on screen
+      backend.contains?("SYNTAX").should be_false       # ...and the first has gone by
+    end
+  end
+
   it "gives every workbench tab a section" do
     # Miner, JWT and OAST had none, while Sequencer — also default-hidden — had a full one,
     # so "it's a hidden tab" was never the rule. Three tabs whose whole keyboard surface was

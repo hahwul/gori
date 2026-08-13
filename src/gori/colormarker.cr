@@ -456,6 +456,22 @@ module Gori
     # because the reason is.
     USEFUL_FIELDS = QL::FIELDS
 
+    # What each field means IN A COLOUR RULE. QL's own text is right for a QUERY and wrong here for
+    # the two content fields, because `compile` parses with `fts: false, body_max: BODY_SCAN_MAX`:
+    # a rule scans the stored bytes rather than the trigram index, and reads 64 KiB of each side
+    # rather than the index's 8 KiB. Telling a rule author "8 KiB/side, via an index that lags
+    # capture" would be wrong about both the mechanism and the bound — in the direction that makes
+    # them narrow a rule that did not need narrowing.
+    FIELD_HELP = QL::FIELD_HELP.merge({
+      "body"      => "body bytes as captured — 64 KiB/side scan",
+      "req.body"  => "request body as captured — 64 KiB scan",
+      "resp.body" => "response body as captured — 64 KiB scan",
+    })
+
+    # As a proc, built once — the rule overlay draws this every frame while the condition row has
+    # focus, and an inline closure there allocates per frame.
+    FIELD_HELP_FOR_RULE = ->(f : String) { FIELD_HELP[QL.canonical_field(f)]? }
+
     # The fields a `FlowRow` answers on its own — the ROW tier's vocabulary, and the whole of it.
     # `InterceptFilter::FIELDS` minus the CONTENT ones: a hold gate fills `Subject#head`/`#payload`
     # with the bytes it has, and a captured row has neither, so `header:` and `body:` belong to
@@ -521,7 +537,10 @@ module Gori
     # is reported as a field is exactly what would ACT as one, `~` terms included.
     def self.unknown_fields(match_filter : String) : Array(String)
       names = QL.fields_used(match_filter).map(&.name)
-      names.uniq!.reject! { |n| QL::FIELDS.includes?(n) }
+      # `QL.known_field?`, NOT `QL::FIELDS.includes?`: `FIELDS` is the pool a surface OFFERS, and
+      # QL accepts spellings it does not offer (`res.body`, `req.size` — see `QL::FIELD_ALIASES`).
+      # Testing membership of the narrower list would refuse a condition QL compiles perfectly.
+      names.uniq!.reject! { |n| QL.known_field?(n) }
     end
 
     # Non-fatal notes about a condition that IS usable but will not behave the way its author

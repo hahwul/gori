@@ -212,17 +212,51 @@ module Gori::Tui
       @intercept.querying?
     end
 
+    # Open dropdown ⇒ ↵ takes the highlighted candidate and shuts it (pushing the narrowed
+    # condition live, as every other edit here does); closed ⇒ leave edit mode. Mirrors History.
+    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` below rather than as
+    # four more arms in it: the dropdown's two keys pushed `handle_query_key` past the complexity
+    # gate CI runs, and "move something" is a different question from "what does this key do".
+    # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
+    # move a caret to — which is why they could be claimed without displacing anything.
+    private def query_nav(key) : Bool
+      case
+      when key.down?  then @intercept.popup_down
+      when key.up?    then @intercept.popup_up
+      when key.left?  then @intercept.query_move(-1)
+      when key.right? then @intercept.query_move(1)
+      else                 return false
+      end
+      true
+    end
+
+    private def query_enter(ic) : Nil
+      if @intercept.popup_open?
+        ic.set_filter(@intercept.query) if @intercept.query_complete(close: true)
+      else
+        @intercept.stop_query
+      end
+    end
+
+    # esc closes the dropdown first. Clearing the condition on a glance at the candidate list
+    # would UNHOLD everything the operator had narrowed to — the one bar where the second-press
+    # rule is not merely convenience.
+    private def query_escape(ic) : Nil
+      return @intercept.popup_close if @intercept.popup_open?
+      @intercept.cancel_query
+      ic.set_filter("")
+    end
+
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char
       ic = @host.session.interceptor
+      return true if query_nav(key)
       case
-      when key.enter?     then @intercept.stop_query
-      when key.escape?    then @intercept.cancel_query; ic.set_filter("")
+      when key.enter?     then query_enter(ic)
+      when key.escape?    then query_escape(ic)
       when key.tab?       then ic.set_filter(@intercept.query) if @intercept.query_complete
       when key.backspace? then @intercept.query_backspace; ic.set_filter(@intercept.query)
-      when key.left?      then @intercept.query_move(-1)
-      when key.right?     then @intercept.query_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @intercept.query_insert(c)

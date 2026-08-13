@@ -1,6 +1,8 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./query_suggest"
+require "./suggest_popup"
 require "./traffic_empty_state"
 require "../settings"
 require "./highlight"
@@ -24,12 +26,27 @@ module Gori::Tui
     # queue|detail split — the Intercept tab's analogue of History's QL bar. While the
     # condition is being edited a second row carries Tab suggestions (see bar_h).
     FILTER_BAR_H = 1
-    # Standing hint on the suggestion row at a cold start (editing, but nothing typed
-    # yet to complete), so the condition language is discoverable the moment `/` opens.
-    # Example values double as syntax cues; keep in sync with InterceptFilter::FIELDS.
-    # `proto:ws` earns its own note: it is not a narrowing term but the WebSocket hold's
-    # OPT-IN, and without it no WS message is held however permissive the rest is (#500).
-    QUERY_HINT = "fields:  host:  path:  url:  method:  scheme:  status:  proto:  header:  body:    ·    ~regex    ·    proto:ws opts WS messages IN    ·    AND OR NOT ( ) combine  ·  -term negates"
+    # Standing hint on the suggestion row at a cold start (editing, but nothing typed yet to
+    # complete), so the condition language is discoverable the moment `/` opens. GENERATED from
+    # this backend's field sample plus the shared operator list, so it cannot drift from the
+    # parser or from History's and Sitemap's wording the way the hand-written version did.
+    # `proto:ws` is appended by hand and earns it: it is not a narrowing term but the WebSocket
+    # hold's OPT-IN, and without it no WS message is held however permissive the rest is (#500) —
+    # a fact no generator over a field list could know.
+    QUERY_HINT = QuerySuggest.cold_hint(InterceptFilter::HINT_FIELDS,
+      note: "proto:ws opts WS messages IN")
+    # The idle bar, before `/` opens the condition. Same generator as History's and Sitemap's, so
+    # the three stop disagreeing about which operators exist.
+    IDLE_HINT = QuerySuggest.idle_hint("/ condition", InterceptFilter::HINT_FIELDS)
+    # The highlighter's field vocabulary. This backend's `FIELDS` really is the whole of what it
+    # accepts (the comment there requires it to stay in lockstep with `field_symbol`), so unlike
+    # History there is no wider accepted set to reach for.
+    GATE_KNOWN = ->(f : String) { InterceptFilter::FIELDS.includes?(f) }
+    # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
+    # under the token, which means knowing how far the condition text is indented.
+    QUERY_PREFIX = "catch › "
+    # This backend's help, as one shared proc — see `InterceptFilter::FIELD_HELP_PROC`.
+    GATE_HELP = InterceptFilter::FIELD_HELP_PROC
 
     # How much of a held WebSocket payload the queue row previews. A row is one line, and
     # the detail pane is where the message is actually read.
@@ -67,6 +84,8 @@ module Gori::Tui
       @suggest_store = nil.as(Store?)
       @host_suggest_prefix = nil.as(String?)
       @host_suggest_values = [] of String
+      # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
+      @popup = SuggestPopup.new
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
       @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
       # Whether the LOADED item is a WebSocket message. Captured when the editor takes the
@@ -301,6 +320,7 @@ module Gori::Tui
 
     def stop_query : Nil # Enter: keep the condition, leave edit mode
       @querying = false
+      @popup.close
     end
 
     def cancel_query : Nil # Esc: clear the condition, leave edit mode
@@ -308,36 +328,73 @@ module Gori::Tui
       @query = ""
       @qcx = 0
       @preedit = ""
+      @popup.close
     end
 
     def query_insert(ch : Char) : Nil
       @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
       @qcx += 1
+      sync_popup
     end
 
     def query_backspace : Nil
       return if @qcx == 0
       @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
       @qcx -= 1
+      sync_popup
     end
 
     def query_move(d : Int32) : Nil
       @qcx = (@qcx + d).clamp(0, @query.size)
+      sync_popup
     end
 
-    # Tab: splice the first suggestion over the token under the caret. False when there
-    # is nothing to complete, so the caller can leave the query untouched.
-    def query_complete : Bool
+    # --- the opt-in completion dropdown (`\u2193`) ---------------------------------
+    # Same component and contract as History's and Sitemap's; see `SuggestPopup`.
+
+    def popup_open? : Bool
+      @popup.open?
+    end
+
+    # `↓`: open the dropdown, or move down inside it. Nil rather than Bool — the key is claimed
+    # either way, and an earlier Bool "so the key falls through" was a contract no controller
+    # honoured, which is worse than not offering one.
+    def popup_down : Nil
+      return @popup.move(1) if @popup.open?
+      @popup.set(query_suggestions)
+      @popup.open!
+    end
+
+    def popup_up : Nil
+      @popup.move(-1)
+    end
+
+    def popup_close : Nil
+      @popup.close
+    end
+
+    private def sync_popup : Nil
+      @popup.set(query_suggestions) if @popup.open?
+    end
+
+    # Splice the SELECTED candidate (dropdown open) or the first (closed) over the token under
+    # the caret. False when there is nothing to complete, so the caller can leave the query
+    # untouched. `close` is ↵'s — see HistoryView#query_complete for why ↵ must shut the popup or
+    # the bar cannot be left with Enter.
+    def query_complete(close : Bool = false) : Bool
       sugg = query_suggestions
-      return false if sugg.empty?
+      pick = @popup.choice(sugg)
+      return false unless pick
       cur = FilterAst.token_at(@query, @qcx)
-      @query = "#{@query[0, cur.start]}#{sugg.first}#{@query[cur.stop..]}"
-      @qcx = cur.start + sugg.first.size
+      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
+      @qcx = cur.start + pick.size
+      close ? @popup.close : (@popup.set(query_suggestions) if @popup.open?)
       true
     end
 
     def query_suggestions : Array(String)
-      InterceptFilter.suggestions(@query, @qcx, host_suggestions)
+      cur = FilterAst.token_at(@query, @qcx)
+      QuerySuggest.with_operators(InterceptFilter.suggestions(@query, @qcx, host_suggestions), cur)
     end
 
     # DISTINCT hosts for the `host:` pool, memoised on the typed prefix (single-entry,
@@ -815,9 +872,30 @@ module Gori::Tui
 
     # --- rendering -----------------------------------------------------------
 
+    # The queue/detail split, then the `↓` dropdown OVER it — drawn last unconditionally, since
+    # the body below returns early on the empty-queue path and that is exactly when an operator
+    # is most likely to be editing the condition. Mirrors HistoryView / SitemapView.
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
+      render_panes(screen, rect, focused, listen: listen, capturing: capturing)
+      render_query_popup(screen, rect)
+    end
+
+    private def render_query_popup(screen : Screen, rect : Rect) : Nil
+      return unless @querying && @popup.open?
+      top = rect.y + bar_h
+      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      # Anchored at the START of the query text, not at the token's offset within it.
+      # `Screen#input_line` scrolls its window horizontally once the query outgrows the bar, so
+      # `base + token.start` stops being the token's screen column on exactly the long queries
+      # where precision would matter — the card would drift right of what it completes and then
+      # clamp. A fixed anchor is always adjacent to the bar and never lies.
+      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds, GATE_HELP)
+    end
+
+    private def render_panes(screen : Screen, rect : Rect, focused : Bool = true, *,
+                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
       render_suggestions(screen, rect, rect.y + FILTER_BAR_H) if @querying
       body = body_rect(rect)
@@ -840,12 +918,11 @@ module Gori::Tui
     private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.empty?
       if @querying
-        prefix = "catch › "
-        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
-        base = rect.x + 1 + prefix.size
+        screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
+        base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
-          width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
+          width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD, GATE_KNOWN))
         return
       end
 
@@ -864,12 +941,12 @@ module Gori::Tui
 
       left_w = {rx - x, 0}.max
       if @query.blank?
-        screen.text(x, rect.y, "/ condition  ·  host:  method:  path:  status:>=500  scheme:", Theme.muted, width: left_w)
+        screen.text(x, rect.y, IDLE_HINT, Theme.muted, width: left_w)
       else
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.
         x = screen.text(x, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
+        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, GATE_KNOWN),
           Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
     end
@@ -894,10 +971,11 @@ module Gori::Tui
       return if y >= rect.bottom
       sugg = query_suggestions
       unless sugg.empty?
-        screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: {rect.w - 2, 0}.max)
+        # This backend's own help, not QL's — see `InterceptFilter::FIELD_HELP`.
+        QuerySuggest.render(screen, rect.x + 1, y, {rect.w - 2, 0}.max, sugg, GATE_HELP)
         return
       end
-      return unless FilterAst.token_at(@query, @qcx).core.empty?
+      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
       screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: {rect.w - 2, 0}.max)
     end
 
