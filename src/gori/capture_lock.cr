@@ -56,7 +56,15 @@ module Gori
     # is never mistaken for "someone else holds it".
     def self.try_at(lock_path : String) : CaptureLock?
       dir = File.dirname(lock_path)
-      Dir.mkdir_p(dir) unless Dir.exists?(dir) # a headless Project has no registry mkdir
+      # `Paths.ensure_dir`, not a bare `Dir.mkdir_p` — the same call, with the same argument,
+      # that `CaptureStatus.write_at` makes for THIS VERY DIRECTORY (capture_status.cr, which
+      # spells out the reasoning): every gori dir is owner-only 0700 because the captured
+      # traffic DB lands in it, and a plain mkdir_p leaves it at the umask, world-traversable
+      # on a shared host. This is the sibling that never got that fix, and the loose mode would
+      # be permanent — `capture_status`'s deliberate `tighten: false` never tightens an
+      # existing dir. `tighten: false` here for the same reason it is there: a `--db` project
+      # can borrow a parent directory that is not gori's to chmod.
+      Paths.ensure_dir(dir, tighten: false) # a headless Project has no registry mkdir
       file = File.open(lock_path, "w")
       begin
         file.flock_exclusive(blocking: false) # => Nil on success; RAISES IO::Error if held

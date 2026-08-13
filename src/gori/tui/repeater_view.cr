@@ -4784,7 +4784,14 @@ module Gori::Tui
       return NO_REGIONS unless markers_live?
       if @editor.edits != @marker_regions_rev
         @marker_regions_rev = @editor.edits
-        @marker_regions_cache = Fuzz::Template.marker_regions(@editor.text)
+        # Pass the already-cached spans. The one-argument form defaults `spans` to
+        # `marked_spans(text)`, so it re-walked the WHOLE request buffer a second time per
+        # render (its own `text.chars` plus `marked_spans`' own) — on the busiest editor in
+        # the app, with `@marker_spans_cache` sitting right there holding the answer.
+        # `FuzzerView#marker_regions` has passed them since the cache was introduced; this
+        # copy drifted. Both call sites gate on the same `@editor.edits` revision, so the
+        # spans handed over are always the ones for this text.
+        @marker_regions_cache = Fuzz::Template.marker_regions(@editor.text, marker_spans)
       end
       @marker_regions_cache
     end
