@@ -176,7 +176,7 @@ method:POST body:password
 
 ## 7. 다음으로 갈 곳 {#7-where-to-go-next}
 
-이제 핵심 루프를 갖췄습니다. 여기서 나아갈 몇 가지 방향이며, 각각 [가이드](/ko/guide/)에서 깊이 다룹니다:
+이제 핵심 루프를 갖췄습니다. 여기서부터는 [Playbooks](/ko/playbooks/)가 이어받아, 스코프·매핑·인터셉트·퍼징·리포트를 한 번에 하나씩 체크포인트와 함께 끝까지 안내합니다. 아래는 첫 방향 몇 가지이며, 각각 [가이드](/ko/guide/)에서도 깊이 다룹니다:
 
 - **파라미터 퍼징.** 플로우를 선택하고 `Shift-I`로 **Fuzzer**에 보낸 뒤, 위치를 표시하고(`Ctrl-A`가 흔한 파라미터를 자동 표시), 워드리스트를 붙이고 `Ctrl-R`로 실행합니다. [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/)를 보세요.
 - **오가는 도중에 잡아 편집하기.** `i`를 눌러 일치하는 요청을 잡아 두고, 계속 진행되기 전에 forward, drop, 또는 수정합니다. [Proxy & History](/ko/guide/proxy/#intercept)를 보세요.

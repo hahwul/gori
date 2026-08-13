@@ -26,5 +26,6 @@ It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, an
 
 - [Installation](/getting-started/installation/): Homebrew, the AUR, Nix, Docker, a binary, or from source
 - [Quick Start](/getting-started/quick-start/): capture, keys, and your first Repeater
+- [Playbooks](/playbooks/): follow-along lessons for each workflow, from scoping to reporting
 - [AI Setup](/getting-started/ai-setup/): connect an AI agent to the project over MCP
 - [Configuration](/getting-started/configuration/): settings, storage, and the CA

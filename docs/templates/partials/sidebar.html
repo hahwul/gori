@@ -1,5 +1,5 @@
 <aside class="docs-sidebar">
-  {% for sec in site.sections | sort(attribute="path") %}{% if sec.name != "" and sec.language == page_language %}
+  {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name != "" and sec.language == page_language %}
   <details class="sidebar-section"{% if page.section == sec.name %} open{% endif %}>
     <summary class="sidebar-title">
       <span class="sidebar-title-text">{{ sec.title | e }}</span>

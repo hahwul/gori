@@ -178,7 +178,7 @@ This is the loop you'll spend most of your time in: take a captured request, cha
 
 ## 7. Where to go next
 
-You now have the core loop. A few directions from here, each covered in depth in the [Guide](/guide/):
+You now have the core loop. From here, the [Playbooks](/playbooks/) walk one workflow at a time — scope, map, intercept, fuzz, and report — each run end to end with checkpoints. A few first directions, also covered in depth in the [Guide](/guide/):
 
 - **Fuzz a parameter.** Select a flow, press `Shift-I` to send it to the **Fuzzer**, mark a position (`Ctrl-A` auto-marks common params), attach a wordlist, and `Ctrl-R` to run. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/).
 - **Intercept and edit in flight.** Press `i` to hold matching requests and forward, drop, or modify them before they continue. See [Proxy & History](/guide/proxy/#intercept).

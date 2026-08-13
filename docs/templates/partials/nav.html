@@ -4,10 +4,11 @@
     <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
   </a>
 
-  {# Primary IA: three doc sections only. Installation lives under Start
-     (sidebar + hero one-liner); it is not a peer of Guide/Reference. #}
+  {# Primary IA: four doc sections. Installation lives under Start
+     (sidebar + hero one-liner); it is not a peer of the four. #}
   <nav class="top-nav" aria-label="{{ "a11y.primary_nav" | t }}">
     <a href="{{ base_url }}{{ lang_prefix }}/getting-started/"{% if page and page.section == "getting-started" %} class="active" aria-current="true"{% endif %}>{{ "nav.start" | t }}</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/playbooks/"{% if page and page.section == "playbooks" %} class="active" aria-current="true"{% endif %}>{{ "nav.playbooks" | t }}</a>
     <a href="{{ base_url }}{{ lang_prefix }}/guide/"{% if page and page.section == "guide" %} class="active" aria-current="true"{% endif %}>{{ "nav.guide" | t }}</a>
     <a href="{{ base_url }}{{ lang_prefix }}/reference/"{% if page and page.section == "reference" %} class="active" aria-current="true"{% endif %}>{{ "nav.reference" | t }}</a>
   </nav>
@@ -19,6 +20,7 @@
     </summary>
     <div class="nav-compact-panel" role="navigation" aria-label="{{ "a11y.primary_nav" | t }}">
       <a href="{{ base_url }}{{ lang_prefix }}/getting-started/"{% if page and page.section == "getting-started" %} class="active" aria-current="true"{% endif %}>{{ "nav.start" | t }}</a>
+      <a href="{{ base_url }}{{ lang_prefix }}/playbooks/"{% if page and page.section == "playbooks" %} class="active" aria-current="true"{% endif %}>{{ "nav.playbooks" | t }}</a>
       <a href="{{ base_url }}{{ lang_prefix }}/guide/"{% if page and page.section == "guide" %} class="active" aria-current="true"{% endif %}>{{ "nav.guide" | t }}</a>
       <a href="{{ base_url }}{{ lang_prefix }}/reference/"{% if page and page.section == "reference" %} class="active" aria-current="true"{% endif %}>{{ "nav.reference" | t }}</a>
       <a href="{{ base_url }}{{ lang_prefix }}/getting-started/installation/"{% if page and page.slug == "installation" %} class="active" aria-current="true"{% endif %}>{{ "nav.install" | t }}</a>
