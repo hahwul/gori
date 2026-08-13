@@ -17,6 +17,36 @@ module IO::Buffered
   end
 end
 
+# `SSL_pending` — bytes OpenSSL has already decrypted and is holding for the next read. Not in
+# Crystal's LibSSL bindings, and it is the half of "is this TLS socket clean?" that an fd-level
+# peek structurally cannot answer: the record is already off the kernel socket. Present in every
+# OpenSSL and LibreSSL gori can link against (it predates SSL_has_pending, which is 1.1+ and
+# would also cover a buffered-but-undecrypted record — the fd peek below covers that instead,
+# so the older, universally available call is enough).
+lib LibSSL
+  fun ssl_pending = SSL_pending(handle : SSL) : Int
+end
+
+# The two things `OpenSSL::SSL::Socket` knows and does not expose, both needed to answer
+# "clean?" WITHOUT a timed read. Same shape as `gori_buffered_residue?` above: reaching into
+# stdlib internals deliberately, so a rename fails to compile rather than silently misbehaving.
+class OpenSSL::SSL::Socket
+  # Decrypted bytes waiting inside OpenSSL.
+  def gori_ssl_pending? : Bool
+    LibSSL.ssl_pending(@ssl) > 0
+  end
+
+  # The socket underneath the TLS layer, so the kernel buffer can be peeked for a record that
+  # has arrived but not been decrypted yet. `BIO` exposes its `io`; the SSL socket does not.
+  def gori_underlying_io : IO
+    {% if compare_versions(Crystal::VERSION, "1.12.0") >= 0 %}
+      @bio.to_reference.io
+    {% else %}
+      @bio.io
+    {% end %}
+  end
+end
+
 module Gori::Repeater
   # HTTP/1.1 keep-alive connection pool for a sweep's sends.
   #
@@ -174,7 +204,7 @@ module Gori::Repeater
         # check is an early retire, and THIS one, right before we write onto the socket, is the
         # reliable one: by now any straggler residue is on the wire. Without it a poisoned socket
         # would frame this request's response against the previous response's leftovers.
-        case checkout_state(io)
+        case ConnPool.checkout_state(io)
         when Checkout::Closed
           # The origin's FIN was on the socket BEFORE gori wrote a byte of this request. That
           # proves what `stale?` (below) explicitly cannot: the ORIGIN NEVER SAW THIS REQUEST.
@@ -340,10 +370,20 @@ module Gori::Repeater
     # 0x02 on every platform gori targets (Linux, macOS, the BSDs).
     MSG_PEEK = 0x02
 
-    # The short-probe deadline for a non-`TCPSocket` (TLS) socket, where the fd trick below
-    # cannot see decrypted application bytes. Only ever paid on a socket that turns out
-    # CLEAN, which is the common case — but a reused TLS socket has already saved a full
-    # handshake, so a millisecond to prove it is safe is a good trade.
+    # LAST-RESORT probe deadline, for a socket that answers to `read_timeout` but is neither a
+    # `TCPSocket` nor an `OpenSSL::SSL::Socket` gori can look inside. Every socket the pool
+    # actually parks now takes a non-blocking path (see `checkout_state`); this is what keeps a
+    # future transport correct-but-slow rather than silently unchecked.
+    #
+    # It used to be the whole TLS answer, and it cost the full deadline on every CLEAN
+    # checkout — which is the common case. MEASURED against a real TLS origin, 200 checkouts:
+    # median 1598µs (min 1105, max 5169), against 0.38µs for the plaintext fd peek. Sequential
+    # callers paid it per request: a default `gori run sequence` over https is 500 samples on
+    # one connection, so ~800ms of the run was this probe.
+    #
+    # With the two-step check in `checkout_state`, a socket parked after a real exchange now
+    # answers in 0.5µs median (max 3µs, fast path 250/250 over a live TLS origin) and this
+    # deadline is only reached when bytes are genuinely waiting.
     DRAIN_PROBE = 1.millisecond
 
     # What is waiting on a parked socket, asked once, right before this request is written.
@@ -364,30 +404,68 @@ module Gori::Repeater
     # so handing back a socket proved dead DROPPED the request. It is now its own answer — and
     # a better one for every method, because a FIN observed BEFORE the write means the origin
     # never saw the request at all.
-    private def checkout_state(io : IO) : Checkout
+    # `MSG_PEEK` on a socket fd: read-without-consume, non-blocking because Crystal's sockets
+    # are evented. EAGAIN/EWOULDBLOCK means nothing is waiting, a byte means residue, 0 means
+    # the peer sent FIN. ~0.38µs measured. Shared by the plaintext branch and the fd half of
+    # the TLS one, so the two cannot disagree about what a peek means.
+    private def self.peek_state(sock : TCPSocket) : Checkout
+      buf = uninitialized UInt8[1]
+      n = LibC.recv(sock.fd, buf.to_unsafe.as(Void*), LibC::SizeT.new(1), MSG_PEEK)
+      return Checkout::Closed if n == 0
+      return Checkout::Residue if n > 0
+      {Errno::EAGAIN, Errno::EWOULDBLOCK}.includes?(Errno.value) ? Checkout::Clean : Checkout::Residue
+    end
+
+    # Let the transport itself say what is waiting, bounded by DRAIN_PROBE. `nil` = EOF (the
+    # peer closed); a byte = residue, and it is CONSUMED — which is fine because this only
+    # runs on a socket that is about to be retired either way, and never on the clean fast
+    # path above.
+    private def self.drain_probe_state(io) : Checkout
+      prev = io.read_timeout
+      begin
+        io.read_timeout = DRAIN_PROBE
+        io.read_byte.nil? ? Checkout::Closed : Checkout::Residue
+      rescue IO::TimeoutError
+        Checkout::Clean
+      ensure
+        io.read_timeout = prev
+      end
+    end
+
+    # Pure and class-level, like the two reuse predicates below it, so a spec can drive it
+    # against a real socket rather than only through a whole pooled send. It reads nothing off
+    # the pool — only the socket it is handed.
+    def self.checkout_state(io : IO) : Checkout
       # 1. Residue already pulled into the buffered layer by `read_head`'s byte reads. This is
       #    where a body-past-Content-Length or a HEAD-with-body actually lands, and it is
       #    non-blocking, so it must be checked FIRST.
       return Checkout::Residue if io.is_a?(IO::Buffered) && io.gori_buffered_residue?
       # 2. Residue — or the peer's FIN — still on the kernel socket.
       if io.is_a?(TCPSocket)
-        buf = uninitialized UInt8[1]
-        n = LibC.recv(io.fd, buf.to_unsafe.as(Void*), LibC::SizeT.new(1), MSG_PEEK)
-        return Checkout::Closed if n == 0
-        return Checkout::Residue if n > 0
-        {Errno::EAGAIN, Errno::EWOULDBLOCK}.includes?(Errno.value) ? Checkout::Clean : Checkout::Residue
-      elsif io.responds_to?(:read_timeout=) && io.responds_to?(:read_timeout)
-        prev = io.read_timeout
-        begin
-          io.read_timeout = DRAIN_PROBE
-          # nil = EOF (the peer closed); a byte = residue. The byte is consumed, which is why
-          # this branch only ever runs on a socket that is about to be retired either way.
-          io.read_byte.nil? ? Checkout::Closed : Checkout::Residue
-        rescue IO::TimeoutError
+        peek_state(io)
+      elsif io.is_a?(OpenSSL::SSL::Socket)
+        # TLS answers in two steps, and the ORDER is the whole design.
+        #
+        # 1. Decrypted bytes already inside OpenSSL are residue outright (`SSL_pending`), free.
+        # 2. Otherwise ask the fd whether ANYTHING is waiting. If the kernel buffer is empty
+        #    too, the socket is provably idle and this returns Clean without a read — the
+        #    common case, and what removes the ~1.6ms this branch used to cost every checkout.
+        #
+        # Only when bytes ARE waiting does it fall through to the timed read below. That step
+        # cannot be skipped: a peek sees bytes but not what they MEAN. A TLS 1.3 record
+        # carrying a NewSessionTicket has outer content type 0x17, exactly like application
+        # data — the real type is encrypted — so nothing short of letting OpenSSL decrypt it
+        # can tell a post-handshake message from a leftover response. Reading the content-type
+        # byte was tried and is wrong for TLS 1.3 for that reason.
+        return Checkout::Residue if io.gori_ssl_pending?
+        under = io.gori_underlying_io
+        if under.is_a?(TCPSocket) && peek_state(under) == Checkout::Clean
           Checkout::Clean
-        ensure
-          io.read_timeout = prev
+        else
+          drain_probe_state(io)
         end
+      elsif io.responds_to?(:read_timeout=) && io.responds_to?(:read_timeout)
+        drain_probe_state(io)
       else
         Checkout::Clean # an IO with no timeout knob is not a pooled socket; nothing to prove
       end
