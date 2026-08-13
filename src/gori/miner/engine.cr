@@ -141,6 +141,16 @@ module Gori::Miner
     def stop : Nil
       @state = State::Stopped
       poke
+      # The dispatcher has TWO park points and `poke` only reaches one: `park_if_paused`
+      # waits on @wake, `wait_for_worker` waits on @idle. A stop arriving while it is parked
+      # on @idle was therefore invisible until a worker finished an in-flight bucket — which
+      # against a dead origin is `retries × retry_pause` long. Releasing @idle too is safe by
+      # construction: `wait_for_worker`'s own comment says a wake means "look again", never
+      # "one task finished", and the loop re-reads @state on the next iteration.
+      select
+      when @idle.send(nil)
+      else
+      end
     end
 
     def pause : Nil
@@ -222,15 +232,28 @@ module Gori::Miner
       workers.times do |i|
         spawn(name: "miner-worker-#{i}") do
           while task = jobs.receive?
-            # Children are queued BEFORE the task is counted out, so the "queue empty and
-            # nothing in flight" test below is a true end-of-work and never races a child in.
-            process_bucket(task).each { |child| work << child } unless @state.stopped?
-            @inflight -= 1
-            # Non-blocking: a worker must never park reporting completion (the dispatcher
-            # only listens while it is idle). Dropping a poke is safe — see `wait_for_worker`.
-            select
-            when @idle.send(nil)
-            else
+            begin
+              # Children are queued BEFORE the task is counted out, so the "queue empty and
+              # nothing in flight" test below is a true end-of-work and never races a child in.
+              process_bucket(task).each { |child| work << child } unless @state.stopped?
+            rescue ex
+              # Every received task MUST count itself out, or the mine hangs — the same
+              # invariant `Discover::Engine#worker_loop` states for its Outcome. Without this
+              # rescue a raise out of process_bucket skips BOTH the decrement and the poke
+              # below, so the dispatcher parks in `wait_for_worker` on an @inflight that can
+              # never reach 0, never reaches `jobs.close`, and every other worker then parks
+              # forever on `jobs.receive?` — a mine that is wedged, not merely wrong. Count the
+              # bucket as an error and keep the pool alive instead.
+              @errors += 1
+              @first_error ||= ex.message || ex.class.name
+            ensure
+              @inflight -= 1
+              # Non-blocking: a worker must never park reporting completion (the dispatcher
+              # only listens while it is idle). Dropping a poke is safe — see `wait_for_worker`.
+              select
+              when @idle.send(nil)
+              else
+              end
             end
           end
         ensure
@@ -302,6 +325,13 @@ module Gori::Miner
       # Reflection is self-identifying — resolve those names with no bisection. `reflected`
       # maps canary → name, so the confirming canary is in hand without a name→canary lookup.
       decision.reflected.each do |canary, name|
+        # The widest amplifier in the miner: one bucket can carry `bucket_size` reflected names
+        # and each one calls `confirm`, which is itself up to `confirm_rounds × (1 + retries)`
+        # requests. Entry to `process_bucket` is gated on the stop flag but nothing below it
+        # was, so a stop landed while ten workers were inside this loop still let hundreds of
+        # requests out per worker. The progress bar is left short on purpose — a stopped run
+        # did not finish these names, and saying it did would be a lie.
+        break if @state.stopped?
         confirmed = confirm(name, task.location, Evidence::Reflection, canary)
         record_finding(confirmed) if confirmed
         mark_done(1)
@@ -384,6 +414,14 @@ module Gori::Miner
       last_grpc_message = nil.as(String?)
       interval = pace_interval
       rounds.times do
+        # A confirm round is a REQUEST, so the stop flag has to be read here and not only at
+        # the top of the bucket: `process_bucket` checks it once on entry, and everything below
+        # that check keeps sending. `Discover::Engine#process_calibrate` re-checks inside its
+        # own fan-out for exactly this reason, and its comment quantifies the bug that fixed at
+        # ~120 requests to a third party AFTER the operator pressed stop. Breaking with
+        # `hits == 0` returns nil — no finding — which is the honest answer for a candidate
+        # whose confirmation never ran.
+        break if @state.stopped?
         c = Canary.fresh
         # Same span-protection as the main loop — the confirm re-send injects the same name.
         bytes, spans = Inject.apply_with_spans(@base, location, [{name, c}], @config.add_content_length_when_missing?)

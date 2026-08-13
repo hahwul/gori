@@ -174,6 +174,71 @@ private class RecordingBucketBackend < F::Backend
   end
 end
 
+# Raises out of `send` instead of answering — an unexpected INTERNAL failure, not a network
+# error (those come back as `Result#error` and the engine already handles them).
+#
+# It raises only once a REAL candidate name is on the wire, which is precisely a bucket send
+# from `process_bucket`. Selecting on the canary (`=gq…`) instead does NOT work: Baseline's
+# control probe carries canary values too, so the raise landed in calibration, came out as an
+# `ErrorEvent`, and never exercised the worker path at all — the run still "finished", which is
+# exactly the false green this spec exists to avoid. Baseline's probes carry no candidate name
+# (raw carries none, control carries bogus `zz…`), so this cannot fire before the workers run.
+private class RaisingBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin, @candidates : Array(String))
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    line = String.new(bytes).lines.first? || ""
+    raise "injected worker failure" if @candidates.any? { |n| line.includes?("#{n}=") }
+    body = "BASELINE BODY CONTENT"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+end
+
+# Counts sends, and trips `stop` on the Nth one so an example can cut a run at a chosen point.
+# `reflect` makes every candidate name self-identify, which is what drives `process_bucket`'s
+# widest fan-out: one `confirm` per reflected name, each up to `confirm_rounds` requests.
+private class StopAtBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+  property engine : M::Engine? = nil
+
+  def initialize(@origin : F::Origin, @reflect : Array(String), @stop_at : Int32? = nil)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    if (n = @stop_at) && @sent == n
+      @engine.try(&.stop)
+    end
+    params = query_params(bytes)
+    body = "BASELINE BODY CONTENT"
+    @reflect.each { |name| (v = params[name]?) && (body += " reflected=#{v}") }
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+
+  private def query_params(bytes : Bytes) : Hash(String, String)
+    pairs = Hash(String, String).new
+    line = String.new(bytes).lines.first? || ""
+    target = line.split(' ')[1]? || ""
+    qi = target.index('?')
+    return pairs unless qi
+    target[(qi + 1)..].split('&').each do |pair|
+      k, _, v = pair.partition('=')
+      pairs[k] = v unless k.empty?
+    end
+    pairs
+  end
+end
+
 private def mine(backend : F::Backend, names : Array(String), config : M::Config) : Array(M::Finding)
   base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
   engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: config)
@@ -480,6 +545,77 @@ describe Gori::Miner::Engine do
         config: c)
       engine.skipped_names.should be_empty
       engine.total_names.should eq(6_i64)
+    end
+  end
+  # A raise out of `process_bucket` used to WEDGE the whole mine, not merely lose the bucket.
+  # The worker decremented `@inflight` and poked `@idle` only on the normal path, so an
+  # exception skipped BOTH: the dispatcher then sat in `wait_for_worker` on an `@inflight`
+  # that could never reach 0, never reached `jobs.close`, and every other worker parked
+  # forever on `jobs.receive?`. Nothing times a mine out, so this surfaced as `gori run mine`
+  # hanging with no output, MCP `mine_stop` answering "stopping" forever, and a TUI tab that
+  # could not be closed.
+  #
+  # `Discover::Engine#worker_loop` already spells out the invariant this restores ("every
+  # received task MUST yield exactly one Outcome, or the orchestrator hangs"). The miner was
+  # the sibling that lacked it.
+  describe "a worker that raises" do
+    it "finishes the mine instead of wedging it, and reports the failure" do
+      c = cfg
+      names = %w(alpha beta gamma delta epsilon zeta)
+      engine = M::Engine.new("GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false,
+        names: names,
+        backend: RaisingBackend.new(F::Origin.new("http", "h", 80), names),
+        config: c)
+
+      # Driven from its own fiber: the bug under test is a HANG, and a spec that hangs takes
+      # the whole suite down and reports nothing. Time it out into an ordinary failure.
+      done = Channel(Nil).new(1)
+      spawn do
+        engine.run { |_ev| }
+        done.send(nil)
+      end
+
+      finished = false
+      select
+      when done.receive
+        finished = true
+      when timeout(10.seconds)
+      end
+
+      finished.should be_true # false ⇒ the dispatcher is parked in wait_for_worker again
+      engine.first_error.should eq("injected worker failure")
+    end
+  end
+  # `process_bucket` reads the stop flag ONCE, on entry. Everything below that check kept
+  # sending: the reflected fan-out calls `confirm` per name, and `confirm` fires up to
+  # `confirm_rounds × (1 + retries)` requests each — so a stop landing while workers were inside
+  # a wide bucket still let hundreds of requests out per worker. For a tool whose contract is
+  # that the operator decides what leaves the machine (P4), that is a correctness bug.
+  # `Discover::Engine#process_calibrate` re-checks inside its own fan-out for the same reason.
+  #
+  # Measured against an UNSTOPPED run of the identical setup rather than a hardcoded count, so
+  # the example says "stopping cuts the run short" and cannot be satisfied by tuning.
+  describe "stop during a bucket's fan-out" do
+    it "stops sending instead of confirming the rest of the bucket" do
+      names = %w(alpha beta gamma delta epsilon zeta)
+      run = ->(stop_at : Int32?) do
+        c = cfg
+        c.bucket_size[M::Location::Query] = 8 # one bucket, every name in it
+        c.confirm_rounds = 3                  # make each confirm visibly expensive
+        backend = StopAtBackend.new(F::Origin.new("http", "h", 80), names, stop_at)
+        engine = M::Engine.new("GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false,
+          names: names, backend: backend, config: c)
+        backend.engine = engine
+        engine.run { |_ev| }
+        backend.sent
+      end
+
+      full = run.call(nil)
+      full.should be > 10 # the fan-out really is wide, or the comparison below proves nothing
+
+      # Cut it just after the bucket send that produced the reflections.
+      stopped = run.call(4)
+      stopped.should be < full
     end
   end
 end

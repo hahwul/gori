@@ -627,7 +627,22 @@ module Gori::Fuzz
         # only the requests already in-flight (inside run_one) finish, matching the
         # documented "in-flight requests finish".
         next if @state == State::Stopped
-        result = run_one(job)
+        result =
+          begin
+            run_one(job)
+          rescue ex
+            # A raise here used to kill the worker outright. `@finished` still fires from the
+            # ensure below, so `coordinate` completes and the sweep reports Done with a
+            # plausible count — while that payload's row is gone and concurrency is silently
+            # down one for the rest of the run. Worse, if EVERY worker dies this way,
+            # `dispatch_loop` is left parked on `@jobs.send` with no receiver and never reaches
+            # its own `ensure @jobs.close`, leaking a fiber that holds the generator and its
+            # open wordlist fds. Turn it into an ordinary errored row instead: `run_one` already
+            # reports network failures that way, and this is the same thing one level out.
+            @errors += 1
+            @events.send(ErrorEvent.new(ex.message || "fuzz worker error"))
+            next
+          end
         @sent += 1
         @matched += 1 if result.matched?
         # A swallowed `¦chain` (the transform did not run, the payload went out raw) is an

@@ -203,7 +203,7 @@ module Gori::Sequencer
         spawn(name: "sequencer-worker-#{i}") do
           while jobs.receive?
             next if @state.stopped?
-            process_one(backend)
+            process_one_guarded(backend)
           end
         ensure
           finished.send(nil)
@@ -211,6 +211,22 @@ module Gori::Sequencer
       end
 
       @concurrency.times { finished.receive }
+    end
+
+    # One sample, with the worker fiber's survival guaranteed.
+    #
+    # Without the rescue, a raise out of `process_one` kills the worker. `finished` still
+    # fires from the loop's `ensure`, so the join completes and the run reports Done — but
+    # the DISPATCHER is left parked on `jobs.send` (buffered to @concurrency) with no
+    # receiver, never reaches its own `ensure jobs.close`, and leaks forever holding the
+    # engine and a `CappedBackend` that `orchestrate`'s ensure has already closed. The
+    # comment above `run_live` names this exact leak and guards only the invalid-regex
+    # case; this covers the rest. Count the sample as an error and keep sampling.
+    private def process_one_guarded(backend : Fuzz::CappedBackend) : Nil
+      process_one(backend)
+    rescue ex
+      @errors += 1
+      @first_error ||= ex.message || ex.class.name
     end
 
     private def process_one(backend : Fuzz::CappedBackend) : Nil
