@@ -160,7 +160,7 @@ module Gori
       # including against a TUI sweeping the same project at the same time.
       private def sweep_out_of_band(store : Store) : Array(Detection)
         dets, _ = OutOfBand.sweep(store, 0_i64)
-        dets.each { |d| store.upsert_probe_issue(d) }
+        store.upsert_probe_issues(dets)
         dets
       rescue DB::Error | SQLite3::Exception
         [] of Detection

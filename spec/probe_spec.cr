@@ -4249,6 +4249,85 @@ end
 # agree on which codes accumulate their evidence. They did not: Group kept its own three-code
 # copy of the list while Store's had grown to five, so a headless scan reported ONE of a host's
 # third-party hosts and dropped the rest. Both now read Store::ACCUMULATING_EVIDENCE_CODES.
+describe "Store#upsert_probe_issues (batched ↔ sequential parity)" do
+  # `upsert_probe_issues` exists to collapse N writer round-trips into one, so its whole licence
+  # is that it replays the SAME statements in the SAME order — no folding. That is only worth
+  # anything if it is checked against the sequential path it replaced, on the cases where a fold
+  # WOULD have diverged: composition onto a row that already exists (the Group parity specs below
+  # only cover an empty store), an accumulating-evidence code, a severity raise that drags the
+  # title with it, affected-URL dedup, and a suppression landing mid-batch.
+  det = ->(code : String, host : String, url : String, sev : Gori::Store::Severity, title : String, evidence : String?) do
+    Gori::Probe::Detection.new(code, "headers", host, url, title, sev, evidence)
+  end
+
+  # Everything but the id and the timestamps: the batch shares one now_us by design, and two
+  # stores are opened microseconds apart, so times cannot be compared across the two runs.
+  shape = ->(i : Gori::Store::ProbeIssue) do
+    {i.code, i.category, i.host, i.title, i.severity, i.status,
+     i.hit_count, i.affected, i.evidence, i.sample_flow_id}
+  end
+
+  run_both = ->(seed : Array(Gori::Probe::Detection), batch : Array(Gori::Probe::Detection), suppress : Array({String, String})) do
+    out = [] of Array({String, String, String, String, Gori::Store::Severity, Gori::Store::Status, Int64, Array(String), String?, Int64?})
+    2.times do |mode|
+      with_store do |store|
+        seed.each { |d| store.upsert_probe_issue(d) } # the pre-existing rows, same either way
+        # A durable suppression is only ever created by a hard delete, so make one the real way.
+        suppress.each do |(code, host)|
+          store.upsert_probe_issue(det.call(code, host, "https://#{host}/seed",
+            Gori::Store::Severity::Low, "t", nil))
+          row = store.probe_issues.find { |i| i.code == code && i.host == host }.not_nil!
+          store.delete_probe_issue(row.id)
+        end
+        if mode == 0
+          batch.each { |d| store.upsert_probe_issue(d) } # sequential: one commit per detection
+        else
+          store.upsert_probe_issues(batch) # batched: one commit for all of them
+        end
+        out << store.probe_issues.map { |i| shape.call(i) }
+      end
+    end
+    out
+  end
+
+  it "writes the same rows as the per-detection loop it replaced" do
+    seed = [
+      det.call("missing_sri", "acme.test", "https://acme.test/a", Gori::Store::Severity::Low, "SRI", "cdn.a.test"),
+      det.call("weak_csp", "acme.test", "https://acme.test/a", Gori::Store::Severity::Low, "CSP", "first"),
+    ]
+    batch = [
+      # accumulating code, new label → evidence must UNION, not overwrite and not concatenate blobs
+      det.call("missing_sri", "acme.test", "https://acme.test/b", Gori::Store::Severity::Low, "SRI", "cdn.b.test"),
+      # …and a third, so the batch composes onto its own earlier write, not just onto the seed
+      det.call("missing_sri", "acme.test", "https://acme.test/c", Gori::Store::Severity::Low, "SRI", "cdn.c.test"),
+      # same affected URL again → must dedup, hit_count still climbs
+      det.call("missing_sri", "acme.test", "https://acme.test/b", Gori::Store::Severity::Low, "SRI", "cdn.b.test"),
+      # non-accumulating code → first-wins evidence survives
+      det.call("weak_csp", "acme.test", "https://acme.test/b", Gori::Store::Severity::Low, "CSP", "second"),
+      # severity raise → title must be adopted with it
+      det.call("weak_csp", "acme.test", "https://acme.test/c", Gori::Store::Severity::High, "CSP (worse)", "third"),
+      # a brand-new (code, host) inside the batch → INSERT branch
+      det.call("cors_wildcard", "other.test", "https://other.test/x", Gori::Store::Severity::Medium, "CORS", nil),
+    ]
+    seq, bat = run_both.call(seed, batch, [] of {String, String})
+    bat.should eq(seq)
+    # and the fold actually happened, so the comparison above is not two empty lists
+    sri = bat.find { |r| r[0] == "missing_sri" }.not_nil!
+    sri[8].not_nil!.should contain("cdn.c.test")
+  end
+
+  it "honours a suppression that lands mid-batch exactly as the sequential path did" do
+    seed = [] of Gori::Probe::Detection
+    batch = [
+      det.call("missing_sri", "acme.test", "https://acme.test/a", Gori::Store::Severity::Low, "SRI", "cdn.a.test"),
+      det.call("weak_csp", "acme.test", "https://acme.test/a", Gori::Store::Severity::Low, "CSP", "first"),
+    ]
+    seq, bat = run_both.call(seed, batch, [{"weak_csp", "acme.test"}])
+    bat.should eq(seq)
+    bat.map(&.[](0)).should eq(["missing_sri"]) # the suppressed code never lands
+  end
+end
+
 describe "Gori::Probe evidence accumulation (Group ↔ Store parity)" do
   # Build N detections of one code on one host, each carrying a different evidence label.
   private_labels = ->(code : String, labels : Array(String)) do

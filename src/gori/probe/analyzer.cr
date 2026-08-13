@@ -411,15 +411,17 @@ module Gori
       private def persist(detections : Array(Detection), *, flow_id : Int64, repeater_id : Int64?) : Nil
         return if detections.empty?
         host = nil.as(String?)
-        wrote = false
+        # Stamp first, write once. One page emits 8-15 detections and `Store#upsert_probe_issue`
+        # blocks on the writer reply, so the per-detection loop this replaced paid a commit each.
+        batch = [] of Detection
         detections.each do |d|
           next if suppressed?(d.code, d.host)
           stamped = Probe.with_source(d, flow_id: (flow_id > 0 ? flow_id : nil), repeater_id: repeater_id)
-          @store.upsert_probe_issue(stamped)
+          batch << stamped
           host ||= stamped.host
-          wrote = true
         end
-        return unless wrote
+        return if batch.empty?
+        @store.upsert_probe_issues(batch)
         # Store#upsert already bumps probe_generation (TUI polls that). Event is for
         # notifications; may be dropped when the channel is full.
         emit(IssueEvent.new(host || ""))
@@ -573,14 +575,14 @@ module Gori
         results.concat(sender.send_pipeline(plan.pipeline, plan.probe_timeout)) unless plan.pipeline.empty?
         detections = rule.detections_all(plan, results, detail)
         return 0 if detections.empty?
-        wrote = 0
+        batch = [] of Detection
         detections.each do |d|
           next if suppressed?(d.code, d.host)
-          stamped = Probe.with_source(d, flow_id: (row.id > 0 ? row.id : nil), repeater_id: repeater_id)
-          @store.upsert_probe_issue(stamped)
-          wrote += 1
+          batch << Probe.with_source(d, flow_id: (row.id > 0 ? row.id : nil), repeater_id: repeater_id)
         end
-        return 0 if wrote == 0
+        return 0 if batch.empty?
+        @store.upsert_probe_issues(batch) # one writer round-trip for the whole rule's findings
+        wrote = batch.size
         # Store#upsert already bumps probe_generation (TUI polls that). Event is for
         # notifications; may be dropped when the channel is full.
         # Notification wording is rule-agnostic: the detection's own title + evidence (so a CORS

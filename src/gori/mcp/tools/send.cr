@@ -1182,9 +1182,8 @@ module Gori
           repeater_id, target, request.to_slice, http2, true, flow_id, 0,
           head, body, nil, duration_us, nil, nil)
         return unless detail = Probe.detail_from_repeater(rec)
-        Probe::Passive.analyze(detail).each do |d|
-          store.upsert_probe_issue(Probe.with_source(d, flow_id: flow_id, repeater_id: repeater_id))
-        end
+        store.upsert_probe_issues(
+          Probe::Passive.analyze(detail).map { |d| Probe.with_source(d, flow_id: flow_id, repeater_id: repeater_id) })
       rescue
         # Probe must never break send_request
       end
