@@ -55,5 +55,16 @@ module Gori
     def self.location(host : String, target : String) : String
       absolute_form?(target) ? target : "#{host}#{target}"
     end
+
+    # The scope/`url:`-matching URL of a LIVE request, from its parts. The Crystal-side twin of
+    # `QL::URL_EXPR`, which builds the identical string in SQL for a STORED flow — so a `url:`
+    # term means the same thing at a hold gate as it does in the History filter bar.
+    #
+    # Deliberately does NOT add the port the way `FlowRow#url` does: every existing Scope spec
+    # agrees on the port-free spelling for an origin-form target, and this is the function
+    # `Scope.request_url` delegates to, so changing that here would move the scope boundary.
+    def self.request_url(scheme : String, host : String, target : String) : String
+      absolute_form?(target) ? target : "#{scheme}://#{host}#{target}"
+    end
   end
 end

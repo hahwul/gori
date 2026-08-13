@@ -1174,8 +1174,9 @@ describe Gori::MCP::Server do
     it "refuses conditions and enum values that would never do what the caller meant" do
       with_store do |store|
         {
-          %({"when":"host:"}),       # a term with an empty value is dropped ⇒ matches everything
-          %({"when":"size:>10000"}), # a History QL field this backend free-texts ⇒ never fires
+          %({"when":"host:"}),      # a term with an empty value is dropped ⇒ matches everything
+          %({"when":"szie:>1000"}), # a field neither compiler implements ⇒ free-texted, never fires
+          %({"when":"body~[bad"}),  # a regex that will not compile ⇒ a colour that never appears
           %({"when":"a","color":"chartreuse"}),
           %({"when":"a","style":"sideways"}),
         }.each_with_index do |args, i|
@@ -1243,10 +1244,13 @@ describe Gori::MCP::Server do
       with_store do |store|
         drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_color_rule","arguments":{"when":"host:h.test","color":"blue"}}}))
         pv = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"preview_color_rule","arguments":{"when":"body:secret"}}}))[0])
-        pv["would_match"].as_i64.should eq(0)
+        pv["would_match"].as_i64.should eq(0) # nothing captured in this store to match
         pv["would_paint"].as_i64.should eq(0)
-        pv["notes"][0].as_s.should contain("`body:` never matches here")
-        store.color_rules.size.should eq(1) # the preview created nothing
+        # The note is now the OPPOSITE claim: `body:` works here, and reaches further than the
+        # same term in the filter bar does.
+        pv["notes"][0].as_s.should contain("scans here rather than reading the text index")
+        pv["notes"][0].as_s.should contain("as CAPTURED") # ...and says what that costs
+        store.color_rules.size.should eq(1)               # the preview created nothing
       end
     end
 

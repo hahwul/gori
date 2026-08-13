@@ -323,24 +323,30 @@ module Gori
     # built LAZILY here, only after the enabled/direction gates pass AND only when Scope
     # is active, so the common capture-only (intercept-off) path never allocates it.
     # Folds in the catch direction (skip when responses-only) and the conditional filter.
+    # `head` is the request head as it will go on the wire, for a `header:`/`header~` term. The
+    # BODY is deliberately absent and always will be: this gate is what decides whether the body
+    # gets buffered at all (see `ClientConn`), so a condition asking about the body would have to
+    # be answered before there is anything to answer it with.
     def intercepts_request?(*, method : String, host : String,
-                            target : String, scheme : String) : Bool
+                            target : String, scheme : String, head : Bytes? = nil) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if dir.response_only?
       return false unless scope_allows?(scheme, host, target)
-      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme))
+      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
+        head: head))
     end
 
     # Precise per-RESPONSE gate (same shape as the request gate). Skips when
     # requests-only; the condition can also test `status:` here (a response has one).
-    def intercepts_response?(*, method : String, host : String,
-                             target : String, scheme : String, status : Int32) : Bool
+    def intercepts_response?(*, method : String, host : String, target : String,
+                             scheme : String, status : Int32, head : Bytes? = nil) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if dir.request_only?
       return false unless scope_allows?(scheme, host, target)
-      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme, status: status))
+      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
+        status: status, head: head))
     end
 
     # Precise per-MESSAGE gate for a reassembled WebSocket message (#500 step 2). `out` is

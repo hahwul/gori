@@ -17,9 +17,14 @@ module Gori
   #   header:set-cookie                 # substring over request/response head bytes
   #   body~secret\d+  host~^api\.       # `~` = regex (host path url header body)
   module QL
-    # `:` fields:  host path method scheme proto status size reqsize respsize dur header body
+    # `:` fields:  see FIELDS below (the list every surface reads).
     # `~` regex on: host path url header body   (+ bare words = free text).
     # Comparison ops (<= >= < > =) apply to status/size/reqsize/respsize/dur.
+    #
+    # QL is not only History's: a Colormarker rule's condition is a QL string too, matched
+    # against the flow it would paint (see `Colormarker`). `InterceptFilter` — the hold gate and
+    # extract-rule condition — speaks the same grammar over the SUBSET of fields a live,
+    # uncaptured message can answer. One language, three surfaces, no dialects.
     struct Filter
       getter sql : String # safe to splice into "WHERE ..."; values are in `args`
       getter args : Array(DB::Any)
@@ -27,10 +32,13 @@ module Gori
       def initialize(@sql : String, @args : Array(DB::Any))
       end
 
-      # Does answering this filter read the trigram index? `body:` and free text are the
-      # only terms that compile to a `flows_fts` subquery (see body_cond / free text below),
-      # and nothing else mentions that table, so matching the name is exact rather than
-      # heuristic. Callers use it to decide whether a stale index would corrupt their answer:
+      # Does answering this filter read the trigram index? `body:` is the only term that
+      # compiles to a `flows_fts` subquery — and only when compiled with `fts: true`, the
+      # default (see `body_cond`) — and nothing else mentions that table, so matching the name
+      # is exact rather than heuristic. (Free text does NOT: it compiles to a LIKE over
+      # method/host/target. This comment claimed otherwise for a while; the test was always
+      # right and only its explanation was wrong.)
+      # Callers use it to decide whether a stale index would corrupt their answer:
       # indexing is off-commit (Store V4), so a one-shot surface drains the backlog first
       # (Store#index_pending!) while a live one reports Store#fts_backlog instead of stalling.
       def uses_fts? : Bool
@@ -92,6 +100,9 @@ module Gori
       body, or in a gzipped/binary one. `body~regex` scans the stored bytes instead, with no
       cap and no content-type rule, so it is the one to reach for when `body:` comes back
       empty and you expected a hit. (`body:` is the fast path; `body~` is the complete one.)
+      A COLOUR RULE's `body:` is the complete one: a rule has to paint the row that just
+      arrived, and the index lags capture, so create_color_rule scans the bytes instead. Same
+      language, one deliberate difference — a colour rule can paint what this query misses.
 
       Free text (no field:): matches method, host, or target (case-insensitive substring).
 
@@ -125,8 +136,25 @@ module Gori
     # backend rejects (bad numeric, unknown proto) folds away, and a combinator left
     # with nothing folds away in turn — so a query whose every term was dropped
     # yields EMPTY, exactly as the old flat parser did.
-    def self.parse(query : String) : Filter
-      tree = FilterAst.build(FilterAst.parse(query)) { |t| term_to_sql(t) }
+    # `fts: false` compiles `body:` to the BLOB scan instead of the trigram-index subquery —
+    # everything else is bit-for-bit the same query. It exists for a caller that cannot tolerate
+    # the index's LAG rather than one that dislikes its bounds: indexing is off-commit (Store V4),
+    # so the row captured a moment ago has no `flows_fts` row yet. A one-shot surface drains the
+    # backlog first (`Store#index_pending!`) and a live one reports it (`Store#fts_backlog`), but
+    # Colormarker can do neither — it answers "paint this row?" on the render path, for a row that
+    # is often SECONDS old, and a colour that arrives whenever the indexer catches up is worse than
+    # one computed the slow way. The scan reads the same bytes `body~` does, so `body:` here is
+    # `body~` with a literal needle: no 8 KiB bound and no text-only rule. See `body_cond`.
+    # `body_max` bounds how many BYTES of each side's body a `body:`/`body~` term reads, by
+    # compiling the column as `substr(col, 1, N)`. nil (the default) reads all of it. It exists
+    # for a caller on an INTERACTIVE path: a body is capped at capture time by
+    # `Settings.capture_max` (2 MiB by default, and raisable), so an uncapped scan of one
+    # screenful of cap-sized bodies measures ~460 ms — a visible stall, per screen, on the list
+    # a proxy scrolls all day. `Rules::RULE_PREVIEW_BODY_MAX` made the identical trade for the
+    # Rewriter's preview, and states the identical consequence: a match past the cap is missed.
+    # Heads are NOT capped — a head is bounded by the codec long before it reaches here.
+    def self.parse(query : String, *, fts : Bool = true, body_max : Int32? = nil) : Filter
+      tree = FilterAst.build(FilterAst.parse(query)) { |t| term_to_sql(t, fts, body_max) }
       return EMPTY unless tree
       args = [] of DB::Any
       Filter.new(wrap_sql(tree, args), args)
@@ -191,7 +219,35 @@ module Gori
       TermAnalysis.new(applied, ignored, invalid_regex_terms(query))
     end
 
+    # Every field `field_cond` implements, in the order the reference lists them. THE list:
+    # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
+    # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
+    # instead of in the four hand-kept copies that used to drift.
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub]
+
     REGEX_FIELDS = %w[host path url header body]
+
+    # The fields that read a message's CONTENT rather than its addressing — the two a surface
+    # can only answer with the bytes in hand (or a query that reads them). Named because
+    # "can this backend answer the term?" is asked at three surfaces and each was spelling the
+    # pair out for itself.
+    CONTENT_FIELDS = %w[header body]
+
+    # One field named by a query, and whether it was written with the regex operator.
+    record FieldUse, name : String, regex : Bool
+
+    # The fields `query` names, in order of appearance, one entry per TERM (so `host:a host~b`
+    # reports both). A bare free-text word contributes nothing. Tokenized through exactly the
+    # path `parse` compiles through — `FilterAst.terms` + `split_field`, the same pair `analyze`
+    # and `invalid_regex_terms` use — so a caller asking "which fields does this need?" is asking
+    # about the terms that will really be compiled, not about a second reading of the string.
+    def self.fields_used(query : String) : Array(FieldUse)
+      FilterAst.terms(FilterAst.parse(query)).compact_map do |term|
+        next nil unless split = split_field(term.text)
+        field, _value, op = split
+        FieldUse.new(field, op == :regex)
+      end
+    end
 
     # The field/operator split, shared by compilation and diagnosis so the two can't
     # disagree about what counts as a term. The first ':' (field op) or '~' (regex op)
@@ -207,14 +263,15 @@ module Gori
 
     # `term.text` arrives already stripped of its quotes and `-` prefix by the grammar;
     # the negation rides on `term.negate?` and wraps whatever the field compiled to.
-    private def self.term_to_sql(term : FilterAst::Term) : SqlTerm?
+    private def self.term_to_sql(term : FilterAst::Term, fts : Bool = true,
+                                 body_max : Int32? = nil) : SqlTerm?
       text = term.text
       return nil if text.empty?
 
       result =
         if split = split_field(text)
           field, value, op = split
-          op == :regex ? regex_cond(field, value, text) : field_cond(field, value, text)
+          op == :regex ? regex_cond(field, value, text, body_max) : field_cond(field, value, text, fts, body_max)
         else
           free_text(text)
         end
@@ -224,7 +281,8 @@ module Gori
       {term.negate? ? "NOT (#{cond})" : cond, args}
     end
 
-    private def self.field_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
+    private def self.field_cond(field : String, value : String, term : String,
+                                fts : Bool = true, body_max : Int32? = nil) : {String, Array(DB::Any)}?
       return nil if value.empty?
       case field
       when "host"                        then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
@@ -237,7 +295,7 @@ module Gori
       when "size", "reqsize", "respsize" then size_cond(field, value)
       when "dur"                         then duration_cond(value)
       when "header"                      then header_cond(value)
-      when "body"                        then body_cond(value)
+      when "body"                        then body_cond(value, fts, body_max)
       when "stub"                        then stub_cond(value)
       else
         # Unknown field — a typo (`hosst:x`) or a literal colon in a value (`time:12:00`):
@@ -323,7 +381,8 @@ module Gori
     # bodyless flow has an empty FTS row, so it never matches and `-body:x`
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
     # values fall back to the NULL-safe BLOB LIKE scan.
-    private def self.body_cond(value : String) : {String, Array(DB::Any)}?
+    private def self.body_cond(value : String, fts : Bool = true,
+                               body_max : Int32? = nil) : {String, Array(DB::Any)}?
       value = value.chars.reject(&.control?).join # strip NUL/control chars (FTS/LIKE safety)
       # `field_cond`'s `return nil if value.empty?` runs BEFORE this strip, so a value made
       # only of control bytes survived that guard and arrived here as "". `like("")` is
@@ -353,14 +412,32 @@ module Gori
         conds = [] of String
         params = [] of DB::Any
         case_permutations(value).each do |v|
-          conds << "COALESCE(instr(request_body, CAST(? AS BLOB)), 0) > 0"
-          conds << "COALESCE(instr(response_body, CAST(? AS BLOB)), 0) > 0"
+          conds << "COALESCE(instr(#{body_col("request_body", body_max)}, CAST(? AS BLOB)), 0) > 0"
+          conds << "COALESCE(instr(#{body_col("response_body", body_max)}, CAST(? AS BLOB)), 0) > 0"
           params << v << v
         end
         return {"(#{conds.join(" OR ")})", params}
       end
+      return body_literal_cond(value, body_max) unless fts
       phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
       {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
+    end
+
+    # The index-free spelling of `body:` (see `parse`'s `fts:`): `body~` with the needle escaped
+    # down to a literal, which makes "`body:` here means `body~` with a literal needle" exactly
+    # true rather than approximately so — one clause, one set of NULL guards, one scan.
+    #
+    # NOT `CAST(… AS TEXT) LIKE '%needle%'`, which is the obvious spelling and the wrong one:
+    # SQLite's own text conversion stops at the first embedded NUL, while `body~` runs through
+    # `Gori::SafeRegexp`, which reads the haystack by its true `value_bytes` length precisely so
+    # a body mixing binary and text is scanned whole. LIKE would have made `body:token` silently
+    # miss what `body~token` finds — in a tool whose targets deliberately put NULs in bodies, and
+    # in exactly the direction `body_cond`'s short-needle branch above already refused to fail.
+    private def self.body_literal_cond(value : String, body_max : Int32? = nil) : {String, Array(DB::Any)}
+      # Control characters are stripped by `body_cond` before this runs, so the escaped literal
+      # can never carry a NUL of its own. `(?i)` because `body:` promises case-insensitive
+      # matching where `body~` is case-SENSITIVE by default.
+      body_regex_cond("(?i)#{Regex.escape(value)}", body_max)
     end
 
     # Every upper/lower spelling of a one- or two-character needle, so a byte-wise `instr`
@@ -506,7 +583,8 @@ module Gori
     # search of the whole token. An invalid pattern would raise inside the SQLite
     # REGEXP callback, so we validate up front and emit a never-matches clause instead.
     # For case-insensitive matching use an inline (?i) flag.
-    private def self.regex_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
+    private def self.regex_cond(field : String, value : String, term : String,
+                                body_max : Int32? = nil) : {String, Array(DB::Any)}?
       # A non-regex field name means `~` wasn't a regex operator here (e.g. `foo~bar`):
       # fall back to a literal free-text search of the WHOLE token. This must happen BEFORE
       # the validity guard — otherwise `foo~[` (an unterminated char class) would compile to
@@ -522,7 +600,7 @@ module Gori
         when "path"   then {"target REGEXP ?", [value] of DB::Any}
         when "url"    then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
         when "header" then header_regex_cond(value)
-        else               body_regex_cond(value)
+        else               body_regex_cond(value, body_max)
         end
       else
         free_text(term)
@@ -531,10 +609,23 @@ module Gori
 
     # NULL-guarded REGEXP over both body columns (a bodyless flow contributes no match,
     # so `-body~x` keeps it — same null-safety as the body: LIKE fallback above).
-    private def self.body_regex_cond(value : String) : {String, Array(DB::Any)}
-      {"((request_body IS NOT NULL AND CAST(request_body AS TEXT) REGEXP ?) OR " \
-       "(response_body IS NOT NULL AND CAST(response_body AS TEXT) REGEXP ?))",
+    private def self.body_regex_cond(value : String, body_max : Int32? = nil) : {String, Array(DB::Any)}
+      req = body_col("request_body", body_max)
+      res = body_col("response_body", body_max)
+      {"((request_body IS NOT NULL AND CAST(#{req} AS TEXT) REGEXP ?) OR " \
+       "(response_body IS NOT NULL AND CAST(#{res} AS TEXT) REGEXP ?))",
        [value, value] of DB::Any}
+    end
+
+    # A body column as the caller wants it READ: whole, or its first `body_max` bytes. The
+    # NULL guards around it stay on the RAW column — `substr(NULL, …)` is NULL either way, and
+    # guarding the raw name keeps the two spellings' null-safety identical (see `parse`).
+    #
+    # `body_max` is an Int32 this module chose, never a user value, so inlining it cannot be an
+    # injection; it is inlined rather than bound because the same constant appears in two
+    # clauses and a `?` here would have to interleave with the pattern's own placeholders.
+    private def self.body_col(column : String, body_max : Int32?) : String
+      body_max ? "substr(#{column}, 1, #{body_max.to_i})" : column
     end
 
     private def self.header_regex_cond(value : String) : {String, Array(DB::Any)}

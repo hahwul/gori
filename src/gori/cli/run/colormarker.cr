@@ -307,11 +307,11 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run colormarker add --when=FILTER [options]\n\n" \
-                     "--when is an InterceptFilter condition (#{Colormarker::USEFUL_FIELDS.join(": ")}:,\n" \
-                     "plus AND/OR/NOT and -negation), evaluated against the\n" \
-                     "captured flow row. `body:` NEVER matches here — a History row carries no\n" \
-                     "payload. `host:` is a SUBSTRING, not a DNS-label glob. There is no\n" \
-                     "header:/size:/dur: — those need a query, and this runs on the render path.\n" \
+                     "--when is a History QL condition (#{Colormarker::USEFUL_FIELDS.join(": ")}:,\n" \
+                     "plus ~regex, AND/OR/NOT and -negation) — the same query the History filter\n" \
+                     "bar takes, matched against the captured flow. `body:` here SCANS the stored\n" \
+                     "bytes rather than the text index, so it also paints matches that same term\n" \
+                     "in the filter bar misses. `host:` is a SUBSTRING, not a DNS-label glob.\n" \
                      "Display only: a colour rule never modifies traffic."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }

@@ -609,8 +609,9 @@ module Gori
     # does, so an origin-form target still builds the exact same URL every existing
     # Scope spec already agrees on.
     def self.request_url(scheme : String, host : String, target : String) : String
-      return target if Store::FlowRow.absolute_form?(target)
-      "#{scheme}://#{host}#{target}"
+      # The rule itself moved to core `Gori::Url` (InterceptFilter's `url:` term needs it and
+      # cannot require the store); this stays as the name its existing callers already use.
+      Gori::Url.request_url(scheme, host, target)
     end
 
     private def rule_cond(rule : Rule) : {String, Array(DB::Any)}

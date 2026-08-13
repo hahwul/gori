@@ -85,6 +85,31 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       end
     end
 
+    # The gate answers "does this rule need the ENTITY", and a rule's CONDITION can need it
+    # just as much as its extraction target does. A head-scoped descriptor whose condition
+    # reads `body:` used to be counted as body-free, so ClientConn streamed past the body and
+    # the condition was asked about bytes nobody kept.
+    it "asks for a body when the CONDITION reads one, not just the target" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "body:logged-in", Gori::ExtractKind::Cookie, "sid",
+          host: "alpha.test").should be_nil
+        b.extracts_body?.should be_true
+        b.extracts_body_for_host?("alpha.test").should be_true
+        b.extracts_body_for_host?("beta.test").should be_false # still host-scoped
+      end
+    end
+
+    # The negated spelling needs the bytes MORE, not less: with nothing buffered `body:x` is
+    # false and `-body:x` negates it to a match on every response.
+    it "asks for a body for a NEGATED body term too" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "-body:guest", Gori::ExtractKind::Cookie, "sid").should be_nil
+        b.extracts_body?.should be_true
+      end
+    end
+
     it "disabling the rule takes both gates back down" do
       with_store do |store|
         b = Gori::Bindings.load(store)
@@ -145,6 +170,46 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         b.add("SESSION", "path:/login AND status:200", Gori::ExtractKind::Cookie, "sid").should be_nil
         observe(b, "HTTP/1.1 302 Found\r\nSet-Cookie: sid=abc123\r\n\r\n", status: 302)
         observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc123\r\n\r\n", target: "/logout")
+        b.bound?("SESSION").should be_false
+      end
+    end
+
+    # `observe_response` is handed the head and the body and used to build a Subject from
+    # neither, so a condition naming them answered false against bytes sitting in its own
+    # argument list. This is the one surface that has BOTH.
+    it "lets the condition read the response head" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "header:x-authoritative", Gori::ExtractKind::Cookie, "sid").should be_nil
+        observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc123\r\n\r\n")
+        b.bound?("SESSION").should be_false # no such header ⇒ the rule does not claim it
+        observe(b, "HTTP/1.1 200 OK\r\nX-Authoritative: 1\r\nSet-Cookie: sid=abc123\r\n\r\n")
+        b.values["SESSION"].should eq "abc123"
+      end
+    end
+
+    it "lets the condition read the response body" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "body:logged-in", Gori::ExtractKind::Cookie, "sid").should be_nil
+        observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc123\r\n\r\n", "guest page".to_slice)
+        b.bound?("SESSION").should be_false
+        observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc123\r\n\r\n", "you are logged-in".to_slice)
+        b.values["SESSION"].should eq "abc123"
+      end
+    end
+
+    # The boundary right next to "reaches a token inside a gzipped body" below, and the reason
+    # that spec is not a contradiction: EXTRACTION decodes, the CONDITION does not. The condition
+    # is evaluated before any decode on purpose (see `candidates`) — that is what stops a rule
+    # from decompressing every response it is going to reject — so a `body:` term reads wire
+    # bytes here exactly as it does on every other surface.
+    it "reads WIRE bytes in the condition, even where extraction would decode" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "body:logged-in", Gori::ExtractKind::Cookie, "sid").should be_nil
+        observe(b, "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nSet-Cookie: sid=abc123\r\n\r\n",
+          gzip("you are logged-in"))
         b.bound?("SESSION").should be_false
       end
     end

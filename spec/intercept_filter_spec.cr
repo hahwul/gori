@@ -14,6 +14,13 @@ private def ws(payload = %({"op":"subscribe","ch":"trades"}), host = "acme.test"
     proto: Gori::Proto::Kind::Ws, payload: payload.to_slice)
 end
 
+# A gated HTTP message WITH its head — what `ClientConn` and the h2 stream gate now pass.
+private def headed(head : String, method = "POST", host = "acme.test", target = "/login",
+                   scheme = "http", status : Int32? = nil, body : String? = nil)
+  Gori::InterceptFilter::Subject.new(method: method, host: host, target: target, scheme: scheme,
+    status: status, head: head.to_slice, payload: body.try(&.to_slice))
+end
+
 describe Gori::InterceptFilter do
   it "an empty filter matches everything" do
     f = Gori::InterceptFilter::EMPTY
@@ -32,6 +39,78 @@ describe Gori::InterceptFilter do
     f = Gori::InterceptFilter.new("method:post")
     f.matches?(req(method: "POST")).should be_true
     f.matches?(req(method: "GET")).should be_false
+  end
+
+  # `header:` reads whatever head the caller had in hand. Every gate has one; the bytes were
+  # simply never passed, so the term answered false against a head sitting in the argument list.
+  it "matches header: against the head bytes in hand" do
+    f = Gori::InterceptFilter.new("header:x-trace")
+    head = "POST /login HTTP/1.1\r\nHost: acme.test\r\nX-Trace: abc123\r\n\r\n"
+    f.matches?(headed(head)).should be_true # case-insensitive
+    f.matches?(headed("POST /login HTTP/1.1\r\n\r\n")).should be_false
+    f.matches?(req).should be_false # no head passed ⇒ no match
+    # NUL-transparent, like the store-side `header:` — the head is bytes, not a C string.
+    f.matches?(headed("POST / HTTP/1.1\r\nA: b\u{0}\r\nX-Trace: 1\r\n\r\n")).should be_true
+  end
+
+  it "matches url: against scheme://host + target" do
+    f = Gori::InterceptFilter.new("url:acme.test/adm")
+    f.matches?(req(host: "acme.test", target: "/admin")).should be_true
+    f.matches?(req(host: "acme.test", target: "/login")).should be_false
+    # An absolute-form target already carries its authority and must not be doubled.
+    f.matches?(req(host: "acme.test", target: "http://acme.test/admin")).should be_true
+  end
+
+  describe "~ regex" do
+    # `~` used to be a character with no meaning here, so `host~^api\.` was free text and matched
+    # nothing real. It is QL's operator on QL's five fields, so a pattern means the same thing in
+    # the intercept bar as in the History bar.
+    it "applies to host, path, url, header and body" do
+      Gori::InterceptFilter.new("host~^api\\.").matches?(req(host: "api.acme.test")).should be_true
+      Gori::InterceptFilter.new("host~^api\\.").matches?(req(host: "x.api.test")).should be_false
+      Gori::InterceptFilter.new("path~/v\\d+/").matches?(req(target: "/v2/users")).should be_true
+      Gori::InterceptFilter.new("url~^https://").matches?(req(scheme: "https")).should be_true
+      Gori::InterceptFilter.new("header~(?i)x-trace:\\s*\\w+")
+        .matches?(headed("GET / HTTP/1.1\r\nX-Trace: abc\r\n\r\n")).should be_true
+      Gori::InterceptFilter.new("body~subscr\\w+").matches?(ws).should be_true
+      Gori::InterceptFilter.new("body~unsubscr\\w+").matches?(ws).should be_false
+    end
+
+    # A `~` on a field QL does not offer it on free-texts the whole token, exactly as
+    # `QL.regex_cond` does — so the two backends never disagree about what is a regex.
+    it "free-texts a ~ on a field that has no regex form" do
+      Gori::InterceptFilter.new("method~POST").matches?(req(method: "POST")).should be_false
+      Gori::InterceptFilter.new("method~POST").matches?(req(target: "/method~post")).should be_true
+    end
+
+    # An invalid pattern must not raise onto the proxy path. It becomes a never-match term,
+    # mirroring QL's never-match clause; the surfaces that let one be SAVED refuse it instead.
+    it "never-matches an uncompilable pattern instead of raising" do
+      f = Gori::InterceptFilter.new("host~[bad")
+      f.blank?.should be_false
+      f.matches?(req).should be_false
+      Gori::InterceptFilter.new("-host~[bad").matches?(req).should be_true # negation still flips
+    end
+
+    # PCRE2 RAISES on invalid UTF-8 rather than not matching, and a target is bytes off the wire.
+    # A raise here would kill the connection fiber at a hold gate.
+    it "survives an invalid-UTF-8 haystack" do
+      f = Gori::InterceptFilter.new("path~admin")
+      f.matches?(req(target: String.new(Bytes[0x2F, 0xFF, 0xFE, 0x61]))).should be_false
+      f.matches?(req(target: String.new(Bytes[0x2F, 0xFF, 0x61, 0x64, 0x6D, 0x69, 0x6E]))).should be_true
+    end
+  end
+
+  # What a caller deciding whether to BUFFER a body has to ask. It descends into NOT where
+  # `mentions_ws?` does not, and that asymmetry is the point: with nothing buffered `-body:x`
+  # evaluates false and negates to a match on everything.
+  it "reports whether a condition reads a body, negation included" do
+    Gori::InterceptFilter.new("body:secret").mentions_body?.should be_true
+    Gori::InterceptFilter.new("-body:secret").mentions_body?.should be_true
+    Gori::InterceptFilter.new("NOT (host:a AND body~x)").mentions_body?.should be_true
+    Gori::InterceptFilter.new("host:a OR body:b").mentions_body?.should be_true
+    Gori::InterceptFilter.new("host:a status:5xx").mentions_body?.should be_false
+    Gori::InterceptFilter::EMPTY.mentions_body?.should be_false
   end
 
   it "matches path as a substring of the target" do
@@ -99,17 +178,20 @@ describe Gori::InterceptFilter do
       Gori::InterceptFilter.suggestions("status:4", 8).should contain("status:4xx")
     end
 
-    it "only offers fields this parser understands (no History-only header:/dur:)" do
-      # `body:` joined the list with #500 step 2 — a held WebSocket message carries its
-      # payload to the gate, so the "no row to query" reason no longer applies to it.
-      # `header:`/`size:`/`dur:` still have nothing to match against.
-      Gori::InterceptFilter::FIELDS.should eq(%w(host path method scheme status proto body))
-      Gori::InterceptFilter.suggestions("he", 2).should be_empty
+    it "only offers fields this parser understands (no History-only size:/dur:)" do
+      # The list is what a LIVE message can answer. `body:` joined with #500 step 2 (a held WS
+      # message carries its payload); `header:`/`url:` joined when the gates began passing the
+      # head they already had. What is still missing needs an exchange that has FINISHED —
+      # `size:`/`respsize:`/`dur:` — or a capture decision not yet made (`stub:`).
+      Gori::InterceptFilter::FIELDS.should eq(%w(host path url method scheme status proto header body))
+      Gori::InterceptFilter.suggestions("s", 1).should eq(["scheme:", "status:"]) # not size:
       Gori::InterceptFilter.suggestions("d", 1).should be_empty
-      # `path:`/`body:` complete the field but have no value pool — both are unbounded.
+      Gori::InterceptFilter.suggestions("he", 2).should eq(["header:"])
+      # `path:`/`header:`/`body:` complete the field but have no value pool — all unbounded.
       Gori::InterceptFilter.suggestions("pa", 2).should eq(["path:"])
       Gori::InterceptFilter.suggestions("path:/ap", 8).should be_empty
       Gori::InterceptFilter.suggestions("body:tra", 8).should be_empty
+      Gori::InterceptFilter.suggestions("header:x-", 9).should be_empty
     end
 
     it "offers only the proto values a hold gate can ever answer (no grpc/sse)" do

@@ -826,10 +826,18 @@ module Gori
     # has already been captured, so unlike a `MatchRule` an over-broad one costs an operator a
     # misleading list, never a modified message.
     #
-    # `match_filter` is an `InterceptFilter` source string — the SAME grammar `ExtractRule`
-    # uses and the conditional-intercept bar speaks, evaluated here against a `FlowRow` in
-    # memory. Not a new dialect, and NOT QL: QL compiles to SQL against the flows table, and
-    # there is no query to run when the row is already in hand on the render path.
+    # `match_filter` is a HISTORY QL string — the same grammar, the same field set and the same
+    # answers as the filter bar above the list it paints. It is still the grammar `ExtractRule`
+    # uses and the conditional-intercept bar speaks (they share `FilterAst`, and `InterceptFilter`
+    # is a subset of QL's vocabulary, not a dialect of it).
+    #
+    # This used to say "NOT QL: QL compiles to SQL against the flows table, and there is no query
+    # to run when the row is already in hand on the render path". That is still true of every
+    # field a `FlowRow` can answer, and `Colormarker` still answers those in memory with no query
+    # at all. It was wrong about the rest: for `body:`/`header:`/`size:`/`dur:` there IS a query
+    # to run, it is bounded by the screenful of ids being painted, and the price of not running
+    # it was `body:` parsing fine and painting nothing. See `Colormarker`'s class header for the
+    # tier split.
     #
     # No `host` field, unlike `MatchRule` and `ExtractRule`: `host:` inside the filter is the
     # same statement, and a second host axis would make "which one wins" a question with no

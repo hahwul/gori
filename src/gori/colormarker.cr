@@ -2,6 +2,7 @@ require "./store"
 require "./settings"
 require "./intercept_filter"
 require "./filter_ast"
+require "./ql"
 require "./proto"
 
 module Gori
@@ -21,11 +22,34 @@ module Gori
   # are never consulted). Order is therefore the operator's precedence statement, which is why
   # reordering is a first-class action on the TUI, the CLI and MCP alike.
   #
+  # ── the two tiers, and why a colour rule speaks full QL ─────────────────────────────────
+  # A colour rule's condition is a HISTORY QL string — the same grammar, the same field set and
+  # the same answers as the filter bar above the list it paints. That is a deliberate reversal
+  # of what this file used to say ("Not a new dialect, and NOT QL: … there is no query to run
+  # when the row is already in hand on the render path"), and the reversal is narrow: for
+  # `host:`/`status:`/`proto:` there is still no query to run, and none is run. The old statement
+  # was wrong only about the fields the ROW PROJECTION cannot answer — `body:`, `header:`,
+  # `size:`, `dur:`, `url:` — where there is a query to run, it is bounded by the screenful of
+  # ids being painted, and the alternative was what shipped: `body:` parsing fine, painting
+  # nothing, and saying so only in a note.
+  #
+  # So `compile` sorts each rule into one of two tiers, and the tier is a property of the rule,
+  # never of the row:
+  #
+  #   ROW tier — every term answerable from a `FlowRow` (see `ROW_FIELDS`). Matched in memory by
+  #     `InterceptFilter`, exactly as before, with no store access at all.
+  #   STORE tier — anything else. Compiled by `QL.parse(…, fts: false)` and answered by one
+  #     `Store#ids_matching` over the ids being painted.
+  #
+  # The tiers cover DISJOINT rule sets, so the two matchers can never disagree about one rule;
+  # for the fields they both implement (`host` `path` `method` `scheme` `status` `proto`, and
+  # bare free text over method/host/target) they already agree term for term.
+  #
   # ── performance contract ────────────────────────────────────────────────────────────────
   # `match` runs on the History RENDER path, once per visible row per frame. So:
   #
-  #   * `InterceptFilter.new` runs ONLY in `refresh` — once per rule per edit/reload. It must
-  #     never appear on the render path; `spec/colormarker_spec.cr` pins this.
+  #   * `InterceptFilter.new` / `QL.parse` run ONLY in `refresh` — once per rule per edit/reload.
+  #     Neither may appear on the render path; `spec/colormarker_spec.cr` pins this.
   #   * `active?` gates everything: a project with no enabled rule pays one atomic read per row.
   #   * the `Subject` is built once per row and reused across the whole compiled walk, and
   #     `proto` is passed IN because History's row loop already computes it.
@@ -33,14 +57,33 @@ module Gori
   #     substring fields. The budget is O(visible rows × rules until first match) short-string
   #     downcases per frame, which is why first-match-wins short-circuiting is load-bearing
   #     rather than cosmetic.
+  #   * `needs_store?` is the STORE tier's version of that gate, and it is what keeps this change
+  #     free for everyone who did not ask for it: with no store-tier rule the render path is
+  #     byte-identical to what it was, down to the absent `@sql_hits` lookup. With one, History
+  #     calls `prefetch` ONCE per frame for the whole visible window (one query per store-tier
+  #     rule, not per row) and every `match` after it reads a memo.
   class Colormarker
-    # A rule with its condition already parsed. Same contract, same reason, as
-    # `Bindings::Compiled`: the FilterAst walk happens once per rule, not once per row.
-    private record Compiled, rule : Store::ColorRule, filter : InterceptFilter
+    # A rule with its condition already parsed, into whichever tier claims it: `filter` for the
+    # ROW tier, `sql` for the STORE tier, exactly one of them non-nil. Same contract, same
+    # reason, as `Bindings::Compiled`: the parse happens once per rule, not once per row.
+    private record Compiled, rule : Store::ColorRule,
+      filter : InterceptFilter?, sql : QL::Filter?
 
     # How many recent flows `preview` scans. Same cap and the same reason as
     # `Rules::RULE_PREVIEW_SCAN` — this runs on the keystroke path of the rule editor.
     PREVIEW_SCAN = 500
+
+    # How many bytes of EACH side's body a store-tier `body:`/`body~` term reads. The same trade
+    # `Rules::RULE_PREVIEW_BODY_MAX` makes, for the same reason and with the same consequence
+    # stated out loud: a match past the cap is missed.
+    #
+    # It is not a taste call. A body is capped at capture time by `Settings.capture_max`, which
+    # DEFAULTS TO 2 MiB and can be raised, and this scan runs on the History render path. Measured
+    # on cap-sized bodies, resolving one screenful (60 rows) uncapped took ~460 ms — half a second
+    # of stall per screen, on the list a proxy scrolls all day. At 64 KiB the same screenful is
+    # single-digit milliseconds, and it is still 8× what History's own `body:` index covers, so a
+    # colour rule remains STRICTLY more thorough than the query that inspired it.
+    BODY_SCAN_MAX = 64 * 1024
 
     # Bumped by every mutator and by `reload`. History compares it once per frame to decide
     # whether to drop its per-row memo — which is what makes an edit here (or an MCP / CLI /
@@ -60,13 +103,31 @@ module Gori
     # changes NO rule (a rule references a colour by name) and still bump `revision` — otherwise
     # a recoloured custom would leave History painting the stale hex until the next rule edit.
     @custom_colors : Array(Settings::ColormarkerColor)
+    # Whether any enabled rule landed in the STORE tier. Read per FRAME (not per row) to decide
+    # whether `prefetch` has anything to do, so it is cached here rather than scanned.
+    @needs_store : Bool
+    # Store-tier answers: flow id → {rule index in `@compiled` → matched?}. Dropped wholesale by
+    # `refresh` (the compiled list those indices refer to is gone) and per id by `forget` (the
+    # row's own bytes changed). Bounded by `SQL_CACHE_MAX` flows, so a session that scrolls a
+    # million rows past a store-tier rule cannot grow it without limit.
+    #
+    # Keyed flow-id-OUTER, not by a `{rule, flow}` tuple: `forget` is called once per response
+    # that lands, on the render fiber, at capture rate, and against a flat tuple map it had to
+    # walk every entry to find the one row's. A nested map makes it one `delete`.
+    @sql_hits : Hash(Int64, Hash(Int32, Bool))
 
     def initialize(@store : Store, rules : Array(Store::ColorRule))
       @mutex = Mutex.new
+      # A SECOND lock, and deliberately not `@mutex`: filling this cache means querying the store,
+      # `@mutex` is taken on the render path, and holding a render-path lock across DB I/O is how
+      # a frame turns into a stall. Nothing is ever held across a query — see `prefetch`.
+      @cache_mutex = Mutex.new
+      @sql_hits = {} of Int64 => Hash(Int32, Bool)
       @rules = rules
       @custom_colors = Settings.colormarker_colors
       @compiled = compile(rules)
       @active = !@compiled.empty?
+      @needs_store = @compiled.any?(&.sql)
       @strip_active = @compiled.any?(&.rule.style.strip?)
       @revision = 1_u64
     end
@@ -126,18 +187,101 @@ module Gori
     # `proto` is accepted so History can pass the `Proto.classify` it already computed for its
     # PROTO column. The no-argument form classifies for itself, for callers off the render path.
     def match(row : Store::FlowRow, proto : Proto::Kind) : Store::ColorRule?
-      @mutex.synchronize do
-        return nil unless @active
-        subject = InterceptFilter::Subject.new(
-          method: row.method, host: row.host, target: row.target,
-          scheme: row.scheme, status: row.status, proto: proto)
-        @compiled.each { |c| return c.rule if c.filter.matches?(subject) }
+      compiled = @mutex.synchronize { @active ? @compiled : nil }
+      return nil unless compiled
+      subject = InterceptFilter::Subject.new(
+        method: row.method, host: row.host, target: row.target,
+        scheme: row.scheme, status: row.status, proto: proto)
+      compiled.each_with_index do |c, i|
+        if f = c.filter
+          return c.rule if f.matches?(subject)
+        elsif sql = c.sql
+          return c.rule if store_tier_hit?(i, row.id, sql)
+        end
       end
       nil
     end
 
     def match(row : Store::FlowRow) : Store::ColorRule?
       match(row, Proto.classify(row.status, row.content_type, row.request_content_type))
+    end
+
+    # Resolve every store-tier rule for `rows` in ONE query per rule, so the `match` calls that
+    # follow read a memo instead of each paying a round trip. History calls this once per frame
+    # with its visible window; skipping it is not a correctness bug — `store_tier_hit?` falls back
+    # to a single-id query — only a per-row one.
+    #
+    # A no-op, with no lock taken and no store touched, unless a store-tier rule exists.
+    def prefetch(rows : Array(Store::FlowRow)) : Nil
+      return if rows.empty? || !needs_store?
+      compiled = @mutex.synchronize { @active ? @compiled : nil }
+      return unless compiled
+      rev = @revision
+      compiled.each_with_index do |c, i|
+        sql = c.sql
+        next unless sql
+        want = @cache_mutex.synchronize do
+          rows.compact_map { |r| @sql_hits[r.id]?.try(&.has_key?(i)) ? nil : r.id }
+        end
+        next if want.empty?
+        # OUTSIDE both locks — see `@cache_mutex`'s note.
+        hits = @store.ids_matching(sql, want)
+        next unless hits # the query failed; leave the ids unresolved so the next frame retries
+        @cache_mutex.synchronize do
+          # A rule edit landed while the query was in flight, so `i` no longer names the rule
+          # these answers are about. Drop the batch rather than file it under the new indices.
+          if @revision == rev
+            trim_sql_cache
+            want.each { |id| (@sql_hits[id] ||= {} of Int32 => Bool)[i] = hits.includes?(id) }
+          end
+        end
+      end
+    end
+
+    # Forget what is known about one flow, because its own bytes changed. History calls this when
+    # a row is REPLACED (`:updated` — the response landed), the same moment it drops its per-row
+    # colour memo: a `body:`/`size:` rule resolved against the pending row genuinely answers
+    # differently once there is a response, and a cache that outlived the row it described would
+    # keep the pending answer for the rest of the session.
+    def forget(id : Int64) : Nil
+      return unless needs_store?
+      @cache_mutex.synchronize { @sql_hits.delete(id) }
+    end
+
+    # Is any enabled rule in the STORE tier? Read per frame by History (to decide whether to
+    # `prefetch`) and by `forget`, so it is a cached flag rather than a scan.
+    def needs_store? : Bool
+      @mutex.synchronize { @needs_store }
+    end
+
+    # One store-tier rule's answer for one row, memoised. The fallback path for a row `prefetch`
+    # did not cover; the cost is one indexed single-id query, paid once per {rule, row}.
+    private def store_tier_hit?(index : Int32, id : Int64, filter : QL::Filter) : Bool
+      # `unless .nil?`, not a truthiness test: a cached FALSE is a real answer, and `if cached`
+      # would re-query for every row a rule does not paint — i.e. for almost every row.
+      cached = @cache_mutex.synchronize { @sql_hits[id]?.try(&.[index]?) }
+      return cached unless cached.nil?
+      rev = @revision
+      hits = @store.ids_matching(filter, [id])
+      return false unless hits # failed, not "no match" — do not cache it (see `Store#ids_matching`)
+      hit = hits.includes?(id)
+      @cache_mutex.synchronize do
+        if @revision == rev
+          trim_sql_cache
+          (@sql_hits[id] ||= {} of Int32 => Bool)[index] = hit
+        end
+      end
+      hit
+    end
+
+    # Flows remembered — roughly a hundred screenfuls. Cleared wholesale rather than evicted
+    # LRU: the rows worth remembering are the ones on screen, the next frame re-resolves them in
+    # one `prefetch`, and an LRU's bookkeeping would cost more than the query it saves.
+    SQL_CACHE_MAX = 8192
+
+    # Caller MUST hold `@cache_mutex`.
+    private def trim_sql_cache : Nil
+      @sql_hits.clear if @sql_hits.size >= SQL_CACHE_MAX
     end
 
     # --- editing (persists, then refreshes the snapshot) ---------------------------------
@@ -306,11 +450,31 @@ module Gori
 
     # --- validation and advice ------------------------------------------------------------
 
-    # The fields worth NAMING to an operator. `InterceptFilter::FIELDS` minus `body:`, which is
-    # legal to write here (the parser accepts it, and `advise` explains it) but can never match
-    # a captured row — so advertising it in the same breath as the rest would contradict the
-    # note the operator gets the moment they take the advice.
-    USEFUL_FIELDS = InterceptFilter::FIELDS - ["body"]
+    # The fields worth NAMING to an operator — every field History's filter bar has, because a
+    # colour rule now answers every one of them. It used to be `InterceptFilter::FIELDS` minus
+    # `body:` (a field this backend accepted and could never match); the subtraction is gone
+    # because the reason is.
+    USEFUL_FIELDS = QL::FIELDS
+
+    # The fields a `FlowRow` answers on its own — the ROW tier's vocabulary, and the whole of it.
+    # `InterceptFilter::FIELDS` minus the CONTENT ones: a hold gate fills `Subject#head`/`#payload`
+    # with the bytes it has, and a captured row has neither, so `header:` and `body:` belong to
+    # the STORE tier however simple the rest of the condition is.
+    #
+    # Derived by SUBTRACTING rather than listed out, and that is load-bearing: written as a
+    # literal list this would silently go stale the next time `InterceptFilter` learns a field.
+    # It already did once — `header:` was added to that list and instantly became "row-answerable",
+    # so a `header:` rule compiled into the ROW tier and matched a Subject whose `head` is nil.
+    ROW_FIELDS = InterceptFilter::FIELDS - QL::CONTENT_FIELDS
+
+    # Can `match` answer this condition from the row projection alone? Drives the tier split in
+    # `compile`. Reads `QL.fields_used`, so "which fields does this name" is answered by the same
+    # tokenizer that compiles them — a bare free-text word names no field and stays row-answerable
+    # (both backends free-text over method/host/target and agree), and a `~` term never is,
+    # because only QL implements the regex operator.
+    def self.row_answerable?(match_filter : String) : Bool
+      QL.fields_used(match_filter).all? { |u| !u.regex && ROW_FIELDS.includes?(u.name) }
+    end
 
     # Why this condition cannot be used, or nil if it can.
     #
@@ -321,33 +485,43 @@ module Gori
     #   1. an empty condition, and 2. one that folds to match-all (a mid-typed `host:` — a term
     #      with an empty value is DROPPED, and an emptied query matches everything), both paint
     #      every row in History;
-    #   3. a `field:` this backend does not know (`size:`, `header:`, `dur:`, `url:`, `stub:` —
-    #      all of them History QL fields, which is exactly why an operator reaches for them).
-    #      `parse_term` free-texts the whole token, so `size:>10000` becomes a literal substring
-    #      search over method/host/target and the rule never fires, with no error anywhere.
+    #   3. a `field:` QL does not implement (`hsot:`, or a literal colon in a value) — both
+    #      compilers free-text the whole token, so `hsot:evil.com` becomes a literal substring
+    #      search over method/host/target and the rule never fires, with no error anywhere;
+    #   4. a `~` pattern that does not compile. QL turns one into a never-match clause on purpose
+    #      (see `QL.invalid_regex_terms`), which for a QUERY is a result an operator can see is
+    #      empty — but for a RULE it is a colour that never appears, and nothing to look at;
+    #   5. a term QL would DROP — a bad numeric or an unknown enum value (`size:>bogus`,
+    #      `proto:zzz`). This one arrived WITH the store tier: while `size:` was an unknown field
+    #      the whole condition was refused by (3), and the moment it became a real field
+    #      `host:acme size:>bogus` started compiling to `host:acme` alone and painting every acme
+    #      row. That is the silent-BROADEN direction — the one `QL.body_cond`'s own comment calls
+    #      the dangerous one — and a query gets to survive it (the operator sees a too-long list
+    #      and `ql_explain` names the term) where a standing rule does not.
     def self.unusable_reason(match_filter : String) : String?
       return "enter a condition" if match_filter.blank?
       if bad = unknown_fields(match_filter).first?
         return "unknown field `#{bad}:` — a colour rule knows #{USEFUL_FIELDS.join(": ")}:"
       end
-      return "this condition matches every flow" if InterceptFilter.new(match_filter).blank?
+      if bad = QL.invalid_regex_terms(match_filter).first?
+        return "`#{bad}` is not a valid regex — it would match nothing"
+      end
+      # Compiled the way `compile` compiles it, so what is judged match-all is what would RUN.
+      # BEFORE the dropped-term check below, so a condition whose EVERY term was dropped keeps
+      # naming the worse consequence: it paints every row, not merely one term fewer.
+      return "this condition matches every flow" if QL.reject_empty?(match_filter, QL.parse(match_filter, fts: false))
+      if bad = QL.analyze(match_filter).ignored.first?
+        return "`#{bad}` is not a value that field takes — it would be dropped, and the rule would paint more"
+      end
       nil
     end
 
-    # The `field:` names in `match_filter` that `InterceptFilter` does not implement, in order
-    # of appearance. Driven by `FilterAst.spans` — the SAME lexer the parser runs — so what is
-    # reported as a field is exactly what would ACT as one.
-    #
-    # `SEPS_FIELD` (":" alone, not ":~"): only QL implements `~`, so `host~x` here is free text
-    # and calling it an unknown FIELD would be the wrong complaint.
+    # The `field:` names in `match_filter` that QL does not implement, deduped, in order of
+    # appearance. Driven by `QL.fields_used` — the SAME tokenization the compilers run — so what
+    # is reported as a field is exactly what would ACT as one, `~` terms included.
     def self.unknown_fields(match_filter : String) : Array(String)
-      acc = [] of String
-      FilterAst.spans(match_filter, FilterAst::SEPS_FIELD).each do |span|
-        next unless span.kind.field?
-        name = match_filter[span.start, span.size].rchop(':').downcase
-        acc << name if !name.empty? && !InterceptFilter::FIELDS.includes?(name) && !acc.includes?(name)
-      end
-      acc
+      names = QL.fields_used(match_filter).map(&.name)
+      names.uniq!.reject! { |n| QL::FIELDS.includes?(n) }
     end
 
     # Non-fatal notes about a condition that IS usable but will not behave the way its author
@@ -360,8 +534,17 @@ module Gori
     def self.advise(match_filter : String) : Array(String)
       notes = [] of String
       lower = match_filter.downcase
-      if lower.includes?("body:")
-        notes << "`body:` never matches here — a History row carries no payload, so a rule using it paints nothing."
+      # The inverse of the note that used to stand here ("`body:` never matches here"). It is
+      # worth saying because the difference runs the OTHER way from what an operator who knows
+      # History's `body:` would assume: the filter bar's reads a trigram index bounded at
+      # `Store::FTS_INDEX_MAX` bytes per side, and a rule cannot, because the index lags capture
+      # and a colour has to be right for the row that just arrived. So a rule can paint rows the
+      # identical query does not list. See `QL.parse`'s `fts:`.
+      if lower.includes?("body:") || lower.includes?("body~")
+        notes << "a body term scans here rather than reading the text index, so it reaches " \
+                 "binary bodies the filter bar's `body:` skips — but only the first " \
+                 "#{BODY_SCAN_MAX // 1024} KiB of each side, and the bytes are as CAPTURED, so " \
+                 "a match past that bound, or inside a compressed body, is not painted."
       end
       if lower.includes?("host:")
         notes << "`host:` is a substring here, not a DNS-label glob: `host:alpha.test` also matches `xalpha.test`."
@@ -379,30 +562,52 @@ module Gori
     # answers the real question: "your rule matches 41 rows and paints 17, because an earlier
     # rule already claims 24." `existing` is the enabled rules that would sit AHEAD of this one.
     #
-    # Cheap by construction — the condition matches on `FlowRow` alone, so this is one
-    # `recent_flows` page and no `get_flow` per row (contrast `Rules#preview`, which must pull
-    # bodies).
+    # Still cheap, and cheap in the same shape `match` is: one `recent_flows` page, plus at most
+    # ONE query per condition for the store-tier ones — never a `get_flow` per row (contrast
+    # `Rules#preview`, which must pull bodies). A preview of `body:secret` against 500 scanned
+    # rows is one query, not 500.
     record Preview, matched : Int32, painted : Int32, scanned : Int32, total : Int64
 
     def self.preview(store : Store, match_filter : String,
                      existing : Array(Store::ColorRule) = [] of Store::ColorRule,
                      limit : Int32 = PREVIEW_SCAN) : Preview
-      filter = InterceptFilter.new(match_filter)
-      ahead = existing.select(&.enabled?).map { |r| InterceptFilter.new(r.match_filter) }
+      rows = store.recent_flows(limit, nil)
+      ids = rows.map(&.id)
+      candidate = resolve_over(store, match_filter, ids)
+      ahead = existing.select(&.enabled?).map { |r| resolve_over(store, r.match_filter, ids) }
       scanned = 0
       matched = 0
       painted = 0
-      store.recent_flows(limit, nil).each do |row|
+      rows.each do |row|
         scanned += 1
         subject = InterceptFilter::Subject.new(
           method: row.method, host: row.host, target: row.target,
           scheme: row.scheme, status: row.status,
           proto: Proto.classify(row.status, row.content_type, row.request_content_type))
-        next unless filter.matches?(subject)
+        next unless candidate.hit?(row, subject)
         matched += 1
-        painted += 1 unless ahead.any?(&.matches?(subject))
+        painted += 1 unless ahead.any?(&.hit?(row, subject))
       end
       Preview.new(matched, painted, scanned, store.count)
+    end
+
+    # One condition resolved over a FIXED set of rows — `preview`'s counterpart to the tier split
+    # `compile` does for the render path, so the two cannot disagree about what a rule would paint.
+    private record Resolved, filter : InterceptFilter?, ids : Set(Int64)? do
+      def hit?(row : Store::FlowRow, subject : InterceptFilter::Subject) : Bool
+        if f = filter
+          f.matches?(subject)
+        elsif s = ids
+          s.includes?(row.id)
+        else
+          false # the query could not run; `Store#ids_matching` has already logged it
+        end
+      end
+    end
+
+    private def self.resolve_over(store : Store, match_filter : String, ids : Array(Int64)) : Resolved
+      return Resolved.new(InterceptFilter.new(match_filter), nil) if row_answerable?(match_filter)
+      Resolved.new(nil, store.ids_matching(QL.parse(match_filter, fts: false, body_max: BODY_SCAN_MAX), ids))
     end
 
     # --- one-line rule formatting (shared) -------------------------------------------------
@@ -429,15 +634,31 @@ module Gori
         @custom_colors = fresh_custom
         @compiled = compiled
         @active = !compiled.empty?
+        @needs_store = compiled.any?(&.sql)
         @strip_active = compiled.any?(&.rule.style.strip?)
         @revision &+= 1
       end
+      # Every key names a rule by its index in the list just replaced, so none of them mean
+      # anything now. Dropped AFTER the bump, so a `match` racing this either reads the old
+      # compiled list with its own answers still cached or the new one with a clean cache —
+      # never the new list against the old list's answers.
+      @cache_mutex.synchronize { @sql_hits.clear }
     end
 
     # ENABLED rules only, in precedence order: `match` then walks a list where every entry is a
     # candidate, rather than re-testing `enabled?` per row per frame.
+    #
+    # This is where a rule is sorted into its tier (see the class header). `row_answerable?`
+    # decides, and it decides from the same tokenization the compilers use, so a rule cannot
+    # land in the ROW tier carrying a term `InterceptFilter` would silently free-text.
     private def compile(list : Array(Store::ColorRule)) : Array(Compiled)
-      list.select(&.enabled?).map { |r| Compiled.new(r, InterceptFilter.new(r.match_filter)) }
+      list.select(&.enabled?).map do |r|
+        if Colormarker.row_answerable?(r.match_filter)
+          Compiled.new(r, InterceptFilter.new(r.match_filter), nil)
+        else
+          Compiled.new(r, nil, QL.parse(r.match_filter, fts: false, body_max: BODY_SCAN_MAX))
+        end
+      end
     end
   end
 end

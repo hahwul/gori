@@ -47,13 +47,12 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
-    # Tab-completion offers exactly what `QL.field_cond` implements — no more, no less.
-    # `flag` used to head this list, so `f` + Tab deterministically produced `flag:`, a
-    # field with no store behind it (Store#flags_for is a stub): it free-texts, matches
-    # nothing, and the empty list reads as "no flows match". `url` is the reverse case —
-    # a real, working field that was never suggested. spec/tui/history_view_spec.cr pins
-    # this list against ql.cr so the two cannot drift apart again.
-    QL_FIELDS  = %w[host url method status path scheme proto body header size reqsize respsize dur stub]
+    # Tab-completion offers exactly what `QL.field_cond` implements — no more, no less. It used
+    # to say that by keeping a hand-written copy, which is how `flag:` (a field with no store
+    # behind it — Store#flags_for is a stub) came to head the list while `url:` (real and
+    # working) was missing from it. It is now THE list, read from `QL::FIELDS`, so the drift the
+    # spec below was written to catch cannot happen at all.
+    QL_FIELDS  = QL::FIELDS
     METHOD_VAL = %w[GET POST PUT DELETE PATCH HEAD OPTIONS QUERY]
     # Discoverability hints for the QL filter, kept loosely in sync with QL_FIELDS.
     # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits
@@ -327,6 +326,35 @@ module Gori::Tui
       @color_memo.fetch(row.id) { @color_memo[row.id] = cm.match(row, proto) }
     end
 
+    # Resolve the STORE-tier colour rules for the whole visible window at once, before the row
+    # loop starts asking about them one row at a time. A condition like `body:secret` cannot be
+    # answered from the row projection, so the engine has to read the database; batching turns a
+    # screenful of single-id queries into one query per such rule.
+    #
+    # A no-op — no allocation, no engine call — when every enabled rule is answerable from the
+    # row, which is the ordinary case and why nothing about the common path changed.
+    #
+    # Only the rows the loop will really draw, and only those the memo has no answer for: paging
+    # back over rows already painted asks for nothing. The revision check is the SAME one
+    # `color_for` makes, made first so a stale memo cannot make this skip a row the loop then
+    # resolves one at a time.
+    private def prefetch_colors(list_h : Int32) : Nil
+      cm = @colormarker
+      return unless cm && cm.needs_store?
+      if cm.revision != @color_rev
+        @color_rev = cm.revision
+        @color_memo.clear
+      end
+      pending = [] of Store::FlowRow
+      (0...list_h).each do |i|
+        ri = @scroll + i
+        break if ri >= @rows.size
+        row = @rows[ri]
+        pending << row unless @color_memo.has_key?(row.id)
+      end
+      cm.prefetch(pending)
+    end
+
     # True when the displayed list is a filtered subset (QL query or Scope lens).
     def filtering? : Bool
       !@query.blank? || (@scope.try(&.active?) == true)
@@ -481,8 +509,11 @@ module Gori::Tui
           # The row's ANSWERS changed, so its colour has to be re-asked. An in-flight row has
           # `status` and `content_type` nil, so `status:>=500` and `proto:sse` genuinely answer
           # differently once the response lands — without this the row would keep the colour it
-          # had while pending, for the rest of the session.
+          # had while pending, for the rest of the session. The engine's own store-tier cache is
+          # dropped for the same id and the same reason: a `body:` rule asked while the flow was
+          # still in flight was asked about a response that had not arrived.
           @color_memo.delete(event.id)
+          @colormarker.try(&.forget(event.id))
         end
       end
     end
@@ -1890,6 +1921,8 @@ module Gori::Tui
         screen.text(time_x, list_top + 2, hint, Theme.muted) if list_h > 2
         return
       end
+
+      prefetch_colors(list_h)
 
       (0...list_h).each do |i|
         ri = @scroll + i

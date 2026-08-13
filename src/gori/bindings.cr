@@ -73,7 +73,17 @@ module Gori
     private record Compiled,
       rule : Store::ExtractRule,
       filter : InterceptFilter,
-      re : Regex?
+      re : Regex? do
+      # Does this rule need the response ENTITY buffered? Two independent reasons, and only the
+      # first used to be counted: the rule's extraction TARGET may be body-scoped, and so may its
+      # CONDITION. A `body:` term cannot be answered without the bytes, and a `-body:` one cannot
+      # be answered SAFELY without them — with nothing buffered it evaluates false and negates to
+      # a match on every response. Counting the target alone left a rule whose own condition read
+      # the body being asked about a body nobody had buffered.
+      def wants_body? : Bool
+        rule.enabled? && (rule.body_scoped? || filter.mentions_body?)
+      end
+    end
 
     # A name's live value plus where it came from. `rule_id` is what lets the readout say
     # WHICH rule wrote a name after the operator has edited several.
@@ -158,7 +168,7 @@ module Gori
       # select-array allocation entirely; `@body_count` additionally decides whether ClientConn
       # BUFFERS a response body that would otherwise stream, which is the expensive half (P6).
       @enabled_count = Atomic(Int32).new(rules.count(&.enabled?))
-      @body_count = Atomic(Int32).new(rules.count { |r| r.enabled? && r.body_scoped? })
+      @body_count = Atomic(Int32).new(@compiled.count(&.wants_body?))
       # Rule ids already reported as needing an entity that was not buffered, at that rule
       # revision — see `miss_no_entity`.
       @no_entity_reported = Set(Int64).new
@@ -463,7 +473,9 @@ module Gori
     def extracts_body_for_host?(host : String) : Bool
       return false if @body_count.get == 0 # lock-free fast path
       @mutex.synchronize do
-        @rules.any? { |r| r.enabled? && r.body_scoped? && Rules.host_matches?(r.host, host) }
+        # `wants_body?`, matching what `@body_count` counts — a rule whose CONDITION reads the
+        # body needs the entity on this host just as much as one whose target does.
+        @compiled.any? { |c| c.wants_body? && Rules.host_matches?(c.rule.host, host) }
       end
     end
 
@@ -512,8 +524,13 @@ module Gori
                          method : String, host : String, target : String,
                          scheme : String, status : Int32, flow_id : Int64? = nil) : Nil
       return unless extracts? # lock-free: nothing configured, nothing allocated
+      # `head` and `body` ride along so a rule's CONDITION can read them — this is the one
+      # surface handed both, and dropping them here is what used to make `header:`/`body:`
+      # answer false against bytes that were sitting in the arguments. Whether a body exists
+      # at all is `wants_body?`'s business (see there): a condition naming `body:` is itself a
+      # reason to buffer one.
       subject = InterceptFilter::Subject.new(method: method, host: host, target: target,
-        scheme: scheme, status: status)
+        scheme: scheme, status: status, head: head, payload: body)
       picked = candidates(subject)
       return if picked.empty?
       # Parsed only now — after the host glob and the condition have both matched. A response
@@ -688,7 +705,7 @@ module Gori
         @scrub_reported.clear
       end
       @enabled_count.set(fresh.count(&.enabled?))
-      @body_count.set(fresh.count { |r| r.enabled? && r.body_scoped? })
+      @body_count.set(compiled.count(&.wants_body?))
       # A rule edit changes which names are DECLARED, and `token_regions` paints on that.
       Env.bump_highlight_rev
     end

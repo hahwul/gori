@@ -67,6 +67,34 @@ module Gori
       [] of FlowRow
     end
 
+    # Which of `ids` satisfy `filter` — the id-scoped form of `search`, for a caller that already
+    # HAS its rows and needs an answer the row projection cannot give (Colormarker asking
+    # `body:`/`header:`/`size:` of a screenful of History rows). Bounded by the caller's window,
+    # never by the table: the id list IS the scan.
+    #
+    # nil — not an empty set — when the query could not run, because the two mean opposite things
+    # to the caller. An empty set is "none of these match" and is worth caching; a failure is "no
+    # answer", and caching it as "no match" would silently unpaint rows for the rest of the
+    # session. Same degrade-and-log contract `search` has (the live render loop must never crash),
+    # with the one distinction its Array return could not express.
+    def ids_matching(filter : QL::Filter, ids : Array(Int64)) : Set(Int64)?
+      # NOT named `out`: `out` is a Crystal keyword, and `return out if …` parses as an out-param.
+      hits = Set(Int64).new
+      return hits if ids.empty?
+      args = filter.args.dup
+      ids.each { |i| args << i }
+      placeholders = Array.new(ids.size, "?").join(',')
+      @db.query("SELECT id FROM flows WHERE (#{filter.sql}) AND id IN (#{placeholders})",
+        args: args) do |rs|
+        rs.each { hits << rs.read(Int64) }
+      end
+      hits
+    rescue ex
+      # Routed to gori.log, never STDERR: in TUI mode STDERR is the alternate screen (see `search`).
+      ::Log.warn { "id-scoped match failed: #{ex.message}" }
+      nil
+    end
+
     EVENT_COLS = "id, created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload"
 
     # #124 forward cursor: events with id strictly AFTER `since_id`, OLDEST-first, up to

@@ -415,7 +415,8 @@ module Gori::Proxy
       # case they part company) only when intercept + Scope are both on, so the common
       # capture-only path spends nothing here.
       if (ic = @interceptor) && ic.intercepts_request?(
-           method: sent_req.method, host: host, target: gate_target, scheme: scheme)
+           method: sent_req.method, host: host, target: gate_target, scheme: scheme,
+           head: sent_head)
         return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
           created_at, started, req_framing, req_len)
       end
@@ -762,7 +763,7 @@ module Gori::Proxy
       # rule that holds the request also holds its response when M&R changed the request line.
       if (ic = @interceptor) && ic.intercepts_response?(
            method: sent_req.method, host: host, target: Codec::Http1.gate_target(sent_req),
-           scheme: scheme, status: resp.status) &&
+           scheme: scheme, status: resp.status, head: sent_resp_head) &&
          !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101
         return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)

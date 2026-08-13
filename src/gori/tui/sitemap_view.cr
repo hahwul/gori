@@ -27,9 +27,16 @@ module Gori::Tui
     # back up the row list to find it (the mark predicate needs it on every drawn row).
     private record VisibleRow, node : Node, depth : Int32, guides : UInt64, host : String
 
-    # The QL fields meaningful for the endpoint tree. Mirrors History's set so the same
-    # `/` query language applies, plus `tag:` — a Sitemap-local field (handled here, not
-    # in the shared QL) that filters the tree by a node's path memo.
+    # The QL fields meaningful for the endpoint tree. The same `/` query language History
+    # takes, plus `tag:` — a Sitemap-local field (handled here, not in the shared QL) that
+    # filters the tree by a node's path memo.
+    #
+    # Written out rather than read from `QL::FIELDS` (which History's own list now IS), and
+    # deliberately: this is a CURATED subset. `tag:` is not in QL at all, and `url:`/`stub:`/
+    # `reqsize:`/`respsize:` are dropped because a tree node is a path, not an exchange —
+    # every term here still COMPILES through QL, this list only decides what Tab offers.
+    # Anything added to `QL::FIELDS` is therefore usable here the moment it exists; it just
+    # is not suggested until someone decides it reads well against a tree.
     QL_FIELDS = %w[host path method status scheme proto body header size dur tag]
     # Discoverability hints for the filter, kept loosely in sync with QL_FIELDS.
     # FILTER_HINT sits on the idle bar (press `/` to start); QUERY_HINT sits on the

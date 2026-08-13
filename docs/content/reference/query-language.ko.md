@@ -93,25 +93,41 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 
 ## 적용 범위 {#where-it-applies}
 
-다섯 개의 필터 바가 위 문법(필드, 비교, `~` 정규식, `AND`/`OR`/`NOT`, 괄호, 따옴표)을 공유합니다. 다른 것은 필드 집합뿐입니다. 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
+모든 필터 바가 위 문법(필드, 비교, `~` 정규식, `AND`/`OR`/`NOT`, 괄호, 따옴표)을 공유합니다. 다른 것은 필드 집합뿐이고, 그것도 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
 
 | 화면 | 필드 |
 |------|------|
 | History, `gori run history`, MCP | 위 표 전체 |
 | Sitemap | 위와 동일, 여기에 노드별 경로 메모용 `tag:` 추가 |
+| 컬러 규칙(Colormarker) | 위와 동일 — History 필터 바에 쓰는 그 쿼리를 그대로 받습니다 |
+| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body` |
 | Probe | `severity`(`sev`), `status`(`st`), `category`(`cat`), `host`, `code` |
 | Issues | `severity`(`sev`), `status`(`st`), `host`, `title` |
-| Intercept 캐치 조건 | `host`, `path`, `method`, `scheme`, `status` |
 
 Probe와 Issues는 심각도 이름(`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`)과 트리아지 상태(`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, 그리고 open이 아닌 모든 상태를 뜻하는 `closed`)를 받습니다. 심각도는 비교를 지원하므로 `sev:>=high`도 동작합니다.
 
 ```text
-sev:>=high -status:fp          Issues: high와 critical, 오탐 제외
-cat:cors sev:medium            Probe: medium 등급 CORS 발견
-host:api.example.com method:POST   Intercept: 한 호스트의 POST만 홀드
+sev:>=high -status:fp                 Issues: high와 critical, 오탐 제외
+cat:cors sev:medium                   Probe: medium 등급 CORS 발견
+host:api.example.com method:POST      Intercept: 한 호스트의 POST만 홀드
+body:secret AND -host:cdn             컬러 규칙: 유출은 칠하고 CDN은 제외
 ```
 
-Intercept 바는 입력하는 동안 필드 이름과 알려진 값을 Tab으로 자동 완성합니다.
+Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 알려진 값을 Tab으로 자동 완성합니다.
+
+### 요청·응답 본문 문자열 매칭 {#matching-content}
+
+`header:`와 `body:`는 메시지의 바이트를 뒤집니다. 따라서 어디서 동작하는지는 필터를 물어보는 그 시점에 **어떤 바이트가 존재하는가**로 정해집니다.
+
+- **History, Sitemap, 컬러 규칙**은 이미 캡처된 플로를 봅니다. 그래서 두 필드 모두 요청·응답 양쪽에서 항상 동작합니다.
+- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 모든 게이트에서 동작합니다. `body:`는 페이로드가 손에 있는 경우 — 홀드된 **WebSocket 메시지**와 **Extract 규칙** 조건 — 에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 바로 본문을 버퍼링할지 말지를 결정하는 지점이기 때문입니다.
+
+규칙을 쓰기 전에 알아둘, 의도된 차이가 하나 있습니다.
+
+- **쿼리**에서 `body:`는 트라이그램 인덱스를 읽습니다. 빠르지만 각 방향 첫 8 KiB로 제한되고 바이너리·압축 본문은 건너뜁니다. `body~정규식`은 대신 저장된 바이트를 그대로 훑고 제한이 없습니다.
+- **컬러 규칙**에서 `body:`는 항상 훑고, 각 방향 첫 64 KiB를 읽습니다. 인덱싱은 캡처 이후에 일어나는데 규칙은 방금 도착한 행을 칠해야 하니 훑는 것 말고는 정답이 없고, 64 KiB 한계는 큰 본문 한 화면이 목록을 멈춰 세우지 않게 하는 장치입니다. 그래서 컬러 규칙은 똑같은 쿼리가 목록에 못 띄우는 행도 칠하지만, 64 KiB를 넘어가는 매치는 칠하지 않습니다.
+
+모든 화면의 `body:`는 **와이어에 흐른 그대로의 바이트**를 읽습니다. 그래서 어느 것도 gzip 본문 안의 문자열은 찾지 못합니다. Extract 규칙 조건도 마찬가지입니다 — 조건은 응답을 디코드하기 *전에* 평가되고, 압축 해제된 텍스트를 보는 것은 그 뒤에 이어지는 추출뿐입니다. 압축된 내용을 걸러야 한다면 그 바깥을 거세요: 헤더, 경로, 또는 응답 크기.
 
 ## 예제 {#examples}
 

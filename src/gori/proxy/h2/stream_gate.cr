@@ -600,8 +600,10 @@ module Gori::Proxy::H2
       method = HeadCodec.pseudo_of(fields, ":method") || "GET"
       target = HeadCodec.pseudo_of(fields, ":path") || "/"
       scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+      # `head` is the encoded h1-shaped head this block projects to, which is what the operator
+      # sees when the message is held — so a `header:` term reads the same bytes on h2 as on h1.
       return nil unless @interceptor.intercepts_request?(
-                          method: method, host: host, target: target, scheme: scheme)
+                          method: method, host: host, target: target, scheme: scheme, head: head)
       @interceptor.enqueue_request(head, method: method, target: target,
         host: host, port: port, scheme: scheme,
         edit_refusal: edit_refusal(block), head_only: true)
@@ -625,7 +627,7 @@ module Gori::Proxy::H2
       host, port = Upstream.split_host_port(ref.authority, @port)
       return nil unless @interceptor.intercepts_response?(
                           method: ref.method, host: host, target: ref.target,
-                          scheme: ref.scheme, status: status)
+                          scheme: ref.scheme, status: status, head: head)
       # h1's response Item carries "<status> <reason>"; h2 has no reason phrase (§8.3.2).
       @interceptor.enqueue_response(head, flow_id: @assembler.flow_id_of(block.stream_id),
         method: ref.method, target: status.to_s, host: host, port: port, scheme: ref.scheme,

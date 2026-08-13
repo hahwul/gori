@@ -29,7 +29,7 @@ module Gori::Tui
     # Example values double as syntax cues; keep in sync with InterceptFilter::FIELDS.
     # `proto:ws` earns its own note: it is not a narrowing term but the WebSocket hold's
     # OPT-IN, and without it no WS message is held however permissive the rest is (#500).
-    QUERY_HINT = "fields:  host:  path:  method:  scheme:  status:  proto:  body:    ·    proto:ws opts WS messages IN    ·    AND OR NOT ( ) combine  ·  -term negates"
+    QUERY_HINT = "fields:  host:  path:  url:  method:  scheme:  status:  proto:  header:  body:    ·    ~regex    ·    proto:ws opts WS messages IN    ·    AND OR NOT ( ) combine  ·  -term negates"
 
     # How much of a held WebSocket payload the queue row previews. A row is one line, and
     # the detail pane is where the message is actually read.

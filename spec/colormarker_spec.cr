@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "compress/gzip"
 
 private def with_store(&)
   path = File.tempname("gori-colormarker", ".db")
@@ -26,6 +27,24 @@ private def with_globals(&)
     Gori::Settings.colormarker_rules = before
     Gori::Settings.colormarker_next_rule_id = counter
   end
+end
+
+# A REAL flow in the store, handed back as the `FlowRow` `match` is asked about. Store-tier
+# rules resolve by flow id, so the synthetic `row` below — whose id names no flow — would answer
+# "no" for the wrong reason and pin nothing.
+private def captured(store, host : String, target : String, *,
+                     body : String? = nil, body_bytes : Bytes? = nil,
+                     head : String? = nil, status : Int32? = 200) : Gori::Store::FlowRow
+  req_head = head || "POST #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n"
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: host, port: 443,
+    method: "POST", target: target, http_version: "HTTP/1.1",
+    head: req_head.to_slice, body: body_bytes || body.try(&.to_slice)))
+  if status
+    store.update_response(Gori::Store::CapturedResponse.new(
+      flow_id: id, status: status, head: "HTTP/1.1 #{status} OK\r\n\r\n".to_slice))
+  end
+  store.flow_row(id).not_nil!
 end
 
 private def row(id : Int64 = 1_i64, method : String = "GET", host : String = "acme.test",
@@ -106,16 +125,149 @@ describe Gori::Colormarker do
       end
     end
 
-    # `Subject.payload` is always nil for a captured row, so a `body:` term answers false and
-    # the rule paints nothing. Tolerated (it is a legal condition) but ADVISED against, and the
-    # advice is what an operator actually sees.
-    it "never matches a `body:` term, and says so" do
+    # The STORE tier. A `body:` rule used to parse fine and paint nothing — `Subject.payload` is
+    # nil for a captured row — so the engine answered "no" for every row and said so only in a
+    # note. It now compiles to QL and asks the store, which is the whole point of the tier split.
+    it "paints a row whose stored body matches a `body:` term" do
+      with_globals do
+        with_store do |store|
+          hit = captured(store, "acme.test", "/login", body: "username=admin&csrf=SeCrEtToken")
+          miss = captured(store, "acme.test", "/about", body: "nothing here")
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:secrettoken", RED, FULL, "leak") # case-insensitive, like History's body:
+          cm.needs_store?.should be_true
+          cm.match(hit).not_nil!.name.should eq("leak")
+          cm.match(miss).should be_nil
+        end
+      end
+    end
+
+    # The reason Colormarker compiles with `fts: false`. Indexing is off-commit, so a row
+    # captured a moment ago has no `flows_fts` row yet — and the render path can neither drain
+    # the backlog nor wait for it. Nothing here calls `index_pending!`, which is the assertion:
+    # the rule must paint the flow that just arrived, not the flow the indexer has caught up to.
+    it "matches a body the text index has not indexed yet" do
+      with_globals do
+        with_store do |store|
+          fresh = captured(store, "acme.test", "/upload", body: "id=1&token=freshvalue")
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:freshvalue", RED, FULL, "fresh")
+          cm.match(fresh).not_nil!.name.should eq("fresh")
+        end
+      end
+    end
+
+    # `body:` here is `body~` with a literal needle, and `body~` reads the haystack by its true
+    # byte length (Gori::SafeRegexp) rather than as a NUL-terminated string. A `CAST(… AS TEXT)
+    # LIKE` would pass every other example in this file and fail only this one — silently, on
+    # exactly the bodies a proxy for security work is pointed at.
+    it "scans a body past an embedded NUL, like body~" do
+      with_globals do
+        with_store do |store|
+          bin = captured(store, "bin.test", "/img", body_bytes: Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43])
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:ABC", RED, FULL, "past-nul")
+          cm.match(bin).not_nil!.name.should eq("past-nul")
+        end
+      end
+    end
+
+    # The bound, and it is a real one. A body is capped at CAPTURE by `Settings.capture_max`
+    # (2 MiB by default), and resolving a screenful of those uncapped measured ~460 ms — half a
+    # second of stall per screen on the render path. So a rule reads the first `BODY_SCAN_MAX`
+    # bytes of each side, exactly as `Rules::RULE_PREVIEW_BODY_MAX` bounds the Rewriter preview,
+    # and `advise` says so where a rule is written. Pinned in both directions.
+    it "scans a bounded prefix of the body, and says where the bound is" do
+      with_globals do
+        with_store do |store|
+          pad = "p" * Gori::Colormarker::BODY_SCAN_MAX
+          near = captured(store, "acme.test", "/near", body: "needle-here#{pad}")
+          far = captured(store, "acme.test", "/far", body: "#{pad}needle-here")
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:needle-here", RED, FULL, "leak")
+          cm.match(near).not_nil!.name.should eq("leak")
+          cm.match(far).should be_nil # past the bound — the documented miss
+          Gori::Colormarker.advise("body:needle-here").first
+            .should contain("first #{Gori::Colormarker::BODY_SCAN_MAX // 1024} KiB")
+        end
+      end
+    end
+
+    # The OTHER bound, and the one an operator is likeliest to assume away. `body:` here scans
+    # the bytes AS STORED, which are the wire bytes: a gzipped response containing "secret" does
+    # not contain the literal "secret", so no scan can find it. That is the exact opposite of an
+    # EXTRACT rule, which decodes first (`bindings_proxy_extract_spec`: "reaches a token inside a
+    # gzipped body") — so the two surfaces genuinely differ here, and only the docs can say it.
+    it "does not reach a token inside a gzipped body, unlike an extract rule" do
+      with_globals do
+        with_store do |store|
+          io = IO::Memory.new
+          Compress::Gzip::Writer.open(io, &.write("csrf=SeCrEtToken".to_slice))
+          zipped = captured(store, "acme.test", "/gz", body_bytes: io.to_slice)
+          plain = captured(store, "acme.test", "/plain", body: "csrf=SeCrEtToken")
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:secrettoken", RED, FULL, "leak")
+          cm.match(plain).not_nil!.name.should eq("leak")
+          cm.match(zipped).should be_nil
+        end
+      end
+    end
+
+    # The other half of the store tier: the fields History has and a `FlowRow` cannot answer.
+    # Every one of these used to be REFUSED at creation as an unknown field.
+    it "answers header:, size: and url: terms against the store" do
+      with_globals do
+        with_store do |store|
+          flow = captured(store, "acme.test", "/login", body: "x=1",
+            head: "POST /login HTTP/1.1\r\nHost: acme.test\r\nX-Trace: abc123\r\n\r\n")
+          other = captured(store, "cdn.test", "/logo.png", body: "y=2")
+          cm = Gori::Colormarker.load(store)
+          cm.add("header:x-trace", RED, FULL, "traced")
+          cm.match(flow).not_nil!.name.should eq("traced")
+          cm.match(other).should be_nil
+        end
+      end
+    end
+
+    # A store-tier answer is memoised per {rule, flow}, and a row whose bytes CHANGE has to drop
+    # it — the pending row genuinely had no response body to match. History calls `forget` at the
+    # same moment it drops its own per-row colour memo.
+    it "re-asks a store-tier rule after `forget`" do
+      with_globals do
+        with_store do |store|
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+            method: "GET", target: "/slow", http_version: "HTTP/1.1",
+            head: "GET /slow HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+          pending = store.flow_row(id).not_nil!
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:landed", RED, FULL, "late")
+          cm.match(pending).should be_nil # no response body yet — a real "no"
+
+          store.update_response(Gori::Store::CapturedResponse.new(
+            flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+            body: "it landed here".to_slice))
+          settled = store.flow_row(id).not_nil!
+          cm.match(settled).should be_nil # still the cached "no"
+          cm.forget(id)
+          cm.match(settled).not_nil!.name.should eq("late")
+        end
+      end
+    end
+
+    # The tier split is a property of the CONDITION, and the row tier must stay exactly what it
+    # was: no store access, and `needs_store?` false so History never even calls `prefetch`.
+    it "keeps an addressing-only rule in the row tier" do
+      Gori::Colormarker.row_answerable?("host:acme status:5xx -method:GET").should be_true
+      Gori::Colormarker.row_answerable?("login").should be_true # bare free text names no field
+      Gori::Colormarker.row_answerable?("body:secret").should be_false
+      Gori::Colormarker.row_answerable?("host~^api\\.").should be_false # only QL implements ~
+      Gori::Colormarker.row_answerable?("size:>1k").should be_false
       with_globals do
         with_store do |store|
           cm = Gori::Colormarker.load(store)
-          cm.add("body:secret", RED, FULL)
-          cm.match(row).should be_nil
-          Gori::Colormarker.advise("body:secret").first.should contain("`body:` never matches here")
+          cm.add("host:acme", RED, FULL)
+          cm.needs_store?.should be_false
         end
       end
     end
@@ -158,19 +310,43 @@ describe Gori::Colormarker do
       Gori::Colormarker.unusable_reason("host:acme").should be_nil
     end
 
-    # History QL has these; InterceptFilter does not, and `parse_term` free-texts an unknown
-    # field — so `size:>10000` would become a literal substring search over method/host/target
-    # and the rule would never fire, with no error anywhere.
-    it "refuses a QL field this backend does not implement" do
-      %w[size header dur url stub reqsize].each do |field|
-        reason = Gori::Colormarker.unusable_reason("#{field}:1")
-        reason.should_not be_nil
-        reason.not_nil!.should contain("unknown field `#{field}:`")
+    # Every one of these was refused as an "unknown field" until the store tier existed. They are
+    # History QL fields, which is exactly why an operator reaches for them, and a colour rule now
+    # answers all of them.
+    it "accepts every field History's filter bar has" do
+      Gori::QL::FIELDS.each do |field|
+        # A value each field actually ACCEPTS: a term QL drops (`proto:x`) folds the condition to
+        # match-all, and being refused for THAT is a different — and correct — answer.
+        value = case field
+                when "status", "size", "reqsize", "respsize", "dur" then "1"
+                when "proto"                                        then "ws"
+                when "stub"                                         then "true"
+                else                                                     "x"
+                end
+        Gori::Colormarker.unusable_reason("#{field}:#{value}").should be_nil
       end
-      Gori::Colormarker.unknown_fields("host:a AND size:1 OR dur:2").should eq(["size", "dur"])
-      # `~` is a QL operator this backend does not accept as a separator, so `host~x` is free
-      # text here — complaining about an unknown FIELD would be the wrong diagnosis.
+      Gori::Colormarker.unknown_fields("host:a AND size:1 OR dur:2").should be_empty
+    end
+
+    # An unknown field still has to be refused, and for the reason it always did: BOTH compilers
+    # free-text the whole token, so `hsot:evil.com` becomes a literal substring search over
+    # method/host/target and the rule never fires, with no error anywhere.
+    it "refuses a field neither compiler implements" do
+      reason = Gori::Colormarker.unusable_reason("hsot:evil.com")
+      reason.not_nil!.should contain("unknown field `hsot:`")
+      Gori::Colormarker.unknown_fields("host:a hsot:b flag:c").should eq(["hsot", "flag"])
+      # `~` IS a separator now, so an unknown field is caught on that side too — and a known one
+      # is not mistaken for one.
       Gori::Colormarker.unknown_fields("host~x").should be_empty
+      Gori::Colormarker.unknown_fields("hsot~x").should eq(["hsot"])
+    end
+
+    # QL turns an uncompilable `~` pattern into a never-match clause on purpose: for a QUERY that
+    # is an empty result an operator can see. For a RULE it is a colour that never appears, with
+    # nothing to look at — so it is refused where it is written instead.
+    it "refuses a regex that cannot compile" do
+      Gori::Colormarker.unusable_reason("body~[bad").not_nil!.should contain("not a valid regex")
+      Gori::Colormarker.unusable_reason("body~[a-z]+").should be_nil
     end
 
     it "refuses to create a rule with an unusable condition" do

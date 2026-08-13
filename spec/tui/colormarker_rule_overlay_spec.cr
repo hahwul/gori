@@ -65,10 +65,17 @@ describe ColormarkerRuleOverlay do
       ov.invalid_reason.should eq("this condition matches every flow")
     end
 
-    it "refuses a QL field this backend never implements" do
-      ov = ColormarkerRuleOverlay.new(match_filter: "size:>10000")
+    # `size:` used to be refused here as a field "this backend never implements". It is a
+    # History QL field, a colour rule speaks History QL, and the store tier answers it.
+    it "accepts a QL field the row projection cannot answer" do
+      ColormarkerRuleOverlay.new(match_filter: "size:>10000").valid?.should be_true
+      ColormarkerRuleOverlay.new(match_filter: "body:secret").valid?.should be_true
+    end
+
+    it "refuses a field neither compiler implements" do
+      ov = ColormarkerRuleOverlay.new(match_filter: "szie:>10000")
       ov.valid?.should be_false
-      ov.invalid_reason.should contain("unknown field `size:`")
+      ov.invalid_reason.should contain("unknown field `szie:`")
     end
 
     it "accepts a real condition" do

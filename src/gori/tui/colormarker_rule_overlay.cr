@@ -276,7 +276,10 @@ module Gori::Tui
     def suggestions : Array(String)
       field = @fields[:when]
       hosts = @on_hosts.try(&.call(host_prefix(field))) || [] of String
-      InterceptFilter.suggestions(field.value, field.caret, hosts)
+      # The wider pool: a colour rule accepts every History QL field, not just the ones a hold
+      # gate can answer. Completing only the gate's list would have hidden `body:`/`size:` from
+      # the one surface that had just learned to answer them.
+      InterceptFilter.suggestions(field.value, field.caret, hosts, Colormarker::USEFUL_FIELDS)
     end
 
     private def host_prefix(field : TextField) : String
@@ -334,8 +337,8 @@ module Gori::Tui
     private def completion_band : String
       sugg = suggestions
       return "↹ #{sugg.first(6).join("  ")}" unless sugg.empty?
-      # No candidates: say what this backend actually knows, since the QL fields History's
-      # search bar accepts are a SUPERSET and reaching for one of them is the likely mistake.
+      # No candidates: name the fields. They are History's, exactly — the search bar's list is no
+      # longer a superset — so an operator who knows one bar knows this one.
       "fields: #{Colormarker::USEFUL_FIELDS.join(": ")}:"
     end
 
