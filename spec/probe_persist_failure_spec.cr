@@ -5,7 +5,11 @@ require "./spec_helper"
 # detail is odd), so the interesting case is the other kind: findings were already made and
 # the recording step blew up.
 private class PersistFailingStore < Gori::Store
-  def upsert_probe_issue(d : Gori::Probe::Detection) : Nil
+  # Hooked on the PLURAL, which is the single chokepoint: `upsert_probe_issue` delegates to it, so
+  # this injects the failure no matter which entry point the analyzer reaches for. Overriding the
+  # singular alone silently stopped injecting the day `persist` switched to writing a page's
+  # findings in one round-trip — the spec kept passing locally and only CI noticed.
+  def upsert_probe_issues(ds : Indexable(Gori::Probe::Detection)) : Nil
     raise ArgumentError.new("persist boom")
   end
 end
