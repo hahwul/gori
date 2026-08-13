@@ -51,7 +51,7 @@ module Gori::Tui
       y = Hotkeys.binding_label(reg, "issue.copy", "y")
       if @issues.detail_open?
         if @issues.notes_insert_mode?
-          "type to edit · esc save · ^W discard"
+          "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
           "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · esc links"
         else
@@ -222,8 +222,14 @@ module Gori::Tui
       case
       when ev.ctrl? && key.lower_w? then @issues.cancel_notes_edit
       when ev.ctrl_z?               then @issues.notes_undo
-      when key.escape?              then @issues.save_notes(@host.session.store)
-      when key.enter?               then @issues.notes_newline
+      when (ev.ctrl? || ev.alt?) && !@issues.notes_word_delete_key?(ev) && !editing_motion?(ev)
+        # Every other modified chord defers to the central keymap so it stays rebindable —
+        # `^Y` Copy above all, which is the only way to copy an INS selection here (bare `y`
+        # is a literal character, and typing it would REPLACE the selection). ⌥⌫ and ⌥/⌃
+        # motion are this editor's own and are excluded above.
+        return false
+      when key.escape? then @issues.save_notes(@host.session.store)
+      when key.enter?  then @issues.notes_newline
         # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @issues.notes_word_delete_key?(ev) then @issues.notes_motion_key(ev)
       when key.backspace?                     then @issues.notes_backspace
@@ -232,6 +238,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @issues.notes_insert(c)
+          report_replaced(@issues.notes_last_replaced) # a printable over a selection REPLACES it
           @issues.set_preedit("")
         end
       end

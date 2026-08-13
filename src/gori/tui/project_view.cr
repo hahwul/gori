@@ -201,7 +201,8 @@ module Gori::Tui
 
     def exit_desc_insert! : Nil
       @desc_mode = InputMode::Read
-      @desc_read.sync_from(@desc_area)
+      # Carry an INS ⇧arrow selection over to READ — see TextReadState#adopt_editor_selection.
+      @desc_read.adopt_editor_selection(@desc_area)
     end
 
     def desc_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
@@ -209,8 +210,13 @@ module Gori::Tui
       @desc_read.move(@desc_area, dr, dc, selecting: selecting)
     end
 
+    # One selection model per mode — see NotesView#selection? / RepeaterView#pane_selection?.
     def desc_copy_text : String
-      @desc_read.copy_text(@desc_area)
+      if desc_insert_mode?
+        @desc_area.selection_text || @desc_read.copy_text(@desc_area)
+      else
+        @desc_read.copy_text(@desc_area)
+      end
     end
 
     def desc_copy_all : String
@@ -218,7 +224,8 @@ module Gori::Tui
     end
 
     def desc_selection? : Bool
-      @pane == :desc && !desc_insert_mode? && @desc_read.selection?
+      return false unless @pane == :desc
+      desc_insert_mode? ? @desc_area.selection? : @desc_read.selection?
     end
 
     def desc_select_line : Nil
@@ -944,6 +951,11 @@ module Gori::Tui
     def insert(ch : Char) : Nil
       @desc_area.insert(ch)
       @desc_dirty = true
+    end
+
+    # Characters the last `insert` replaced — see TextArea#last_replaced.
+    def last_replaced : Int32
+      @desc_area.last_replaced
     end
 
     def newline : Nil

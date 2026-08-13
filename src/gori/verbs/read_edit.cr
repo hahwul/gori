@@ -137,6 +137,9 @@ module Gori
       # verb moved into a `:rules` section at the same time). Two sections never render together,
       # so `x` keeps meaning "select line" here and "toggle" there.
       in_rewriter_out = ->(ctx : Verb::ExecContext) { ctx.current_tab == :rewriter && ctx.rewriter_preview_out? }
+      in_rewriter_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :rewriter && (ctx.rewriter_preview_out? || ctx.editor_focused?)
+      end
       r.register Verb::Definition.new(
         "rewriter.select-line", "Select line", "Select the entire current preview line",
         Verb::Scope::Rewriter, [Verb::Chord.new("x")],
@@ -148,9 +151,11 @@ module Gori
         "rewriter.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::Rewriter, available: in_sel, mnemonic: 'S', section: :preview) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
-        "rewriter.copy", "Copy", "Copy the selected preview text, or the whole transformed sample if nothing is selected",
-        Verb::Scope::Rewriter, [Verb::Chord.new("y")],
-        available: in_rewriter_out, mnemonic: 'y', section: :preview) { |ctx| ctx.read_copy; nil }
+        # `^Y` and the wider gate: the INPUT pane is an EDITOR, where a bare `y` is a literal
+        # character that replaces the selection, so Copy has to be reachable by chord there too.
+        "rewriter.copy", "Copy", "Copy the selected preview text, or the whole pane if nothing is selected",
+        Verb::Scope::Rewriter, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_rewriter_copy, mnemonic: 'y', section: :preview) { |ctx| ctx.read_copy; nil }
 
       # The Comparer's diff. Whole ROWS, never a char span: a screen row is two columns of the
       # same diff, so `ReadPane(line_select_only: true)` is what the cursor is — see
@@ -178,6 +183,7 @@ module Gori
       # with a live queue action — the menu is the discoverable route, as it is for the Project
       # description.
       in_icept_preview = ->(ctx : Verb::ExecContext) { ctx.current_tab == :intercept && ctx.intercept_preview_readable? }
+      in_icept_copy = ->(ctx : Verb::ExecContext) { ctx.current_tab == :intercept && ctx.intercept_copyable? }
       r.register Verb::Definition.new(
         "intercept.select-line", "Select line", "Select the entire current preview line",
         Verb::Scope::Intercept, available: in_icept_preview, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
@@ -188,8 +194,13 @@ module Gori
         "intercept.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::Intercept, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
+        # Bare `y` stays chordless for the reason above (the queue spends the letters), but `^Y`
+        # IS registered and the gate is the WIDER `intercept_copyable?`: the held-bytes editor
+        # can build a ⇧arrow selection in INS, where a bare `y` is a literal character that
+        # REPLACES it. A ctrl chord collides with nothing in the queue.
         "intercept.copy", "Copy", "Copy the selected preview text, or the whole held message if nothing is selected",
-        Verb::Scope::Intercept, available: in_icept_preview, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("y", ctrl: true)],
+        available: in_icept_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # An OAST callback's detail. `section: :detail` (OastController#command_section answers to
       # match): the callbacks LIST spends `y` on "copy the generated payload", and this pane's `y`

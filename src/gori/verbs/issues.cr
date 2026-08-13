@@ -145,11 +145,15 @@ module Gori
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       in_issues_notes_read = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
+      # `y` in READ, `^Y` in INS — see repeater.copy in verbs/history.cr.
+      in_issues_notes_copy = ->(ctx : Verb::ExecContext) do
+        ctx.issues_notes_read_mode? || (ctx.current_tab == :issues && ctx.editor_focused?)
+      end
 
       r.register Verb::Definition.new(
         "issue.copy", "Copy", "Copy the selected notes text, or the whole notes if nothing is selected, to the clipboard",
-        Verb::Scope::IssuesDetail, [Verb::Chord.new("y")],
-        available: in_issues_notes_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_issues_notes_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "issue.edit-notes", "Edit notes", "Edit the issue notes inline (i/↵/e)", Verb::Scope::IssuesDetail,

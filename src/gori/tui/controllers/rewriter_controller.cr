@@ -370,6 +370,7 @@ module Gori::Tui
       else
         if (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
           ed.insert(c)
+          report_replaced(ed.last_replaced) # a printable over a selection REPLACES it
           ed.set_preedit("")
         elsif key.space? && !ev.ctrl? && !ev.alt?
           @host.open_space_menu
@@ -505,14 +506,28 @@ module Gori::Tui
     end
 
     # --- READ-pane delegators (the Rewriter verbs + the Runner's read_* ladders) ---
+    # Two panes, two selection models: `@out` is the read-only transform result, `@preview_input`
+    # is the editable sample. The INPUT half used to be absent everywhere here, so a ⇧arrow
+    # selection built in that editor could be destroyed by the next printable (TextArea#insert
+    # cuts it) but never copied. Same shape as RepeaterView#pane_selection?.
     def rewriter_selection_active? : Bool
-      @sub == :rules && @focus == :preview_out && @out.selection?
+      return false unless @sub == :rules
+      case @focus
+      when :preview_out then @out.selection?
+      when :preview_in  then @preview_input.selection?
+      else                   false
+      end
     end
 
     def rewriter_selection_text : String
-      return "" unless @sub == :rules && @focus == :preview_out
-      sync_preview_out
-      @out.copy_text
+      return "" unless @sub == :rules
+      case @focus
+      when :preview_in then @preview_input.selection_text || @preview_input.text
+      when :preview_out
+        sync_preview_out
+        @out.copy_text
+      else ""
+      end
     end
 
     def rewriter_select_line : Nil
@@ -530,10 +545,20 @@ module Gori::Tui
     # Same `Clipboard.copy` + status shape every other tab's copy verb uses, so the toast reads
     # the same and the OSC-52 truncation note is not re-derived here.
     def rewriter_copy : Nil
-      return unless @sub == :rules && @focus == :preview_out
-      sync_preview_out
-      sel = @out.selection?
-      text = sel ? @out.copy_text : @out.copy_all
+      return unless @sub == :rules
+      case @focus
+      when :preview_in
+        # The editable sample. `^Y` is the only way to copy a selection here: in INS a bare `y`
+        # is a literal character, and typing it REPLACES the selection.
+        sel = @preview_input.selection?
+        text = sel ? (@preview_input.selection_text || "") : @preview_input.text
+      when :preview_out
+        sync_preview_out
+        sel = @out.selection?
+        text = sel ? @out.copy_text : @out.copy_all
+      else
+        return
+      end
       return if text.empty?
       written = Clipboard.copy(text)
       note = Clipboard.note(written, text)

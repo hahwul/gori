@@ -3592,9 +3592,17 @@ module Gori::Tui
     # editor) rather than driving a navigable list/tree or a read-only pane. Splits
     # the BODY badge into EDITOR/BODY so the user can tell at a glance whether the
     # keys under their fingers land as text or as commands.
-    private def body_editor? : Bool
+    # Also the `*.copy` verbs' INS-side availability gate (Verb::ExecContext#editor_focused?),
+    # which is why it is no longer private: one definition of "the keys under your fingers
+    # land as text", read by both the status badge and the keymap.
+    def body_editor? : Bool
       return false unless @focus == :body
       @tabs[@active_tab]?.try(&.body_badge) == :editor
+    end
+
+    # :ditto:
+    def editor_focused? : Bool
+      body_editor?
     end
 
     # Contextual key hints for the bottom row — change with the focused region,

@@ -117,6 +117,16 @@ module Gori
       # whole focused pane. Routes to the active tab's existing copy delegators
       # (not new copy logic) — mirrors read_selection_active?'s per-tab dispatch.
       abstract def read_copy : Nil
+      # Whether the focused body region captures typed characters as text (INS / an
+      # editor sub-mode) rather than driving a navigable list or a read-only pane.
+      #
+      # This is what lets the `*.copy` verbs be available in INS, where their bare `y`
+      # cannot reach them: in INS the editor ladders claim printables upstream of the
+      # keymap, so `y` types a `y` and only the `^Y` chord arrives. Gating on this rather
+      # than on read_selection_active? is deliberate — a selection-only gate would make
+      # `^Y` a DEAD KEY in INS whenever nothing is selected, while READ's `y` copies the
+      # whole pane in that case (see Runner#read_copy). One key, one meaning, both modes.
+      abstract def editor_focused? : Bool
       # "Copy as X": open a centered picker of the focused HTTP message's copy formats
       # (url/headers/body/cookies/curl/raw). Focus-aware — the offered set follows the
       # active pane; degrades to read_copy when the context has no format variants.

@@ -126,22 +126,39 @@ describe "Gori::Verbs.register_core" do
   end
 
   describe "project description copy" do
-    # The chord stays dropped: ProjectController raw-dispatches 'y' in the description pane and
-    # handle_body_key returns true there, so the shared Keymap is never consulted — a chord could
-    # only ever be dead weight in the rebind editor. The mnemonic mirrors that real key.
-    it "carries the 'y' menu key with no chord, in its own scope, gated on tab AND pane" do
+    # BARE 'y' stays chordless: ProjectController raw-dispatches it in the description pane and
+    # handle_body_key returns true there, so the shared Keymap is never consulted — a bare chord
+    # could only ever be dead weight in the rebind editor. The mnemonic mirrors that real key.
+    #
+    # `^Y` IS registered, because that raw dispatch only covers READ. In INS a bare `y` is a
+    # literal character (and typing it over a ⇧arrow selection REPLACES it), so the ctrl form is
+    # the only way to copy without leaving the mode.
+    it "carries the 'y' menu key with only the ctrl chord, in its own scope, gated on tab AND pane" do
       verb = r["project.copy"]
-      verb.chords.should be_empty
+      verb.chords.should eq([Gori::Verb::Chord.new("y", ctrl: true)])
       verb.menu_key.should eq('y')
       verb.scope.should eq(Gori::Verb::Scope::ProjectDesc) # NOT Body — see the History list
       ctx = FakeExecContext.new
       ctx.current_tab = :project
-      verb.available?(ctx).should be_false # the description pane is not in read mode
+      verb.available?(ctx).should be_false # neither read mode nor a focused editor
       ctx.project_desc_read_mode = true
       verb.available?(ctx).should be_true
       ctx.current_tab = :history
       verb.available?(ctx).should be_false # pane flag alone must not leak it into History
       verb_intents(r, "project.copy").should eq([:read_copy])
+    end
+
+    # The INS half: with the pane in INSERT (read_mode false) the verb must still be available,
+    # or `^Y` would be a dead key in exactly the mode that needs it.
+    it "is available while the description editor is focused in INS, and still tab-gated" do
+      verb = r["project.copy"]
+      ctx = FakeExecContext.new
+      ctx.current_tab = :project
+      ctx.project_desc_read_mode = false
+      ctx.editor_focused = true
+      verb.available?(ctx).should be_true
+      ctx.current_tab = :history
+      verb.available?(ctx).should be_false
     end
   end
 

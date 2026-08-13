@@ -71,7 +71,7 @@ module Gori::Tui
         end
       else
         if @project_view.desc_insert_mode?
-          "type to edit · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR"
+          "type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR"
         else
           "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs"
         end
@@ -150,7 +150,6 @@ module Gori::Tui
         true
       else
         handle_project_desc_key(ev)
-        true
       end
     end
 
@@ -362,7 +361,8 @@ module Gori::Tui
     end
 
     # --- DESCRIPTION pane: READ/INS multi-line editing ---
-    private def handle_project_desc_key(ev : Termisu::Event::Key) : Nil
+    # Returns false when the key should fall through to the shell keymap — see the `^Y` arm.
+    private def handle_project_desc_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
@@ -375,11 +375,18 @@ module Gori::Tui
         else
           leave_to_strip
         end
+      elsif (ev.ctrl? || ev.alt?) && !ev.ctrl_z? && !editing_motion?(ev)
+        # Any OTHER modified chord defers to the central keymap so it stays rebindable —
+        # `^Y` Copy above all, which is the only way to copy an INS selection (bare `y` is a
+        # literal character here, and typing it would REPLACE the selection instead). ^Z and
+        # ⌥/⌃ motion belong to this editor and are handled below.
+        return false
       elsif @project_view.desc_insert_mode?
         edit_desc_insert(ev, key, c)
       else
         handle_desc_read(ev, key, c)
       end
+      true
     end
 
     # ⇧←/→ SELECT here, they no longer h-scroll. The description is a navigable pane with a
@@ -418,6 +425,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)
+          report_replaced(@project_view.last_replaced) # a printable over a selection REPLACES it
           @project_view.set_preedit("")
         end
       end

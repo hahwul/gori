@@ -272,7 +272,10 @@ module Gori::Tui
           # → `request_tab_insert`) — a header value is allowed to hold one, and this is the
           # only editor that can type it. The pane ring is Tab's job only in READ mode, and
           # the footer said otherwise for both.
-          "type to edit · ⇧arrows select · ^Z undo · #{marks} · ^G goto · ^F find · #{hex} hex · esc read · ↹ text"
+          # `^Y copy` is named here and not only in READ: a ⇧arrow selection can be built in
+          # INSERT, and the bare `y` that copies it in READ is a literal character here — one
+          # that REPLACES the selection. The footer has to say which key copies while typing.
+          "type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^G goto · ^F find · #{hex} hex · esc read · ↹ text"
         else
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
@@ -392,13 +395,13 @@ module Gori::Tui
             else
               "GraphQL query/vars"
             end
-      mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
       "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · ↹ pane"
     end
 
     private def ws_hint(v : RepeaterView) : String
       sub = v.req_pane == :envelope ? "handshake request" : "messages"
-      mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
       # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
       # nothing in the tab suggested a handshake could be sent as an ordinary request.
       "#{mode} #{sub} · ^T switch · ^V http · ^G goto · ^F find · esc read · ↹ pane"
@@ -2037,7 +2040,8 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
-          view.set_preedit("") # commit preedit
+          report_replaced(view.edit_last_replaced) # a printable over a selection REPLACES it
+          view.set_preedit("")                     # commit preedit
         end
       end
       true

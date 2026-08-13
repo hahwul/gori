@@ -266,10 +266,6 @@ module Gori::Tui
         decoder_new
       elsif ev.ctrl? && key.lower_w?
         decoder_close
-      elsif ev.ctrl? && key.lower_y?
-        # ^Y stays inline: it copies the OUTPUT specifically, and `decoder.copy` is the
-        # focused-pane copy on bare `y`. No verb to defer to.
-        copy_output
       elsif ev.ctrl_z? || editing_motion?(ev)
         # Undo and ⌥/⌃ word motion belong to the focused editor, not the keymap.
         return route_pane_keys(ev, c)
@@ -283,7 +279,9 @@ module Gori::Tui
         s = cur
         if s.pane == :input && s.input_mode == InputMode::Insert
           s.input_mode = InputMode::Read
-          s.input_read.sync_from(s.input)
+          # Carry an INS ⇧arrow selection over to READ, so `esc` then `y` copies it —
+          # see TextReadState#adopt_editor_selection.
+          s.input_read.adopt_editor_selection(s.input)
         else
           commit
           @host.request_focus(:subtabs)
@@ -458,10 +456,12 @@ module Gori::Tui
         end
         "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc sub-tabs"
       when :output
-        "↑/↓ move · ⇧arrows select · #{y} copy · ↑-top chain · space cmds · ^X mode · ^Y copy all · esc sub-tabs"
+        # `^Y` is the same Copy verb as `y` now (it exists so the key survives INS on INPUT),
+        # so it is not re-listed here as a second, different action.
+        "↑/↓ move · ⇧arrows select · #{y} copy · ↑-top chain · space cmds · ^X mode · esc sub-tabs"
       when :input
         if s.input_mode == InputMode::Insert
-          "type to edit · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
+          "type to edit · ⇧arrows select · ^Y copy · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
         else
           "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓/↹ chain · ^X mode · ^N new · esc sub-tabs"
         end
@@ -553,8 +553,13 @@ module Gori::Tui
       s = cur
       text = case s.pane
              when :output then s.view.output_copy_text(s.result)
-             when :input  then s.input_read.copy_text(s.input)
-             else              ""
+             when :input  then input_copy_text(s)
+               # The CHAIN pane has no selection of its own, and `^Y` USED to be a hardcoded
+               # copy-OUTPUT chord reachable from here (the chain footer advertised it). Now
+               # that `^Y` is the unified Copy verb, routing :chain to the output keeps that
+               # working instead of answering "nothing to copy" on a pane that used to copy.
+             when :chain then s.view.output_copy_text(s.result)
+             else             ""
              end
       if text.empty?
         @host.status("nothing to copy")
@@ -589,7 +594,7 @@ module Gori::Tui
       s = cur
       case s.pane
       when :output then s.view.output_copy_text(s.result)
-      when :input  then s.input_read.copy_text(s.input)
+      when :input  then input_copy_text(s)
       else              ""
       end
     end
@@ -599,10 +604,22 @@ module Gori::Tui
       s.pane == :output || (s.pane == :input && s.input_mode == InputMode::Read)
     end
 
+    # The INPUT pane's two selection models, one per mode — see RepeaterView#pane_selection?.
+    # `decoder_selection_active?` and `input_copy_text` change together: claiming a selection
+    # while copy still read `input_read` would offer "Copy selection" and copy the caret line.
+    private def input_copy_text(s) : String
+      if s.input_mode == InputMode::Insert
+        s.input.selection_text || s.input_read.copy_text(s.input)
+      else
+        s.input_read.copy_text(s.input)
+      end
+    end
+
     def decoder_selection_active? : Bool
       s = cur
       case s.pane
-      when :input  then s.input_mode == InputMode::Read && s.input_read.selection?
+      when :input
+        s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
       when :output then s.view.output_selection?
       else              false
       end
@@ -697,7 +714,8 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           s.input.insert(c)
-          s.input.set_preedit("") # commit any preedit (termisu dup-guard)
+          report_replaced(s.input.last_replaced) # a printable over a selection REPLACES it
+          s.input.set_preedit("")                # commit any preedit (termisu dup-guard)
           touch
         end
       end

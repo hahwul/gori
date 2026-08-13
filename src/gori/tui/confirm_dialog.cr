@@ -49,8 +49,12 @@ module Gori::Tui
     # `y` is guarded on ctrl/alt because `key.y?` is termisu's CASE-INSENSITIVE macro: it
     # compares the key enum alone and knows nothing about modifiers, so an unguarded branch
     # reads every `^Y` as the destructive answer to a card whose hint only ever advertises a
-    # bare `y`. `^Y` is a live chord (repeater.attach-chain), fired in the very pane the
-    # marker-removal confirm pops up in. Shift is deliberately NOT guarded — `key.y?` matches
+    # bare `y`. `^Y` is a live chord — it is now COPY in every text box, which makes this guard
+    # load-bearing on a hotter path than before: the marker-removal confirm pops up inside the
+    # request editor, exactly where an operator reaches for `^Y` to copy. (It was
+    # repeater.attach-chain when this guard was written; that verb has since moved to `^Q`, and
+    # the guard outlived the specific chord because the RULE is about modifiers, not about which
+    # verb owns them.) Shift is deliberately NOT guarded — `key.y?` matches
     # UpperY on purpose, and a shifted/caps-locked `Y` is the advertised mnemonic. `n`/esc
     # stay unguarded too: a modified key that CANCELS costs one keystroke, one that COMMITS
     # destroys data, so the strictness is spent only where the harm is.

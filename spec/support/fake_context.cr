@@ -1303,6 +1303,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     @intercept_preview
   end
 
+  # Copy's wider gate — settable independently so a spec can hold the held-bytes editor open
+  # (preview NOT readable) and still assert `^Y` reaches Copy.
+  property intercept_copyable : Bool = false
+
+  def intercept_copyable? : Bool
+    intercept_copyable
+  end
+
   def oast_detail_readable? : Bool
     @oast_detail
   end
@@ -1405,6 +1413,15 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def read_copy : Nil
     rec(:read_copy)
+  end
+
+  # Settable so the INS half of the `*.copy` verbs' availability can be exercised: those verbs
+  # are available in READ mode OR while an editor is focused, which is what gives `^Y` a copy
+  # to reach when a bare `y` would be a literal character.
+  property editor_focused : Bool = false
+
+  def editor_focused? : Bool
+    editor_focused
   end
 
   def copy_as_open : Nil

@@ -165,6 +165,8 @@ This is the loop you'll spend most of your time in: take a captured request, cha
    X-Gori-Test: 1
    ```
 4. Press `Esc` to leave edit mode, then `Ctrl-R` to **send**.
+
+   Copying while you edit: `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`; in INS `y` is a literal character — and typing it over a selection *replaces* the selection — so use **`Ctrl-Y`**. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke does eat a selection, `Ctrl-Z` puts it back in one step.
 5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">

@@ -41,10 +41,15 @@ module Gori
 
       in_decoder_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.decoder_read_mode? }
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
+      # `^Y` used to be a hardcoded copy-OUTPUT chord in DecoderController; it is folded in
+      # here so INPUT's INS mode gets the same key, and so the chord is rebindable.
+      in_decoder_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :decoder && (ctx.decoder_read_mode? || ctx.editor_focused?)
+      end
       r.register Verb::Definition.new(
         "decoder.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, from INPUT/OUTPUT",
-        Verb::Scope::Decoder, [Verb::Chord.new("y")],
-        available: in_decoder_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Decoder, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_decoder_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # Cycles the OUTPUT pane's display mode — tagged :output.
       r.register Verb::Definition.new(

@@ -42,10 +42,15 @@ module Gori
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
+      # `y` in READ, `^Y` in INS — one verb. See repeater.copy in verbs/history.cr for why
+      # Copy is available while typing at all (an INS selection had no way to be copied).
+      in_notes_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :notes && (ctx.notes_read_mode? || ctx.editor_focused?)
+      end
       r.register Verb::Definition.new(
         "notes.copy", "Copy", "Copy the selected text, or the whole current note if nothing is selected, to the clipboard",
-        Verb::Scope::Notes, [Verb::Chord.new("y")],
-        available: in_notes_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Notes, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_notes_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "notes.clear", "Clear note", "Clear the current note's text",

@@ -625,6 +625,11 @@ module Gori::Tui
       mark_editor_edit
     end
 
+    # Characters the last `edit_insert` replaced — see TextArea#last_replaced.
+    def edit_last_replaced : Int32
+      @editor.last_replaced
+    end
+
     def edit_newline : Nil
       return unless @editing
       @editor.insert_newline
@@ -647,8 +652,10 @@ module Gori::Tui
       reflect_content_length_in_editor
     end
 
-    def edit_move(dr : Int32, dc : Int32) : Nil
-      @editor.move(dr, dc) if @editing
+    # `selecting` is the ⇧ half, forwarded to `TextArea#move` exactly as `edit_motion_key` does —
+    # exposed so a caller (and a spec) can extend the INS selection without synthesising a key.
+    def edit_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      @editor.move(dr, dc, selecting: selecting) if @editing
     end
 
     # The shared editor keymap — ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word, ⌥⌫
@@ -1196,19 +1203,25 @@ module Gori::Tui
       @preview.clear_selection
     end
 
+    # Two selection models, one per mode, and they can never both be live: `@preview` is the
+    # read-only pane's, `@editor` holds the held-bytes editor's INS one. These three used to
+    # bail outright while editing (`return "" if @editing`), which made an INS ⇧arrow selection
+    # impossible to copy on the one pane whose whole point is that you are rewriting bytes by
+    # hand — while the next printable would REPLACE it. Same split as
+    # RepeaterView#pane_selection? / #request_copy_text; all three change together.
     def preview_selection? : Bool
-      !@editing && @preview.selection?
+      @editing ? @editor.selection? : @preview.selection?
     end
 
     def preview_copy_text : String
-      return "" if @editing
+      return @editor.selection_text || @editor.text if @editing
       it = selected_item || return ""
       sync_preview(it)
       @preview.copy_text
     end
 
     def preview_copy_all : String
-      return "" if @editing
+      return @editor.text if @editing
       it = selected_item || return ""
       sync_preview(it)
       @preview.copy_all

@@ -32,10 +32,15 @@ module Gori
 
       # The single smart Copy (selection if any, else the focused pane) — chord 'y'.
       in_jwt_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.jwt_read_mode? }
+      # `^Y` used to be a hardcoded copy-all chord in JwtController; folded in here so the
+      # INPUT/header/payload editors get the same key in INS, and so it is rebindable.
+      in_jwt_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :jwt && (ctx.jwt_read_mode? || ctx.editor_focused?)
+      end
       r.register Verb::Definition.new(
         "jwt.copy", "Copy", "Copy the selection, or the whole focused pane if nothing is selected",
-        Verb::Scope::Jwt, [Verb::Chord.new("y")],
-        available: in_jwt_read, mnemonic: 'y') { |ctx| ctx.jwt_copy; nil }
+        Verb::Scope::Jwt, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_jwt_copy, mnemonic: 'y') { |ctx| ctx.jwt_copy; nil }
 
       # Copy the re-signed OUTPUT token — tagged :output (the ENCODE result pane).
       r.register Verb::Definition.new(

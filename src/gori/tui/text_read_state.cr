@@ -108,6 +108,47 @@ module Gori::Tui
       @cursor.sync(editor.cy, editor.cx)
     end
 
+    # Leaving INSERT: carry the editor's own ⇧arrow selection over to this mode, so `esc`
+    # then `y` copies what was selected while typing.
+    #
+    # Without this the selection was simply lost. INS grew ⇧arrow selection (the shared
+    # `TextArea#handle_motion_key`) and replace-on-type (`TextArea#insert` cuts the selection
+    # before splicing), but no way to COPY — the copy verbs were READ-only and `esc` routed
+    # through `apply` → `place_cursor`, which drops `@sel_anchor` on purpose. So the operator
+    # could build a selection, could destroy it with the next keystroke, and could not copy it
+    # by any means.
+    #
+    # This is NOT `place_cursor`'s job: that method is also the read-cursor write-back for
+    # ordinary NOR navigation, where clearing the stale INS anchor is correct (see the note
+    # there). Only the INS→READ transition hands over; every other path still clears.
+    #
+    # AUTHORITATIVE in both directions: after this call the READ selection is exactly the INS
+    # selection that existed at `esc` time, empty included. That is what keeps the round trip
+    # honest — READ-select, `i`, type, `esc` must not resurrect the band from before the edit,
+    # which a plain `sync_from` (it leaves the read anchor alone) would do. It is also why
+    # RepeaterView#exit_request_insert! can route here instead of hard-clearing: the reason it
+    # cleared was that an INS band is painted only while INS is on, so leaving the anchor set
+    # HID a live selection. Handing it to this mode — whose band is painted in READ — keeps it
+    # visible instead, so there is no longer a hidden state to dismiss.
+    #
+    # Returns true when a selection was actually adopted. `apply` runs last on purpose — it
+    # calls `place_cursor`, which retires the editor-side anchor, so the span lives in exactly
+    # one place afterwards and cannot come back the next time `i` is pressed.
+    def adopt_editor_selection(editor : TextArea) : Bool
+      span = editor.selection_span
+      lines = editor.lines_snapshot
+      if span.nil? || lines.empty?
+        editor.clear_selection # retire a collapsed anchor so `i` cannot revive it
+        @cursor.clear_selection
+        sync_from(editor)
+        return false
+      end
+      y0, x0, y1, x1 = span
+      @cursor.select_range(y0, x0, y1, x1)
+      apply(editor, lines)
+      true
+    end
+
     # Adopt the EDITOR's caret as this mode's, extending the read selection to it when
     # `selecting` (⇧Home/⇧End, which move the editor caret directly) and collapsing it
     # otherwise. `sync_from`'s counterpart for a key that went through the editor first.

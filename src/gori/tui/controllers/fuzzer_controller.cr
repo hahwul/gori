@@ -491,7 +491,10 @@ module Gori::Tui
       when key.end?         then buffer_jump?(ev) ? v.template_buffer_end(ev.shift?) : v.template_end(ev.shift?)
       when key.delete?      then template_delete_key(v, backward: false)
       else
-        printable(ev).try { |ch| v.template_insert(ch) }
+        printable(ev).try do |ch|
+          v.template_insert(ch)
+          report_replaced(v.template_last_replaced) # a printable over a selection REPLACES it
+        end
       end
       true
     end

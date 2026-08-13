@@ -283,8 +283,6 @@ module Gori::Tui
         jwt_new
       elsif ev.ctrl? && key.lower_w?
         jwt_close
-      elsif ev.ctrl? && key.lower_y?
-        jwt_copy # copy-all; `jwt.copy` is the focused-pane copy on bare `y`
       elsif ev.ctrl_z? || editing_motion?(ev)
         # Undo and ⌥/⌃ word motion belong to the focused editor, not the keymap.
         return route_pane(ev, c)
@@ -306,7 +304,8 @@ module Gori::Tui
       s = cur
       if s.pane == :input && s.input_mode == InputMode::Insert
         s.input_mode = InputMode::Read
-        s.input_read.sync_from(s.input)
+        # Carry an INS ⇧arrow selection over to READ — see TextReadState#adopt_editor_selection.
+        s.input_read.adopt_editor_selection(s.input)
       else
         commit
         @host.request_focus(:subtabs)
@@ -347,6 +346,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           s.input.insert(c)
+          report_replaced(s.input.last_replaced) # a printable over a selection REPLACES it
           s.input.set_preedit("")
           recompute_decode(s)
         end
@@ -777,15 +777,23 @@ module Gori::Tui
         (s.pane == :input && s.input_mode == InputMode::Read)
     end
 
+    # The INPUT pane's two selection models, one per mode — see RepeaterView#pane_selection?.
+    # This pair changes together with `jwt_selection_text`'s :input arm.
     def jwt_selection_active? : Bool
       s = cur
-      s.pane == :input && s.input_mode == InputMode::Read && s.input_read.selection?
+      return false unless s.pane == :input
+      s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
     end
 
     def jwt_selection_text : String
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Read ? s.input_read.copy_text(s.input) : ""
+      when :input
+        if s.input_mode == InputMode::Insert
+          s.input.selection_text || s.input_read.copy_text(s.input)
+        else
+          s.input_read.copy_text(s.input)
+        end
       when :decoded then s.decoded
       when :output  then s.output_ok? ? s.output : ""
       when :attacks then (a = s.attacks[s.view.attacks_selected]?) ? a.token : ""

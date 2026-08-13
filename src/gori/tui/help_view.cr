@@ -82,13 +82,18 @@ module Gori::Tui
         Item.new("t", "tag the active sub-tab (on the strip)", "repeater.tag-subtab"),
         Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
         Item.new("space", "command menu (READ mode on request/target/response)"),
-        Item.new("y", "copy selection/line (READ)", "repeater.copy"),
+        # Copy is the one READ verb that also works while TYPING: in INS a bare `y` is a
+        # literal character (and typing it over a selection REPLACES it), so INS gets the
+        # ctrl form. The key column resolves `y` from the verb id; `^Y` is its second chord.
+        Item.new("y · ^Y", "copy selection/line — `y` in READ, ^Y in INS too", "repeater.copy"),
         Item.new("x · ⇧arrows", "select the current line · extend selection"),
         # The §…§ marker trio, same keys and same order as the FUZZER section below — the
         # Repeater grew `^K`/`^T` to match and Help documented neither.
         Item.new("^A · ^K · ^T", "auto-mark params · mark word · mark point (manual §)", "repeater.auto-mark"),
         Item.new("space → c", "clear every § marker", "repeater.clear-marks"),
-        Item.new("^Y", "edit the decoder chain on the marker at the cursor", "repeater.attach-chain"),
+        # ^Q, not ^Y — ^Y is Copy in every text box now (see the `y · ^Y` row above). The key
+        # column resolves from the verb id, so it follows a rebind either way.
+        Item.new("^Q", "edit the decoder chain on the marker at the cursor", "repeater.attach-chain"),
         Item.new("^X", "hex-edit the request", "repeater.toggle-hex"),
         Item.new("^S", "SNI override (on the target)", "repeater.toggle-sni"),
         Item.new("^L", "toggle auto Content-Length", "repeater.toggle-auto-content-length"),
@@ -142,7 +147,7 @@ module Gori::Tui
       {"JWT", [
         Item.new("^T", "switch decode ⟷ encode", "jwt.toggle-mode"),
         Item.new("^A", "cycle the signing alg (alg=none included)", "jwt.cycle-alg"),
-        Item.new("^L · ^Y", "clear the session · copy everything", "jwt.clear"),
+        Item.new("^L", "clear the session", "jwt.clear"),
         Item.new("↹", "cycle INPUT → DECODED → ATTACKS (decode) / HEADER → PAYLOAD → SECRET → OUTPUT (encode)"),
         Item.new("i / ↵", "enter INS on an editable pane · esc back to READ"),
         Item.new("↑/↓ · ↵", "attacks: select · copy the selected payload"),
@@ -189,10 +194,11 @@ module Gori::Tui
       {"DECODER", [
         Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),
         Item.new("INPUT READ", "⇧arrows select · y copy · space cmds"),
+        Item.new("INPUT INS", "⇧arrows select · ^Y copy (bare y types a `y`)"),
         Item.new("chain", "always editable — base64 > url-encode > sha256 ( > | , )"),
         Item.new("↹ / ↵", "complete the suggested converter (popup)"),
         Item.new("OUTPUT", "↑/↓ move · ⇧arrows select · y copy"),
-        Item.new("^Y · ^X", "copy all output · cycle text/hex/base64"),
+        Item.new("^X", "cycle text/hex/base64"),
         Item.new("^S · ^O", "save the chain under a name · pick from the saved chains"),
         Item.new("chain library", "shared by every project · picker: type to filter · ^X deletes an entry"),
         Item.new("^N · ^W", "new · close conversion sub-tab"),

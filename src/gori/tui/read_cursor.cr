@@ -50,6 +50,22 @@ module Gori::Tui
       @cx = cx
     end
 
+    # Adopt an explicit anchor+caret pair as this cursor's selection. The one range SETTER —
+    # `select_line` and `select_word_at_cursor` derive their span from the buffer, and `move`
+    # grows one a step at a time, so a caller handing over a span computed elsewhere had no
+    # way in. Used when leaving INSERT: the editor's own `@sel_anchor` selection is transferred
+    # here so `esc` then `y` copies what was selected in INS, instead of dropping it (see
+    # `TextReadState#adopt_editor_selection`).
+    #
+    # No clamping: the caller owns the buffer these coordinates came from, and both
+    # `highlight_spans` and `selection_text` clamp per line as they read. An anchor equal to
+    # the caret collapses the selection, which `selection?` already reports as none.
+    def select_range(anchor_cy : Int32, anchor_cx : Int32, cy : Int32, cx : Int32) : Nil
+      @anchor = {anchor_cy, anchor_cx}
+      @cy = cy
+      @cx = cx
+    end
+
     def line_selection? : Bool
       a = @anchor
       return false unless a

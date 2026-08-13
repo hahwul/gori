@@ -1265,7 +1265,7 @@ describe Gori::Tui::RepeaterView do
     grid.should_not contain("§v¦md5§")
     # ...but the caret tooltip reveals the concealed chain + the ^Y edit affordance.
     grid.should contain("md5")         # chain shown in the tooltip
-    grid.should contain("^Y edit")     # edit affordance
+    grid.should contain("^Q edit")     # edit affordance
     grid.should_not contain("PREVIEW") # the ^Y modal is NOT auto-shown
   end
 
@@ -1353,7 +1353,7 @@ describe Gori::Tui::RepeaterView do
     view.render(Screen.new(b), Rect.new(0, 0, 120, 24))
     grid = (0...24).map { |y| b.row(y) }.join("\n")
     grid.should contain("no chain yet")
-    grid.should contain("^Y edit")
+    grid.should contain("^Q edit")
     grid.should_not contain("^O sets") # the Fuzzer's extra half — a Repeater marker is complete alone
   end
 
@@ -1365,7 +1365,7 @@ describe Gori::Tui::RepeaterView do
     view.render(Screen.new(b), Rect.new(0, 0, 120, 24))
     grid = (0...24).map { |y| b.row(y) }.join("\n")
     grid.should_not contain("no chain yet")
-    grid.should_not contain("^Y edit")
+    grid.should_not contain("^Q edit")
   end
 
   it "yields the hint-only tooltip to the $KEY peek, but never a real chain" do
@@ -1392,7 +1392,7 @@ describe Gori::Tui::RepeaterView do
       chained.edit_move(0, 5) # the SAME caret — a real chain outranks the peek
       b2 = MemoryBackend.new(120, 24)
       chained.render(Screen.new(b2), Rect.new(0, 0, 120, 24))
-      (0...24).map { |y| b2.row(y) }.join("\n").should contain("^Y edit")
+      (0...24).map { |y| b2.row(y) }.join("\n").should contain("^Q edit")
     ensure
       Gori::Settings.env_vars = saved
     end

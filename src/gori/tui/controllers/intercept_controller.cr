@@ -85,6 +85,14 @@ module Gori::Tui
       elsif ev.key.space? && !ev.ctrl? && !ev.alt? && !@intercept.editing?
         @host.open_space_menu # space menu in the navigable queue (editing swallows space as a char)
         true
+      elsif @intercept.editing? && (ev.ctrl? || ev.alt?) &&
+            !ev.ctrl_z? && !(ev.ctrl? && key.lower_r?) && !(ev.ctrl? && key.lower_l?) &&
+            !@intercept.edit_word_delete_key?(ev) && !editing_motion?(ev)
+        # Any OTHER modified chord defers to the central keymap so it stays rebindable — `^Y`
+        # Copy above all, which is the only way to copy an INS selection here (bare `y` is a
+        # literal character, and typing it would REPLACE the selection). ^Z undo, ^R forward,
+        # ^L Content-Length sync and ⌥/⌃ motion are this editor's own and stay above.
+        false
       elsif @intercept.editing?
         handle_edit_key(ev)
         true
@@ -122,6 +130,7 @@ module Gori::Tui
         # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word — TextArea#handle_motion_key.
       elsif c && !ev.ctrl? && !ev.alt?
         @intercept.edit_insert(c)
+        report_replaced(@intercept.edit_last_replaced) # a printable over a selection REPLACES it
       end
     end
 
@@ -310,8 +319,16 @@ module Gori::Tui
     end
 
     # --- READ-pane delegators (the preview's read verbs + the Runner's read_* ladders) ---
+    # Gates `x`/`v`/`S` — the READ-pane verbs, which the editor has no use for.
     def intercept_preview_readable? : Bool
       !@intercept.empty? && !@intercept.editing?
+    end
+
+    # Copy's gate, which is DELIBERATELY wider: it also fires while the held-bytes editor is
+    # open, because an INS selection there could be built and destroyed but never copied. See
+    # `InterceptView#preview_selection?` for the two selection models it routes between.
+    def intercept_copyable? : Bool
+      !@intercept.empty?
     end
 
     def intercept_preview_selection_active? : Bool
@@ -333,7 +350,7 @@ module Gori::Tui
     # `y`: the selection, or the whole held message when nothing is selected. The bytes here are
     # the item's own — byte-exact, which is the point of holding it.
     def intercept_preview_copy : Nil
-      return unless intercept_preview_readable?
+      return unless intercept_copyable?
       sel = @intercept.preview_selection?
       text = sel ? @intercept.preview_copy_text : @intercept.preview_copy_all
       return if text.empty?

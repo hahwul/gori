@@ -155,6 +155,13 @@ module Gori
       # and show their key hints — actual keys are handled directly by the TUI) ---
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
       in_repeater_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_read_mode? }
+      # Copy is the one READ verb that must also work while TYPING: INS can build a
+      # ⇧arrow selection but had no way to copy it, so the next printable replaced it
+      # (TextArea#insert cuts the selection). READ keeps bare `y`; INS reaches the same
+      # verb through the `^Y` chord, which the editor ladders defer to the keymap.
+      in_repeater_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :repeater && (ctx.repeater_read_mode? || ctx.editor_focused?)
+      end
 
       r.register Verb::Definition.new(
         "repeater.send", "Send repeater", "Resend the request byte-exact and diff the response",
@@ -168,8 +175,8 @@ module Gori
       # farther down so the physical registration order matches).
       r.register Verb::Definition.new(
         "repeater.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, to the clipboard",
-        Verb::Scope::Repeater, [Verb::Chord.new("y")],
-        available: in_repeater_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Repeater, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_repeater_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # "Copy as X": a picker of focus-aware copy formats (REQUEST → url/headers/body/
       # cookies/curl/wscat-for-WS/raw · RESPONSE → status+headers/body/raw). Sits beside Copy in
@@ -257,9 +264,15 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'c', section: :request) { |ctx| ctx.repeater_clear_marks; nil }
+      # ^Q, not ^Y: `^Y` is now Copy in every text box (see `in_repeater_copy`), and Copy is
+      # the far more frequent action of the two, so it takes the chord whose letter means
+      # something. attach-chain keeps a CTRL chord rather than falling back to its space-menu
+      # mnemonic because the space menu is unreachable from INS (`Runner#handle_key`: "text
+      # editors swallow keys upstream, so space stays a literal char there") — and attaching a
+      # chain to a `§` marker you have just typed is an INS-mode action. Both are rebindable.
       r.register Verb::Definition.new(
         "repeater.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
-        Verb::Scope::Repeater, [Verb::Chord.new("y", ctrl: true)],
+        Verb::Scope::Repeater, [Verb::Chord.new("q", ctrl: true)],
         available: in_repeater, mnemonic: 'e', section: :request) { |ctx| ctx.repeater_attach_chain; nil }
 
       # Request-pane VIEW toggles — keymap-driven (Repeater scope) so they're rebindable.
@@ -553,7 +566,7 @@ module Gori
         available: in_fuzzer, mnemonic: 'i', section: :template) { |ctx| ctx.fuzz_insert_marker; nil }
       r.register Verb::Definition.new(
         "fuzz.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("y", ctrl: true)],
+        Verb::Scope::Fuzzer, [Verb::Chord.new("q", ctrl: true)], # ^Y → Copy; see repeater.attach-chain
         available: in_fuzzer, mnemonic: 'e', section: :template) { |ctx| ctx.fuzz_attach_chain; nil }
       r.register Verb::Definition.new(
         "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
@@ -581,11 +594,15 @@ module Gori
         Verb::Scope::Fuzzer, [Verb::Chord.new("s", ctrl: true)],
         available: in_fuzzer, mnemonic: 'i', section: :target) { |ctx| ctx.fuzz_toggle_sni; nil }
       in_fuzzer_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_read_mode? }
-      # The single smart Copy (see repeater.copy above) — copy-all is gone.
+      in_fuzzer_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :fuzzer && (ctx.fuzzer_read_mode? || ctx.editor_focused?)
+      end
+      # The single smart Copy (see repeater.copy above) — copy-all is gone. `y` in READ,
+      # `^Y` in INS, same verb.
       r.register Verb::Definition.new(
         "fuzzer.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, to the clipboard",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("y")],
-        available: in_fuzzer_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Fuzzer, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
+        available: in_fuzzer_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,

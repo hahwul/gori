@@ -61,11 +61,21 @@ describe "Gori::Verbs.register_decoder" do
     Gori::Verbs.registry.has_section?(Gori::Verb::Scope::Decoder, :tab).should be_true
   end
 
-  it "gates Copy on a read-mode pane and routes it through the shared read_copy" do
+  # `y` in READ, `^Y` in INS too — one verb, two chords. The INS half exists because the editor
+  # ladders claim printables upstream of the keymap, so a bare `y` types a `y` there (and over a
+  # ⇧arrow selection it REPLACES it). `^Y` was previously a hardcoded copy-OUTPUT chord in
+  # DecoderController; it is folded into this verb so INPUT's INS mode gets it and it rebinds.
+  it "gates Copy on a read-mode pane OR a focused editor, and routes it through read_copy" do
     r["decoder.copy"].available?(in_decoder).should be_false
     r["decoder.copy"].available?(in_decoder(read: true)).should be_true
-    r["decoder.copy"].chords.should eq([Gori::Verb::Chord.new("y")])
+    r["decoder.copy"].chords.should eq([
+      Gori::Verb::Chord.new("y"), Gori::Verb::Chord.new("y", ctrl: true),
+    ])
     verb_intents(r, "decoder.copy").should eq([:read_copy])
+
+    ins = in_decoder # read_mode false — the INPUT pane in INSERT
+    ins.editor_focused = true
+    r["decoder.copy"].available?(ins).should be_true
   end
 
   it "shows the sub-tab search/filter only with two or more conversions open" do

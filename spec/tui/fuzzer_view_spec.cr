@@ -246,7 +246,7 @@ describe Gori::Tui::FuzzerView do
     view.render(Screen.new(b), Rect.new(0, 0, 120, 30))
     grid = (0...30).map { |y| b.row(y) }.join("\n")
     grid.should contain("no chain yet")
-    grid.should contain("^Y edit · ^O sets")
+    grid.should contain("^Q edit · ^O sets")
   end
 
   # `template_scroll_view` used to bail on `template_insert?`, so the wheel died the moment `i`

@@ -67,7 +67,7 @@ Saved chains can call each other. A recursive definition fails that step with a 
 
 A few entries only go one way, and the chain will not undo them. `shell-escape` and `powershell-escape` wrap a value in a quoted literal. `homoglyph` swaps ASCII letters for Unicode lookalikes, and is partial: a letter with no established confusable is left alone. `typo` is a generator rather than a transform, emitting one near-miss variant per line, built from omissions, adjacent-character swaps, and QWERTY neighbour keys.
 
-OUTPUT can cycle display modes (text → hex → base64) for binary results. Copy with `y` in READ mode, or use the space menu.
+OUTPUT can cycle display modes (text → hex → base64) for binary results. Copy with `y` in READ mode, `Ctrl-Y` while editing INPUT in INS, or use the space menu.
 
 ## When to Use It
 

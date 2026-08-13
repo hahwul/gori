@@ -143,6 +143,11 @@ module Gori::Tui
       @chain_peek = nil.as(ChainPeek?)
       @chain_peek_text = nil.as(String?)
       @chain_peek_hint = ChainPeek::DEFAULT_HINT
+      # Characters the LAST `insert` replaced (0 when it replaced nothing). Read by the owner
+      # right after the call, exactly the way owners already check `edits` around `backspace`
+      # — this widget has no route to the shell and must not grow one, so it reports the fact
+      # and the controller decides whether to say anything about it.
+      @last_replaced = 0
       set_text(text)
     end
 
@@ -165,6 +170,9 @@ module Gori::Tui
     end
 
     getter edits : Int32
+    # Characters the last `insert` replaced — see the ivar's note. Owners report a MULTI-char
+    # replace ("^Z to undo"); a 1-char one is ordinary typing over a selection and stays quiet.
+    getter last_replaced : Int32
     getter cy : Int32
     getter cx : Int32
     getter scroll : Int32
@@ -366,6 +374,7 @@ module Gori::Tui
       # The ONE call that may join the step before it — see `push_undo`. A selection makes
       # this a replace, which is a step of its own however it was typed.
       push_undo(force: !@sel_anchor.nil?)
+      note_replaced
       # Replace-on-type: a printable typed over a selection REPLACES it. The cut runs after
       # push_undo and before the splice, so the pair is ONE undo step — ⌃Z brings back both
       # the deleted run and the character that displaced it, which is what "replace" means.
@@ -416,6 +425,7 @@ module Gori::Tui
     def insert_text(text : String) : Nil
       return if text.empty?
       push_undo
+      note_replaced
       cut_selection # replace-on-paste, one undo step — see `insert`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
@@ -446,8 +456,17 @@ module Gori::Tui
     # Insert `ch` TWICE as one undo unit — the `§§`/`¦¦` escaped-literal pair the marker
     # guard produces when a `§`/`¦` would otherwise nest inside (or flush against) a marker.
     # Caret ends past both, so the literal sits behind it like a normal keystroke.
+    # How much the splice about to run will DESTROY, for an owner that wants to say so (see
+    # `last_replaced`). Measured before the cut, and set on EVERY splice that cuts — including
+    # the ones that replace nothing — so an owner reading it right after a call can never see a
+    # stale count from an earlier keystroke.
+    private def note_replaced : Nil
+      @last_replaced = @sel_anchor.nil? ? 0 : (selection_text.try(&.size) || 0)
+    end
+
     def insert_pair(ch : Char) : Nil
       push_undo
+      note_replaced
       cut_selection # replace-on-type, one undo step — see `insert`
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
@@ -828,6 +847,13 @@ module Gori::Tui
     # is empty). Both ends are clamped to the buffer as it stands now: the anchor was planted
     # against an earlier revision and an external `replace_line` / `resync Content-Length`
     # can have shortened its line since.
+    # The INSERT-mode selection as an ORDERED span, for an owner handing it to the read-mode
+    # cursor when leaving INS (`TextReadState#adopt_editor_selection`). Public because the
+    # handover crosses files; nil when nothing is selected, exactly like `selection?`.
+    def selection_span : {Int32, Int32, Int32, Int32}?
+      selection_range
+    end
+
     private def selection_range : {Int32, Int32, Int32, Int32}?
       anc = @sel_anchor
       return nil unless anc

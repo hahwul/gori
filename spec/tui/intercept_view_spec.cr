@@ -285,9 +285,14 @@ describe Gori::Tui::InterceptView do
     end
 
     # The read caret and the editor's are different carets over the same bytes: while the editor
-    # is open the preview is not drawn, so its gestures must stand down rather than address a
+    # is open the preview is not drawn, so its GESTURES must stand down rather than address a
     # pane nobody is looking at.
-    it "stands down entirely while the editor is open" do
+    #
+    # COPY is the exception, and deliberately so. It used to stand down with them, which left the
+    # held-bytes editor as a pane where a ⇧arrow selection could be built, destroyed by the next
+    # printable (`TextArea#insert` cuts it), and never copied. Copy now routes to whichever
+    # selection model is live — the editor's while editing, the read pane's otherwise.
+    it "stands its read gestures down while the editor is open, but not copy" do
       tmp_interceptor do |ic|
         hold_req(ic, "acme.test", "/e", "GET /e HTTP/1.1\r\nHost: acme.test\r\n\r\n")
         view = InterceptView.new
@@ -298,9 +303,25 @@ describe Gori::Tui::InterceptView do
         view.editing?.should be_true
 
         view.preview_select_word(rect, 60, 8).should be_false
-        view.preview_selection?.should be_false
-        view.preview_copy_text.should eq("")
-        view.preview_copy_all.should eq("")
+        view.preview_selection?.should be_false # the EDITOR has no selection yet either
+        # No selection → the whole held message, the same fallback `y` has in every read pane.
+        view.preview_copy_all.should contain("GET /e HTTP/1.1")
+        view.preview_copy_text.should contain("GET /e HTTP/1.1")
+      end
+    end
+
+    it "copies the EDITOR's selection while the editor is open" do
+      tmp_interceptor do |ic|
+        hold_req(ic, "acme.test", "/e", "GET /e HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+        view = InterceptView.new
+        view.reload(ic)
+        view.render(Screen.new(MemoryBackend.new(110, 16)), Rect.new(0, 0, 110, 16))
+        view.toggle_edit
+        view.edit_move(0, 0) # place the caret at the buffer start
+        3.times { view.edit_move(0, 1, selecting: true) }
+
+        view.preview_selection?.should be_true
+        view.preview_copy_text.should eq("GET")
       end
     end
   end

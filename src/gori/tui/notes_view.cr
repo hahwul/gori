@@ -201,7 +201,9 @@ module Gori::Tui
 
     def exit_insert! : Nil
       @mode = InputMode::Read
-      @read.sync_from(current.area)
+      # Carry an INS ⇧arrow selection over to READ, so `esc` then `y` copies it instead of
+      # silently dropping it — see TextReadState#adopt_editor_selection.
+      @read.adopt_editor_selection(current.area)
     end
 
     def read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
@@ -209,12 +211,21 @@ module Gori::Tui
       @read.move(current.area, dr, dc, selecting: selecting)
     end
 
+    # Two selection models, one per mode, and they can never both be live: `@read` holds the
+    # READ band, the TextArea its own INS one. Reporting only the READ side made a visible
+    # ⇧arrow selection uncopyable in INS — see RepeaterView#pane_selection?, which this pair
+    # mirrors. Both members change together: claiming a selection here while copy still read
+    # `@read` would offer "Copy selection" and then copy the caret line.
     def copy_text : String
-      @read.copy_text(current.area)
+      if insert_mode?
+        current.area.selection_text || @read.copy_text(current.area)
+      else
+        @read.copy_text(current.area)
+      end
     end
 
     def selection? : Bool
-      !insert_mode? && @read.selection?
+      insert_mode? ? current.area.selection? : @read.selection?
     end
 
     def select_line : Nil
@@ -229,6 +240,11 @@ module Gori::Tui
     def insert(ch : Char) : Nil
       current.area.insert(ch)
       @dirty = true
+    end
+
+    # Characters the last `insert` replaced — see TextArea#last_replaced.
+    def last_replaced : Int32
+      current.area.last_replaced
     end
 
     def newline : Nil

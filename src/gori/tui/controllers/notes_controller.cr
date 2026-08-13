@@ -88,6 +88,13 @@ module Gori::Tui
           save_notes
           @host.request_focus(:subtabs)
         end
+      elsif (ev.ctrl? || ev.alt?) && !ev.ctrl_z? && !editing_motion?(ev)
+        # Any OTHER modified chord defers to the central keymap so it stays rebindable —
+        # `^Y` Copy above all, which is the only way to copy an INS selection (bare `y` is
+        # a literal character here, and typing it would REPLACE the selection instead).
+        # ^Z and ⌥/⌃ motion belong to this editor and are handled below/above.
+        # Editors never insert ctrl/alt chars, so the defer is safe mid-edit.
+        return false
       elsif @notes.insert_mode?
         edit_insert(ev, c)
       else
@@ -146,6 +153,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
+          report_replaced(@notes.last_replaced) # a printable over a selection REPLACES it
           @notes.set_preedit("")
         end
       end
@@ -269,7 +277,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @notes.insert_mode?
-        "type to edit · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs"
+        "type to edit · ⇧arrows select · ^Y copy · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs"
       else
         y = Hotkeys.binding_label(@host.session.registry, "notes.copy", "y")
         "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc sub-tabs"

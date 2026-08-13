@@ -1257,6 +1257,10 @@ private class FakeContext < ExecContext
     false
   end
 
+  def intercept_copyable? : Bool
+    false
+  end
+
   def oast_detail_readable? : Bool
     false
   end
@@ -1357,6 +1361,12 @@ private class FakeContext < ExecContext
 
   def read_copy : Nil
     @calls << :read_copy
+  end
+
+  property editor_focused : Bool = false
+
+  def editor_focused? : Bool
+    editor_focused
   end
 
   def copy_as_open : Nil

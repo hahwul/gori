@@ -50,6 +50,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # The read-only held-message preview is on screen — the gate for its read verbs.
+  def intercept_copyable? : Bool
+    intercept_controller.intercept_copyable?
+  end
+
   def intercept_preview_readable? : Bool
     intercept_controller.intercept_preview_readable?
   end

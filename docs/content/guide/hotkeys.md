@@ -30,6 +30,8 @@ Rules of thumb:
 
 - Default for new pane actions is L3 (space menu only). Promote to a direct key only after the loop proves it.
 - **Ctrl** is for actions that must work while typing (INS) or that are destructive. It is not a general upgrade from bare.
+- **Copy is the worked example of that rule.** `y` copies in READ, and `Ctrl-Y` copies in **INS as well**, in every text box. In INS a bare `y` is a literal character — and typing it over a `Shift`+arrows selection *replaces* the selection — so the copy reflex needs a chord that survives typing. Both are the same verb (`*.copy`), so rebinding follows.
+- The space menu is **not** an INS fallback: text editors swallow keys upstream, so `Space` stays a literal character there. An action that has to be reachable while typing needs a Ctrl chord, not just a mnemonic. (This is why `Ctrl-Q` — not the space menu alone — carries the Repeater/Fuzzer decoder-chain editor after it gave `Ctrl-Y` up to Copy.)
 - **History → Repeater** and **Repeater send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Repeater to bare `r`.
 - Match & Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.
 

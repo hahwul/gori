@@ -17,7 +17,7 @@ module Gori::Tui
     # What `^Y` opens is the same everywhere, so this is the floor — but the marker under the
     # caret means different things per surface, and the Fuzzer chains `^O` onto it (a position
     # with no payload set produces nothing, which the chain alone never says). Owner-fed.
-    DEFAULT_HINT = "^Y edit"
+    DEFAULT_HINT = "^Q edit"
 
     # Show the chain of the marker under the caret (opens the peek). An empty chain still
     # opens — the marker is concealment-eligible, the hint invites attaching a chain.

@@ -158,6 +158,90 @@ describe "Gori::Tui::TextArea INSERT-mode selection" do
       ed.insert_newline
       ed.text.should eq("hello\n")
     end
+
+    # What the owner reports as "replaced N chars — ^Z to undo". The count has to be measured
+    # BEFORE the cut, and it has to be reset by every insert: an owner reads it right after the
+    # call, so a stale count from an earlier keystroke would name the wrong number of lost
+    # characters. `> 1` is the owner's threshold (TabController#report_replaced), so the
+    # 1-char case is asserted here only to prove it is distinguishable.
+    it "reports how many characters a replace destroyed, and resets on the next insert" do
+      ed = TextArea.new("hello world")
+      ed.place_cursor(0, 0)
+      5.times { ed.move(0, 1, selecting: true) }
+      ed.insert('X')
+      ed.last_replaced.should eq(5)
+      ed.insert('Y') # no selection this time
+      ed.last_replaced.should eq(0)
+      ed.place_cursor(0, 0)
+      ed.move(0, 1, selecting: true)
+      ed.insert('Z')
+      ed.last_replaced.should eq(1) # ordinary typing over one char — owner stays quiet
+    end
+
+    it "counts a multi-line replace across the line break it swallows" do
+      ed = TextArea.new("ab\ncd")
+      ed.place_cursor(0, 1)
+      3.times { ed.move(0, 1, selecting: true) } # "b\nc"
+      ed.selection_text.should eq("b\nc")
+      ed.insert('X')
+      ed.last_replaced.should eq(3)
+      ed.text.should eq("aXd")
+    end
+  end
+
+  # Leaving INS used to DROP the selection: `TextReadState#apply` → `place_cursor` clears the
+  # anchor on purpose (it is also the read-cursor write-back for ordinary NOR navigation), so
+  # `esc` then `y` — the reflex — copied nothing. `adopt_editor_selection` is the one path that
+  # hands the span over instead. The round trip is the part most likely to regress.
+  describe "handing an INS selection to READ mode on esc" do
+    it "carries the span over, so the read side can copy exactly what was selected" do
+      ed = TextArea.new("hello world")
+      read = TextReadState.new
+      ed.place_cursor(0, 0)
+      5.times { ed.move(0, 1, selecting: true) }
+
+      read.adopt_editor_selection(ed).should be_true
+      read.selection?.should be_true
+      read.copy_text(ed).should eq("hello")
+      # The span now lives in exactly ONE place: the editor-side anchor is retired, so
+      # pressing `i` again cannot bring a stale INS band back.
+      ed.selection?.should be_false
+    end
+
+    it "carries a backwards selection over the same way" do
+      ed = TextArea.new("hello world")
+      read = TextReadState.new
+      ed.place_cursor(0, 5)
+      5.times { ed.move(0, -1, selecting: true) } # caret ends LEFT of the anchor
+      read.adopt_editor_selection(ed).should be_true
+      read.copy_text(ed).should eq("hello")
+    end
+
+    it "is authoritative when there was no INS selection: it CLEARS the read one" do
+      # The round trip. READ-select, `i`, type, `esc` must not resurrect the band from before
+      # the edit — the inverse of the invariant `place_cursor` protects. A plain `sync_from`
+      # leaves the read anchor alone and would do exactly that.
+      ed = TextArea.new("hello world")
+      read = TextReadState.new
+      read.select_line(ed)
+      read.selection?.should be_true
+
+      ed.insert('X') # the edit that made the old span meaningless
+      read.adopt_editor_selection(ed).should be_false
+      read.selection?.should be_false
+      ed.selection?.should be_false
+    end
+
+    it "leaves ordinary NOR navigation clearing the anchor, as before" do
+      # The other half of the bargain: only the INS→READ transition hands over. `place_cursor`
+      # is still the write-back every read-mode move goes through, and it still clears.
+      ed = TextArea.new("hello world")
+      ed.place_cursor(0, 0)
+      5.times { ed.move(0, 1, selecting: true) }
+      ed.selection?.should be_true
+      ed.place_cursor(0, 7)
+      ed.selection?.should be_false
+    end
   end
 
   describe "what collapses the selection" do

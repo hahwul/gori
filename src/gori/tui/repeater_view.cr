@@ -412,11 +412,12 @@ module Gori::Tui
     def exit_request_insert! : Nil
       @request_mode = InputMode::Read
       req_editor.env_complete_close # no dangling $ENV dropdown once we leave insert mode
-      # Drop the INS selection with the mode that owns it. Its band is only painted while
-      # `cursor` is on (INS), so leaving the anchor set hides it without clearing it — and
-      # `esc` then `i` brought a band back that the operator had visually dismissed, over a
-      # caret they had since moved.
-      req_editor.clear_selection
+      # HAND the INS selection to READ rather than dropping it: `esc` then `y` is the reflex,
+      # and discarding it here meant an INS selection could be built and destroyed but never
+      # copied. This still answers what the old hard clear was for — an INS band is painted
+      # only while INS is on, so leaving the anchor set HID a live selection — because the
+      # read-mode band IS painted here, and the handover retires the editor-side anchor.
+      @req_read.adopt_editor_selection(req_editor)
     end
 
     # --- $ENV autocomplete in the request editor (delegates to the active req editor) ---
@@ -3245,6 +3246,11 @@ module Gori::Tui
       before = ed.edits
       ed.undo
       mark_req_edit(reflect: false) if ed.edits != before # see mark_req_edit
+    end
+
+    # Characters the last `edit_insert` replaced — see TextArea#last_replaced.
+    def edit_last_replaced : Int32
+      req_editor.last_replaced
     end
 
     def edit_insert(ch : Char) : Nil

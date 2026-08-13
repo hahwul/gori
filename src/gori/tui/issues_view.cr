@@ -553,7 +553,8 @@ module Gori::Tui
 
     def exit_notes_insert! : Nil
       @notes_mode = InputMode::Read
-      @notes_read.sync_from(@notes)
+      # Carry an INS ⇧arrow selection over to READ — see TextReadState#adopt_editor_selection.
+      @notes_read.adopt_editor_selection(@notes)
     end
 
     def notes_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
@@ -565,8 +566,15 @@ module Gori::Tui
       @notes.scroll_view(step)
     end
 
+    # One selection model per mode — see NotesView#selection? / RepeaterView#pane_selection?.
+    # This pair changes together: claiming a selection while copy still read `@notes_read`
+    # would offer "Copy selection" and then copy the caret line.
     def notes_copy_text : String
-      @notes_read.copy_text(@notes)
+      if notes_insert_mode?
+        @notes.selection_text || @notes_read.copy_text(@notes)
+      else
+        @notes_read.copy_text(@notes)
+      end
     end
 
     def notes_copy_all : String
@@ -574,7 +582,8 @@ module Gori::Tui
     end
 
     def notes_selection? : Bool
-      notes_focused? && !notes_insert_mode? && @notes_read.selection?
+      return false unless notes_focused?
+      notes_insert_mode? ? @notes.selection? : @notes_read.selection?
     end
 
     def notes_select_line : Nil
@@ -593,6 +602,11 @@ module Gori::Tui
 
     def notes_insert(ch : Char) : Nil
       @notes.insert(ch) if notes_insert_mode?
+    end
+
+    # Characters the last `notes_insert` replaced — see TextArea#last_replaced.
+    def notes_last_replaced : Int32
+      @notes.last_replaced
     end
 
     def notes_newline : Nil

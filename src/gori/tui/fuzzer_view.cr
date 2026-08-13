@@ -102,7 +102,7 @@ module Gori::Tui
       # setup: with no payload set in the CONFIG pane the run produces nothing, and the two
       # halves sit in different panes, so the tooltip over the position names the pane that
       # completes it. (In the Repeater a marker IS complete on its own — hence the default.)
-      @editor.chain_peek_hint = "^Y edit · ^O sets"
+      @editor.chain_peek_hint = "^Q edit · ^O sets"
       @last_synced_config = "" # last store config blob applied (reconcile equality)
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
@@ -546,6 +546,8 @@ module Gori::Tui
     def exit_template_insert! : Nil
       @template_mode = InputMode::Read
       @editor.env_complete_close # no dangling $ENV dropdown once we leave insert mode
+      # Carry an INS ⇧arrow selection over to READ — see TextReadState#adopt_editor_selection.
+      @template_read.adopt_editor_selection(@editor)
     end
 
     # --- $ENV autocomplete in the template editor ---
@@ -1704,6 +1706,11 @@ module Gori::Tui
     end
 
     # --- template editing ----------------------------------------------------
+    # Characters the last `template_insert` replaced — see TextArea#last_replaced.
+    def template_last_replaced : Int32
+      @editor.last_replaced
+    end
+
     def template_insert(ch : Char) : Nil
       # Marker-in-marker guard: a §/¦ typed inside (or flush against) a closed marker is
       # auto-escaped to a §§/¦¦ literal so the structure survives (Template.insert_breaks_marker?).
@@ -1874,8 +1881,14 @@ module Gori::Tui
       @editor.scroll_view(step)
     end
 
+    # One selection model per mode — see RepeaterView#request_copy_text, which this mirrors.
+    # Changes together with `pane_selection?`'s :template arm.
     def template_copy_text : String
-      @template_read.copy_text(@editor)
+      if pane_insert?(:template)
+        @editor.selection_text || @template_read.copy_text(@editor)
+      else
+        @template_read.copy_text(@editor)
+      end
     end
 
     def template_copy_all_text : String
@@ -1902,7 +1915,9 @@ module Gori::Tui
 
     def pane_selection? : Bool
       case @focus
-      when :template then !pane_insert?(:template) && @template_read.selection?
+      # INS has its own selection model (the editor's `@sel_anchor`); reporting only the READ
+      # side made a visible ⇧arrow band uncopyable — see RepeaterView#pane_selection?.
+      when :template then pane_insert?(:template) ? @editor.selection? : @template_read.selection?
       when :target   then !pane_insert?(:target) && @target_read.selection?
       when :detail   then detail_navigable? && @detail_read.selection?
       else                false

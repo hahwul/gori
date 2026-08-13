@@ -235,6 +235,20 @@ module Gori::Tui
       !!c && (c == '\u{7F}' || c == '\b')
     end
 
+    # Say so when a keystroke just destroyed a MULTI-character selection (replace-on-type:
+    # `TextArea#insert` cuts the selection before splicing). The loss is one undo step, but
+    # nothing told the operator that — and this is the exact keystroke people mean when they
+    # report "I pressed a key and my text vanished", because in INS the copy reflex `y` is a
+    # literal character. Every INS printable arm calls this right after `insert`, reading the
+    # count the editor exposes (`TextArea#last_replaced`).
+    #
+    # `> 1` on purpose: replacing a single selected character is ordinary typing and a toast
+    # for it would fire constantly.
+    def report_replaced(n : Int32) : Nil
+      return unless n > 1
+      @host.status("replaced #{n} chars — ^Z to undo")
+    end
+
     # Whether a press in this tab's body can start a DRAG — pointer motion with the button
     # held, which extends a selection from where the press landed. False by default: a tab
     # opts in only for a pane that has a text selection to extend.

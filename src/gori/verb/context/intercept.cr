@@ -20,4 +20,7 @@ abstract class Gori::Verb::ExecContext
   # the gate for its select-line / copy verbs. Its caret comes from the POINTER: the tab has no
   # focus tier for this pane, so there is no keyboard caret to gate on.
   abstract def intercept_preview_readable? : Bool
+  # Copy's wider gate: also true while the held-bytes EDITOR is open, so an INS selection there
+  # can be copied (`^Y`) instead of only destroyed by the next printable.
+  abstract def intercept_copyable? : Bool
 end

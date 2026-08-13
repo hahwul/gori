@@ -28,11 +28,20 @@ describe "Gori::Verbs.register_jwt" do
     end
   end
 
-  it "gates the smart Copy on a read-mode pane, but not the pane-specific copies" do
+  # `y` in READ, `^Y` in INS too — see decoder.copy for the reasoning. `^Y` used to be a
+  # hardcoded copy-all chord in JwtController; folded in here so the INPUT/header/payload
+  # editors get it while typing, and so it is rebindable.
+  it "gates the smart Copy on a read-mode pane OR a focused editor, but not the pane-specific copies" do
     r["jwt.copy"].available?(in_jwt).should be_false
     r["jwt.copy"].available?(in_jwt(read: true)).should be_true
-    r["jwt.copy"].chords.should eq([Gori::Verb::Chord.new("y")])
+    r["jwt.copy"].chords.should eq([
+      Gori::Verb::Chord.new("y"), Gori::Verb::Chord.new("y", ctrl: true),
+    ])
     verb_intents(r, "jwt.copy").should eq([:jwt_copy])
+
+    ins = in_jwt # read_mode false — an editable pane in INSERT
+    ins.editor_focused = true
+    r["jwt.copy"].available?(ins).should be_true
 
     # copy-token / copy-attack copy a computed value, not a text selection, so they only
     # need the tab — and they live in the section of the pane that value comes from.

@@ -183,10 +183,16 @@ module Gori
       # only ever be dead weight in the rebind editor. Mnemonic 'y' matches the key that
       # actually works in the pane.
       in_project_desc_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :project && ctx.project_desc_read_mode? }
+      # Bare `y` stays chordless here (ProjectController raw-dispatches it — see above), but
+      # `^Y` IS registered: INS has no other way to reach Copy, and the raw dispatch only
+      # covers READ. See repeater.copy in verbs/history.cr.
+      in_project_desc_copy = ->(ctx : Verb::ExecContext) do
+        ctx.current_tab == :project && (ctx.project_desc_read_mode? || ctx.editor_focused?)
+      end
       r.register Verb::Definition.new(
         "project.copy", "Copy", "Copy the selected description text, or the whole description if nothing is selected, to the clipboard",
-        Verb::Scope::ProjectDesc,
-        available: in_project_desc_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::ProjectDesc, [Verb::Chord.new("y", ctrl: true)],
+        available: in_project_desc_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # Match & Replace now lives in the Rewriter tab; this palette entry jumps there
       # (kept under the familiar "Match & Replace" name so a search still finds it).
