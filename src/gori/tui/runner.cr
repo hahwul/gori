@@ -4408,6 +4408,9 @@ module Gori::Tui
       sitemap_controller.reload
       msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{path}"
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
+      # The import is chunked, so a partial write is possible — say so rather than letting a
+      # short count read as a successful import of a smaller file (see Import::Result).
+      result.shortfall_note.try { |note| msg += " — #{note}" }
       @toast = msg
     rescue ex
       @toast = "import failed: #{ex.message}"

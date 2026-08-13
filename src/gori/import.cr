@@ -10,7 +10,22 @@ module Gori
   # Bulk-import captured flows from HAR files, URL lists, OpenAPI specs, Postman or
   # Insomnia collections, or a Burp item export.
   module Import
-    record Result, count : Int32, skipped : Int32 = 0
+    # `attempted` is how many parsed pairs the import TRIED to write; `count` is how many
+    # committed. They differ only when a chunk rolled back part-way (see `insert_all`), and
+    # every surface that prints `count` has to say so when they do — a smaller number printed
+    # as a success is how an import that half-failed looks like an import of a small file.
+    record Result, count : Int32, skipped : Int32 = 0, attempted : Int32 = 0 do
+      def short? : Bool
+        attempted > 0 && count < attempted
+      end
+
+      # The clause a surface appends when the import did not finish. One home, because three
+      # surfaces print this line and a fourth (MCP) emits the same facts as JSON.
+      def shortfall_note : String?
+        return nil unless short?
+        "#{attempted - count} of #{attempted} did NOT commit (store busy or unwritable) — re-run the import to retry them"
+      end
+    end
 
     # The human name of each source, in ONE place. The TUI card title, the TUI toast and the
     # CLI result line all read it, so they cannot drift apart as sources are added — the
@@ -59,12 +74,45 @@ module Gori
       Burp.parse_file(path)
     end
 
-    # Insert every parsed pair into the store atomically. Returns the committed count.
-    def self.insert_all(store : Store, pairs : Array(Builder::FlowPair)) : Int32
-      batch = pairs.map do |pair|
-        {pair.request, pair.response}
+    # Pairs per store write. The whole file used to go in as ONE `insert_import_batch`, which
+    # is one writer op and therefore ONE transaction — and `Store::BATCH_MAX` bounds ops per
+    # transaction, not pairs per op, so nothing capped it. A captured flow arriving mid-import
+    # waits behind the entire file, which is the one thing P6 says must not happen.
+    #
+    # MEASURED on a 50k-entry HAR, with capture writes running against the same store
+    # (median of three; the numbers are stable to ~1%):
+    #
+    #   chunk   import    worst capture stall
+    #   none     598 ms   598 ms
+    #   1000     703 ms    13 ms
+    #   2000     569 ms    22 ms
+    #   4000     496 ms    41 ms
+    #
+    # 2000 is the size that is better than today on BOTH axes — the import is slightly faster
+    # than the single giant transaction, and the stall drops 26x. (Chunking being faster is
+    # not a typo: one enormous transaction costs more in WAL and memory than several medium
+    # ones. 4000 is faster still, but there is no reason to buy speed with stall when the
+    # smaller size already beats the status quo.)
+    IMPORT_CHUNK = 2000
+
+    # Insert every parsed pair. Returns {committed, attempted}.
+    #
+    # NOT atomic across the file any more, and the count says so. A chunk that rolls back (a
+    # closing store, a full disk) stops the import with the earlier chunks already committed,
+    # so the caller is handed both numbers and every surface reports the shortfall rather than
+    # printing a smaller success. Whole-file atomicity was not protecting much: nothing
+    # deduplicates on re-import, so a failed all-or-nothing import meant starting over anyway,
+    # and 80% of a 200 MB HAR plus an honest message beats losing all of it.
+    def self.insert_all(store : Store, pairs : Array(Builder::FlowPair)) : {Int32, Int32}
+      committed = 0
+      pairs.each_slice(IMPORT_CHUNK) do |slice|
+        n = store.insert_import_batch(slice.map { |pair| {pair.request, pair.response} })
+        committed += n
+        # A short answer means the batch rolled back or the store is closing; stop rather than
+        # push more work at a store that just refused some.
+        break if n < slice.size
       end
-      store.insert_import_batch(batch)
+      {committed, pairs.size}
     end
 
     def self.import_file(store : Store, kind : Symbol, path : String) : Result
@@ -91,7 +139,8 @@ module Gori
         end
         raise Gori::Error.new("no flows found in #{expanded}")
       end
-      Result.new(insert_all(store, parsed.flows), parsed.skipped)
+      committed, attempted = insert_all(store, parsed.flows)
+      Result.new(committed, parsed.skipped, attempted)
     end
   end
 end

@@ -38,7 +38,12 @@ module Gori
             j.field "kind", kind_s
             j.field "path", path
             j.field "count", result.count
+            j.field "attempted", result.attempted
             j.field "skipped", result.skipped
+            # The import writes in chunks, so a roll-back part-way leaves the earlier ones
+            # committed. Named rather than implied, so an agent does not read a short count as
+            # a complete import of a smaller file.
+            result.shortfall_note.try { |note| j.field "partial", note }
           end
         end)
       rescue ex : Gori::Error

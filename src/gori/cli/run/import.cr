@@ -101,6 +101,7 @@ module Gori
       private def self.import_result_text(kind : Symbol, path : String, result : Import::Result) : String
         s = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{Import.label(kind)} · #{path}"
         s += " (#{result.skipped} #{result.skipped == 1 ? "entry" : "entries"} skipped)" if result.skipped > 0
+        result.shortfall_note.try { |note| s += " — #{note}" }
         s
       end
 
@@ -110,6 +111,9 @@ module Gori
             j.field "kind", kind.to_s
             j.field "path", path
             j.field "count", result.count
+            # Both numbers, always: a consumer diffing them is how a partial import is
+            # detected without parsing prose.
+            j.field "attempted", result.attempted
             j.field "skipped", result.skipped
           end
         end
