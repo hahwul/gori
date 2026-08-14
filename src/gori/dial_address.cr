@@ -1,6 +1,27 @@
 require "socket"
 
 module Gori
+  # The KEY half of a host override: the form of a hostname both override layers store and
+  # look up by, so "does this request match an override?" has ONE answer.
+  #
+  # Lives beside `DialAddress` (the value half) for the same reason that one does: the
+  # per-project table (`Gori::HostOverrides`) and the global `settings.json`
+  # `hostname_overrides` list must agree, and `Settings` deliberately does not depend on the
+  # proxy model.
+  #
+  # Two things are folded away. CASE, because DNS names are case-insensitive and both layers
+  # already lowercased. And a TRAILING ROOT DOT, because `example.com.` and `example.com` name
+  # the same host — `SelfPage.magic_host?` has always chomped it, so an override on the
+  # reserved name could be escaped by one spelling and not the other, and an entry typed WITH
+  # the dot was a silent dead override that no request could ever match.
+  module OverrideHost
+    # The lookup/storage key for `host`. `rstrip` rather than `chomp` so the pathological
+    # "example.com.." folds too instead of leaving a dot behind that still matches nothing.
+    def self.key(host : String) : String
+      host.strip.downcase.rstrip('.')
+    end
+  end
+
   # The VALUE half of a host override: the address gori dials in place of a name.
   #
   # It used to be an IP literal and nothing else, which encoded the belief that redirecting a

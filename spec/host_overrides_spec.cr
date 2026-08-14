@@ -36,6 +36,38 @@ describe Gori::HostOverrides do
     end
   end
 
+  # A trailing root dot names the SAME host: `SelfPage.magic_host?` has always chomped one,
+  # so leaving the override lookup byte-exact meant the two disagreed about what a request
+  # for "gori.proxy." was. Both directions have to fold — the request spelling and the
+  # stored one — or an operator gets a dead entry whose only symptom is silence.
+  it "folds a trailing root dot on both the stored host and the looked-up one" do
+    with_store do |store|
+      ov = Gori::HostOverrides.load(store)
+      ov.add("Staging.acme.test.", "10.0.0.1").should be_true
+      ov.entries.first.host.should eq("staging.acme.test") # stored without the dot
+      ov.connect_address("staging.acme.test").should eq("10.0.0.1")
+      ov.connect_address("staging.acme.test.").should eq("10.0.0.1") # fully-qualified request
+      # …and the dotted spelling is therefore the SAME entry, not a second one.
+      ov.add("staging.acme.test", "10.0.0.2").should be_false
+      ov.size.should eq(1)
+    end
+  end
+
+  # Rows written BEFORE the key form existed still have to resolve. The store is written
+  # directly here, which is the only way to produce one now that every writer folds.
+  it "folds a row that predates the key form, rather than leaving it dead in the list" do
+    with_store do |store|
+      store.add_host_override("Legacy.test.", "10.0.0.1")
+      ov = Gori::HostOverrides.load(store)
+      ov.entries.first.host.should eq("legacy.test")
+      ov.connect_address("legacy.test").should eq("10.0.0.1")
+      ov.connect_address("legacy.test.").should eq("10.0.0.1")
+      # …and `add`'s dedupe sees it, so the old row cannot be shadowed by a live duplicate.
+      ov.add("legacy.test", "10.0.0.2").should be_false
+      ov.size.should eq(1)
+    end
+  end
+
   it "rejects an invalid pair (bad IP, blank host)" do
     with_store do |store|
       ov = Gori::HostOverrides.load(store)
@@ -96,6 +128,31 @@ describe Gori::HostOverrides do
     end
   end
 
+  # The mutex `connect_address` takes on EVERY proxied request must never be held across a
+  # store round-trip. `exec_task` parks the calling fiber on its reply channel, and with
+  # `busy_timeout=5000` a peer process holding the write lock parks it for up to five
+  # seconds — so `add`/`update`/`remove`/`reload` doing their store work inside that lock
+  # stalled every dial in a project that has any override at all, for as long as the peer
+  # held it. The writers serialise on a SECOND mutex the read path never touches.
+  #
+  # Pinned at source level because the failure is a stall, not a wrong answer: reproducing it
+  # needs a peer process holding a SQLite write lock, and a timing assertion around that is a
+  # flaky spec rather than a proof. What CAN be stated exactly is the invariant that removes
+  # it — every `@mutex` critical section is one expression on one line, and none of them
+  # touches the store.
+  it "never holds the read-path mutex across a store round-trip" do
+    src = File.read(File.join(__DIR__, "..", "src", "gori", "host_overrides.cr"))
+    sections = src.lines.select(&.includes?("@mutex.synchronize"))
+    sections.should_not be_empty # the guard is worthless if the mutex was renamed away
+
+    sections.each do |line|
+      # One-line brace form, so the whole critical section is visible on the line asserted.
+      line.should match(/@mutex\.synchronize\s*\{[^}]*\}/)
+      line.should_not contain("@store")
+      line.should_not contain("load_entries")
+    end
+  end
+
   describe ".valid?" do
     it "accepts an IPv4/IPv6 literal with a non-empty host" do
       Gori::HostOverrides.valid?("example.com", "10.0.0.1").should be_true
@@ -111,6 +168,25 @@ describe Gori::HostOverrides do
     it "rejects a host with embedded whitespace or garbage (silent dead override)" do
       Gori::HostOverrides.valid?("foo bar", "10.0.0.1").should be_false
       Gori::HostOverrides.valid?("ex ample.com", "10.0.0.1").should be_false
+    end
+
+    # Judged on the KEY, so the answer matches what the lookup will actually do with it: a
+    # fully-qualified spelling is fine, but a host that is NOTHING but dots folds to empty
+    # and is the dead override HOST_RE exists to refuse.
+    it "judges the folded key, so a root dot passes and a dot-only host does not" do
+      Gori::HostOverrides.valid?("example.com.", "10.0.0.1").should be_true
+      Gori::HostOverrides.valid?(".", "10.0.0.1").should be_false
+      Gori::HostOverrides.valid?("...", "10.0.0.1").should be_false
+    end
+
+    # The LEADING dot is the half the fold deliberately leaves alone, so HOST_RE has to be
+    # the one that refuses it — `.api.test` is how a cookie domain is written, and it
+    # validated, stored and rendered while matching no request Host that can exist.
+    it "refuses a leading dot, but not the leading _ and - real setups use" do
+      Gori::HostOverrides.valid?(".api.test", "10.0.0.1").should be_false
+      Gori::HostOverrides.valid?("api.test", "10.0.0.1").should be_true
+      Gori::HostOverrides.valid?("_dmarc.test", "10.0.0.1").should be_true
+      Gori::HostOverrides.valid?("-odd.test", "10.0.0.1").should be_true
     end
 
     # The port half: an override used to be able to say WHICH MACHINE and never WHICH PORT.
@@ -160,10 +236,25 @@ describe Gori::HostOverrides do
     end
   end
 
+  # The KEY half of the same shared grammar, and split out for the same reason.
+  describe Gori::OverrideHost do
+    it "folds case and a trailing root dot, and nothing else" do
+      Gori::OverrideHost.key("Example.COM").should eq("example.com")
+      Gori::OverrideHost.key("example.com.").should eq("example.com")
+      Gori::OverrideHost.key("  example.com.  ").should eq("example.com")
+      Gori::OverrideHost.key("example.com..").should eq("example.com") # not just the last one
+      Gori::OverrideHost.key(".").should eq("")
+      # A LEADING dot is not a root dot and stays — it makes the host garbage, which is
+      # HOST_RE's job to refuse, not this one's to quietly repair into a different name.
+      Gori::OverrideHost.key(".example.com").should eq(".example.com")
+    end
+  end
+
   describe ".parse_line" do
     it "parses \"IP host\" (collapses whitespace, lowercases the host)" do
       Gori::HostOverrides.parse_line("10.0.0.1 Example.COM").should eq({"example.com", "10.0.0.1"})
       Gori::HostOverrides.parse_line("10.0.0.1   api.test").should eq({"api.test", "10.0.0.1"})
+      Gori::HostOverrides.parse_line("10.0.0.1 api.test.").should eq({"api.test", "10.0.0.1"})
     end
 
     it "returns nil for a missing host, a bad IP, or a host with spaces" do
@@ -180,6 +271,7 @@ describe Gori::Settings do
     it "resolves a global override case-insensitively, nil otherwise" do
       Gori::Settings.hostname_overrides = [{"staging.acme.test", "10.0.0.1"}]
       Gori::Settings.host_override_address("STAGING.acme.test").should eq("10.0.0.1")
+      Gori::Settings.host_override_address("staging.acme.test.").should eq("10.0.0.1")
       Gori::Settings.host_override_address("other.test").should be_nil
     ensure
       Gori::Settings.hostname_overrides = [] of {String, String}
@@ -261,6 +353,29 @@ describe Gori::Proxy::Upstream do
     ensure
       Gori::Settings.hostname_overrides = [] of {String, String}
       server.close
+    end
+  end
+
+  # The two-layer chain, as ONE method. `connect_target` asked both layers and
+  # `ClientConn#reserved_self_host?` asked only the project one, so the escape hatch that
+  # takes a reserved name out of the self-page set could not see a settings.json override at
+  # all. Both callers go through this now, so they cannot disagree again.
+  describe ".override_address" do
+    it "prefers the project layer, falls back to the global one, and folds the key" do
+      with_store do |store|
+        ov = Gori::HostOverrides.load(store)
+        ov.add("both.test", "10.0.0.1").should be_true
+        Gori::Settings.hostname_overrides = [{"both.test", "10.9.9.9"}, {"global.test", "10.0.0.2"}]
+
+        Gori::Proxy::Upstream.override_address("both.test", ov).should eq("10.0.0.1")   # project wins
+        Gori::Proxy::Upstream.override_address("global.test", ov).should eq("10.0.0.2") # global fills in
+        Gori::Proxy::Upstream.override_address("global.test.", ov).should eq("10.0.0.2")
+        Gori::Proxy::Upstream.override_address("neither.test", ov).should be_nil
+        # No project layer at all (the shape every active-send path without a store has).
+        Gori::Proxy::Upstream.override_address("global.test", nil).should eq("10.0.0.2")
+      end
+    ensure
+      Gori::Settings.hostname_overrides = [] of {String, String}
     end
   end
 

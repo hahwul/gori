@@ -1480,8 +1480,15 @@ module Gori::Proxy
     # Upstream.addresses_self?. An explicit host override on the name is the escape hatch,
     # for the rare LAN that has a real box called "gori"; that mirrors why addresses_self?
     # skips override resolution — a mapping the user wrote down is a statement of intent.
+    #
+    # Asked through `Upstream.override_address`, which is the SAME chain the dial itself
+    # resolves. This used to read the project table directly, and so disagreed with the dial
+    # twice: it could not see a GLOBAL (settings.json) override at all, and it matched the
+    # host byte-for-byte where `magic_host?` chomps a trailing root dot — so `gori.proxy.`
+    # stayed reserved no matter what the operator wrote. Both spellings ended at the 502 in
+    # `handle_reserved_host` with no way out.
     private def reserved_self_host?(host : String) : Bool
-      SelfPage.magic_host?(host) && @host_overrides.try(&.connect_address(host)).nil?
+      SelfPage.magic_host?(host) && Upstream.override_address(host, @host_overrides).nil?
     end
 
     # The plaintext half of the reserved-host route. Returns true when the request was
