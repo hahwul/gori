@@ -99,6 +99,8 @@ module Gori::Tui
         "shell command (/bin/sh -c) — receives a JSON context (project, capture, flows, proxy) on stdin"),
       Field.new("Interval (s)",
         "how often to re-run the command — seconds (min 1)"),
+      Field.new("Timeout (s)",
+        "how long one run may take before it is killed — seconds (min 1); may exceed the interval"),
     ]
     # Display: message-body + chrome prefs (three choice fields, three bools, a text cap).
     DISPLAY_PANE_CHOICES = ["request", "response"]
@@ -214,7 +216,7 @@ module Gori::Tui
                 when :keys          then keys_values
                 when :theme         then [Theme.canonical(Settings.theme)]
                 when :layout        then layout_values
-                when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
+                when :statusline    then statusline_values
                 when :display       then display_values
                 when :companion     then companion_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
@@ -262,6 +264,7 @@ module Gori::Tui
                   Settings::DEFAULT_STATUSLINE_ENABLED ? "on" : "off",
                   Settings::DEFAULT_STATUSLINE_COMMAND,
                   Settings::DEFAULT_STATUSLINE_INTERVAL.to_s,
+                  Settings::DEFAULT_STATUSLINE_TIMEOUT.to_s,
                 ]
                 when :display then [
                   Settings::DEFAULT_DETAIL_PANE,
@@ -383,6 +386,15 @@ module Gori::Tui
         Settings.issues_preview ? "on" : "off",
         order_label(Settings.history_list_order),
         depth_label(Settings.sitemap_expand_depth),
+      ]
+    end
+
+    private def statusline_values : Array(String)
+      [
+        Settings.statusline_enabled? ? "on" : "off",
+        Settings.statusline_command,
+        Settings.statusline_interval.to_s,
+        Settings.statusline_timeout.to_s,
       ]
     end
 
@@ -605,10 +617,16 @@ module Gori::Tui
           @status = "invalid interval"
           return "settings: invalid statusline interval #{@values[2].inspect} (seconds, min 1)"
         end
+        to = @values[3].strip.to_i?
+        unless to && to >= 1
+          @status = "invalid timeout"
+          return "settings: invalid statusline timeout #{@values[3].inspect} (seconds, min 1)"
+        end
         Settings.statusline_enabled = @values[0] == "on"
-        Settings.statusline_command = @values[1] # blank is valid (no-op while enabled)
+        Settings.statusline_command = @values[1] # blank is valid (the row is simply not reserved)
         Settings.statusline_interval = iv
-        @values = [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, iv.to_s]
+        Settings.statusline_timeout = to
+        @values = statusline_values
         return persist
       end
       if @section == :display

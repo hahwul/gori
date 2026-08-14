@@ -301,7 +301,8 @@ An opt-in extra row at the very bottom of the TUI (Preferences → **General** �
   "statusline": {
     "enabled": true,
     "command": "printf 'proj:%s flows:%s' \"$(jq -r .project)\" \"$(jq -r .flows)\"",
-    "interval": 3
+    "interval": 3,
+    "timeout": 10
   }
 }
 ```
@@ -309,10 +310,17 @@ An opt-in extra row at the very bottom of the TUI (Preferences → **General** �
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `false` | Whether the statusline row is shown |
-| `command` | string | `""` | Shell command, run via `/bin/sh -c`. Its first line of stdout becomes the row |
+| `command` | string | `""` | Shell command, run via `/bin/sh -c`. Its first line of stdout becomes the row. Blank means no row is reserved at all, even when `enabled` |
 | `interval` | integer | `3` | Seconds between runs (minimum `1`) |
+| `timeout` | integer | `10` | Seconds one run may take before it is killed (minimum `1`). May exceed `interval` |
 
-The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. A run that exceeds `interval` seconds is terminated, and a failing command simply leaves the row blank. It never blocks the UI.
+The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. It never blocks the UI.
+
+`timeout` is deliberately separate from `interval`. Runs never overlap — gori launches the next one only after the previous has finished — so a script slower than `interval` simply refreshes as fast as it can rather than being killed on every run. A run that does exceed `timeout` is terminated and the row reads `⋯ (timed out)`.
+
+A command that fails without printing anything reports its exit status instead of leaving the row blank — `⋯ (exit 127)` for a command that was not found, `⋯ (killed)` for one a signal ended. A command that exits cleanly having printed nothing leaves the row empty, which is a legitimate thing for a script to do. stderr is discarded either way.
+
+Edits take effect immediately: saving a new `command`, `interval` or `timeout` re-runs the command on the next frame instead of waiting out the current interval.
 
 Each run receives a JSON context on stdin describing the live session, so scripts can display proxy state without querying gori:
 
