@@ -9,9 +9,11 @@ module Gori::Settings
   # someone is at the keyboard (~1/s on "lively", ~0.3/s on "calm"; zero once she dozes
   # off after 90s of inactivity). That is an explicit opt-in, never a surprise.
   DEFAULT_COMPANION = false
-  # "lively" = blinks, winks, a glint sweep, and about once a minute one of four idle
-  # gestures (a yawn, a smile, a squint, a deadpan). "calm" halves the blink rate and drops
-  # the rest — for SSH sessions and battery.
+  # "lively" = blinks, winks, a glint sweep, and about every 25 seconds one of seven idle
+  # gestures (a yawn, a smile, a squint, a deadpan, a curious look, a huff, an "hmm").
+  # "calm" halves the blink rate and drops the rest — for SSH sessions and battery. Her
+  # REACTIONS to results are not motion she starts on her own, so both modes play them,
+  # arc and all (tui/companion.cr#pose_for).
   DEFAULT_COMPANION_MOTION  = "lively" # "lively" | "calm"
   DEFAULT_COMPANION_NOTICES = true
   # Where she sits. "body" is the 8x3 sprite in the tab body's bottom-right corner; "bar"

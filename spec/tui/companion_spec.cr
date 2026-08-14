@@ -219,6 +219,25 @@ describe Gori::Tui::Companion do
     folded.should be_empty
   end
 
+  # …and the other half of that, which nothing asserted while both wink specs only said
+  # where a wink may NOT appear: she must still wink. The gestures own the cavity whenever
+  # one is running, so raising their rate takes winks away — silently, and in the same
+  # direction as "more variety", which is what makes it worth pinning. Both sides in one
+  # sweep so the ladder's two owners are counted against each other.
+  it "still winks, on the idle face, alongside the gestures" do
+    winks = 0
+    gestures = 0
+    gesture_sweep(6000, "lively") do |f|
+      winks += 1 if f.wink != :none
+      gestures += 1 if Companion::GESTURES.flatten.uniq!.includes?(f.pose) && f.pose != :blink
+    end
+    winks.should be > 0
+    gestures.should be > 0
+    # Neither track may crowd the other out: over 20 minutes of awake beats they stay
+    # within an order of magnitude of each other.
+    (winks * 10).should be > gestures
+  end
+
   it "keeps every gesture script inside its window" do
     Companion::GESTURES.min_of(&.size).should be > 0
     Companion::GESTURES.max_of(&.size).should be <= Companion::GESTURE_MAX
@@ -370,6 +389,37 @@ describe Gori::Tui::Companion do
       f.bubble.not_nil!.should contain("fuzzer")
       f.mood.should eq(:happy)
       f.pose.should eq(:happy)
+    end
+  end
+
+  # A mood is held for three to five seconds — fifteen to twenty-five beats — so a single
+  # frozen face reads as stuck rather than as reacting. Every reaction therefore plays a
+  # peak and then settles into a quieter cousin of it.
+  #
+  # The ORDER is the half that matters and the half a lazy implementation gets wrong: the
+  # peak has to be the face on the beat the note lands, or the settle stops being a tail on
+  # something the operator saw and becomes a different first impression. So this asserts
+  # both ends AND where the switch falls, rather than "the pose changes at some point".
+  it "peaks on the beat a note lands, then settles for the rest of the hold" do
+    [{:success, :happy, :smile}, {:warn, :alert, :hmm}, {:error, :error, :flat}].each do |level, peak, settled|
+      with_companion(true) do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(level, "engine: something happened")
+        # Stops inside the shortest mood hold (:happy, 3s = 15 beats), so nothing here is
+        # the mood EXPIRING back to idle.
+        poses = (1..Companion::REACT_PEAK + 4).map do |i|
+          companion.tick(t0 + Companion::BEAT * i)
+          companion.frame.not_nil!.pose
+        end
+        poses.first.should eq(peak)
+        poses.last.should eq(settled)
+        # …and the switch is where REACT_PEAK says it is: beat 1 is the first drawn beat of
+        # the mood, so the settle starts at index REACT_PEAK - 1.
+        poses.index(settled).should eq(Companion::REACT_PEAK - 1)
+      end
     end
   end
 
@@ -592,12 +642,31 @@ describe Gori::Tui::Companion do
     Mascot::INK.each(&.size.should eq(Mascot::W))
   end
 
-  it "gives the Miss her lashes on every pose" do
+  # She is a MISS, so she has lashes — on every pose, whichever way they lean. The brows
+  # are an expression axis (Mascot.brows), so this asserts MEMBERSHIP rather than the
+  # resting pair: what may never happen is a pose that drops one, which would leave a hole
+  # cell painted plate-on-plate and shorten the face by a column.
+  it "gives the Miss her lashes on every pose, whichever way they lean" do
     Mascot::POSES.each do |pose|
       cav = Mascot.cavity(pose, :none)
-      cav[0].should eq(Mascot::LASH_L)
-      cav[4].should eq(Mascot::LASH_R)
+      [cav[0], cav[4]].each { |brow| {Mascot::LASH_L, Mascot::LASH_R}.includes?(brow).should be_true }
     end
+    # …and the resting face is still the soft, open pairing: ´ left, ` right, both inner
+    # ends up. The mirror of it is the stern read, so getting these two backwards would
+    # ship a permanently cross mascot — see the LASH_L/LASH_R comments.
+    Mascot.cavity(:idle, :none)[0].should eq(Mascot::LASH_L)
+    Mascot.cavity(:idle, :none)[4].should eq(Mascot::LASH_R)
+    Mascot.brows(:error).should eq({Mascot::LASH_R, Mascot::LASH_L})
+  end
+
+  # The rule the pose table is held to: a pose is only a pose if it looks like one. Every
+  # entry has to differ from every other in the five cavity cells — brows, eyes, mouth —
+  # because that is the entire vocabulary a pose has. A duplicate here is a face the
+  # operator can never tell apart from another, and neither the art tables nor a tmux
+  # capture of one frame would say so.
+  it "gives every pose a face no other pose wears" do
+    faces = Mascot::POSES.to_a.map { |pose| Mascot.cavity(pose, :none) }
+    faces.uniq.size.should eq(Mascot::POSES.size)
   end
 
   # A wink is a gesture of the open-eyed idle pose; on a mood pose it would read as a

@@ -35,29 +35,43 @@ module Gori::Tui
     SLEEP_AFTER = 90.seconds
 
     # Idle-track windows, as a shift of the beat counter: 2^n beats per window.
-    BLINK_SHIFT   = 4 #  16 beats = 3.2s
-    WINK_SHIFT    = 6 #  64 beats = 12.8s
+    BLINK_SHIFT   = 4 # 16 beats = 3.2s
+    WINK_SHIFT    = 6 # 64 beats = 12.8s
     GLINT_SHIFT   = 7 # 128 beats = 25.6s
-    GESTURE_SHIFT = 7 # 128 beats = 25.6s
+    GESTURE_SHIFT = 6 # 64 beats = 12.8s
 
     # …but a gesture fires in only one window in GESTURE_ODDS, so she plays one about every
-    # 75 seconds and any PARTICULAR one about every five minutes. Deliberately rare: the
-    # blink is what she does, and a gesture only reads as one if it is not the norm.
-    GESTURE_ODDS = 3
+    # 25 seconds and any PARTICULAR one about every three minutes. Still rare per gesture —
+    # the blink is what she does, and a gesture only reads as one if it is not the norm —
+    # but the RATE is sized against SLEEP_AFTER rather than against taste alone: she dozes
+    # after 90 seconds, so at the old one-per-75s an operator who stepped away saw a single
+    # gesture per waking spell, and the table might as well have had one entry in it.
+    GESTURE_ODDS = 2
 
     # The gestures themselves, one pose per beat. The hash picks the script and where in the
     # window it starts, so a gesture is a tiny scripted animation rather than a single frame
     # flashed for 200ms — the yawn in particular only reads as a yawn because the mouth opens
     # before the eyes shut.
     #
-    # ALL FIVE POSES LIVE IN THE CAVITY (eyes + mouth), which is the constraint that picked
-    # them: Mascot.draw_row paints the middle row alone, so a gesture expressed in the badge,
-    # the glint or the shake is invisible to everyone running `placement = bar`.
+    # EVERY POSE HERE LIVES IN THE CAVITY (brows + eyes + mouth), which is the constraint
+    # that picked them: Mascot.draw_row paints the middle row alone, so a gesture expressed
+    # in the badge, the glint or the shake is invisible to everyone running `placement =
+    # bar`. The brows are part of that vocabulary — the last three scripts are told apart
+    # from the first four as much by which way the lashes lean as by the eyes.
+    #
+    # SEVEN AND NOT MORE, because the table is bounded by what the OPENING can show rather
+    # than by what reads well: @beat starts at 0 in every process, so the first firings are
+    # the same fixed sequence for every user, and a spec pins that they cover the whole
+    # table. Ten firings fit in the sweep, so seven scripts leave slack to choose a salt on
+    # (111 of 1024 cover it); eight left four salts in the whole space, and nine none.
     GESTURES = [
       [:oh, :yawn, :yawn, :blink], # mouth opens, eyes squeeze shut, settles on a blink
       [:smile, :smile, :smile],    # eyes crinkle shut over the resting mouth
       [:squint, :squint],          # pupils shrink — peering at something
       [:flat, :flat],              # deadpan
+      [:wonder, :wonder, :wry],    # one brow cocks at something, then the other — she got it
+      [:pout, :pout, :blink],      # brows furrow, mouth turns over, blinked off
+      [:hmm, :hmm, :hmm, :squint], # one eye narrows while she weighs it, then both
     ]
     # The longest script. The hashed start offset is bounded by (window - this) so a script
     # can never straddle a window edge and play half of itself; a spec pins the two together.
@@ -65,6 +79,11 @@ module Gori::Tui
 
     # Beats she stays startled after being woken from a doze.
     WAKE_BEATS = 3
+
+    # Beats a reaction holds its PEAK face before settling into its quieter cousin — see
+    # #pose_for. 8 beats is 1.6s, roughly half of the shortest mood hold (:happy, 3s), so
+    # every reaction gets a visible peak and a visible settle.
+    REACT_PEAK = 8
 
     # Reaction severity. A new note may take the face only if it ranks at or above the
     # live one — a burst of :info must not stomp on an error reaction.
@@ -274,11 +293,25 @@ module Gori::Tui
       )
     end
 
+    # A REACTION IS AN ARC, NOT ONE FROZEN FACE. A mood is held for three to five seconds
+    # (mood_hold) — fifteen to twenty-five beats of an identical sprite, which is long
+    # enough that she stops reading as reacting and starts reading as stuck. So she hits
+    # the peak face, holds it for REACT_PEAK, then settles into a quieter cousin of it for
+    # the remainder: beams then smiles, tenses then considers, recoils then stares.
+    #
+    # THE PEAK IS BEAT 0 OF THE MOOD, which is the half of this that matters: the settle is
+    # a tail on a reaction someone already saw, never a different first impression. It also
+    # costs exactly one extra frame change per note, so the repaint budget is untouched.
+    #
+    # Unlike the idle tracks this plays on `calm` too — "calm drops the rest" is about
+    # motion she starts on her own, and a reaction is an answer to something the operator
+    # just did.
     private def pose_for(mood : Symbol) : Symbol
+      settled = @beat - @mood_beat >= REACT_PEAK
       case mood
-      when :happy then :happy
-      when :warn  then :alert
-      when :alarm then :error # ×_× — its own face now, not :alert with a different badge
+      when :happy then settled ? :smile : :happy
+      when :warn  then settled ? :hmm : :alert
+      when :alarm then settled ? :flat : :error # ×_× recoil, then a stunned stare
       else             idle_pose
       end
     end
@@ -367,9 +400,12 @@ module Gori::Tui
       # pseudo-independent of the `% GESTURE_ODDS` that just selected on it, and that opening
       # left the deadpan unplayed through its first twenty minutes: a draw can be flawless in
       # aggregate and still hide a quarter of the feature across the only stretch most people
-      # watch. This one opens on four DIFFERENT gestures and stays even long-run; the spec
-      # below pins the first half of that, which is the half a retune can silently lose.
-      script = GESTURES[(Companion.beat_hash(@beat >> GESTURE_SHIFT, 45_u32) % GESTURES.size).to_i]
+      # watch. Salt 918 opens on the seven scripts in seven firings — a clean permutation,
+      # every gesture inside the first three minutes — and stays even long-run (±1.7% over
+      # 25k firings); the spec below pins the first half of that, which is the half a retune
+      # can silently lose. Re-derive it by replaying this arithmetic offline if the table
+      # changes size: the salt is tuned to GESTURES.size and does not survive a new entry.
+      script = GESTURES[(Companion.beat_hash(@beat >> GESTURE_SHIFT, 918_u32) % GESTURES.size).to_i]
       # Bounded by the window MINUS the longest script, so the whole thing plays inside one
       # window — a script that ran off the end would drop its last beats, and the yawn would
       # lose the blink it settles on.

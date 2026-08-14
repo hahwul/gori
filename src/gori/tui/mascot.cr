@@ -56,6 +56,29 @@ module Gori::Tui
     LASH_L = '´' # U+00B4 ACUTE ACCENT — rises to the right, so it lifts the inner brow
     LASH_R = '`' # U+0060 GRAVE ACCENT — rises to the left, mirroring it
 
+    # …which makes the PAIRING an expression axis of its own, and the cheapest one she has:
+    # four leanings out of two glyphs she already wears, with no new coverage risk and no
+    # new cell claimed. The eyes say what she is doing; the brows say how she feels about
+    # it, which is why ●_● and ●_● with the brows turned over read as "deadpan" and
+    # "unimpressed" rather than as the same face twice.
+    #
+    # DERIVED FROM THE POSE, never carried on Frame. A brow field would be the third member
+    # of the folded-field class the `wink` and `shake` comments describe: Mascot.cavity is
+    # the only thing that reads these, so anything it did not honour would be a Frame that
+    # compares unequal to its neighbour and paints identical cells. Deriving them here
+    # leaves nothing to fold.
+    #
+    # The ink layer needs no change either — row 1 is "HlemelS.", so both brow cells are
+    # already role 'l' whichever way they lean.
+    def self.brows(pose : Symbol) : {Char, Char}
+      case pose
+      when :error, :pout then {LASH_R, LASH_L} # both inner ends DOWN — furrowed
+      when :wonder, :hmm then {LASH_L, LASH_L} # ´ on the right drops that brow alone …
+      when :wry          then {LASH_R, LASH_R} # … and ` on the left drops the other one
+      else                    {LASH_L, LASH_R} # soft and open — the resting pair
+      end
+    end
+
     # The centre cell of the cavity: a small mouth between the eyes.
     #
     # EVERY MOUTH HAS TO SIT AT OR BELOW MID-CELL. A combining-style diacritic is drawn at
@@ -72,9 +95,14 @@ module Gori::Tui
     # box. u is the same cup at the same x-height and is in every monospace font, which is
     # why the mouth is spelled with it and there is no setting to change that.
     #
+    # n is the ONE addition to that set and it costs nothing the argument above forbids: it
+    # is u turned over, the same letterform in the same x-height band, in the same fonts.
+    # The cup opening downward is the frown, and it is the only mouth shape the four
+    # existing ones cannot approximate.
+    #
     # CAP_HEIGHT_MARKS is what a spec checks the mouth against — it may never be one.
     CAP_HEIGHT_MARKS = {'˘', '¯', '^', '´', '`', '¨', '˙', '˚', '˜', '‾'}
-    MOUTHS           = {'u', 'o', '_', '·'}
+    MOUTHS           = {'u', 'o', '_', '·', 'n'}
 
     def self.mouth(pose : Symbol) : Char
       case pose
@@ -87,17 +115,25 @@ module Gori::Tui
       when :smile  then 'u' # the resting cup, under crinkled-shut eyes
       when :squint then 'u'
       when :flat   then '_' # deadpan: the tense mouth on an unbothered face
+      when :wonder then 'o' # the curious "oh?", told apart from :oh by the cocked brow
+      when :wry    then 'u' # the resting cup under one crinkled eye — a half-smile
+      when :hmm    then '_' # weighing it up
+      when :pout   then 'n' # the cup turned over — the sulk
       else              'u' # the resting smile — a cup below the eyes
       end
     end
 
     # Every pose. Two families, and the split matters: the first six are REACTIONS (what
     # mood she is in, chosen by Companion#pose_for), the rest are IDLE GESTURES she plays
-    # unprompted (Companion::GESTURES). Still kept small — expression variety comes first
-    # from the independent wink/badge/glint axes below, and a new entry here has to earn
-    # itself a face no other pose already wears.
+    # unprompted (Companion::GESTURES) — plus the quieter cousins a reaction SETTLES into,
+    # which belong to both families at once (:smile, :hmm, :flat).
+    #
+    # Still a table that has to be earned: a new entry needs a face no other pose already
+    # wears, and it is only a face if the three cavity glyphs plus the brows differ, since
+    # that is the whole of what a pose can change. A spec sweeps exactly that.
     POSES = {:idle, :blink, :happy, :alert, :error, :doze,
-             :oh, :yawn, :smile, :squint, :flat}
+             :oh, :yawn, :smile, :squint, :flat,
+             :wonder, :wry, :hmm, :pout}
     WINKS = {:none, :left, :right}
 
     # Ink roles, one char per art cell, parallel to the assembled art rows:
@@ -171,12 +207,21 @@ module Gori::Tui
       when :squint then {'·', '·'} # pupils down to a dot, peering at something
       when :oh     then {'●', '●'} # open, over an open mouth
       when :flat   then {'●', '●'} # open, over a flat mouth — deadpan
+      when :wonder then {'●', '●'} # :oh's eyes; the cocked brow is what makes it a question
+      when :wry    then {'^', '●'} # ONE eye crinkled — the asymmetry is the whole joke
+      when :hmm    then {'·', '●'} # one pupil narrowed, weighing something up
+      when :pout   then {'●', '●'} # open and unimpressed, under furrowed brows
       else              {'●', '●'} # :idle
       end
     end
 
     # Cols 1..5 of the middle row: lash, left eye, mouth, right eye, lash. Named for the
     # hole it fills, which is what the ink layer calls it too.
+    #
+    # THE WHOLE OF A POSE IS THESE FIVE CELLS — brows, eyes and mouth — which is also why
+    # every idle gesture is expressed here and not in the badge or the glint: `placement =
+    # bar` paints this row alone (Mascot.draw_row), so anything said elsewhere is mute for
+    # everyone running the chip.
     #
     # A wink only applies to the open-eyed idle pose — a winking :alert or :doze would
     # read as a rendering glitch rather than a gesture.
@@ -186,7 +231,8 @@ module Gori::Tui
         l = '─' if wink == :left
         r = '─' if wink == :right
       end
-      {LASH_L, l, mouth(pose), r, LASH_R}
+      bl, br = brows(pose)
+      {bl, l, mouth(pose), r, br}
     end
 
     # The glyph at (col, row) of the 8x3 grid. Allocation-free — this is what the draw

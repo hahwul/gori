@@ -138,7 +138,7 @@ module Gori::Tui
         "body = an 8x3 sprite in the tab body's bottom-right corner; bar = a one-row chip in the status row beside CPU/MEM, which covers nothing and drops the speech bubble — ←/→ cycles",
         choices: COMPANION_PLACEMENT_CHOICES),
       Field.new("Motion",
-        "lively = blinks, winks, a glint sweep and the odd yawn or smile; calm halves the blink rate and drops the rest (SSH/battery) — ←/→ cycles",
+        "lively = blinks, winks, a glint sweep and one of seven idle gestures every 25s or so; calm halves the blink rate and drops the rest (SSH/battery) — ←/→ cycles",
         choices: COMPANION_MOTION_CHOICES),
       Field.new("Notices",
         "announce new background results in a speech bubble, and react to them — independent of the bottom-bar toast — ←/→/space toggles",

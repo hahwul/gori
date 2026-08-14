@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Miss Ring: a wider range of faces, out of the two glyphs she already wore. Her lashes are now an expression axis rather than a fixed pair — ´ and ` point inward for the soft, open resting face, turn over for a furrowed one, and lean the same way for a single cocked brow — so four new poses (a curious `oh?`, a knowing half-smile, a narrow-eyed `hmm`, a sulk with the mouth cup turned over) cost no new glyph and no new cell, and the error face gets the furrowed brows it always wanted. Reactions became arcs instead of single frames: a mood is held three to five seconds, which is fifteen to twenty-five beats of an identical sprite, so she now hits the peak on the beat the result lands and settles into a quieter cousin of it 1.6s later — beams then smiles, tenses then considers, recoils then stares. The idle gestures went from four to seven and from one per 75 seconds to one per 25: she dozes off after 90 seconds, so at the old rate an operator who stepped away saw a single gesture per waking spell and the table might as well have had one entry in it. Seven and not more because the table is bounded by what her OPENING can show — the schedule is a pure hash of a beat counter that starts at 0 in every process, so the first firings are the same fixed sequence for every user, and a spec pins that they cover the whole table; at eight scripts only four choice-salts in a thousand cover it, and at nine none do. Everything is still in the five cavity cells, so the status-bar chip shows all of it, and the repaint budget is unchanged at ~22% of beats
+
 ## v0.3.1
 
 - Filters: one query grammar on every filter surface, content terms included; `header:`/`body:` now take a side, and the filter bar teaches its own syntax (#668, #674)
