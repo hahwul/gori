@@ -44,18 +44,17 @@ describe "BodyChrome ⌕ find affordance — geometry" do
     chips.should eq(row)
   end
 
-  it "fits the cursor bar and a double-width ⌕ without either touching the other" do
-    # BOTH glyphs are East-Asian AMBIGUOUS — `⌕` (U+2315) and the `▎` cursor (U+258E).
-    # termisu measures each as 1 column; a CJK-configured terminal paints 2. The pill sits
-    # at the row's left edge, so anything it cannot absorb shifts the entire strip.
-    #   marker | gap | glyph | glyph's second half | trailing pad for `Chrome`'s `‹`
-    BodyChrome::ICON_W.should be >= 1 + 1 + 2 + 1
-    marker = Screen.display_width(BodyChrome::MARKER.to_s)
-    glyph = Screen.display_width(BodyChrome::ICON)
-    # The glyph starts at col 2 (render_find_icon), so a fat marker must stop before it…
-    marker.should be <= 2
-    # …and a fat glyph must still stop before the trailing pad.
-    (2 + glyph).should be <= BodyChrome::ICON_W - 1
+  it "spends no column on breathing room, but never lets the glyph end on the chips" do
+    # cursor | glyph | spare — three columns, and the spare is the whole safety margin.
+    # `Chrome` writes `‹` at the chips rect's x when the strip scrolls, and a glyph ending
+    # on that column would be blanked by it (a terminal clears a wide glyph's lead when
+    # something lands on its continuation cell). Everything else that used to pad this pill
+    # was defending against ambiguous-width terminals, which gori's own box-drawing borders
+    # do not survive either — so it was bought at the price of looking like an empty chip.
+    BodyChrome::ICON_W.should eq(3)
+    Screen.display_width(BodyChrome::MARKER.to_s).should eq(1)
+    # The glyph starts one column in, and must fit inside the pill even measured double.
+    (1 + Screen.display_width(BodyChrome::ICON)).should be <= BodyChrome::ICON_W
   end
 
   it "drops the pill rather than leaving the strip with no room for a chip" do
@@ -116,9 +115,12 @@ describe "BodyChrome ⌕ find affordance — what is drawn is what is hit" do
     end
   end
 
-  it "leaves the pill's trailing pad clear of the ‹ overflow marker" do
-    # `Chrome` always writes `‹` at ITS rect's x (chrome.cr:507). Without the narrowed rect
-    # the marker lands on the glyph; without the pad it lands flush against it.
+  it "keeps the glyph off the last column, where the ‹ overflow marker would erase it" do
+    # `Chrome` always writes `‹` at ITS rect's x (chrome.cr:507) — the column immediately
+    # after the pill. Without the narrowed chips rect that marker lands ON the glyph; with
+    # the glyph on the pill's last column it lands on the glyph's continuation cell, and a
+    # terminal answers that by blanking the wide glyph that owns it. The spare column is
+    # what keeps `⌕` on screen for the one state that reaches this code — a scrolled strip.
     backend = MemoryBackend.new(24, 1)
     many = (1..9).map { |i| "#{i}:session#{i}" }
     BodyChrome.render_subtab_strip(Screen.new(backend), Rect.new(0, 0, 24, 1),
@@ -126,7 +128,7 @@ describe "BodyChrome ⌕ find affordance — what is drawn is what is hit" do
     icon = BodyChrome.find_icon_split(Rect.new(0, 0, 24, 1), many, nil, show: true)[0].not_nil!
     backend.row(0).should contain("‹")            # the window really did scroll
     backend.row(0)[0, icon.w].should contain("⌕") # …and the pill survived it
-    backend.row(0)[icon.right - 1].should eq(' ') # the pad, kept clear
+    backend.row(0)[icon.right - 1].should eq(' ') # the spare, never inked
   end
 
   it "marks the focused pill with a cursor and gold ink, never a filled band" do
@@ -144,12 +146,12 @@ describe "BodyChrome ⌕ find affordance — what is drawn is what is hit" do
 
     lit.row(0)[icon.x].should eq(BodyChrome::MARKER)
     lit.fg_at(icon.x, 0).should eq(Theme.focus_gold)
-    lit.fg_at(icon.x + 2, 0).should eq(Theme.focus_gold) # the glyph, same ink as its cursor
+    lit.fg_at(icon.x + 1, 0).should eq(Theme.focus_gold) # the glyph, same ink as its cursor
     # The two inked cells sit on the plain canvas, and NO column of the pill wears the gold
     # fill — stated over the whole rect because that is the treatment being ruled out, and
     # the gap column between cursor and glyph is never painted at all.
     lit.bg_at(icon.x, 0).should eq(Theme.bg)
-    lit.bg_at(icon.x + 2, 0).should eq(Theme.bg)
+    lit.bg_at(icon.x + 1, 0).should eq(Theme.bg)
     (icon.x...icon.right).each do |cx|
       lit.bg_at(cx, 0).should_not eq(Theme.focus_gold),
         "column #{cx} of the pill is filled gold, not inked"
@@ -162,7 +164,7 @@ describe "BodyChrome ⌕ find affordance — what is drawn is what is hit" do
     BodyChrome.render_subtab_strip(Screen.new(off), Rect.new(0, 0, 60, 1),
       labels, 0, focused: true, find: true, find_lit: false)
     off.row(0)[icon.x].should eq(' ') # the cursor column is claimed either way
-    off.fg_at(icon.x + 2, 0).should eq(Theme.muted)
+    off.fg_at(icon.x + 1, 0).should eq(Theme.muted)
     off.bg_at(chip.x + 1, 0).should eq(Theme.focus_gold) # focus stays on the active chip
   end
 

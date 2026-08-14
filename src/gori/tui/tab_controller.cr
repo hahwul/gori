@@ -182,22 +182,24 @@ module Gori::Tui
     # number on the pill was a third telling of the same fact, in the one spot on the row
     # that has to stay quiet.
     #
-    # 5 columns, and every one of them is spoken for:
+    # Three columns, no breathing room spent on a glyph this small:
     #
-    #     col 0    │ col 1 │ col 2-3 │ col 4
-    #     MARKER   │ gap   │ ICON    │ trailing pad
+    #     col 0    │ col 1 │ col 2
+    #     MARKER   │ ICON  │ spare
     #
-    #   1. BOTH glyphs are East-Asian AMBIGUOUS — `⌕` (U+2315) and `▎` (U+258E) alike.
-    #      termisu measures each as 1 column, but a terminal configured for double-width
-    #      ambiguous glyphs paints 2. The gap column is what keeps a fat marker off the
-    #      glyph; the column after the glyph absorbs a fat glyph. Every `▎` cursor in this
-    #      app is already laid out this way (setup_wizard.cr:713 draws the marker at x+1
-    #      and its label at x+3), so this is the house convention, not a local hedge.
-    #   2. The pill sits at the row's LEFT edge, so anything it fails to absorb shifts the
-    #      whole strip. The ink is clipped to the pill besides (see render_find_icon).
-    #   3. The trailing pad keeps `Chrome`'s `‹` overflow marker — which it always draws at
-    #      its rect's x (chrome.cr:507) — one column clear of the glyph, in both measures.
-    ICON_W = 5
+    # `⌕` (U+2315) and `▎` (U+258E) are both East-Asian AMBIGUOUS: termisu measures each as
+    # 1 column, a terminal set to paint ambiguous glyphs double gives them 2. This layout
+    # does NOT try to stay correct under that setting, and neither does anything else here —
+    # box drawing (U+2500..257F) is ambiguous too, so a terminal in that mode has already
+    # doubled every border gori draws. Widening the pill to survive alone would buy nothing
+    # and cost the two columns that made a one-glyph control look like an empty chip.
+    #
+    # The one column kept is `spare`, and it earns its place in the measure we DO ship:
+    # `Chrome` writes its `‹` overflow marker at the chips rect's x (chrome.cr:507), and a
+    # glyph that ended on that column would be orphaned and blanked by it (the terminal
+    # clears a wide glyph's lead when something lands on its continuation cell). The spare
+    # is what keeps `⌕` on screen when the strip scrolls.
+    ICON_W = 3
     ICON   = "⌕"
     # The cursor bar that marks the pill as the strip's current stop. Same glyph the ~45
     # `focused ? '▎' : ' '` sites across the app use for "this is the current item".
@@ -224,7 +226,9 @@ module Gori::Tui
     end
 
     # The pill itself: a `▎` cursor and gold ink when it is the strip's current stop, a
-    # muted glyph at rest. Deliberately NOT the solid gold block the active chip and
+    # muted glyph at rest. The cursor sits flush against the glyph — `▎⌕` is one mark, the
+    # way the project picker draws `│▎ + New project` against its own card edge.
+    # Deliberately NOT the solid gold block the active chip and
     # `Chrome.render_more_button` wear — this is one glyph, not a labelled chip, and a
     # filled 5-column band around it reads as a chip that lost its label. The state change
     # is a SHAPE (a mark that was not there) rather than colour alone, which is what makes
@@ -242,9 +246,9 @@ module Gori::Tui
       # A space at rest, like every other cursor column in the app: the cell is claimed
       # either way, so a stale mark can never survive a frame where the pill lost focus.
       screen.cell(seg.x, seg.y, lit ? MARKER : ' ', fg, Theme.bg)
-      gx = seg.x + 2
+      gx = seg.x + 1
       screen.text(gx, seg.y, ICON, fg, Theme.bg,
-        lit ? Attribute::Bold : Attribute::None, width: seg.right - 1 - gx)
+        lit ? Attribute::Bold : Attribute::None, width: seg.right - gx)
     end
 
     # The frame-less segmented control shared by Repeater, Notes, Fuzzer, … `focused` =
