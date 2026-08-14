@@ -58,7 +58,9 @@ module Gori::Settings
       ip = o["ip"]?.try(&.as_s?)
       next if host.nil? || host.empty? || ip.nil? || ip.empty?
       next unless Gori::DialAddress.valid?(ip) # defense-in-depth: a hand-edited non-literal "ip" would re-resolve via DNS
-      out << {host.downcase, ip}
+      key = Gori::OverrideHost.key(host)
+      next if key.empty? # a hand-edited "." folds to nothing and could never match a request
+      out << {key, ip}
     end
     out
   end
@@ -91,14 +93,15 @@ module Gori::Settings
     end
   end
 
-  # The global override ADDRESS to dial for `host` (case-insensitive exact match), or nil
-  # when no global override applies. May carry a port (`Gori::DialAddress`). Read LIVE by
-  # Upstream.dial, so settings edits take effect on the next flow. A project-level
-  # HostOverrides entry is consulted FIRST and wins on a collision (see
-  # Proxy::Upstream.connect_target).
+  # The global override ADDRESS to dial for `host` (exact match on the `Gori::OverrideHost`
+  # key, so case and a trailing root dot don't decide it), or nil when no global override
+  # applies. May carry a port (`Gori::DialAddress`). Read LIVE by Upstream.dial, so settings
+  # edits take effect on the next flow. A project-level HostOverrides entry is consulted
+  # FIRST and wins on a collision — ask both through `Proxy::Upstream.override_address`
+  # rather than open-coding the pair.
   def self.host_override_address(host : String) : String?
     return nil if hostname_overrides.empty?
-    h = host.downcase
+    h = Gori::OverrideHost.key(host)
     hostname_overrides.each { |(oh, ip)| return ip if oh == h }
     nil
   end

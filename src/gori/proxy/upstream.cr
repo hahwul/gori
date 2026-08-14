@@ -90,7 +90,7 @@ module Gori::Proxy
     # their own table by name.
     private def self.connect_target(host : String, port : Int32, overrides : Gori::HostOverrides?,
                                     pin : String? = nil) : {String, Int32}
-      if value = overrides.try(&.connect_address(host)) || Settings.host_override_address(host)
+      if value = override_address(host, overrides)
         # An unparseable value can only come from a hand-edited settings.json / DB row: both
         # writers validate. Fall through to the name rather than dialing garbage.
         if parsed = Gori::DialAddress.parse(value)
@@ -98,6 +98,20 @@ module Gori::Proxy
         end
       end
       {pin || host, port}
+    end
+
+    # The override VALUE an operator wrote for `host`, from either layer — the per-project
+    # table first, then the global `Settings` list — or nil when neither covers it. Still a
+    # raw value: `IP` or `IP:PORT`, parsed by `Gori::DialAddress`.
+    #
+    # Public and shared because "is this host overridden?" is asked in two places and they
+    # DRIFTED. `connect_target` below asked both layers; `ClientConn#reserved_self_host?`
+    # — the escape hatch that lets a real LAN box called `gori` be proxied instead of being
+    # answered by the setup page — open-coded the project layer alone, so an operator who
+    # wrote that override in settings.json got a 502 and no way to reach their host. One
+    # method means the next reader of the chain cannot disagree with it.
+    def self.override_address(host : String, overrides : Gori::HostOverrides?) : String?
+      overrides.try(&.connect_address(host)) || Settings.host_override_address(host)
     end
 
     # True when dialing `host:port` (after override resolution) would connect back

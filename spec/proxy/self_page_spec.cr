@@ -362,6 +362,75 @@ describe "magic host (proxy-configured client)" do
     end
   end
 
+  # The ESCAPE HATCH: a LAN that has a real box called "gori" gets it back by writing a host
+  # override, and gori then proxies the name instead of answering for it. `reserved_self_host?`
+  # used to read the per-project table only, so an operator who wrote the override in
+  # settings.json — the global layer, and the only one a session with no project has — still
+  # got the setup page (or a 502) with no way out. Asserted by reaching a real listener the
+  # override names, which is something the self-page branch can never do.
+  it "proxies the reserved host when a GLOBAL override claims it" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      if conn = origin.accept?
+        while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
+        end
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nreal-lan"
+        conn.flush rescue nil
+        conn.close rescue nil
+      end
+    end
+    begin
+      Gori::Settings.hostname_overrides = [{"gori.proxy", "127.0.0.1:#{origin.local_address.port}"}]
+      with_landing_proxy(serve_landing: true) do |proxy, _ca, _sink, done|
+        client = TCPSocket.new("127.0.0.1", proxy.port)
+        client << "GET http://gori.proxy/ HTTP/1.1\r\nHost: gori.proxy\r\n\r\n"
+        client.flush
+        resp = String.new(read_all(client))
+        client.close
+
+        resp.should contain("200 OK")
+        resp.should contain("real-lan") # the LAN box answered…
+        resp.should_not contain("text/html")
+        done.receive # …and it was proxied traffic, so it IS captured (a self-page hit is not)
+      end
+    ensure
+      Gori::Settings.hostname_overrides = [] of {String, String}
+      origin.close
+    end
+  end
+
+  # `magic_host?` chomps a trailing root dot, so "gori.proxy." is reserved too — and the
+  # escape hatch has to fold the same way or that one spelling is unescapable. Same override,
+  # the fully-qualified request.
+  it "proxies the fully-qualified spelling of the reserved host too" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      if conn = origin.accept?
+        while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
+        end
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nreal-lan"
+        conn.flush rescue nil
+        conn.close rescue nil
+      end
+    end
+    begin
+      Gori::Settings.hostname_overrides = [{"gori.proxy", "127.0.0.1:#{origin.local_address.port}"}]
+      with_landing_proxy(serve_landing: true) do |proxy, _ca, _sink, done|
+        client = TCPSocket.new("127.0.0.1", proxy.port)
+        client << "GET / HTTP/1.1\r\nHost: gori.proxy.\r\n\r\n"
+        client.flush
+        resp = String.new(read_all(client))
+        client.close
+
+        resp.should contain("real-lan")
+        done.receive
+      end
+    ensure
+      Gori::Settings.hostname_overrides = [] of {String, String}
+      origin.close
+    end
+  end
+
   # https://gori.proxy/ — the HTTPS-First shape. gori answers the CONNECT itself and serves
   # the page under its own leaf. Verification is left ON here so a broken SAN for the
   # reserved name fails the test rather than passing silently.
