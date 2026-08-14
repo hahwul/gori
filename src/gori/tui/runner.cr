@@ -825,6 +825,23 @@ module Gori::Tui
       # own inline add/edit row is a separate buffer and is untouched by this (only the
       # underlying list changes), so there is nothing to clobber — same as Scope above.
       @session.host_overrides.reload
+      # The per-project `$KEY` table, for the same reason and one more. Env vars live in a
+      # process global (`Settings.project_env_vars`) that `Session.open` fills ONCE, so an
+      # external `gori run project env set` / MCP `set_env_var` was invisible here for the rest
+      # of the session — every Repeater/Fuzzer/Miner/Intercept send expanded the value this
+      # process happened to open with.
+      #
+      # The extra reason is that the Project tab's ENV pane read-modify-WRITES the whole array
+      # (`Env.save_project` persists it wholesale, from the copy `ProjectView#reload` took of
+      # this global), so a stale copy did not just READ wrong — the next edit in the pane wrote
+      # the stale set back and silently DELETED every var the other process had added. MCP
+      # states exactly this hazard as the reason it refreshes per call (see
+      # `MCP::Tools::ENV_REFRESH_TOOLS`); this surface is the one that had no refresh at all.
+      #
+      # Safe in place, like the two above: the pane's inline add/edit row is a separate buffer,
+      # and `@env_items` is re-seeded only on tab entry (`on_enter`) — `on_external_change`
+      # below just pulls the selection back inside a list that may have shrunk.
+      Env.load_project(@session.store)
       # Colour rules are read by ANOTHER tab's render path (History's row loop), so this one
       # cannot ride the active-tab rule below: gating it on `@active_tab == :colormarker`
       # would leave History painting stale colours for the rest of the session after an

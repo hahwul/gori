@@ -336,8 +336,13 @@ module Gori::Tui
     # this view renders straight out of; all that is left is to pull the two list selections
     # back inside a list another process may have SHRUNK, so the highlight doesn't sit on a
     # row that no longer exists.
+    #
+    # ENV is the one pane that keeps its OWN copy of the data (and writes it back wholesale),
+    # so it needs the copy re-seeded here rather than only on tab entry — see
+    # `ProjectView#reload_env_vars` for what that copy going stale does to the store.
     def on_external_change : Nil
       @project_view.clamp_selections
+      @project_view.reload_env_vars
     end
 
     def save : Nil
@@ -740,8 +745,13 @@ module Gori::Tui
       @host.confirm("DELETE ENV VAR", "Delete “#{key}”? This can't be undone.",
         confirm_label: "delete", danger: true) do
         if removed = @project_view.env_delete
-          Env.save_project(@host.session.store, @project_view.env_vars)
-          @host.status("env var deleted: #{removed}")
+          # Whether the write COMMITTED, like the host-override sibling above and like MCP's
+          # `delete_env_var` / `gori run project env delete`. `Env.save_project` updates the
+          # in-memory table either way and this view re-seeds from THAT, not from the store —
+          # so a dropped write reported as "deleted" stayed convincing for the whole session
+          # and the var came back at the next launch.
+          ok = Env.save_project(@host.session.store, @project_view.env_vars)
+          @host.status(ok ? "env var deleted: #{removed}" : "env var NOT deleted (project busy or unwritable) — try again")
         end
       end
     end
@@ -786,9 +796,12 @@ module Gori::Tui
 %(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*))
       when :dup then @host.status("env var: KEY already defined")
       when :ok
-        Env.save_project(@host.session.store, @project_view.env_vars)
+        # See `env_delete_var`: the store answers whether the write committed, and this is the
+        # surface where a false "saved" is least recoverable — nothing here re-reads the store,
+        # so the row keeps showing the value that never landed.
+        ok = Env.save_project(@host.session.store, @project_view.env_vars)
         n = @project_view.env_vars.size
-        @host.status("env var saved — #{n} total")
+        @host.status(ok ? "env var saved — #{n} total" : "env var NOT saved (project busy or unwritable) — try again")
       end
     end
 
