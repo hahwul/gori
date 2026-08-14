@@ -582,7 +582,8 @@ module Gori
     end
 
     # True when `host_cond`'s NATIVE SQL spelling provably means the same thing as
-    # `HostPattern::Compiled`. Three things part them, and the PATTERN decides all three:
+    # `HostPattern::Compiled`. Three things part them, and the PATTERN is what this predicate
+    # reads to decide which of the three can arise:
     #
     #   · non-ASCII — SQLite's built-in `lower()` folds ASCII only while Crystal's
     #     `String#downcase` folds all of Unicode, so a rule `äcme.test` matched a captured
@@ -606,6 +607,11 @@ module Gori
     # it cannot spell have no second dialect at all. `?`, a non-surrounding `[…]` and an
     # unbalanced `[` were checked and agree between the two engines; `/ \ ? # @` and whitespace
     # can't reach a stored host pattern anyway (validation_error).
+    #
+    # The bound this trades for that fast path: the folding case can in principle be triggered
+    # from the HOST side too, by a non-ASCII character whose Unicode lowercase IS ASCII (U+212A
+    # KELVIN SIGN folds to `k`) sitting in a column an ASCII pattern reads. Deciding that per
+    # ROW means the UDF on every row of every reload, for a host no DNS resolver would answer.
     def self.sql_native_host?(pattern : String) : Bool
       pattern.ascii_only? && !pattern.includes?('{') && !pattern.includes?('}') &&
         bare_host(pattern) == pattern
