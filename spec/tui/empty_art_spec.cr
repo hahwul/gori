@@ -20,7 +20,8 @@ end
 # no art forever and nothing else would ever mention it.
 EXPECTED_ART = [
   :history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues,
-  :notes, :project_desc, :discover, :comparer, :miner, :sequencer,
+  :notes, :project_desc, :discover, :comparer, :miner, :miner_results, :sequencer,
+  :sequencer_samples, :oast,
 ]
 
 describe Gori::Tui::EmptyArt do
@@ -77,18 +78,35 @@ describe Gori::Tui::EmptyArt do
   end
 
   # THE budget, and the reason it is a spec rather than a comment. A body is 14..16 rows on an
-  # 80x24 and a card eats 6..15 of them, so a figure has 3 rows to spend — 4 or 5 only for the
+  # 80x24 and a card eats 6..15 of them, so a figure has 3 rows to spend — 4 only for the
   # CENTERED variants, whose cards are the shortest and which draw no headline. `Brand::ART` is
   # 11 rows and needed ~20: it was gated out of every realistic pane, which is exactly how art
   # ends up looking absent instead of opportunistic. Growing a figure past this budget fails
   # here instead of silently disappearing on the terminal most people run.
+  #
+  # The CENTERED cap is 4 rather than 5 because `:project_desc` shipped at 5 and proved the
+  # point one size down: its pane is the shortest full-card host in the app (the overview card
+  # takes the top of the Project tab), so 5 + gap + card needed 14 rows against the 13 a 100x30
+  # leaves — the figure only ever appeared at 120x40. `paints every figure at a realistic body
+  # size` below cannot catch that on its own; it renders into a rect no real pane is that tall.
   it "keeps every figure inside the row budget its tier can pay for" do
     EmptyArt::CATALOG.each do |variant, block|
-      cap = TrafficEmptyState::CENTERED.includes?(variant) ? 5 : 3
+      cap = TrafficEmptyState::CENTERED.includes?(variant) ? 4 : 3
       block.h.should be <= cap, "#{variant} is #{block.h} rows, over the #{cap}-row budget"
       # Wider than this and the figure stops reading as belonging to the 42..50 column card.
       block.ink_w.should be <= 34, "#{variant} is #{block.ink_w} columns wide"
     end
+  end
+
+  # The Project dossier's own arithmetic, pinned at the size that caught it. 13 rows is what a
+  # 100x30 leaves the DESCRIPTION pane once the overview card above it has taken its share, and
+  # `place_art_and_card` admits a figure only when `art.h + ART_GAP + card_h` fits — so this
+  # fails the moment the figure grows a row back or the card does.
+  it "paints the project dossier in the pane a 100x30 actually leaves it" do
+    b = MemoryBackend.new(100, 13)
+    TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 100, 13), variant: :project_desc)
+    b.contains?("PROJECT").should be_true
+    b.contains?(painted(EmptyArt::PROJECT_DESC.lines[1]).strip).should be_true
   end
 
   # The tiers are what stop a figure reading as one flat blob. Assert the SEPARATION and the

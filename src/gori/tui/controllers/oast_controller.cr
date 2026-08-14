@@ -2,6 +2,7 @@ require "../tab_controller"
 require "../screen"
 require "../theme"
 require "../frame"
+require "../traffic_empty_state"
 require "../highlight"
 require "../clipboard"
 require "../read_pane"
@@ -871,14 +872,22 @@ module Gori::Tui
       Frame.card(screen, rect, title, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
       if ordered.empty?
-        msg = filtering ? "no callbacks match “#{@filter.value.strip}” — esc to clear" : "no callbacks yet — get a payload (g), use it in a target, watch here"
-        screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg, width: inner.w - 2)
+        # A FILTERED miss keeps its line. The card explains how the tab works, and an operator
+        # who has typed a query already knows — what they need is the query back and the
+        # eviction caveat below it, neither of which a card would say.
+        unless filtering
+          TrafficEmptyState.render(screen, inner, variant: :oast,
+            has_provider: !enabled_providers.empty?)
+          return
+        end
+        screen.text(inner.x + 1, inner.y, "no callbacks match “#{@filter.value.strip}” — esc to clear",
+          Theme.muted, Theme.bg, width: inner.w - 2)
         # A no-match over a WINDOW is not a no-match over the evidence. Unqualified, the
         # operator filters for the source IP they care about, reads "no match", and concludes
         # it never hit — when the row is sitting in the table the filter never saw. Its OWN row
         # (not appended to the message) so it survives the width clamp on an 80-column terminal,
         # where a tacked-on clause is exactly the part that gets cut.
-        if filtering && @evicted > 0 && inner.h > 1
+        if @evicted > 0 && inner.h > 1
           screen.text(inner.x + 1, inner.y + 1,
             "filter covers the newest #{@callbacks.size} only — #{@evicted} older are in the project DB",
             Theme.yellow, Theme.bg, width: inner.w - 2)

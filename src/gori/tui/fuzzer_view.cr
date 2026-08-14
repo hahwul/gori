@@ -2516,6 +2516,14 @@ module Gori::Tui
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)
       adjust_scroll(inner.h)
+      if view.empty?
+        # No column header over an empty list: it is a legend for a table that is not drawn, and
+        # it sat directly on the onboarding card's roof. The card takes the whole interior
+        # instead. `results_row_at` already refuses every click here (it bounds-checks against
+        # `sorted_results.size`), so dropping the row cannot desynchronise the hit-test.
+        TrafficEmptyState.render(screen, inner, variant: :fuzzer_results, running: @running)
+        return
+      end
       header = "  #   payload                 status  len      words   time"
       screen.text(inner.x, inner.y, header, Theme.muted, Theme.bg, width: inner.w)
       rows_h = {inner.h - 1, 0}.max
@@ -2523,10 +2531,6 @@ module Gori::Tui
         ri = @scroll + i
         break if ri >= view.size
         render_result_row(screen, inner, inner.y + 1 + i, view[ri], ri == @sel)
-      end
-      if view.empty?
-        body = Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
-        TrafficEmptyState.render(screen, body, variant: :fuzzer_results, running: @running)
       end
       # Gauge rides the rows region (below the header row), so its track lines up with
       # what @scroll actually windows.
@@ -2621,7 +2625,12 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       return if inner.empty?
       if @results.empty?
-        TrafficEmptyState.render(screen, inner, variant: :fuzzer_results, running: @running)
+        # A LINE, not the card. DIST sits beside the RESULTS pane, which is already drawing the
+        # `fuzzer_results` card — the same variant here put "no results yet · ^O payload sets ·
+        # ^R run" on screen twice, side by side, in a sidebar too narrow to render anything but
+        # the medium fallback anyway.
+        screen.text(inner.x + 1, inner.y, @running ? "sampling…" : "no results yet",
+          Theme.muted, Theme.bg, width: {inner.w - 2, 0}.max)
         return
       end
       d = dist_data(inner.w)

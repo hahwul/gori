@@ -13,9 +13,15 @@ module Gori::Tui
   # to spend. A card runs 6..15 of them. That leaves 3 rows for a figure if it is to appear
   # at all on the terminal most people run — which is why every block here is 3 rows except
   # the two CENTERED variants (`:notes`, `:project_desc`), whose cards are the shortest and
-  # which spend no row on a headline, so they can afford 4 and 5. `Brand::ART` is 11 rows
-  # and needed ~20: it was gated out of every realistic pane, which is what made the art on
-  # the Project tab read as missing rather than as opportunistic.
+  # which spend no row on a headline, so they can afford 4. `Brand::ART` is 11 rows and
+  # needed ~20: it was gated out of every realistic pane, which is what made the art on the
+  # Project tab read as missing rather than as opportunistic.
+  #
+  # 4, not 5, and the Project dossier is why the cap moved. Its pane is the shortest full-card
+  # host in the app — the overview card above it leaves DESCRIPTION 13 rows on a 100x30 — and
+  # a 5-row figure needs 14 (5 + the gap + an 8-row card). So the one variant added BECAUSE
+  # `Brand::ART` never fit was itself gated out of every terminal short of 120x40, which is the
+  # same failure one size down. At 4 it clears 100x30 with nothing to spare.
   #
   # Width is capped by the card, not by the pane: a card is 42..50 columns, so a figure
   # wider than ~34 stops reading as belonging to the card below it.
@@ -179,24 +185,33 @@ module Gori::Tui
       "└─┴──────────────────┘",
     ])
 
-    # A torn-off sheet: a scratchpad, not a document. The tear is what tells it apart from
-    # the Project dossier below, which is the same framed page with a title.
+    # A page with sub-tabs on it, the open one lit — which is what the card underneath says
+    # this tab is ("notes stack as sub-tabs"), and how the strip really renders.
+    #
+    # It replaced a torn-off sheet whose tear was `╲╱╲╱…` between a `└` and a `┘`. Two things
+    # were wrong with that and only one was the glyph. `╲`/`╱` are FULL-CELL diagonals, so the
+    # sawtooth came out as the loudest mass in a figure whose subject was supposed to be the
+    # writing — and a corner glyph promises the straight edge that a sawtooth then refuses, so
+    # it read as a broken box rather than a torn one. The deeper problem was that a lone framed
+    # page is the same silhouette as PROJECT_DESC below: two neighbouring tabs differing only in
+    # which row was lit. Hanging the page off a tab strip fixes the resemblance in the OUTLINE,
+    # which is the part that survives being three rows tall.
     NOTES = Block.new([
-      "┌───────────────┐",
-      "│ ▄▄▄▄▄  ▄▄▄▄   │",
-      "│ ▄▄▄▄▄▄▄▄▄▄    │",
-      "└╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲┘",
+      "┌────┬────┐",
+      "│████│▓▓▓▓└─────────┐",
+      "│ ▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄  │",
+      "└───────────────────┘",
     ])
 
     # The Project mark: a dossier with a title and a written body. NOT the gori logo — this
     # pane is "what is this engagement", and the brand mark answered a different question
     # (and at 11 rows never fit). The title line is the lit one because that is the thing
-    # the empty pane is asking the operator to write first.
+    # the empty pane is asking the operator to write first. ONE body line, not two: see the
+    # row budget above — the second line cost this figure every terminal under 120x40.
     PROJECT_DESC = Block.new([
       "┌───────────────┐",
       "│ ██████        │",
-      "│ ▄▄▄▄▄  ▄▄▄▄▄  │",
-      "│ ▄▄▄▄▄▄▄▄▄     │",
+      "│ ▄▄▄▄▄▄▄  ▄▄▄▄ │",
       "└───────────────┘",
     ])
 
@@ -215,12 +230,40 @@ module Gori::Tui
       "└──────┴──────┘",
     ])
 
-    # A wordlist over a sieve, with the two names that got through lit below it. The slots
-    # sit under the gaps on purpose: that alignment is what makes it read as filtering.
+    # A wordlist over a sieve, with the two names that got through lit below it. Both slots sit
+    # squarely under a name in the row above (cols 3 and 12) — one of them used to straddle the
+    # divider at col 11, which put the pair on two different sub-grids and cost the row its
+    # "these two fell through" reading.
     MINER = Block.new([
       "▓▓ ▓▓ ▓▓ ▓▓ ▓▓ ▓▓",
       "──┬──┬──┬──┬──┬──",
-      "   ██       ██",
+      "   ██        ██",
+    ])
+
+    # A mine that has run: names probed, and the one whose response came back different. The
+    # arrows are what keep this off FUZZER_RESULTS' histogram — a mine reads pairs, not bars.
+    MINER_RESULTS = Block.new([
+      "▓▓▓▓ ──> ▓▓▓▓",
+      "▓▓▓▓ ──> ▓▓▓▓",
+      "████ ──> ██████",
+    ])
+
+    # One request sent repeatedly, one token back per send, newest lit — which is exactly what
+    # the SAMPLES pane fills with.
+    SEQUENCER_SAMPLES = Block.new([
+      "┌────┐ ══> ▓▓▓▓",
+      "│ ██ │ ══> ▓▓▓▓",
+      "└────┘ ══> ████",
+    ])
+
+    # A listener hands out a payload, the target keeps it, and the hit comes back on a channel
+    # that is not the one it went out on — which is the whole idea of out-of-band. Solid on the
+    # way out, dashed on the way back; the lit box is the listener, because "it lands HERE" is
+    # what the card is there to say.
+    OAST = Block.new([
+      "┌────────┐ ══> ▓▓▓▓",
+      "│  ████  │        │",
+      "└────────┘ <─ ─ ─ ┘",
     ])
 
     # One token split into cells, with the positions that vary between samples lit — which
@@ -232,20 +275,23 @@ module Gori::Tui
     ])
 
     CATALOG = {
-      :history        => HISTORY,
-      :sitemap        => SITEMAP,
-      :intercept      => INTERCEPT,
-      :repeater       => REPEATER,
-      :fuzzer         => FUZZER,
-      :fuzzer_results => FUZZER_RESULTS,
-      :probe          => PROBE,
-      :issues         => ISSUES,
-      :notes          => NOTES,
-      :project_desc   => PROJECT_DESC,
-      :discover       => DISCOVER,
-      :comparer       => COMPARER,
-      :miner          => MINER,
-      :sequencer      => SEQUENCER,
+      :history           => HISTORY,
+      :sitemap           => SITEMAP,
+      :intercept         => INTERCEPT,
+      :repeater          => REPEATER,
+      :fuzzer            => FUZZER,
+      :fuzzer_results    => FUZZER_RESULTS,
+      :probe             => PROBE,
+      :issues            => ISSUES,
+      :notes             => NOTES,
+      :project_desc      => PROJECT_DESC,
+      :discover          => DISCOVER,
+      :comparer          => COMPARER,
+      :miner             => MINER,
+      :miner_results     => MINER_RESULTS,
+      :sequencer         => SEQUENCER,
+      :sequencer_samples => SEQUENCER_SAMPLES,
+      :oast              => OAST,
     }
 
     # The figure for a variant, or nil when it has none — an unknown variant is not an

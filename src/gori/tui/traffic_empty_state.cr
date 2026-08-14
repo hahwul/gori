@@ -43,6 +43,7 @@ module Gori::Tui
                catch_on : Bool = false,
                running : Bool = false,
                scan_on : Bool = true,
+               has_provider : Bool = true,
                title : String? = nil) : Nil
       return if suppressed?
       return if rect.empty?
@@ -65,13 +66,13 @@ module Gori::Tui
       # either way, so a resize can never appear to move the proxy.
       if rect.h >= full_h && rect.w >= FULL_MIN_W
         addr = BindAddress.display(host, port)
-        render_full(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on)
+        render_full(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on, has_provider)
       elsif rect.h >= MED_MIN_H && rect.w >= MED_MIN_W
         addr = BindAddress.display(host, port, terse: true)
-        render_medium(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on)
+        render_medium(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on, has_provider)
       else
         addr = BindAddress.display(host, port, terse: true)
-        render_minimal(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on)
+        render_minimal(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on, has_provider)
       end
     end
 
@@ -81,21 +82,28 @@ module Gori::Tui
     private def full_inner_h(variant : Symbol, *, capturing : Bool = true, catch_on : Bool = false,
                              running : Bool = false, scan_on : Bool = true) : Int32
       case variant
-      when :history        then 5 + (capturing ? 0 : 1) + 3
-      when :sitemap        then 6 + (capturing ? 0 : 1) + 3
-      when :intercept      then 5 + (catch_on ? 0 : 1) + 3 + (capturing ? 0 : 1)
-      when :repeater       then 5 + 2
-      when :fuzzer         then 5 + 2
-      when :fuzzer_results then running ? 3 : 4
-      when :probe          then scan_on ? 6 + (capturing ? 0 : 1) + 2 : 4
-      when :issues         then 5 + 2
-      when :discover       then 5 + 2
-      when :comparer       then 5 + 2
-      when :miner          then 5 + 2
-      when :sequencer      then 5 + 2
-      when :notes          then 5 + 1
-      when :project_desc   then 5 + 1
-      else                      0 # unknown variant — render_full draws nothing, as before
+      when :history   then 5 + (capturing ? 0 : 1) + 3
+      when :sitemap   then 5 + (capturing ? 0 : 1) + 3
+      when :intercept then 5 + (catch_on ? 0 : 1) + 3 + (capturing ? 0 : 1)
+      when :repeater  then 5 + 2
+      when :fuzzer    then 5 + 2
+        # The three results-pane variants share one budget: the rows they draw, plus one blank so
+        # the card is not flush against its own bottom border. In flight that is a single sentence
+        # and the chord line is gone, so the card shrinks with it — at the old 3 an in-flight card
+        # carried two empty rows under one line of text and read as a box that failed to fill.
+      when :fuzzer_results    then running ? 2 : 4
+      when :probe             then scan_on ? 5 + (capturing ? 0 : 1) + 2 : 4
+      when :issues            then 5 + 2
+      when :discover          then 5 + 2
+      when :comparer          then 5 + 2
+      when :miner             then 5 + 2
+      when :miner_results     then running ? 2 : 4
+      when :sequencer         then 5 + 2
+      when :sequencer_samples then running ? 2 : 5
+      when :oast              then 5 + 1 # six, and flat — see render_oast_full
+      when :notes             then 5 + 1
+      when :project_desc      then 5 + 1
+      else                         0 # unknown variant — render_full draws nothing, as before
       end
     end
 
@@ -116,48 +124,54 @@ module Gori::Tui
     # resize between the card and the one-line fallback does not appear to change what happened.
     private def default_title(variant : Symbol, *, running : Bool, scan_on : Bool) : String
       case variant
-      when :history        then "waiting for traffic…"
-      when :sitemap        then "no traffic captured yet"
-      when :intercept      then "no held messages"
-      when :repeater       then "no repeater open"
-      when :fuzzer         then "no fuzz session open"
-      when :fuzzer_results then running ? "running…" : "no results yet"
-      when :probe          then scan_on ? "no issues yet" : "scanning is OFF"
-      when :issues         then "no issues yet"
-      when :discover       then "no runs yet"
-      when :comparer       then "nothing to compare"
-      when :miner          then "no mining session"
-      when :sequencer      then "no sequencer session"
-      when :notes          then "empty note"
-      when :project_desc   then "no description yet"
-      else                      "nothing here yet"
+      when :history           then "waiting for traffic…"
+      when :sitemap           then "no traffic captured yet"
+      when :intercept         then "no held messages"
+      when :repeater          then "no repeater open"
+      when :fuzzer            then "no fuzz session open"
+      when :fuzzer_results    then running ? "running…" : "no results yet"
+      when :probe             then scan_on ? "no issues yet" : "scanning is OFF"
+      when :issues            then "no issues yet"
+      when :discover          then "no runs yet"
+      when :comparer          then "nothing to compare"
+      when :miner             then "no mining session"
+      when :miner_results     then running ? "mining…" : "no run yet"
+      when :sequencer         then "no sequencer session"
+      when :sequencer_samples then running ? "collecting…" : "no samples yet"
+      when :oast              then "no callbacks yet"
+      when :notes             then "empty note"
+      when :project_desc      then "no description yet"
+      else                         "nothing here yet"
       end
     end
 
     private def render_full(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                             addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                            scan_on : Bool) : Nil
+                            scan_on : Bool, has_provider : Bool) : Nil
       case variant
-      when :history        then render_history_full(screen, rect, headline, addr, capturing)
-      when :sitemap        then render_sitemap_full(screen, rect, headline, addr, capturing)
-      when :intercept      then render_intercept_full(screen, rect, headline, addr, capturing, catch_on)
-      when :repeater       then render_repeater_full(screen, rect, headline)
-      when :fuzzer         then render_fuzzer_full(screen, rect, headline)
-      when :fuzzer_results then render_fuzzer_results_full(screen, rect, headline, running)
-      when :probe          then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
-      when :issues         then render_issues_full(screen, rect, headline)
-      when :discover       then render_discover_full(screen, rect, headline)
-      when :comparer       then render_comparer_full(screen, rect, headline)
-      when :miner          then render_miner_full(screen, rect, headline)
-      when :sequencer      then render_sequencer_full(screen, rect, headline)
-      when :notes          then render_notes_full(screen, rect)
-      when :project_desc   then render_project_desc_full(screen, rect)
+      when :history           then render_history_full(screen, rect, headline, addr, capturing)
+      when :sitemap           then render_sitemap_full(screen, rect, headline, addr, capturing)
+      when :intercept         then render_intercept_full(screen, rect, headline, addr, capturing, catch_on)
+      when :repeater          then render_repeater_full(screen, rect, headline)
+      when :fuzzer            then render_fuzzer_full(screen, rect, headline)
+      when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running)
+      when :probe             then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
+      when :issues            then render_issues_full(screen, rect, headline)
+      when :discover          then render_discover_full(screen, rect, headline)
+      when :comparer          then render_comparer_full(screen, rect, headline)
+      when :miner             then render_miner_full(screen, rect, headline)
+      when :miner_results     then render_miner_results_full(screen, rect, headline, running)
+      when :sequencer         then render_sequencer_full(screen, rect, headline)
+      when :sequencer_samples then render_sequencer_samples_full(screen, rect, headline, running)
+      when :oast              then render_oast_full(screen, rect, headline, has_provider)
+      when :notes             then render_notes_full(screen, rect)
+      when :project_desc      then render_project_desc_full(screen, rect)
       end
     end
 
     private def render_medium(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                               addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                              scan_on : Bool) : Nil
+                              scan_on : Bool, has_provider : Bool) : Nil
       lines = case variant
               when :history
                 medium_history(headline, addr, capturing)
@@ -181,8 +195,14 @@ module Gori::Tui
                 medium_comparer(headline)
               when :miner
                 medium_miner(headline)
+              when :miner_results
+                medium_miner_results(headline, running)
               when :sequencer
                 medium_sequencer(headline)
+              when :sequencer_samples
+                medium_sequencer_samples(headline, running)
+              when :oast
+                medium_oast(headline, has_provider)
               when :notes
                 medium_notes(headline)
               when :project_desc
@@ -195,7 +215,7 @@ module Gori::Tui
 
     private def render_minimal(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                                addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                               scan_on : Bool) : Nil
+                               scan_on : Bool, has_provider : Bool) : Nil
       hint = case variant
              when :history
                "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · press c"}"
@@ -219,8 +239,14 @@ module Gori::Tui
                "a pick A · b pick B"
              when :miner
                "space → Mine parameters · ^R run"
+             when :miner_results
+               running ? "mining…" : "^R mine this request"
              when :sequencer
                "space → Send to Sequencer · ^R"
+             when :sequencer_samples
+               running ? "collecting…" : "c configure · ^R collect"
+             when :oast
+               has_provider ? "g payload · ^R listen" : "^2 Providers — add one first"
              when :notes
                "^N new note · start typing"
              when :project_desc
@@ -301,8 +327,14 @@ module Gori::Tui
 
     private def render_sitemap_full(screen : Screen, rect : Rect, headline : String,
                                     addr : String, capturing : Bool) : Nil
-      # +3 (not +2): the final "or set your client's proxy" line lands one row below
-      # the palette hint, which the old budget pushed onto the card's bottom border.
+      # 5 + 3, not 6 + 3. The Target tab spends two rows on a sub-tab strip that History does
+      # not, and this card was one row TALLER than History's on top of that — so on an 80x24
+      # the tree pane had 11 rows against a 12-row card and the whole thing fell through to the
+      # three-line medium form. Sitemap is the default sub-tab and Discover, one chip over, was
+      # drawing figure AND card in the same pane: the sharpest possible version of a resize
+      # deciding how much a tab explains itself. The row came from the blank that used to sit
+      # between the address and the palette hint, which is the one place a gap bought nothing —
+      # address, "^P Open browser" and "or set your client's proxy" are one instruction.
       inner_h = full_inner_h(:sitemap, capturing: capturing)
       inner, ix, iw = begin_card(screen, rect, :sitemap, headline, "SITE MAP", inner_h)
       y = inner.y
@@ -316,7 +348,7 @@ module Gori::Tui
       screen.text(ix, y, "proxy ", Theme.muted, Theme.bg)
       px = ix + "proxy ".size
       screen.text(px, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: {ix + iw - px, 0}.max)
-      y += 2
+      y += 1
       unless capturing
         screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
         y += 1
@@ -381,9 +413,14 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ⇧I ", "send from History/Repeater", bullet: "▸ ")
     end
 
+    # "FUZZ RUN", not "RESULTS": this card draws INSIDE the pane the Fuzzer titles RESULTS, and a
+    # card wearing its container's name reads as a rendering fault rather than as a nested hint.
+    # Every other card already avoided the collision by accident (FLOW LOG in an untitled list,
+    # SITE MAP under a HOST / PATH header); the two results-pane variants below take the same
+    # verb-shaped name for the same reason.
     private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
       inner_h = full_inner_h(:fuzzer_results, running: running)
-      inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "RESULTS", inner_h)
+      inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h)
       y = inner.y
 
       msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press ^R to start a fuzz run."
@@ -402,7 +439,11 @@ module Gori::Tui
         screen.text(ix, y, "Passive scanning flags issues as traffic flows through the proxy.", Theme.text, Theme.bg, width: iw)
         y += 2
         screen.text(ix, y, "traffic ──► scan ──► issues", Theme.muted, Theme.bg, width: iw)
-        y += 2
+        # One row, not two — the same 80x24 arithmetic as SITE MAP above. Probe's Findings pane
+        # loses rows to a sub-tab strip, a mode row, a filter bar AND a column header, leaving 10
+        # against an 11-row card. The address belongs against the diagram anyway: both name the
+        # pipe the scanner reads from.
+        y += 1
         screen.text(ix + 2, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: iw)
         y += 2
         unless capturing
@@ -494,6 +535,70 @@ module Gori::Tui
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Send to Sequencer\" on a flow", bullet: "▸ ")
       draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ")
+    end
+
+    # The three RESULTS-pane variants below (fuzz above, mine and sample here) all draw inside a
+    # pane that is itself a card, so they take the compact `fuzzer_results` shape — a sentence,
+    # a gap, the chord — rather than the prose/diagram/divider block their container-level
+    # siblings use. Only the never-run and in-flight states reach them: a pane reporting on a
+    # run that finished empty has something specific to say and keeps its own line.
+
+    private def render_miner_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
+      inner_h = full_inner_h(:miner_results, running: running)
+      inner, ix, iw = begin_card(screen, rect, :miner_results, headline, "MINE RUN", inner_h)
+      y = inner.y
+
+      msg = running ? "Probing the wordlist — names the target answers to land here." : "A run sends the wordlist and keeps the names that change the response."
+      screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+      y += 2
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ") unless running
+    end
+
+    private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
+      inner_h = full_inner_h(:sequencer_samples, running: running)
+      inner, ix, iw = begin_card(screen, rect, :sequencer_samples, headline, "TOKEN RUN", inner_h)
+      y = inner.y
+
+      msg = running ? "Collecting — one token per send lands here." : "A run re-sends this request and keeps one token from each response."
+      screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+      return if running
+      y += 2
+      y = draw_chord_hint(screen, ix, y, iw, " c ", "where the token lives", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ")
+    end
+
+    # OAST is the one workbench tab that had no card at all: an empty CALLBACKS pane is the
+    # tallest void in the app, and it is also the tab whose loop is hardest to guess — the thing
+    # you are waiting for arrives on a channel you never opened. With no provider configured the
+    # card leads with that instead, because `g` refuses without one and "get a payload URL" as
+    # step one would be a dead end.
+    #
+    # SIX interior rows, one under its container-level siblings, because the OAST tab spends
+    # three rows above this pane that they do not (a two-row payload bar and a filter bar) and an
+    # 80x24 leaves the CALLBACKS card nine. The row comes off the divider, which `:notes` and
+    # `:fuzzer_results` already do without. And the count is FLAT across both branches — the
+    # warning takes the blank row rather than pushing one in — so the provider state can never be
+    # what decides whether the card appears: the state without a provider is the first thing a
+    # new operator sees and the one that most needs explaining.
+    private def render_oast_full(screen : Screen, rect : Rect, headline : String, has_provider : Bool) : Nil
+      inner, ix, iw = begin_card(screen, rect, :oast, headline, "OAST", full_inner_h(:oast))
+      y = inner.y
+
+      screen.text(ix, y, "Payloads you plant call back here — DNS, HTTP and SMTP hits.", Theme.text, Theme.bg, width: iw)
+      y += 2
+      screen.text(ix, y, "payload ──► target ──► callback", Theme.muted, Theme.bg, width: iw)
+      y += 1
+      unless has_provider
+        screen.text(ix, y, "no provider yet — one has to hand out the payloads", Theme.yellow, Theme.bg, width: iw)
+      end
+      y += 1
+      if has_provider
+        y = draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL (copied)", bullet: "▸ ")
+        draw_chord_hint(screen, ix, y, iw, " ^R ", "start listening", bullet: "▸ ")
+      else
+        y = draw_chord_hint(screen, ix, y, iw, " ^2 ", "Providers — interactsh is prefilled", bullet: "▸ ")
+        draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL, once one is on", bullet: "▸ ")
+      end
     end
 
     # A CENTERED variant, so the whole rect goes to `place_art_and_card` — there is no
@@ -597,6 +702,22 @@ module Gori::Tui
 
     private def medium_sequencer(headline) : Array(String)
       [headline, "collect ──► samples ──► entropy", "space → Send to Sequencer · ^R"]
+    end
+
+    private def medium_miner_results(headline, running) : Array(String)
+      running ? [headline, "probing the wordlist…"] : [headline, "^R mines this request"]
+    end
+
+    private def medium_sequencer_samples(headline, running) : Array(String)
+      running ? [headline, "collecting tokens…"] : [headline, "c token location · ^R collect"]
+    end
+
+    private def medium_oast(headline, has_provider) : Array(String)
+      if has_provider
+        [headline, "payload ──► target ──► callback", "g payload URL · ^R listen"]
+      else
+        [headline, "no provider yet — ^2 Providers", "then g for a payload URL"]
+      end
     end
 
     private def medium_notes(headline) : Array(String)

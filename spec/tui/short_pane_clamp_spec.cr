@@ -165,7 +165,7 @@ describe TrafficEmptyState do
   # already-granted full tier, so it is the art gate — not the card gate — that decides whether
   # those extra rows fit; sweeping one fixed width never exercises `FULL_MIN_W` or a figure's
   # own `min_w`, and the art path adds a second reason a renderer can outgrow its rect.
-  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :discover, :comparer, :miner, :sequencer] %}
+  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :discover, :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast] %}
     it "never draws {{ variant.id }} below its rect, at any size the gate admits" do
       (8..26).each do |h|
         [30, 40, 42, 43, 46, 50, 60, 100].each do |w|
@@ -184,7 +184,7 @@ describe TrafficEmptyState do
   # …and nothing may run off the RIGHT edge either. A figure is centred on its ink extent, so a
   # block wider than the pane would paint past `rect.right` — where `Screen`'s bounds check
   # silently drops it in the app but a narrower rect inside a wider backend makes it visible.
-  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :sequencer] %}
+  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :sequencer, :oast] %}
     it "never draws {{ variant.id }} past its right edge" do
       (8..26).each do |h|
         [42, 46, 50, 60].each do |w|
@@ -217,12 +217,46 @@ describe TrafficEmptyState do
     end
   end
 
+  # `:oast` is the other variant whose height moves with a flag: with no provider configured the
+  # card grows a warning row, exactly the way `:intercept` does for catch/capture. The sweep
+  # above only ever exercises the default (a provider present), i.e. the SHORTER of the two.
+  it "never spills for either oast provider state" do
+    {true, false}.each do |has_provider|
+      (8..24).each do |h|
+        b = MemoryBackend.new(100, h + 8)
+        TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 100, h),
+          variant: :oast, has_provider: has_provider)
+        (h...(h + 8)).each do |y|
+          b.row(y).strip.should eq("") # (has_provider=#{has_provider} h=#{h} row #{y})
+        end
+      end
+    end
+  end
+
   # Degrading is the point: a rect too short for the full card still says something.
   it "falls back to a shorter form instead of drawing nothing" do
     b = MemoryBackend.new(100, 9)
     TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 100, 9),
       variant: :intercept, listen: {"127.0.0.1", 8080})
     (0...9).map { |y| b.row(y) }.any? { |r| !r.strip.empty? }.should be_true
+  end
+
+  # …but degrading is only right when the pane really cannot pay. These are the heights an 80x24
+  # leaves the two panes a sub-tab strip squeezes hardest — Sitemap's tree (strip + filter bar +
+  # column header) and Probe's findings list (strip + mode row + filter bar + column header).
+  # Both cards used to want exactly one row more than that and fell through to the three-line
+  # medium form, which on Target put a full card and a bare sentence one chip apart inside a
+  # single tab: Discover's pane pays for no filter bar and had rows to spare.
+  #
+  # Measured from the running app, not derived — if the chrome above either pane grows a row,
+  # this is the spec that says so instead of the card quietly vanishing at the common size.
+  it "still draws the full card in the panes an 80x24 leaves Sitemap and Probe" do
+    [{:sitemap, 11, "SITE MAP"}, {:probe, 10, "PROBE"}].each do |(variant, h, title)|
+      b = MemoryBackend.new(80, h)
+      TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 80, h),
+        variant: variant, listen: {"127.0.0.1", 8080})
+      b.contains?(title).should be_true, "#{variant} fell out of its full card at 80x#{h}"
+    end
   end
 end
 

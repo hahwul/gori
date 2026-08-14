@@ -3,6 +3,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./read_pane"
+require "./traffic_empty_state"
 require "./spark"
 require "./fmt"
 require "../store"
@@ -712,14 +713,16 @@ module Gori::Tui
       # `inner.y` one row down, so an unguarded placeholder lands OUTSIDE the pane.
       return if inner.h <= 0 || inner.w <= 0
       if @samples.empty?
-        msg = if @running
-                "collecting…"
-              elsif @config.mode.manual?
-                "paste tokens (space → Configure), then ^R"
-              else
-                "no samples — ^R to collect (space → Configure to set the token location)"
-              end
-        screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg, width: inner.w - 1)
+        # MANUAL mode keeps its line: there is no run to explain there — the tokens come from a
+        # paste, and the card's "re-sends this request" would describe a mode this session is
+        # not in. The collecting and never-run states get the card, the same two the Fuzzer's
+        # RESULTS pane has always answered with one.
+        if !@running && @config.mode.manual?
+          screen.text(inner.x + 1, inner.y, "paste tokens (space → Configure), then ^R",
+            Theme.muted, Theme.bg, width: inner.w - 1)
+          return
+        end
+        TrafficEmptyState.render(screen, inner, variant: :sequencer_samples, running: @running)
         return
       end
       screen.text(inner.x + 2, inner.y, "#", Theme.muted, Theme.bg)

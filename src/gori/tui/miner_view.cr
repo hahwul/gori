@@ -3,6 +3,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./read_pane"
+require "./traffic_empty_state"
 require "../host_overrides"
 require "../store"
 require "../miner"
@@ -556,17 +557,18 @@ module Gori::Tui
         # Distinguish never-run from a completed run that found nothing, using the
         # same signal the status line does (names_total > 0 ⇒ a run happened).
         # "no hidden parameters found" over a wordlist the budget never opened is the one
-        # claim this pane must not make — it did not look.
-        msg = if @running
-                "mining… discovered parameters appear here"
-              elsif budget_exhausted?
-                "none found in the #{@progress.names_done} of #{@progress.names_total} names the budget allowed"
-              elsif @progress.names_total > 0
-                "no hidden parameters found"
-              else
-                "no run yet — ^R to mine"
-              end
-        screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
+        # claim this pane must not make — it did not look. Both REPORTING states therefore keep
+        # their own line: they are claims about a run that happened, and an onboarding card in
+        # their place would read as "nothing has happened here", which is the opposite.
+        if !@running && @progress.names_total > 0
+          msg = budget_exhausted? ? "none found in the #{@progress.names_done} of #{@progress.names_total} names the budget allowed" : "no hidden parameters found"
+          screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
+          return
+        end
+        # Never run, or in flight — the two states the Fuzzer answers with a card. This pane
+        # answered them with `no run yet — ^R to mine`, one grey line, for the identical moment
+        # its sibling one tab over drew a figure and a card.
+        TrafficEmptyState.render(screen, inner, variant: :miner_results, running: @running)
         return
       end
       header_row(screen, inner)
