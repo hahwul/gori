@@ -6,6 +6,7 @@ require "./highlight"
 require "./url"
 require "./subtab_clone"
 require "./comparer_slot"
+require "./traffic_empty_state"
 require "../store"
 require "../repeater/diff"
 require "../repeater/side_by_side"
@@ -308,6 +309,9 @@ module Gori::Tui
 
     # Hit-test the REQ / RES chips on the divider row (render_pane_selector geometry).
     def pane_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      # `render` reads the same predicate to skip the whole chrome block, selector included.
+      # One source, so the chips cannot be clickable on a row the renderer left to the card.
+      return nil if blank?
       return nil if rect.h <= 2 || my != rect.y + 1
       geom = pane_selector_geom(rect)
       return nil unless geom
@@ -320,6 +324,13 @@ module Gori::Tui
 
     def both_set? : Bool
       !@slot_a.nil? && !@slot_b.nil?
+    end
+
+    # NEITHER side picked — the first-run state, distinct from `!both_set?` (which is also true
+    # with one flow loaded). Read by `render` to hand the whole rect to the onboarding card and
+    # by `pane_chip_at` to stop the mouse reaching chrome that branch does not draw.
+    def blank? : Bool
+      @slot_a.nil? && @slot_b.nil?
     end
 
     # --- scrolling ---------------------------------------------------------
@@ -568,6 +579,15 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.empty?
+      # Neither side picked: the two column headers would only say "empty" twice and the
+      # REQ⇄RES selector switches a view of nothing, so the whole rect goes to the onboarding
+      # card — which is also the only way it is wide and tall enough to carry its figure.
+      # `pane_chip_at` declines on the same predicate, so the selector cannot be clicked while
+      # it is not drawn.
+      if blank?
+        TrafficEmptyState.render(screen, rect, variant: :comparer)
+        return
+      end
       left_w = {(rect.w - SEP_W) // 2, 0}.max
       right_w = {rect.w - SEP_W - left_w, 0}.max
       sep_x = rect.x + left_w
@@ -585,12 +605,12 @@ module Gori::Tui
       body_h = body.h
       footer_y = rect.bottom - 1
 
+      # Exactly one side picked. The headers stay — the one that IS set names a real flow, which
+      # is worth reading — so the card goes in the body and its title names the side still
+      # missing rather than repeating the generic headline.
       unless both_set?
-        if body_h > 0
-          screen.text(rect.x + 1, body_top,
-            "pick flow A (a) and flow B (b) to compare — or “Send to Comparer” from History",
-            Theme.muted, width: {rect.w - 2, 1}.max)
-        end
+        TrafficEmptyState.render(screen, body, variant: :comparer,
+          title: @slot_a.nil? ? "pick flow A to compare against" : "pick flow B to compare against")
         return
       end
 

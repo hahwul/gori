@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./fmt"
+require "./traffic_empty_state"
 require "../discover"
 
 module Gori::Tui
@@ -287,6 +288,16 @@ module Gori::Tui
     # --- rendering ---
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.empty?
+      # Nothing crawled yet: both lists are empty, so tiling two cards spends the whole pane
+      # on a pair of empty frames and one grey line. The onboarding card is what the sibling
+      # sub-tab (Sitemap) has always shown in the same situation — this pane said one sentence
+      # inside a RUNS frame instead, and the asymmetry inside one tab read as breakage.
+      # `pane_at`/`click` decline in the same state, so the mouse cannot address a pane that
+      # was never drawn.
+      if @runs.empty?
+        TrafficEmptyState.render(screen, rect, variant: :discover)
+        return
+      end
       runs_rect, res_rect = pane_rects(rect)
       render_runs(screen, runs_rect, focused && @focus == :runs)
       render_findings(screen, res_rect, focused && @focus == :findings) unless res_rect.empty?
@@ -548,6 +559,15 @@ module Gori::Tui
     # --- click hit-test ---
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless rect.contains?(mx, my)
+      # With no runs the renderer draws the onboarding card over the whole rect and no panes at
+      # all, so there is nothing here to focus. Without this the hit-test would still hand back
+      # :runs / :findings off `pane_rects`, focusing a pane that is not on screen.
+      #
+      # This is the only guard `click` needs as well, even though it consults `gauge_hit` first:
+      # `Frame.scroll_gauge_row` refuses whenever `total <= track`, so an empty list has no
+      # gauge to hit, and the findings gauge bails on `current`. Everything else in `click` is
+      # downstream of this call.
+      return nil if @runs.empty?
       runs_rect, res_rect = pane_rects(rect) # the tiling render draws into, not a re-derivation
       return :runs if runs_rect.contains?(mx, my)
       res_rect.contains?(mx, my) ? :findings : nil

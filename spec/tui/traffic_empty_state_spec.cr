@@ -158,6 +158,61 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("^N").should be_true
   end
 
+  # The four engine tabs whose "nothing open yet" state used to be one muted line, while their
+  # siblings (Repeater, Fuzzer) reached this module from the identical container-level branch.
+  # Discover is the sharpest case: it sits in the same tab as Sitemap, which has always drawn a
+  # card here.
+  it "renders the discover crawl card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :discover)
+    # "no runs" is the phrase the pane has always used, so a reader of either form sees the same
+    # claim — and spec/tui/discover_runs_pane_spec.cr asserts it through the view.
+    backend.contains?("no runs").should be_true
+    backend.contains?("DISCOVER").should be_true
+    backend.contains?("crawl").should be_true
+    backend.contains?("Discover here").should be_true
+  end
+
+  it "renders the comparer diff card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :comparer)
+    backend.contains?("nothing to compare").should be_true
+    backend.contains?("COMPARER").should be_true
+    backend.contains?("pick flow A").should be_true
+    backend.contains?("pick flow B").should be_true
+  end
+
+  it "renders the miner hidden-parameter card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :miner)
+    backend.contains?("no mining session").should be_true
+    backend.contains?("MINER").should be_true
+    backend.contains?("Mine parameters").should be_true
+    backend.contains?("^R").should be_true
+  end
+
+  it "renders the sequencer token card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :sequencer)
+    backend.contains?("no sequencer session").should be_true
+    backend.contains?("SEQUENCER").should be_true
+    backend.contains?("entropy").should be_true
+    backend.contains?("Send to Sequencer").should be_true
+  end
+
+  # Each new variant must degrade like the older ones. A variant added to `render_full` but not
+  # to the medium/minimal dispatches falls through to `else`, which prints the headline and
+  # nothing else — passing any test that only checks the full card.
+  {% for variant in [:discover, :comparer, :miner, :sequencer] %}
+    it "degrades {{ variant.id }} to compact lines on a narrow pane" do
+      backend = MemoryBackend.new(34, 6)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 34, 6), variant: {{ variant }})
+      rows = (0...6).map { |y| backend.row(y) }
+      rows.count { |r| !r.strip.empty? }.should be >= 2 # headline + at least the diagram line
+      backend.contains?("──►").should be_true           # the diagram, not just the headline
+    end
+  {% end %}
+
   it "degrades to a two-line hint on a very small pane" do
     backend = MemoryBackend.new(38, 3)
     rect = Rect.new(0, 0, 38, 3)

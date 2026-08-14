@@ -109,11 +109,15 @@ describe ComparerView do
   # they were drawn on — the RES chip's left edge was a dead click and a phantom
   # clickable column sat one past it. render + pane_chip_at now share one geometry
   # helper, so every drawn chip column maps back to its pane.
+  #
+  # Loaded, not blank, on purpose: a view with NEITHER slot set now spends the whole rect on
+  # the onboarding card and draws no divider chrome at all, so a blank view has no chips to
+  # be the subject of this example. The state below it pins the other half of that agreement.
   it "pane_chip_at lands on exactly the drawn REQ/RES chip columns" do
     w, h = 80, 20
     backend = MemoryBackend.new(w, h)
     rect = Rect.new(0, 0, w, h)
-    v = ComparerView.new
+    v = diff_view
     v.render(Screen.new(backend), rect, focused: true)
 
     divider_y = rect.y + 1
@@ -132,6 +136,47 @@ describe ComparerView do
     v.pane_chip_at(rect, res + 4, divider_y).should be_nil
     # Wrong row never hits.
     v.pane_chip_at(rect, req, divider_y + 1).should be_nil
+  end
+
+  # The other half of that agreement. With neither slot picked, `render` hands the whole rect to
+  # the onboarding card and skips the header / divider / selector block — so the selector must
+  # not be clickable either. Both read `blank?`, which is what makes them impossible to
+  # desynchronise: a hit-test derived from `pane_selector_geom` alone would still report a chip
+  # on a row the card is drawing.
+  it "declines a selector click while the onboarding card owns the rect" do
+    w, h = 80, 20
+    backend = MemoryBackend.new(w, h)
+    rect = Rect.new(0, 0, w, h)
+    v = ComparerView.new
+    v.blank?.should be_true
+    v.render(Screen.new(backend), rect, focused: true)
+
+    divider_y = rect.y + 1
+    backend.row(divider_y).includes?("REQ").should be_false
+    (rect.x...rect.right).each do |c|
+      v.pane_chip_at(rect, c, divider_y).should be_nil # (col #{c})
+    end
+    # …and the card it drew instead is the Comparer one, not a bare line.
+    backend.contains?("COMPARER").should be_true
+    backend.contains?("nothing to compare").should be_true
+  end
+
+  # One side loaded is NOT the blank state: the header naming the flow that IS set is worth
+  # reading, so that branch keeps the chrome and puts the card in the body — with a title that
+  # names the side still missing rather than repeating the generic headline.
+  it "keeps the chrome and names the missing side with one slot set" do
+    w, h = 80, 20
+    backend = MemoryBackend.new(w, h)
+    rect = Rect.new(0, 0, w, h)
+    v = ComparerView.new
+    v.add_flow(flow("GET", "/only"))
+    v.blank?.should be_false
+    v.both_set?.should be_false
+    v.render(Screen.new(backend), rect, focused: true)
+
+    backend.row(rect.y).includes?("/only").should be_true # the loaded side still names its flow
+    backend.contains?("pick flow B").should be_true
+    v.pane_chip_at(rect, backend.row(rect.y + 1).index("REQ").not_nil!, rect.y + 1).should eq(:request)
   end
 
   # A body line wider than a diff column used to be clipped with no way to see the tail,

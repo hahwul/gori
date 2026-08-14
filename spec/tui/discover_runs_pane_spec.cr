@@ -127,7 +127,30 @@ describe "Discover RUNS list" do
     view.dismiss(b).should be_false # already gone
     view.dismiss(view.current.not_nil!).should be_true
     view.empty?.should be_true
-    render_runs(view).contains?("no runs").should be_true
+    # Back to the standing empty state, which is now the onboarding card rather than one grey
+    # line inside a RUNS frame — same claim ("no runs"), and the same card Sitemap draws in the
+    # same situation one sub-tab over.
+    b = render_runs(view)
+    b.contains?("no runs").should be_true
+    b.contains?("DISCOVER").should be_true
+  end
+
+  # Render and the mouse must agree about a pane that is not on screen. With no runs the card
+  # owns the whole rect and neither pane is drawn, so a click must not focus or select anything.
+  # `click` consults the scroll gauges BEFORE `pane_at`, so this covers that ordering too: the
+  # gauges decline on an empty list of their own accord (`Frame.scroll_gauge_row` refuses when
+  # `total <= track`), which is why one guard in `pane_at` is enough.
+  it "declines every mouse hit while the onboarding card owns the rect" do
+    view = DiscoverView.new
+    view.empty?.should be_true
+    rect = Rect.new(0, 0, 120, 24)
+    (0...24).step(3) do |y|
+      [1, 40, 119].each do |x|
+        view.pane_at(rect, x, y).should be_nil # (#{x},#{y})
+        view.click(rect, x, y)                 # inert: nothing to focus or select
+      end
+    end
+    view.focus.should eq(:runs) # untouched by any of those clicks
   end
 
   it "refuses to dismiss a run that is still crawling" do

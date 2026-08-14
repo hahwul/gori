@@ -468,9 +468,23 @@ describe "Chrome top-bar chip hit-testing" do
   end
 end
 
+private def comparer_flow(target : String) : Gori::Store::FlowDetail
+  row = Gori::Store::FlowRow.new(
+    1_i64, 1_i64, "http", "GET", "h.test", 80, target,
+    200, 100_i64, Gori::Store::FlowState::Complete, 10_i64, 1_i64, "text/plain")
+  Gori::Store::FlowDetail.new(row, "HTTP/1.1",
+    "GET #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, nil,
+    "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice)
+end
+
 describe "ComparerView#pane_chip_at" do
+  # A slot has to be filled for the divider chrome to exist at all: with NEITHER picked, the
+  # view hands the whole rect to the onboarding card and draws no header, divider or selector —
+  # and `pane_chip_at` declines to match on the same predicate. See spec/tui/comparer_view_spec.cr
+  # for both halves of that agreement; this example is about the chip GEOMETRY.
   it "hits REQ / RES chips on the divider row" do
     view = ComparerView.new
+    view.add_flow(comparer_flow("/a"))
     rect = Rect.new(0, 0, 80, 10)
     # geometry: sx = right - ("←/→ ".dw + 10) - 1; chips after the hint
     hint = "←/→ "

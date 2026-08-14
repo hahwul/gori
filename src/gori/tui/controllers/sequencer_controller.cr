@@ -98,9 +98,7 @@ module Gori::Tui
           if v = current_view
             v.render(screen, body, body_focused)
           else
-            screen.text(body.x + 1, body.y,
-              "no sequencer sessions — from History/Repeater press space → \"Send to Sequencer\", or select a token and use \"Send selection to\"", Theme.muted,
-              width: body.w - 2)
+            TrafficEmptyState.render(screen, body, variant: :sequencer)
           end
         end
       end

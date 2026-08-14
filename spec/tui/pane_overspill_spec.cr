@@ -64,6 +64,9 @@ describe "short-body pane overspill" do
   it "DiscoverView keeps every drawn cell inside the rect it was handed" do
     {1, 2}.each do |body_h|
       view = DiscoverView.new
+      # The run is LOAD-BEARING, not scenery: with none, `render` short-circuits to the
+      # onboarding card over the whole rect and never tiles the two panes this example exists
+      # to measure. Remove it and the test passes without testing anything.
       view.add(DiscoverRun.new("http://a.test/", Gori::Discover::Config.new))
       b = MemoryBackend.new(60, 12)
       rect = Rect.new(3, 12 - 2 - body_h, 54, body_h)

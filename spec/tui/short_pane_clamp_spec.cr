@@ -156,15 +156,44 @@ describe TrafficEmptyState do
   #
   # Renders into a backend taller than the rect, so anything drawn past `rect.h` shows up as
   # a non-blank row in the margin.
-  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes] %}
-    it "never draws {{ variant.id }} below its rect, at any height the gate admits" do
-      (8..24).each do |h|
-        margin = 8
-        b = MemoryBackend.new(100, h + margin)
-        TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 100, h),
-          variant: {{ variant }}, listen: {"127.0.0.1", 8080})
-        (h...(h + margin)).each do |y|
-          b.row(y).strip.should eq("") # ({{ variant.id }} at h=#{h} spilled onto row #{y})
+  #
+  # This list is LITERAL, so a variant missing from it is untested rather than passing. It must
+  # name every variant `render` dispatches — the four engine tabs and `:project_desc` (which was
+  # absent while it was the only variant carrying art, i.e. the one most able to overflow).
+  #
+  # The width sweep is what covers the FIGURE. A figure rides above the card inside an
+  # already-granted full tier, so it is the art gate — not the card gate — that decides whether
+  # those extra rows fit; sweeping one fixed width never exercises `FULL_MIN_W` or a figure's
+  # own `min_w`, and the art path adds a second reason a renderer can outgrow its rect.
+  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :discover, :comparer, :miner, :sequencer] %}
+    it "never draws {{ variant.id }} below its rect, at any size the gate admits" do
+      (8..26).each do |h|
+        [30, 40, 42, 43, 46, 50, 60, 100].each do |w|
+          margin = 8
+          b = MemoryBackend.new(w, h + margin)
+          TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, w, h),
+            variant: {{ variant }}, listen: {"127.0.0.1", 8080})
+          (h...(h + margin)).each do |y|
+            b.row(y).strip.should eq("") # ({{ variant.id }} at #{w}x#{h} spilled onto row #{y})
+          end
+        end
+      end
+    end
+  {% end %}
+
+  # …and nothing may run off the RIGHT edge either. A figure is centred on its ink extent, so a
+  # block wider than the pane would paint past `rect.right` — where `Screen`'s bounds check
+  # silently drops it in the app but a narrower rect inside a wider backend makes it visible.
+  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :sequencer] %}
+    it "never draws {{ variant.id }} past its right edge" do
+      (8..26).each do |h|
+        [42, 46, 50, 60].each do |w|
+          b = MemoryBackend.new(w + 10, h)
+          TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, w, h),
+            variant: {{ variant }}, listen: {"127.0.0.1", 8080})
+          (0...h).each do |y|
+            b.row(y)[w, 10].strip.should eq("") # ({{ variant.id }} at #{w}x#{h} spilled past col #{w} on row #{y})
+          end
         end
       end
     end
