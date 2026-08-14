@@ -48,10 +48,14 @@ module Gori
       # peer held the lock. The writers below serialise against each other on @write_mutex
       # instead, which the read path never touches.
       @mutex = Mutex.new
-      # Serialises WRITERS (the TUI fiber and the in-process MCP fiber both reach add/update/
-      # remove). Held across the store round-trip so a check-then-write pair stays atomic
-      # against another writer in THIS process; a peer PROCESS is still answered by the
-      # store — `INSERT OR IGNORE` + the post-write reload verify below.
+      # Serialises writers THROUGH THIS INSTANCE — the session's live object, which the TUI
+      # holds and the proxy dials from. It is deliberately not claimed as more than that: the
+      # MCP tools and the CLI each `HostOverrides.load` an instance of their own per call, so
+      # they carry their own lock and never contend with this one. They are answered the same
+      # way a peer PROCESS is, which is the case that has to work anyway: `INSERT OR IGNORE`
+      # plus the post-write reload verify below. The residue is that two writers racing the
+      # same host make the loser's verify fail, and MCP reports that deterministic duplicate
+      # as retryable — narrow enough to leave, but it is a race, not an atomicity guarantee.
       @write_mutex = Mutex.new
     end
 
@@ -139,7 +143,16 @@ module Gori
     # Permitted hostname shape: letters/digits/dot/hyphen/underscore, no spaces. Rejects
     # garbage like "foo bar" that could never match a real request host (a silent dead
     # override) without being so strict it blocks ordinary names.
-    HOST_RE = /\A[a-zA-Z0-9._-]+\z/
+    #
+    # The first character may not be a DOT, which is the one shape an operator types on
+    # purpose and gets nothing from: `.api.test` is how a cookie domain is written, and
+    # pasting one here validated, stored and rendered in the pane while no request Host could
+    # ever equal it. A TRAILING dot is a different question and is answered before this — see
+    # `OverrideHost.key`, which folds it away rather than refusing it. Leading `_` and `-` are
+    # still allowed: neither starts a name a resolver would accept either, but both appear in
+    # real internal setups and refusing them here would block a host gori can genuinely be
+    # asked about, which is a worse trade than the dot.
+    HOST_RE = /\A[a-zA-Z0-9_-][a-zA-Z0-9._-]*\z/
 
     # A valid override is a hostname-shaped host plus an address that parses as a real
     # IPv4/IPv6 literal, optionally with a port — rejecting a hostname-as-"IP" prevents a

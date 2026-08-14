@@ -179,6 +179,16 @@ describe Gori::HostOverrides do
       Gori::HostOverrides.valid?("...", "10.0.0.1").should be_false
     end
 
+    # The LEADING dot is the half the fold deliberately leaves alone, so HOST_RE has to be
+    # the one that refuses it — `.api.test` is how a cookie domain is written, and it
+    # validated, stored and rendered while matching no request Host that can exist.
+    it "refuses a leading dot, but not the leading _ and - real setups use" do
+      Gori::HostOverrides.valid?(".api.test", "10.0.0.1").should be_false
+      Gori::HostOverrides.valid?("api.test", "10.0.0.1").should be_true
+      Gori::HostOverrides.valid?("_dmarc.test", "10.0.0.1").should be_true
+      Gori::HostOverrides.valid?("-odd.test", "10.0.0.1").should be_true
+    end
+
     # The port half: an override used to be able to say WHICH MACHINE and never WHICH PORT.
     it "accepts an address that also names a port" do
       Gori::HostOverrides.valid?("api.test", "127.0.0.1:8443").should be_true
