@@ -65,6 +65,34 @@ private def row_of(view : ProjectView, rect : Rect, needle : String) : Int32
   (0...rect.h).find { |r| b.row(r).includes?(needle) } || raise "#{needle.inspect} was not drawn"
 end
 
+describe "Gori::Env.load_project" do
+  # Both repeat callers ask on a cadence (`apply_external_change` on every `data_version` move,
+  # which own captures cause; MCP before every outbound tool), and the rev they would bump is
+  # what `TextArea`'s styled buffer and `Rules#subst_snapshot` cache against.
+  it "publishes, and invalidates, only on a real delta" do
+    tmp_store do |store, _project|
+      with_project_vars([] of {String, String}) do
+        Gori::Env.save_project(store, [{"ALPHA", "1"}]).should be_true
+        store.flush
+        Gori::Env.load_project(store)
+        rev = Gori::Env.highlight_rev
+
+        Gori::Env.load_project(store) # same table, twice more
+        Gori::Env.load_project(store)
+        Gori::Env.highlight_rev.should eq(rev)
+        Gori::Settings.project_env_vars.should eq([{"ALPHA", "1"}])
+
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"ALPHA", "2"}])).should be_true
+        store.flush
+        Gori::Env.load_project(store)
+        Gori::Env.highlight_rev.should_not eq(rev) # a real change still invalidates
+        Gori::Settings.project_env_vars.should eq([{"ALPHA", "2"}])
+      end
+    end
+  end
+end
+
 describe "ProjectView ENV pane" do
   it "picks the row under the pointer while the prefix editor holds the first line" do
     tmp_store do |store, project|
@@ -157,6 +185,29 @@ describe "ProjectView ENV pane" do
         view.env_commit.should eq(:ok)
         # The edit landed on ALPHA. Against the index alone it hit PEER's slot — or, once the
         # duplicate check saw ALPHA elsewhere, refused the operator's edit as a dup.
+        view.env_vars.should eq([{"PEER", "0"}, {"ALPHA", "19"}])
+      end
+    end
+  end
+
+  # `reload` is the OTHER re-seed site. Nothing on the top-level tab-switch path cancels an open
+  # ENV row — `flush_active_tab_edits` → `ProjectController#commit` saves the description and
+  # the network fields, and `cancel_env_add` lives in `settle_subtab`, which only sub-tab
+  # changes reach. So a Project → History → Project round trip past a peer's write hands the
+  # open row a list that has shifted under its index.
+  it "re-anchors an open edit row across a tab-entry reload too" do
+    tmp_store do |store, project|
+      with_project_vars([{"ALPHA", "1"}]) do
+        view = env_view(store, project)
+        view.env_edit_start
+        type(view, "9") # "ALPHA 19", still open
+
+        Gori::Settings.project_env_vars = [{"PEER", "0"}, {"ALPHA", "1"}]
+        view.reload(project, store) # ← tab entry, not the external-change path
+
+        view.env_commit.should eq(:ok)
+        # In range but stale, the index wrote PEER's slot and `Env.save_project` then persisted
+        # the whole array — the peer's var deleted by the very commit that added the refresh.
         view.env_vars.should eq([{"PEER", "0"}, {"ALPHA", "19"}])
       end
     end
@@ -358,6 +409,14 @@ describe Gori::Tui::ProjectController do
       # was never contradicted — the var was simply gone at the next launch.
       host.statuses.last.should contain("NOT saved")
       host.statuses.last.should_not contain("env var saved")
+
+      # …and the pane + the substitution table agree with the store, which is what the message
+      # claims. `Env.save_project` publishes to the global whatever the store answered, and a
+      # rolled-back write does not move `data_version` — so without the rollback the phantom
+      # var expanded in every send for the rest of the session, and the next committing write
+      # would have made it real.
+      c.view.env_vars.should be_empty
+      Gori::Settings.project_env_vars.should be_empty
     end
   end
 
@@ -375,6 +434,9 @@ describe Gori::Tui::ProjectController do
       c.env_delete_var # FakeHost#confirm runs the action
 
       host.statuses.last.should contain("NOT deleted")
+      # The row is back, because the store still has it — see the save example above.
+      c.view.env_vars.should eq([{"TOKEN", "sekrit"}])
+      Gori::Settings.project_env_vars.should eq([{"TOKEN", "sekrit"}])
     end
   end
 

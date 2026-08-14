@@ -129,8 +129,14 @@ module Gori::Tui
         @desc_read.sync_from(@desc_area)
       end
       load_settings_values
-      @env_items = Settings.project_env_vars.dup
-      @env_sel = @env_sel.clamp(0, {@env_items.size - 1, 0}.max)
+      # THE one re-seed, shared with the external-change path. Tab entry is the other moment
+      # the list can move under an open EDIT row — `flush_active_tab_edits` persists the
+      # description and the network fields on the way out but does not cancel this row (only a
+      # SUB-tab change does, via `settle_subtab`), so a top-level tab round trip past a peer's
+      # write left the row indexing a list that had shifted. Re-seeding without the anchor is
+      # exactly the case `env_commit`'s bound check can no longer catch: an index that is stale
+      # but still IN RANGE writes the wrong row and then persists the whole array.
+      reload_env_vars
     end
 
     # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
@@ -675,8 +681,9 @@ module Gori::Tui
       clamp_ov_sel
     end
 
-    # Re-seed the ENV list after a PEER PROCESS changed it (Runner#apply_external_change has
-    # just reloaded the process global this copies from).
+    # Re-seed the ENV list from the process global — THE one place `@env_items` is refilled,
+    # called from `reload` (tab entry) and from the external-change path once
+    # `Runner#apply_external_change` has refreshed that global.
     #
     # Unlike SCOPE and HOST OVERRIDES — which this view renders straight out of one live
     # object — the ENV pane holds its own `@env_items` copy and `Env.save_project` persists it
