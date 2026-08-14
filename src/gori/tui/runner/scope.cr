@@ -17,11 +17,43 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # visible window (filter change, trim, follow reload).
     hosts = ids.compact_map { |id| @session.store.flow_row(id).try(&.host) }.uniq!
     return (@toast = "no flows left to add") if hosts.empty?
+    # A host gori itself could not store as a rule — a flow captured with no Host header at
+    # all, say — is named, not counted as added and not blamed on the store below.
+    hosts, unusable = hosts.map(&.strip).partition { |h| !h.empty? && Scope.valid?("host", h) }
+    return (@toast = "no usable host on the selected flow#{ids.size == 1 ? "" : "s"}") if hosts.empty?
+    # `add` answers whether the rule LANDED and `enable` whether the lens flag COMMITTED;
+    # both answers used to be discarded and the toast said "added <host> to scope" either way.
+    # A busy or locked project was therefore told hosts were scoped while the scope had not
+    # changed — the one claim every other scope write path in gori checks (the CLI, MCP, and
+    # the Project pane's own :failed branch). `add` collapses "already there" and "the store
+    # refused it" into ONE false, so neither is read off its return: the rule list says which
+    # is which. Present before ⇒ already scoped; absent after ⇒ the store refused it.
+    known = hosts.select { |h| scope_has_host_include?(h) }
     hosts.each { |h| @scope.add("include", "host", h) }
-    @scope.enable
+    lens = @scope.enable
     history_controller.view.reload(@session.store)
-    added = hosts.size == 1 ? hosts.first : "#{hosts.size} hosts"
-    @toast = "added #{added} to scope (#{@scope.size})"
+    missing = hosts.reject { |h| scope_has_host_include?(h) }
+    added = hosts - known - missing
+    if added.empty?
+      return (@toast = "scope NOT changed (project busy) — nothing was added") unless missing.empty?
+      return (@toast = "already in scope: #{name_hosts(known)}")
+    end
+    msg = "added #{name_hosts(added)} to scope (#{@scope.size})"
+    msg += " · #{known.size} already there" unless known.empty?
+    msg += " · #{missing.size} NOT added (project busy)" unless missing.empty?
+    msg += " · #{unusable.size} skipped (not a host)" unless unusable.empty?
+    msg += " · lens NOT enabled (project busy)" unless lens
+    @toast = msg
+  end
+
+  # One host by name, several by count — the toast has one line and a batch can be 12 hosts.
+  private def name_hosts(hosts : Array(String)) : String
+    hosts.size == 1 ? hosts.first : "#{hosts.size} hosts"
+  end
+
+  # Is `host` already an include/host rule? The read-back behind scope_add_host's report.
+  private def scope_has_host_include?(host : String) : Bool
+    @scope.rules.any? { |r| r.include? && r.host_type? && r.pattern == host }
   end
 
   # Toggle the scope display lens (in-scope-only ⇄ all flows) right from History —

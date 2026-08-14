@@ -442,3 +442,36 @@ describe "ProjectView NETWORK pane" do
     end
   end
 end
+
+# The SCOPE pane's add lands the highlight on the rule it just wrote, the way the HOST
+# OVERRIDES and ENV add rows already do. `scope_rules` is ORDER BY id so an add appends:
+# without this the selection stayed put and, on a list taller than the card, the new rule
+# was drawn off-screen — nothing on screen said the write had landed.
+describe "ProjectView SCOPE pane" do
+  it "selects the rule an add just wrote" do
+    tmp_store do |store|
+      scope = Gori::Scope.load(store)
+      view = ProjectView.new(scope, Gori::HostOverrides.load(store))
+      %w[a.test b.test c.test].each { |h| scope.add("include", "host", h) }
+      view.focus_scope
+      view.selected_rule.try(&.pattern).should eq("a.test") # highlight sits at the top
+
+      view.commit_scope_rule("include", "host", "d.test").should eq(:ok)
+      view.selected_rule.try(&.pattern).should eq("d.test")
+    end
+  end
+
+  it "leaves the highlight on the rule an EDIT changed" do
+    tmp_store do |store|
+      scope = Gori::Scope.load(store)
+      view = ProjectView.new(scope, Gori::HostOverrides.load(store))
+      %w[a.test b.test].each { |h| scope.add("include", "host", h) }
+      view.focus_scope
+      view.scope_select(1)
+      id = view.selected_rule.not_nil!.id
+
+      view.commit_scope_rule("exclude", "host", "b2.test", id).should eq(:ok)
+      view.selected_rule.try(&.pattern).should eq("b2.test")
+    end
+  end
+end

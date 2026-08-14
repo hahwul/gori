@@ -1,4 +1,9 @@
 require "sqlite3"
+# For `install` below, which registers the Scope match functions alongside this one.
+# Mutually recursive with scope_match.cr's require of this file (it needs `value_bytes`);
+# Crystal resolves the cycle by skipping the re-entry, and neither file reads the other's
+# constants at load time.
+require "./scope_match"
 
 # The shard binds value_text but not value_bytes; add it so the REGEXP haystack can
 # be read by its true byte length (value_text alone is NUL-terminated). Re-opening
@@ -84,7 +89,15 @@ module Gori
     # `Store.configure_connections` block instead of calling both and losing one.
     def self.install(db : DB::Database) : Nil
       db.setup_connection do |conn|
-        conn.as?(SQLite3::Connection).try(&.gori_install_safe_regexp)
+        next unless sqlite = conn.as?(SQLite3::Connection)
+        sqlite.gori_install_safe_regexp
+        # The Scope match functions come with it: no caller wants a handle that can run a
+        # regex scope rule but not a string or non-ASCII/brace host one, and `Scope#filter`
+        # emits calls to these unconditionally — a handle without them fails the QUERY
+        # ("no such function"), it does not merely match differently. Store.open installs
+        # both through its own single setup block; this is the same set for the standalone
+        # handles that don't come through it.
+        sqlite.gori_install_scope_match
       end
     end
   end

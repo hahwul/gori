@@ -5,6 +5,7 @@ require "json"
 require "./media_type"
 require "./store/models"
 require "./store/safe_regexp"
+require "./store/scope_match"
 require "./store/schema"
 require "./store/compact"
 require "./store/scope_rules"
@@ -329,6 +330,9 @@ module Gori
         # Byte-safe REGEXP before any query runs, so a binary body can't crash a
         # `body~`/`header~` scan or a regex scope rule. See SafeRegexp.
         sqlite.gori_install_safe_regexp
+        # The Scope match functions, for the rule shapes whose native SQL spelling does not
+        # mean what the in-memory lens means (see ScopeMatch).
+        sqlite.gori_install_scope_match
         sqlite.exec("PRAGMA mmap_size = #{MMAP_SIZE}")
       end
     end
