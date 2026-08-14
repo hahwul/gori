@@ -2153,12 +2153,17 @@ module Gori::Tui
             return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
           end
           rn = renameable_subtabs? ? " · r rename" : ""
+          # `f find` takes the column `^1-9 jump` used to hold. Both keys still work; only one
+          # of them works EVERYWHERE. Ctrl+digit has no control character, so on many terminals
+          # the jump never arrives (docs/content/guide/hotkeys.md says so in as many words),
+          # and it runs out at nine on the strips that pile up past nine.
+          #
           # Miner sessions are background-seeded (^N is a no-op) and its body is a read-only
           # table (↵ ENTERS, doesn't edit) — drop the ^N/edit tokens that fit editor strips.
           unless subtab_new_supported?
-            return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ^W close · space cmds#{rn} · ↑/esc tabs"
+            return "←/→ switch sub-tab · ↓/↵ enter · f find · ^W close · space cmds#{rn} · ↑/esc tabs"
           end
-          return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close · space cmds#{rn} · ↑/esc tabs"
+          return "←/→ switch sub-tab · ↓/↵ edit · f find · ^N new · ^W close · space cmds#{rn} · ↑/esc tabs"
         end
         body_hints
       end

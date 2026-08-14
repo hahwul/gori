@@ -37,6 +37,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the affordance is a stop on the strip rather than a mode with a keymap of its own.
   # Splitting the two would cost more than the small oddity of `^W` closing the active
   # session from there.
+  #
+  # `f` opens that same picker from ANY chip. Walking `←` to the affordance is a fine gesture
+  # from chip 1 and a poor one from chip 15 — which is the strip the picker exists for — and
+  # on a terminal too narrow to draw the pill it was not a gesture at all.
   private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
     key = ev.key
     c = ev.char || key.to_char
@@ -59,6 +63,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       open_tag_edit(current_subtab_index) # tag the active Repeater sub-tab (issue #121)
     when !ev.ctrl? && !ev.alt? && c == '/' && @tabs[@active_tab]?.try(&.subtab_filter_shown?)
       @tabs[@active_tab]?.try(&.start_subtab_filter) # open the `/` sub-tab filter bar
+    when find_subtab_chord?(ev)
+      subtab_search_open # `f` — the ⌕ picker, reachable from any chip (see the note above)
     when find_affordance_key?(ev) && subtab_find_focused?
       handle_find_affordance_key(key)
     when key.left?, key.lower_h?
@@ -132,6 +138,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the outgoing tab first so a cross-session reconcile can't clobber its edits.
   private def move_subtab(dir : Int32) : Nil
     @tabs[@active_tab]?.try(&.move_subtab(dir))
+  end
+
+  # `f` on the strip: open the ⌕ picker wherever the operator is standing. Gated on the
+  # SAME predicate the pill's render and click hit-test read (`subtab_find_shown?`), so the
+  # key and the glyph exist on exactly the eight strips — and NOT on `subtab_find_icon_rect`,
+  # which answers "does the pill fit at this width". A narrow terminal is the one place the
+  # `←` route already fails; a key that disappeared with the glyph would leave it failing.
+  private def find_subtab_chord?(ev : Termisu::Event::Key) : Bool
+    return false if ev.ctrl? || ev.alt?
+    ev.key.lower_f? && (@tabs[@active_tab]?.try(&.subtab_find_shown?) || false)
   end
 
   # The three keys the ⌕ affordance takes over. Asked FIRST so `subtab_find_focused?` —

@@ -54,11 +54,10 @@ module Gori::Tui
         # the status strip gives them, and spending six cells per tab to repeat one rule
         # would push a tab-specific key off the end.
         Item.new("j / k", "move down / up — anywhere ↑/↓ moves (h/l where ←/→ do)"),
-        # The one stop on a sub-tab strip that is not a session. It earns a line here for the
-        # same reason j/k does: it is the answer to "I have thirty Repeater sessions and the
-        # one I want has scrolled off", and nothing on screen says ← goes anywhere from the
-        # first chip.
-        Item.new("⌕", "sub-tab strip: ← off the first chip, then ↵ to list + search them all"),
+        # The answer to "I have thirty Repeater sessions and the one I want has scrolled off".
+        # It earns a line here for the same reason j/k does — the key is real on eight tabs and
+        # named on none of them until the operator is already standing on the strip.
+        Item.new("f", "sub-tab strip: list + search every sub-tab (⌕, from any chip)"),
         Item.new("Settings: Tabs", "show/hide + reorder tabs"),
         Item.new("esc", "pop back to the tab bar"),
       ]},
