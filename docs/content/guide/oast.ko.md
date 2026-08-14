@@ -29,6 +29,8 @@ group = "워크벤치"
 
 각 리스너가 하나의 **provider**입니다. **Providers** 서브탭에서 추가하세요(`a` 추가, `e` 편집, `t` 타입 설정, `d` 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.
 
+콜백 테이블 위의 바가 `g`와 `Ctrl-R`가 사용할 provider를 고릅니다. `←` / `→`로 순환하며(바에는 `‹ 이름 ›`으로 표시됩니다), **All**은 모든 provider의 콜백을 한 번에 보여줍니다. payload를 받거나 리스닝을 시작하려면 provider가 하나로 정해져야 하므로, **All** 상태에서 활성화된 provider가 둘 이상이면 `g`와 `Ctrl-R`가 선택 카드를 엽니다. `↵`로 고르면 바도 따라갑니다. 활성화된 provider가 하나뿐이면 물어볼 것이 없으니 바로 실행됩니다.
+
 | Provider | 설명 |
 |----------|-----------|
 | `interactsh` | 자체 호스팅 또는 public [interactsh](https://github.com/projectdiscovery/interactsh) 서버. 암호화된 **DNS, HTTP, SMTP** 콜백을 잡습니다. Public preset: `oast.pro`, `oast.live`, `oast.site`, `oast.fun`, `oast.me`. 기본값입니다. |
@@ -61,7 +63,8 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 | `Ctrl-R` | 리스닝 시작(payload 등록 후 폴링 시작) |
 | `Ctrl-X` | 폴링 중지(세션은 유지 — `r`로 재개) |
 | `r` | 저장된 리스너 재개 |
-| `g` | 현재 payload 가져오기 / 복사 |
+| `g` | 현재 payload 가져오기 / 복사(**All**이면 provider를 고르는 카드) |
+| `←` / `→` | 바가 사용할 provider 순환 |
 | `y` | 선택한 콜백 복사 |
 | `Shift-F` | 선택한 콜백을 Issue로 등록 |
 | `/` | 콜백 목록 필터링 |

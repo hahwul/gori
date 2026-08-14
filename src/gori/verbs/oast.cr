@@ -14,11 +14,14 @@ module Gori
         "oast.stop", "Stop listening", "Stop polling the selected provider (deregisters)",
         Verb::Scope::OastCallbacks, [Verb::Chord.new("x", ctrl: true)], mnemonic: 's') { |ctx| ctx.oast_stop; nil }
 
-      # `g`/`y` are handled directly in the controller for the body; expose them in the
-      # space menu too (menu-only, no chord).
+      # `g` carries its chord HERE rather than in the controller's key handler, which is where it
+      # used to live: with the provider bar on "All" and two or more providers enabled, getting a
+      # payload opens a picker card, and a controller cannot open an overlay (same reason `r` and
+      # `a` are verbs). Routing it through the verb also means the chord and the space-menu entry
+      # take the identical path. `y` stays controller-side — it only ever copies.
       r.register Verb::Definition.new(
-        "oast.generate", "Get payload URL", "Get + copy a fresh OAST payload URL from the selected provider",
-        Verb::Scope::OastCallbacks, [] of Verb::Chord, mnemonic: 'g') { |ctx| ctx.oast_generate; nil }
+        "oast.generate", "Get payload URL", "Get + copy a fresh OAST payload URL (asks which provider when several are on)",
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("g")], mnemonic: 'g') { |ctx| ctx.oast_generate; nil }
 
       r.register Verb::Definition.new(
         "oast.copy", "Copy payload URL", "Copy the last generated OAST payload URL to the clipboard",

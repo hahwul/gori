@@ -1,7 +1,12 @@
 # OAST out-of-band listener — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
+  # Both of these act on exactly ONE provider, and the provider bar's "All" position names
+  # none. Where that is genuinely ambiguous — two or more providers enabled — ask with a card
+  # instead of refusing with a status line; the controller resolves the unambiguous cases
+  # (none enabled, exactly one) itself. Same picker, different commit.
   def oast_listen : Nil
+    return if pick_oast_provider("START LISTENING WITH") { |key| oast_controller.start_listening_with(key) }
     oast_controller.start_listening_action
   end
 
@@ -10,7 +15,29 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def oast_generate : Nil
+    return if pick_oast_provider("GET PAYLOAD FROM") { |key| oast_controller.generate_payload_with(key) }
     oast_controller.generate_payload
+  end
+
+  # Open PICK A PROVIDER when the action has more than one candidate, answering whether it
+  # did. The picker stays a dumb list — the open-site injects what ↵ means, per the Overlay
+  # seam — and the commit lands back in the controller, which owns the pick and every listener.
+  #
+  # `action` answers whether the pick RESOLVED, and that Bool is the shell's close signal
+  # (overlay.cr: a false commit keeps the form up). A row can go stale while the card is open —
+  # a peer process disabling that provider is enough — and closing onto "that provider is gone"
+  # would leave the operator with the refusal and nothing left to pick from.
+  private def pick_oast_provider(title : String, &action : String -> Bool) : Bool
+    return false unless oast_controller.provider_pick_needed?
+    rows = oast_controller.provider_pick_rows
+    return false if rows.empty?
+    picker = OastProviderPicker.new(rows, title)
+    picker.on_commit = -> {
+      row = picker.selected_row
+      row ? action.call(row.key) : true
+    }
+    open_overlay(picker)
+    true
   end
 
   def oast_copy : Nil

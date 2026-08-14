@@ -29,6 +29,8 @@ A callback is proof the target reached a server it shouldn't have. The absence o
 
 Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` set type, `d` delete); a public preset auto-fills the server host when you pick its type.
 
+The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on — `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card; pick a row with `↵` and the bar follows. With a single enabled provider there is nothing to ask, and the action just runs.
+
 | Provider | What it is |
 |----------|-----------|
 | `interactsh` | Self-hosted or public [interactsh](https://github.com/projectdiscovery/interactsh) servers. Catches encrypted **DNS, HTTP, and SMTP** callbacks. Public presets: `oast.pro`, `oast.live`, `oast.site`, `oast.fun`, `oast.me`. Default. |
@@ -61,7 +63,8 @@ Only the TUI resumes sessions. `gori run oast` and the MCP `oast_*` tools are ad
 | `Ctrl-R` | Start listening (register a payload and begin polling) |
 | `Ctrl-X` | Stop polling (the session is kept — resume it with `r`) |
 | `r` | Resume a saved listener |
-| `g` | Get / copy the current payload |
+| `g` | Get / copy the current payload (asks which provider on **All**) |
+| `←` / `→` | Cycle the provider the bar acts on |
 | `y` | Copy the selected callback |
 | `Shift-F` | File the selected callback as an Issue |
 | `/` | Filter the callback list |

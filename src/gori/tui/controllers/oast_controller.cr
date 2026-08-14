@@ -11,6 +11,7 @@ require "../../settings"
 require "../../oast"
 require "../../oast/provider_config"
 require "../oast_provider_overlay"
+require "../oast_provider_picker"
 require "../oast_session_picker"
 
 module Gori::Tui
@@ -341,17 +342,100 @@ module Gori::Tui
     end
 
     # =========================================================================
+    # The "All" position → one provider
+    # =========================================================================
+    #
+    # The payload bar has an All position, which is legible for the CALLBACKS table (show every
+    # provider's hits) and meaningless for `g` / `^R` / `^X`, each of which acts on exactly one
+    # provider. All three used to answer that with a status line — "select a specific provider
+    # (use ‹/› to cycle)" — which is a refusal that names a second, invisible step: the operator
+    # pressed a key, was told no, and had to go find a bar they were not looking at.
+    #
+    # Two thirds of that is answerable without asking. With NO enabled provider the answer is
+    # "add one", not "pick one". With exactly ONE, All *is* that provider, so the pick is
+    # busywork — resolve it in place and let the bar show what happened. Only a genuine
+    # ambiguity (two or more enabled, bar on All) is a question, and `g`/`^R` ask it as a card
+    # at their open-site (see Runner#oast_generate) rather than as a refusal.
+
+    # An action needing one provider has more than one candidate — the open-site's cue to open
+    # OastProviderPicker instead of calling the action straight through.
+    def provider_pick_needed? : Bool
+      @payload_pick == 0 && enabled_providers.size > 1
+    end
+
+    # The enabled providers as picker rows, in the Providers sub-tab's order.
+    def provider_pick_rows : Array(OastProviderPicker::Row)
+      enabled_providers.map do |p|
+        OastProviderPicker::Row.new(
+          key: p.key,
+          name: p.name,
+          kind: Oast::ProviderKind.parse?(p.kind).try(&.label) || p.kind,
+          host: p.host,
+          scope: p.global? ? "global" : "project",
+          live: !listener_for(p.key).nil?)
+      end
+    end
+
+    # Point the payload bar at the provider the card committed. Addressed BY KEY, never by the
+    # card's row index: the enabled list is re-formed on every reload/soft-sync — a peer process
+    # toggling a provider is enough — so an index captured when the card opened can name a
+    # different provider by the time ↵ lands. false when it is gone (the caller must not act).
+    def select_provider(key : String) : Bool
+      idx = enabled_providers.index { |p| p.key == key }
+      unless idx
+        @host.status("that provider is gone or was disabled — pick another")
+        return false
+      end
+      @payload_pick = idx + 1
+      # The pick also NARROWS the callbacks table (filtered_callbacks keys off @payload_pick),
+      # so the row cursor can now sit past the end of a shorter list — the same reason
+      # cycle_provider clamps. Unclamped, the table draws no highlighted row and ↵ / ⇧F go inert
+      # until the operator happens to press an arrow key.
+      clamp_selection
+      true
+    end
+
+    # Both answer whether the pick RESOLVED, which is what the picker card's on_commit returns:
+    # a key that no longer names an enabled provider must leave the card up, with something left
+    # to pick, rather than close it onto a status line the operator can no longer act on.
+    def generate_payload_with(key : String) : Bool
+      return false unless select_provider(key)
+      generate_payload
+      true
+    end
+
+    def start_listening_with(key : String) : Bool
+      return false unless select_provider(key)
+      start_listening_action
+      true
+    end
+
+    # Collapse the All position onto the only enabled provider there is. A no-op when there are
+    # none (nothing to resolve) or several (an operator question — see provider_pick_needed?).
+    private def resolve_single_provider : Nil
+      return unless @payload_pick == 0 && enabled_providers.size == 1
+      @payload_pick = 1
+      clamp_selection # narrows the table, exactly as select_provider does
+    end
+
+    # Why an action found no provider to run against. Nothing enabled is a different problem
+    # from an unresolved All, and telling an operator with no providers to "pick one" sends
+    # them to a bar that has nothing on it.
+    private def no_provider_status(action : String) : String
+      return "no enabled provider — add one in the Providers tab" if enabled_providers.empty?
+      "pick a provider to #{action} — ‹/› on the bar"
+    end
+
+    # =========================================================================
     # Actions (also reachable as verbs / space menu)
     # =========================================================================
 
     # Get an OAST payload for the picked provider: generate locally if a listener already
     # exists, else start listening (register off-fiber) and deliver the payload when ready.
     def generate_payload : Nil
-      if @payload_pick == 0 && !enabled_providers.empty?
-        return @host.status("select a specific provider to generate payload (use ‹/› to cycle)")
-      end
+      resolve_single_provider
       prov = picked_provider
-      return @host.status("no enabled provider — add one in the Providers tab") unless prov
+      return @host.status(no_provider_status("generate a payload")) unless prov
       if listener = listener_for(prov.key)
         url = listener.provider.generate_payload(listener.session)
         deliver_payload(url)
@@ -370,11 +454,9 @@ module Gori::Tui
     end
 
     def start_listening_action : Nil
-      if @payload_pick == 0 && !enabled_providers.empty?
-        return @host.status("select a specific provider to listen (use ‹/› to cycle)")
-      end
+      resolve_single_provider
       prov = picked_provider
-      return @host.status("no enabled provider to listen with") unless prov
+      return @host.status(no_provider_status("listen")) unless prov
       if listener_for(prov.key)
         @host.status("already listening with #{prov.name}")
       else
@@ -382,12 +464,14 @@ module Gori::Tui
       end
     end
 
+    # `^X` keeps the bar as its selector — its rows would be the LIVE listeners, not the enabled
+    # providers, and an All that meant "stop everything" is a behaviour change, not a prompt.
+    # It still gets the single-provider collapse, so the one-provider project never sees a
+    # "select a provider" that has only one answer.
     def stop_listening : Nil
-      if @payload_pick == 0 && !enabled_providers.empty?
-        return @host.status("select a specific provider to stop listening (use ‹/› to cycle)")
-      end
+      resolve_single_provider
       prov = picked_provider
-      return @host.status("no provider selected") unless prov
+      return @host.status(no_provider_status("stop listening")) unless prov
       listener = listener_for(prov.key)
       return @host.status("not listening with #{prov.name}") unless listener
       stop_listener(listener)
@@ -1045,11 +1129,11 @@ module Gori::Tui
           @cb_detail = true
           @cb_pane.reset # a different callback renumbers every line
         end
-      when c == 'g' then generate_payload
       when c == 'y' then copy_payload
-        # `r` (resume) and `a` (add issue) are NOT claimed here: both open an overlay, which a
-        # controller cannot do, so they stay verbs with plain chords and reach the keymap through
-        # the `return false` below — the same fall-through every unhandled key takes.
+        # `g` (get payload), `r` (resume) and `a` (add issue) are NOT claimed here: each can open
+        # an overlay, which a controller cannot do, so they stay verbs with plain chords and reach
+        # the keymap through the `return false` below — the same fall-through every unhandled key
+        # takes. `g` used to be claimed here, back when its only "All" answer was a status line.
       else return false
       end
       sync_scroll
