@@ -159,7 +159,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return unless renameable_subtabs? && @overlay.none? && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
     sub_rect = BodyChrome.strip_rect(layout.body, strip: true, strip_divider: subtab_strip_divider?)
     return unless sub_rect && sub_rect.contains?(mx, my)
-    if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
+    icon, chips = subtab_strip_split(sub_rect)
+    # A right-click on the ⌕ pill renames nothing. Stated rather than left to fall out of
+    # the narrowed rect: without the narrowing the pill's columns sit inside chip 1, and the
+    # gesture would silently open the WRONG session's rename prompt.
+    return if icon.try(&.contains?(mx, my))
+    if seg = Chrome.strip_segments(chips, subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
       open_rename(seg[0])
     end
   end
@@ -178,6 +183,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       close_tag_edit if @tag_edit_open
       return
     end
+    # The ⌕ pill is inert while the picker it opened is up. Without this it is click-AWAY
+    # like any other cell outside the card, so the second press of a double-click on the
+    # pill dismisses what the first press opened — the gesture reads as "the button does
+    # nothing". Sits above the modal tier because that tier is what would cancel.
+    return if active_overlay && subtab_find_pill_hit?(layout.body, mx, my)
     if modal_overlay?
       handle_overlay_click(layout, mx, my)
       return
@@ -227,11 +237,43 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
     sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?, strip_divider: subtab_strip_divider?)
     return false unless sub_rect && sub_rect.contains?(mx, my)
-    if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
+    icon, chips = subtab_strip_split(sub_rect)
+    if icon.try(&.contains?(mx, my))
+      open_subtab_find_from_click
+      return true
+    end
+    if seg = Chrome.strip_segments(chips, subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
       jump_subtab(seg[0])
       focus_pane(:subtabs)
     end
     true # consume any click on the strip row, even between chips
+  end
+
+  # Clicking the ⌕ pill opens the picker, like the tab bar's ⋯ affordance opens the
+  # hidden-tabs menu. ORDER IS LOAD-BEARING: focus_pane clears @overlay, so opening first
+  # would have the focus hop close the picker it just opened.
+  private def open_subtab_find_from_click : Nil
+    focus_pane(:subtabs)
+    subtab_search_open
+  end
+
+  # Whether (mx, my) is on the ⌕ pill of the active tab's strip. Only asked while a modal
+  # is up (see dispatch_click); the ordinary path reaches the same rect through
+  # `click_subtab_strip`, which owns the strip row outright.
+  private def subtab_find_pill_hit?(body : Rect, mx : Int32, my : Int32) : Bool
+    return false unless subtabs_shown? && !subtab_strip_self_drawn?
+    sub_rect = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?)
+    return false unless sub_rect
+    subtab_strip_split(sub_rect)[0].try(&.contains?(mx, my)) || false
+  end
+
+  # {⌕ pill, chips} for a carved strip — the one place the shell splits that row, so a
+  # click can only ever land on what render drew there. Render reads the same
+  # `BodyChrome.find_icon_split`; passing a bare `tab_row` to `Chrome.strip_segments` is
+  # what would put chip 1 under the pill's columns.
+  private def subtab_strip_split(sub_rect : Rect) : {Rect?, Rect}
+    BodyChrome.find_icon_split(BodyChrome.tab_row(sub_rect), subtab_labels,
+      current_subtab_hidden, count: @tabs[@active_tab]?.try(&.subtab_find_count))
   end
 
   # Labels for the active tab's sub-tab strip — built identically to render_body.

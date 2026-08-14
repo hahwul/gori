@@ -60,11 +60,16 @@ module Gori
         Verb::Scope::Jwt, available: in_jwt, mnemonic: 'd', section: :subtab) { |ctx| ctx.jwt_duplicate_subtab; nil }
 
       # Search + filter across sessions — tagged :tab (like decoder.find-subtab), so
-      # jumping never needs Ctrl+digit. Gated on ≥2 open sessions.
+      # jumping never needs Ctrl+digit. The two thresholds differ and must not share a
+      # lambda: search opens from the FIRST session, because the strip's ⌕ affordance is
+      # drawn from the first session and a visible affordance has to do something. Filtering
+      # one chip narrows nothing, so the `/` bar keeps ≥2 (and gates itself again in
+      # TabController#subtab_filter_shown?).
+      has_any = ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_search_count >= 1 }
       has_many = ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_search_count >= 2 }
       r.register Verb::Definition.new(
         "jwt.find-subtab", "Search sub-tabs", "Filter the open JWT sessions and jump to one",
-        Verb::Scope::Jwt, available: has_many, mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+        Verb::Scope::Jwt, available: has_any, mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
       r.register Verb::Definition.new(
         "jwt.filter-subtabs", "Filter sub-tabs", "Filter the JWT sub-tab strip by name / token",
         Verb::Scope::Jwt, available: has_many, mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }

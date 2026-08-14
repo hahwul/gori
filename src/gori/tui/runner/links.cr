@@ -68,9 +68,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when 'f' then link_add_flow_picker(lo)
     when 'r' then link_add_subtab_picker(lo, "PICK REPEATER", repeater_controller.subtab_search_rows,
       Store::LinkRefKind::Repeater, "no repeater sessions to link") { |i| repeater_controller.db_id_at(i) }
-    when 'z' then link_add_subtab_picker(lo, "PICK FUZZ", fuzz_subtab_rows,
+    when 'z' then link_add_subtab_picker(lo, "PICK FUZZ", fuzzer_controller.subtab_search_rows,
       Store::LinkRefKind::Fuzz, "no fuzz sessions to link") { |i| fuzzer_controller.db_id_at(i) }
-    when 'm' then link_add_subtab_picker(lo, "PICK MINER", miner_subtab_rows,
+    when 'm' then link_add_subtab_picker(lo, "PICK MINER", miner_controller.subtab_search_rows,
       Store::LinkRefKind::Miner, "no miner sessions to link") { |i| miner_controller.db_id_at(i) }
     end
   end
@@ -123,20 +123,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       issues_controller.view.reload_detail_links(@session.store)
     when .note?
       refresh_note_link_preview(id)
-    end
-  end
-
-  private def fuzz_subtab_rows : Array(SubtabPicker::Row)
-    fuzzer_controller.subtab_labels.map_with_index do |label, i|
-      detail = @session.store.fuzz_sessions[i]?.try(&.target) || ""
-      SubtabPicker::Row.new(i, label, detail)
-    end
-  end
-
-  private def miner_subtab_rows : Array(SubtabPicker::Row)
-    miner_controller.subtab_labels.map_with_index do |label, i|
-      detail = @session.store.miner_sessions[i]?.try(&.target) || ""
-      SubtabPicker::Row.new(i, label, detail)
     end
   end
 

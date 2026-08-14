@@ -30,6 +30,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The focusable sub-tab strip for Repeater/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
   # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
   # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
+  #
+  # One stop left of the first chip is the ⌕ affordance, where ↵ opens the sub-tab picker.
+  # Its arm sits BELOW the chords and above the arrows on purpose: everything above it still
+  # acts on the ACTIVE chip — which is unchanged, and still legible in the receded gold — so
+  # the affordance is a stop on the strip rather than a mode with a keymap of its own.
+  # Splitting the two would cost more than the small oddity of `^W` closing the active
+  # session from there.
   private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
     key = ev.key
     c = ev.char || key.to_char
@@ -52,8 +59,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       open_tag_edit(current_subtab_index) # tag the active Repeater sub-tab (issue #121)
     when !ev.ctrl? && !ev.alt? && c == '/' && @tabs[@active_tab]?.try(&.subtab_filter_shown?)
       @tabs[@active_tab]?.try(&.start_subtab_filter) # open the `/` sub-tab filter bar
+    when find_affordance_key?(ev) && subtab_find_focused?
+      handle_find_affordance_key(key)
     when key.left?, key.lower_h?
-      move_subtab(-1)
+      step_left_or_find
     when key.right?, key.lower_l?
       move_subtab(1)
     when key.down?, key.lower_j?, key.enter?, key.tab?
@@ -125,8 +134,58 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @tabs[@active_tab]?.try(&.move_subtab(dir))
   end
 
+  # The three keys the ⌕ affordance takes over. Asked FIRST so `subtab_find_focused?` —
+  # which recomputes the layout to answer whether the pill is on screen — runs once per
+  # keypress rather than once per arm.
+  private def find_affordance_key?(ev : Termisu::Event::Key) : Bool
+    return false if ev.ctrl? || ev.alt?
+    k = ev.key
+    k.enter? || k.left? || k.right? || k.lower_h? || k.lower_l?
+  end
+
+  # What those keys do while the affordance holds the strip. `↵` is its whole job; `→`
+  # steps back onto the chips; `←` is the hard stop the first chip used to be, mirroring
+  # the tab bar's leftmost tab.
+  private def handle_find_affordance_key(key : Termisu::Input::Key) : Nil
+    if key.enter?
+      # The flag deliberately SURVIVES the open. Picking a session clears it on the way to
+      # the body (subtab_search_open's on_commit), while cancelling clears nothing — so esc
+      # out of the picker lands back on the affordance the operator opened it from, rather
+      # than dropping them onto chip 1 as if they had never pressed anything.
+      subtab_search_open
+    elsif key.right? || key.lower_l?
+      # Only if there ARE chips: with the `/` filter hiding every one, leaving the
+      # affordance would strand focus on an empty row with no way back to clear the filter.
+      @subtab_find_focus = false if visible_subtab_count > 0
+    end
+  end
+
+  # `←` off the FIRST visible chip steps onto the ⌕ affordance instead of stopping dead.
+  #
+  # "Am I on the first chip?" is answered by whether the move HAPPENED, not by comparing
+  # the index to 0. Two reasons: the `/` filter can hide chip 0, so index 0 is the wrong
+  # question; and `visible_indices.first` — the obvious alternative — RAISES when the
+  # filter has hidden every chip. `move_subtab` is already a true no-op at either edge
+  # (TabController#step_visible returns nil), including on a one-chip strip, so a lone
+  # session reaches the affordance too.
+  #
+  # Guarded on the pill actually being drawn: on a terminal too narrow for it, `←` stays
+  # the quiet no-op it is today rather than advertising a stop nobody can see.
+  private def step_left_or_find : Nil
+    before = current_subtab_index
+    move_subtab(-1)
+    return unless current_subtab_index == before
+    @subtab_find_focus = true if subtab_find_icon_rect
+  end
+
+  # Chips the `/` filter currently leaves on screen (all of them when unfiltered).
+  private def visible_subtab_count : Int32
+    @tabs[@active_tab]?.try(&.visible_indices.size) || 0
+  end
+
   # Jump to an absolute sub-tab index (^1-9 on the strip) and STAY on the strip.
   private def jump_subtab(idx : Int32) : Nil
+    @subtab_find_focus = false # a jump always lands on a chip; ^1-9 skips focus_pane
     @tabs[@active_tab]?.try(&.jump_subtab(idx))
   end
 

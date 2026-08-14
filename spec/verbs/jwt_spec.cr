@@ -59,9 +59,13 @@ describe "Gori::Verbs.register_jwt" do
     verb_intents(r, "jwt.rename-subtab").should eq([:jwt_rename_subtab])
     verb_intents(r, "jwt.duplicate-subtab").should eq([:jwt_duplicate_subtab])
 
+    %w[jwt.find-subtab jwt.filter-subtabs].each { |id| r[id].section.should eq(:tab) }
+    # These two used to share one `has_many` lambda. They no longer can: the strip's ⌕
+    # affordance opens the picker from the first session, while filtering one chip narrows
+    # nothing. Asserted apart so re-merging the lambda fails here.
+    r["jwt.find-subtab"].available?(in_jwt(sessions: 1)).should be_true
+    r["jwt.filter-subtabs"].available?(in_jwt(sessions: 1)).should be_false
     %w[jwt.find-subtab jwt.filter-subtabs].each do |id|
-      r[id].section.should eq(:tab)
-      r[id].available?(in_jwt(sessions: 1)).should be_false
       r[id].available?(in_jwt(sessions: 2)).should be_true
     end
     verb_intents(r, "jwt.find-subtab").should eq([:subtab_search_open])

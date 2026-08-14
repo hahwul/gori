@@ -63,10 +63,18 @@ module Gori::Tui
     # overlay restored on cancel/accept (default :none) — pass the launching overlay (e.g.
     # :detail) when raising the confirm from inside another overlay so cancel returns there.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, return_to : Symbol = :none, &action : -> Nil) : Nil
-    abstract def session : Session             # store / scope / proxy / registry / interceptor
-    abstract def overlay : Symbol              # read the overlay state (e.g. History reads :detail)
-    abstract def active_tab : Symbol           # read the active tab (Repeater reconcile gates on it)
-    abstract def focus : Symbol                # read the focus model (:menu | :subtabs | :body)
+    abstract def session : Session   # store / scope / proxy / registry / interceptor
+    abstract def overlay : Symbol    # read the overlay state (e.g. History reads :detail)
+    abstract def active_tab : Symbol # read the active tab (Repeater reconcile gates on it)
+    abstract def focus : Symbol      # read the focus model (:menu | :subtabs | :body)
+
+    # The strip's ⌕ affordance is the current stop — one step LEFT of the first chip, inside
+    # `:subtabs` focus. CONCRETE, not abstract: nine spec files `include Host` to drive a
+    # controller, and `false` is the right answer for every one of them. Runner overrides.
+    def subtab_find_focused? : Bool
+      false
+    end
+
     abstract def reveal? : Bool                # global whitespace-reveal pref, pushed into views
     abstract def toggle_reveal : Nil           # flip the whitespace-reveal pref (^B from any view)
     abstract def pretty? : Bool                # global pretty-print-bodies pref, pushed into views
@@ -114,12 +122,14 @@ module Gori::Tui
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
                     prev_start : Int32 = 0, hidden : Set(Int32)? = nil, *,
-                    strip_divider : Bool = true, & : Rect ->) : Int32
+                    strip_divider : Bool = true, find : Int32? = nil,
+                    find_lit : Bool = false, & : Rect ->) : Int32
       new_start = prev_start
       framed(screen, rect, shell_focused) do |inner|
         if labels
           sub_rect, content = carve_subtab_row(inner, divider: strip_divider)
-          new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused, prev_start, hidden)
+          new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused,
+            prev_start, hidden, find: find, find_lit: find_lit)
           yield content
         else
           yield inner
@@ -160,15 +170,89 @@ module Gori::Tui
       Rect.new(strip.x, strip.y, strip.w, 1)
     end
 
+    # ===== the ⌕ "find sub-tab" affordance ===================================
+    # A pill at the LEFT edge of the chip row that opens the sub-tab picker. It lives here
+    # rather than in `Chrome` on purpose: `Chrome.render_tab_strip` is also the Project tab's
+    # self-drawn strip (project_view.cr) and the Preferences group strip (preferences_view.cr),
+    # neither of which is a sub-tab strip. Carving the row one layer up excludes them
+    # STRUCTURALLY instead of by a flag those two would have to keep passing as false.
+
+    # FIXED width — " ⌕ NNN ", never derived from the count. Three reasons, all load-bearing:
+    #   1. `Chrome.scroll_start` only ever ADVANCES its window (chrome.cr:453). A width that
+    #      grew when the count went 9 → 10 would shove the strip right and never give the
+    #      column back when it dropped to 9 again.
+    #   2. `⌕` (U+2315) is East-Asian AMBIGUOUS. termisu measures it as 1 column, but a
+    #      terminal configured for double-width ambiguous glyphs paints 2 — and this pill sits
+    #      at the row's left edge, so the whole strip would shift. The spare pad absorbs it,
+    #      and the ink is clipped to the pill (see render_find_icon).
+    #   3. The trailing pad keeps `Chrome`'s `‹` overflow marker — which it always draws at
+    #      its rect's x (chrome.cr:507) — one column clear of the glyph.
+    # 7 = a pad each side plus a 5-column interior, the width of the longest label (`⌕ 99+`)
+    # and of the common one (`⌕ 23`) when `⌕` is painted double-width.
+    ICON_W = 7
+
+    # The pill's label. Counts past two digits collapse to `99+` so the text can never
+    # outgrow ICON_W (the render clips too, but the label should not rely on that).
+    def icon_label(count : Int32) : String
+      count > 99 ? "⌕ 99+" : "⌕ #{count}"
+    end
+
+    # {icon rect, chips rect} for one chip row — the SINGLE source of both. Returned as a
+    # pair so no caller can narrow one without the other; `Chrome.more_button_rect` +
+    # `tabs_area` are the same pair one level up. `count: nil` (a fixed or self-drawn strip)
+    # gives {nil, row}, which is byte-for-byte today's layout.
+    #
+    # The icon is dropped when it would not leave room for the FIRST VISIBLE chip plus the
+    # two marker columns: an affordance for finding sub-tabs must never be the reason no
+    # sub-tab is on screen. When dropped, the chips get every column back — they must not
+    # pay for a pill that was not drawn.
+    def find_icon_split(row : Rect, labels : Array(String), hidden : Set(Int32)?,
+                        *, count : Int32?) : {Rect?, Rect}
+      return {nil, row} if count.nil? || row.empty? || labels.empty?
+      first = (0...labels.size).find { |i| hidden.nil? || !hidden.includes?(i) }
+      return {nil, row} unless first
+      need = Screen.display_width(labels[first]) + 2 + 2 # chip + the ‹ / › columns
+      return {nil, row} if row.w - ICON_W < need
+      {Rect.new(row.x, row.y, ICON_W, 1),
+       Rect.new(row.x + ICON_W, row.y, row.w - ICON_W, 1)}
+    end
+
+    # The pill itself: a gold fill when it is the strip's current stop (mirroring the active
+    # chip), a muted label at rest. Structurally `Chrome.render_more_button`, one row down.
+    # The ink is bound to `seg` so a double-width `⌕` cannot paint into the first chip.
+    private def render_find_icon(screen : Screen, seg : Rect, count : Int32, lit : Bool) : Nil
+      label = icon_label(count)
+      w = seg.right - 1 - (seg.x + 1)
+      if lit
+        bg = Theme.focus_gold
+        screen.fill(seg, bg)
+        screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold, width: w)
+      else
+        screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg, width: w)
+      end
+    end
+
     # The frame-less segmented control shared by Repeater, Notes, Fuzzer, … `focused` =
     # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
     # divider hairline matches (when the strip owns that hairline, i.e. rect.h ≥ 2).
+    # `find` is the ⌕ affordance's count (nil = no affordance on this strip), `find_lit`
+    # whether it is the strip's current stop. Keyword-only: the positional tail here is
+    # already `prev_start, hidden` at a dozen call sites, and a new positional would bind
+    # silently to the wrong one.
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
                             active : Int32, focused : Bool, prev_start : Int32 = 0,
-                            hidden : Set(Int32)? = nil) : Int32
+                            hidden : Set(Int32)? = nil, *,
+                            find : Int32? = nil, find_lit : Bool = false) : Int32
       return prev_start if rect.empty?
-      new_start = Chrome.render_tab_strip(screen, tab_row(rect), labels, active, focused, prev_start, hidden)
+      icon, chips = find_icon_split(tab_row(rect), labels, hidden, count: find)
+      # `lit` is false whenever the pill was dropped for width, so a narrow terminal leaves
+      # the bright pill on the active chip rather than on nothing at all.
+      lit = focused && find_lit && !icon.nil?
+      render_find_icon(screen, icon, find || 0, lit) if icon
+      new_start = Chrome.render_tab_strip(screen, chips, labels, active, focused && !lit, prev_start, hidden)
       return prev_start if rect.h < 2
+      # The hairline reads the UNMODIFIED focus: the affordance is a stop on the strip, so
+      # the strip still owns the row even while the active chip is dimmed.
       border = focused ? Theme.focus_gold : Theme.border
       screen.hline(rect.x, rect.y + 1, rect.w, fg: border, bg: Theme.bg)
       new_start
@@ -335,6 +419,25 @@ module Gori::Tui
     # shell's strip geometry does not describe it and must not hit-test with it — the
     # controller's handle_click owns chip clicks instead. Project sets this: its strip rides
     # UNDER the OVERVIEW band, and the shell's strip rect would land on OVERVIEW rows.
+    # The ⌕ affordance's count for this strip, or nil when it gets no affordance. ONE
+    # predicate: the render (framed_body) and the shell's click hit-test both read it, so
+    # the pill and its click zone cannot drift apart.
+    #
+    # A FIXED strip (Help / Probe / Target / OAST) has nothing to find — its two or three
+    # chips ARE the tab's structure, and they never pile up. A self-drawn strip (Project)
+    # is not at the geometry the shell would hit-test. Every `framed_body` call site passes
+    # this, so the decision lives here rather than in twelve callers, and a new tab cannot
+    # forget to make it.
+    #
+    # The count is `subtab_count`, not the filtered `visible_indices.size`: the picker lists
+    # every session regardless of the `/` filter, so the badge must count the same set the
+    # list shows — and the filter bar one row below already reads `visible/total`.
+    def subtab_find_count : Int32?
+      return nil if subtabs_fixed? || subtab_strip_self_drawn?
+      n = subtab_count
+      n >= 1 ? n : nil
+    end
+
     def subtab_strip_self_drawn? : Bool
       false
     end
@@ -346,14 +449,37 @@ module Gori::Tui
     def jump_subtab(idx : Int32) : Nil
     end
 
-    # Rows for the "find sub-tab" search picker (space → search). Default: one row per
-    # strip label — good enough for Fuzzer/Notes/Decoder. Repeater overrides to add a
-    # summary/URL detail line. Only meaningful when there are ≥2 sub-tabs (the verb gates
-    # on subtab_count), so jumping to a sub-tab never needs the Ctrl+digit chord.
+    # A searchable row's detail column is capped here. `NotesController#filter_subjects`
+    # puts the WHOLE note body in `summary` — deliberately, so a note is findable by any
+    # word it holds — and `SubtabPicker` precomputes one lowercased haystack per row.
+    SEARCH_DETAIL_MAX = 200
+
+    # Rows for the "find sub-tab" search picker (the strip's ⌕ affordance, or space → search).
+    #
+    # The detail column is the SAME projection the `/` filter bar matches on: every session
+    # tab already builds `filter_subjects`, so one description of a session serves both, and
+    # the two cannot drift into disagreeing about what a session is called. Before this,
+    # only Repeater filled the column — on the other seven tabs the picker could be searched
+    # by chip label alone, which is exactly the thing an operator does not remember when
+    # twenty sessions have piled up. Fixed strips return an empty array and fall back to a
+    # bare label, as they did before.
+    #
+    # Built once per open (SubtabPicker caches the haystacks), so nothing here is per-keystroke.
     def subtab_search_rows : Array(SubtabPicker::Row)
+      subjects = filter_subjects
       (subtab_labels || [] of String).map_with_index do |label, i|
-        SubtabPicker::Row.new(i, label, "")
+        # Drop the leading "N:" — the picker draws the index in a column of its own, so the
+        # label would otherwise read "3   3:login".
+        num_end, _ = Chrome.chip_zones(label)
+        detail = (s = subjects[i]?) ? search_detail(s) : ""
+        SubtabPicker::Row.new(i, label[num_end..], detail)
       end
+    end
+
+    # One searchable line for a session: what it does, where it goes, and how it is tagged.
+    protected def search_detail(subject : Repeater::SubtabFilter::Subject) : String
+      tags = subject.tags.map { |t| "##{t}" }.join(' ')
+      "#{subject.summary} #{subject.target} #{tags}".squeeze(' ').strip[0, SEARCH_DETAIL_MAX]
     end
 
     # Open sub-tab count — gates the search entry. Derived from the strip labels.

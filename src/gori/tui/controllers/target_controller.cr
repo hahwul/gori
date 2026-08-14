@@ -89,7 +89,8 @@ module Gori::Tui
       shell = BodyChrome.shell_focused(focus, multi_pane: @active_sub == 1)
       subtabs_focused = focus == :subtabs
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused,
-        subtab_labels, @active_sub, @subtab_start) do |content|
+        subtab_labels, @active_sub, @subtab_start,
+        find: subtab_find_count, find_lit: @host.subtab_find_focused?) do |content|
         if @active_sub == 0
           @sitemap.render_content(screen, content, focus)
         else

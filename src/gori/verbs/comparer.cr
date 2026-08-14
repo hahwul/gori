@@ -81,7 +81,7 @@ module Gori
       r.register Verb::Definition.new(
         "comparer.find-subtab", "Search sub-tabs", "Filter the open comparisons and jump to one",
         Verb::Scope::Comparer,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 2 },
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 1 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       r.register Verb::Definition.new(

@@ -318,3 +318,28 @@ describe "code-review fixes" do
     src[/def gauge_row_at.*?\n    end/m].not_nil!.should contain("nearest_selectable")
   end
 end
+
+# The ⌕ affordance carves columns off the LEFT of the sub-tab chip row. Render narrows the
+# rect it hands `Chrome.render_tab_strip`; both mouse paths have to narrow the rect they hand
+# `Chrome.strip_segments` by the same amount, or chip 1 sits under the pill — a left-click on
+# ⌕ would jump to session 1 and a right-click would open its rename prompt.
+#
+# Two independent paths (left-click chip select, right-click rename) regress separately, so
+# this counts CALLS rather than asserting one of them.
+describe "sub-tab strip hit-tests" do
+  it "never hand Chrome.strip_segments an un-narrowed chip row" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "mouse.cr"))
+    # CODE only — the comment above `subtab_strip_split` names the very shape being banned,
+    # and a grep that reads prose is the way three specs in this file were fooled before.
+    code = src.lines.map(&.sub(/\s*#.*$/, ""))
+    calls = code.select(&.includes?("Chrome.strip_segments("))
+    calls.size.should eq(2) # left-click select + right-click rename
+    calls.each do |line|
+      line.should_not contain("BodyChrome.tab_row"),
+        "a strip hit-test measures the full row, so the ⌕ pill's columns belong to chip 1: #{line.strip}"
+    end
+    # And the split itself is derived from the same helper the renderer uses.
+    split = code.join("\n")[/private def subtab_strip_split.*?\n  end/m].not_nil!
+    split.should contain("BodyChrome.find_icon_split")
+  end
+end

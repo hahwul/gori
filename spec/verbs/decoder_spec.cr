@@ -78,12 +78,15 @@ describe "Gori::Verbs.register_decoder" do
     r["decoder.copy"].available?(ins).should be_true
   end
 
-  it "shows the sub-tab search/filter only with two or more conversions open" do
+  it "shows the sub-tab search from the first conversion, and the filter only from the second" do
     %w[decoder.find-subtab decoder.filter-subtabs].each do |id|
-      r[id].available?(in_decoder(sessions: 1)).should be_false
       r[id].available?(in_decoder(sessions: 2)).should be_true
       r[id].section.should eq(:tab)
     end
+    # See comparer_spec: the strip's ⌕ affordance opens this picker from the first session,
+    # so the menu entry must not disagree about whether the action exists.
+    r["decoder.find-subtab"].available?(in_decoder(sessions: 1)).should be_true
+    r["decoder.filter-subtabs"].available?(in_decoder(sessions: 1)).should be_false
     verb_intents(r, "decoder.find-subtab").should eq([:subtab_search_open])
     verb_intents(r, "decoder.filter-subtabs").should eq([:subtab_filter_open])
   end

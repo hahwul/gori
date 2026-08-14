@@ -236,7 +236,7 @@ module Gori::Tui
       s = cur
       shell = BodyChrome.shell_focused(focus, multi_pane: true)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_count, find_lit: @host.subtab_find_focused?) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           if s.mode == :decode
             s.view.render_decode(screen, body,

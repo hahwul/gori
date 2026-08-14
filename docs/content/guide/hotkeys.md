@@ -81,7 +81,7 @@ Today the per-OS defaults are identical: in a terminal, `Ctrl`+letter chords rea
 
 The chord family listed under *Reserved keys* is fixed because a hardcoded guard runs before the keymap. That's a problem when your terminal never delivers the Ctrl form at all:
 
-- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals** — there is no control character for it, so the sub-tab jumps simply never arrive.
+- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals** — there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: on a sub-tab strip, press `←` from the first chip to reach the **`⌕ N`** affordance at the left edge, then `Enter` to list and search every open sub-tab (or just click it).
 - **A multiplexer eats the chord first.** tmux's default prefix is `Ctrl-B`, which gori also uses for reveal-whitespace.
 
 **Preferences → Editor & Keys → Keys → Command modifier** (`Ctrl-,`), or **`settings:keys`** in the palette, switches that family between `Ctrl` and `Option (⌥)`. It is an **alias, not a swap**: with Option selected, `⌥P` opens the palette *and* `^P` still does. Only the advertised form changes — status hints, the Help tab and the palette all start showing `⌥P`, `⌥N`, `⌥1-9`.

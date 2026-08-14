@@ -49,10 +49,14 @@ describe "Gori::Verbs.register_comparer" do
     end
   end
 
-  it "shows the sub-tab search/filter only with two or more comparisons open" do
+  it "shows the sub-tab search from the first comparison, and the filter only from the second" do
+    %w[comparer.find-subtab comparer.filter-subtabs].each { |id| r[id].section.should eq(:tab) }
+    # The strip's ⌕ affordance opens the SAME picker and is drawn from the first session, so
+    # the menu entry has to exist there too — one action must not have two availability
+    # rules. Filtering a single chip narrows nothing, so `/` still waits for a second.
+    r["comparer.find-subtab"].available?(in_comparer(sessions: 1)).should be_true
+    r["comparer.filter-subtabs"].available?(in_comparer(sessions: 1)).should be_false
     %w[comparer.find-subtab comparer.filter-subtabs].each do |id|
-      r[id].section.should eq(:tab)
-      r[id].available?(in_comparer(sessions: 1)).should be_false
       r[id].available?(in_comparer(sessions: 2)).should be_true
     end
     verb_intents(r, "comparer.find-subtab").should eq([:subtab_search_open])

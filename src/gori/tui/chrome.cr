@@ -515,7 +515,12 @@ module Gori::Tui
     #     none). The run must reach the end, so a Notes first line like "fix #42 now"
     #     keeps its plain colour; a title ending exactly in " #word" is the rare residual.
     # Display-only: label widths are untouched, so the click hit-test never drifts.
-    private def self.chip_zones(label : String) : {Int32, Int32}
+    #
+    # Public for the `num_end` half alone: the sub-tab picker draws its own index column, so
+    # it strips the same "N:" run off a chip label before showing it. That run has exactly
+    # one definition and this is it — re-deriving it next to the new caller is the shape
+    # AGENTS.md names as a trap.
+    def self.chip_zones(label : String) : {Int32, Int32}
       num_end = 0
       while num_end < label.size && label[num_end].ascii_number?
         num_end += 1

@@ -36,7 +36,7 @@ module Gori::Tui
       labels = subtab_strip_shown? ? @notes.subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @notes.current_index, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @notes.current_index, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_count, find_lit: @host.subtab_find_focused?) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           editor_rect = body
           if !@notes.link_preview.empty?

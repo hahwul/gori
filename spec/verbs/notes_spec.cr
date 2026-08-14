@@ -50,10 +50,13 @@ describe "Gori::Verbs.register_notes" do
     keys.should eq(keys.uniq)
   end
 
-  it "shows the sub-tab search/filter only with two or more notes open" do
+  it "shows the sub-tab search from the first note, and the filter only from the second" do
+    %w[notes.find-subtab notes.filter-subtabs].each { |id| r[id].section.should eq(:tab) }
+    # See comparer_spec: the strip's ⌕ affordance opens this picker from the first session,
+    # so the menu entry must not disagree about whether the action exists.
+    r["notes.find-subtab"].available?(in_notes(sessions: 1)).should be_true
+    r["notes.filter-subtabs"].available?(in_notes(sessions: 1)).should be_false
     %w[notes.find-subtab notes.filter-subtabs].each do |id|
-      r[id].section.should eq(:tab)
-      r[id].available?(in_notes(sessions: 1)).should be_false
       r[id].available?(in_notes(sessions: 2)).should be_true
     end
     verb_intents(r, "notes.find-subtab").should eq([:subtab_search_open])

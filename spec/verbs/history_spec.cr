@@ -228,16 +228,20 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "repeater.copy-as").should eq([:copy_as_open])
     end
 
-    it "shows the sub-tab jump only once there are two sessions to pick between" do
+    it "shows the sub-tab jump from the first session, and the filter only from the second" do
       one = on(:repeater)
       one.repeater_tab_count = 1
       two = on(:repeater)
       two.repeater_tab_count = 2
       %w[repeater.find-subtab repeater.filter-subtabs].each do |id|
-        r[id].available?(one).should be_false
         r[id].available?(two).should be_true
         r[id].section.should eq(:tab) # seeds has_section?(Repeater, :tab) for the tab-bar menu
       end
+      # The strip's ⌕ affordance opens the SAME picker and is drawn from the first session,
+      # so the menu entry has to exist there too — one action must not have two availability
+      # rules. Filtering a single chip narrows nothing, so `/` still waits for a second.
+      r["repeater.find-subtab"].available?(one).should be_true
+      r["repeater.filter-subtabs"].available?(one).should be_false
       # Duplicate needs only ONE session — it clones what is open.
       r["repeater.duplicate-subtab"].available?(one).should be_true
       r["repeater.duplicate-subtab"].available?(on(:repeater)).should be_false # zero sessions

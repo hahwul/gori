@@ -29,7 +29,7 @@ module Gori
       r.register Verb::Definition.new(
         "notes.find-subtab", "Search sub-tabs", "Filter the open notes and jump to one",
         Verb::Scope::Notes,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 1 },
         mnemonic: 's', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       # Inline `/` filter bar over the note sub-tab strip (issue #121) — narrows chips by

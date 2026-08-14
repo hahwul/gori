@@ -202,15 +202,17 @@ module Gori
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'M') { |ctx| ctx.repeater_minimize; nil }
 
       # Search the open repeater sub-tabs and jump to the chosen one — menu-only
-      # (no chord), shown only when there are ≥2 sessions to pick between. Tagged
-      # :tab (session-level) rather than :common: it's the one verb that seeds
+      # (no chord), shown from the FIRST session: the strip's ⌕ affordance opens this same
+      # picker and is drawn from the first session, so the two entrances must not disagree
+      # about whether it exists. Tagged :tab (session-level) rather than :common: it's the
+      # one verb that seeds
       # has_section?(Repeater, :tab), so the tab-bar space menu shows a deliberate
       # TAB group (COMMON + this) instead of falling back to whatever body focus
       # section (request/response/target) happened to be active last.
       r.register Verb::Definition.new(
         "repeater.find-subtab", "Search sub-tabs", "Filter the open repeater sessions and jump to one",
         Verb::Scope::Repeater,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 2 },
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 1 },
         mnemonic: 's', section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`r` rename, ^W
@@ -520,7 +522,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.find-subtab", "Search sub-tabs", "Filter the open fuzz sessions and jump to one",
         Verb::Scope::Fuzzer,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 },
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 1 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       # Inline `/` filter bar over the fuzz sub-tab strip (issue #121) — narrows chips by
@@ -674,7 +676,7 @@ module Gori
       r.register Verb::Definition.new(
         "mine.find-subtab", "Search sub-tabs", "Filter the open mining sessions and jump to one",
         Verb::Scope::Miner,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 2 },
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 1 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       r.register Verb::Definition.new(

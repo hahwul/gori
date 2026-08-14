@@ -257,7 +257,14 @@ module Gori::Tui
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @menu_more = false               # tab-bar focus is on the far-right ⋯ "more" affordance (only meaningful when @focus == :menu)
-      @toast = nil.as(String?)         # transient action feedback; nil → show key hints
+      # Sub-tab strip focus is on the left-edge ⌕ affordance rather than a chip. A HINT
+      # only — `subtab_find_focused?` is the truth, and it re-derives the answer from the
+      # live frame. That matters: `@focus` is assigned raw at twenty-odd sites across
+      # runner/*.cr (and a cross-session reconcile can empty a strip without touching focus
+      # at all), so a flag that had to be cleared everywhere would rot on the next one added.
+      # Deriving instead makes "the pill is focused but not on screen" unrepresentable.
+      @subtab_find_focus = false
+      @toast = nil.as(String?) # transient action feedback; nil → show key hints
       # When the toast was set. The status row has ONE text slot and Miss Ring's bar
       # placement also writes to it, so the two are resolved by recency rather than by a
       # fixed precedence — see #companion_notice for why a fixed one is wrong.
@@ -2136,6 +2143,10 @@ module Gori::Tui
         # were the only unadvertised keys at this focus with an effect outside the current tab.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · c capture · i intercept · ^P cmds · q projects · ^D quit" if @focus == :menu
         if @focus == :subtabs
+          # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
+          # sub-tab here instead of entering one. Only ever reached when the pill is really
+          # on screen (see subtab_find_focused?), so this never advertises a missing stop.
+          return "↵ list all sub-tabs · → chips · ↑/esc tabs" if subtab_find_focused?
           # A fixed strip (Help) has no create/close and a read-only body — don't
           # advertise ^N/^W/edit as live keys there.
           if @tabs[@active_tab]?.try(&.subtabs_fixed?)
@@ -2581,6 +2592,40 @@ module Gori::Tui
 
     def focus : Symbol
       @focus
+    end
+
+    # The sub-tab strip's ⌕ affordance is the current stop. Every clause is a way the
+    # stored flag can go stale without anyone clearing it, so they are re-checked here
+    # instead of at each of the ~20 raw `@focus =` sites:
+    #   * focus left the strip (or the tab changed under it),
+    #   * the `/` filter bar is capturing keys — it does so regardless of @focus
+    #     (runner.cr's key path), so without this the pill would sit lit while `↵`
+    #     committed a filter, and the highlight would be lying about where keys go,
+    #   * the pill is not on screen at this terminal width (see #subtab_find_icon_rect).
+    def subtab_find_focused? : Bool
+      return false unless @subtab_find_focus && @focus == :subtabs
+      return false if @tabs[@active_tab]?.try(&.subtab_filter_editing?)
+      !subtab_find_icon_rect.nil?
+    end
+
+    # Where the ⌕ pill is actually drawn this frame, or nil when this strip has none or
+    # the width does not allow one. O(1) arithmetic over the current terminal size — the
+    # same `@backend.size` + `Layout.compute` pair the space menu uses to refuse to open
+    # a card that would not fit.
+    #
+    # This is what stops the affordance from becoming an INVISIBLE stop: `←` off the first
+    # chip consults it, so on a terminal too narrow to draw the pill the key stays the
+    # quiet no-op it is today rather than advertising a key that points at nothing.
+    private def subtab_find_icon_rect : Rect?
+      return nil unless ctl = @tabs[@active_tab]?
+      return nil unless count = ctl.subtab_find_count
+      return nil unless subtabs_shown? && !subtab_strip_self_drawn?
+      w, h = @backend.size
+      body = Layout.compute(w, h, statusline_active?).body
+      strip = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?)
+      return nil unless strip
+      BodyChrome.find_icon_split(BodyChrome.tab_row(strip), subtab_labels,
+        current_subtab_hidden, count: count)[0]
     end
 
     def reveal? : Bool
@@ -3070,6 +3115,11 @@ module Gori::Tui
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
       @menu_more = false # any focus change lands on a real tab, not the ⋯ affordance
+      # Unconditional, INCLUDING pane == :subtabs. This is what keeps entering a tab landing
+      # on chip 1: `enter_content` descends through here, so the strip is always entered at
+      # a session, never at the ⌕ affordance. Reaching the affordance is always a deliberate
+      # `←` off the first chip.
+      @subtab_find_focus = false
       @overlay = OverlayKind::None
       view_focus_first if pane == :body
     end
@@ -3108,6 +3158,7 @@ module Gori::Tui
       @active_tab = tab
       @focus = focus
       @menu_more = false
+      @subtab_find_focus = false # writes @focus raw, so focus_pane's clear never runs here
       @overlay = OverlayKind::None
       on_enter_tab
       view_focus_first
@@ -3597,7 +3648,10 @@ module Gori::Tui
     # rely on Ctrl+digit (undeliverable on many terminals).
     def subtab_search_open : Nil
       rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
-      return @toast = "no other sub-tab to search" if rows.size < 2
+      # Opens from ONE session up, matching the ⌕ affordance's own threshold: the pill is
+      # drawn from the first session, and an affordance that is visible has to do something.
+      # A one-row list is a poor list, but it is not a dead key.
+      return @toast = "no sub-tabs open" if rows.empty?
       sp = SubtabPicker.new("FIND SUB-TAB", rows)
       # The picker hands back the ABSOLUTE index; jump_subtab clamps + saves the outgoing
       # tab, so a stale index (the cross-session reconcile reordered behind the modal) is
@@ -3606,6 +3660,7 @@ module Gori::Tui
         if idx = sp.selected_index
           @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Repeater/Fuzzer/Notes/Decoder)
           @focus = :body                              # land on the chosen session's content
+          @subtab_find_focus = false                  # raw @focus write — focus_pane's clear never runs
         end
         true
       }

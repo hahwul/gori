@@ -785,7 +785,8 @@ module Gori::Tui
       subtabs_focused = focus == :subtabs
       body_focused = focus == :body
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused,
-        subtab_labels, @active_sub, @subtab_start) do |content|
+        subtab_labels, @active_sub, @subtab_start,
+        find: subtab_find_count, find_lit: @host.subtab_find_focused?) do |content|
         if callbacks_sub?
           render_callbacks(screen, content, body_focused)
         else

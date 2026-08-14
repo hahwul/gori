@@ -77,7 +77,7 @@ module Gori
       r.register Verb::Definition.new(
         "decoder.find-subtab", "Search sub-tabs", "Filter the open conversions and jump to one",
         Verb::Scope::Decoder,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 2 },
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 1 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       # Inline `/` filter bar over the conversion sub-tab strip (issue #121) — narrows
