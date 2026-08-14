@@ -992,8 +992,20 @@ module Gori
       end
     end
 
+    # Publish (and invalidate) only on a real DELTA. Both repeat callers ask on a cadence —
+    # the TUI's `apply_external_change` fires whenever `data_version` moves, which own captures
+    # do, and MCP's `refresh_project_env` runs before every outbound tool call — while
+    # `bump_highlight_rev` is the invalidation signal for two caches that assume it is rare:
+    # every `TextArea`'s styled buffer, and `Rules#subst_snapshot`, whose own doc names the
+    # bump set as "a settings load, a project env write, a rule edit and every rebind". An
+    # unchanged table publishes nothing, so re-reading it costs one row and one parse.
+    #
+    # `Array({String, String})` compares elementwise, so this is order-sensitive as it must be:
+    # the pane renders the table in stored order.
     def self.load_project(store : Store) : Nil
-      Settings.project_env_vars = parse_vars_json(store.setting(PROJECT_VARS_KEY))
+      vars = parse_vars_json(store.setting(PROJECT_VARS_KEY))
+      return if vars == Settings.project_env_vars
+      Settings.project_env_vars = vars
       bump_highlight_rev
     end
 

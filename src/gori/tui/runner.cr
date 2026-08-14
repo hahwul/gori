@@ -824,6 +824,29 @@ module Gori::Tui
       # own inline add/edit row is a separate buffer and is untouched by this (only the
       # underlying list changes), so there is nothing to clobber — same as Scope above.
       @session.host_overrides.reload
+      # The per-project `$KEY` table, for the same reason and one more. Env vars live in a
+      # process global (`Settings.project_env_vars`) that `Session.open` fills ONCE, so an
+      # external `gori run project env set` / MCP `set_env_var` was invisible here for the rest
+      # of the session — every Repeater/Fuzzer/Miner/Intercept send expanded the value this
+      # process happened to open with.
+      #
+      # The extra reason is that the Project tab's ENV pane read-modify-WRITES the whole array
+      # (`Env.save_project` persists it wholesale, from the copy `ProjectView#reload` took of
+      # this global), so a stale copy did not just READ wrong — the next edit in the pane wrote
+      # the stale set back and silently DELETED every var the other process had added. MCP
+      # states exactly this hazard as the reason it refreshes per call (see
+      # `MCP::Tools::ENV_REFRESH_TOOLS`); this surface is the one that had no refresh at all.
+      #
+      # Safe in place, like the two above: the pane's inline add/edit row is a separate buffer,
+      # and re-seeding the list around it is `ProjectView#reload_env_vars`' business — it
+      # re-anchors an open edit row by KEY. `on_external_change` below calls it.
+      #
+      # Cheap on an unchanged table: `load_project` publishes (and bumps the highlight rev)
+      # only on a real delta. This runs on OWN captures too — the poll above cannot tell whose
+      # commit moved `data_version` — so an unconditional bump would invalidate every styled
+      # buffer and `Rules#subst_snapshot` on a cadence, which is the same reason
+      # `colormarker.reload` below bails out on an unchanged rule set.
+      Env.load_project(@session.store)
       # Colour rules are read by ANOTHER tab's render path (History's row loop), so this one
       # cannot ride the active-tab rule below: gating it on `@active_tab == :colormarker`
       # would leave History painting stale colours for the rest of the session after an

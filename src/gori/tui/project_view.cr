@@ -80,6 +80,9 @@ module Gori::Tui
       @env_adding = false
       @env_prefix_editing = false # non-nil ⇒ the single-line prefix editor is up (shares @env_input)
       @env_edit_idx = nil.as(Int32?)
+      # The KEY an open edit row targets, so `reload_env_vars` can re-anchor the index when a
+      # peer process reorders or shortens the list under it.
+      @env_edit_key = nil.as(String?)
       @env_input = ""
       @env_icx = 0
       @env_preedit = ""
@@ -126,8 +129,14 @@ module Gori::Tui
         @desc_read.sync_from(@desc_area)
       end
       load_settings_values
-      @env_items = Settings.project_env_vars.dup
-      @env_sel = @env_sel.clamp(0, {@env_items.size - 1, 0}.max)
+      # THE one re-seed, shared with the external-change path. Tab entry is the other moment
+      # the list can move under an open EDIT row — `flush_active_tab_edits` persists the
+      # description and the network fields on the way out but does not cancel this row (only a
+      # SUB-tab change does, via `settle_subtab`), so a top-level tab round trip past a peer's
+      # write left the row indexing a list that had shifted. Re-seeding without the anchor is
+      # exactly the case `env_commit`'s bound check can no longer catch: an index that is stale
+      # but still IN RANGE writes the wrong row and then persists the whole array.
+      reload_env_vars
     end
 
     # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
@@ -426,7 +435,16 @@ module Gori::Tui
 
     def env_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless card = card_rect(rect, :env)
-      row_at(env_list_inner(card.inset(1, 1)), mx, my, @env_adding, @env_sel, @env_items.size)
+      row_at(env_list_inner(card.inset(1, 1)), mx, my, env_row_offset?, @env_sel, @env_items.size)
+    end
+
+    # Whether the ENV list starts ONE ROW DOWN. `render_env_list` gives the first interior line
+    # to EITHER sub-mode — the add/edit row or the prefix row — so both hit-tests have to ask
+    # about both. Passing `@env_adding` alone made every click land on the row after the one
+    # under the pointer while the prefix editor was open. One predicate, three callers (the
+    # draw, `env_row_at`, `env_gauge_row`), which is the lockstep the geometry section promises.
+    private def env_row_offset? : Bool
+      @env_adding || @env_prefix_editing
     end
 
     # Shared row hit-test for the SCOPE/HOST-OVERRIDES list interiors: account for the
@@ -446,7 +464,7 @@ module Gori::Tui
 
     def env_gauge_row(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless card = card_rect(rect, :env)
-      gauge_row(env_list_inner(card.inset(1, 1)), mx, my, @env_adding, @env_items.size)
+      gauge_row(env_list_inner(card.inset(1, 1)), mx, my, env_row_offset?, @env_items.size)
     end
 
     private def gauge_row(inner : Rect, mx : Int32, my : Int32, adding : Bool, n : Int32) : Int32?
@@ -663,6 +681,27 @@ module Gori::Tui
       clamp_ov_sel
     end
 
+    # Re-seed the ENV list from the process global — THE one place `@env_items` is refilled,
+    # called from `reload` (tab entry) and from the external-change path once
+    # `Runner#apply_external_change` has refreshed that global.
+    #
+    # Unlike SCOPE and HOST OVERRIDES — which this view renders straight out of one live
+    # object — the ENV pane holds its own `@env_items` copy and `Env.save_project` persists it
+    # WHOLESALE. So a stale copy did not merely display wrong: the next commit here wrote the
+    # stale set back over the store, deleting every var the other process had added. Refreshing
+    # only on tab entry left that window open for as long as the operator stayed on the tab.
+    #
+    # An open EDIT row names its target by INDEX, and the list that index pointed into is gone,
+    # so re-anchor by the KEY the row opened on: the commit still updates that var if it
+    # survived, and becomes an ADD if the peer deleted it — which is what the typed text now
+    # means. Either way the operator's half-typed line is untouched, no unrelated row is
+    # overwritten, and the index can no longer point past the end.
+    def reload_env_vars : Nil
+      @env_items = Settings.project_env_vars.dup
+      clamp_env_sel
+      @env_edit_idx = @env_items.index { |(k, _)| k == @env_edit_key } if @env_edit_key
+    end
+
     private def clamp_sel : Nil
       @sel = @sel.clamp(0, {@scope.rules.size - 1, 0}.max)
     end
@@ -717,11 +756,15 @@ module Gori::Tui
       @ov_preedit = ""
     end
 
-    # Backspace the add-row; false when already empty (the controller then closes the row).
+    # Backspace the add-row; false when the ROW is empty (the controller then closes it) —
+    # never merely because the caret sits at 0, which discarded a typed line the operator had
+    # only moved the caret inside. Same rule as `env_backspace`, which spells it out.
     def ov_backspace : Bool
-      return false if @ov_icx == 0
-      @ov_input = "#{@ov_input[0, @ov_icx - 1]}#{@ov_input[@ov_icx..]}"
-      @ov_icx -= 1
+      return false if @ov_input.empty?
+      if @ov_icx > 0
+        @ov_input = "#{@ov_input[0, @ov_icx - 1]}#{@ov_input[@ov_icx..]}"
+        @ov_icx -= 1
+      end
       true
     end
 
@@ -817,6 +860,7 @@ module Gori::Tui
       cancel_env_prefix_edit
       @env_adding = true
       @env_edit_idx = nil
+      @env_edit_key = nil
       @env_input = ""
       @env_icx = 0
       @env_preedit = ""
@@ -829,6 +873,7 @@ module Gori::Tui
       cancel_env_prefix_edit
       @env_adding = true
       @env_edit_idx = @env_sel
+      @env_edit_key = key
       @env_input = "#{key} #{val}"
       @env_icx = @env_input.size
       @env_preedit = ""
@@ -837,6 +882,7 @@ module Gori::Tui
     def cancel_env_add : Nil
       @env_adding = false
       @env_edit_idx = nil
+      @env_edit_key = nil
       @env_input = ""
       @env_icx = 0
       @env_preedit = ""
@@ -875,10 +921,20 @@ module Gori::Tui
       @env_preedit = ""
     end
 
+    # Whether the row still holds text — the callers read this to tell a ⌫ that edited the
+    # line from one on an EMPTY row, which closes the row.
+    #
+    # The question is whether the ROW is empty, NOT whether the caret is at 0. Answering the
+    # caret question threw the line away: ← to the start of a typed "TOKEN abc123" and one ⌫
+    # closed the row with the text unsaved, which is the one thing a ⌫ must never do. A caret
+    # already at 0 with text behind it is an ordinary no-op, and that is what `TextField`
+    # (`EnvOverlay`'s field, the same editor one modal away) has always done.
     def env_backspace : Bool
-      return false if @env_icx == 0
-      @env_input = "#{@env_input[0, @env_icx - 1]}#{@env_input[@env_icx..]}"
-      @env_icx -= 1
+      return false if @env_input.empty?
+      if @env_icx > 0
+        @env_input = "#{@env_input[0, @env_icx - 1]}#{@env_input[@env_icx..]}"
+        @env_icx -= 1
+      end
       true
     end
 
@@ -894,7 +950,10 @@ module Gori::Tui
       key, val = parsed
       idx = @env_edit_idx
       return :dup if @env_items.each_with_index.any? { |(k, _), i| k == key && i != idx }
-      if idx
+      # `idx` is re-anchored by `reload_env_vars` whenever a peer shortens the list, so it is
+      # in range — the bound is checked anyway rather than trusted, because the failure mode of
+      # trusting it is an IndexError raised out of a keystroke.
+      if idx && idx < @env_items.size
         @env_items[idx] = {key, val}
         @env_sel = idx
       else
@@ -1339,12 +1398,10 @@ module Gori::Tui
       return if list.h <= 0
       y = list.y
       rows = list.h
-      if @env_prefix_editing
-        render_env_prefix_row(screen, list, y)
-        y += 1
-        rows -= 1
-      elsif @env_adding
-        render_env_add_row(screen, list, y, focused)
+      if env_row_offset?
+        # The two sub-modes are mutually exclusive and share this line; `env_row_offset?` is
+        # what both hit-tests ask, so the offset cannot drift from the draw.
+        @env_prefix_editing ? render_env_prefix_row(screen, list, y) : render_env_add_row(screen, list, y, focused)
         y += 1
         rows -= 1
       end

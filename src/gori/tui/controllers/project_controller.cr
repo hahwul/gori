@@ -336,8 +336,13 @@ module Gori::Tui
     # this view renders straight out of; all that is left is to pull the two list selections
     # back inside a list another process may have SHRUNK, so the highlight doesn't sit on a
     # row that no longer exists.
+    #
+    # ENV is the one pane that keeps its OWN copy of the data (and writes it back wholesale),
+    # so it needs the copy re-seeded here rather than only on tab entry — see
+    # `ProjectView#reload_env_vars` for what that copy going stale does to the store.
     def on_external_change : Nil
       @project_view.clamp_selections
+      @project_view.reload_env_vars
     end
 
     def save : Nil
@@ -740,10 +745,39 @@ module Gori::Tui
       @host.confirm("DELETE ENV VAR", "Delete “#{key}”? This can't be undone.",
         confirm_label: "delete", danger: true) do
         if removed = @project_view.env_delete
-          Env.save_project(@host.session.store, @project_view.env_vars)
-          @host.status("env var deleted: #{removed}")
+          # Whether the write COMMITTED, like the host-override sibling above and like MCP's
+          # `delete_env_var` / `gori run project env delete`. A dropped write reported as
+          # "deleted" stayed convincing for the whole session, and the var came back at the
+          # next launch.
+          ok = persist_env_vars
+          @host.status(ok ? "env var deleted: #{removed}" : "env var NOT deleted (project busy or unwritable) — try again")
         end
       end
+    end
+
+    # Persist the pane's list, and put memory back where the store is when it did not commit.
+    #
+    # `Env.save_project` publishes the new array to the process global whatever the store
+    # answered — deliberately, so the TUI list updates without a round trip (see its doc), and
+    # harmlessly for MCP, which reloads from the store before its next active tool. On THIS
+    # surface nothing reloads: a rolled-back write does not move `data_version`, so
+    # `apply_external_change` never fires, and the pane would go on showing — and every
+    # Repeater/Fuzzer/Miner/Intercept send would go on expanding — a var the store does not
+    # have. Then the next write that DOES commit persists that whole array, making the phantom
+    # real (or, after a failed delete, deleting the var for good).
+    #
+    # So the failure arm rolls the global back to the array we handed in and re-seeds the pane
+    # from it: the list, the substitution table and the store all say the same thing, which is
+    # what the "NOT saved" the caller is about to print claims. Rolled back in MEMORY, never by
+    # re-reading — the store that just refused a write is exactly the one a read cannot be
+    # asked of (it may be closing), and the pre-write array is already in hand.
+    private def persist_env_vars : Bool
+      before = Settings.project_env_vars
+      return true if Env.save_project(@host.session.store, @project_view.env_vars)
+      Settings.project_env_vars = before
+      Env.bump_highlight_rev # the failed publish bumped it; the rollback is a change too
+      @project_view.reload_env_vars
+      false
     end
 
     def env_edit_prefix : Nil
@@ -786,9 +820,12 @@ module Gori::Tui
 %(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*))
       when :dup then @host.status("env var: KEY already defined")
       when :ok
-        Env.save_project(@host.session.store, @project_view.env_vars)
+        # See `env_delete_var`: the store answers whether the write committed, and this is the
+        # surface where a false "saved" is least recoverable — nothing here re-reads the store,
+        # so the row keeps showing the value that never landed.
+        ok = persist_env_vars
         n = @project_view.env_vars.size
-        @host.status("env var saved — #{n} total")
+        @host.status(ok ? "env var saved — #{n} total" : "env var NOT saved (project busy or unwritable) — try again")
       end
     end
 
