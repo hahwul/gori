@@ -582,7 +582,7 @@ module Gori
     end
 
     # True when `host_cond`'s NATIVE SQL spelling provably means the same thing as
-    # `HostPattern::Compiled`. Two things part them, and the PATTERN decides both:
+    # `HostPattern::Compiled`. Three things part them, and the PATTERN decides all three:
     #
     #   · non-ASCII — SQLite's built-in `lower()` folds ASCII only while Crystal's
     #     `String#downcase` folds all of Unicode, so a rule `äcme.test` matched a captured
@@ -591,14 +591,24 @@ module Gori
     #     braces literally. An include `*.acme.{test,dev}` matched three hosts live and none
     #     in History, and an exclude with braces carved out nothing in SQL — fail-OPEN on the
     #     display lens, the direction that matters.
+    #   · a SURROUNDING bracket pair — `HostPattern::Compiled` peels it for the exact/subdomain
+    #     arm (`@bare`) but globs against the UN-peeled `@down`, so `[2001:db8::*]` is a rule
+    #     that matches NOTHING in Crystal (`File.match?` reads the outer `[…]` as a character
+    #     class). host_cond peels first, so its GLOB would match every host under
+    #     `2001:db8::` — a dead INCLUDE listing its flows as in-scope in History while
+    #     `allowlisted_unlocked?` refuses every request, i.e. Sandbox black-holes the proxy
+    #     with `include_count` non-zero and the "blocks everything" warning quiet. Gated on
+    #     the bracket pair alone rather than "bracketed AND globbed": which of Compiled's two
+    #     arms applies is exactly the thing not worth restating here.
     #
     # Anything else routes through `gori_host_match`, which IS HostPattern — so the fast path
     # stays native (host matching runs per row of every scope-filtered reload) and the shapes
-    # it cannot spell have no second dialect at all. `?`, `[…]` and an unbalanced `[` were
-    # checked and agree between the two engines; `/ \ ? # @` and whitespace can't reach a
-    # stored host pattern anyway (validation_error).
+    # it cannot spell have no second dialect at all. `?`, a non-surrounding `[…]` and an
+    # unbalanced `[` were checked and agree between the two engines; `/ \ ? # @` and whitespace
+    # can't reach a stored host pattern anyway (validation_error).
     def self.sql_native_host?(pattern : String) : Bool
-      pattern.ascii_only? && !pattern.includes?('{') && !pattern.includes?('}')
+      pattern.ascii_only? && !pattern.includes?('{') && !pattern.includes?('}') &&
+        bare_host(pattern) == pattern
     end
 
     # The pattern with its :PORT stripped AND surrounding brackets peeled, for the
@@ -668,9 +678,9 @@ module Gori
         # `lower(URL_EXPR) LIKE ?`, and SQLite's built-in `lower()` folds ASCII ONLY: a
         # rule `/über` matched a captured `/Über` in the live gate and nothing in History,
         # breaking the branch-for-branch parity this file's header promises. Nothing is
-        # lost by going through the function — `URL_EXPR` already builds and lowercases a
-        # fresh string per row, so there was no index to give up — and a literal % / _ in
-        # the pattern now needs no LIKE escaping at all.
+        # lost by going through the function: `URL_EXPR` concatenates a fresh string per
+        # row for the old `lower(…) LIKE` to fold and scan, so there was no index to give
+        # up — and a literal % / _ in the pattern now needs no LIKE escaping at all.
         {"gori_ci_contains(#{QL::URL_EXPR}, ?)", [rule.pattern] of DB::Any}
       when "regex"
         # Case-SENSITIVE (no lower()) to match Rule#matches? + the shard's REGEXP.

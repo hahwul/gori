@@ -34,13 +34,20 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.view.reload(@session.store)
     missing = hosts.reject { |h| scope_has_host_include?(h) }
     added = hosts - known - missing
-    if added.empty?
-      return (@toast = "scope NOT changed (project busy) — nothing was added") unless missing.empty?
-      return (@toast = "already in scope: #{name_hosts(known)}")
-    end
-    msg = "added #{name_hosts(added)} to scope (#{@scope.size})"
-    msg += " · #{known.size} already there" unless known.empty?
-    msg += " · #{missing.size} NOT added (project busy)" unless missing.empty?
+    # ONE tail for every outcome. Two early returns here dropped `unusable` and `lens`, so
+    # "already in scope: 2 hosts" could be the whole report of a press that ALSO failed to
+    # turn on the lens it was pressed for — the same silence this method is being fixed for.
+    msg =
+      if !added.empty?
+        m = "added #{name_hosts(added)} to scope (#{@scope.size})"
+        m += " · #{known.size} already there" unless known.empty?
+        m
+      elsif !missing.empty?
+        "scope NOT changed (project busy) — nothing was added"
+      else
+        "already in scope: #{name_hosts(known)}"
+      end
+    msg += " · #{missing.size} NOT added (project busy)" unless missing.empty? || added.empty?
     msg += " · #{unusable.size} skipped (not a host)" unless unusable.empty?
     msg += " · lens NOT enabled (project busy)" unless lens
     @toast = msg

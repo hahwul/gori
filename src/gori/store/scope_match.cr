@@ -31,6 +31,7 @@ module Gori
     # same single-threaded-fiber argument, as SafeRegexp::CACHE_MAX above it.
     CACHE_MAX = 32
     @@hosts = {} of String => HostPattern::Compiled
+    @@needles = {} of String => String
 
     # :nodoc: — internal (called from the FNs, which need an explicit receiver, so not private)
     def self.compiled(pattern : String) : HostPattern::Compiled
@@ -41,6 +42,19 @@ module Gori
       @@hosts.clear if @@hosts.size >= CACHE_MAX
       @@hosts[pattern] = c
       c
+    end
+
+    # :nodoc: — the needle's lowercased form, memoised for the same reason as `compiled`
+    # above: it is CONSTANT across the scan (one per string rule) but `downcase` allocates,
+    # and this callback fires once per row.
+    def self.folded(needle : String) : String
+      if d = @@needles[needle]?
+        return d
+      end
+      d = needle.downcase
+      @@needles.clear if @@needles.size >= CACHE_MAX
+      @@needles[needle] = d
+      d
     end
 
     # :nodoc: — a SQLite TEXT argument read by its TRUE byte length and scrubbed to valid
@@ -79,7 +93,16 @@ module Gori
       args = Slice.new(argv, 2)
       haystack = ScopeMatch.text(args[0])
       needle = ScopeMatch.text(args[1])
-      LibSQLite3.result_int(context, haystack.downcase.includes?(needle.downcase) ? 1 : 0)
+      matched =
+        begin
+          haystack.downcase.includes?(ScopeMatch.folded(needle))
+        rescue
+          # Same belt as HOST_FN: an exception here unwinds through the C callback and
+          # aborts the WHOLE query, which is the failure mode SafeRegexp exists to prevent.
+          # `text` scrubs, so nothing known raises — that is the point of having it anyway.
+          false
+        end
+      LibSQLite3.result_int(context, matched ? 1 : 0)
       nil
     end
   end

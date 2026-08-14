@@ -310,6 +310,29 @@ describe Gori::Scope do
     end
   end
 
+  # `HostPattern::Compiled` peels a surrounding bracket pair for its exact/subdomain arm but
+  # globs against the UN-peeled pattern, so `[2001:db8::*]` matches NOTHING in Crystal (the
+  # outer `[…]` is read as a character class). A host_cond that peels first would GLOB
+  # `2001:db8::*` and match every host under it: a dead INCLUDE whose flows are listed as
+  # in-scope while the Sandbox refuses every request with include_count non-zero — the
+  # "blocks everything" warning stays quiet because a rule IS configured.
+  it "SQL filter agrees with in_scope_url? on a BRACKETED host glob (a rule that matches nothing)" do
+    with_store do |store|
+      flows = [{"2001:db8::2", "/x"}, {"[2001:db8::1]", "/x"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      Gori::Scope.valid?("host", "[2001:db8::*]").should be_true # it IS storable
+      scope.add("include", "host", "[2001:db8::*]")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql.should eq(mem)
+      mem.should be_empty
+    end
+  end
+
   # Crystal's `File.match?` reads `{a,b}` as brace alternation; SQLite's GLOB reads the braces
   # literally. The include direction hid three matching hosts from History; the EXCLUDE
   # direction was worse — it carved out nothing in SQL, so out-of-scope hosts stayed listed.
