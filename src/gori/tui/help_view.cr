@@ -58,7 +58,7 @@ module Gori::Tui
         # same reason j/k does: it is the answer to "I have thirty Repeater sessions and the
         # one I want has scrolled off", and nothing on screen says ← goes anywhere from the
         # first chip.
-        Item.new("⌕ N", "sub-tab strip: ← off the first chip, then ↵ to list + search them all"),
+        Item.new("⌕", "sub-tab strip: ← off the first chip, then ↵ to list + search them all"),
         Item.new("Settings: Tabs", "show/hide + reorder tabs"),
         Item.new("esc", "pop back to the tab bar"),
       ]},
@@ -66,7 +66,7 @@ module Gori::Tui
         Item.new("click tab", "switch to it"),
         Item.new("click row", "select · click again opens"),
         Item.new("click pane", "focus · in an editor, place the caret"),
-        Item.new("sub-tab chip", "switch · ⌕ N at the left lists them all · right-click renames"),
+        Item.new("sub-tab chip", "switch · ⌕ at the left lists them all · right-click renames"),
         Item.new("wheel", "scroll / move the selection"),
         Item.new("click outside", "close a popup"),
       ]},

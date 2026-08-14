@@ -102,7 +102,7 @@ module Gori::Tui
       focused = focus == :body
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, PAGE_LABELS, @current, @subtab_start,
-        find: subtab_find_count, find_lit: @host.subtab_find_focused?) do |content|
+        find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
         if about_page?
           @help.render_about(screen, content)
         elsif query_page?

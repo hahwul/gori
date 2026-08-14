@@ -13,7 +13,7 @@ Once you've captured an interesting flow, **Repeater** and the **Fuzzer** are wh
 
 Repeater is a request workbench. Send a flow to it, edit any part of the request, and re-send. The response, timing, and a diff against the previous response are shown side by side. Sessions persist with the project, so you can come back to them later.
 
-Once a few dozen have piled up, the chip strip scrolls and hunting along it with `←`/`→` stops being practical. At the strip's left edge sits **`⌕ N`**, where `N` is how many sessions are open: press `←` from the first chip to reach it (or click it) and `Enter` lists every session, filtered as you type by name, method, path, target host or `#tag`. `Enter` jumps to the one you picked. Every workbench strip has it — Fuzzer, Notes, Decoder, JWT, Comparer, Miner and Sequencer alike.
+Once a few dozen have piled up, the chip strip scrolls and hunting along it with `←`/`→` stops being practical. At the strip's left edge sits **`⌕`**: press `←` from the first chip to reach it (or click it) and `Enter` lists every session, filtered as you type by name, method, path, target host or `#tag`. `Enter` jumps to the one you picked. Every workbench strip has it — Fuzzer, Notes, Decoder, JWT, Comparer, Miner and Sequencer alike.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="gori Repeater tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a replayed 200 in 1152ms status line">

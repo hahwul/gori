@@ -2618,14 +2618,14 @@ module Gori::Tui
     # quiet no-op it is today rather than advertising a key that points at nothing.
     private def subtab_find_icon_rect : Rect?
       return nil unless ctl = @tabs[@active_tab]?
-      return nil unless count = ctl.subtab_find_count
+      return nil unless ctl.subtab_find_shown?
       return nil unless subtabs_shown? && !subtab_strip_self_drawn?
       w, h = @backend.size
       body = Layout.compute(w, h, statusline_active?).body
       strip = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?)
       return nil unless strip
       BodyChrome.find_icon_split(BodyChrome.tab_row(strip), subtab_labels,
-        current_subtab_hidden, count: count)[0]
+        current_subtab_hidden, show: true)[0]
     end
 
     def reveal? : Bool

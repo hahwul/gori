@@ -26,7 +26,7 @@ end
 
 describe "BodyChrome ⌕ find affordance — geometry" do
   it "partitions the row: the pill takes the left edge, the chips take the rest" do
-    icon, chips = BodyChrome.find_icon_split(row, labels, nil, count: 3)
+    icon, chips = BodyChrome.find_icon_split(row, labels, nil, show: true)
     icon = icon.not_nil!
     icon.x.should eq(row.x)
     icon.w.should eq(BodyChrome::ICON_W)
@@ -36,30 +36,33 @@ describe "BodyChrome ⌕ find affordance — geometry" do
   end
 
   it "gives the chips every column back when there is no affordance" do
-    # A fixed (Help/Probe/Target/OAST) or self-drawn (Project) strip passes count: nil, and
+    # A fixed (Help/Probe/Target/OAST) or self-drawn (Project) strip passes show: false, and
     # must lay out byte-for-byte as it did before the affordance existed. This example is
     # the no-regression gate for those five strips.
-    icon, chips = BodyChrome.find_icon_split(row, labels, nil, count: nil)
+    icon, chips = BodyChrome.find_icon_split(row, labels, nil, show: false)
     icon.should be_nil
     chips.should eq(row)
   end
 
-  it "keeps the pill the same width as the count grows" do
-    # `Chrome.scroll_start` only ever ADVANCES its window, so a pill that widened at the
-    # 10th session would shove the strip right and never give the column back. Collapsing
-    # past 99 is what keeps the label inside the fixed box.
-    widths = [1, 9, 10, 99, 100, 4000].map do |n|
-      BodyChrome.find_icon_split(row, labels, nil, count: n)[0].not_nil!.w
-    end
-    widths.uniq.should eq([BodyChrome::ICON_W])
-    Screen.display_width(BodyChrome.icon_label(4000)).should be <= BodyChrome::ICON_W - 2
+  it "fits the cursor bar and a double-width ⌕ without either touching the other" do
+    # BOTH glyphs are East-Asian AMBIGUOUS — `⌕` (U+2315) and the `▎` cursor (U+258E).
+    # termisu measures each as 1 column; a CJK-configured terminal paints 2. The pill sits
+    # at the row's left edge, so anything it cannot absorb shifts the entire strip.
+    #   marker | gap | glyph | glyph's second half | trailing pad for `Chrome`'s `‹`
+    BodyChrome::ICON_W.should be >= 1 + 1 + 2 + 1
+    marker = Screen.display_width(BodyChrome::MARKER.to_s)
+    glyph = Screen.display_width(BodyChrome::ICON)
+    # The glyph starts at col 2 (render_find_icon), so a fat marker must stop before it…
+    marker.should be <= 2
+    # …and a fat glyph must still stop before the trailing pad.
+    (2 + glyph).should be <= BodyChrome::ICON_W - 1
   end
 
   it "drops the pill rather than leaving the strip with no room for a chip" do
     # An affordance for FINDING sub-tabs must never be the reason none is on screen.
     # Swept rather than sampled: the crossover column depends on the label's width.
     (8..40).each do |w|
-      icon, chips = BodyChrome.find_icon_split(row(w), [CJK_LABEL, "beta"], nil, count: 2)
+      icon, chips = BodyChrome.find_icon_split(row(w), [CJK_LABEL, "beta"], nil, show: true)
       next unless icon
       Chrome.strip_segments(chips, [CJK_LABEL, "beta"], 0).size.should be >= 1,
         "at width #{w} the pill is drawn but no chip fits beside it"
@@ -72,23 +75,36 @@ describe "BodyChrome ⌕ find affordance — geometry" do
     hidden = Set{0}
     wide = [CJK_LABEL, "b"]
     w = BodyChrome::ICON_W + Screen.display_width("b") + 2 + 2
-    BodyChrome.find_icon_split(row(w), wide, hidden, count: 2)[0].should_not be_nil
-    BodyChrome.find_icon_split(row(w), wide, nil, count: 2)[0].should be_nil
+    BodyChrome.find_icon_split(row(w), wide, hidden, show: true)[0].should_not be_nil
+    BodyChrome.find_icon_split(row(w), wide, nil, show: true)[0].should be_nil
   end
 
   it "has no affordance to place when every chip is filtered away" do
-    BodyChrome.find_icon_split(row, labels, Set{0, 1, 2}, count: 3)[0].should be_nil
-    BodyChrome.find_icon_split(row, [] of String, nil, count: 0)[0].should be_nil
+    BodyChrome.find_icon_split(row, labels, Set{0, 1, 2}, show: true)[0].should be_nil
+    BodyChrome.find_icon_split(row, [] of String, nil, show: true)[0].should be_nil
   end
 end
 
 describe "BodyChrome ⌕ find affordance — what is drawn is what is hit" do
+  it "draws the glyph alone — the pill carries no session count" do
+    # The chips already say how many sessions there are, and the `/` filter bar one row
+    # below prints `visible/total`. A number on the pill was the same fact told a third
+    # time, in the one spot on the row that has to stay quiet.
+    backend = MemoryBackend.new(60, 1)
+    many = (1..12).map { |i| "#{i}:session#{i}" }
+    BodyChrome.render_subtab_strip(Screen.new(backend), Rect.new(0, 0, 60, 1),
+      many, 0, focused: true, find: true)
+    pill = backend.row(0)[0, BodyChrome::ICON_W]
+    pill.should contain("⌕")
+    pill.each_char { |c| c.ascii_number?.should be_false, "the pill drew a count: #{pill.inspect}" }
+  end
+
   it "paints no chip ink inside the pill's columns" do
     backend = MemoryBackend.new(60, 2)
     BodyChrome.render_subtab_strip(Screen.new(backend), Rect.new(0, 0, 60, 2),
-      labels, 0, focused: true, find: 3)
+      labels, 0, focused: true, find: true)
     icon, chips = BodyChrome.find_icon_split(BodyChrome.tab_row(Rect.new(0, 0, 60, 2)),
-      labels, nil, count: 3)
+      labels, nil, show: true)
     icon = icon.not_nil!
     # Every column the chips claim is outside the pill, and vice versa. Column-by-column
     # rather than a rect comparison, because that is the unit a click arrives in.
@@ -106,44 +122,62 @@ describe "BodyChrome ⌕ find affordance — what is drawn is what is hit" do
     backend = MemoryBackend.new(24, 1)
     many = (1..9).map { |i| "#{i}:session#{i}" }
     BodyChrome.render_subtab_strip(Screen.new(backend), Rect.new(0, 0, 24, 1),
-      many, 8, focused: false, find: 9)
-    icon = BodyChrome.find_icon_split(Rect.new(0, 0, 24, 1), many, nil, count: 9)[0].not_nil!
+      many, 8, focused: false, find: true)
+    icon = BodyChrome.find_icon_split(Rect.new(0, 0, 24, 1), many, nil, show: true)[0].not_nil!
     backend.row(0).should contain("‹")            # the window really did scroll
     backend.row(0)[0, icon.w].should contain("⌕") # …and the pill survived it
     backend.row(0)[icon.right - 1].should eq(' ') # the pad, kept clear
   end
 
-  it "lights exactly one pill on the row" do
-    # The affordance and the active chip share the strip's focus colour, so only one of
-    # them may wear it. `focused && !lit` on the chips is what enforces that.
+  it "marks the focused pill with a cursor and gold ink, never a filled band" do
+    # The pill is one glyph, not a labelled chip: it says "the keys are here" with a `▎`
+    # that was not there a frame ago plus gold ink, and paints NO background. A filled
+    # band reads as a chip that lost its label, and it is the treatment this affordance
+    # was deliberately moved off. MemoryBackend records no attributes, so the Bold half
+    # of the treatment is not observable here — the colour and the mark are.
     lit = MemoryBackend.new(60, 1)
     BodyChrome.render_subtab_strip(Screen.new(lit), Rect.new(0, 0, 60, 1),
-      labels, 0, focused: true, find: 3, find_lit: true)
-    icon = BodyChrome.find_icon_split(Rect.new(0, 0, 60, 1), labels, nil, count: 3)[0].not_nil!
+      labels, 0, focused: true, find: true, find_lit: true)
+    icon = BodyChrome.find_icon_split(Rect.new(0, 0, 60, 1), labels, nil, show: true)[0].not_nil!
     chip = Chrome.strip_segments(
-      BodyChrome.find_icon_split(Rect.new(0, 0, 60, 1), labels, nil, count: 3)[1], labels, 0)[0][1]
-    lit.bg_at(icon.x + 1, 0).should eq(Theme.focus_gold)
+      BodyChrome.find_icon_split(Rect.new(0, 0, 60, 1), labels, nil, show: true)[1], labels, 0)[0][1]
+
+    lit.row(0)[icon.x].should eq(BodyChrome::MARKER)
+    lit.fg_at(icon.x, 0).should eq(Theme.focus_gold)
+    lit.fg_at(icon.x + 2, 0).should eq(Theme.focus_gold) # the glyph, same ink as its cursor
+    # The two inked cells sit on the plain canvas, and NO column of the pill wears the gold
+    # fill — stated over the whole rect because that is the treatment being ruled out, and
+    # the gap column between cursor and glyph is never painted at all.
+    lit.bg_at(icon.x, 0).should eq(Theme.bg)
+    lit.bg_at(icon.x + 2, 0).should eq(Theme.bg)
+    (icon.x...icon.right).each do |cx|
+      lit.bg_at(cx, 0).should_not eq(Theme.focus_gold),
+        "column #{cx} of the pill is filled gold, not inked"
+    end
+    # The active chip recedes while the pill holds the keys — `focused && !lit` — so the
+    # row still names exactly one current stop.
     lit.bg_at(chip.x + 1, 0).should eq(Theme.blend(Theme.focus_gold, Theme.bg, Chrome::SUBTAB_DIM_GOLD))
 
     off = MemoryBackend.new(60, 1)
     BodyChrome.render_subtab_strip(Screen.new(off), Rect.new(0, 0, 60, 1),
-      labels, 0, focused: true, find: 3, find_lit: false)
-    off.bg_at(icon.x + 1, 0).should_not eq(Theme.focus_gold)
+      labels, 0, focused: true, find: true, find_lit: false)
+    off.row(0)[icon.x].should eq(' ') # the cursor column is claimed either way
+    off.fg_at(icon.x + 2, 0).should eq(Theme.muted)
     off.bg_at(chip.x + 1, 0).should eq(Theme.focus_gold) # focus stays on the active chip
   end
 
   it "leaves the bright pill on the active chip when the affordance did not fit" do
     # A narrow terminal must not produce a row where nothing is lit — the operator would be
-    # typing at a strip that looks unfocused. Width 12 is deliberately a size where a chip
+    # typing at a strip that looks unfocused. Width 10 is deliberately a size where a chip
     # still fits (so the row is not the pre-existing zero-chip case) but the pill does not.
-    narrow = Rect.new(0, 0, 12, 1)
+    narrow = Rect.new(0, 0, 10, 1)
     short = ["beta", "gamma"]
-    BodyChrome.find_icon_split(narrow, short, nil, count: 2)[0].should be_nil
+    BodyChrome.find_icon_split(narrow, short, nil, show: true)[0].should be_nil
     Chrome.strip_segments(narrow, short, 0).size.should be >= 1
 
     backend = MemoryBackend.new(narrow.w, 1)
     BodyChrome.render_subtab_strip(Screen.new(backend), narrow,
-      short, 0, focused: true, find: 2, find_lit: true)
+      short, 0, focused: true, find: true, find_lit: true)
     backend.bg_at(1, 0).should eq(Theme.focus_gold)
   end
 end

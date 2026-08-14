@@ -273,7 +273,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # what would put chip 1 under the pill's columns.
   private def subtab_strip_split(sub_rect : Rect) : {Rect?, Rect}
     BodyChrome.find_icon_split(BodyChrome.tab_row(sub_rect), subtab_labels,
-      current_subtab_hidden, count: @tabs[@active_tab]?.try(&.subtab_find_count))
+      current_subtab_hidden, show: @tabs[@active_tab]?.try(&.subtab_find_shown?) || false)
   end
 
   # Labels for the active tab's sub-tab strip — built identically to render_body.

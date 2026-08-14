@@ -122,7 +122,7 @@ module Gori::Tui
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
                     prev_start : Int32 = 0, hidden : Set(Int32)? = nil, *,
-                    strip_divider : Bool = true, find : Int32? = nil,
+                    strip_divider : Bool = true, find : Bool = false,
                     find_lit : Bool = false, & : Rect ->) : Int32
       new_start = prev_start
       framed(screen, rect, shell_focused) do |inner|
@@ -177,38 +177,44 @@ module Gori::Tui
     # neither of which is a sub-tab strip. Carving the row one layer up excludes them
     # STRUCTURALLY instead of by a flag those two would have to keep passing as false.
 
-    # FIXED width — " ⌕ NNN ", never derived from the count. Three reasons, all load-bearing:
-    #   1. `Chrome.scroll_start` only ever ADVANCES its window (chrome.cr:453). A width that
-    #      grew when the count went 9 → 10 would shove the strip right and never give the
-    #      column back when it dropped to 9 again.
-    #   2. `⌕` (U+2315) is East-Asian AMBIGUOUS. termisu measures it as 1 column, but a
-    #      terminal configured for double-width ambiguous glyphs paints 2 — and this pill sits
-    #      at the row's left edge, so the whole strip would shift. The spare pad absorbs it,
-    #      and the ink is clipped to the pill (see render_find_icon).
+    # `▎ ⌕` — the glyph alone, no session count beside it. The strip's own chips already
+    # say how many there are, and the filter bar one row below prints `visible/total`; a
+    # number on the pill was a third telling of the same fact, in the one spot on the row
+    # that has to stay quiet.
+    #
+    # 5 columns, and every one of them is spoken for:
+    #
+    #     col 0    │ col 1 │ col 2-3 │ col 4
+    #     MARKER   │ gap   │ ICON    │ trailing pad
+    #
+    #   1. BOTH glyphs are East-Asian AMBIGUOUS — `⌕` (U+2315) and `▎` (U+258E) alike.
+    #      termisu measures each as 1 column, but a terminal configured for double-width
+    #      ambiguous glyphs paints 2. The gap column is what keeps a fat marker off the
+    #      glyph; the column after the glyph absorbs a fat glyph. Every `▎` cursor in this
+    #      app is already laid out this way (setup_wizard.cr:713 draws the marker at x+1
+    #      and its label at x+3), so this is the house convention, not a local hedge.
+    #   2. The pill sits at the row's LEFT edge, so anything it fails to absorb shifts the
+    #      whole strip. The ink is clipped to the pill besides (see render_find_icon).
     #   3. The trailing pad keeps `Chrome`'s `‹` overflow marker — which it always draws at
-    #      its rect's x (chrome.cr:507) — one column clear of the glyph.
-    # 7 = a pad each side plus a 5-column interior, the width of the longest label (`⌕ 99+`)
-    # and of the common one (`⌕ 23`) when `⌕` is painted double-width.
-    ICON_W = 7
-
-    # The pill's label. Counts past two digits collapse to `99+` so the text can never
-    # outgrow ICON_W (the render clips too, but the label should not rely on that).
-    def icon_label(count : Int32) : String
-      count > 99 ? "⌕ 99+" : "⌕ #{count}"
-    end
+    #      its rect's x (chrome.cr:507) — one column clear of the glyph, in both measures.
+    ICON_W = 5
+    ICON   = "⌕"
+    # The cursor bar that marks the pill as the strip's current stop. Same glyph the ~45
+    # `focused ? '▎' : ' '` sites across the app use for "this is the current item".
+    MARKER = '▎'
 
     # {icon rect, chips rect} for one chip row — the SINGLE source of both. Returned as a
     # pair so no caller can narrow one without the other; `Chrome.more_button_rect` +
-    # `tabs_area` are the same pair one level up. `count: nil` (a fixed or self-drawn strip)
-    # gives {nil, row}, which is byte-for-byte today's layout.
+    # `tabs_area` are the same pair one level up. `show: false` (a fixed or self-drawn strip)
+    # gives {nil, row}, which is byte-for-byte the layout from before the affordance existed.
     #
     # The icon is dropped when it would not leave room for the FIRST VISIBLE chip plus the
-    # two marker columns: an affordance for finding sub-tabs must never be the reason no
-    # sub-tab is on screen. When dropped, the chips get every column back — they must not
+    # two `‹`/`›` overflow columns: an affordance for finding sub-tabs must never be the
+    # reason no sub-tab is on screen. When dropped, the chips get every column back — they must not
     # pay for a pill that was not drawn.
     def find_icon_split(row : Rect, labels : Array(String), hidden : Set(Int32)?,
-                        *, count : Int32?) : {Rect?, Rect}
-      return {nil, row} if count.nil? || row.empty? || labels.empty?
+                        *, show : Bool) : {Rect?, Rect}
+      return {nil, row} if !show || row.empty? || labels.empty?
       first = (0...labels.size).find { |i| hidden.nil? || !hidden.includes?(i) }
       return {nil, row} unless first
       need = Screen.display_width(labels[first]) + 2 + 2 # chip + the ‹ / › columns
@@ -217,38 +223,46 @@ module Gori::Tui
        Rect.new(row.x + ICON_W, row.y, row.w - ICON_W, 1)}
     end
 
-    # The pill itself: a gold fill when it is the strip's current stop (mirroring the active
-    # chip), a muted label at rest. Structurally `Chrome.render_more_button`, one row down.
+    # The pill itself: a `▎` cursor and gold ink when it is the strip's current stop, a
+    # muted glyph at rest. Deliberately NOT the solid gold block the active chip and
+    # `Chrome.render_more_button` wear — this is one glyph, not a labelled chip, and a
+    # filled 5-column band around it reads as a chip that lost its label. The state change
+    # is a SHAPE (a mark that was not there) rather than colour alone, which is what makes
+    # it catchable at the edge of vision on a wide strip.
+    #
+    # Gold, not the `Theme.accent` every other `▎` in the app uses: accent marks the current
+    # row INSIDE a focused list, while this row already spends gold on "which stop has the
+    # keys" (the active chip, the hairline below). A third colour here would say the pill is
+    # a third kind of thing. `focus_gold` is defined as an outline/ink colour in all 30
+    # palettes, light ones included, so it carries its own contrast.
+    #
     # The ink is bound to `seg` so a double-width `⌕` cannot paint into the first chip.
-    private def render_find_icon(screen : Screen, seg : Rect, count : Int32, lit : Bool) : Nil
-      label = icon_label(count)
-      w = seg.right - 1 - (seg.x + 1)
-      if lit
-        bg = Theme.focus_gold
-        screen.fill(seg, bg)
-        screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold, width: w)
-      else
-        screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg, width: w)
-      end
+    private def render_find_icon(screen : Screen, seg : Rect, lit : Bool) : Nil
+      fg = lit ? Theme.focus_gold : Theme.muted
+      # A space at rest, like every other cursor column in the app: the cell is claimed
+      # either way, so a stale mark can never survive a frame where the pill lost focus.
+      screen.cell(seg.x, seg.y, lit ? MARKER : ' ', fg, Theme.bg)
+      gx = seg.x + 2
+      screen.text(gx, seg.y, ICON, fg, Theme.bg,
+        lit ? Attribute::Bold : Attribute::None, width: seg.right - 1 - gx)
     end
 
     # The frame-less segmented control shared by Repeater, Notes, Fuzzer, … `focused` =
     # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
     # divider hairline matches (when the strip owns that hairline, i.e. rect.h ≥ 2).
-    # `find` is the ⌕ affordance's count (nil = no affordance on this strip), `find_lit`
-    # whether it is the strip's current stop. Keyword-only: the positional tail here is
-    # already `prev_start, hidden` at a dozen call sites, and a new positional would bind
-    # silently to the wrong one.
+    # `find` = this strip gets the ⌕ affordance, `find_lit` whether it is the strip's
+    # current stop. Keyword-only: the positional tail here is already `prev_start, hidden`
+    # at a dozen call sites, and a new positional would bind silently to the wrong one.
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
                             active : Int32, focused : Bool, prev_start : Int32 = 0,
                             hidden : Set(Int32)? = nil, *,
-                            find : Int32? = nil, find_lit : Bool = false) : Int32
+                            find : Bool = false, find_lit : Bool = false) : Int32
       return prev_start if rect.empty?
-      icon, chips = find_icon_split(tab_row(rect), labels, hidden, count: find)
+      icon, chips = find_icon_split(tab_row(rect), labels, hidden, show: find)
       # `lit` is false whenever the pill was dropped for width, so a narrow terminal leaves
       # the bright pill on the active chip rather than on nothing at all.
       lit = focused && find_lit && !icon.nil?
-      render_find_icon(screen, icon, find || 0, lit) if icon
+      render_find_icon(screen, icon, lit) if icon
       new_start = Chrome.render_tab_strip(screen, chips, labels, active, focused && !lit, prev_start, hidden)
       return prev_start if rect.h < 2
       # The hairline reads the UNMODIFIED focus: the affordance is a stop on the strip, so
@@ -419,9 +433,9 @@ module Gori::Tui
     # shell's strip geometry does not describe it and must not hit-test with it — the
     # controller's handle_click owns chip clicks instead. Project sets this: its strip rides
     # UNDER the OVERVIEW band, and the shell's strip rect would land on OVERVIEW rows.
-    # The ⌕ affordance's count for this strip, or nil when it gets no affordance. ONE
-    # predicate: the render (framed_body) and the shell's click hit-test both read it, so
-    # the pill and its click zone cannot drift apart.
+    # Whether this strip gets the ⌕ affordance. ONE predicate: the render (framed_body) and
+    # the shell's click hit-test both read it, so the pill and its click zone cannot drift
+    # apart.
     #
     # A FIXED strip (Help / Probe / Target / OAST) has nothing to find — its two or three
     # chips ARE the tab's structure, and they never pile up. A self-drawn strip (Project)
@@ -429,13 +443,12 @@ module Gori::Tui
     # this, so the decision lives here rather than in twelve callers, and a new tab cannot
     # forget to make it.
     #
-    # The count is `subtab_count`, not the filtered `visible_indices.size`: the picker lists
-    # every session regardless of the `/` filter, so the badge must count the same set the
-    # list shows — and the filter bar one row below already reads `visible/total`.
-    def subtab_find_count : Int32?
-      return nil if subtabs_fixed? || subtab_strip_self_drawn?
-      n = subtab_count
-      n >= 1 ? n : nil
+    # Shown from ONE session up, matching the picker's own threshold: a lone session still
+    # answers "what is open here", and the affordance must not appear and vanish as sessions
+    # come and go.
+    def subtab_find_shown? : Bool
+      return false if subtabs_fixed? || subtab_strip_self_drawn?
+      subtab_count >= 1
     end
 
     def subtab_strip_self_drawn? : Bool
