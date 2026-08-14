@@ -21,6 +21,13 @@ module Gori::Settings
   DEFAULT_STATUSLINE_ENABLED  = false
   DEFAULT_STATUSLINE_COMMAND  = ""
   DEFAULT_STATUSLINE_INTERVAL = 3 # seconds between runs (min 1)
+  # How long a single run may take before it is killed. SEPARATE from the interval on
+  # purpose: it used to BE the interval, which meant a script slower than the refresh
+  # rate was killed at its deadline on every single run and the row read "timed out"
+  # forever — and the only way to give the script more time was to make the row staler.
+  # Runs still cannot pile up (the controller launches one at a time), so a timeout
+  # longer than the interval simply refreshes as fast as the script allows.
+  DEFAULT_STATUSLINE_TIMEOUT = 10 # seconds one run may take (min 1)
   # Display (settings:display): message-body rendering prefs. detail_pane = which pane a
   # freshly-opened History flow shows first; history_time_format = list time column;
   # show_gutter = line-number gutter on the message body views; preview_body_kib = how many
@@ -74,6 +81,7 @@ module Gori::Settings
   class_property? statusline_enabled : Bool = DEFAULT_STATUSLINE_ENABLED
   class_property statusline_command : String = DEFAULT_STATUSLINE_COMMAND
   class_property statusline_interval : Int32 = DEFAULT_STATUSLINE_INTERVAL
+  class_property statusline_timeout : Int32 = DEFAULT_STATUSLINE_TIMEOUT
   # Display prefs (settings:display). detail_pane/history_time_format are validated to their
   # two-value sets on load; show_gutter follows the LAYOUT bools (plain accessor); the History
   # list preview reads preview_body_cap (bytes) so the preview never pulls a multi-MiB body.
@@ -125,7 +133,16 @@ module Gori::Settings
     end
   end
 
-  # Tolerant statusline section: absent/non-object keeps current; interval floored at 1.
+  # Whether the statusline row is actually LIVE — enabled AND given something to run.
+  # "Enabled" alone is not enough: an enabled-but-blank command reserved a row at the
+  # bottom that nothing ever drew into, so the body lost a line to a permanently empty
+  # strip. The single source both the layout (which must reserve the row) and the
+  # controller (which must clear it) gate on, so the two can never disagree.
+  def self.statusline_active? : Bool
+    statusline_enabled? && !statusline_command.blank?
+  end
+
+  # Tolerant statusline section: absent/non-object keeps current; interval/timeout floored at 1.
   private def self.parse_statusline(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
     self.statusline_enabled = load_bool_h(o, "enabled", statusline_enabled?)
@@ -134,6 +151,9 @@ module Gori::Settings
     end
     if iv = int_field(o, "interval")
       self.statusline_interval = {iv, 1}.max
+    end
+    if to = int_field(o, "timeout")
+      self.statusline_timeout = {to, 1}.max
     end
   end
 
@@ -215,12 +235,14 @@ module Gori::Settings
   private def self.serialize_statusline(j : JSON::Builder) : Nil
     unless statusline_enabled? == DEFAULT_STATUSLINE_ENABLED &&
            statusline_command == DEFAULT_STATUSLINE_COMMAND &&
-           statusline_interval == DEFAULT_STATUSLINE_INTERVAL
+           statusline_interval == DEFAULT_STATUSLINE_INTERVAL &&
+           statusline_timeout == DEFAULT_STATUSLINE_TIMEOUT
       j.field "statusline" do
         j.object do
           j.field "enabled", statusline_enabled?
           j.field "command", statusline_command
           j.field "interval", statusline_interval
+          j.field "timeout", statusline_timeout
         end
       end
     end

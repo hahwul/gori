@@ -292,7 +292,8 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
   "statusline": {
     "enabled": true,
     "command": "printf 'proj:%s flows:%s' \"$(jq -r .project)\" \"$(jq -r .flows)\"",
-    "interval": 3
+    "interval": 3,
+    "timeout": 10
   }
 }
 ```
@@ -300,10 +301,17 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `false` | statusline 행 표시 여부 |
-| `command` | string | `""` | `/bin/sh -c`로 실행되는 셸 명령. stdout의 첫 줄이 행이 됨 |
+| `command` | string | `""` | `/bin/sh -c`로 실행되는 셸 명령. stdout의 첫 줄이 행이 됨. 비어 있으면 `enabled`여도 행 자체를 잡지 않음 |
 | `interval` | integer | `3` | 실행 간격 초 (최소 `1`) |
+| `timeout` | integer | `10` | 한 번의 실행이 종료되기까지 허용되는 초 (최소 `1`). `interval`보다 커도 됨 |
 
-명령의 stdout은 ANSI/SGR 색상 이스케이프(16색, 256색, truecolor, 그리고 볼드/밑줄 등)를 파싱하므로 색상이 있는 세그먼트를 만들 수 있습니다. 첫 줄만 사용되며, 출력은 터미널 너비로 잘립니다. `interval`초를 초과하는 실행은 종료되고, 실패한 명령은 그냥 행을 비워 둡니다. UI를 절대 막지 않습니다.
+명령의 stdout은 ANSI/SGR 색상 이스케이프(16색, 256색, truecolor, 그리고 볼드/밑줄 등)를 파싱하므로 색상이 있는 세그먼트를 만들 수 있습니다. 첫 줄만 사용되며, 출력은 터미널 너비로 잘립니다. UI를 절대 막지 않습니다.
+
+`timeout`은 `interval`과 의도적으로 분리되어 있습니다. 실행은 겹치지 않으므로(이전 실행이 끝난 뒤에야 다음 실행을 띄웁니다) `interval`보다 느린 스크립트는 매번 죽는 대신 가능한 만큼만 천천히 갱신됩니다. `timeout`을 초과한 실행은 종료되고 행은 `⋯ (timed out)`이 됩니다.
+
+아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다 — 명령을 찾지 못했으면 `⋯ (exit 127)`, 시그널로 끝났으면 `⋯ (killed)`. 정상 종료했는데 출력이 없으면 행은 비어 있습니다(스크립트가 그렇게 할 수 있는 정당한 선택입니다). 어느 쪽이든 stderr는 버려집니다.
+
+편집은 즉시 반영됩니다. `command` · `interval` · `timeout`을 저장하면 현재 간격이 끝나기를 기다리지 않고 다음 프레임에 다시 실행합니다.
 
 각 실행은 라이브 세션을 설명하는 JSON 컨텍스트를 stdin으로 받으므로, 스크립트는 gori를 쿼리하지 않고도 프록시 상태를 표시할 수 있습니다:
 

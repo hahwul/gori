@@ -571,7 +571,8 @@ module Gori::Tui
               dirty = true
             end
             # Statusline: drain a finished script result and (re-)launch on its interval.
-            # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
+            # Self-gated on Settings.statusline_active? — a no-op (zero cost) while the row
+            # is off or has no command, and it only reports dirty when the row's bytes change.
             dirty = true if @statusline.tick(now)
             # Resource meter: re-sample CPU/RSS on its own interval. Like the clock below, it
             # only reports true when the RENDERED string changes, so a parked gori doesn't
@@ -1888,9 +1889,11 @@ module Gori::Tui
 
     # Whether the extra bottom statusline row is reserved. MUST gate every Layout.compute
     # call (render + mouse hit-test + space-menu guard) identically, or the click geometry
-    # drifts a row from what was drawn.
+    # drifts a row from what was drawn. Delegated to Settings so the CONTROLLER gates on
+    # the same predicate — "enabled" alone left an enabled-but-blank command holding a row
+    # the controller never drew into.
     private def statusline_active? : Bool
-      Settings.statusline_enabled?
+      Settings.statusline_active?
     end
 
     # Reflect the open project and active tab in the terminal-window title

@@ -15,15 +15,21 @@ module Gori::Tui
     # command (`yes`, `cat /dev/zero`) ballooning memory before the timeout fires.
     MAX_CAPTURE = 64 * 1024
 
+    # How long the empty-output path may wait for the child's exit status before giving
+    # up on it. Only reached once stdout has already hit EOF, so in practice the status
+    # is there already; the bound just means the pathological child (stdout closed, still
+    # alive) costs one short pause rather than wedging the worker.
+    STATUS_GRACE = 200.milliseconds
+
     # Run `command` via `/bin/sh -c`, feeding `stdin_json` on stdin, and return the
-    # FIRST line of its stdout (styling still embedded). On timeout or spawn failure,
-    # return a short marker instead of raising.
+    # FIRST line of its stdout (styling still embedded). On timeout, failure or spawn
+    # error, return a short marker instead of raising.
     #
-    # Both the success and timeout paths converge on a single teardown: close stdout
-    # (so a reader fiber blocked in `read` unblocks — critical when the command
-    # backgrounds a descendant that keeps the pipe open), kill the child, and reap it
-    # on a detached fiber. We deliberately do NOT block this fiber on `process.wait`,
-    # so a child still writing more output can never wedge us.
+    # Every path converges on one teardown: close stdout (so a reader fiber blocked in
+    # `read` unblocks — critical when the command backgrounds a descendant that keeps the
+    # pipe open), kill the child unless it has already been reaped, and reap it on a
+    # detached fiber. This fiber never blocks on a bare `process.wait`, so a child still
+    # writing more output can never wedge us.
     def self.run(command : String, stdin_json : String, timeout_span : Time::Span) : String
       process = Process.new("/bin/sh", ["-c", command],
         input: Process::Redirect::Pipe,
@@ -45,20 +51,63 @@ module Gori::Tui
         done.send("")
       end
 
+      timed_out = false
       result =
         select
         when line = done.receive
           line
         when timeout(timeout_span)
+          timed_out = true
           "⋯ (timed out)"
         end
 
+      line = first_line(result)
+      # Empty stdout, and the script ran to completion: ask the exit status what happened.
+      # `sh` itself always spawns successfully, so a typo'd command exits 127 having
+      # printed nothing — byte-identical on screen to a script that deliberately prints
+      # nothing. stderr is discarded (draining a second pipe would need its own reader
+      # fiber and its own cap), which leaves the status as the only evidence to show.
+      #
+      # The wait is spawned HERE, not up front, and that ordering is load-bearing twice
+      # over: `Process#wait`'s own `ensure` closes `process.output` and releases the pid,
+      # so a wait racing the reader could swallow output that had no trailing newline, and
+      # a wait that won the race left the `terminate` below signalling a pid we no longer
+      # own. By this point the reader is finished with `output`, and `reaped` tells the
+      # teardown to keep its hands off an already-reaped child.
+      reaped = false
+      status_ch = nil.as(Channel(Process::Status)?)
+      if !timed_out && line.empty?
+        ch = Channel(Process::Status).new(1)
+        status_ch = ch
+        spawn(name: "gori-statusline-reap") { ch.send(process.wait) rescue nil }
+        select
+        when st = ch.receive
+          reaped = true
+          line = exit_marker(st) unless st.success?
+        when timeout(STATUS_GRACE)
+          # status not in yet — the fiber above is still in `wait` and will reap it
+        end
+      end
+
       output.close rescue nil # unblock the reader fiber if still in read()
-      process.terminate(graceful: false) rescue nil
-      spawn(name: "gori-statusline-reap") { process.wait rescue nil } # reap; never zombie
-      first_line(result)
+      unless reaped
+        process.terminate(graceful: false) rescue nil
+        # Exactly one `wait` per process, ever: only spawn one when the branch above did not.
+        spawn(name: "gori-statusline-reap") { process.wait rescue nil } if status_ch.nil?
+      end
+      line
     rescue File::NotFoundError | RuntimeError | IO::Error
       "⋯ (statusline failed)"
+    end
+
+    # The row shown for a run that produced nothing and failed. Short by necessity — it
+    # shares one terminal row with whatever the script would have printed.
+    private def self.exit_marker(status : Process::Status) : String
+      if code = status.exit_code?
+        "⋯ (exit #{code})"
+      else
+        "⋯ (killed)"
+      end
     end
 
     # Read stdout up to the first newline, bounded by MAX_CAPTURE. Stops early on the
@@ -99,53 +148,70 @@ module Gori::Tui
   # main fiber, from `tick`. The worker never touches them.
   class StatuslineController
     getter segments : Array(Ansi::Segment)
+    @last_spec : {String, Time::Span, Time::Span}
 
     def initialize(@session : Gori::Session)
       @work_ch = Channel({String, String, Time::Span}).new(1) # {command, ctx_json, timeout}
       @result_ch = Channel(String).new(1)                     # latest-wins raw first line
       @segments = [] of Ansi::Segment
-      @running = false     # a run is in flight (guards against overlapping launches)
-      @started = false     # the worker fiber has been spawned (lazy — only once enabled)
-      @was_enabled = false # last-seen Settings.statusline_enabled? (for the disable edge)
+      @rendered = nil.as(String?) # raw line the row currently shows (nil = nothing painted)
+      @running = false            # a run is in flight (guards against overlapping launches)
+      @started = false            # the worker fiber has been spawned (lazy — only once active)
+      @was_active = false         # last-seen Settings.statusline_active? (for the off edge)
+      @discard = false            # drop the in-flight result: it belongs to a superseded run
       @last_run = nil.as(Time::Instant?)
+      @last_spec = current_spec # the {command, interval, timeout} the last launch used
     end
 
     # Called every main-loop tick. Drains a finished result and (re-)launches the
     # command when its interval has elapsed. Returns true if the row changed (→ dirty).
-    # Self-gated on Settings.statusline_enabled? so it's a cheap no-op while disabled.
+    # Self-gated on Settings.statusline_active? so it's a cheap no-op while off.
     def tick(now : Time::Instant) : Bool
-      enabled = Settings.statusline_enabled?
-      # 1. Drain a finished script result (non-blocking). While disabled we still drain
+      active = Settings.statusline_active?
+      # 1. Drain a finished script result (non-blocking). While off we still drain
       #    (to clear @running for an in-flight run) but do NOT paint it — so a result
       #    produced after the user disabled can't flash on the next re-enable.
-      changed = drain_result(apply: enabled)
+      changed = drain_result(apply: active)
 
-      # 2. Enable→disable edge: drop the row immediately. We leave @running as-is — an
+      # 2. On→off edge: drop the row immediately. We leave @running as-is — an
       #    in-flight run clears it via drain above when it finishes; resetting it here
       #    would let a re-enable launch a second overlapping run.
-      if @was_enabled && !enabled
+      if @was_active && !active
         changed = true unless @segments.empty?
         @segments = [] of Ansi::Segment
+        @rendered = nil # so a re-enable repaints even if the output is unchanged
         @last_run = nil
+        @discard = true if @running
       end
-      @was_enabled = enabled
-      return changed unless enabled
+      @was_active = active
+      return changed unless active
 
-      # 3. (Re-)launch when idle and the interval has elapsed.
+      # 3. A settings edit takes effect NOW, not at the end of the current interval. The
+      #    row used to keep showing the PREVIOUS command's output for up to a full
+      #    interval after the operator saved a new one, with nothing on screen saying so.
+      #    An in-flight run belongs to the superseded command, so it is dropped rather
+      #    than painted for one interval under the new one.
+      spec = current_spec
+      if spec != @last_spec
+        @last_spec = spec
+        @last_run = nil
+        @discard = true if @running
+      end
+
+      # 4. (Re-)launch when idle and the interval has elapsed.
       return changed if @running
-      cmd = Settings.statusline_command.strip
-      return changed if cmd.empty?
-      interval = {Settings.statusline_interval, 1}.max.seconds
+      cmd, interval, timeout_span = spec
       last = @last_run
       return changed unless last.nil? || now - last >= interval
 
       ensure_started
       ctx = build_context_json
-      # Cap the run at the interval so a slow script is killed before the next launch
-      # (backs the @running guard so runs can never pile up). Advance @last_run / mark
+      # The run is capped by its OWN timeout, not by the interval: runs cannot pile up
+      # regardless (the @running guard launches one at a time), so a script slower than
+      # the refresh rate now renders late instead of never. Advance @last_run / mark
       # running ONLY on a successful send, so a full channel just retries next tick.
       select
-      when @work_ch.send({cmd, ctx, interval})
+      when @work_ch.send({cmd, ctx, timeout_span})
         @last_run = now
         @running = true
       else
@@ -154,18 +220,34 @@ module Gori::Tui
       changed
     end
 
+    # The live {command, interval, timeout} triple a launch is configured from. Compared
+    # against the last launch's to notice a settings edit.
+    private def current_spec : {String, Time::Span, Time::Span}
+      {Settings.statusline_command.strip,
+       {Settings.statusline_interval, 1}.max.seconds,
+       {Settings.statusline_timeout, 1}.max.seconds}
+    end
+
     # Apply a finished script result if one is waiting (non-blocking). Always clears
-    # @running so the next run can launch; paints @segments only when `apply` (enabled).
+    # @running so the next run can launch; paints @segments only when `apply` (active).
     # Returns true if the row changed. Runs on the main fiber — the only @segments writer.
     private def drain_result(apply : Bool) : Bool
       select
       when line = @result_ch.receive
         @running = false
-        if apply
-          @segments = Ansi.parse(line)
-          return true
+        if @discard # superseded command / turned off mid-run — this output is stale
+          @discard = false
+          return false
         end
-        false
+        return false unless apply
+        # Byte-identical to what the row already shows ⇒ NOT dirty. The render loop only
+        # repaints when something reports dirty, so returning true unconditionally bought
+        # a whole frame that painted not one different cell, once per interval, forever —
+        # the exact thing ResourceMeter's idle-zero-CPU invariant exists to prevent.
+        return false if @rendered == line
+        @rendered = line
+        @segments = Ansi.parse(line)
+        true
       else
         false
       end
