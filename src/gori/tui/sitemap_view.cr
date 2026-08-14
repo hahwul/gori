@@ -49,7 +49,7 @@ module Gori::Tui
     # never mentioned `-term` at all. `tag:` is appended because it is this surface's own field
     # and the shared sample cannot know about it.
     FILTER_HINT = QuerySuggest.idle_hint("/ filter", ["tag"] + QL::HINT_FIELDS)
-    QUERY_HINT  = QuerySuggest.cold_hint(["tag"] + QL::HINT_FIELDS)
+    QUERY_HINT  = QuerySuggest.cold_hint(["tag"] + QL::HINT_FIELDS, help_key: true)
     # The highlighter's field vocabulary: everything QL ACCEPTS (a superset of `QL_FIELDS`, which
     # is only what Tab offers here) plus this surface's own `tag:`, which QL knows nothing about
     # because `partition` pulls it out before the query ever reaches the parser.
@@ -438,6 +438,13 @@ module Gori::Tui
 
     def querying? : Bool
       @querying
+    end
+
+    # The committed filter text. HistoryView and InterceptView have carried this since they
+    # were written; this bar simply never had a reader outside itself until `ql_help_key?`
+    # needed to ask whether it was empty. Same name as its two siblings on purpose.
+    def query : String
+      @query
     end
 
     # True when the tree is a filtered subset (a `/` query or the Scope lens is on).

@@ -65,7 +65,7 @@ module Gori::Tui
     # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits on the
     # suggestion row at a cold start (already editing, nothing to Tab-complete yet).
     FILTER_HINT = QuerySuggest.idle_hint("/ filter")
-    QUERY_HINT  = QuerySuggest.cold_hint
+    QUERY_HINT  = QuerySuggest.cold_hint(help_key: true)
     # The editing bar's label. A constant because `render_query_popup` has to line the dropdown
     # up under the token, which means knowing exactly how far the query text is indented.
     QUERY_PREFIX = "filter › "

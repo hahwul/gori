@@ -63,6 +63,9 @@ private class FakeHost
   def open_palette : Nil
   end
 
+  def open_help_query(surface : Symbol) : Nil
+  end
+
   def open_space_menu : Nil
   end
 

@@ -35,6 +35,7 @@ require "./history_view"
 require "./repeater_view"
 require "./sitemap_view"
 require "./help_view"
+require "./help_popup_overlay"
 require "./issues_view"
 require "./notes_view"
 require "./project_view"
@@ -2602,6 +2603,55 @@ module Gori::Tui
       # and via leave_overlay so no pop-back lands on top of it.
       ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
+    end
+
+    # Help's cheat-sheet as a popup over the current pane (the help.hotkeys palette entry).
+    # Read-only, so there is no on_commit.
+    #
+    # `@active_tab` is what makes this worth having over `tab.help`: the card opens on the
+    # section for the tab the operator is standing in, so the question they arrived with is
+    # already on screen. The registry goes through so the key column follows a rebind — the
+    # popup renders HelpView's own rows, not a copy of SECTIONS.
+    def open_help_shortcuts : Nil
+      ov = HelpPopupOverlay.shortcuts(@session.registry, @active_tab)
+      # Same ordering rule as open_passthrough: drop this modal BEFORE raising the palette,
+      # and via leave_overlay so no pop-back lands on top of it.
+      ov.on_palette = -> { jump_to_palette }
+      open_overlay(ov)
+    end
+
+    # The QL reference as a popup (the help.query palette entry, and `?` on an empty filter
+    # bar — see each controller's handle_query_key). Opening it from the bar is why nothing
+    # here touches focus: the query branch is gated on `@overlay.none?`, so the bar simply
+    # stops receiving keys while this is up and resumes with its text intact on esc.
+    def open_help_query(surface : Symbol) : Nil
+      ov = help_query_overlay(surface)
+      ov.on_palette = -> { jump_to_palette }
+      open_overlay(ov)
+    end
+
+    # Which field vocabulary the reference teaches. The GRAMMAR is one — every bar parses
+    # through `FilterAst`, so SYNTAX and WORTH KNOWING are shared — but the field list is not,
+    # and a reference that lists fields the bar under it will reject (or defines them the other
+    # way round) is worse than none.
+    #
+    # The mapping lives here because the Runner is the one place that already knows every
+    # surface; `HelpPopupOverlay` stays free of tab-specific requires.
+    private def help_query_overlay(surface : Symbol) : HelpPopupOverlay
+      case surface
+      when :intercept
+        # Nine fields, not eighteen, and four of them mean something else at a hold gate —
+        # `InterceptFilter::FIELD_HELP` is merged over QL's precisely to state that delta.
+        HelpPopupOverlay.query_reference("INTERCEPT CONDITION",
+          HelpView.query_rows(InterceptFilter::FIELDS, InterceptFilter::FIELD_HELP_PROC))
+      when :sitemap
+        # QL plus this surface's own `tag:`, which never reaches the parser (FilterAst.partition
+        # pulls it out first) and so cannot come from QL's table.
+        HelpPopupOverlay.query_reference("SITEMAP FILTER",
+          HelpView.query_rows(["tag"] + QL::FIELDS, SitemapView::QL_HELP))
+      else
+        HelpPopupOverlay.query_reference
+      end
     end
 
     # Open the additional-listener inventory (the `listeners:N` top-bar chip + the

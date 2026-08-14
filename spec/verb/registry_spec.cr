@@ -48,6 +48,14 @@ private class FakeContext < ExecContext
     @calls << :open_listeners
   end
 
+  def open_help_shortcuts : Nil
+    @calls << :open_help_shortcuts
+  end
+
+  def open_help_query(surface : Symbol) : Nil
+    @calls << :open_help_query
+  end
+
   def close_overlay : Nil
     @calls << :close_overlay
   end

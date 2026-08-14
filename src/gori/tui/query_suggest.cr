@@ -182,11 +182,16 @@ module Gori::Tui
     # appended note lands past the operator tail, which is already ~120 columns, so it was
     # permanently truncated on every real terminal — and the shrink below can only protect what it
     # composes itself.
+    # `help_key` advertises the `?`-opens-the-QL-reference affordance (TabController#ql_help_key?).
+    # A flag rather than always-on, because `cold_hint` also dresses the Colormarker rule form's
+    # `when:` band — a plain text field where `?` types a `?`. An unconditional chip would make
+    # this generator advertise a key on a surface that does not have it, which is the exact
+    # failure the hand-written FILTER_HINT/QUERY_HINT pair was replaced for.
     def self.cold_hint(fields : Array(String) = QL::HINT_FIELDS, width : Int32? = nil,
-                       note : String? = nil) : String
+                       note : String? = nil, help_key : Bool = false) : String
       n = {fields.size, HINT_MAX}.min
       loop do
-        line = compose(fields.first(n), note)
+        line = compose(fields.first(n), note, help_key)
         return line if width.nil? || n == 0 || fits?(line, width)
         n -= 1
       end
@@ -197,10 +202,21 @@ module Gori::Tui
     # field-name pool dropped every one of them. Completion cannot teach comparison either — Tab
     # offers names until a `:` is typed — so without this nothing on the bar shows that `status:`
     # takes an operator at all.
-    private def self.compose(fields : Array(String), note : String? = nil) : String
+    private def self.compose(fields : Array(String), note : String? = nil,
+                             help_key : Bool = false) : String
+      # AFTER `-term excludes`, not before it. Leading with the chip read better and was wrong:
+      # it is 16 columns, and `fits?` below protects `-term excludes` by INDEX, so putting
+      # anything ahead of that token pushes it right on every surface at once — measured, it
+      # moved from column 78 to 94 on History, newly cutting it off on any terminal 84-99 wide.
+      # None of the three bars passes `width`, so the shrink loop cannot claw that back either.
+      #
+      # Behind it, every pre-existing token sits exactly where it did, and the new chip takes
+      # its chances with the tail — which is the right trade: a new affordance must not cost an
+      # existing one its place.
+      help = help_key ? "? reference  ·  " : ""
       chips = fields.empty? ? "" : "fields: #{sample(fields)}  ·  "
       tail = note ? "#{note}  ·  " : ""
-      "#{chips}-term excludes  ·  #{tail}OR NOT ( ) group  ·  ~regex  ·  >= < on status size dur"
+      "#{chips}-term excludes  ·  #{help}#{tail}OR NOT ( ) group  ·  ~regex  ·  >= < on status size dur"
     end
 
     # Does the operator that matters survive this width? Not "does the whole line fit" — the tail

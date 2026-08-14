@@ -36,6 +36,11 @@ module Gori::Tui
         Item.new("^D / ^C ×2", "quit gori"),
         Item.new("q", "back to projects (on the tab bar)"),
         Item.new("?", "open this Help tab", "tab.help"),
+        # The same two pages as a popup over whatever you were doing, so looking a key up
+        # does not cost the pane you were in. Both are palette-only; `binding_label` prints
+        # the literal `^P` here for want of a chord, and follows one if either ever gains it.
+        Item.new("^P", "this page as a popup — 'Keyboard shortcuts'", "help.hotkeys"),
+        Item.new("^P", "the Query page as a popup — also `?` on an empty filter bar", "help.query"),
         Item.new("Settings: Hotkeys", "rebind any shortcut below (^P → Settings: Hotkeys)"),
       ]},
       {"TABS & FOCUS", [
@@ -255,20 +260,55 @@ module Gori::Tui
       ]},
     ]
 
+    # Which SECTIONS entry a tab's shortcuts live under. Read by the palette's Shortcuts
+    # popup, which opens scrolled to the section for the tab you were on — the popup exists
+    # for the "I'm here, what can I press" moment, and landing on GLOBAL every time would
+    # make the operator scroll for the answer they came with.
+    #
+    # The six tabs with no section of their own share OTHER TABS, which holds exactly one
+    # row each; :help itself is absent so opening from Help lands at the top (the whole
+    # sheet is already what that tab shows). A spec pins every Chrome::TABS symbol either
+    # here or deliberately out, and pins every title named here against SECTIONS — a typo'd
+    # title would otherwise silently degrade to "open at the top".
+    TAB_SECTION = {
+      :history     => "HISTORY",
+      :repeater    => "REPEATER",
+      :fuzzer      => "FUZZER",
+      :miner       => "MINER",
+      :oast        => "OAST",
+      :sequencer   => "SEQUENCER",
+      :decoder     => "DECODER",
+      :jwt         => "JWT",
+      :comparer    => "COMPARER",
+      :rewriter    => "REWRITER",
+      :colormarker => "COLORMARKER",
+      :target      => "OTHER TABS",
+      :sitemap     => "OTHER TABS",
+      :issues      => "OTHER TABS",
+      :probe       => "OTHER TABS",
+      :notes       => "OTHER TABS",
+      :project     => "OTHER TABS",
+      :intercept   => "OTHER TABS",
+    }
+
     @rows : Array(Row)
     @scroll : Int32 = 0
 
     def initialize(registry : Verb::Registry? = nil)
-      @rows = build_rows(registry)
+      @rows = HelpView.shortcut_rows(registry)
     end
 
     # Rebuild from the live registry (call after a hotkeys save so Help stays honest).
     def reload(registry : Verb::Registry) : Nil
-      @rows = build_rows(registry)
+      @rows = HelpView.shortcut_rows(registry)
       @scroll = 0
     end
 
-    private def build_rows(registry : Verb::Registry?) : Array(Row)
+    # A class method, not an instance one, because the palette's Shortcuts popup renders the
+    # SAME rows without owning a HelpView. Going through here rather than reading SECTIONS is
+    # what keeps the popup honest: the key column is resolved from the live keymap below, so a
+    # rebind (or the ⌥ alias) reaches both surfaces or neither.
+    def self.shortcut_rows(registry : Verb::Registry?) : Array(Row)
       rows = [] of Row
       SECTIONS.each_with_index do |(title, items), si|
         rows << Row.new(:gap, "", "") if si > 0
@@ -304,7 +344,7 @@ module Gori::Tui
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @rows.size
-        draw_row(screen, rect, rect.y + i, @rows[li])
+        HelpView.draw_row(screen, rect, rect.y + i, @rows[li])
       end
     end
 
@@ -312,8 +352,12 @@ module Gori::Tui
     # QL EXPRESSIONS, not key chords: `NOT (host:cdn OR host:img)` is 26 columns where the widest
     # chord label is 20, and truncating an example query to `NOT (host:cdn OR ho…` would teach the
     # syntax wrong. Same two-column row, one page's worth of extra room.
-    private def draw_row(screen : Screen, rect : Rect, y : Int32, row : Row,
-                         key_w : Int32 = KEY_W) : Nil
+    #
+    # A class method for the same reason `shortcut_rows` is: the palette's Shortcuts/Query popup
+    # paints the same two-column row into its card, and one painter is what stops the two
+    # surfaces disagreeing about where the description column starts. It reads no instance state.
+    def self.draw_row(screen : Screen, rect : Rect, y : Int32, row : Row,
+                      key_w : Int32 = KEY_W) : Nil
       case row.kind
       when :head
         screen.text(rect.x + 1, y, row.a, Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
@@ -344,6 +388,11 @@ module Gori::Tui
     # `-term` on the two surfaces most likely to be asked for it.
     QUERY_KEY_W = 28
 
+    # The default field-help lookup. A constant proc rather than an inline closure because
+    # `query_rows`'s default argument would otherwise allocate one per call — the same reason
+    # `InterceptFilter::FIELD_HELP_PROC` exists.
+    QL_FIELD_HELP = ->(f : String) { QL.field_help(f) }
+
     # Its own offset, not `@scroll`: the two pages have different lengths, and sharing one would
     # carry the cheat-sheet's position onto this page — where `at_top?` then answers about the
     # wrong page and ↑ pops focus to the strip in the middle of a scroll.
@@ -364,19 +413,37 @@ module Gori::Tui
       (0...rect.h).each do |i|
         li = @query_scroll + i
         break if li >= rows.size
-        draw_row(screen, rect, rect.y + i, rows[li], QUERY_KEY_W)
+        HelpView.draw_row(screen, rect, rect.y + i, rows[li], QUERY_KEY_W)
       end
     end
 
     # Memoised per instance: the tables are constants, so this is the same list every time, and
     # `render_query` runs on the draw path.
     private def query_rows : Array(Row)
-      @query_rows ||= build_query_rows
+      @query_rows ||= HelpView.query_rows
     end
 
     @query_rows : Array(Row)? = nil
 
-    private def build_query_rows : Array(Row)
+    # Built fresh per call, and deliberately NOT memoised on the class: the callers each hold
+    # their own copy for the lifetime they need it (this view above, the palette popup at open
+    # time), and neither is on a draw path that would notice. A class-level `||=` would be
+    # shared mutable state bought for nothing.
+    #
+    # `fields`/`help` are parameters because the FIELD LIST is per-surface even though the
+    # GRAMMAR is not. Every bar parses through `FilterAst`, so SYNTAX and WORTH KNOWING are the
+    # same everywhere — but the Intercept condition accepts nine of QL's eighteen fields and
+    # deliberately redefines four of them (`InterceptFilter::FIELD_HELP`: `status:` "scopes to
+    # RESPONSES only", `header:` "this leg only", …), and Sitemap adds a `tag:` that never
+    # reaches the parser at all.
+    #
+    # Handing this page QL's tables on those surfaces is precisely the drift `FIELD_HELP`'s own
+    # comment says it was merged-not-copied to prevent — a reference stating the opposite of what
+    # the bar under it will do. Aliases are filtered to targets that survive `fields` for the
+    # same reason: `res.header:` is not "also accepted" where `resp.header:` does not exist.
+    def self.query_rows(fields : Array(String) = QL::FIELDS,
+                        help : Proc(String, String?) = QL_FIELD_HELP,
+                        aliases : Hash(String, String) = QL::FIELD_ALIASES) : Array(Row)
       rows = [] of Row
       rows << Row.new(:head, "SYNTAX", "")
       QL::SYNTAX_HELP.each { |(example, meaning)| rows << Row.new(:item, example, meaning) }
@@ -385,14 +452,17 @@ module Gori::Tui
       # agree about what comes first.
       rows << Row.new(:gap, "", "")
       rows << Row.new(:head, "FIELDS  (: matches, ~ is regex)", "")
-      QL::FIELDS.each do |name|
-        rows << Row.new(:item, "#{name}:", QL::FIELD_HELP[name]? || "")
+      fields.each do |name|
+        rows << Row.new(:item, "#{name}:", help.call(name) || "")
       end
 
-      rows << Row.new(:gap, "", "")
-      rows << Row.new(:head, "ALSO ACCEPTED", "")
-      QL::FIELD_ALIASES.each do |from, to|
-        rows << Row.new(:item, "#{from}:", "= #{to}:")
+      live = aliases.select { |_, to| fields.includes?(to) }
+      unless live.empty?
+        rows << Row.new(:gap, "", "")
+        rows << Row.new(:head, "ALSO ACCEPTED", "")
+        live.each do |from, to|
+          rows << Row.new(:item, "#{from}:", "= #{to}:")
+        end
       end
 
       rows << Row.new(:gap, "", "")

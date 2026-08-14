@@ -34,7 +34,7 @@ module Gori::Tui
     # hold's OPT-IN, and without it no WS message is held however permissive the rest is (#500) —
     # a fact no generator over a field list could know.
     QUERY_HINT = QuerySuggest.cold_hint(InterceptFilter::HINT_FIELDS,
-      note: "proto:ws opts WS messages IN")
+      note: "proto:ws opts WS messages IN", help_key: true)
     # The idle bar, before `/` opens the condition. Same generator as History's and Sitemap's, so
     # the three stop disagreeing about which operators exist.
     IDLE_HINT = QuerySuggest.idle_hint("/ condition", InterceptFilter::HINT_FIELDS)

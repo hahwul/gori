@@ -316,6 +316,25 @@ module Gori
         "tab.help", "Go to Help", "Focus the Help tab (keyboard cheat-sheet)", Verb::Scope::Global,
         [Verb::Chord.new("?")], category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(:help); nil }
 
+      # The same two pages WITHOUT leaving the pane — a popup over whatever is on screen, so
+      # looking a key up costs nothing to undo. Palette-only, and not for want of trying: every
+      # Ctrl+letter a–z is spoken for between the verb chords declared here, the pre-keymap
+      # guards in `Hotkeys::CLAIMED_CTRL_LETTERS` and the terminal-reserved set in
+      # `verb/reserved.cr`, so a chord could only be taken FROM something. A reference page is
+      # not what you spend that on, and the palette is where an operator already goes to ask
+      # "what can I do here".
+      #
+      # The ids carry the search terms the titles cannot. The palette fuzzy-scores
+      # "#{title} #{id}", so `help.hotkeys` is what makes a query of "hotkey" land while the
+      # title says "Keyboard shortcuts" — the two words an operator might reach for are
+      # covered between them.
+      r.register Verb::Definition.new(
+        "help.hotkeys", "Keyboard shortcuts", "Show the keyboard cheat-sheet in a popup (Help's Shortcuts page)",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_help_shortcuts; nil }
+      r.register Verb::Definition.new(
+        "help.query", "Query language reference", "Show the filter/query language reference in a popup (Help's Query page)",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_help_query(:ql); nil }
+
       # Discover is a sub-tab under Target, so it gets its own "Go to" (Target's own jump
       # lands on the last-active sub-tab).
       r.register Verb::Definition.new(

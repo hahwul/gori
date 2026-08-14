@@ -25,6 +25,10 @@ module Gori::Tui
     abstract def goto_tab(tab : Symbol) : Nil         # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Repeater)
     abstract def open_palette : Nil                   # open the command palette overlay
     abstract def open_space_menu : Nil                # open the space action menu (bottom-right)
+    # The QL reference popup. Reached from a filter bar (see `ql_help_key?`), where the
+    # question "what fields are there?" actually occurs — a controller cannot open an
+    # overlay itself, so it asks here.
+    abstract def open_help_query(surface : Symbol) : Nil
     # Open the Fuzzer's payload-set editor overlay (nil = add a new set, else edit that
     # index) / the advanced-settings overlay. The Runner builds them from the current view.
     abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil
@@ -513,6 +517,36 @@ module Gori::Tui
       cur = vis.index(current)
       target = cur ? vis[(cur + dir).clamp(0, vis.size - 1)] : (dir < 0 ? vis.first : vis.last)
       target == current ? nil : target
+    end
+
+    # --- QL filter bar: the "show me the reference" key -----------------------
+    # `?` on an EMPTY query bar opens the QL reference popup instead of typing a `?`.
+    #
+    # `?` and not a Ctrl chord, for three reasons. It is ALREADY the app's help key
+    # (`tab.help`), and every text sub-mode — these three bars included — swallowed it, so
+    # this makes an existing gesture stop being dead in the one place people go looking for
+    # QL syntax. It costs no `Hotkeys::CLAIMED_CTRL_LETTERS` entry and cannot shadow a
+    # rebind. And the alternatives lose: there is no free Ctrl+letter to take — every a–z is
+    # claimed between the verb chords, `Hotkeys::CLAIMED_CTRL_LETTERS` and `verb/reserved.cr`
+    # — `Ctrl+Space` collides with the Hangul/IME toggle this bar has preedit handling for,
+    # and F1 is inexpressible as a `Verb::Chord` (`NAMED_KEYS` has no function keys), so it
+    # could never be advertised or rebound.
+    #
+    # EMPTY buffer only, not "after whitespace": `?id=` is a plausible free-text search on a
+    # proxy, and a key whose trigger state the operator cannot see is worse than one that
+    # only fires from a visibly empty bar. The single query this displaces is a bare leading
+    # `?`, which compiles to free text (`LIKE '%?%'` over method/host/target) — "every flow
+    # with a query string", which nobody types deliberately. `path:?` and `url:?` are
+    # untouched.
+    #
+    # Shared here rather than written into the three `handle_query_key`s, which are otherwise
+    # byte-for-byte parallel: a predicate in one place is a class that cannot be half-fixed.
+    # A CLASS method so a spec can drive it without a Host — controllers need the Runner, which
+    # needs a live tty, so an instance-level predicate would be reachable only through the TUI.
+    def self.ql_help_key?(ev : Termisu::Event::Key, query : String) : Bool
+      return false unless query.empty?
+      return false if ev.ctrl? || ev.alt?
+      (ev.char || ev.key.to_char) == '?'
     end
 
     # --- filter bar rendering (shared by every opt-in tab's render_body) ---

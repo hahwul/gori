@@ -52,6 +52,12 @@ module Gori
       # state (which hosts actually got bypassed), not the rule list settings:network edits.
       abstract def open_passthrough : Nil
       abstract def open_listeners : Nil
+      # Help's two reference pages as a popup over the current pane, rather than a jump to the
+      # Help tab. The distinction is the whole point: `tab.help` costs the pane you were in,
+      # and the moment you want a key looked up is the moment you cannot afford that.
+      abstract def open_help_shortcuts : Nil
+      # `surface` picks the field vocabulary: :ql (the palette entry), :sitemap, :intercept.
+      abstract def open_help_query(surface : Symbol) : Nil
       abstract def close_overlay : Nil
 
       # Emergency full repaint: redraw every cell (a full sync, not a diff). Recovers from

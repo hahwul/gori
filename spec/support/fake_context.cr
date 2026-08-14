@@ -70,6 +70,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:open_listeners)
   end
 
+  def open_help_shortcuts : Nil
+    rec(:open_help_shortcuts)
+  end
+
+  def open_help_query(surface : Symbol) : Nil
+    rec(:open_help_query)
+  end
+
   def close_overlay : Nil
     rec(:close_overlay)
   end

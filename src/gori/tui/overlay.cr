@@ -38,6 +38,9 @@ module Gori::Tui
     Hosts
     Env
     Hotkeys
+    # Help's cheat-sheet / QL reference as a popup over the current pane (HelpPopupOverlay).
+    # ONE member for both pages: they never coexist, and an overlay's `title` is per instance.
+    Help
     Notifications
     Passthrough
     Listeners

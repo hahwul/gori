@@ -268,10 +268,12 @@ module Gori::Tui
       ic = @host.session.interceptor
       return true if query_nav(key)
       case
-      when key.enter?     then query_enter(ic)
-      when key.escape?    then query_escape(ic)
-      when key.tab?       then ic.set_filter(@intercept.query) if @intercept.query_complete
+      when key.enter?  then query_enter(ic)
+      when key.escape? then query_escape(ic)
+      when key.tab?    then ic.set_filter(@intercept.query) if @intercept.query_complete
       when key.backspace? then @intercept.query_backspace; ic.set_filter(@intercept.query)
+      # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
+      when TabController.ql_help_key?(ev, @intercept.query) then @host.open_help_query(:intercept)
       else
         if c && !ev.ctrl? && !ev.alt?
           @intercept.query_insert(c)

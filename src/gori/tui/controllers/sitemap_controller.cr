@@ -143,10 +143,12 @@ module Gori::Tui
       store = @host.session.store
       return true if query_nav(key)
       case
-      when key.enter?     then query_enter
-      when key.escape?    then query_escape(store)
-      when key.tab?       then (@sitemap.query_complete; schedule_query_reload)
+      when key.enter?  then query_enter
+      when key.escape? then query_escape(store)
+      when key.tab?    then (@sitemap.query_complete; schedule_query_reload)
       when key.backspace? then @sitemap.query_backspace; schedule_query_reload
+      # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
+      when TabController.ql_help_key?(ev, @sitemap.query) then @host.open_help_query(:sitemap)
       else
         if c && !ev.ctrl? && !ev.alt?
           @sitemap.query_insert(c)
