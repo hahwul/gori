@@ -4025,6 +4025,31 @@ describe "MCP host overrides" do
       edited["ip"].as_s.should eq "10.0.0.1"
     end
   end
+
+  # A fully-qualified argument is the spelling that separates `OverrideHost.key` from a plain
+  # `downcase`, and every answer this tool gives is looked up by the key it thinks was stored.
+  # Reading it the other way put BOTH answers back to the shapes their own comments say were
+  # bugs: `{"id": null}` on success, and the deterministic duplicate reported as retryable.
+  it "answers a fully-qualified host by the key it actually stores" do
+    with_store do |store|
+      tools = tools_for(store)
+      added = ok_json(tools, "add_host_override", %({"host":"api.test.","ip":"10.0.0.1"}))
+      added["id"].as_i64?.should_not be_nil # not the id-less "success" #414 left behind
+      added["host"].as_s.should eq "api.test"
+
+      dup = tools.call("add_host_override", JSON.parse(%({"host":"api.test.","ip":"10.0.0.2"})))
+      dup.error_code.should eq "INVALID_ARGUMENT"
+      dup.retryable.should be_false
+
+      other = ok_json(tools, "add_host_override", %({"host":"b.test","ip":"127.0.0.2"}))
+      clash = tools.call("update_host_override", JSON.parse(%({"id":#{other["id"]},"host":"api.test.","ip":"127.0.0.3"})))
+      clash.error_code.should eq "INVALID_ARGUMENT"
+      clash.retryable.should be_false
+
+      renamed = ok_json(tools, "update_host_override", %({"id":#{other["id"]},"host":"c.test.","ip":"127.0.0.4"}))
+      renamed["host"].as_s.should eq "c.test" # echoes the stored key, not the typed spelling
+    end
+  end
 end
 
 describe "MCP agent event feed" do

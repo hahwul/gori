@@ -59,8 +59,19 @@ module Gori
       new(store, load_entries(store))
     end
 
+    # Folded on READ, not just on write, because the `Entry#host` invariant has to hold for
+    # rows that predate it. Every writer now stores `OverrideHost.key`, but a row written
+    # before this — "legacy.test." — would otherwise sit in the list in a form no lookup can
+    # produce: dead for both spellings of the request, AND invisible to `add`'s dedupe, so
+    # adding "legacy.test" would succeed and leave two rows for one host, one of them dead.
+    #
+    # A migration would rewrite the column instead, and is not worth it: `host` is UNIQUE, so
+    # a db holding BOTH "x." and "x" cannot be folded in place without picking one to drop —
+    # a decision an UPDATE has no business making on an operator's routing table. Folding here
+    # leaves both rows visible in the pane; the first by id answers `connect_address`, and
+    # editing either one rewrites it to the key form for good.
     protected def self.load_entries(store : Store) : Array(Entry)
-      store.host_overrides.map { |(id, host, ip)| Entry.new(id, host, ip) }
+      store.host_overrides.map { |(id, host, ip)| Entry.new(id, OverrideHost.key(host), ip) }
     end
 
     # Entry count (chrome chip) — read on the TUI fiber, the only writer.

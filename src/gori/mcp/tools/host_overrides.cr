@@ -26,7 +26,12 @@ module Gori
         return err("missing required 'ip'", "INVALID_ARGUMENT", field: "ip") if ip.nil? || ip.empty?
         return err("invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
         ov = HostOverrides.load(store)
-        normalized = host.strip.downcase
+        # `OverrideHost.key`, not `downcase` — it is the form `add` will STORE, so a lookup that
+        # spelled it any other way would miss the row it just wrote. A fully-qualified argument
+        # ("api.test.") is the case that separates them, and missing here costs both answers
+        # below: the duplicate would come back as retryable PROJECT_BUSY (the #414 loop the
+        # comment right under this exists to prevent) and a success would report `"id": null`.
+        normalized = Gori::OverrideHost.key(host)
         # The DUPLICATE question is deterministic and can never succeed on retry, so answer it
         # here as a non-retryable INVALID_ARGUMENT — reporting it as retryable PROJECT_BUSY made
         # an agent that trusts `retryable` loop forever (the #414 shape, fixed there in
@@ -46,7 +51,7 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", entry.try(&.id)
-            j.field "host", host.strip.downcase
+            j.field "host", normalized
             j.field "ip", ip
           end
         end)
@@ -63,14 +68,16 @@ module Gori
         return err("invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
         # Split the two causes HostOverrides#update collapses into one `false`: a collision with
         # ANOTHER entry is deterministic (never retry), a rolled-back store write is transient.
-        normalized = host.strip.downcase
+        # `OverrideHost.key` for the same reason as `add` above — `update` dedupes on the folded
+        # host, so a check spelled any other way hands the deterministic case to `busy`.
+        normalized = Gori::OverrideHost.key(host)
         if ov.entries.any? { |e| e.id != id && e.host == normalized }
           return err("another host override already covers '#{normalized}'", "INVALID_ARGUMENT", field: "host")
         end
         unless ov.update(id, host, ip)
           return busy("host override NOT updated (store busy or unwritable); it is unchanged")
         end
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "host", host.strip.downcase; j.field "ip", ip } })
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "host", normalized; j.field "ip", ip } })
       end
 
       private def delete_host_override(h) : Result

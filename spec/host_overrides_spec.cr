@@ -53,6 +53,21 @@ describe Gori::HostOverrides do
     end
   end
 
+  # Rows written BEFORE the key form existed still have to resolve. The store is written
+  # directly here, which is the only way to produce one now that every writer folds.
+  it "folds a row that predates the key form, rather than leaving it dead in the list" do
+    with_store do |store|
+      store.add_host_override("Legacy.test.", "10.0.0.1")
+      ov = Gori::HostOverrides.load(store)
+      ov.entries.first.host.should eq("legacy.test")
+      ov.connect_address("legacy.test").should eq("10.0.0.1")
+      ov.connect_address("legacy.test.").should eq("10.0.0.1")
+      # …and `add`'s dedupe sees it, so the old row cannot be shadowed by a live duplicate.
+      ov.add("legacy.test", "10.0.0.2").should be_false
+      ov.size.should eq(1)
+    end
+  end
+
   it "rejects an invalid pair (bad IP, blank host)" do
     with_store do |store|
       ov = Gori::HostOverrides.load(store)

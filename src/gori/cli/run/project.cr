@@ -996,11 +996,15 @@ module Gori
             abort "gori run project host-override add: override NOT added (duplicate host, empty, " \
                   "invalid, or the store was busy/unwritable); nothing was created"
           end
-          entry = ov.entries.find { |e| e.host == h.strip.downcase }
-          if e = entry
+          # `OverrideHost.key` is the form `add` stored, so this is the lookup that finds it.
+          # `downcase` alone missed a fully-qualified `--host=api.test.` and dropped this to
+          # the id-less fallback below — the id being the operator's only handle for a later
+          # `update`/`delete`, and the echoed name one the table does not contain.
+          key = OverrideHost.key(h)
+          if e = ov.entries.find { |x| x.host == key }
             puts "Host override ##{e.id} added: #{e.ip} → #{e.host}"
           else
-            puts "Host override added: #{i} → #{h.strip.downcase}"
+            puts "Host override added: #{i} → #{key}"
           end
         ensure
           store.close
@@ -1047,7 +1051,7 @@ module Gori
             store.close
             abort "gori run project host-override update: failed (duplicate host, empty, or invalid)"
           end
-          puts "Host override ##{id} updated: #{i} → #{h.strip.downcase}"
+          puts "Host override ##{id} updated: #{i} → #{OverrideHost.key(h)}" # the stored form, not the typed one
         ensure
           store.close
         end
