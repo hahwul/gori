@@ -656,6 +656,13 @@ module Gori::Tui
              @scope.add(kind, match_type, pattern)
            end
       return :failed unless ok
+      # Land the highlight on the rule that was just written, the way the HOST OVERRIDES and
+      # ENV add rows already do (`ov_commit`, `env_commit`). `scope_rules` is ORDER BY id, so
+      # an ADD always appends: without this the selection stayed where it was and, on a list
+      # taller than the card, the new rule was drawn off-screen — no sign the write landed.
+      if edit_id.nil?
+        @sel = @scope.rules.index { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern } || @sel
+      end
       clamp_sel
       :ok
     end

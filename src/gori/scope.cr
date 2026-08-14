@@ -304,6 +304,22 @@ module Gori
       @mutex.synchronize { set_sandbox_unlocked(false) }
     end
 
+    # The `host` column with a SURROUNDING bracket pair peeled — the SQL twin of
+    # `HostPattern.bare`, which `Rule#host_match?` applies to the flow host before matching.
+    # host_cond peeled the PATTERN only, and this file's comment claimed both; a flow captured
+    # as `[::1]` was therefore in scope at every live gate (intercept hold, sandbox, Probe
+    # allowlist, the Sitemap marker) while the History/Sitemap SQL lens hid it — and no host
+    # rule could reach it, since a `[::1]` pattern is bared to `::1` on the way in too. That
+    # host shape is not exotic: `resolve_forward` puts a plain-HTTP forward-proxy request's
+    # absolute-form target through `URI#host`, which hands back IPv6 literals BRACKETED, and
+    # FlowMapper stores it verbatim.
+    #
+    # Spelled as the pair test rather than `trim(host, '[]')` so it peels exactly what
+    # `HostPattern.bare` peels: a half-bracketed oddity like `[::1` keeps its bracket on both
+    # sides of the parity, instead of the two disagreeing again in the other direction.
+    HOST_BARE = "(CASE WHEN substr(host, 1, 1) = '[' AND substr(host, -1) = ']' " \
+                "THEN substr(host, 2, length(host) - 2) ELSE host END)"
+
     # A SQL filter selecting in-scope flows (QL::EMPTY when inactive). The URL the
     # string/regex rules see is `scheme || '://' || host || target` — the same value
     # `in_scope_url?` builds in memory. Combined Burp-style:
@@ -348,7 +364,7 @@ module Gori
     # the answer is simply to look: present ⇒ stored.
     def add(kind : String, match_type : String, pattern : String) : Bool
       pattern = pattern.strip
-      return false if pattern.empty? || !Scope.valid?(match_type, pattern)
+      return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
       @mutex.synchronize do
         return false if @rules.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
         @store.add_scope_rule(kind, match_type, pattern)
@@ -361,7 +377,7 @@ module Gori
     # no-op self-edit is allowed. Returns false on empty/invalid/duplicate.
     def update(id : Int64, kind : String, match_type : String, pattern : String) : Bool
       pattern = pattern.strip
-      return false if pattern.empty? || !Scope.valid?(match_type, pattern)
+      return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
       @mutex.synchronize do
         return false if @rules.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
         # The store's answer, not an unconditional `true`. `update_scope_rule` is `exec_task_ok`
@@ -440,6 +456,14 @@ module Gori
     # add`, the History add-host quick-action) — gate on Scope.valid?, defined below in
     # terms of this, so a rejection here keeps a dead rule out of the store regardless of
     # which entry point created it.
+    # `kind` is validated by `add`/`update` against KINDS rather than here, since this
+    # function answers about the (match_type, pattern) pair its callers show the operator. A
+    # stored `"Include"` would be neither `include?` nor `exclude?`: counted by `size` and
+    # drawn in the SCOPE card, but read as ZERO includes by `matches_url_unlocked?`, which
+    # then passes everything. Every write path checks KINDS itself today (MCP, `gori run
+    # project scope add`/`update`, and the TUI overlay, which can only index into KINDS), so
+    # the guard closes no live hole — same argument, and same next-caller guarantee, as the
+    # match_type `else` arm below.
     #   match_type — must be one of TYPES. This case had no `else`, so any other string fell
     #           through to nil and `valid?` said yes: `Scope#add` stored it, and `Rule#matches?`
     #           (whose own `case` DOES end in `else false`) then never matched it. A typo'd
@@ -557,6 +581,42 @@ module Gori
       HostPattern.bare(host)
     end
 
+    # True when `host_cond`'s NATIVE SQL spelling provably means the same thing as
+    # `HostPattern::Compiled`. Three things part them, and the PATTERN is what this predicate
+    # reads to decide which of the three can arise:
+    #
+    #   · non-ASCII — SQLite's built-in `lower()` folds ASCII only while Crystal's
+    #     `String#downcase` folds all of Unicode, so a rule `äcme.test` matched a captured
+    #     `ÄCME.test` in the live gate and nothing in History.
+    #   · `{a,b}` — Crystal's `File.match?` reads brace alternation; SQLite's GLOB reads the
+    #     braces literally. An include `*.acme.{test,dev}` matched three hosts live and none
+    #     in History, and an exclude with braces carved out nothing in SQL — fail-OPEN on the
+    #     display lens, the direction that matters.
+    #   · a SURROUNDING bracket pair — `HostPattern::Compiled` peels it for the exact/subdomain
+    #     arm (`@bare`) but globs against the UN-peeled `@down`, so `[2001:db8::*]` is a rule
+    #     that matches NOTHING in Crystal (`File.match?` reads the outer `[…]` as a character
+    #     class). host_cond peels first, so its GLOB would match every host under
+    #     `2001:db8::` — a dead INCLUDE listing its flows as in-scope in History while
+    #     `allowlisted_unlocked?` refuses every request, i.e. Sandbox black-holes the proxy
+    #     with `include_count` non-zero and the "blocks everything" warning quiet. Gated on
+    #     the bracket pair alone rather than "bracketed AND globbed": which of Compiled's two
+    #     arms applies is exactly the thing not worth restating here.
+    #
+    # Anything else routes through `gori_host_match`, which IS HostPattern — so the fast path
+    # stays native (host matching runs per row of every scope-filtered reload) and the shapes
+    # it cannot spell have no second dialect at all. `?`, a non-surrounding `[…]` and an
+    # unbalanced `[` were checked and agree between the two engines; `/ \ ? # @` and whitespace
+    # can't reach a stored host pattern anyway (validation_error).
+    #
+    # The bound this trades for that fast path: the folding case can in principle be triggered
+    # from the HOST side too, by a non-ASCII character whose Unicode lowercase IS ASCII (U+212A
+    # KELVIN SIGN folds to `k`) sitting in a column an ASCII pattern reads. Deciding that per
+    # ROW means the UDF on every row of every reload, for a host no DNS resolver would answer.
+    def self.sql_native_host?(pattern : String) : Bool
+      pattern.ascii_only? && !pattern.includes?('{') && !pattern.includes?('}') &&
+        bare_host(pattern) == pattern
+    end
+
     # The pattern with its :PORT stripped AND surrounding brackets peeled, for the
     # rejection message (only called when a port is present). "[::1]:9091" → "::1";
     # "127.0.0.1:9091" → "127.0.0.1". The bare form is the one host matching stores/compares,
@@ -619,9 +679,15 @@ module Gori
       when "host"
         host_cond(rule.pattern)
       when "string"
-        # Case-insensitive substring of the URL; QL.like neutralises % / _ so a literal
-        # %/_ in the pattern matches literally (paired with ESCAPE '\').
-        {"lower(#{QL::URL_EXPR}) LIKE ? ESCAPE '\\'", [QL.like(rule.pattern)] of DB::Any}
+        # Case-insensitive substring of the URL, through the SAME `downcase.includes?`
+        # Rule#matches? runs (Store::ScopeMatch). The native spelling was
+        # `lower(URL_EXPR) LIKE ?`, and SQLite's built-in `lower()` folds ASCII ONLY: a
+        # rule `/über` matched a captured `/Über` in the live gate and nothing in History,
+        # breaking the branch-for-branch parity this file's header promises. Nothing is
+        # lost by going through the function: `URL_EXPR` concatenates a fresh string per
+        # row for the old `lower(…) LIKE` to fold and scan, so there was no index to give
+        # up — and a literal % / _ in the pattern now needs no LIKE escaping at all.
+        {"gori_ci_contains(#{QL::URL_EXPR}, ?)", [rule.pattern] of DB::Any}
       when "regex"
         # Case-SENSITIVE (no lower()) to match Rule#matches? + the shard's REGEXP.
         {"#{QL::URL_EXPR} REGEXP ?", [rule.pattern] of DB::Any}
@@ -631,17 +697,21 @@ module Gori
     end
 
     private def host_cond(pattern : String) : {String, Array(DB::Any)}
+      # A pattern the native spelling below cannot express faithfully is matched by the very
+      # object Rule#host_match? uses (Store::ScopeMatch), so the two can't drift.
+      return {"gori_host_match(host, ?)", [pattern] of DB::Any} unless Scope.sql_native_host?(pattern)
       # Peel brackets so a "[::1]" rule compares against the bare "::1" the host column
       # stores — matches Rule#host_match?'s @pattern_host normalization (keeps SQL parity).
       pattern = Scope.bare_host(pattern)
       if pattern.includes?('*')
-        {"lower(host) GLOB ?", [pattern.downcase] of DB::Any}
+        {"lower(#{HOST_BARE}) GLOB ?", [pattern.downcase] of DB::Any}
       else
         d = pattern.downcase
         # The subdomain arm splices the host into a LIKE pattern, so its % / _ must be
         # escaped (keeping the literal leading `%.`) or a host like `a_b.test` would
         # match `aXb.test` in SQL but not in Rule#host_match? — breaking parity.
-        {"(lower(host) = ? OR lower(host) LIKE ? ESCAPE '\\')", [d, "%.#{QL.like_escape(d)}"] of DB::Any}
+        {"(lower(#{HOST_BARE}) = ? OR lower(#{HOST_BARE}) LIKE ? ESCAPE '\\')",
+         [d, "%.#{QL.like_escape(d)}"] of DB::Any}
       end
     end
   end

@@ -272,6 +272,157 @@ describe Gori::Scope do
     end
   end
 
+  # `Rule#host_match?` peels a surrounding bracket pair off the FLOW HOST as well as off the
+  # pattern; `host_cond` peeled the pattern only. A plain-HTTP forward-proxy request to an
+  # IPv6 literal is captured with host `[::1]` (resolve_forward → URI#host, stored verbatim by
+  # FlowMapper), so it was in scope at EVERY live gate while the SQL lens hid it — and there
+  # was no pattern that could reach it, since `[::1]` is bared to `::1` on the way in too.
+  it "SQL filter reaches a BRACKETED IPv6 flow host, like every live gate does" do
+    with_store do |store|
+      capture(store, "[::1]", "/admin")
+      capture(store, "::1", "/admin") # the bare form the CONNECT/tunnel path stores
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "::1")
+      scope.enable
+
+      store.search(scope.filter, 50).map(&.host).sort.should eq(["::1", "[::1]"])
+      scope.in_scope_url?(url_of("http", "[::1]", "/admin"), "[::1]").should be_true
+      # …and a BRACKETED pattern reaches both spellings too (it is bared on the way in).
+      scope2 = Gori::Scope.load(store)
+      scope2.rules.each { |r| scope2.remove(r.id) }
+      scope2.add("include", "host", "[::1]")
+      scope2.enable
+      store.search(scope2.filter, 50).map(&.host).sort.should eq(["::1", "[::1]"])
+    end
+  end
+
+  # A half-bracketed oddity must peel the same on both sides — the reason HOST_BARE is the
+  # pair test and not `trim(host, '[]')`, which would have peeled one and left the other.
+  it "peels a bracket pair the way HostPattern.bare does, not one bracket at a time" do
+    with_store do |store|
+      capture(store, "[::1", "/x")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "::1")
+      scope.enable
+      store.search(scope.filter, 50).map(&.host).should be_empty
+      scope.in_scope_url?(url_of("http", "[::1", "/x"), "[::1").should be_false
+    end
+  end
+
+  # `HostPattern::Compiled` peels a surrounding bracket pair for its exact/subdomain arm but
+  # globs against the UN-peeled pattern, so `[2001:db8::*]` matches NOTHING in Crystal (the
+  # outer `[…]` is read as a character class). A host_cond that peels first would GLOB
+  # `2001:db8::*` and match every host under it: a dead INCLUDE whose flows are listed as
+  # in-scope while the Sandbox refuses every request with include_count non-zero — the
+  # "blocks everything" warning stays quiet because a rule IS configured.
+  it "SQL filter agrees with in_scope_url? on a BRACKETED host glob (a rule that matches nothing)" do
+    with_store do |store|
+      flows = [{"2001:db8::2", "/x"}, {"[2001:db8::1]", "/x"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      Gori::Scope.valid?("host", "[2001:db8::*]").should be_true # it IS storable
+      scope.add("include", "host", "[2001:db8::*]")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql.should eq(mem)
+      mem.should be_empty
+    end
+  end
+
+  # Crystal's `File.match?` reads `{a,b}` as brace alternation; SQLite's GLOB reads the braces
+  # literally. The include direction hid three matching hosts from History; the EXCLUDE
+  # direction was worse — it carved out nothing in SQL, so out-of-scope hosts stayed listed.
+  it "SQL filter agrees with in_scope_url? on a brace-alternation host glob" do
+    with_store do |store|
+      flows = [{"api.acme.test", "/x"}, {"api.acme.dev", "/x"}, {"api.acme.org", "/x"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "*.acme.{test,dev}")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql.should eq(mem)
+      mem.should eq(["api.acme.dev", "api.acme.test"])
+    end
+  end
+
+  it "SQL filter agrees with in_scope_url? on a brace-alternation host EXCLUDE" do
+    with_store do |store|
+      flows = [{"api.acme.test", "/x"}, {"secret.corp.test", "/x"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "test")
+      scope.add("exclude", "host", "*.{corp,internal}.test")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql.should eq(mem)
+      mem.should eq(["api.acme.test"]) # the exclude carves out in SQL too, not just in memory
+    end
+  end
+
+  # SQLite's built-in `lower()` folds ASCII only; Crystal's `String#downcase` folds all of
+  # Unicode. Both rule kinds that case-fold were affected.
+  it "SQL filter agrees with in_scope_url? on a non-ASCII string rule" do
+    with_store do |store|
+      capture(store, "acme.test", "/Über")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "/über")
+      scope.enable
+      store.search(scope.filter, 50).map(&.target).should eq(["/Über"])
+      scope.in_scope_url?(url_of("http", "acme.test", "/Über"), "acme.test").should be_true
+    end
+  end
+
+  it "SQL filter agrees with in_scope_url? on a non-ASCII host rule" do
+    with_store do |store|
+      capture(store, "ÄCME.test", "/x")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "äcme.test")
+      scope.enable
+      store.search(scope.filter, 50).map(&.host).should eq(["ÄCME.test"])
+      scope.in_scope_url?(url_of("http", "ÄCME.test", "/x"), "ÄCME.test").should be_true
+    end
+  end
+
+  # The string arm no longer builds a LIKE pattern, so the % / _ literalness it used to get
+  # from QL.like has to come from the substring match itself.
+  it "keeps % and _ literal in a string rule now that it matches by substring" do
+    with_store do |store|
+      capture(store, "x.test", "/a%b")
+      capture(store, "x.test", "/axxb")
+      capture(store, "x.test", "/a_b")
+      capture(store, "x.test", "/aYb")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "/a%b")
+      scope.add("include", "string", "/a_b")
+      scope.enable
+      store.search(scope.filter, 50).map(&.target).sort.should eq(["/a%b", "/a_b"])
+    end
+  end
+
+  it "refuses a rule whose kind is neither include nor exclude" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      # Neither include? nor exclude?: it would be counted by `size` and drawn in the SCOPE
+      # card while matches_url_unlocked? read ZERO includes and passed everything.
+      scope.add("Include", "host", "acme.test").should be_false
+      scope.rules.should be_empty
+      scope.add("include", "host", "acme.test").should be_true
+      id = scope.rules.first.id
+      scope.update(id, "EXCLUDE", "host", "acme.test").should be_false
+      scope.rules.first.kind.should eq("include")
+    end
+  end
+
   it "SQL filter agrees with in_scope_url? when an EXCLUDE rule was stored before the INCLUDE" do
     # #filter emits placeholders include-first, exclude-second, but used to bind values in
     # rule-id order. Add the exclude first and the two orders diverge: the include's `?`
