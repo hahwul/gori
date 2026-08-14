@@ -7,7 +7,10 @@ require "./text_area"
 require "./input_mode"
 require "./text_read_state"
 require "./gutter"
+require "./traffic_empty_state"
 require "../project"
+require "../project_registry"
+require "../paths"
 require "../store"
 require "../scope"
 require "../probe"
@@ -36,6 +39,14 @@ module Gori::Tui
     @status_counts : Array({Int32?, Int64})
     @sev_tally : StaticArray(Int64, 5)
     @desc_area : TextArea
+    # Registry sidecar facts, nil off the canonical registry db (see `overview_groups`).
+    @proj_id : String?
+    @workspace : String?
+    @last_activity : Time?
+    @probe_count : Int32
+    # Live capture state. NOT snapshotted by `reload`: capture starts and stops while this tab
+    # sits open, so the controller re-supplies it on every render instead.
+    @capturing : Bool
 
     # The body shows ONE card at a time, picked by the shell's sub-tab strip (@focus ==
     # :subtabs owns ←/→; the card underneath is only focused once you drop in with ↓/↵).
@@ -52,6 +63,11 @@ module Gori::Tui
       @created = nil
       @status_counts = [] of {Int32?, Int64}
       @sev_tally = StaticArray(Int64, 5).new(0_i64)
+      @proj_id = nil
+      @workspace = nil
+      @last_activity = nil
+      @probe_count = 0
+      @capturing = false
       @desc_area = TextArea.new
       # Soft wrap, like every other reading surface in the tree. A description is prose typed
       # as one logical line per paragraph, so the `follow_x` sideways pan this used to carry
@@ -109,10 +125,14 @@ module Gori::Tui
       @probe_tech = scoped_tech(store.probe_tech_rows)
       @db_size = project.db_size
       @total_captured = store.total_size
+      @last_activity = project.last_modified
       # AT A GLANCE aggregates: traffic status mix + Issues severity (human-confirmed
-      # `issues` table only — Probe hits stay on the Probe tab, not here).
+      # `issues` table only — Probe hits stay on the Probe tab, not here). That still holds for
+      # the CHART; the OVERVIEW band beside it does carry a Probe *count* — see `issues_value`.
       @status_counts = store.flow_status_counts
       @sev_tally = store.issues_severity_counts
+      @probe_count = store.count_probe_issues
+      load_registry_facts(project)
       earliest = store.earliest_created_at
       # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — decoder
       # to seconds for Time.unix, like History's fmt_time does. (Passing micros makes
@@ -137,6 +157,39 @@ module Gori::Tui
       # exactly the case `env_commit`'s bound check can no longer catch: an index that is stale
       # but still IN RANGE writes the wrong row and then persists the whole array.
       reload_env_vars
+    end
+
+    # The registry's sidecar facts about this project: its short id and the workspace it is
+    # bound to. Two small `File.read`s, which is why they can ride `reload`.
+    #
+    # Only for a REGISTRY project. A `Project` built from an explicit `--db PATH` borrows an
+    # arbitrary parent directory, so the `.id`/`.workspace` probes there would read sidecars
+    # describing whatever ELSE lives in that directory.
+    # `Project#canonical?` is the same discriminator the sidecar paths themselves use, so the
+    # two cannot drift.
+    private def load_registry_facts(project : Project) : Nil
+      unless registry_project?(project)
+        @proj_id = @workspace = nil
+        return
+      end
+      reg = ProjectRegistry.new(Paths.projects_dir)
+      @proj_id = reg.id_of(project)
+      @workspace = reg.workspace_of(project)
+    rescue
+      # A sidecar that vanished or is unreadable costs two rows, never the tab.
+      @proj_id = @workspace = nil
+    end
+
+    # Whether this project's directory is one the REGISTRY owns.
+    #
+    # `Project#canonical?` alone is not that test: it only asks whether the file is named
+    # `gori.db`, so `--db ~/backup/api/gori.db` passes it and would read that directory's
+    # `.id`/`.workspace` — printing an id that `ProjectRegistry#find` resolves to a DIFFERENT
+    # project. That is the same "a confidently wrong identifier is worse than none" this guard
+    # exists for, one level out. So require both: the canonical filename AND a parent that is
+    # the projects root.
+    private def registry_project?(project : Project) : Bool
+      project.canonical? && File.dirname(project.dir) == Paths.projects_dir
     end
 
     # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
@@ -344,17 +397,44 @@ module Gori::Tui
 
     # --- geometry (ONE source of truth so render + every hit-test stay in lockstep) ---
 
-    # Height of the top OVERVIEW band (capped to ~2/5 of the body, 3..11 rows).
+    # Hard ceiling on the OVERVIEW band, so a tall terminal spends the surplus on the CARD
+    # below rather than on ever-taller label columns.
+    OVERVIEW_CAP = 11
+    # Inner width the band needs before its rows deal into TWO columns. Measured on the width
+    # OVERVIEW actually RECEIVED (i.e. after `viz_width` takes its slice), never negotiated
+    # with the viz pane — this reads what it got, so the two cannot fight over the same cells.
+    OVERVIEW_2COL_MIN_W = 64
+
+    # Inner rows the band has to spend, before deciding what to spend them on.
+    private def overview_budget(rect : Rect) : Int32
+      { {rect.h * 2 // 5, 3}.max, OVERVIEW_CAP }.min - 2
+    end
+
+    # Width OVERVIEW is left with once the AT A GLANCE pane takes its slice — the same split
+    # `render` performs, expressed once so the layout decision below cannot disagree with it.
+    private def overview_inner_w(rect : Rect) : Int32
+      vw = viz_width(rect.w)
+      {(vw > 0 ? rect.w - vw - 1 : rect.w) - 2, 0}.max
+    end
+
+    # Height of the top OVERVIEW band. Content-driven with a cap: a band that folds its rows
+    # (see `overview_plan`) needs fewer of them, and every row it gives back goes to the card
+    # underneath. Still a PURE function of `rect`, which is what keeps it the single source of
+    # truth `strip_rect` / `active_card` / `strip_chip_at` / `pane_at` all route through.
     private def overview_h(rect : Rect) : Int32
-      {11, {rect.h * 2 // 5, 3}.max}.min
+      plan = overview_plan(rect)
+      {plan.rows + (plan.signpost ? 1 : 0) + 2, overview_budget(rect) + 2, OVERVIEW_CAP}.min
     end
 
     # Width carved off the RIGHT of the OVERVIEW band for the AT A GLANCE viz pane, or 0
     # to hide it (so OVERVIEW keeps its full width on a narrow terminal). Mirrors the
     # Fuzzer DIST sidebar's dist_width gating.
     VIZ_MIN_TOTAL = 64 # below this band width, no room to split without cramping OVERVIEW
-    VIZ_MAX_W     = 30
-    VIZ_MIN_W     = 24
+    # The bars fill `inner.w` (see `render_bar_row`), so this cap is the only thing that was
+    # stopping them growing on a wide terminal. The 32% proportion below still governs, so
+    # OVERVIEW keeps the larger share and only a genuinely wide band reaches this ceiling.
+    VIZ_MAX_W = 36
+    VIZ_MIN_W = 24
 
     private def viz_width(w : Int32) : Int32
       return 0 if w < VIZ_MIN_TOTAL
@@ -1081,13 +1161,22 @@ module Gori::Tui
     # focus (the card lights gold); `strip_focused` = the strip does (the chips light instead)
     # — the two are mutually exclusive tiers of the shell's focus ring, so a focused strip
     # must leave the card below at rest.
-    def render(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false) : Nil
+    def render(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false,
+               capturing : Bool = false) : Nil
       return if rect.empty?
+      # Read per frame, never cached in `reload`: capture toggles while this tab sits open, and
+      # a stale "capturing" on the address an operator is about to point a client at is a lie.
+      @capturing = capturing
       oh = overview_h(rect)
       band = Rect.new(rect.x, rect.y, rect.w, oh)
       vw = viz_width(band.w)
       ov_rect = vw > 0 ? Rect.new(band.x, band.y, band.w - vw - 1, band.h) : band
-      render_overview(screen, ov_rect)
+      # The plan is derived from the BODY rect (the one `overview_h` sized the band from) and
+      # handed down, not recomputed from the band: `render_overview` receives the band, whose
+      # height is the ANSWER to the plan, so planning again from it decides a second, smaller
+      # tier and paints one line into a nine-row box. Same draw/measure divergence `frame.cr`
+      # documents for badges — one decision, passed along, is the only safe shape.
+      render_overview(screen, ov_rect, overview_plan(rect))
       render_analytics(screen, Rect.new(band.right - vw, band.y, vw, band.h)) if vw > 0
       return unless card = active_card(rect)
       @strip_start = Chrome.render_tab_strip(screen, strip_rect(rect), PANE_LABELS, pane_index, strip_focused, @strip_start)
@@ -1100,42 +1189,296 @@ module Gori::Tui
       end
     end
 
-    private def render_overview(screen : Screen, rect : Rect) : Nil
+    # One OVERVIEW row: its label, its value, an optional value colour (nil = Theme.text), and
+    # whether the value truncates from the LEFT. Paths do: the tail names the project, and
+    # `Screen#fit`'s right-side ellipsis is precisely the half that identifies it.
+    private record OvRow, label : String, value : String, fg : Color? = nil, elide : Bool = false
+
+    # A semantic group of rows plus the ONE line it folds to when the band cannot afford them
+    # individually. Same contract as `render_severity` → `render_severity_tally` right below:
+    # a group that does not fit gets SMALLER, it never disappears. That distinction is the
+    # whole point — the retired tiling layout dropped a whole pane below a height threshold
+    # (see `active_card`), and a fact vanishing with no trace is the defect, not the fix.
+    private record OvGroup, rows : Array(OvRow), folded : String
+
+    # How hard the band is folding, and the exact inner row count that costs. `render_overview`
+    # paints precisely `rows` rows, so no fact is ever left to a `break` to discard.
+    private record OvPlan, level : Symbol, rows : Int32, two_col : Bool, signpost : Bool
+
+    # The band's layout decision, made ONCE and read by both `overview_h` (which sizes the
+    # band, and through it everything below) and `render_overview` (which paints it).
+    #
+    # Four fold levels, largest that fits wins:
+    #   :expanded — every group prints its own label:value rows (2 columns when wide enough)
+    #   :compact  — every group prints its folded one-liner            (one row per group)
+    #   :paired   — the three highest-priority groups, folded (see `ov_paired_lines`)
+    #   :single   — identity + the counts, budgeted to the width (see `ov_single_line`)
+    #
+    # `:expanded` and `:compact` carry every group; the two below them do not, and drop by an
+    # explicit priority order rather than by whatever row the band ran out on.
+    private def overview_plan(rect : Rect) : OvPlan
+      signpost = @flow_count == 0
+      avail = overview_budget(rect) - (signpost ? 1 : 0)
+      two_col = overview_inner_w(rect) >= OVERVIEW_2COL_MIN_W
+      # Both branches go through the SAME height functions the renderers use, so the band can
+      # never be sized for one arrangement and painted with another.
+      expanded = two_col ? ov_two_col_rows : overview_row_count
+      return OvPlan.new(:expanded, expanded, two_col, signpost) if avail >= expanded
+      return OvPlan.new(:compact, OV_GROUPS, false, signpost) if avail >= OV_GROUPS
+      return OvPlan.new(:paired, 3, false, signpost) if avail >= 3
+      OvPlan.new(:single, 1, false, signpost)
+    end
+
+    # `overview_groups` count, fixed: identity, proxy, volume, provenance, tech.
+    OV_GROUPS = 5
+
+    private def overview_row_count : Int32
+      ov_group_sizes.sum + 1 # + the full-width Tech row
+    end
+
+    # Row counts of every group but Tech, which always spans.
+    #
+    # DERIVED from `overview_groups`, deliberately, rather than restated as a literal
+    # `[ident, 1, 4, 2]`. That literal was a second definition of the band's shape running
+    # beside the real one: they agreed on the day they were written, and the day they stopped
+    # agreeing the band would be sized SHORT and `draw_ov_column`'s bounds `break` would resume
+    # silently dropping rows — the precise defect this whole arrangement exists to remove,
+    # reintroduced through a parallel-definition seam. Same trap as the Scope SQL/in-memory
+    # pair. Building the groups costs a handful of small strings and is not on a hot path
+    # (the TUI repaints on demand, and hit-tests are mouse-rate).
+    private def ov_group_sizes : Array(Int32)
+      overview_groups[0..-2].map(&.rows.size)
+    end
+
+    # How many LEADING groups go in the left column. Splitting on a group boundary rather than
+    # a flat row index is what keeps a group whole: a mid-group cut left "Flows" alone at the
+    # foot of one column with Captured/Issues/DB Size in the other, reading as two unrelated
+    # lists. Greedy on the running height, which is optimal for this fixed set of sizes.
+    private def ov_split_at(sizes : Array(Int32)) : Int32
+      half = (sizes.sum + 1) // 2
+      run = 0
+      sizes.each_with_index do |n, i|
+        return i if i > 0 && run + n > half
+        run += n
+      end
+      sizes.size
+    end
+
+    # Rows the two-column arrangement occupies: the taller column, plus Tech's own row.
+    private def ov_two_col_rows : Int32
+      sizes = ov_group_sizes
+      at = ov_split_at(sizes)
+      {sizes[0, at].sum, sizes[at..].sum}.max + 1
+    end
+
+    # The groups, in display order. Ordered so the first row of the band is still the project
+    # name, as it has always been.
+    private def overview_groups : Array(OvGroup)
+      # Deliberately built even with no project yet (the state before the first `reload`). The
+      # band's SHAPE has to be constant or `overview_h` shrinks on the first frame and everything
+      # below it jumps a row when the values arrive; only the VALUES are allowed to be unknown.
+      p = @project
+      id = @proj_id
+      ws = @workspace
+      ident = [OvRow.new("Name", p.try(&.name) || "—"),
+               OvRow.new("Path", p.try(&.dir) || "—", elide: true)]
+      # Registry sidecar facts. A `--db PATH` project borrows an arbitrary parent directory, so
+      # these would describe whatever ELSE lives there — a confidently wrong identifier is worse
+      # than none, so `reload` leaves them nil off the registry and the rows aren't offered.
+      ident << OvRow.new("ID", id) if id
+      ident << OvRow.new("Workspace", ws, elide: true) if ws
+      [
+        OvGroup.new(ident, fold_identity),
+        OvGroup.new([OvRow.new("Proxy", proxy_value, proxy_color)], proxy_value),
+        OvGroup.new([
+          OvRow.new("Flows", @flow_count.to_s),
+          OvRow.new("Captured", human_size(@total_captured)),
+          OvRow.new("Issues", issues_value),
+          OvRow.new("DB Size", human_size(@db_size)),
+        ], fold_volume),
+        OvGroup.new([
+          OvRow.new("Created", created_value),
+          OvRow.new("Activity", activity_value),
+        ], fold_provenance),
+        OvGroup.new([OvRow.new("Technologies", tech_value)], "tech #{tech_value}"),
+      ]
+    end
+
+    # A folded line has no label column, so it has to read as a sentence on its own — which is
+    # why the unit words are here and not only in the `label:value` rows.
+    private def fold_volume : String
+      flows = @flow_count == 1 ? "1 flow" : "#{Fmt.count(@flow_count)} flows"
+      "#{flows} · #{human_size(@total_captured)} · #{issues_value} issues"
+    end
+
+    private def fold_identity : String
+      p = @project
+      parts = [p.try(&.name) || "—"]
+      @proj_id.try { |id| parts << id }
+      parts << "ephemeral" if p && p.ephemeral?
+      parts.join(" · ")
+    end
+
+    private def fold_provenance : String
+      c = (t = @created) ? "created #{Fmt.ago(t)} ago" : "created —"
+      (a = @last_activity) ? "#{c} · active #{Fmt.ago(a)} ago" : c
+    end
+
+    # The address an operator points a client at, plus whether the proxy is actually on it.
+    # Mirrors the top bar's listen chip (`Chrome.listen_chip`) so the two never disagree.
+    private def proxy_value : String
+      addr = BindAddress.display(Settings.effective_bind_host, Settings.effective_bind_port)
+      "#{addr} #{@capturing ? "● capturing" : "‖ paused"}"
+    end
+
+    private def proxy_color : Color
+      @capturing ? Theme.green : Theme.muted
+    end
+
+    # Human-confirmed issues, with unreviewed Probe hits alongside. `reload`'s comment keeps
+    # Probe OUT of the AT A GLANCE severity chart on purpose, and that still holds — this is a
+    # COUNT, not a severity breakdown, and "how much is waiting to be triaged" is a question
+    # the project's own home page should answer. The chart beside it is still `issues` only.
+    private def issues_value : String
+      @probe_count > 0 ? "#{@issues_count} · probe #{@probe_count}" : @issues_count.to_s
+    end
+
+    private def activity_value : String
+      (t = @last_activity) ? "#{Fmt.ago(t)} ago" : "—"
+    end
+
+    private def created_value : String
+      c = @created
+      return "—" unless c
+      "#{format_time(c)} (#{Fmt.ago(c)} ago)"
+    end
+
+    private def tech_value : String
+      @probe_tech.empty? ? "—" : @probe_tech.join(", ")
+    end
+
+    private def render_overview(screen : Screen, rect : Rect, plan : OvPlan) : Nil
       return if rect.h < 2 || rect.w < 2
       Frame.card(screen, rect, nil, bg: Theme.bg, border: Theme.border)
       p = @project
       return unless p
       inner = rect.inset(1, 1)
-      vx = inner.x + 1 + 14
-      vw = {inner.right - vx, 0}.max
+      return if inner.h <= 0 || inner.w <= 0
       y = inner.y
-      max_y = inner.bottom - 1
 
       # First run (no flows yet): a one-line signpost on how to start, since the empty
-      # History/Sitemap tabs don't say. The proxy address lives in the status bar /
-      # settings, so it isn't repeated here.
-      if @flow_count == 0 && y <= max_y
+      # History/Sitemap tabs don't say. Costs a row, and `overview_plan` already charged it.
+      if plan.signpost
         screen.text(inner.x + 1, y,
           Hotkeys.retag("▸ first run — point your client at the proxy · ^P: Open browser · Export CA certificate"),
           Theme.muted, width: {inner.right - inner.x - 1, 0}.max)
         y += 1
       end
 
-      lines = [
-        {"Name", p.name},
-        {"Created", format_time(@created)},
-        {"DB Path", p.dir},
-        {"DB Size", human_size(@db_size)},
-        {"Flows", @flow_count.to_s},
-        {"Captured", human_size(@total_captured)},
-        {"Issues", @issues_count.to_s},
-        {"Technologies", @probe_tech.empty? ? "—" : @probe_tech.join(", ")},
-      ]
-      lines.each do |(label, value)|
-        break if y > max_y
-        screen.text(inner.x + 1, y, label + ":", Theme.text_bright)
-        screen.text(vx, y, value, Theme.text, width: vw) if vw > 0
-        y += 1
+      groups = overview_groups
+      case plan.level
+      when :expanded then plan.two_col ? draw_ov_two_col(screen, inner, y, groups) : draw_ov_rows(screen, inner, y, groups)
+      when :compact  then draw_ov_lines(screen, inner, y, groups.map(&.folded))
+      when :paired   then draw_ov_lines(screen, inner, y, ov_paired_lines(groups))
+      else                draw_ov_lines(screen, inner, y, [ov_single_line(screen, groups, ov_line_w(inner))])
+      end
+    end
+
+    # `:paired` — three rows. The two tiers below `:compact` are the only ones that do not carry
+    # every group, and they drop by an EXPLICIT priority order rather than leaving it to a
+    # `break` at whatever row the band happened to end on (which is the defect this whole
+    # arrangement replaces). Same discipline as History's column cluster, which sheds
+    # TYPE/SIZE/DUR right-to-left once HOST+PATH have their reserved width.
+    #
+    # Deliberately NOT concatenated: joining two folded lines produced a string longer than a
+    # one-column band, so `width:` ellipsized it and the second half vanished anyway — a
+    # lossless-looking fold that lost more than an honest drop would.
+    private def ov_paired_lines(groups : Array(OvGroup)) : Array(String)
+      # identity, volume, proxy — who this is, what it holds, where it listens.
+      [groups[0], groups[2], groups[1]].map(&.folded)
+    end
+
+    # `:single` — one row, built against the width it has to fit in.
+    #
+    # The counts are short and bounded; the project NAME is neither. Concatenating them and
+    # letting `width:` ellipsize the result means a long name pushes the numbers off the end,
+    # leaving a line that looks complete and answers nothing. So the name is what absorbs the
+    # squeeze: it is reserved LAST and elided to the room left over, and it is also the one fact
+    # still readable from the tab title and the project picker.
+    private def ov_single_line(screen : Screen, groups : Array(OvGroup), w : Int32) : String
+      vol = groups[2].folded
+      name = groups[0].folded
+      room = w - Screen.display_width(vol) - 3 # " · "
+      return vol if room < 4
+      # `screen.fit` rather than a local right-elide: it is the house truncation primitive and
+      # already walks graphemes with a bounded scan.
+      "#{screen.fit(name, room)} · #{vol}"
+    end
+
+    # One label:value column, `x0` for the labels and `label_w` reserving the value column.
+    private def draw_ov_column(screen : Screen, inner : Rect, y0 : Int32, rows : Array(OvRow),
+                               x0 : Int32, label_w : Int32, right : Int32) : Nil
+      vx = x0 + label_w
+      vw = {right - vx, 0}.max
+      rows.each_with_index do |row, i|
+        y = y0 + i
+        break if y >= inner.bottom
+        screen.text(x0, y, row.label + ":", Theme.text_bright, width: {label_w - 1, 0}.max)
+        next unless vw > 0
+        value = row.elide ? elide_left(row.value, vw) : row.value
+        screen.text(vx, y, value, row.fg || Theme.text, width: vw)
+      end
+    end
+
+    # Drop leading GRAPHEMES until the value fits, marking the cut with a leading ellipsis —
+    # the mirror of `Screen#fit`, which is why it walks graphemes rather than chars: macOS
+    # stores filenames NFD, so a directory named `café` is `e` + U+0301 and a cut between them
+    # would orphan the combining mark onto the ellipsis. Measured in DISPLAY COLUMNS too, so a
+    # path with a CJK component cannot paint through the column it was budgeted for.
+    private def elide_left(s : String, w : Int32) : String
+      return s if w <= 1 || Screen.display_width(s) <= w
+      gs = s.each_grapheme.map(&.to_s).to_a
+      width = gs.sum { |g| Screen.grapheme_cols(g) }
+      while !gs.empty? && width > w - 1
+        width -= Screen.grapheme_cols(gs.shift)
+      end
+      "…#{gs.join}"
+    end
+
+    OV_LABEL_W = 14 # value column starts past the widest label ("Technologies")
+
+    private def draw_ov_rows(screen : Screen, inner : Rect, y0 : Int32, groups : Array(OvGroup)) : Nil
+      draw_ov_column(screen, inner, y0, groups.flat_map(&.rows), inner.x + 1, OV_LABEL_W, inner.right)
+    end
+
+    # Two columns of label:value, with the last row (Technologies) spanning the full width —
+    # it is the longest and most variable value, so a half-width cell truncates it first.
+    private def draw_ov_two_col(screen : Screen, inner : Rect, y0 : Int32, groups : Array(OvGroup)) : Nil
+      body = groups[0..-2] # every group but Tech, which spans below both columns
+      at = ov_split_at(body.map(&.rows.size))
+      left = body[0, at].flat_map(&.rows)
+      right = body[at..].flat_map(&.rows)
+      col_w = {(inner.w - 2) // 2, 1}.max
+      draw_ov_column(screen, inner, y0, left, inner.x + 1, OV_LABEL_W, inner.x + 1 + col_w)
+      draw_ov_column(screen, inner, y0, right, inner.x + 1 + col_w + 1, OV_LABEL_W, inner.right)
+      # Tech sits under the TALLER column — the same height `ov_two_col_rows` charged the band.
+      draw_ov_column(screen, inner, y0 + {left.size, right.size}.max, groups.last.rows,
+        inner.x + 1, OV_LABEL_W, inner.right)
+    end
+
+    # Width one folded line gets. ONE expression, so a line built against a budget (see
+    # `ov_single_line`) and the `width:` that finally clips it cannot disagree.
+    private def ov_line_w(inner : Rect) : Int32
+      {inner.right - inner.x - 1, 0}.max
+    end
+
+    # Folded group lines, one per row. Muted like every other collapsed tally in the tree.
+    private def draw_ov_lines(screen : Screen, inner : Rect, y0 : Int32, lines : Array(String)) : Nil
+      w = ov_line_w(inner)
+      lines.each_with_index do |line, i|
+        y = y0 + i
+        break if y >= inner.bottom
+        screen.text(inner.x + 1, y, line, i == 0 ? Theme.text_bright : Theme.text, width: w)
       end
     end
 
@@ -1474,9 +1817,26 @@ module Gori::Tui
       # target on a border with nothing on it. Focus is carried by the border colour above.
       Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 14, desc_insert_mode?)
       inner = rect.inset(1, 1)
+      # Nothing written yet: the shared onboarding card instead of the void an empty TextArea
+      # paints. Not in INSERT — the operator came here to type, and a "no description yet"
+      # sitting under the caret reads as text they just deleted.
+      #
+      # `paint_desc_read_chrome` is gated on the SAME condition, not merely on focus: on an
+      # empty buffer its only ink is one caret cell at the interior top-left, which would sit
+      # on the card as a stray inverted block.
+      if desc_empty_state?
+        TrafficEmptyState.render(screen, inner, variant: :project_desc)
+        return
+      end
       @desc_area.render(screen, inner, cursor: ins,
         highlight: Settings.editor_markdown ? :markdown : nil, gauge: true, gauge_focused: focused)
       paint_desc_read_chrome(screen, inner, focused && !ins)
+    end
+
+    # THE one predicate for "draw the onboarding card, not the editor" — both the card and the
+    # suppressed read-chrome read it, so the two cannot disagree about which is showing.
+    private def desc_empty_state? : Bool
+      @desc_area.text.empty? && !desc_insert_mode?
     end
 
     # The shared over-paint — see `TextReadState#paint_chrome`, which carries the reasoning

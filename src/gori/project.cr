@@ -53,7 +53,23 @@ module Gori
     # can only weaken: a third sidecar, or a change to what counts as canonical, would have to be
     # applied everywhere for it to hold.
     private def sidecar_path(legacy : String, suffix : String) : String
-      File.basename(@db_path) == DB_FILE ? legacy : "#{@db_path}#{suffix}"
+      canonical? ? legacy : "#{@db_path}#{suffix}"
+    end
+
+    # Whether this database carries the CANONICAL registry filename (`gori.db`), as opposed to
+    # an arbitrary `--db PATH` file that merely borrows a parent directory.
+    #
+    # NOT the same question as "is this a registry project": a `--db` aimed at some other
+    # project's own `gori.db` (a backup, a copy under another root) answers true here while its
+    # directory is not one the registry owns. Anything reading the registry's `.id` /
+    # `.workspace` sidecars must ALSO check the parent against `Paths.projects_dir` — see
+    # `ProjectView#registry_project?`, which is exactly that pairing.
+    #
+    # Extracted from `sidecar_path` rather than copied at the new call site, because the rule
+    # above insists the two sidecars agree about it. One predicate, so a change to what counts
+    # as canonical lands everywhere at once.
+    def canonical? : Bool
+      File.basename(@db_path) == DB_FILE
     end
 
     # A one-line, operator-readable reason this project's store would not open, for a

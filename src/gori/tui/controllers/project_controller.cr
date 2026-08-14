@@ -134,7 +134,8 @@ module Gori::Tui
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       # Self-frames its OVERVIEW band, the sub-tab strip, and the active card.
-      @project_view.render(screen, rect, focused: focus == :body, strip_focused: focus == :subtabs)
+      @project_view.render(screen, rect, focused: focus == :body, strip_focused: focus == :subtabs,
+        capturing: @host.session.capturing?)
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool

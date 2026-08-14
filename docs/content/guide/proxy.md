@@ -411,6 +411,14 @@ A bypassed host leaves no flow anywhere, so the top bar grows a yellow `bypass:N
 
 The **Project** home tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.
 
+The overview band carries the project's own facts: name, directory, its registry short id and
+bound workspace, the proxy address with whether capture is live, flow and byte counts, confirmed
+issues (with unreviewed Probe hits alongside), database size, when it was created and last
+touched, and the technologies Probe fingerprinted. It lays those out in two columns on a wide
+terminal and folds them into one summary line per group on a short one, so a narrow window loses
+detail rather than whole facts.
+
+
 <figure class="tui-shot">
   <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
   <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>

@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./brand"
 require "../bind_address"
 require "../settings"
 
@@ -84,16 +85,22 @@ module Gori::Tui
       when :probe          then scan_on ? 6 + (capturing ? 0 : 1) + 2 : 4
       when :issues         then 5 + 2
       when :notes          then 5 + 1
+      when :project_desc   then 5 + 1
       else                      0 # unknown variant — render_full draws nothing, as before
       end
     end
 
+    # Variants whose card centres in the WHOLE rect, with no headline row riding above it.
+    # Both are editor panes reached by a sub-tab that already names them on its chip, so a
+    # headline would repeat the label the operator just clicked.
+    CENTERED = {:notes, :project_desc}
+
     # Rows the full card needs inside `rect`: its interior plus two borders, plus the headline
-    # row that rides above it for every variant except Notes (which centres in the whole rect).
+    # row that rides above it for every variant except the CENTERED ones.
     private def full_rows(variant : Symbol, *, capturing : Bool, catch_on : Bool,
                           running : Bool, scan_on : Bool) : Int32
       full_inner_h(variant, capturing: capturing, catch_on: catch_on,
-        running: running, scan_on: scan_on) + 2 + (variant == :notes ? 0 : 1)
+        running: running, scan_on: scan_on) + 2 + (CENTERED.includes?(variant) ? 0 : 1)
     end
 
     private def default_title(variant : Symbol, *, running : Bool, scan_on : Bool) : String
@@ -107,6 +114,7 @@ module Gori::Tui
       when :probe          then scan_on ? "no issues yet" : "scanning is OFF"
       when :issues         then "no issues yet"
       when :notes          then "empty note"
+      when :project_desc   then "no description yet"
       else                      "nothing here yet"
       end
     end
@@ -124,6 +132,7 @@ module Gori::Tui
       when :probe          then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
       when :issues         then render_issues_full(screen, rect, headline)
       when :notes          then render_notes_full(screen, rect)
+      when :project_desc   then render_project_desc_full(screen, rect)
       end
     end
 
@@ -149,6 +158,8 @@ module Gori::Tui
                 medium_issues(headline)
               when :notes
                 medium_notes(headline)
+              when :project_desc
+                medium_project_desc(headline)
               else
                 [headline]
               end
@@ -177,6 +188,8 @@ module Gori::Tui
                "⇧F from History · n create"
              when :notes
                "^N new note · start typing"
+             when :project_desc
+               "i/↵ describe this engagement · ^E $EDITOR"
              else
                headline
              end
@@ -395,6 +408,48 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ^W ", "close current note", bullet: "▸ ")
     end
 
+    # The Project tab's DESCRIPTION sub-tab with nothing written yet. Sibling cards on that
+    # tab all name their own emptiness ("no scope rules — press a to add"); this one used to
+    # render as pure void, which is why it exists.
+    private def render_project_desc_full(screen : Screen, rect : Rect) : Nil
+      inner_h = full_inner_h(:project_desc)
+      card_h = inner_h + 2
+      card_w = {rect.w - 4, 46}.min.clamp(FULL_MIN_W, rect.w)
+
+      # The brand mark is OPPORTUNISTIC: it rides above the card only when the pane has room
+      # for both, and the two centre as ONE block so the pair never drifts apart. `render`'s
+      # height gate promises room for the card alone (`full_rows`), so the art can never be
+      # what overflows — it is added inside an already-granted full tier or not at all.
+      art = art_fits?(rect, card_h)
+      block_h = art ? Brand::ART_H + 1 + card_h : card_h
+      y = rect.y + {(rect.h - block_h) // 2, 0}.max
+      if art
+        Brand.draw_art(screen, Brand.art_origin_x(rect.x, rect.w), y)
+        y += Brand::ART_H + 1
+      end
+
+      card = Rect.new(rect.x + {(rect.w - card_w) // 2, 0}.max, y, card_w, card_h)
+      Frame.card(screen, card, "PROJECT", bg: Theme.bg, border: Theme.border)
+      inner = card.inset(1, 1)
+      ix = inner.x + 1
+      iw = {inner.w - 2, 1}.max
+      y = inner.y
+
+      screen.text(ix, y, "Target, scope, credentials, rules.", Theme.text, Theme.bg, width: iw)
+      y += 2
+      screen.text(ix, y, "the first thing you read on re-entry", Theme.muted, Theme.bg, width: iw)
+      y += 2
+      y = draw_chord_hint(screen, ix, y, iw, " i/↵ ", "start writing", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^E ", "open in $EDITOR", bullet: "▸ ")
+    end
+
+    # Whether the brand mark seats above a `card_h`-tall card: its own 11 rows plus a spacer,
+    # and enough width for the figure. `ART_MIN_W` is DERIVED from the art (brand.cr), so a
+    # redraw of the mark keeps this gate honest instead of silently outgrowing it.
+    private def art_fits?(rect : Rect, card_h : Int32) : Bool
+      rect.h >= Brand::ART_H + 1 + card_h && rect.w >= Brand::ART_MIN_W + 4
+    end
+
     private def medium_history(headline, addr, capturing) : Array(String)
       lines = [headline, "──► proxy #{addr} ──► flows"]
       lines << "capture is OFF — press c to start" unless capturing
@@ -442,6 +497,10 @@ module Gori::Tui
 
     private def medium_notes(headline) : Array(String)
       [headline, "scratchpad for this project", "^N new note · ^W close"]
+    end
+
+    private def medium_project_desc(headline) : Array(String)
+      [headline, "target · scope · credentials · rules", "i/↵ edit · ^E $EDITOR"]
     end
 
     private def draw_medium_lines(screen : Screen, rect : Rect, lines : Array(String)) : Nil
