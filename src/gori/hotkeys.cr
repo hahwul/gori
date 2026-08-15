@@ -198,6 +198,13 @@ module Gori
     # of them, and it can be deleted wholesale if the guards ever move into the keymap.
     def self.retag(s : String) : String
       return s unless alias_active?
+      # PCRE2 raises `ArgumentError: Regex match error: UTF-8 error` on a subject that is
+      # not valid UTF-8, and this funnel takes ARBITRARY display text — including status
+      # toasts interpolating captured wire bytes (a flow's host/method, built by
+      # `String.new(bytes)` without a scrub). The raise would land inside `render`, and a
+      # toast persists across frames, so it re-raises every tick until the tick-error
+      # breaker exits the session. A malformed string has no claimed caret to rewrite.
+      return s unless s.valid_encoding?
       s.gsub(CLAIMED_CARET_RE) { "⌥#{$1}" }
     end
 

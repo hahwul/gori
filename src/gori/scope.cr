@@ -88,7 +88,14 @@ module Gori
           r = @regex
           return false unless r
           begin
-            r.matches?(url)
+            # `.scrub` the SUBJECT, not just rescue it. PCRE2 raises `ArgumentError` on a
+            # non-UTF-8 subject, and `request_target` does not scrub what came off the wire,
+            # so a request whose target carries a raw byte >= 0x80 used to take the rescue
+            # below — reporting "no match". On an EXCLUDE rule "no match" means NOT excluded,
+            # i.e. the gate fails OPEN, and a peer can dodge a regex exclude by planting one
+            # invalid byte in the target. Scrubbing evaluates the rule as written instead.
+            # The rescue stays as defense-in-depth for anything else PCRE2 refuses.
+            r.matches?(url.scrub)
           rescue
             false
           end
@@ -118,7 +125,25 @@ module Gori
       # filter/active?) while the TUI fiber mutates them (add/remove/update/toggle).
       # Guard every cross-fiber access with a mutex — only the TUI mutates, so its own
       # render reads are race-free, but proxy reads vs TUI writes need the lock.
+      #
+      # Guards those fields ONLY, and every critical section it has is a field read or a
+      # pointer swap. The store round-trips that used to sit inside it do not: `exec_task`
+      # parks the calling fiber on its reply channel, and with `busy_timeout=5000` a PEER
+      # process holding the write lock parks it for up to five seconds. `sandbox_blocks?` /
+      # `sandbox_blocks_host?` / `in_scope_url?` / `may_match_host?` take this same mutex on
+      # every proxied request, so holding it across a write stalled every dial, intercept
+      # gate and sandbox decision in the process for as long as the peer held the lock —
+      # and `reload`, which the TUI's data_version poll and headless capture's reload fiber
+      # call on a timer, did three store reads inside it. `HostOverrides` measured and fixed
+      # exactly this; `Scope` is the sibling that had the same shape.
       @mutex = Mutex.new
+      # Serialises WRITERS through this instance, so the dedupe-then-write-then-verify
+      # sequences below stay atomic against each other now that they no longer hold
+      # @mutex for their duration. Same scope as `HostOverrides#@write_mutex`: it covers
+      # this object, not the table — MCP and the CLI each load a `Scope` of their own, and
+      # are answered the way a peer PROCESS is (the UNIQUE triple plus the post-write
+      # verify), which is the case that has to work regardless.
+      @write_mutex = Mutex.new
     end
 
     def self.load(store : Store) : Scope
@@ -293,15 +318,15 @@ module Gori
     # merely "does not survive restart": the next `reload` re-reads the PERSISTED value and
     # silently reverts the gate a surface has already reported as on.
     def toggle_sandbox : Bool
-      @mutex.synchronize { set_sandbox_unlocked(!@sandbox) }
+      @write_mutex.synchronize { set_sandbox(!@mutex.synchronize { @sandbox }) }
     end
 
     def enable_sandbox : Bool
-      @mutex.synchronize { set_sandbox_unlocked(true) }
+      @write_mutex.synchronize { set_sandbox(true) }
     end
 
     def disable_sandbox : Bool
-      @mutex.synchronize { set_sandbox_unlocked(false) }
+      @write_mutex.synchronize { set_sandbox(false) }
     end
 
     # The `host` column with a SURROUNDING bracket pair peeled — the SQL twin of
@@ -365,11 +390,11 @@ module Gori
     def add(kind : String, match_type : String, pattern : String) : Bool
       pattern = pattern.strip
       return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
-      @mutex.synchronize do
-        return false if @rules.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+      @write_mutex.synchronize do
+        return false if rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
         @store.add_scope_rule(kind, match_type, pattern)
-        reload_rules_unlocked
-        @rules.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        reload_rules
+        rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
       end
     end
 
@@ -378,8 +403,8 @@ module Gori
     def update(id : Int64, kind : String, match_type : String, pattern : String) : Bool
       pattern = pattern.strip
       return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
-      @mutex.synchronize do
-        return false if @rules.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+      @write_mutex.synchronize do
+        return false if rules_snapshot.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
         # The store's answer, not an unconditional `true`. `update_scope_rule` is `exec_task_ok`
         # and has always reported whether the UPDATE committed; `remove` below returns it, and
         # `HostOverrides#update` next door returns it with the note "false also when the store
@@ -396,7 +421,7 @@ module Gori
         # then violates the table's UNIQUE triple and rolls back. That is the reachable path,
         # and it is the one that used to report success.
         committed = @store.update_scope_rule(id, kind, match_type, pattern)
-        reload_rules_unlocked
+        reload_rules
         committed
       end
     end
@@ -411,25 +436,25 @@ module Gori
     # flag, and the CLI re-read the reloaded rule list. One dropped return value, three
     # treatments — so it is returned here instead.
     def remove(id : Int64) : Bool
-      @mutex.synchronize do
+      @write_mutex.synchronize do
         ok = @store.remove_scope_rule(id)
-        reload_rules_unlocked
+        reload_rules
         ok
       end
     end
 
     def toggle : Nil
-      @mutex.synchronize { set_enabled_unlocked(!@enabled) }
+      @write_mutex.synchronize { set_enabled(!@mutex.synchronize { @enabled }) }
     end
 
     # Returns whether the persisted enabled flag committed (false = store busy/locked).
     def enable : Bool
-      @mutex.synchronize { set_enabled_unlocked(true) }
+      @write_mutex.synchronize { set_enabled(true) }
     end
 
     # Returns whether the persisted enabled flag committed (false = store busy/locked).
     def disable : Bool
-      @mutex.synchronize { set_enabled_unlocked(false) }
+      @write_mutex.synchronize { set_enabled(false) }
     end
 
     # Re-read rules + the enabled/sandbox flags from the store after an EXTERNAL change —
@@ -441,10 +466,17 @@ module Gori
     # reload fiber (App#spawn_reload_loop), the same two call sites Rules#reload already
     # has.
     def reload : Nil
+      # All three store reads run OUTSIDE @mutex, then swap together — this is called on a
+      # TIMER (the TUI data_version poll, headless capture's reload fiber), so doing them
+      # under the hot-path lock stalled every proxied request on each tick for as long as
+      # the store took to answer.
+      fresh = Scope.load_rules(@store)
+      enabled = @store.setting(SETTING_ENABLED) == "1"
+      sandbox = @store.setting(SETTING_SANDBOX) == "1"
       @mutex.synchronize do
-        reload_rules_unlocked
-        @enabled = @store.setting(SETTING_ENABLED) == "1"
-        @sandbox = @store.setting(SETTING_SANDBOX) == "1"
+        @rules = fresh
+        @enabled = enabled
+        @sandbox = sandbox
       end
     end
 
@@ -640,17 +672,30 @@ module Gori
     # Re-read the rules from the store after every mutation so in-memory == DB
     # (authoritative ids + UNIQUE dedup reflected). exec_task is synchronous, so the
     # just-written row is committed and visible to this pool read.
-    private def reload_rules_unlocked : Nil
-      @rules = Scope.load_rules(@store)
+    # The rule list as the hot path sees it. Read under @mutex; the array is rebuilt rather
+    # than edited in place, so a concurrent matcher reads either the whole old list or the
+    # whole new one.
+    private def rules_snapshot : Array(Rule)
+      @mutex.synchronize { @rules }
     end
 
-    private def set_enabled_unlocked(value : Bool) : Bool
-      @enabled = value
+    # Re-read the rules and swap them in. The SELECT runs OUTSIDE @mutex — see the
+    # constructor — and only the pointer swap is guarded.
+    private def reload_rules : Nil
+      fresh = Scope.load_rules(@store)
+      @mutex.synchronize { @rules = fresh }
+    end
+
+    # Flag writers: the in-memory field is swapped under @mutex (the hot path reads it
+    # there), and the persisting write runs outside it. Callers hold @write_mutex, which is
+    # what keeps a concurrent toggle from interleaving between the read and the write.
+    private def set_enabled(value : Bool) : Bool
+      @mutex.synchronize { @enabled = value }
       @store.set_setting(SETTING_ENABLED, value ? "1" : "0")
     end
 
-    private def set_sandbox_unlocked(value : Bool) : Bool
-      @sandbox = value
+    private def set_sandbox(value : Bool) : Bool
+      @mutex.synchronize { @sandbox = value }
       @store.set_setting(SETTING_SANDBOX, value ? "1" : "0")
     end
 

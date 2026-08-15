@@ -266,42 +266,14 @@ module Gori::Tui
       decoded.empty? ? ["(paste or send a JWT into INPUT to decode)"] : decoded.split('\n')
     end
 
+    # The shared over-paint — see `TextReadState#paint_chrome`, which carries the reasoning
+    # (including the `sync_from` this pane's own copy omitted: `^L` clears the INPUT buffer
+    # without resetting the read cursor, so a caret parked on line >= 1 then indexed off the
+    # end of the one-line snapshot and took the render down every tick until the tick-error
+    # breaker exited the session). Routing here also makes the band wrap-correct, by
+    # inverting the row list the editor actually drew instead of assuming `li - scroll`.
     private def paint_read_chrome(screen : Screen, rect : Rect, ed : TextArea, read : TextReadState) : Nil
-      lines = ed.lines_snapshot
-      return if lines.empty?
-      scr = ed.scroll
-      read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        paint_span_bg(screen, rect.x, rect.y + (li - scr), lines[li], x0, x1)
-      end
-      cy, cx = read.cursor.cy, read.cursor.cx
-      return unless cy >= scr && cy < scr + rect.h
-      line = lines[cy]
-      px = rect.x + Screen.draw_width(line[0, cx.clamp(0, line.size)])
-      return if px >= rect.x + rect.w
-      ch = cx < line.size ? line[cx] : ' '
-      screen.cell(px, rect.y + (cy - scr), ch, Theme.bg, Theme.accent_bg)
-      screen.cursor(px, rect.y + (cy - scr))
-    end
-
-    private def paint_span_bg(screen : Screen, x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32) : Nil
-      return if x0 >= x1
-      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
-      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
-      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
-      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
-      # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
-      b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
-        screen.text(px, y, seg, Theme.text, Theme.accent_bg)
-        px += Screen.draw_width(seg)
-        i = e
-      end
+      read.paint_chrome(screen, rect, ed)
     end
 
     # ---- scroll / selection mutators (called by the controller) ----

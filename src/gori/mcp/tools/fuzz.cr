@@ -79,7 +79,14 @@ module Gori
           fjob.ended_at_ms ||= Time.utc.to_unix_ms
         end
       rescue ex
-        Log.error(exception: ex) { "fuzz job #{fjob.id} drain error" }
+        # Bounded logging — see `FuzzJob#drain_errors`. This rescue is on the per-EVENT
+        # path, so a persistent failure would otherwise emit one stderr line per request
+        # and can park the job fiber on a full pipe.
+        fjob.drain_errors += 1
+        if fjob.drain_errors <= DRAIN_LOG_CAP
+          Log.error(exception: ex) { "fuzz job #{fjob.id} drain error" }
+          Log.error { "fuzz job #{fjob.id}: further drain errors suppressed" } if fjob.drain_errors == DRAIN_LOG_CAP
+        end
         fjob.status = :error if fjob.status == :running
         fjob.error_msg ||= ex.message || "internal fuzz drain error"
       end
@@ -97,14 +104,14 @@ module Gori
           fjob.history_truncated = true
           return nil
         end
-        fid = record_fuzz_flow(req, fjob.origin, fjob.http2?, r)
+        fid = record_fuzz_flow(fjob, req, fjob.origin, fjob.http2?, r)
         fjob.recorded_flows += 1 if fid
         fid
       end
 
       # Reconstruct a History flow (request head/body + response head/body) from a
       # fuzz Result. Stored raw; get_flow redacts sensitive headers on read.
-      private def record_fuzz_flow(request : Bytes, origin : Fuzz::Origin, http2 : Bool, r : Fuzz::Result) : Int64?
+      private def record_fuzz_flow(fjob : FuzzJob, request : Bytes, origin : Fuzz::Origin, http2 : Bool, r : Fuzz::Result) : Int64?
         head, body = split_wire_request(request)
         method, target, version = Proxy::Codec::Http1.authored_start_line(head)
         fid = store.insert_flow(Store::CapturedRequest.new(
@@ -125,7 +132,10 @@ module Gori
         end
         fid
       rescue ex
-        Log.warn(exception: ex) { "fuzz history record failed" }
+        # Bounded for the same reason as the drain rescue: history recording runs per
+        # result, so a store that fails every insert would log once per request.
+        fjob.drain_errors += 1
+        Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
         nil
       end
 
@@ -586,6 +596,11 @@ module Gori
           return Fuzz::NumberRange.new(from, to, fuzz_int(obj["step"]?) || 1_i64)
         end
         s = v.as_s? || raise FuzzArgError.new(%('numbers' must be a string 'FROM-TO[:STEP]' or an object {from,to,step}))
+        # `.scrub`: `s` is a JSON string argument, and the `match` below is a PCRE2 call that
+        # raises `ArgumentError` on a non-UTF-8 subject — which escaped as an INTERNAL error
+        # instead of the FuzzArgError ("invalid numbers ...") this method reports for every
+        # other unusable spelling. Lossless for any spec that could actually parse.
+        s = s.scrub
         range_part, _, step_part = s.partition(':')
         if md = range_part.match(/^(-?\d+)-(-?\d+)$/)
           from = md[1].to_i64?

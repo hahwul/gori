@@ -166,7 +166,12 @@ module Gori
       # Hex digits, optionally 0x-prefixed and with `:`/`-`/spaces between octets — the forms
       # a mask key or a payload gets pasted in. An odd digit count is an error, not a guess.
       protected def self.hex(v : String) : Bytes?
-        s = v.strip.gsub(/\A0[xX]/, "").gsub(/[\s:_-]/, "")
+        # `.scrub` first: `v` is a raw `--message-frame` value off the command line, and
+        # PCRE2 raises `ArgumentError` on a subject that is not valid UTF-8 — which would
+        # break this module's documented "Never raises" contract (see `parse` above) and
+        # escape `CLI.run`, whose rescue only covers `Gori::Error`. Lossless in practice:
+        # anything a scrub touches fails the hex-digit check two lines down regardless.
+        s = v.scrub.strip.gsub(/\A0[xX]/, "").gsub(/[\s:_-]/, "")
         return Bytes.empty if s.empty?
         return nil unless s.size.even? && s.matches?(/\A[0-9a-fA-F]+\z/)
         s.hexbytes

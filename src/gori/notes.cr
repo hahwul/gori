@@ -60,7 +60,14 @@ module Gori
 
     # Parse the JSON document set; nil on malformed data so callers can fall back.
     def self.parse(raw : String) : Doc?
-      doc = JSON.parse(raw)
+      # Read the root through `as_h?` rather than indexing the JSON::Any directly:
+      # `JSON::Any#[]?` RAISES a bare Exception ("Expected Hash for #[]?") when the
+      # root is valid JSON that is not an object (`[]`, `42`, `null`), which the
+      # `JSON::ParseException` rescue below does not catch. A corrupt or externally
+      # written "notes.docs" row would then escape as a backtrace out of `gori run
+      # notes`, and re-raise every TUI tick until the tick-error breaker exits.
+      doc = JSON.parse(raw).as_h?
+      return nil unless doc
       arr = doc["notes"]?.try(&.as_a?)
       return nil unless arr
       cur = doc["cur"]?.try(&.as_i?) || 0

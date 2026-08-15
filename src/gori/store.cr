@@ -1273,13 +1273,24 @@ module Gori
     # not know whether the frame was masked, which is not the same as knowing it was not.
     def self.read_ws_shape(rs : DB::ResultSet) : WsShape
       fin = rs.read(Int64) != 0
-      rsv = rs.read(Int64).to_i
+      rsv = ws_i32(rs.read(Int64))
       masked = rs.read(Int64?).try { |m| m != 0 }
       mask_key = rs.read(Bytes?)
-      frames = rs.read(Int64).to_i
-      declared = rs.read(Int64?).try(&.to_i)
+      frames = ws_i32(rs.read(Int64))
+      declared = rs.read(Int64?).try { |v| ws_i32(v) }
       WsShape.new(fin: fin, rsv: rsv, masked: masked, mask_key: mask_key,
         frames: frames, declared_len: declared)
+    end
+
+    # Narrow a stored column to Int32 by CLAMPING rather than with a bare `to_i`. SQLite
+    # columns are dynamically typed and nothing constrains these three, so a corrupt or
+    # hand-written row holding a value outside Int32 made `to_i` raise `OverflowError` out
+    # of the WS message list — into the detail view and `gori run show`, and in the TUI into
+    # the tick-error breaker. Clamping keeps a plausible row readable instead of taking the
+    # pane down; a value out of range was never meaningful for a 3-bit RSV, a frame count or
+    # a declared length anyway.
+    private def self.ws_i32(v : Int64) : Int32
+      v.clamp(Int32::MIN.to_i64, Int32::MAX.to_i64).to_i32
     end
 
     private def now_us : Int64

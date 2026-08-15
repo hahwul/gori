@@ -193,6 +193,15 @@ module Gori
           # last ProgressEvent happened to carry — it is the number the status below reports.
           djob.queued = ev.progress.queued
           djob.stats = ev.stats
+          # Flush the tail HERE, while the job is still :running. `jobs_running?` is what
+          # refuses a concurrent `switch_project`, and it keys on that status — so once the
+          # terminal status below is assigned, the flush that used to happen after
+          # `engine.run` returned was racing a project swap across a fiber yield, and
+          # `flush_discover_persist` reads the LIVE `store` getter. The loser wrote up to
+          # `DISCOVER_PERSIST_MAX` findings into whichever project had just been bound.
+          # The read side already refuses a cross-project read (`job_project_mismatch`);
+          # this is the write side of the same guarantee.
+          flush_discover_persist(djob)
           # Discover has no fixed candidate total (a live crawl's denominator moves), so the
           # shortfall cannot be derived the way fuzz and mine derive it from `done_count <
           # total`. The ENGINE says it: `DoneEvent#budget_exhausted` is `cap_reached? &&
@@ -253,6 +262,16 @@ module Gori
       private def flush_discover_persist(djob : DiscoverJob) : Nil
         djob.persist_at = Time.instant # stamped even when empty: this is the FLUSH clock
         return if djob.persist_buf.empty?
+        # Never write a job's findings into a project it did not run against. The DoneEvent
+        # branch now flushes while the job still blocks `switch_project`, so this should not
+        # fire — but `store` is a LIVE getter, and silently persisting a crawl of one target
+        # into somebody else's project is the worst outcome available here. Same comparison
+        # `job_project_mismatch` makes on the read side.
+        if djob.db_path != @db_path
+          Log.warn { "discover job #{djob.id}: dropping #{djob.persist_buf.size} unflushed finding(s) — project changed since the run started" }
+          djob.persist_buf.clear
+          return
+        end
         store.insert_import_batch(djob.persist_buf)
         djob.persist_buf.clear
       rescue

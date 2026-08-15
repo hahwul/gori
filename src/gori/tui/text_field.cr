@@ -125,7 +125,21 @@ module Gori::Tui
     def delete_selection : Bool
       span = @sel.selection_span(@caret)
       return false unless span
+      # Clamp both ends: `selection_span` reports the raw anchor/caret pair without bounding
+      # it to the CURRENT value, so any path that shrinks `@value` while an anchor is live
+      # leaves `x1 > @value.size`, and `@value[x1..]` raises IndexError. `undo` was that
+      # path; clamping here keeps the next one from reaching the render loop.
       x0, x1 = span
+      x0 = x0.clamp(0, @value.size)
+      x1 = x1.clamp(x0, @value.size)
+      # `selection_span` never reports an empty span, so the two can only meet here when the
+      # whole selection sat past the end of the current value — a fully stale anchor with
+      # nothing left to cut. Drop it and report "took nothing" so the caller falls back to
+      # its own single-character delete.
+      if x0 == x1
+        @sel.clear_selection
+        return false
+      end
       @value = "#{@value[0, x0]}#{@value[x1..]}"
       @caret = x0
       @sel.clear_selection
@@ -343,6 +357,12 @@ module Gori::Tui
       state = @undo_stack.pop
       @value = state.value
       @caret = state.caret.clamp(0, @value.size)
+      # Same reason `set` does it: restoring an earlier (usually SHORTER) value leaves any
+      # live ⇧arrow anchor pointing past the new end, and `selection_span` does not clamp.
+      # The next edit key then ran `@value[x1..]` with `x1 > size`, which raises IndexError
+      # (only `x1 == size` is legal) — out of the render loop and into the tick-error
+      # breaker. `TextArea#undo` already drops its anchor for exactly this reason.
+      @sel.clear_selection
       @preedit = ""
     end
   end

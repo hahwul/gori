@@ -145,7 +145,11 @@ module Gori::Update
   # string, or nil when absent/unsupported (older API, GHE, non-sha256 algo).
   def self.parse_sha256_digest(digest : String?) : String?
     return nil unless digest
-    d = digest.strip.downcase
+    # `.scrub`: the digest is copied verbatim out of the release JSON, and `matches?` is a
+    # PCRE2 call that raises `ArgumentError` on a non-UTF-8 subject — from inside
+    # `verify_download!`, which has no rescue below `CLI.run`. A scrubbed digest simply
+    # fails the hex test and returns nil, which is this method's documented "unsupported".
+    d = digest.scrub.strip.downcase
     return nil unless d.starts_with?("sha256:")
     hex = d.lchop("sha256:")
     HEX_SHA256.matches?(hex) ? hex : nil
@@ -158,7 +162,11 @@ module Gori::Update
   def self.parse_checksums(text : String) : Hash(String, String)
     sums = {} of String => String
     text.each_line do |line|
-      parts = line.strip.split(/\s+/, 2)
+      # `.scrub` per line: the SHA256SUMS body is fetched over the network, and the
+      # `split(/\s+/, 2)` is a PCRE2 call that raises `ArgumentError` on a non-UTF-8
+      # subject — which would break this method's documented contract that a malformed
+      # line is SKIPPED rather than raised on.
+      parts = line.scrub.strip.split(/\s+/, 2)
       next unless parts.size == 2
       hex = parts[0].downcase
       next unless HEX_SHA256.matches?(hex)

@@ -326,7 +326,19 @@ module Gori
     # silent, total loss of everything captured after the delete.
     def delete(project : Project) : Nil
       return unless Dir.exists?(project.dir)
-      raise Gori::Error.new("project is in use by another gori instance — stop its capture first") if CaptureLock.held?(project.dir)
+      # `CaptureLock.try_at` deliberately RE-RAISES a non-contention failure so it is never
+      # read as "someone else holds it" (see its comment). That contract is right, and it
+      # makes translating the failure this caller's job: on an unwritable or read-only
+      # project directory the probe raises `File::AccessDeniedError`, which is not a
+      # `Gori::Error` and so sailed past `CLI.run`'s rescue as a raw backtrace on
+      # `gori run project delete`. Refuse the delete with a sentence instead — a directory
+      # we cannot even open a lock file in is not one to start `rm_rf`-ing.
+      held = begin
+        CaptureLock.held?(project.dir)
+      rescue ex : File::Error
+        raise Gori::Error.new("cannot check the capture lock for '#{project.name}': #{ex.message}")
+      end
+      raise Gori::Error.new("project is in use by another gori instance — stop its capture first") if held
       # Capturing is not the only way to be writing to a project. An MCP server takes no capture
       # lock and still writes issues, notes, repeaters and fuzz history, so the guard above saw
       # nothing while one MCP server deleted the project another was serving — after which the

@@ -405,8 +405,7 @@ module Gori
         item_id = positional[0].to_i64? || abort("gori run intercept edit: invalid item id '#{positional[0]}'")
 
         content = if f = raw_file
-                    abort "gori run intercept edit: --raw-file '#{f}' is not readable" unless File.exists?(f) && !File.directory?(f)
-                    File.read(f)
+                    read_input_file(f, "gori run intercept edit: --raw-file")
                   elsif r = raw
                     r
                   else

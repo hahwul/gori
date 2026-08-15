@@ -68,7 +68,10 @@ module Gori
 
     private def self.resolve_miner(store : Store, link : Store::EntityLink) : Resolved
       if rec = store.get_miner_session(link.ref_id)
-        label = rec.name || first_line(String.new(rec.request)) || "miner ##{rec.id}"
+        # `.scrub` for parity with `resolve_repeater` above: this label is DISPLAY text built
+        # from captured wire bytes, and the TUI funnels display text through
+        # `Hotkeys.retag`, whose regex raises on a non-UTF-8 subject.
+        label = rec.name || first_line(String.new(rec.request).scrub) || "miner ##{rec.id}"
         Resolved.new(link, link.ref_kind.tag, label, rec.target)
       else
         Resolved.new(link, link.ref_kind.tag, "miner ##{link.ref_id} (gone)", "miner ##{link.ref_id}", stale: true)

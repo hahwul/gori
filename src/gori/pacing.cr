@@ -24,9 +24,18 @@ module Gori
     # `rps` wins over `throttle_ms` when both are set — a requests-per-second budget is the
     # more specific statement of intent, and the two would otherwise compose into a rate
     # neither knob names.
+    # The largest gap worth expressing. `(1.0 / rps).seconds` on an absurdly small rate
+    # (`--rate=1e-20` → 1e20 seconds) raises `OverflowError` building the Span; the engine
+    # loops catch it, but the operator was then told "Arithmetic overflow" rather than
+    # anything about the rate they typed. Clamping keeps the knob monotonic — smaller rate,
+    # longer wait — and tops out at a gap no run outlives anyway.
+    MAX_INTERVAL_SECONDS = 86_400.0
+
     private def pace_interval : Time::Span?
       if (rps = @config.rps) && rps > 0
-        (1.0 / rps).seconds
+        secs = 1.0 / rps
+        secs = MAX_INTERVAL_SECONDS unless secs.finite? && secs < MAX_INTERVAL_SECONDS
+        secs.seconds
       elsif (t = @config.throttle_ms) && t > 0
         t.milliseconds
       end

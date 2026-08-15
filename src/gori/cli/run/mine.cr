@@ -176,8 +176,7 @@ module Gori
       private def self.mine_source(flow_id : Int64?, request_file : String?,
                                    project_name : String?, db_path : String?) : {String, String?, Bool, Bool}
         if file = request_file
-          abort "gori run mine: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
-          {File.read(file), nil, false, false}
+          {read_input_file(file, "gori run mine"), nil, false, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))
           detail = begin

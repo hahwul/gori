@@ -823,7 +823,15 @@ module Gori::Decoder
           k += PUNY_BASE
         end
         bias = puny_adapt(i - oldi, acc.size + 1, oldi == 0)
-        n += (i // (acc.size + 1)).to_i32
+        # Accumulate in Int64 and range-check BEFORE narrowing. The loop guard above only
+        # bounds `i` at Int32::MAX, so with `acc.size + 1 == 1` the addition itself could
+        # carry `n` past Int32 and raise a raw `OverflowError` — the one exit from this
+        # module that was not the `DecoderError` its callers are written around. (The chain's
+        # blanket rescue caught it, so the step merely read "Arithmetic overflow" instead of
+        # naming punycode.) Matches the explicit overflow guards at the two `raise`s above.
+        n_wide = n.to_i64 + (i // (acc.size + 1))
+        raise DecoderError.new("punycode overflow") if n_wide > Int32::MAX
+        n = n_wide.to_i32
         raise DecoderError.new("invalid punycode: U+#{n.to_s(16).upcase} is not a Unicode scalar value") unless puny_scalar?(n)
         i = i % (acc.size + 1)
         acc.insert(i.to_i32, n.unsafe_chr)

@@ -84,8 +84,25 @@ module Gori
         return [] of Detection if detail.row.short_circuited?
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
-        RULES.each { |r| r.check(ctx, acc) unless Probe.rule_disabled?(r.info.id, disabled) }
-        custom.each(&.check(ctx, acc))
+        # Per-RULE containment, matching `Active.analyze`. Without it one rule raising on a
+        # hostile body (a regex PCRE2 refuses, an unexpected shape) discarded the findings of
+        # every rule after it in the list — the flow's whole scan was lost to one bad rule,
+        # and which rules survived depended on their order. The raise was caught a layer up
+        # (`Probe::Scan`, `supervise`), so this changes no crash behaviour; it changes how
+        # much of the scan survives.
+        RULES.each do |r|
+          next if Probe.rule_disabled?(r.info.id, disabled)
+          begin
+            r.check(ctx, acc)
+          rescue ex
+            Log.debug(exception: ex) { "passive rule #{r.info.id} failed on flow #{detail.row.id}" }
+          end
+        end
+        custom.each do |r|
+          r.check(ctx, acc)
+        rescue ex
+          Log.debug(exception: ex) { "custom passive rule failed on flow #{detail.row.id}" }
+        end
         acc
       end
 

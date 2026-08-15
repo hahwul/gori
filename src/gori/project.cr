@@ -97,13 +97,25 @@ module Gori
     end
 
     # Best-effort last-activity time (DB file mtime), for the picker.
+    #
+    # `File.info?` + rescue, not `File.exists?` then `File.info`: that pair is a TOCTOU
+    # window a PEER closes routinely — `ProjectRegistry#delete` and MCP `delete_project`
+    # `rm_rf` the workspace, so the file can vanish between the two calls and `File.info`
+    # raises `File::NotFoundError` out of `ProjectRegistry#list`'s `sort_by!`, the picker's
+    # row render and MCP `list_projects`. `File.info?` closes the vanish case; the rescue
+    # covers the one it does not (an unreadable parent raises `File::AccessDeniedError`).
+    # `disk_size` below already takes exactly this stance per entry.
     def last_modified : Time?
-      File.exists?(@db_path) ? File.info(@db_path).modification_time : nil
+      File.info?(@db_path).try(&.modification_time)
+    rescue File::Error
+      nil
     end
 
     # On-disk size of the SQLite DB (shown as "DB Size" in the Project tab).
     def db_size : Int64
-      File.exists?(@db_path) ? File.info(@db_path).size : 0_i64
+      File.info?(@db_path).try(&.size) || 0_i64
+    rescue File::Error
+      0_i64
     end
 
     # Total bytes of every file under the project directory (DB + WAL/SHM + the dotfile
@@ -146,8 +158,9 @@ module Gori
     # Best-effort project creation time (project dir mtime from mkdir in registry;
     # falls back to earliest flow activity inside the Project tab view).
     def created : Time?
-      d = dir
-      Dir.exists?(d) ? File.info(d).modification_time : nil
+      File.info?(dir).try { |i| i.directory? ? i.modification_time : nil }
+    rescue File::Error
+      nil # same best-effort stance as `last_modified` — a peer may be deleting this project
     end
 
     # Remove the workspace from disk (temp projects only).

@@ -186,7 +186,7 @@ module Gori
       end
 
       private def self.read_token_list(file : String) : Array(String)
-        raw = file == "-" ? STDIN.gets_to_end : (File.exists?(file) && !File.directory?(file) ? File.read(file) : abort("gori run sequence: not a readable file: #{file}"))
+        raw = read_input_file(file, "gori run sequence", stdin: true)
         # Token lists are usually text, but a stray non-UTF-8 byte (0xff/0xfe) makes the
         # PCRE2 regex split raise "Regex match error: UTF-8 error" and kill the run. Scrub
         # to valid UTF-8 first (bad bytes → U+FFFD) so a lone junk byte doesn't abort the
@@ -217,8 +217,7 @@ module Gori
       private def self.sequence_source(flow_id : Int64?, request_file : String?,
                                        project_name : String?, db_path : String?) : {Bytes, String?, Bool, Bool}
         if file = request_file
-          abort "gori run sequence: not a readable file: #{file}" unless File.exists?(file) && !File.directory?(file)
-          {File.read(file).to_slice, nil, false, false}
+          {read_input_file(file, "gori run sequence").to_slice, nil, false, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))
           detail = begin
