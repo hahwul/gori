@@ -13,6 +13,11 @@ module Gori
       # Bounded so a multi-MiB body is O(1) to classify.
       BINARY_SNIFF_LIMIT = 8192
 
+      # No "press x"/hex-view pointer here, unlike the History detail pane's placeholder:
+      # this text is shared by the Comparer tab (no hex view; `x` there selects the diff
+      # row instead — see `comparer.select-line`) and by the non-interactive CLI/MCP
+      # `compare` output, where no keypress applies at all.
+
       # The head, a blank separator, then the body — each split into rstripped lines.
       # A BINARY body (NUL in its prefix) is shown as a one-line placeholder, never as
       # text: rendering raw non-UTF-8 bytes here (Comparer + the Repeater response diff)
@@ -31,7 +36,7 @@ module Gori
         if b && !b.empty?
           lines << ""
           if binary?(b)
-            lines << "— binary body (#{b.size} bytes) — not shown as text; press x for the hex view —"
+            lines << "— binary body (#{b.size} bytes) — not shown as text —"
           else
             lines.concat(bytes_to_lines(b))
           end

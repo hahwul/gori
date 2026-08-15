@@ -2819,12 +2819,12 @@ module Gori::Tui
       # bytes as UTF-8 and rendering them yields garbage AND — worse — the accidental
       # wide/emoji graphemes among the bytes desync the terminal's cursor tracking, so
       # the diff-renderer leaves stray glyphs it can never reach (the reported "잔상").
-      # Show a placeholder and point at the byte-exact hex view (x), like Burp/mitmproxy.
+      # Show a placeholder and point at the byte-exact hex view (^X), like Burp/mitmproxy.
       if (b = src) && !b.empty? && binary_body?(b)
         head_lines = Highlight.message_windowed(head, nil, request).head
         head_lines << Highlight::Line.new
         head_lines << [Highlight::Span.new(
-          "— binary body (#{Fmt.size(b.size.to_i64)}) — not shown as text; press x for the hex view —", Theme.muted)]
+          "— binary body (#{Fmt.size(b.size.to_i64)}) — not shown as text; press ^X for the hex view —", Theme.muted)]
         return DetailView.new(head_lines, EMPTY_BODY, :text, trailer, binary: true)
       end
       # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
