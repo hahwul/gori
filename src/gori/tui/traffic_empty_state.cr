@@ -286,12 +286,23 @@ module Gori::Tui
       screen.text(rect.x + 1, y0, headline, Theme.muted, width: {rect.w - 2, 0}.max)
     end
 
+    # Shared by `begin_card`/`begin_centered_card`. `min_w` is the caller's longest
+    # description line, in DISPLAY columns (not `.size` — `Screen.display_width` is what
+    # every sibling box-sizing call site in this codebase measures with, and it is the only
+    # one that stays correct once a caption line picks up a wide/CJK glyph) — `floor` is a
+    # floor for short-caption variants, not a ceiling for long ones. Without this, prose
+    # that runs past 46 usable columns (most of it: several description sentences are
+    # 55-70 chars) clipped with an ellipsis on every terminal, wide or not.
+    private def card_width(rect : Rect, min_w : Int32, floor : Int32) : Int32
+      {rect.w - 4, {min_w + 4, floor}.max}.min.clamp(FULL_MIN_W, rect.w)
+    end
+
     # The headline rides `rect`'s top edge; the figure and the card share every row below it.
     # `variant` is threaded through purely so the art lookup happens at this ONE site instead
     # of in each of the ten renderers below.
     private def begin_card(screen : Screen, rect : Rect, variant : Symbol, headline : String,
-                           card_title : String, inner_h : Int32) : {Rect, Int32, Int32}
-      card_w = {rect.w - 4, 50}.min.clamp(FULL_MIN_W, rect.w)
+                           card_title : String, inner_h : Int32, min_w : Int32 = 0) : {Rect, Int32, Int32}
+      card_w = card_width(rect, min_w, 50)
       draw_headline(screen, rect, rect.y, headline)
       body = Rect.new(rect.x, rect.y + 1, rect.w, {rect.h - 1, 0}.max)
       card = place_art_and_card(screen, body, variant, card_w, inner_h + 2)
@@ -306,10 +317,11 @@ module Gori::Tui
       # divider + palette hint reach row 6, and the final "or set your client's proxy"
       # line lands on row 7 — which the old budget pushed onto the card's bottom border.
       inner_h = full_inner_h(:history, capturing: capturing)
-      inner, ix, iw = begin_card(screen, rect, :history, headline, "FLOW LOG", inner_h)
+      desc = "Requests stream in here as they pass through the proxy."
+      inner, ix, iw = begin_card(screen, rect, :history, headline, "FLOW LOG", inner_h, Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Requests stream in here as they pass through the proxy.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix + 2, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: iw)
       y += 1
@@ -336,10 +348,11 @@ module Gori::Tui
       # between the address and the palette hint, which is the one place a gap bought nothing —
       # address, "^P Open browser" and "or set your client's proxy" are one instruction.
       inner_h = full_inner_h(:sitemap, capturing: capturing)
-      inner, ix, iw = begin_card(screen, rect, :sitemap, headline, "SITE MAP", inner_h)
+      desc = "Browsing builds a host → path tree from captured traffic."
+      inner, ix, iw = begin_card(screen, rect, :sitemap, headline, "SITE MAP", inner_h, Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Browsing builds a host → path tree from captured traffic.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "◆ hosts group traffic", Theme.muted, Theme.bg, width: iw)
       y += 1
@@ -360,11 +373,11 @@ module Gori::Tui
     private def render_intercept_full(screen : Screen, rect : Rect, headline : String,
                                       addr : String, capturing : Bool, catch_on : Bool) : Nil
       inner_h = full_inner_h(:intercept, capturing: capturing, catch_on: catch_on)
-      inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h)
+      msg = catch_on ? "Matching traffic pauses here for review before it continues." : "Catch is OFF — press i to hold matching requests/responses."
+      inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h, Screen.display_width(msg))
       y = inner.y
 
-      msg = catch_on ? "Matching traffic pauses here for review before it continues." : "Catch is OFF — press i to hold matching requests/responses."
-      screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
       screen.text(ix, y, "traffic ──► ⏸ hold ──► f forward · d drop", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -385,10 +398,11 @@ module Gori::Tui
 
     private def render_repeater_full(screen : Screen, rect : Rect, headline : String) : Nil
       inner_h = full_inner_h(:repeater)
-      inner, ix, iw = begin_card(screen, rect, :repeater, headline, "REPEATER", inner_h)
+      desc = "Edit a captured request and resend it — compare the response."
+      inner, ix, iw = begin_card(screen, rect, :repeater, headline, "REPEATER", inner_h, Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Edit a captured request and resend it — compare the response.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "flow ──► edit ──► send ──► response", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -400,10 +414,11 @@ module Gori::Tui
 
     private def render_fuzzer_full(screen : Screen, rect : Rect, headline : String) : Nil
       inner_h = full_inner_h(:fuzzer)
-      inner, ix, iw = begin_card(screen, rect, :fuzzer, headline, "FUZZER", inner_h)
+      desc = "Probe endpoints by swapping §markers§ in a template."
+      inner, ix, iw = begin_card(screen, rect, :fuzzer, headline, "FUZZER", inner_h, Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Probe endpoints by swapping §markers§ in a template.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "template ──► §payloads§ ──► probe", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -420,11 +435,11 @@ module Gori::Tui
     # verb-shaped name for the same reason.
     private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
       inner_h = full_inner_h(:fuzzer_results, running: running)
-      inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h)
+      msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press ^R to start a fuzz run."
+      inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h, Screen.display_width(msg))
       y = inner.y
 
-      msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press ^R to start a fuzz run."
-      screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
       draw_chord_hint(screen, ix, y, iw, " ^R ", running ? "running…" : "run fuzzer", bullet: "▸ ") unless running
     end
@@ -432,11 +447,14 @@ module Gori::Tui
     private def render_probe_full(screen : Screen, rect : Rect, headline : String,
                                   addr : String, capturing : Bool, scan_on : Bool) : Nil
       inner_h = full_inner_h(:probe, capturing: capturing, scan_on: scan_on)
-      inner, ix, iw = begin_card(screen, rect, :probe, headline, "PROBE", inner_h)
+      desc = scan_on ? "Passive scanning flags issues as traffic flows through the proxy." : "Probe is not analyzing traffic while scanning is OFF."
+      hint2 = "enable PASSIVE (safe) or ACTIVE to detect issues"
+      min_w = scan_on ? Screen.display_width(desc) : {Screen.display_width(desc), Screen.display_width(hint2)}.max
+      inner, ix, iw = begin_card(screen, rect, :probe, headline, "PROBE", inner_h, min_w)
       y = inner.y
 
       if scan_on
-        screen.text(ix, y, "Passive scanning flags issues as traffic flows through the proxy.", Theme.text, Theme.bg, width: iw)
+        draw_wrapped_message(screen, ix, y, iw, desc)
         y += 2
         screen.text(ix, y, "traffic ──► scan ──► issues", Theme.muted, Theme.bg, width: iw)
         # One row, not two — the same 80x24 arithmetic as SITE MAP above. Probe's Findings pane
@@ -453,9 +471,9 @@ module Gori::Tui
         y = draw_chord_hint(screen, ix, y, iw, " m:MODE ", "cycle scan mode", bullet: "◇ ")
         draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
       else
-        screen.text(ix, y, "Probe is not analyzing traffic while scanning is OFF.", Theme.text, Theme.bg, width: iw)
+        draw_wrapped_message(screen, ix, y, iw, desc)
         y += 2
-        screen.text(ix, y, "enable PASSIVE (safe) or ACTIVE to detect issues", Theme.muted, Theme.bg, width: iw)
+        screen.text(ix, y, hint2, Theme.muted, Theme.bg, width: iw)
         y += 2
         draw_chord_hint(screen, ix, y, iw, " m:MODE ", "turn scanning on", bullet: "◇ ")
       end
@@ -463,10 +481,11 @@ module Gori::Tui
 
     private def render_issues_full(screen : Screen, rect : Rect, headline : String) : Nil
       inner_h = full_inner_h(:issues)
-      inner, ix, iw = begin_card(screen, rect, :issues, headline, "ISSUES", inner_h)
+      desc = "Track confirmed vulnerabilities you triage by hand."
+      inner, ix, iw = begin_card(screen, rect, :issues, headline, "ISSUES", inner_h, Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Track confirmed vulnerabilities you triage by hand.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "flow ──► issue ──► triage ──► resolve", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -482,10 +501,11 @@ module Gori::Tui
     # `5 + 2` interior rows, which is what `full_inner_h` claims for them.
 
     private def render_discover_full(screen : Screen, rect : Rect, headline : String) : Nil
-      inner, ix, iw = begin_card(screen, rect, :discover, headline, "DISCOVER", full_inner_h(:discover))
+      desc = "Crawl a target for endpoints nothing linked."
+      inner, ix, iw = begin_card(screen, rect, :discover, headline, "DISCOVER", full_inner_h(:discover), Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Crawl a target for endpoints nothing linked.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "target ──► crawl ──► endpoints", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -496,10 +516,11 @@ module Gori::Tui
     end
 
     private def render_comparer_full(screen : Screen, rect : Rect, headline : String) : Nil
-      inner, ix, iw = begin_card(screen, rect, :comparer, headline, "COMPARER", full_inner_h(:comparer))
+      desc = "Diff two flows side by side — req or res."
+      inner, ix, iw = begin_card(screen, rect, :comparer, headline, "COMPARER", full_inner_h(:comparer), Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Diff two flows side by side — req or res.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "A ──► diff ◄── B", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -510,10 +531,11 @@ module Gori::Tui
     end
 
     private def render_miner_full(screen : Screen, rect : Rect, headline : String) : Nil
-      inner, ix, iw = begin_card(screen, rect, :miner, headline, "MINER", full_inner_h(:miner))
+      desc = "Find undocumented parameters a target takes."
+      inner, ix, iw = begin_card(screen, rect, :miner, headline, "MINER", full_inner_h(:miner), Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Find undocumented parameters a target takes.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "wordlist ──► probe ──► params", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -524,10 +546,11 @@ module Gori::Tui
     end
 
     private def render_sequencer_full(screen : Screen, rect : Rect, headline : String) : Nil
-      inner, ix, iw = begin_card(screen, rect, :sequencer, headline, "SEQUENCER", full_inner_h(:sequencer))
+      desc = "Collect tokens and measure their randomness."
+      inner, ix, iw = begin_card(screen, rect, :sequencer, headline, "SEQUENCER", full_inner_h(:sequencer), Screen.display_width(desc))
       y = inner.y
 
-      screen.text(ix, y, "Collect tokens and measure their randomness.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "collect ──► samples ──► entropy", Theme.muted, Theme.bg, width: iw)
       y += 2
@@ -545,22 +568,22 @@ module Gori::Tui
 
     private def render_miner_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
       inner_h = full_inner_h(:miner_results, running: running)
-      inner, ix, iw = begin_card(screen, rect, :miner_results, headline, "MINE RUN", inner_h)
+      msg = running ? "Probing the wordlist — names the target answers to land here." : "A run sends the wordlist and keeps the names that change the response."
+      inner, ix, iw = begin_card(screen, rect, :miner_results, headline, "MINE RUN", inner_h, Screen.display_width(msg))
       y = inner.y
 
-      msg = running ? "Probing the wordlist — names the target answers to land here." : "A run sends the wordlist and keeps the names that change the response."
-      screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
       draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ") unless running
     end
 
     private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
       inner_h = full_inner_h(:sequencer_samples, running: running)
-      inner, ix, iw = begin_card(screen, rect, :sequencer_samples, headline, "TOKEN RUN", inner_h)
+      msg = running ? "Collecting — one token per send lands here." : "A run re-sends this request and keeps one token from each response."
+      inner, ix, iw = begin_card(screen, rect, :sequencer_samples, headline, "TOKEN RUN", inner_h, Screen.display_width(msg))
       y = inner.y
 
-      msg = running ? "Collecting — one token per send lands here." : "A run re-sends this request and keeps one token from each response."
-      screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, msg)
       return if running
       y += 2
       y = draw_chord_hint(screen, ix, y, iw, " c ", "where the token lives", bullet: "▸ ")
@@ -581,15 +604,18 @@ module Gori::Tui
     # what decides whether the card appears: the state without a provider is the first thing a
     # new operator sees and the one that most needs explaining.
     private def render_oast_full(screen : Screen, rect : Rect, headline : String, has_provider : Bool) : Nil
-      inner, ix, iw = begin_card(screen, rect, :oast, headline, "OAST", full_inner_h(:oast))
+      desc = "Payloads you plant call back here — DNS, HTTP and SMTP hits."
+      warning = "no provider yet — one has to hand out the payloads"
+      min_w = has_provider ? Screen.display_width(desc) : {Screen.display_width(desc), Screen.display_width(warning)}.max
+      inner, ix, iw = begin_card(screen, rect, :oast, headline, "OAST", full_inner_h(:oast), min_w)
       y = inner.y
 
-      screen.text(ix, y, "Payloads you plant call back here — DNS, HTTP and SMTP hits.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
       screen.text(ix, y, "payload ──► target ──► callback", Theme.muted, Theme.bg, width: iw)
       y += 1
       unless has_provider
-        screen.text(ix, y, "no provider yet — one has to hand out the payloads", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, warning, Theme.yellow, Theme.bg, width: iw)
       end
       y += 1
       if has_provider
@@ -604,12 +630,14 @@ module Gori::Tui
     # A CENTERED variant, so the whole rect goes to `place_art_and_card` — there is no
     # headline row to carve off first (see CENTERED).
     private def render_notes_full(screen : Screen, rect : Rect) : Nil
-      inner, ix, iw = begin_centered_card(screen, rect, :notes, "NOTES", full_inner_h(:notes))
+      desc = "Your project scratchpad — observations, hypotheses, write-ups."
+      hint = "notes stack as sub-tabs · first line becomes the title"
+      inner, ix, iw = begin_centered_card(screen, rect, :notes, "NOTES", full_inner_h(:notes), {Screen.display_width(desc), Screen.display_width(hint)}.max)
       y = inner.y
 
-      screen.text(ix, y, "Your project scratchpad — observations, hypotheses, write-ups.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
-      screen.text(ix, y, "notes stack as sub-tabs · first line becomes the title", Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
       y = draw_chord_hint(screen, ix, y, iw, " ^N ", "new note tab", bullet: "▸ ")
       draw_chord_hint(screen, ix, y, iw, " ^W ", "close current note", bullet: "▸ ")
@@ -619,24 +647,26 @@ module Gori::Tui
     # tab all name their own emptiness ("no scope rules — press a to add"); this one used to
     # render as pure void, which is why it exists.
     private def render_project_desc_full(screen : Screen, rect : Rect) : Nil
+      desc = "Target, scope, credentials, rules."
+      hint = "the first thing you read on re-entry"
       inner, ix, iw = begin_centered_card(screen, rect, :project_desc, "PROJECT",
-        full_inner_h(:project_desc))
+        full_inner_h(:project_desc), {Screen.display_width(desc), Screen.display_width(hint)}.max)
       y = inner.y
 
-      screen.text(ix, y, "Target, scope, credentials, rules.", Theme.text, Theme.bg, width: iw)
+      draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
-      screen.text(ix, y, "the first thing you read on re-entry", Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
       y = draw_chord_hint(screen, ix, y, iw, " i/↵ ", "start writing", bullet: "▸ ")
       draw_chord_hint(screen, ix, y, iw, " ^E ", "open in $EDITOR", bullet: "▸ ")
     end
 
     # `begin_card` for a CENTERED variant: the same figure-and-card block, but centred in the
-    # whole rect because these two draw no headline. Narrower cap than `begin_card`'s 50 —
+    # whole rect because these two draw no headline. Narrower floor than `begin_card`'s 50 —
     # both are editor panes, where a wide card over an empty buffer reads as chrome.
     private def begin_centered_card(screen : Screen, rect : Rect, variant : Symbol,
-                                    card_title : String, inner_h : Int32) : {Rect, Int32, Int32}
-      card_w = {rect.w - 4, 46}.min.clamp(FULL_MIN_W, rect.w)
+                                    card_title : String, inner_h : Int32, min_w : Int32 = 0) : {Rect, Int32, Int32}
+      card_w = card_width(rect, min_w, 46)
       card = place_art_and_card(screen, rect, variant, card_w, inner_h + 2)
       Frame.card(screen, card, card_title, bg: Theme.bg, border: Theme.border)
       inner = card.inset(1, 1)
@@ -762,6 +792,42 @@ module Gori::Tui
       return full if full.size <= max_w
       short = "──► proxy ──► flows"
       short.size <= max_w ? short : "──► #{listen} ──►"
+    end
+
+    # The RESULTS/SAMPLES-pane variants (fuzz/mine/token run) draw inside a pane nested a
+    # frame deeper than the container-level cards above — its own "RESULTS"/"FINDINGS" card
+    # eats another 2 columns of border before `TrafficEmptyState` ever sees a rect, so on a
+    # stock 80x24 terminal `card_width`'s floor still can't always buy back the room a 55-70
+    # char idle message needs. Word-wrapping onto the blank row these three variants already
+    # reserve between the message and the chord hint (`full_inner_h`'s `+2`/`+4`/`+5` never
+    # changes) fits a wrap with zero risk to the row-budget tier gate `render` decides with
+    # BEFORE any of this width math runs — the alternative, growing `inner_h` here, would
+    # reopen the exact overflow bug the row-budget rewrite (PR #693) fixed.
+    private def draw_wrapped_message(screen : Screen, ix : Int32, y : Int32, iw : Int32, msg : String) : Nil
+      if Screen.display_width(msg) <= iw
+        screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
+        return
+      end
+      line1, line2 = wrap_two_lines(msg, iw)
+      screen.text(ix, y, line1, Theme.text, Theme.bg, width: iw)
+      screen.text(ix, y + 1, line2, Theme.text, Theme.bg, width: iw)
+    end
+
+    # Greedily fills `line1` with whole words up to `max_w` display columns (always at
+    # least one word, even if that word alone overflows) and returns the rest as `line2` —
+    # `screen.text`'s own width-aware ellipsis still guards `line2` if it is somehow still
+    # too long for a second line.
+    private def wrap_two_lines(msg : String, max_w : Int32) : {String, String}
+      words = msg.split(' ')
+      line1 = [] of String
+      i = 0
+      while i < words.size
+        trial = (line1 + [words[i]]).join(" ")
+        break if !line1.empty? && Screen.display_width(trial) > max_w
+        line1 << words[i]
+        i += 1
+      end
+      {line1.join(" "), words[i..].join(" ")}
     end
   end
 end
