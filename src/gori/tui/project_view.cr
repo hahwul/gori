@@ -1614,7 +1614,7 @@ module Gori::Tui
       return if rows <= 0
 
       if rules.empty?
-        screen.text(inner.x, y, "no scope rules — press a to add", Theme.muted, Theme.bg)
+        TrafficEmptyState.render(screen, inner, variant: :project_scope)
         return
       end
 
@@ -1667,6 +1667,13 @@ module Gori::Tui
     # a persistent format-example header on the first row (parity with the settings editor).
     private def render_overrides_list(screen : Screen, inner : Rect, focused : Bool) : Nil
       return if inner.h <= 0 || inner.w <= 0
+      # Nothing mapped yet, and not mid-add: the shared onboarding card owns the whole
+      # interior — the format hint below only makes sense once there is a row to read it
+      # against, and it reappears the moment `a` opens the add-row.
+      if @host_overrides.entries.empty? && !@ov_adding
+        TrafficEmptyState.render(screen, inner, variant: :project_overrides)
+        return
+      end
       # Always-visible format example so the "IP HOSTNAME" entry shape is clear at a glance
       # (IP first so it survives truncation in a narrow pane).
       screen.text(inner.x, inner.y, "IP HOSTNAME · e.g. 10.0.0.1 example.com", Theme.muted, width: inner.w)
@@ -1683,10 +1690,9 @@ module Gori::Tui
       end
       return if rows <= 0
 
-      if entries.empty?
-        screen.text(list.x, y, "no overrides — press a to add", Theme.muted, Theme.bg) unless @ov_adding
-        return
-      end
+      # Empty here means the add-row is open on a fresh pane (the onboarding card handled the
+      # standing-empty case up top): nothing to window, so skip the list and gauge.
+      return if entries.empty?
 
       scroll = scroll_for(@ov_sel, entries.size, rows)
       shown = {rows, entries.size - scroll}.min
@@ -1743,6 +1749,12 @@ module Gori::Tui
 
     private def render_env_list(screen : Screen, inner : Rect, focused : Bool) : Nil
       return if inner.h <= 0 || inner.w <= 0
+      # Nothing set yet, and not mid add/prefix-edit: the onboarding card owns the interior.
+      # The format hint and the input row return together the instant either editor opens.
+      if @env_items.empty? && !env_row_offset?
+        TrafficEmptyState.render(screen, inner, variant: :project_env)
+        return
+      end
       screen.text(inner.x, inner.y, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, width: inner.w)
       list = env_list_inner(inner)
       return if list.h <= 0
@@ -1756,10 +1768,9 @@ module Gori::Tui
         rows -= 1
       end
       return if rows <= 0
-      if @env_items.empty?
-        screen.text(list.x, y, "no env vars — press a to add", Theme.muted, Theme.bg) unless @env_adding || @env_prefix_editing
-        return
-      end
+      # Empty here means an add/prefix row is open on a fresh pane (the onboarding card
+      # handled the standing-empty case up top): nothing to window.
+      return if @env_items.empty?
       scroll = scroll_for(@env_sel, @env_items.size, rows)
       shown = {rows, @env_items.size - scroll}.min
       shown.times do |i|

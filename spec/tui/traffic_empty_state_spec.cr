@@ -160,6 +160,34 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("^N").should be_true
   end
 
+  # The three Project list sub-tabs. Each renders inside a card the pane already titled, so the
+  # inner card takes a DIFFERENT name (TARGETS / DNS MAP / VARIABLES) rather than echoing the
+  # border, and — being CENTERED — draws no headline.
+  it "renders the scope targets card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :project_scope)
+    backend.contains?("TARGETS").should be_true
+    backend.contains?("which hosts you're testing").should be_true
+    backend.contains?("include or exclude").should be_true
+    backend.contains?("no scope rules yet").should be_false # CENTERED: headline suppressed
+  end
+
+  it "renders the host-overrides DNS map card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :project_overrides)
+    backend.contains?("DNS MAP").should be_true
+    backend.contains?("Pin a hostname").should be_true
+    backend.contains?("map a host to an IP").should be_true
+  end
+
+  it "renders the env variables card" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :project_env)
+    backend.contains?("VARIABLES").should be_true
+    backend.contains?("reuse across requests").should be_true
+    backend.contains?("add a $KEY variable").should be_true
+  end
+
   # The four engine tabs whose "nothing open yet" state used to be one muted line, while their
   # siblings (Repeater, Fuzzer) reached this module from the identical container-level branch.
   # Discover is the sharpest case: it sits in the same tab as Sitemap, which has always drawn a
@@ -263,7 +291,7 @@ describe Gori::Tui::TrafficEmptyState do
   # Each new variant must degrade like the older ones. A variant added to `render_full` but not
   # to the medium/minimal dispatches falls through to `else`, which prints the headline and
   # nothing else — passing any test that only checks the full card.
-  {% for variant in [:discover, :comparer, :miner, :sequencer, :oast] %}
+  {% for variant in [:discover, :comparer, :miner, :sequencer, :oast, :project_scope, :project_overrides, :project_env] %}
     it "degrades {{ variant.id }} to compact lines on a narrow pane" do
       backend = MemoryBackend.new(34, 6)
       TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 34, 6), variant: {{ variant }})

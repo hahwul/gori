@@ -215,6 +215,30 @@ module Gori::Tui
       "╰───────────────╯",
     ])
 
+    # The scope boundary as a shape: the host under test lit inside the fence, out-of-scope
+    # traffic dimmed either side of it — include and exclude in one picture.
+    PROJECT_SCOPE = Block.new([
+      "       ╭─────────╮",
+      " ▓▓▓   │  █████  │   ▓▓▓",
+      "       ╰─────────╯",
+    ])
+
+    # A hostname forking at the resolver: dashed to the DNS answer it bypasses, solid
+    # down-and-over to the pinned address — the pinned one wins, so it is the lit one.
+    PROJECT_OVERRIDES = Block.new([
+      " ▓▓▓▓▓▓┬┄> ▓▓▓▓",
+      "       │",
+      "       ╰──> ██████",
+    ])
+
+    # A named $KEY token expanding into the request it is typed in — substitution, drawn.
+    # The key is the lit part because writing one is what the empty pane is asking for.
+    PROJECT_ENV = Block.new([
+      "╭──────╮",
+      "│ $██  │ ┄┄> ▓▓▓▓▓▓",
+      "╰──────╯",
+    ])
+
     # A root fanning out into the endpoints a crawl turns up.
     DISCOVER = Block.new([
       "      ╭── ▓▓▓▓",
@@ -285,6 +309,9 @@ module Gori::Tui
       :issues            => ISSUES,
       :notes             => NOTES,
       :project_desc      => PROJECT_DESC,
+      :project_scope     => PROJECT_SCOPE,
+      :project_overrides => PROJECT_OVERRIDES,
+      :project_env       => PROJECT_ENV,
       :discover          => DISCOVER,
       :comparer          => COMPARER,
       :miner             => MINER,

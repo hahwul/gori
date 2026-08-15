@@ -20,8 +20,8 @@ end
 # no art forever and nothing else would ever mention it.
 EXPECTED_ART = [
   :history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues,
-  :notes, :project_desc, :discover, :comparer, :miner, :miner_results, :sequencer,
-  :sequencer_samples, :oast,
+  :notes, :project_desc, :project_scope, :project_overrides, :project_env, :discover,
+  :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast,
 ]
 
 describe Gori::Tui::EmptyArt do

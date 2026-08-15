@@ -201,7 +201,7 @@ describe "ProjectView created time" do
 end
 
 describe "ProjectView SCOPE list" do
-  it "shows the empty-state hint (add via popup, not an inline row)" do
+  it "shows the onboarding card (art + TARGETS card) when empty" do
     tmp_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       project = Gori::Project.new("t", File.tempname("gori-scope-empty"))
@@ -209,10 +209,11 @@ describe "ProjectView SCOPE list" do
       view.focus_pane(:scope)
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
-      # The wording every empty list in gori uses: what is missing, then `press a to add`.
-      # This pane used to say `(no rules — a to add)`, in parentheses and with a bare key.
-      b.contains?("no scope rules").should be_true
-      b.contains?("press a to add").should be_true
+      # The empty pane now draws the shared onboarding card (variant :project_scope) instead of
+      # a single muted line — an inner TARGETS card explaining the include/exclude split, with
+      # `a` still the add key.
+      b.contains?("TARGETS").should be_true
+      b.contains?("include or exclude").should be_true
     end
   end
 end

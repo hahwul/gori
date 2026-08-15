@@ -103,14 +103,16 @@ module Gori::Tui
       when :oast              then 5 + 1 # six, and flat — see render_oast_full
       when :notes             then 5 + 1
       when :project_desc      then 5 + 1
+      when :project_scope, :project_overrides, :project_env then 5 + 1
       else                         0 # unknown variant — render_full draws nothing, as before
       end
     end
 
     # Variants whose card centres in the WHOLE rect, with no headline row riding above it.
-    # Both are editor panes reached by a sub-tab that already names them on its chip, so a
+    # All are panes reached by a sub-tab that already names them on its chip (and the three
+    # Project list panes sit inside an outer card that names them AGAIN on its border), so a
     # headline would repeat the label the operator just clicked.
-    CENTERED = {:notes, :project_desc}
+    CENTERED = {:notes, :project_desc, :project_scope, :project_overrides, :project_env}
 
     # Rows the full card needs inside `rect`: its interior plus two borders, plus the headline
     # row that rides above it for every variant except the CENTERED ones.
@@ -141,6 +143,9 @@ module Gori::Tui
       when :oast              then "no callbacks yet"
       when :notes             then "empty note"
       when :project_desc      then "no description yet"
+      when :project_scope     then "no scope rules yet"
+      when :project_overrides then "no host overrides yet"
+      when :project_env       then "no env variables yet"
       else                         "nothing here yet"
       end
     end
@@ -166,6 +171,9 @@ module Gori::Tui
       when :oast              then render_oast_full(screen, rect, headline, has_provider)
       when :notes             then render_notes_full(screen, rect)
       when :project_desc      then render_project_desc_full(screen, rect)
+      when :project_scope     then render_project_scope_full(screen, rect)
+      when :project_overrides then render_project_overrides_full(screen, rect)
+      when :project_env       then render_project_env_full(screen, rect)
       end
     end
 
@@ -207,6 +215,12 @@ module Gori::Tui
                 medium_notes(headline)
               when :project_desc
                 medium_project_desc(headline)
+              when :project_scope
+                medium_project_scope(headline)
+              when :project_overrides
+                medium_project_overrides(headline)
+              when :project_env
+                medium_project_env(headline)
               else
                 [headline]
               end
@@ -251,6 +265,12 @@ module Gori::Tui
                "^N new note · start typing"
              when :project_desc
                "i/↵ describe this engagement · ^E $EDITOR"
+             when :project_scope
+               "a add rule · space menu"
+             when :project_overrides
+               "a map host→IP · space menu"
+             when :project_env
+               "a add $KEY · space prefix"
              else
                headline
              end
@@ -661,9 +681,60 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ^E ", "open in $EDITOR", bullet: "▸ ")
     end
 
+    # The Project tab's SCOPE card with no rules. Titled TARGETS, not SCOPE — the outer card
+    # already says SCOPE on its border, and the rules are the list of targets.
+    private def render_project_scope_full(screen : Screen, rect : Rect) : Nil
+      desc = "Scope rules mark which hosts you're testing."
+      hint = "incl keeps a host in · excl passes it through"
+      inner, ix, iw = begin_centered_card(screen, rect, :project_scope, "TARGETS",
+        full_inner_h(:project_scope), {Screen.display_width(desc), Screen.display_width(hint)}.max)
+      y = inner.y
+
+      draw_wrapped_message(screen, ix, y, iw, desc)
+      y += 2
+      screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
+      y += 2
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "add an include or exclude rule", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " space ", "rule actions", bullet: "▸ ")
+    end
+
+    # The Project tab's HOST OVERRIDES card with no entries. DNS MAP because that is what an
+    # entry does — resolve past DNS — where "overrides" only repeats the border.
+    private def render_project_overrides_full(screen : Screen, rect : Rect) : Nil
+      desc = "Pin a hostname to a chosen IP for this project."
+      hint = "requests resolve there before real DNS"
+      inner, ix, iw = begin_centered_card(screen, rect, :project_overrides, "DNS MAP",
+        full_inner_h(:project_overrides), {Screen.display_width(desc), Screen.display_width(hint)}.max)
+      y = inner.y
+
+      draw_wrapped_message(screen, ix, y, iw, desc)
+      y += 2
+      screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
+      y += 2
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "map a host to an IP", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " space ", "override actions", bullet: "▸ ")
+    end
+
+    # The Project tab's ENVIRONMENT card with no vars. The copy hardcodes the default `$`
+    # sigil: an empty pane means a fresh project, and the live prefix rides the outer border.
+    private def render_project_env_full(screen : Screen, rect : Rect) : Nil
+      desc = "Store $KEY values to reuse across requests."
+      hint = "$KEY in a request expands when you send"
+      inner, ix, iw = begin_centered_card(screen, rect, :project_env, "VARIABLES",
+        full_inner_h(:project_env), {Screen.display_width(desc), Screen.display_width(hint)}.max)
+      y = inner.y
+
+      draw_wrapped_message(screen, ix, y, iw, desc)
+      y += 2
+      screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
+      y += 2
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "add a $KEY variable", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " space ", "vars & prefix", bullet: "▸ ")
+    end
+
     # `begin_card` for a CENTERED variant: the same figure-and-card block, but centred in the
-    # whole rect because these two draw no headline. Narrower floor than `begin_card`'s 50 —
-    # both are editor panes, where a wide card over an empty buffer reads as chrome.
+    # whole rect because these draw no headline. Narrower floor than `begin_card`'s 50 —
+    # all sit inside a pane that is otherwise empty, where a wide card reads as chrome.
     private def begin_centered_card(screen : Screen, rect : Rect, variant : Symbol,
                                     card_title : String, inner_h : Int32, min_w : Int32 = 0) : {Rect, Int32, Int32}
       card_w = card_width(rect, min_w, 46)
@@ -756,6 +827,18 @@ module Gori::Tui
 
     private def medium_project_desc(headline) : Array(String)
       [headline, "target · scope · credentials · rules", "i/↵ edit · ^E $EDITOR"]
+    end
+
+    private def medium_project_scope(headline) : Array(String)
+      [headline, "incl / excl ──► scope lens", "a add rule · space menu"]
+    end
+
+    private def medium_project_overrides(headline) : Array(String)
+      [headline, "host ──► your IP", "a add · e edit · d delete"]
+    end
+
+    private def medium_project_env(headline) : Array(String)
+      [headline, "$KEY ──► value on send", "a add var · space prefix"]
     end
 
     private def draw_medium_lines(screen : Screen, rect : Rect, lines : Array(String)) : Nil

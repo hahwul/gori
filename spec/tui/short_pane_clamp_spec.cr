@@ -165,7 +165,7 @@ describe TrafficEmptyState do
   # already-granted full tier, so it is the art gate — not the card gate — that decides whether
   # those extra rows fit; sweeping one fixed width never exercises `FULL_MIN_W` or a figure's
   # own `min_w`, and the art path adds a second reason a renderer can outgrow its rect.
-  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :discover, :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast] %}
+  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :project_scope, :project_overrides, :project_env, :discover, :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast] %}
     it "never draws {{ variant.id }} below its rect, at any size the gate admits" do
       (8..26).each do |h|
         [30, 40, 42, 43, 46, 50, 60, 100].each do |w|
@@ -184,7 +184,7 @@ describe TrafficEmptyState do
   # …and nothing may run off the RIGHT edge either. A figure is centred on its ink extent, so a
   # block wider than the pane would paint past `rect.right` — where `Screen`'s bounds check
   # silently drops it in the app but a narrower rect inside a wider backend makes it visible.
-  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :sequencer, :oast] %}
+  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :project_scope, :project_overrides, :project_env, :sequencer, :oast] %}
     it "never draws {{ variant.id }} past its right edge" do
       (8..26).each do |h|
         [42, 46, 50, 60].each do |w|
