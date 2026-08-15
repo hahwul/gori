@@ -32,8 +32,8 @@ describe Gori::Repeater::MessageLines do
     lines = MessageLines.of(head, body, decode: false)
     lines[0].should eq("HTTP/1.1 200 OK")
     lines[1].should eq("")
-    lines[2].should contain("binary body")
-    lines[2].should contain("press x") # never the raw bytes (which desync the terminal)
+    lines[2].should contain("binary body") # never the raw bytes (which desync the terminal)
+    lines[2].should_not contain("press") # shared by Comparer/CLI/MCP, which have no hex view
   end
 
   it "scrubs stray non-UTF-8 bytes in an otherwise-text body (no wide-grapheme desync)" do

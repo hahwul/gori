@@ -637,7 +637,7 @@ describe Gori::Tui::HistoryView do
       backend.contains?("hex view").should be_true    # points at the hex view
       backend.contains?("RIFF").should be_false       # raw bytes NOT rendered as text
 
-      # The byte-exact hex view is still one keypress away (x).
+      # The byte-exact hex view is still one keypress away (^X).
       view.toggle_detail_hex
       hex = MemoryBackend.new(80, 16)
       view.render_detail(Screen.new(hex), Rect.new(0, 0, 80, 16))
