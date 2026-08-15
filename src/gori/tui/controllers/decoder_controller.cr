@@ -136,6 +136,16 @@ module Gori::Tui
       end
     end
 
+    # The ⌕ picker searches the full input AND the decoded output — the memorable string
+    # is as often what came OUT (`admin` in a decoded JWT) as what the operator pasted in.
+    # The 200-column filter detail carries only chain + a slice of input; this goes further.
+    def subtab_search_extras : Array(String)
+      @sessions.map do |s|
+        bytes = s.result.output
+        search_extra(bytes ? "#{s.input.text} #{String.new(bytes)}" : s.input.text)
+      end
+    end
+
     # The chip label: the custom name if set, else a compact preview of the chain
     # spec (or "empty" when blank), capped to ~18 cols like Repeater/Notes.
     private def session_label(s : DecoderSession) : String

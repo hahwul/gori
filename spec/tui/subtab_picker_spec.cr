@@ -37,6 +37,44 @@ describe Gori::Tui::SubtabPicker do
     p.selected_index.should eq(2) # both terms hit only the checkout row
   end
 
+  it "matches an all-digit term against the row's own number" do
+    # The labels had their "N:" stripped, so the number a chip advertises ("2:search api")
+    # lived only in the picker's № column — and typing it found nothing.
+    p = sample_picker
+    p.query_char('2') # no row TEXT contains a 2
+    p.entry_count.should eq(1)
+    p.selected_index.should eq(1)
+
+    colon = sample_picker
+    "3:".each_char { |c| colon.query_char(c) } # the chip's own spelling works too
+    colon.entry_count.should eq(1)
+    colon.selected_index.should eq(2)
+  end
+
+  it "keeps the substring arm for digits, so a port still matches by text" do
+    p = SubtabPicker.new("FIND SUB-TAB", [
+      SubtabPicker::Row.new(0, "local", "GET / http://127.0.0.1:8080"),
+      SubtabPicker::Row.new(1, "prod", "GET / https://app.example.com"),
+    ])
+    "8080".each_char { |c| p.query_char(c) }
+    p.selected_index.should eq(0) # the port, not "session 8080"
+  end
+
+  it "searches Row#extra (request content) without ever drawing it" do
+    rows = [
+      SubtabPicker::Row.new(0, "login", "POST /login https://app.example.com", "Authorization: Bearer sekret-tok"),
+      SubtabPicker::Row.new(1, "search api", "GET /api/search https://api.example.com"),
+    ]
+    p = SubtabPicker.new("FIND SUB-TAB", rows)
+    "sekret-tok".each_char { |c| p.query_char(c) }
+    p.entry_count.should eq(1)
+    p.selected_index.should eq(0)
+
+    backend = MemoryBackend.new(100, 30)
+    SubtabPicker.new("FIND SUB-TAB", rows).render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("sekret-tok").should be_false # haystack only — never a column
+  end
+
   it "reports no match when the filter excludes every row" do
     p = sample_picker
     "zzz".each_char { |c| p.query_char(c) }

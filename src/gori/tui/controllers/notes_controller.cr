@@ -271,6 +271,13 @@ module Gori::Tui
       end
     end
 
+    # The ⌕ picker searches the WHOLE note body (capped), not just the 200-column detail
+    # the drawn projection stops at: a note exists to be found by any word it holds, and
+    # the words worth remembering are as often in paragraph three as the first line.
+    def subtab_search_extras : Array(String)
+      @notes.filter_rows.map { |(_, body)| search_extra(body) }
+    end
+
     def body_badge : Symbol
       @notes.insert_mode? ? :editor : :body
     end

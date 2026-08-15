@@ -469,6 +469,12 @@ module Gori::Tui
       end
     end
 
+    # The ⌕ picker searches the captured request itself (wire bytes, capped) — findable by
+    # a header or parameter the operator recalls, beyond the summary's request line.
+    def subtab_search_extras : Array(String)
+      @sessions.map { |t| search_extra(t.view.request_bytes) }
+    end
+
     # --- sub-tab nav ---
     def move_subtab(dir : Int32) : Nil
       if t = step_visible(@current_idx, dir)

@@ -16,20 +16,24 @@ module Gori::Tui
   # session to an issue or note, opened as a child of LinksOverlay).
   class SubtabPicker < FilterPickerOverlay
     # `index` is the sub-tab's absolute position — the value handed back on commit;
-    # `label` is the chip text, `detail` the dim searchable request line.
-    record Row, index : Int32, label : String, detail : String
+    # `label` is the chip text, `detail` the dim searchable request line. `extra` is
+    # searched but never drawn — request/template content far too long for a column
+    # (TabController#subtab_search_extras fills it, capped at SEARCH_EXTRA_MAX).
+    record Row, index : Int32, label : String, detail : String, extra : String = ""
 
     # Doubles as `Overlay#title` on purpose: the pre-seam `focus_label` read this field
     # (`@subtab_picker.try(&.title)`), so "FIND SUB-TAB" / "PICK REPEATER" is both the card
     # heading and the focus badge. Intended here — but a field quietly satisfying an
     # abstract method is a real hazard in Crystal (no `override`), so it is spelled out.
     getter title : String
-    getter action : String          # verb shown in the ↵ hint ("jump" for search, "link" when picking a link target)
-    @indexed : Array({Row, String}) # each row paired with its precomputed filter haystack
+    getter action : String                  # verb shown in the ↵ hint ("jump" for search, "link" when picking a link target)
+    @indexed : Array({Row, String, String}) # each row with its precomputed filter haystack + its 1-based number
 
     def initialize(@title : String, @rows : Array(Row), @action : String = "jump")
-      # Precompute each row's filter haystack ONCE (not per keystroke).
-      @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail}".downcase} }
+      # Precompute each row's filter haystack ONCE (not per keystroke). The number kept
+      # beside it is the SAME one draw_row paints and the chip wears (`3:login`) — matched
+      # whole in refilter, so "3" finds session 3 without also claiming 13/30.
+      @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail} #{row.extra}".downcase, (row.index + 1).to_s} }
       @filtered = @rows
     end
 
@@ -58,10 +62,15 @@ module Gori::Tui
     end
 
     # Recompute the visible rows from the precomputed haystacks: every whitespace-
-    # separated term must appear (case-insensitive). Resets the cursor to the top.
+    # separated term must appear (case-insensitive). An all-digit term ("3", or "3:" as
+    # the chip spells it) ALSO matches the row whose number it is: the labels had their
+    # `N:` stripped (subtab_search_rows), so without this arm the one name every chip
+    # advertises was the one string the picker could not find. A widening only — the
+    # substring arm still runs, so "8080" keeps matching a port in a request line.
+    # Resets the cursor to the top.
     protected def refilter : Nil
-      terms = @query.downcase.split
-      @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
+      terms = @query.downcase.split.map { |t| {t, (m = t.match(/\A(\d+):?\z/)) ? m[1] : nil} }
+      @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay, num)| terms.all? { |(t, n)| hay.includes?(t) || n == num } }.map(&.first)
       @selected = 0
       @scroll = 0
     end

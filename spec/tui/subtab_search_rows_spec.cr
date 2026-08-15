@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "file_utils"
+require "base64"
 
 include Gori::Tui
 
@@ -161,7 +162,7 @@ private def with_session(&)
     session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
       Gori::Proxy::Tls::CertAuthority.load_or_create(SEARCH_ROWS_CA), Gori::Verbs.registry, project)
     session.store.insert_repeater("https://shop.example.com/cart",
-      "POST /cart/checkout HTTP/1.1\r\nHost: shop.example.com\r\n\r\n".to_slice, false, true, nil, 0)
+      "POST /cart/checkout HTTP/1.1\r\nHost: shop.example.com\r\nX-Api-Token: tok-sekret-9\r\n\r\n".to_slice, false, true, nil, 0)
     yield FakeHost.new(session)
   ensure
     session.try(&.close)
@@ -197,6 +198,63 @@ describe "TabController#subtab_search_rows" do
       RepeaterController.new(host).subtab_search_rows.each do |row|
         row.detail.size.should be <= Gori::Tui::TabController::SEARCH_DETAIL_MAX
       end
+    end
+  end
+
+  it "carries the request content in the searchable extra, capped and off the drawn columns" do
+    with_session do |host|
+      row = RepeaterController.new(host).subtab_search_rows.first
+      # A header lives only in the wire text — summary/target never show it, so before the
+      # extra the one session sending this token was unfindable by it.
+      row.extra.should contain("X-Api-Token: tok-sekret-9")
+      row.detail.should_not contain("tok-sekret-9")
+      row.extra.size.should be <= Gori::Tui::TabController::SEARCH_EXTRA_MAX
+
+      # An empty session contributes no searchable text (a fresh Decoder conversion).
+      DecoderController.new(host).subtab_search_rows.each(&.extra.strip.should(be_empty))
+    end
+  end
+
+  it "fills the fuzzer's extra from its template" do
+    with_session do |host|
+      fc = FuzzerController.new(host)
+      fc.fuzz_new
+      # load_blank seeds "GET / HTTP/1.1\r\nHost: example.com..." — findable by a header
+      # the summary (request line only) never shows.
+      fc.subtab_search_rows.first.extra.should contain("Host: example.com")
+    end
+  end
+
+  it "searches the WHOLE note body, past the 200-column detail cap" do
+    with_session do |host|
+      nc = NotesController.new(host)
+      body = "title line\n" + ("filler word " * 40) + "BURIEDWORD tail"
+      body.size.should be > Gori::Tui::TabController::SEARCH_DETAIL_MAX # the word is past detail's reach
+      nc.view.replace_current(body)
+      row = nc.subtab_search_rows.first
+      row.detail.should_not contain("BURIEDWORD") # the drawn column stops at 200
+      row.extra.should contain("BURIEDWORD")      # the picker still finds it
+    end
+  end
+
+  it "searches the decoder's input and its decoded output" do
+    with_session do |host|
+      dc = DecoderController.new(host)
+      dc.decoder_from_text("aGVsbG8td29ybGQ") # base64 of "hello-world", no chain yet
+      row = dc.subtab_search_rows.last
+      row.extra.should contain("aGVsbG8td29ybGQ") # the pasted input
+    end
+  end
+
+  it "searches the JWT's decoded header and payload, not its opaque token" do
+    with_session do |host|
+      jc = JwtController.new(host)
+      header = Base64.urlsafe_encode(%({"alg":"HS256","typ":"JWT"}), padding: false)
+      payload = Base64.urlsafe_encode(%({"role":"admin","iss":"gori-test"}), padding: false)
+      jc.jwt_from_text("#{header}.#{payload}.sig")
+      extra = jc.subtab_search_rows.last.extra
+      extra.should contain("admin")     # a claim the operator remembers ...
+      extra.should contain("gori-test") # ... found in the DECODED payload
     end
   end
 end

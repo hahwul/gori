@@ -353,6 +353,12 @@ module Gori::Tui
       end
     end
 
+    # The ⌕ picker searches the mined request itself (wire bytes, capped) — a header or
+    # parameter the operator recalls, beyond the request line the summary shows.
+    def subtab_search_extras : Array(String)
+      @miners.map { |t| search_extra(t.view.request_bytes) }
+    end
+
     # --- sub-tab nav (filter-aware: ←/→ skip hidden chips; ^1-9 escapes the filter) ---
     def move_subtab(dir : Int32) : Nil
       if t = step_visible(@current_idx, dir)

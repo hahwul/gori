@@ -54,6 +54,12 @@ module Gori::Tui
       @sessions.map(&.filter_subject)
     end
 
+    # The ⌕ picker searches both slots' request lines (capped) — a comparison is findable
+    # by a header the operator diffed, not just the two targets the summary names.
+    def subtab_search_extras : Array(String)
+      @sessions.map { |v| search_extra(v.search_text) }
+    end
+
     # Filter-aware strip nav: ←/→ skip hidden chips; ^1-9 to a hidden chip drops the
     # filter (chip numbers are absolute). Sessions are in-memory, so no persist on switch.
     def move_subtab(dir : Int32) : Nil

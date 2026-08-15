@@ -118,6 +118,14 @@ module Gori::Tui
       Repeater::SubtabFilter::Subject.new(@name, summ, targets, methods, [] of String)
     end
 
+    # The ⌕ picker's searchable content: the REQUEST lines of both slots. Request-side only
+    # — those are the memorable half (the header/param the operator chose to compare), and
+    # `lines(:request)` is the cheap projection (no body decode/scrub), memoized so this
+    # warms the very cache render is about to read.
+    def search_text : String
+      [@slot_a, @slot_b].compact.flat_map(&.lines(:request)).join('\n')
+    end
+
     # Identity for rename/apply (view object, not content) — mirrors MinerView/RepeaterView.
     def same?(other : ComparerView) : Bool
       object_id == other.object_id

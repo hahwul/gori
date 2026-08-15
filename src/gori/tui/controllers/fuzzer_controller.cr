@@ -101,6 +101,13 @@ module Gori::Tui
       end
     end
 
+    # The ⌕ picker also searches each session's TEMPLATE (base hook, capped): a fuzz
+    # session is findable by a header or §marker§ the operator remembers, not just the
+    # request line its summary shows.
+    def subtab_search_extras : Array(String)
+      @fuzzers.map { |t| search_extra(t.view.template_text) }
+    end
+
     def view_at(idx : Int32) : FuzzerView?
       (0 <= idx < @fuzzers.size) ? @fuzzers[idx].view : nil
     end

@@ -471,6 +471,11 @@ module Gori::Tui
     # word it holds — and `SubtabPicker` precomputes one lowercased haystack per row.
     SEARCH_DETAIL_MAX = 200
 
+    # Cap for `subtab_search_extras` text: the request line + headers + the start of a
+    # body, and small enough that a multi-MiB capture can't make N sessions × its size
+    # the picker's per-open cost.
+    SEARCH_EXTRA_MAX = 2048
+
     # Rows for the "find sub-tab" search picker (the strip's ⌕ affordance, or space → search).
     #
     # The detail column is the SAME projection the `/` filter bar matches on: every session
@@ -484,13 +489,34 @@ module Gori::Tui
     # Built once per open (SubtabPicker caches the haystacks), so nothing here is per-keystroke.
     def subtab_search_rows : Array(SubtabPicker::Row)
       subjects = filter_subjects
+      extras = subtab_search_extras
       (subtab_labels || [] of String).map_with_index do |label, i|
         # Drop the leading "N:" — the picker draws the index in a column of its own, so the
         # label would otherwise read "3   3:login".
         num_end, _ = Chrome.chip_zones(label)
         detail = (s = subjects[i]?) ? search_detail(s) : ""
-        SubtabPicker::Row.new(i, label[num_end..], detail)
+        SubtabPicker::Row.new(i, label[num_end..], detail, extras[i]? || "")
       end
+    end
+
+    # Per-session text the picker SEARCHES but never draws — request/template content
+    # (Repeater wire text, Fuzzer templates), parallel to subtab_labels by index. Kept out
+    # of `detail` because that column is drawn: 200 columns of header soup would bury the
+    # request line it exists to show. Default empty — most tabs have nothing beyond their
+    # filter_subjects projection. Overrides cap each entry with `search_extra`.
+    def subtab_search_extras : Array(String)
+      [] of String
+    end
+
+    protected def search_extra(text : String) : String
+      text[0, SEARCH_EXTRA_MAX]
+    end
+
+    # Bytes variant (captured requests: Miner/Sequencer). Cap the SLICE before building the
+    # String so a multi-MiB capture never allocates in full just to be truncated — and so an
+    # invalid-UTF-8 body (a real capture holds them) is scrubbed over 2KB, not megabytes.
+    protected def search_extra(bytes : Bytes) : String
+      String.new(bytes[0, {bytes.size, SEARCH_EXTRA_MAX}.min])
     end
 
     # One searchable line for a session: what it does, where it goes, and how it is tagged.

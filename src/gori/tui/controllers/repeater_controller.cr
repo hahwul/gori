@@ -134,15 +134,16 @@ module Gori::Tui
       @repeaters.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}#{tab.view.tags_label(12)}" }
     end
 
-    # Overridden for the LABEL only: 40 columns rather than the chip's 18, which the
+    # Overridden for the LABEL: 40 columns rather than the chip's 18, which the
     # full-width picker card has room for and reads better in. The detail column is what
     # the base would build (see TabController#search_detail) — a dim, searchable request
     # line so a session is findable by host/path/tag even when a custom name hides its
-    # summary.
+    # summary. The extra is the request itself (wire text, capped), so a session is also
+    # findable by a header or body fragment the operator remembers typing.
     def subtab_search_rows : Array(SubtabPicker::Row)
       @repeaters.map_with_index do |tab, i|
         v = tab.view
-        SubtabPicker::Row.new(i, v.label(40), search_detail(filter_subject(v)))
+        SubtabPicker::Row.new(i, v.label(40), search_detail(filter_subject(v)), search_extra(v.request_text))
       end
     end
 

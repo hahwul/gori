@@ -149,6 +149,15 @@ module Gori::Tui
       end
     end
 
+    # The ⌕ picker searches the DECODED claims, not the opaque token the summary carries:
+    # an operator remembers a token by something inside it (`admin`, an `iss`, a `kid`),
+    # never by its base64. `decoded` holds that text in decode mode; header/payload hold it
+    # in encode mode (the operator is drafting the claims) — both, so either direction is
+    # findable by what it says.
+    def subtab_search_extras : Array(String)
+      @sessions.map { |s| search_extra("#{s.decoded} #{s.header.text} #{s.payload.text}") }
+    end
+
     # The chip label: the custom name, else the token's alg (or "empty"), capped ~18 cols.
     private def session_label(s : JwtSession) : String
       raw = (n = s.view.name) ? n : token_summary(s)
