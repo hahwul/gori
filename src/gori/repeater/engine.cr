@@ -202,6 +202,21 @@ module Gori
                         started : Time::Instant) : Result
         upstream.write(request)
         upstream.flush
+        read_response(upstream, request, host, port, started)
+      rescue ex
+        # A write/flush failure — no response byte was ever attempted, so this is always the
+        # pre-delivery case (see `read_response`'s own rescue for the post-head-read one).
+        error(exchange_error(ex, host, port, nil), started, delivered: false)
+      end
+
+      # The read half of `exchange`, split out so a caller can write a request in TWO
+      # pieces — most of it now, the rest later — and only call this once the whole thing is
+      # actually on the wire. `Fuzz::Sender#send_race` is that caller: a last-byte-sync race
+      # group holds back each connection's final byte until every member is ready, then
+      # releases them together, and only reads responses afterwards (reading is no longer
+      # time-critical once every byte has been written).
+      def self.read_response(upstream : IO, request : Bytes, host : String, port : Int32,
+                             started : Time::Instant) : Result
         head = read_response_head(upstream)
         return error(no_response_error(host, port), started) unless head
 

@@ -133,6 +133,21 @@ module Gori::Fuzz
     def send_pipeline(requests : Array(Bytes), timeout : Time::Span? = nil) : Array(Repeater::Result)
       requests.map { |b| send(b, Backend.all_verbatim(b)) }
     end
+
+    # Race condition (last-byte-sync): dial `jobs.size` DEDICATED connections, hold back the
+    # final byte of every request until every connection is ready, then release them all in
+    # one tight write loop (see `Config#race_count`). `warmup`, when given, is sent and fully
+    # read on each connection BEFORE its held-back request is queued.
+    #
+    # A CONCRETE DEFAULT, not a second abstract, for the same reason `send_pipeline` is one:
+    # every wrapper backend inherits its gating/capping through the `send` override it already
+    # has, and every spec double stays a three-line class. Only `Sender` overrides this to
+    # reach REAL dedicated sockets and a genuine synchronized release — the default's
+    # per-member `send` calls are each a fresh, independent connection and prove nothing about
+    # timing, which is the entire point of this primitive.
+    def send_race(jobs : Array(Job), warmup : Bytes? = nil, timeout : Time::Span? = nil) : Array(Repeater::Result)
+      jobs.map { |j| send(j.bytes, j.payload_spans) }
+    end
   end
 
   # Production backend over the Repeater engines (fresh connection per send — there is
@@ -313,6 +328,116 @@ module Gori::Fuzz
         port: @origin.port, verify_upstream: @verify, sni: @sni,
         timeout: timeout || @timeout, overrides: @overrides)
     end
+
+    # The real transport for `Backend#send_race` (see there for the contract). All of
+    # `jobs` are byte-identical by construction (`Engine#run_race` renders one baseline
+    # request and copies it), so there is exactly ONE distinct request to gate/expand —
+    # unlike `send`/`send_pipeline`, which handle a caller-supplied member per call.
+    def send_race(jobs : Array(Job), warmup : Bytes? = nil, timeout : Time::Span? = nil) : Array(Repeater::Result)
+      return [] of Repeater::Result if jobs.empty?
+      # h2 multiplexes its own connection per send with independent stream-state — "hold back
+      # the final TCP byte" has no meaning there. DEGRADE to the per-member default, exactly
+      # the shape `send_pipeline`'s own h2 guard uses. A true HTTP/2 single-packet race needs
+      # real stream multiplexing in H2Engine, a separate, larger change.
+      return super if @http2
+
+      bytes = jobs[0].bytes
+      verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
+      expanded = Gori::Env.expand_bindings(bytes, verbatim)
+      # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
+      # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
+      return super if expanded.size < 2
+
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(expanded))
+        @blocked += jobs.size
+        @blocked_reason ||= err
+        return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
+      end
+
+      head = expanded[0, expanded.size - 1]
+      tail = expanded[expanded.size - 1, 1]
+      n = jobs.size
+      dial_timeout = timeout || @timeout
+      results = Array(Repeater::Result?).new(n) { nil }
+      sockets = Array(IO?).new(n) { nil }
+
+      # ── assemble: dial, optionally warm up, write everything but the final byte ──────────
+      n.times do |i|
+        upstream, dial_error = Repeater::Engine.dial_result(@origin.scheme, @origin.host,
+          @origin.port, @verify, @sni, dial_timeout, @overrides)
+        unless upstream
+          msg = Repeater::Engine.connect_error(@origin.scheme, @origin.host, @origin.port, @verify, dial_error)
+          results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: dial failed — #{msg}")
+          next
+        end
+        if w = warmup
+          wr = Repeater::Engine.exchange(upstream, w, @origin.host, @origin.port, Time.instant)
+          # Same retirement rule `send_pipeline`/`ConnPool` use: an error, an incomplete read,
+          # or a response that itself says the connection will NOT survive (`Connection:
+          # close`, HTTP/1.0 without keep-alive, a close-delimited body) all leave this socket
+          # unusable for a second exchange — writing the race request onto it would either
+          # misframe the response or simply find the socket already gone by release time.
+          # `ConnPool.reusable_response?` is the exact same check the keep-alive pool already
+          # makes before parking a socket (it covers error/incomplete itself); reused here
+          # rather than re-deriving it.
+          unless ConnPool.reusable_response?(wr, Repeater::Engine.request_method(w))
+            upstream.close rescue nil
+            results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
+              "race: warmup failed — #{wr.error || "the connection will not survive to the race request"}")
+            next
+          end
+        end
+        begin
+          upstream.write(head) # sync=true already flushes; no second syscall needed
+        rescue ex
+          upstream.close rescue nil
+          results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: write failed — #{ex.message}")
+          next
+        end
+        sockets[i] = upstream
+      end
+
+      live = (0...n).select { |i| sockets[i] }
+      if live.size < 2
+        # Fewer than 2 connections survived assembly — refuse the release (racing one
+        # connection proves nothing) rather than silently reporting a weaker "race".
+        live.each { |i| sockets[i].try(&.close) rescue nil }
+        return (0...n).map do |i|
+          results[i] || Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
+            "race: could not assemble enough live connections (#{live.size} of #{n})")
+        end
+      end
+
+      # ── release: one tight loop, no sleep/channel-op/other I/O between writes ────────────
+      started = Time.instant
+      live.each do |i|
+        socket = sockets[i].not_nil!
+        begin
+          socket.write(tail)
+        rescue ex
+          # A broken socket here must not stop writing to the REST of the group — that would
+          # desynchronize the release far worse than losing one member.
+          results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: release write failed — #{ex.message}")
+          socket.close rescue nil
+          sockets[i] = nil
+        end
+      end
+
+      # ── read: no longer time-critical once every byte is on the wire — fan out ───────────
+      released = (0...n).select { |i| sockets[i] }
+      done = Channel(Nil).new(released.size)
+      released.each do |i|
+        spawn do
+          socket = sockets[i].not_nil!
+          results[i] = Repeater::Engine.read_response(socket, expanded, @origin.host, @origin.port, started)
+          socket.close rescue nil
+          done.send(nil)
+        end
+      end
+      released.size.times { done.receive }
+
+      (0...n).map { |i| results[i].not_nil! }
+    end
   end
 
   # Enforces a HARD ceiling on the total number of real network sends. Wraps any Backend
@@ -369,6 +494,23 @@ module Gori::Fuzz
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
       @sent += 1
       @inner.send(bytes, verbatim)
+    end
+
+    # NOT a default delegation to `send` per-member: `Fuzz::Engine` ALWAYS wraps its backend
+    # in `CappedBackend` (unlike `send_pipeline`, whose only caller — Probe Active — never
+    # holds one), so without this explicit override, `send_race` would silently resolve to
+    # `Backend`'s inherited default and degrade to N independent, unsynchronized sends: it
+    # would compile, run, and return a plausible-looking result — and never actually race
+    # anything. See `spec/fuzz/race_spec.cr`'s CappedBackend regression case.
+    #
+    # The cap is enforced per GROUP, not per connection within one: splitting a race group at
+    # a budget boundary mid-release would corrupt the synchronization the primitive exists to
+    # provide, so a group that is already over cap is refused whole, before any dial.
+    def send_race(jobs : Array(Job), warmup : Bytes? = nil, timeout : Time::Span? = nil) : Array(Repeater::Result)
+      return [] of Repeater::Result if jobs.empty?
+      return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) } if cap_reached?
+      @sent += jobs.size
+      @inner.send_race(jobs, warmup: warmup, timeout: timeout)
     end
 
     def close : Nil
@@ -435,6 +577,10 @@ module Gori::Fuzz
 
     EVENT_BUFFER    =  256
     MAX_CONCURRENCY = 1000 # hard ceiling on worker fibers / channel capacity
+    # A race group bypasses the bounded @jobs channel entirely (see `run_race`) — the
+    # mechanism that gives every other mode its backpressure — so it needs its OWN ceiling,
+    # clamped at the same deepest point MAX_CONCURRENCY already is.
+    MAX_RACE_SIZE = 100
     # Synthetic baseline requests sent before the sweep when auto-calibration is on (see
     # calibrate_baseline). A single exact-match snapshot can't tell a target's ordinary
     # per-request variability apart from a genuine anomaly; a handful of staggered,
@@ -480,6 +626,7 @@ module Gori::Fuzz
     @last_dispatch : Time::Instant
     @total : Int64?
     @total_computed : Bool
+    @race_count : Int32?
 
     def initialize(@generator : Generator, @matcher : Matcher, backend : Backend, @config : Config)
       # Wrap so max_requests is a TRUE hard cap on real sends — retries, redirect hops and
@@ -503,11 +650,15 @@ module Gori::Fuzz
       @last_dispatch = Time.instant
       @total = nil.as(Int64?)
       @total_computed = false
+      # Same deepest-point clamp as @concurrency above (see MAX_RACE_SIZE).
+      @race_count = @config.race_count.try(&.clamp(1, MAX_RACE_SIZE))
     end
 
     # Total request count (memoized). Computing it also opens/counts wordlists, which
-    # surfaces a missing/unreadable file before any worker spawns.
+    # surfaces a missing/unreadable file before any worker spawns. A race run's total is
+    # simply its group size — it never reads the generator's payload-combinatorial total.
     def total : Int64?
+      return @race_count.try(&.to_i64) if @race_count
       unless @total_computed
         @total = @generator.total
         @total_computed = true
@@ -573,9 +724,16 @@ module Gori::Fuzz
         @events.close
         return
       end
-      spawn(name: "fuzz-dispatch") { dispatch_loop }
-      @concurrency.times { |i| spawn(name: "fuzz-worker-#{i}") { worker_loop } }
-      spawn(name: "fuzz-coord") { coordinate }
+      if n = @race_count
+        # A race group is ONE unit assembled and released together — it has no use for the
+        # ordinary dispatcher/worker-fleet/coordinator split, which exists to stream
+        # INDEPENDENT jobs through bounded concurrency. See `run_race`.
+        spawn(name: "fuzz-race") { run_race(n) }
+      else
+        spawn(name: "fuzz-dispatch") { dispatch_loop }
+        @concurrency.times { |i| spawn(name: "fuzz-worker-#{i}") { worker_loop } }
+        spawn(name: "fuzz-coord") { coordinate }
+      end
     end
 
     # Blocking drain — for synchronous consumers (CLI, the MCP background fiber).
@@ -652,25 +810,49 @@ module Gori::Fuzz
             @events.send(ErrorEvent.new(ex.message || "fuzz worker error"))
             next
           end
-        @sent += 1
-        @matched += 1 if result.matched?
-        # A swallowed `¦chain` (the transform did not run, the payload went out raw) is an
-        # error too — otherwise a sweep reports `0 errors` while sending the untransformed
-        # payload. `||` not `+2`: one request is one error even if it both failed on the wire
-        # AND carried a chain that could not run.
-        @errors += 1 if result.error || result.chain_error
-        # Every SUPERSEDED attempt was a failed send too: `run_one` only re-sends after a
-        # network error, so `resent_count` is exactly the count of earlier attempts that failed
-        # and were replaced. The line above counts the FINAL result; without this one a POST
-        # that failed twice and then succeeded on try 3 reported `0 errors` for two real network
-        # failures. `resent_count` is 0 on the common path, so a clean run is byte-unchanged; and
-        # it never double-counts the final attempt, which is the one the `||` above already saw.
-        @errors += result.resent_count
-        @events.send(ResultEvent.new(result)) # blocking — never drop a row
-        emit_progress
+        record_result(result)
       end
     ensure
       @finished.send(nil)
+    end
+
+    # One race group: N copies of the SAME baseline request (no §…§ substitution — a race
+    # group is not a payload sweep, see `Config#race_count`), assembled and released together
+    # by `Backend#send_race`, then reported through the ordinary Result/Progress pipeline so
+    # every existing surface (rows, `--mc/--fc`, JSON/jsonl) renders them unchanged. A member
+    # `Backend#send_race` could not assemble/release carries a `race: …`-prefixed error
+    # string in its Result rather than a new field — see `Sender#send_race`.
+    private def run_race(n : Int32) : Nil
+      return if @state == State::Stopped
+      base = @generator.baseline_request
+      jobs = Array.new(n) { |i| Job.new(i.to_i64, [] of String, nil, base) }
+      results = @backend.send_race(jobs, warmup: @config.race_warmup, timeout: @config.timeout)
+      results.each_with_index { |raw, i| record_result(@matcher.build(jobs[i], raw)) }
+    ensure
+      @backend.close rescue nil
+      @events.send(DoneEvent.new(snapshot, @state == State::Stopped))
+      @events.close
+    end
+
+    # One result row's bookkeeping — shared by `worker_loop` (one job per call) and
+    # `run_race` (one race-group member per call).
+    private def record_result(result : Result) : Nil
+      @sent += 1
+      @matched += 1 if result.matched?
+      # A swallowed `¦chain` (the transform did not run, the payload went out raw) is an
+      # error too — otherwise a sweep reports `0 errors` while sending the untransformed
+      # payload. `||` not `+2`: one request is one error even if it both failed on the wire
+      # AND carried a chain that could not run.
+      @errors += 1 if result.error || result.chain_error
+      # Every SUPERSEDED attempt was a failed send too: `run_one` only re-sends after a
+      # network error, so `resent_count` is exactly the count of earlier attempts that failed
+      # and were replaced. The line above counts the FINAL result; without this one a POST
+      # that failed twice and then succeeded on try 3 reported `0 errors` for two real network
+      # failures. `resent_count` is 0 on the common path, so a clean run is byte-unchanged; and
+      # it never double-counts the final attempt, which is the one the `||` above already saw.
+      @errors += result.resent_count
+      @events.send(ResultEvent.new(result)) # blocking — never drop a row
+      emit_progress
     end
 
     private def coordinate : Nil

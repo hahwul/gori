@@ -11,7 +11,7 @@ module Gori::Tui
   # strings (compiled by the view's commit_buffers at build/persist time, unchanged).
   record AdvancedSnapshot,
     conc : String, rate : String, timeout : String, retries : String,
-    max_requests : String,
+    max_requests : String, race : String,
     follow : Bool, calibrate : Bool, keep_alive : Bool, update_cl : Bool,
     m_status : String, m_size : String, m_words : String, m_regex : String,
     f_status : String, f_size : String, f_words : String, f_regex : String
@@ -51,6 +51,12 @@ module Gori::Tui
       {:f_size, "Filter size", :text},
       {:f_words, "Filter words", :text},
       {:f_regex, "Filter regex", :text},
+      # Appended LAST, deliberately: every other row above is referenced by hardcoded index
+      # in spec/tui/fuzz_advanced_overlay_spec.cr, and this is the one position that shifts
+      # none of them. Race condition (last-byte-sync): N dedicated connections holding back
+      # the final byte, released together — bypasses Mode/payload sets entirely (see
+      # Fuzz::Config#race_count). Blank = off. A warm-up request is CLI/MCP-only for this phase.
+      {:race, "Race (N conns)", :text},
     ]
     LABEL_W = 21 # value column offset (widest label "Auto Content-Length" + padding)
 
@@ -67,6 +73,7 @@ module Gori::Tui
         :timeout      => TextField.new(snap.timeout),
         :retries      => TextField.new(snap.retries),
         :max_requests => TextField.new(snap.max_requests),
+        :race         => TextField.new(snap.race),
         :m_status     => TextField.new(snap.m_status),
         :m_size       => TextField.new(snap.m_size),
         :m_words      => TextField.new(snap.m_words),
@@ -164,7 +171,7 @@ module Gori::Tui
       AdvancedSnapshot.new(
         conc: @fields[:conc].value, rate: @fields[:rate].value,
         timeout: @fields[:timeout].value, retries: @fields[:retries].value,
-        max_requests: @fields[:max_requests].value,
+        max_requests: @fields[:max_requests].value, race: @fields[:race].value,
         follow: @follow, calibrate: @calibrate, keep_alive: @keep_alive,
         update_cl: @update_cl,
         m_status: @fields[:m_status].value, m_size: @fields[:m_size].value,

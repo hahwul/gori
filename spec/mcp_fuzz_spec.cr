@@ -84,6 +84,37 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "runs a race_count job with no payloads at all" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      args = {
+        "template"       => "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "race_count"     => 6,
+        "match"          => {"status" => "200"},
+        "allow_unscoped" => true,
+      }.to_json
+
+      start = call_json(tools, "fuzz_start", args)
+      job_id = start["job_id"].as_s
+      start["total"].as_i.should eq(6)
+
+      done = false
+      30.times do
+        sleep 0.02.seconds
+        status = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+        next if status["status"].as_s == "running"
+        status["status"].as_s.should eq("done")
+        status["sent"].as_i.should eq(6)
+        status["matched"].as_i.should eq(6)
+        done = true
+        break
+      end
+      done.should be_true
+    end
+  end
+
   it "accepts payloads as a JSON array (not only a JSON string)" do
     port = start_origin
     with_store do |store|

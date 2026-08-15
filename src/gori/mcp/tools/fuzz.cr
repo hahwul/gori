@@ -741,7 +741,22 @@ module Gori
         # Transfer-Encoding) was unreachable for an agent — every payload was re-framed to fit
         # before it went out, which is precisely the observation such a sweep is looking for.
         cfg.update_content_length = bool_arg(h, "update_content_length", cfg.update_content_length?)
+        # Race condition (last-byte-sync): bypasses `mode`/`payloads` entirely — see
+        # `Fuzz::Config#race_count`. Clamped at the same deepest point the CLI and the engine
+        # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
+        int(h, "race_count").try { |v| cfg.race_count = v.clamp(1_i64, Fuzz::Engine::MAX_RACE_SIZE.to_i64).to_i }
+        cfg.race_warmup = fuzz_race_warmup(h)
         cfg
+      end
+
+      # Exact raw wire bytes, sent-then-fully-read on each race connection before it holds the
+      # race request — the same "no template processing, no Env expansion" contract
+      # `--race-warmup=FILE` has on the CLI (`read_input_file` is a bare `File.read`). nil when
+      # absent, matching `Config#race_warmup`'s "no warm-up" default.
+      private def fuzz_race_warmup(h) : Bytes?
+        s = str(h, "race_warmup")
+        return nil if s.nil? || s.empty?
+        s.to_slice
       end
 
       # The tools/list schemas for the Fuzzer tools, kept beside the handlers that
@@ -757,7 +772,8 @@ module Gori
           "ACTIVE: sends many real outbound requests from this host. Mark payload " \
           "positions with §…§ in `template`, via `marks` (literal token wrap, like " \
           "CLI --mark), or pass `flow_id` + auto:true, then provide payload sets via " \
-          "`payloads`. Capped " \
+          "`payloads`. OR set `race_count` for a race-condition (last-byte-sync) run — " \
+          "N dedicated connections releasing the same request together, no payloads needed. Capped " \
           "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
           s.field "template", strprop("raw HTTP request with §…§ position markers")
           s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
@@ -786,6 +802,8 @@ module Gori
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "record_history", strprop("none (default) | matched | all — record each sent request+response as a History flow for audit/evidence; matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.")
           s.field "update_content_length", boolprop("recompute Content-Length after each payload is spliced into the body (default true). Set FALSE to send your template's declared value verbatim — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive, and with the default on every payload is silently re-framed to fit before it leaves. Mirrors CLI `gori run fuzz --verbatim` and intercept_forward_edit{update_content_length:false}.")
+          s.field "race_count", intprop("Race condition (last-byte-sync) mode: dial this many DEDICATED connections, hold back the request's final byte on each, then release every held-back byte in one tight write loop so the target receives all of them as close to simultaneously as this process can manage — for finding TOCTOU bugs (double-spend, coupon reuse, limit bypass). BYPASSES mode/payloads/marks entirely: the template is sent byte-identical on every connection (no §…§ substitution), so `template`/`flow_id` alone is enough — set match:{status:...} so 'matched' in fuzz_results marks the success response (a correctly-guarded endpoint should show at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. This is HTTP/1.1-only (h2 degrades to independent per-connection sends — true single-packet HTTP/2 racing is not yet implemented).")
+          s.field "race_warmup", strprop("race_count only: a raw HTTP request sent, and its response fully read, on each connection BEFORE it holds the race request — equalizes per-connection TLS-handshake/accept latency, which narrows the achievable release window. Sent EXACTLY as given (no §…§, no Env expansion) — use something harmless (e.g. a plain GET) against the same origin, never the race request itself (which would perform its side effect once per connection before the timed attempt).")
         end
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \

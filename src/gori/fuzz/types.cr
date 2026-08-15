@@ -228,6 +228,22 @@ module Gori
       # mis-declared Content-Length, `Connection: close`, CL+TE — get their own connection
       # regardless of this flag.
       property? keep_alive : Bool
+      # Race condition (last-byte-sync) mode: nil = off (the ordinary Mode-driven sweep runs).
+      # N = dial N dedicated connections to the origin, hold back the request's final byte on
+      # each, then release every held-back byte in one tight write loop so the target receives
+      # all N as close to simultaneously as gori's single-threaded fiber scheduler allows. This
+      # bypasses `Mode`/`Generator` entirely (see `Fuzz::Engine#run_race`) — a race group is N
+      # copies of ONE request, not a payload-substitution sweep, so it does not fit the
+      # Sniper/BatteringRam/Pitchfork/ClusterBomb combinatorial model at all.
+      property race_count : Int32?
+      # Exact raw wire bytes sent (and fully read) on each race connection BEFORE the held-back
+      # race request is queued — equalizes per-connection TLS-handshake/accept latency, which
+      # narrows the achievable release window in practice. nil = no warm-up. Never synthesized:
+      # the operator supplies the exact bytes (mirrors `--request=FILE`'s raw-bytes contract),
+      # because gori does not guess a "harmless" request on the operator's behalf, and reusing
+      # the race request itself as its own warm-up would perform a non-idempotent action once
+      # before the timed attempt.
+      property race_warmup : Bytes?
 
       def initialize(@mode : Mode = Mode::Sniper,
                      @concurrency : Int32 = 20,
@@ -244,7 +260,9 @@ module Gori
                      @auto_calibrate : Bool = false,
                      @keep_bodies : Symbol = :matched,
                      @max_requests : Int64? = nil,
-                     @keep_alive : Bool = true)
+                     @keep_alive : Bool = true,
+                     @race_count : Int32? = nil,
+                     @race_warmup : Bytes? = nil)
       end
     end
   end

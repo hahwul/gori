@@ -117,6 +117,11 @@ module Gori::Tui
       @s_timeout = ""
       @s_retries = "0"
       @s_max_req = ""
+      # Race condition (last-byte-sync): blank = off. Bypasses Mode/payload sets entirely
+      # (see Fuzz::Config#race_count) — a warm-up request is CLI/MCP-only for this phase
+      # (`gori run fuzz --race-warmup`/MCP `race_warmup`), same as the Fuzzer tab never having
+      # had a processor UI (see `commit_buffers`).
+      @s_race = ""
       @s_m_regex = "" # regex fields buffered as source strings, compiled on commit
       @s_f_regex = ""
       # Memoized "Run · N requests" count, recomputed only when the config signature
@@ -998,7 +1003,7 @@ module Gori::Tui
     def advanced_snapshot : AdvancedSnapshot
       AdvancedSnapshot.new(
         conc: @s_conc, rate: @s_rate, timeout: @s_timeout, retries: @s_retries,
-        max_requests: @s_max_req,
+        max_requests: @s_max_req, race: @s_race,
         follow: @config.follow_redirects?, calibrate: @config.auto_calibrate?,
         keep_alive: @config.keep_alive?, update_cl: @config.update_content_length?,
         m_status: @matcher.match_status || "", m_size: @matcher.match_size || "",
@@ -1015,6 +1020,7 @@ module Gori::Tui
       @s_timeout = s.timeout
       @s_retries = s.retries
       @s_max_req = s.max_requests
+      @s_race = s.race
       @config.follow_redirects = s.follow
       @config.auto_calibrate = s.calibrate
       @matcher.auto_calibrate = s.calibrate
@@ -1110,6 +1116,9 @@ module Gori::Tui
       # Blank / unparsable / <= 0 all mean "no cap" — the same reading `--max-requests`
       # and MCP give an absent key, so clearing the field really does remove the ceiling.
       @config.max_requests = @s_max_req.to_i64?.try { |n| n > 0 ? n : nil }
+      # Blank / unparsable / <= 0 all mean "off" — same reading as every other numeric
+      # buffer here. Clamped at the same ceiling the engine itself clamps at.
+      @config.race_count = @s_race.to_i?.try { |n| n > 0 ? n.clamp(1, Fuzz::Engine::MAX_RACE_SIZE) : nil }
       @matcher.match_regex = @s_m_regex.empty? ? nil : (Regex.new(@s_m_regex) rescue nil)
       @matcher.filter_regex = @s_f_regex.empty? ? nil : (Regex.new(@s_f_regex) rescue nil)
     end
@@ -1120,6 +1129,7 @@ module Gori::Tui
       @s_timeout = @config.timeout.try(&.total_seconds.to_i.to_s) || ""
       @s_retries = @config.retries.to_s
       @s_max_req = @config.max_requests.try(&.to_s) || ""
+      @s_race = @config.race_count.try(&.to_s) || ""
       @s_m_regex = @matcher.match_regex.try(&.source) || ""
       @s_f_regex = @matcher.filter_regex.try(&.source) || ""
     end
@@ -1977,6 +1987,7 @@ module Gori::Tui
           j.field "timeout_s", @config.timeout.try(&.total_seconds.to_i)
           j.field "retries", @config.retries
           j.field "max_requests", @config.max_requests
+          j.field "race_count", @config.race_count
           j.field "follow", @config.follow_redirects?
           j.field "calibrate", @config.auto_calibrate?
           j.field "keep_alive", @config.keep_alive?
@@ -2007,6 +2018,7 @@ module Gori::Tui
       obj["timeout_s"]?.try(&.as_i?).try { |s| @config.timeout = s.seconds }
       obj["retries"]?.try(&.as_i?).try { |n| @config.retries = n }
       @config.max_requests = obj["max_requests"]?.try(&.as_i64?)
+      @config.race_count = obj["race_count"]?.try(&.as_i?)
       @config.follow_redirects = obj["follow"]?.try(&.as_bool?) || false
       @config.auto_calibrate = obj["calibrate"]?.try(&.as_bool?) || false
       # A session persisted before this key existed reads as nil ⇒ keep the ctor default
@@ -2421,7 +2433,12 @@ module Gori::Tui
     private def render_run_summary(screen, inner : Rect, y : Int32) : Nil
       return if y >= inner.bottom
       text =
-        if n = run_request_count
+        if race = @config.race_count
+          # Race bypasses Mode/sets entirely (Config#race_count) — say so here rather than
+          # let the row go blank (the normal "empty sets" case this summary otherwise reads
+          # as) or report a payload count that was never computed.
+          "↳ race ×#{race} (last-byte-sync, Mode/sets ignored)"
+        elsif n = run_request_count
           "↳ #{Fmt.count(n)} request#{n == 1 ? "" : "s"}"
         elsif @sets.empty?
           ""

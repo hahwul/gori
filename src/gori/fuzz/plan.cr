@@ -251,7 +251,11 @@ module Gori::Fuzz
         {tok, count}
       end
       template = Template.parse(text, options.http2?)
-      raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if template.position_count == 0
+      # A race group is N copies of ONE request, not a payload-substitution sweep — see
+      # `Config#race_count` — so it has no use for §…§ positions or payload sets at all, and
+      # both guards below (and NoPayloads, one screen down) are skipped when it is set.
+      race_count = validate_race_count(options.config.race_count)
+      raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if template.position_count == 0 && !race_count
       # The twin of `refuse_unresolved`, one line down and for the same reason: a `¦chain` this
       # run cannot apply leaves the position's payload UNTRANSFORMED on the wire. See
       # `refuse_unusable_chains`.
@@ -268,7 +272,7 @@ module Gori::Fuzz
       origin = resolve_origin(options)
 
       sets = options.sources.map { |src| PayloadSet.new(src, options.processors) }
-      raise PlanError.new(PlanError::Reason::NoPayloads, "no payload sets") if sets.empty?
+      raise PlanError.new(PlanError::Reason::NoPayloads, "no payload sets") if sets.empty? && !race_count
 
       config = options.config
       matcher = options.matcher
@@ -276,8 +280,10 @@ module Gori::Fuzz
       # was previously synced by hand on two surfaces out of three.
       matcher.auto_calibrate = config.auto_calibrate?
       # Sniper / BatteringRam take ONE shared set; Pitchfork / ClusterBomb take one per
-      # position (see Generator's set contract).
-      gen_sets = config.mode.per_position? ? sets : [sets.first]
+      # position (see Generator's set contract). Empty for a race run — `Generator#each`/
+      # `#total` (the only readers of `@sets`) are never called on that path; `Engine#run_race`
+      # calls `Generator#baseline_request` instead, which does not touch `@sets` either.
+      gen_sets = sets.empty? ? [] of PayloadSet : (config.mode.per_position? ? sets : [sets.first])
       # The shared decoder registry applies each position's inline `¦chain` at render time.
       # Wired here so a new surface cannot forget it and silently send un-transformed payloads.
       generator = Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
@@ -334,6 +340,17 @@ module Gori::Fuzz
       scheme, host, port = Repeater::FlowRequest.parse_target(url)
       raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url) if host.empty?
       Origin.new(scheme, host, port)
+    end
+
+    # Race mode needs at least two connections in flight together (one is just a send).
+    # Refused here — not silently clamped — so the operator sees why a `--race=1` did nothing.
+    # Returns the count back so the caller can gate the position/payload guards on it in one go.
+    private def self.validate_race_count(race_count : Int32?) : Int32?
+      if race_count && race_count < 2
+        raise Gori::Error.new("race_count must be at least 2 (a race needs at least two " \
+                              "connections in flight together, or it is just a send)")
+      end
+      race_count
     end
 
     # Refuse a run whose TARGET carries a token that resolves to nothing.

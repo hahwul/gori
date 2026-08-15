@@ -389,7 +389,7 @@ describe "Fuzzer tab — Content-Length (T2)" do
         snap = off.advanced_snapshot
         off.apply_advanced(AdvancedSnapshot.new(
           conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
-          max_requests: snap.max_requests, follow: snap.follow, calibrate: snap.calibrate,
+          max_requests: snap.max_requests, race: snap.race, follow: snap.follow, calibrate: snap.calibrate,
           keep_alive: snap.keep_alive, update_cl: false,
           m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
           f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
@@ -424,7 +424,7 @@ describe "Fuzzer tab — Content-Length (T2)" do
     snap.max_requests.should eq("")
     view.apply_advanced(AdvancedSnapshot.new(
       conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
-      max_requests: "250", follow: snap.follow, calibrate: snap.calibrate,
+      max_requests: "250", race: snap.race, follow: snap.follow, calibrate: snap.calibrate,
       keep_alive: snap.keep_alive, update_cl: false,
       m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
       f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
