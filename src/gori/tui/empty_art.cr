@@ -64,7 +64,7 @@ module Gori::Tui
     #   █  the subject       — the proxy, the payload that landed, the token bit that moved
     #   ▓  secondary mass    — the traffic around it, the candidates that did not hit
     #   ▄▀ etc.              — detail strokes; always secondary
-    #   ─│┌ and ASCII        — scaffolding: frames, wires, tree joints
+    #   ─│╭ and ASCII        — scaffolding: frames, wires, tree joints
     #
     # All three are the SAME hue sunk to different depths toward the canvas, so a figure reads
     # as one object rather than as blocks in one colour wired together in another — and, more
@@ -126,40 +126,40 @@ module Gori::Tui
     # Client, proxy, origin — with the proxy lit, because the card's whole job is to hand
     # over the address of that middle box.
     HISTORY = Block.new([
-      "┌────┐   ┌────┐   ┌────┐",
-      "│ ▓▓ │══>│ ██ │══>│ ▓▓ │",
-      "└────┘   └────┘   └────┘",
+      "╭────╮   ╭────╮   ╭────╮",
+      "│ ▓▓ │──>│ ██ │──>│ ▓▓ │",
+      "╰────╯   ╰────╯   ╰────╯",
     ])
 
     # A host that branches into paths — the host → path tree the card describes, as the
     # shape it actually takes in the pane.
     SITEMAP = Block.new([
-      "┌──────┐",
+      "╭──────╮",
       "│ ████ ├──┬── ▓▓▓▓▓▓▓",
-      "└──────┘  └── ▓▓▓▓",
+      "╰──────╯  ╰── ▓▓▓▓",
     ])
 
     # Two messages stopped at a closed barrier, with nothing past it: the queue is the
     # point, and the dashes beyond the gate are the traffic that is NOT flowing.
     INTERCEPT = Block.new([
-      "┌────┐ ┌────┐ ║",
-      "│ ▓▓ │ │ ██ │ ║ ─ ─ ─",
-      "└────┘ └────┘ ║",
+      "╭────╮ ╭────╮ ║",
+      "│ ▓▓ │ │ ██ │ ║ ┄┄┄",
+      "╰────╯ ╰────╯ ║",
     ])
 
     # Out and back: one request sent, one response to compare it against.
     REPEATER = Block.new([
-      "┌────┐ ══>  ┌────┐",
+      "╭────╮ ──>  ╭────╮",
       "│ ██ │      │ ▓▓ │",
-      "└────┘ <══  └────┘",
+      "╰────╯ <┄┄  ╰────╯",
     ])
 
     # A template whose two marked positions drop payloads out through the bottom edge —
     # the §marker§ substitution the card explains, drawn.
     FUZZER = Block.new([
-      "┌────────────────┐",
+      "╭────────────────╮",
       "│ ▓▓▓ ██ ▓▓ ██ ▓ │",
-      "└─────██────██───┘",
+      "╰─────██────██───╯",
     ])
 
     # A response-length histogram with the outlier lit: what a finished run looks like, and
@@ -173,16 +173,16 @@ module Gori::Tui
     # A window sliding along a stream — passive scanning reads what passes, it does not
     # send. The caught span is the lit one.
     PROBE = Block.new([
-      "      ┌────┐",
+      "      ╭────╮",
       "▓▓▓▓▓▓│ ██ │▓▓▓▓▓▓",
-      "      └────┘",
+      "      ╰────╯",
     ])
 
     # One triaged record with its severity bar — the unit of work on this tab.
     ISSUES = Block.new([
-      "┌─┬──────────────────┐",
+      "╭─┬──────────────────╮",
       "│█│ ▓▓▓▓▓▓▓▓▓▓▓▓     │",
-      "└─┴──────────────────┘",
+      "╰─┴──────────────────╯",
     ])
 
     # A page with sub-tabs on it, the open one lit — which is what the card underneath says
@@ -197,10 +197,10 @@ module Gori::Tui
     # which row was lit. Hanging the page off a tab strip fixes the resemblance in the OUTLINE,
     # which is the part that survives being three rows tall.
     NOTES = Block.new([
-      "┌────┬────┐",
-      "│████│▓▓▓▓└─────────┐",
+      "╭────┬────╮",
+      "│████│▓▓▓▓╰─────────╮",
       "│ ▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄  │",
-      "└───────────────────┘",
+      "╰───────────────────╯",
     ])
 
     # The Project mark: a dossier with a title and a written body. NOT the gori logo — this
@@ -209,25 +209,25 @@ module Gori::Tui
     # the empty pane is asking the operator to write first. ONE body line, not two: see the
     # row budget above — the second line cost this figure every terminal under 120x40.
     PROJECT_DESC = Block.new([
-      "┌───────────────┐",
+      "╭───────────────╮",
       "│ ██████        │",
       "│ ▄▄▄▄▄▄▄  ▄▄▄▄ │",
-      "└───────────────┘",
+      "╰───────────────╯",
     ])
 
     # A root fanning out into the endpoints a crawl turns up.
     DISCOVER = Block.new([
-      "      ┌── ▓▓▓▓",
+      "      ╭── ▓▓▓▓",
       "██ ───┼── ▓▓▓",
-      "      └── ▓▓▓▓▓▓",
+      "      ╰── ▓▓▓▓▓▓",
     ])
 
     # Two columns with one span differing — the answer this tab exists to give, so the
     # figure shows a diff rather than two identical halves.
     COMPARER = Block.new([
-      "┌──────┬──────┐",
+      "╭──────┬──────╮",
       "│ ▄▄▄▄ │ ██▄▄ │",
-      "└──────┴──────┘",
+      "╰──────┴──────╯",
     ])
 
     # A wordlist over a sieve, with the two names that got through lit below it. Both slots sit
@@ -243,17 +243,17 @@ module Gori::Tui
     # A mine that has run: names probed, and the one whose response came back different. The
     # arrows are what keep this off FUZZER_RESULTS' histogram — a mine reads pairs, not bars.
     MINER_RESULTS = Block.new([
-      "▓▓▓▓ ──> ▓▓▓▓",
-      "▓▓▓▓ ──> ▓▓▓▓",
+      "▓▓▓▓ ┄┄> ▓▓▓▓",
+      "▓▓▓▓ ┄┄> ▓▓▓▓",
       "████ ──> ██████",
     ])
 
     # One request sent repeatedly, one token back per send, newest lit — which is exactly what
     # the SAMPLES pane fills with.
     SEQUENCER_SAMPLES = Block.new([
-      "┌────┐ ══> ▓▓▓▓",
-      "│ ██ │ ══> ▓▓▓▓",
-      "└────┘ ══> ████",
+      "╭────╮ ┄┄> ▓▓▓▓",
+      "│ ██ │ ┄┄> ▓▓▓▓",
+      "╰────╯ ──> ████",
     ])
 
     # A listener hands out a payload, the target keeps it, and the hit comes back on a channel
@@ -261,17 +261,17 @@ module Gori::Tui
     # way out, dashed on the way back; the lit box is the listener, because "it lands HERE" is
     # what the card is there to say.
     OAST = Block.new([
-      "┌────────┐ ══> ▓▓▓▓",
-      "│  ████  │        │",
-      "└────────┘ <─ ─ ─ ┘",
+      "╭────────╮ ──> ▓▓▓▓",
+      "│  ████  │        ┆",
+      "╰────────╯ <┄┄┄┄┄┄╯",
     ])
 
     # One token split into cells, with the positions that vary between samples lit — which
     # is exactly what the analysis pane reports.
     SEQUENCER = Block.new([
-      "┌──┬──┬──┬──┬──┬──┐",
+      "╭──┬──┬──┬──┬──┬──╮",
       "│▓▓│██│▓▓│██│▓▓│▓▓│",
-      "└──┴──┴──┴──┴──┴──┘",
+      "╰──┴──┴──┴──┴──┴──╯",
     ])
 
     CATALOG = {
