@@ -171,6 +171,11 @@ module Gori
       # Ceiling on History flows recorded per run (record_history), so `all` on a
       # huge run can't unboundedly grow the project database.
       FUZZ_HISTORY_MAX = 5_000
+      # Ceiling on how many times ONE job may log from its per-event rescues. Those sit on
+      # the per-result path, so a persistent failure logs once per request sent; a client
+      # that does not drain stderr then fills the pipe and parks the job fiber, wedging the
+      # job at `:running`. The count itself is never capped — only the writes.
+      DRAIN_LOG_CAP = 20
 
       # Param-miner safety rails (same intent as the fuzz caps).
       MINE_MAX_REQUESTS    = 100_000_i64
@@ -367,6 +372,15 @@ module Gori
         property grpc_requests = 0_i64
         property grpc_stale_reason : String? = nil
         property error_msg : String? = nil
+        # How many times the drain / history-record rescues have fired for this job. Those
+        # rescues log, and they sit on the per-EVENT path: a persistent failure (a broken
+        # store, a full disk) fires once per result, so an unbounded log would write one
+        # stderr line per request sent. An MCP client that does not drain stderr fills the
+        # 64 KB pipe, `Log` then blocks the job fiber, every fuzz worker parks on
+        # `@events.send`, and the job wedges at `:running` — which also blocks
+        # `switch_project`/`delete_project` for the rest of the session. Callers still see
+        # the true count in `error_msg`; only the LOGGING is capped (see LOG_CAP).
+        property drain_errors = 0
         getter results = [] of Fuzz::Result
         # History flow ids for the stored (matched) results, index-aligned with
         # `results`; nil when record_history was off or the record failed.

@@ -102,6 +102,28 @@ module Gori
       raise Error.new("#{what}: #{ex.message.presence || ex.class}")
     end
 
+    # `URI.parse` on a NETWORK-supplied string. Every URL this module parses past the first
+    # one comes from the release JSON (`browser_download_url`) or a `Location` header, and
+    # `URI.parse` raises on both a malformed authority (`URI::Error`) and an out-of-range
+    # port (`OverflowError`, e.g. `host:9999999999`). Neither is a `Gori::Error`, so an
+    # unguarded parse backtraces straight out of `gori update` — `CLI.run` rescues only
+    # `Gori::Error`, and `io_guard` covers only `IO::Error`/`OpenSSL::Error`.
+    private def self.parse_url(url : String, what : String) : URI
+      URI.parse(url)
+    rescue ex : URI::Error | OverflowError
+      raise Error.new("#{what}: #{ex.message.presence || ex.class}")
+    end
+
+    # A `Location` header resolved against the URL it came from. Absolute targets pass
+    # through; a relative one is resolved, which PARSES the server-supplied value and so
+    # carries the same raise surface `parse_url` guards — wrapped rather than left bare.
+    private def self.resolve_redirect(url : String, location : String) : String
+      return location if location.starts_with?("http://") || location.starts_with?("https://")
+      parse_url(url, "invalid download URL: #{url}").resolve(location).to_s
+    rescue ex : URI::Error | OverflowError
+      raise Error.new("invalid redirect target #{location.inspect} from #{url}: #{ex.message.presence || ex.class}")
+    end
+
     def self.resolve_executable_path : String
       path = Process.executable_path
       raise Error.new("could not determine the running gori executable path") unless path
@@ -311,7 +333,7 @@ module Gori
     def self.fetch_latest_release_json(api_url : String? = nil, *,
                                        timeout : Time::Span = HTTP_TIMEOUT) : String
       url = resolve_api_url(api_url)
-      uri = URI.parse(url)
+      uri = parse_url(url, "invalid API URL: #{url}")
       headers = HTTP::Headers{
         "Accept"     => "application/vnd.github+json",
         "User-Agent" => USER_AGENT,
@@ -343,7 +365,7 @@ module Gori
                          force_progress : Bool = false) : Int64
       raise Error.new("too many redirects downloading #{url}") if redirects_left < 0
 
-      uri = URI.parse(url)
+      uri = parse_url(url, "invalid download URL: #{url}")
       host = uri.host || raise Error.new("invalid download URL: #{url}")
       port = uri.port || (uri.scheme == "https" ? 443 : 80)
       tls = uri.scheme == "https"
@@ -364,8 +386,7 @@ module Gori
               location = response.headers["Location"]?
               raise Error.new("redirect without Location from #{url}") unless location
               response.body_io.gets_to_end
-              # Resolve relative redirects against the current URL.
-              redirect_url = location.starts_with?("http://") || location.starts_with?("https://") ? location : URI.parse(url).resolve(location).to_s
+              redirect_url = resolve_redirect(url, location)
               next
             end
             unless code == 200

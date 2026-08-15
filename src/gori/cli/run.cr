@@ -275,6 +275,26 @@ module Gori
         end
       end
 
+      # Read an operator-named input file, reporting a clean CLI error instead of a
+      # backtrace. `File.exists? && !File.directory?` is NOT enough on its own: it passes
+      # for a file that exists but cannot be opened (mode 000, an unreadable parent, a
+      # foreign-owned path), and it is a TOCTOU window besides — the path can be deleted
+      # between the check and the read. `File.read` then raises `File::AccessDeniedError` /
+      # `File::NotFoundError`, and `File::Error < IO::Error` is re-raised by `Run.dispatch`
+      # (which only absorbs EPIPE), so it escapes `CLI.run`'s `Gori::Error`-only rescue.
+      # Mirrors the guard `run/rewriter.cr`'s `read_stub_response` already had. `stdin:` is
+      # opt-in rather than the default so this stays a pure robustness change: only the one
+      # caller that already spelled `-` as stdin keeps that meaning, and the flags that used
+      # to reject `-` as an unreadable path go on rejecting it instead of quietly blocking
+      # on a terminal read.
+      private def self.read_input_file(path : String, what : String, *, stdin : Bool = false) : String
+        return STDIN.gets_to_end if stdin && path == "-"
+        abort "#{what}: not a readable file: #{path}" if File.directory?(path)
+        File.read(path)
+      rescue ex : File::Error
+        abort "#{what}: cannot read '#{path}': #{ex.message}"
+      end
+
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
       # turn that into a clean CLI error instead of an unhandled backtrace.
       private def self.open_store(project : Project) : Store

@@ -22,8 +22,12 @@ module Gori::Miner
   end
 
   module Fingerprint
+    # Cap the INFLATE at the capture ceiling for the same reason `Fuzz::Matcher#decode`
+    # does — this and that were the two decode sites in the active engines still taking
+    # `ContentDecode`'s 32 MiB default, so a compressible response inflated ~4x past the
+    # 8 MiB the capture read already bounds, once per in-flight worker.
     def self.probe(raw : Repeater::Result) : Probe
-      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
+      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body, Proxy::Codec::Body::CAPTURE_READ_MAX)
       body = decoded || raw.body || Bytes.empty
       words, lines = count_metrics(body)
       metrics = Fuzz::Metrics.new(

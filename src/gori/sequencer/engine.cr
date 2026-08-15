@@ -123,7 +123,10 @@ module Gori::Sequencer
       # stopped or raising run leaks no fd — the same standard `Fuzz::Engine` and
       # `Discover::Engine` hold. A no-op for manual mode (no backend) and for the
       # connection-per-send doubles, whose `close` is empty by default.
-      @backend.try(&.close)
+      # `rescue nil` so a raising close cannot skip the `@events.close` on the next line —
+      # that close is what ends the consumer's blocking `receive?`, and without it an MCP
+      # job fiber never reaches `finalize_job` and stays pinned at `:running`.
+      @backend.try(&.close) rescue nil
       @events.close
     end
 

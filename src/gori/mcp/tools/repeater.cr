@@ -411,6 +411,12 @@ module Gori
       # set, and nothing else. Deliberately narrow: `hello=world` is a payload, not a spec,
       # and misreading it would mean gori sending something other than what was asked for.
       private def ws_frame_spec?(s : String) : Bool
+        # `valid_encoding?` guard, NOT a scrub: an invalid-UTF-8 message is a legitimate
+        # WebSocket TEXT payload to send (`send.cr` keeps it unscrubbed on purpose), so the
+        # string must not be rewritten — but PCRE2 raises `ArgumentError` on it, which
+        # surfaced as an INTERNAL error instead of sending the frame. Such a string cannot
+        # start with one of these ASCII keys anyway, so "not a spec" is the right answer.
+        return false unless s.valid_encoding?
         s.matches?(/\A(opcode|fin|rsv|mask|mask_key|len|hex|b64|text)=/)
       end
 

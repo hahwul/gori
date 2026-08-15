@@ -677,9 +677,17 @@ module Gori::Fuzz
       @concurrency.times { @finished.receive }
       # Every worker has left run_one, so no fiber can be holding a checked-out socket:
       # release the keep-alive pool's parked ones instead of waiting for GC to finalize
-      # them (a stopped 50-worker run would otherwise sit on 50 fds).
-      @backend.close
+      # them (a stopped 50-worker run would otherwise sit on 50 fds). `rescue nil` for the
+      # same reason `Discover::Engine#orchestrate` guards its teardown: a raise here used to
+      # skip the `@events.close` below, and a synchronous consumer (`Engine#run`, the CLI,
+      # the MCP job fiber) sits in `while ev = @events.receive?` forever — which for MCP also
+      # means `finalize_job` never runs, pinning the job at `:running` and blocking
+      # `switch_project`/`delete_project` for the rest of the session.
+      @backend.close rescue nil
       @events.send(DoneEvent.new(snapshot, @state == State::Stopped))
+    ensure
+      # ALWAYS close, on every exit path: closing is what turns the consumer's blocking
+      # `receive?` into a nil and lets it finish. `Channel#close` is idempotent.
       @events.close
     end
 

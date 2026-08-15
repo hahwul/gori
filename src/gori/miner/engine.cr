@@ -205,7 +205,10 @@ module Gori::Miner
       # socket: release the keep-alive pool's parked ones instead of waiting for GC to
       # finalize them (a stopped 40-worker run would otherwise sit on 40 fds). Same close
       # `Fuzz::Engine#coordinate` performs, at the miner's equivalent seam.
-      @backend.close
+      # `rescue nil` so a raising close cannot skip the `@events.close` on the next line —
+      # that close is what ends the consumer's blocking `receive?`, and without it an MCP
+      # job fiber never reaches `finalize_job` and stays pinned at `:running`.
+      @backend.close rescue nil
       @events.close
     end
 

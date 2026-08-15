@@ -437,8 +437,18 @@ module Gori::Fuzz
       nil # a runaway --extract regex yields no capture rather than a dead worker (see regex_pass?)
     end
 
+    # Cap the INFLATE at the same ceiling the capture read already enforces. Left at
+    # `ContentDecode`'s 32 MiB default this was the one decode site in the active engines
+    # with no cap of its own (discover passes `MAX_BODY`, every probe rule passes
+    # `BODY_CAP`), so a hostile target answering every request `Content-Encoding: gzip`
+    # could inflate an 8 MiB capture toward 32 MiB per in-flight worker — and `--concurrency`
+    # goes to `MAX_CONCURRENCY` = 1000, which is tens of GB of transient allocation and an
+    # OOM kill no worker-loop rescue can catch. Pinning it to `CAPTURE_READ_MAX` removes the
+    # decompression AMPLIFICATION without inventing a truncation policy: the raw body is
+    # already bounded there, so no response that fits the capture can have its length,
+    # word/line counts or regex text changed by this cap.
     private def decode(raw : Repeater::Result) : Bytes
-      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
+      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body, Proxy::Codec::Body::CAPTURE_READ_MAX)
       decoded || raw.body || Bytes.empty
     end
 

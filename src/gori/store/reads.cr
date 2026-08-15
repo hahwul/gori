@@ -275,6 +275,12 @@ module Gori
 
     def count : Int64
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+    rescue
+      # Degrade like `data_version` rather than raise: this is a POLL reader (the Project
+      # tab's periodic refresh, MCP `get_context`/`list_projects`), so a transient
+      # SQLITE_BUSY under a checkpoint would otherwise burn the TUI's tick-error budget and
+      # void the MCP response instead of showing a stale number for one tick.
+      0_i64
     end
 
     # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
@@ -486,6 +492,8 @@ module Gori
     def total_size : Int64
       sql = "SELECT COALESCE(SUM(request_size + COALESCE(response_size, 0)), 0) FROM flows"
       @db.scalar(sql).as(Int64)
+    rescue
+      0_i64 # same poll-reader degrade as `count`/`data_version` above
     end
 
     # Distinct (host, method, target) endpoints for building the Sitemap tree,

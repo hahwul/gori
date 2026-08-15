@@ -6,8 +6,17 @@ module Gori::Update
   # Release asset naming (pure)
   # ---------------------------------------------------------------------------
 
+  # SCRUB FIRST: `version` is a release tag straight off the update endpoint, and
+  # every consumer below eventually feeds it to a regex — `version_cmp` splits on
+  # /[.+-]/, and PCRE2 raises `ArgumentError: Regex match error: UTF-8 error` on a
+  # subject holding a byte >= 0x80 that is not valid UTF-8. That raise lands on the
+  # TUI's main fiber with no rescue under it. Worse, `notice_version` persists the
+  # normalized tag as the read-once marker BEFORE anything else validates it, so a
+  # poisoned tag would be re-read from settings.json on every later launch and
+  # crash the process again from cache. Scrubbing here is the one choke point all
+  # four callers (version_cmp, notice_version, display_version, asset_name) share.
   def self.normalize_version(version : String) : String
-    v = version
+    v = version.scrub
     v = v[1..] if v.starts_with?('v') || v.starts_with?('V')
     v
   end

@@ -936,7 +936,11 @@ module Gori
     # whitespace, not on the `=` buried inside the value. Returns nil when KEY is
     # invalid.
     def self.parse_line(text : String) : {String, String}?
-      raw = text.strip
+      # `.scrub` first: `text` is an operator-supplied env line (`gori run project env set
+      # KEY VALUE`, the TUI env editor), and both the `index(/\s/)` and `split(/\s+/, 2)`
+      # below are PCRE2 calls, which raise `ArgumentError` on a subject that is not valid
+      # UTF-8. That escapes `CLI.run`'s `Gori::Error`-only rescue as a raw backtrace.
+      raw = text.scrub.strip
       return nil if raw.empty?
       eq = raw.index('=')
       ws = raw.index(/\s/)

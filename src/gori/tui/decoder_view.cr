@@ -122,28 +122,15 @@ module Gori::Tui
       paint_input_read_chrome(screen, body, input, read, reading) if reading && read
     end
 
+    # The shared over-paint — see `TextReadState#paint_chrome`, which carries the reasoning
+    # (including the `sync_from` this pane's own copy omitted: `^L` clears the INPUT buffer
+    # without resetting the read cursor, so a caret parked on line >= 1 then indexed off the
+    # end of the one-line snapshot and took the render down every tick until the tick-error
+    # breaker exited the session). Routing here also makes the band wrap-correct, by
+    # inverting the row list the editor actually drew instead of assuming `li - scroll`.
     private def paint_input_read_chrome(screen : Screen, rect : Rect, ed : TextArea,
                                         read : TextReadState, focused : Bool) : Nil
-      return unless focused
-      lines = ed.lines_snapshot
-      return if lines.empty?
-      scr = ed.scroll
-      sel_bg = Theme.accent_bg
-      read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
-        next unless li >= scr && li < scr + rect.h
-        row = li - scr
-        paint_char_span_bg(screen, rect.x, rect.y + row, lines[li], x0, x1, sel_bg)
-      end
-      cy, cx = read.cursor.cy, read.cursor.cx
-      return unless cy >= scr && cy < scr + rect.h
-      row = cy - scr
-      line = lines[cy]
-      px = rect.x + Screen.draw_width(line[0, cx])
-      if px < rect.x + rect.w
-        ch = cx < line.size ? line[cx] : ' '
-        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
-        screen.cursor(px, rect.y + row)
-      end
+      read.paint_chrome(screen, rect, ed, focused)
     end
 
     # CHAIN — a framed single-line spec field with a "›" prompt; gold when focused.
@@ -269,27 +256,6 @@ module Gori::Tui
 
     def output_clear_selection : Nil
       @out.clear_selection
-    end
-
-    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
-      return if x0 >= x1
-      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
-      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
-      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
-      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
-      # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
-      b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
-        screen.text(px, y, seg, Theme.text, bg)
-        px += Screen.draw_width(seg)
-        i = e
-      end
     end
 
     # The displayed OUTPUT split into lines, cached until the next recompute / mode

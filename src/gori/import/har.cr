@@ -68,7 +68,9 @@ module Gori
             http_version, req_declared)
         end
 
-        status = resp["status"]?.try(&.as_i).try(&.to_i32) || 0
+        # `number_i64`, not `as_i`: a fractional `"status": 200.5` raises `TypeCastError`
+        # out of `as_i`, which the per-entry rescue turned into a dropped request.
+        status = number_i64(resp["status"]?).try(&.clamp(0_i64, Int32::MAX.to_i64)).try(&.to_i32) || 0
         # Prefer the HAR's own statusText. Only invent a phrase for HTTP/1.x when the
         # field is absent — HTTP/2 has no reason phrase on the wire, and inventing "OK"
         # (or a trailing space on an empty phrase) broke the export→import fixed point.
@@ -112,9 +114,27 @@ module Gori
       # spec's own "not available" is -1, and a generator that writes 0 for a body it did
       # ship is saying nothing useful either — only a positive number is a claim.
       private def self.declared_size(node : JSON::Any?) : Int64?
-        return nil unless node
-        n = node.as_i64? || node.as_f?.try(&.to_i64)
+        n = number_i64(node)
         n && n > 0 ? n : nil
+      end
+
+      # A HAR number as an Int64, or nil when it is absent, not a number, or too large to
+      # represent. Every numeric field here goes through this because the obvious spellings
+      # RAISE on values a JSON parser accepts: `Float64#to_i64` raises `OverflowError` past
+      # ~9.2e18 (`"bodySize": 1e30`), and `JSON::Any#as_i` raises `TypeCastError` on a
+      # fractional number (`"status": 200.5`). Either one unwound to the per-entry
+      # `rescue nil` in `parse`, which then dropped an OTHERWISE VALID request — one junk
+      # metadata field cost the whole captured exchange. Degrading the FIELD to "not
+      # available" keeps the request and loses only the number that was unusable.
+      private def self.number_i64(node : JSON::Any?) : Int64?
+        return nil unless node
+        if i = node.as_i64?
+          return i
+        end
+        f = node.as_f?
+        return nil unless f && f.finite?
+        return nil unless f >= Int64::MIN.to_f64 && f <= Int64::MAX.to_f64
+        f.to_i64
       end
 
       # HAR `time` is milliseconds; the store keeps micros.
@@ -127,8 +147,13 @@ module Gori
       # shapes, so an integer `"time": 0` needs no separate branch.)
       private def self.parse_time(node : JSON::Any?) : Int64?
         ms = node.try(&.as_f?)
-        return nil unless ms && ms >= 0
-        (ms * 1_000).round.to_i64
+        # `finite?` and the range test for the reason `number_i64` spells out: `to_i64` on a
+        # huge (or non-finite) Float64 raises `OverflowError`, and that raise used to cost
+        # the entire entry rather than just its duration.
+        return nil unless ms && ms.finite? && ms >= 0
+        us = (ms * 1_000).round
+        return nil unless us <= Int64::MAX.to_f64
+        us.to_i64
       end
 
       # An ORDERED list of {name, value} — a HAR response commonly has several Set-Cookie

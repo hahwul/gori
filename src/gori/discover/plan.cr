@@ -189,8 +189,13 @@ module Gori::Discover
       # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
       # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
       # the run was refused as out-of-scope, naming the wrong gate.
-      refuse_unresolved(Env.unresolved(raw.strip, deferred: nil))
-      target = Env.expand(raw.strip)
+      # `.scrub` the seed once, up front: it is a raw `--target` / MCP argument, and the
+      # scheme test below is a PCRE2 call that raises `ArgumentError` on a non-UTF-8
+      # subject. The call site rescues only `PlanError`, and this runs AFTER `open_store`,
+      # so an escaping raise also strands a half-migrated DB + WAL behind it.
+      stripped = raw.scrub.strip
+      refuse_unresolved(Env.unresolved(stripped, deferred: nil))
+      target = Env.expand(stripped)
       raise PlanError.new(PlanError::Reason::NoTarget, "no seed target") if target.empty?
       target.matches?(/\Ahttps?:\/\//i) ? target : "https://#{target}"
     end

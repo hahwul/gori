@@ -28,8 +28,12 @@ module Gori
       end
 
       # Lenient CLI/MCP token decode (case + separators ignored).
+      # `.scrub` first: the token arrives straight from `--containment` / an MCP arg, and the
+      # `gsub` is a PCRE2 call that raises `ArgumentError` on a non-UTF-8 subject — inside
+      # the OptionParser handler, ahead of every command-level rescue. A scrubbed token
+      # simply matches no branch and returns nil, which is the intended "unknown token" path.
       def self.parse?(token : String) : Containment?
-        case token.downcase.strip.gsub(/[\s_]+/, "-")
+        case token.scrub.downcase.strip.gsub(/[\s_]+/, "-")
         when "same-origin", "origin", "strict"                                                 then SameOrigin
         when "host", "subdomains", "host+subdomains", "host-and-subdomains", "host-subdomains" then HostAndSubdomains
         when "scope", "scope-aware", "scoped"                                                  then ScopeAware

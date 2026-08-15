@@ -274,7 +274,12 @@ module Gori
         # the case-insensitive Host/Content-Length dedup and puts a second, conflicting
         # line on the wire (name "Content-Length:0" writes `Content-Length:0: x` next to
         # the auto `Content-Length: <bodylen>`).
-        if name =~ /[^!#$%&'*+\-.^_`|~0-9A-Za-z]/
+        # `valid_encoding?` first: PCRE2 raises `ArgumentError` on a non-UTF-8 subject, and
+        # `reject_token_breakers` deliberately allows bytes >= 0x80 through — so a header
+        # name carrying one reached this regex and surfaced as an INTERNAL error instead of
+        # the INVALID_ARGUMENT this check exists to report. A name that is not valid UTF-8
+        # cannot be an RFC 7230 token either, so it fails the same way, with the right words.
+        if !name.valid_encoding? || name =~ /[^!#$%&'*+\-.^_`|~0-9A-Za-z]/
           raise Gori::Error.new("illegal character in header name #{name.inspect} (must be an RFC 7230 token)")
         end
         raise Gori::Error.new("illegal CR/LF/NUL in value of header #{name.inspect}") if injection_char?(value)
@@ -313,17 +318,44 @@ module Gori
       # PUBLIC because `intercept_forward_edit` needs the identical rule: it used to
       # gsub the WHOLE message, silently rewriting 0x0A bytes inside the body it was
       # meant to forward verbatim. One rule, one implementation.
+      # Done in BYTE space, not through a regex `gsub`. Two reasons, and the byte-exactness
+      # contract above is the important one:
+      #
+      #   * PCRE2 raises `ArgumentError` on a subject that is not valid UTF-8, so a `raw`
+      #     carrying a deliberately malformed byte (a desync primitive, a binary body, a
+      #     smuggling probe — exactly what this tool exists to send) failed here instead of
+      #     being sent, and surfaced to the caller as an INTERNAL error.
+      #   * `.scrub`bing it to appease the regex is NOT the fix: that would rewrite the
+      #     operator's bytes and send something other than what was asked for.
+      #
+      # The boundary rule is unchanged (first of `\r\n\r\n` / `\n\n`, terminator included),
+      # only moved from char indices to byte indices — which is what a byte-exact sender
+      # wanted all along.
       def self.normalize_raw(raw : String) : Bytes
-        crlf = raw.index("\r\n\r\n")
-        lf = raw.index("\n\n")
+        bytes = raw.to_slice
+        crlf = raw.byte_index("\r\n\r\n")
+        lf = raw.byte_index("\n\n")
         ends = [] of Int32
         ends << crlf + 4 if crlf
         ends << lf + 2 if lf
-        head_len = ends.min? || raw.size
-        String.build do |io|
-          io << raw[0, head_len].gsub(/\r?\n/, "\r\n")
-          io << raw[head_len..]
-        end.to_slice
+        head_len = ends.min? || bytes.size
+        io = IO::Memory.new(bytes.size + 16)
+        i = 0
+        while i < head_len
+          b = bytes[i]
+          if b == 0x0D_u8 && i + 1 < head_len && bytes[i + 1] == 0x0A_u8
+            io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # already CRLF
+            i += 2
+          elsif b == 0x0A_u8
+            io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # lone LF promoted
+            i += 1
+          else
+            io.write_byte(b)
+            i += 1
+          end
+        end
+        io.write(bytes[head_len..]) if head_len < bytes.size
+        io.to_slice
       end
     end
   end
