@@ -141,6 +141,35 @@ describe Gori::Browser do
       status.should contain("exit 1")
     end
 
+    # Chromium's sandbox refusal — the actual #700 shape — is a LOG(FATAL), so the browser
+    # ABORTS rather than exiting. Process::Status#exit_code raises on that, which would
+    # have thrown away the stderr line this whole change exists to surface.
+    it "reports the browser's words when it dies on a signal, not an exit code" do
+      status = Gori::Browser.launch(bin.call("aborts", "echo 'Failed to move to new namespace' >&2; kill -ABRT $$"), spec)
+      status.should contain("quit right after starting")
+      status.should contain("Failed to move to new namespace")
+      status.should contain("ABRT")
+      status.should_not contain("Abnormal exit")
+    end
+
+    # A grandchild holding the write end means EOF never comes; the reason is still in the
+    # pipe and must reach the operator instead of being dropped for a bare exit code.
+    it "keeps the stderr it has read when the pipe never reaches EOF" do
+      status = Gori::Browser.launch(
+        bin.call("zygote", "echo 'sandbox refused' >&2; sleep 30 & exit 1"), spec)
+      status.should contain("sandbox refused")
+      status.should contain("exit 1")
+    end
+
+    # Distro wrappers colorize their errors, and a raw ESC in the status row corrupts the
+    # rest of the frame's attributes.
+    it "strips control bytes out of the browser's stderr before toasting it" do
+      status = Gori::Browser.launch(
+        bin.call("ansi", "printf '\\033[31mred failure\\033[0m\\n' >&2; exit 1"), spec)
+      status.should contain("red failure")
+      status.should_not contain("\e")
+    end
+
     it "still reports the exit code when the browser dies silently" do
       status = Gori::Browser.launch(bin.call("mute", "exit 3"), spec)
       status.should contain("quit right after starting")

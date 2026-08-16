@@ -102,6 +102,9 @@ module Gori
     # it runs and this buffer outlives the grace window.
     private STDERR_CAP = 4096
 
+    # A scheduler turn for the stderr drain to catch up once the browser is known dead.
+    private STDERR_SETTLE = 50.milliseconds
+
     # Launch `found` pre-trusted; returns a one-line status for the UI. Raises only
     # on a hard spawn failure. Creates the profile dir (and, for Firefox, writes
     # prefs + imports the CA) as a side effect.
@@ -212,12 +215,23 @@ module Gori
     # is the one thing that could explain a failed launch to the operator (#700).
     private def self.spawn_detached(path : String, args : Array(String)) : String?
       reader, writer = IO.pipe
-      process = Process.new(path, args,
-        input: Process::Redirect::Close,
-        output: Process::Redirect::Close,
-        error: writer)
+      process =
+        begin
+          Process.new(path, args,
+            input: Process::Redirect::Close,
+            output: Process::Redirect::Close,
+            error: writer)
+        rescue ex
+          # `resolve` only proves the file EXISTS, so a non-executable browser binary
+          # raises here. The caller turns that into a toast and the operator can pick the
+          # same broken entry again — leak both ends and that is 2 fds per attempt.
+          reader.close rescue nil
+          writer.close rescue nil
+          raise ex
+        end
       writer.close # our copy; the child holds the only remaining one, so EOF means it died
-      stderr = drain_stderr(reader)
+      tail = StderrTail.new
+      spawn { drain_stderr(reader, tail) }
       sleep SPAWN_GRACE
       unless process.terminated?
         spawn { process.wait rescue nil }
@@ -228,43 +242,77 @@ module Gori
       # `firefox` and packaged-Chrome entry points hand the URL to an already-running
       # instance and return. Only a non-zero exit is a browser that refused to start.
       return nil if status.success?
-      # EOF may never come — a Chromium zygote can outlive its parent still holding the
-      # write end — so take what has been read by now rather than block the UI on it.
-      select
-      when text = stderr.receive
-        failure_reason(text, status)
-      when timeout(200.milliseconds)
-        failure_reason("", status)
-      end
+      # One scheduler turn for the drain fiber to pick up what the dying browser left in
+      # the pipe — it has usually read it during the grace window already, but a browser
+      # that died at the very end of it hasn't been read yet.
+      sleep STDERR_SETTLE
+      reason = failure_reason(tail.text, status)
+      # Take what was read rather than wait for EOF: a Chromium zygote can outlive its
+      # parent still holding the write end, so EOF may never come. Closing here unblocks
+      # the drain fiber (its `read` raises) instead of stranding it, and the fd with it.
+      reader.close rescue nil
+      reason
     end
 
-    # Read the child's stderr to EOF on its own fiber, keeping at most STDERR_CAP bytes.
-    # Draining is not optional: stop reading and a chatty browser fills the pipe and
-    # blocks on its own logging. Past the cap we keep reading and discard.
-    private def self.drain_stderr(reader : IO::FileDescriptor) : Channel(String)
-      done = Channel(String).new(1) # buffered: nobody receives on the success path
-      spawn do
-        buf = Bytes.new(1024)
-        text = IO::Memory.new
-        begin
-          while (n = reader.read(buf)) > 0
-            text.write(buf[0, n]) if text.bytesize < STDERR_CAP
-          end
-        rescue
-          # pipe torn down with the process — whatever we already have is all there is
-        ensure
-          reader.close rescue nil
-          done.send(text.to_s) rescue nil
-        end
+    # Read the child's stderr until it ends or the reader is closed under us. Draining is
+    # not optional: stop reading and a chatty browser fills the pipe and blocks on its own
+    # logging, so this runs for the browser's whole life on the success path.
+    private def self.drain_stderr(reader : IO::FileDescriptor, tail : StderrTail) : Nil
+      buf = Bytes.new(1024)
+      while (n = reader.read(buf)) > 0
+        tail << buf[0, n]
       end
-      done
+    rescue
+      # pipe torn down with the process, or closed by spawn_detached once it had enough
+    ensure
+      reader.close rescue nil
+    end
+
+    # What the browser has written to stderr so far. Readable at any moment rather than
+    # only at EOF: on the failure path EOF may never arrive, and what has been read by
+    # then is the whole explanation the operator is ever going to get.
+    private class StderrTail
+      def initialize
+        @buf = IO::Memory.new
+        @mutex = Mutex.new
+      end
+
+      # Past the cap we keep reading and discard — a LIVE Chromium narrates crashpad
+      # warnings for as long as it runs, and this buffer outlives the grace window.
+      def <<(bytes : Bytes) : Nil
+        @mutex.synchronize { @buf.write(bytes) if @buf.bytesize < STDERR_CAP }
+      end
+
+      def text : String
+        @mutex.synchronize { @buf.to_s }
+      end
     end
 
     # The toast for a browser that quit on the spot: its own first words if it left any,
-    # and always the exit code — which is what a bug report needs when stderr was silent.
+    # and always how it died — which is what a bug report needs when stderr was silent.
     private def self.failure_reason(stderr : String, status : Process::Status) : String
-      line = stderr.each_line.map(&.strip).find { |l| !l.empty? }
-      line ? "#{line[0, 160]} (exit #{status.exit_code})" : "exit #{status.exit_code}"
+      # `exit_code` RAISES on an abnormal exit, and this is exactly where those happen:
+      # Chromium's sandbox refusal is a LOG(FATAL), i.e. an abort, so the browser dies on
+      # a SIGNAL. Asking for its code there would trade the stderr line we came for
+      # against a "browser launch failed: Abnormal exit has no exit code" toast (#700).
+      how =
+        if code = status.exit_code?
+          "exit #{code}"
+        elsif signal = status.exit_signal?
+          "killed by #{signal}"
+        else
+          status.exit_reason.to_s
+        end
+      line = stderr.each_line.map { |l| toast_safe(l) }.find { |l| !l.empty? }
+      line ? "#{line} (#{how})" : how
+    end
+
+    # Browser stderr is arbitrary bytes headed for the TUI's status row: distro wrappers
+    # colorize their errors, and a raw ESC written there corrupts the rest of the frame's
+    # attributes. Drop invalid UTF-8 and control bytes, then cap it to a status-row length.
+    private def self.toast_safe(line : String) : String
+      cleaned = line.scrub("").gsub { |c| c.control? ? "" : c }.strip
+      cleaned.size > 160 ? "#{cleaned[0, 159]}…" : cleaned
     end
 
     # Resolve a candidate location to an existing executable path, or nil.
