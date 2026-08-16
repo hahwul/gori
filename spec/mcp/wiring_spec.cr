@@ -7,7 +7,7 @@ require "socket"
 # `Gori::MCP::Tools` (the IO::Memory server harness never yields to a job fiber).
 #
 # Helpers are file-local — Crystal's top-level `private def` is file-scoped, so this file
-# does not depend on mcp_fuzz_spec.cr's.
+# does not depend on spec/mcp/fuzz_spec.cr's.
 
 private def with_store(&)
   path = File.tempname("gori-mcpwire", ".db")

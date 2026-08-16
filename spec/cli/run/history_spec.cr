@@ -4,7 +4,7 @@ require "json"
 
 # `gori run history` / `gori run show` — the QL gate on the listing, the flow-row text and
 # JSON contract in CLI::Output, and the `show --format json` document. Split out of the
-# monolithic spec/cli_run_spec.cr so each subcommand mirrors src/gori/cli/run/.
+# monolithic spec/cli/run_spec.cr so each subcommand mirrors src/gori/cli/run/.
 
 private def flow_row(*, target : String, host : String, status : Int32?, state : Gori::Store::FlowState)
   Gori::Store::FlowRow.new(

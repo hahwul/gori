@@ -29,7 +29,7 @@ require "json"
 #     rewritten anyway — split them out with that work.
 #
 # Two more `gori run` specs predate the split and still sit at the top level:
-# spec/cli_run_oast_stop_spec.cr and spec/cli_run_sequence_tokens_spec.cr (oast / sequence,
+# spec/cli/run/oast_stop_spec.cr and spec/cli/run/sequence_tokens_spec.cr (oast / sequence,
 # also active-sender). Fold them into spec/cli/run/ when those subcommands are covered.
 
 # Builds a minimal FlowDetail without touching the DB (the structs have public

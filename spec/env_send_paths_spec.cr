@@ -81,7 +81,7 @@ end
 private WS_UPGRADE = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
 
 # `ws_out_messages` is private CLI glue; reopen the module for a bare-call wrapper.
-# Distinctly named from cli_run_spec.cr's own wrapper — both files compile into the same
+# Distinctly named from spec/cli/run_spec.cr's own wrapper — both files compile into the same
 # module in a full run, and two identical `def`s would silently redefine each other.
 module Gori::CLI::Run
   def self.ws_out_messages_env_for_spec(store : Gori::Store, id : Int64,

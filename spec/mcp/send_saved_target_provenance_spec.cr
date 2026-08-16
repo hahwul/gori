@@ -18,7 +18,7 @@ require "../spec_helper"
 # The binding has to be BOUND INSIDE the driven server: `Bindings` persists rules, never held
 # values. So these drive a real `send_request` at a local origin first, which is exactly how
 # an agent reaches this state. Sibling coverage for `create_repeater` / `update_repeater`
-# lives in `spec/mcp_repeater_wire_field_provenance_spec.cr`.
+# lives in `spec/mcp/repeater_wire_field_provenance_spec.cr`.
 
 private def with_store(&)
   path = File.tempname("gori-sendtarget", ".db")

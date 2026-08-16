@@ -8,7 +8,7 @@ require "socket"
 # it PERMISSION_DENIED — both read as a plain 200 finding.
 #
 # Real TCP origin (not a FakeBackend) so this exercises the actual MCP job pipeline: mine_start
-# → the live send → mine_results, the same path `spec/mcp_wiring_spec.cr` uses for its own
+# → the live send → mine_results, the same path `spec/mcp/wiring_spec.cr` uses for its own
 # gaps. The origin denies (grpc-status 7) every query unless it carries `secret=`, which it
 # grants (grpc-status 0) AND grows the body — the metric signal Miner's bisection isolates.
 

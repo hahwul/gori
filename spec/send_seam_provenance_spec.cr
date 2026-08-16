@@ -675,7 +675,7 @@ end
 
 module Gori::CLI::Run
   # Bare-call wrapper for the private CLI glue. Distinctly named from the wrappers in
-  # `cli_run_spec.cr` / `env_send_paths_spec.cr` — all three compile into this one module
+  # `spec/cli/run_spec.cr` / `env_send_paths_spec.cr` — all three compile into this one module
   # in a full run, and two identical `def`s would silently redefine each other.
   def self.ws_out_messages_prov_spec(store : Gori::Store, id : Int64, *, evidence : Bool,
                                      override : Array(Gori::Store::WsOutMessage) = [] of Gori::Store::WsOutMessage,

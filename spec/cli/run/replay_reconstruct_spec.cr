@@ -16,7 +16,7 @@ require "../../spec_helper"
 # The WELL-FORMED side of the same function — the absolute→origin rewrite on ordinary
 # requests, the http2 flag, the target derivation, and the Content-Length/chunked re-frame
 # applied when a capture was TRUNCATED — is covered by `describe Gori::Repeater::FlowRequest`
-# in spec/cli_run_spec.cr. This file only adds the hostile inputs.
+# in spec/cli/run_spec.cr. This file only adds the hostile inputs.
 
 # Every example reconstructs the same way `gori run repeater send --flow` does: a complete
 # http/1.1 flow whose only interesting part is the captured request bytes.
@@ -78,7 +78,7 @@ describe "replay reconstruct (P7) — malformed input is never rejected" do
   it "preserves BOTH framing headers of a CL.TE probe when the body was not truncated" do
     # RFC 7230 forbids TE+CL; keeping both is the entire test. (The single-Content-Length
     # collapse fires ONLY on the truncated-capture path, which cannot replay faithfully
-    # anyway — that branch is covered in spec/cli_run_spec.cr, not here.)
+    # anyway — that branch is covered in spec/cli/run_spec.cr, not here.)
     head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n"
     body = "0\r\n\r\n".to_slice
     String.new(rebuilt(head, body)).should eq(head + "0\r\n\r\n")

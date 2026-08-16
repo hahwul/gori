@@ -256,7 +256,7 @@ module Gori
     # "Existing" is a real DB **or** a workspace binding. The binding has to count on its own
     # because `create_for_workspace` deliberately claims the directory and leaves the DB for
     # its caller to open — the window is what lets a second MCP process see the binding before
-    # SQLite has created anything (spec/mcp_project_resolver_spec.cr states this), and it does
+    # SQLite has created anything (spec/mcp/project_resolver_spec.cr states this), and it does
     # not always close a moment later: the MCP entry point degrades to unbound when its
     # `Store.open` fails, and a killed process closes it never. Judging by the DB alone, a
     # differently-named `create` then walked into that directory, overwrote `.name`, and

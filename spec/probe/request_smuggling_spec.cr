@@ -318,7 +318,7 @@ describe Gori::Probe::Active::RequestSmuggling do
   describe "seam" do
     it "Sender#send_pipeline sends the whole group on ONE socket, in order" do
       # A keep-alive origin tagging every response with its connection id; identical ids prove
-      # one shared socket (mirrors spec/repeater_spec.cr's send_pipeline harness).
+      # one shared socket (mirrors spec/repeater/repeater_spec.cr's send_pipeline harness).
       origin = TCPServer.new("127.0.0.1", 0)
       port = origin.local_address.port
       spawn do

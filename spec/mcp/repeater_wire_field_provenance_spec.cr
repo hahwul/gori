@@ -1,7 +1,7 @@
 require "../spec_helper"
 
 # Round 5 stopped MCP masking the repeater's REQUEST bytes into the store
-# (`spec/mcp_repeater_draft_provenance_spec.cr`) and left `target` / `sni` / `name` / `tags`
+# (`spec/mcp/repeater_draft_provenance_spec.cr`) and left `target` / `sni` / `name` / `tags`
 # masked, on the rationale that those are "short author-typed fields with no wire semantics
 # of their own … re-expanded identically by every surface".
 #

@@ -12,7 +12,7 @@ end
 
 # `create_for_workspace` binds a directory to a source workspace and deliberately leaves
 # the DB for the caller to open (so the binding is visible to a second MCP process before
-# SQLite has created anything — see spec/mcp_project_resolver_spec.cr). That window is not
+# SQLite has created anything — see spec/mcp/project_resolver_spec.cr). That window is not
 # always closed a moment later: the MCP entry point degrades to unbound when `Store.open`
 # fails, and a killed process closes it never. So a workspace-bound directory with no db
 # is a state the registry has to keep honouring.

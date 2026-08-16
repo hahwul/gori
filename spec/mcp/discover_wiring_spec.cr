@@ -2,11 +2,11 @@ require "../spec_helper"
 require "socket"
 
 # The MCP half of round 3's wiring, discover's share of it. Kept in its own file: the
-# fuzz/mine/sequence examples in mcp_wiring_spec.cr leave engine fibers behind them, and a
+# fuzz/mine/sequence examples in spec/mcp/wiring_spec.cr leave engine fibers behind them, and a
 # discover run sharing a process with those took twenty times as long as it does alone.
 #
 # Helpers are file-local — Crystal's top-level `private def` is file-scoped, so this file
-# does not depend on mcp_wiring_spec.cr's or mcp_fuzz_spec.cr's.
+# does not depend on spec/mcp/wiring_spec.cr's or spec/mcp/fuzz_spec.cr's.
 
 private def with_store(&)
   path = File.tempname("gori-mcpwire", ".db")

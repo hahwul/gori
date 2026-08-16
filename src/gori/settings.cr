@@ -518,7 +518,7 @@ module Gori
     # Hand-maintained, deliberately: this is the set of keys the `serialize` dispatcher at the
     # bottom of this file can emit and `apply_sections` can read, and no runtime expression
     # produces it without a fully-populated settings object. Add a section → add its key here.
-    # The `document_keys - SECTION_KEYS` guard in spec/settings_profile_spec.cr catches a
+    # The `document_keys - SECTION_KEYS` guard in spec/settings/profile_spec.cr catches a
     # rename, and catches an addition as soon as any example populates the new section.
     SECTION_KEYS = %w[
       theme mouse pretty_bodies layout statusline display companion notifications general update

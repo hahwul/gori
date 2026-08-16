@@ -10,7 +10,7 @@ require "digest/sha1"
 # to be a refusal that names the field.
 #
 # Helpers are file-local (Crystal's top-level `private def` is file-scoped) so this file does
-# not depend on mcp_spec.cr's.
+# not depend on spec/mcp_spec.cr's.
 
 private def with_store(&)
   path = File.tempname("gori-mcp-agent", ".db")

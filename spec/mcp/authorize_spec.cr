@@ -500,7 +500,7 @@ describe "MCP authorize tools" do
       end
     end
 
-    # The house rule (spec/mcp_bool_args_spec.cr): a boolean argument is coerced leniently
+    # The house rule (spec/mcp/bool_args_spec.cr): a boolean argument is coerced leniently
     # ("true"/"false") but NEVER silently — a `1` for unsafe_methods would otherwise replay a
     # POST nobody authorised, and a `0` for allow_unscoped would look like a waiver.
     it "refuses boolean garbage by name instead of running a different test" do

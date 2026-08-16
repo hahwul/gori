@@ -42,7 +42,7 @@ end
 
 # The CLI's refusal wording lives behind `private def self.` (nothing outside `gori run` may
 # phrase it), so it is reached through a shim in the same module — the pattern
-# `verb_token_for_spec` / `emit_fuzz_result_for_spec` in spec/cli_run_spec.cr already use.
+# `verb_token_for_spec` / `emit_fuzz_result_for_spec` in spec/cli/run_spec.cr already use.
 module Gori::CLI::Run
   def self.env_unresolved_error_for_spec(detail : String?) : String
     env_unresolved_error(detail)
@@ -148,7 +148,7 @@ describe "gori run --bind-from — the pre-plan refusal" do
     # through `preflight_bind_from_blocker`, which returns BIND_FROM_NO_PROJECT instead, because a
     # nil layer there means `--request`/stdin was run with no --project/--db and telling that
     # operator their project "declares no extract rules" was measurably false. Do not merge the two
-    # back together; see spec/cli_run_spec.cr's "no project vs no rules".
+    # back together; see spec/cli/run_spec.cr's "no project vs no rules".
     Gori::CLI::Run.bind_from_blocker_for_spec(nil).should eq(Gori::CLI::Run::BIND_FROM_NO_RULES)
   end
 

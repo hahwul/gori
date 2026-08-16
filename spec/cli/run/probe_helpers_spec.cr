@@ -4,7 +4,7 @@ require "../../spec_helper"
 # subcommand that run before any traffic does.
 #
 # The scan itself is an active sender and is covered with the rest of them (see the header of
-# spec/cli_run_spec.cr). What is here is everything a triage command decides on its own: which
+# spec/cli/run_spec.cr). What is here is everything a triage command decides on its own: which
 # rule tier `--kind` names, which STORE a rule id addresses, and how a malformed query is
 # echoed back. The `abort` branches call `exit`, so only the success paths run here — the
 # same limit spec/cli/run/links_spec.cr works under.

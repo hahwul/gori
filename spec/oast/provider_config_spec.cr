@@ -1,7 +1,7 @@
 require "../spec_helper"
 
 # Configured OAST providers: the global/project merge (Oast.provider_configs) mirrors
-# Probe.custom_rules — see probe_custom_rule_spec.cr for the analogous test.
+# Probe.custom_rules — see spec/probe/custom_rule_spec.cr for the analogous test.
 
 private def with_store(&)
   path = File.tempname("gori-oast-config", ".db")
