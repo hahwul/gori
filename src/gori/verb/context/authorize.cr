@@ -19,6 +19,10 @@ abstract class Gori::Verb::ExecContext
   # Open the identity list — who the queue is replayed as. The set persists per project.
   abstract def authorize_identities : Nil
 
+  # Flip unattended replay: authenticated GETs are queued and replayed as they are captured.
+  abstract def authorize_toggle_passive : Nil
+  abstract def authorize_passive? : Bool
+
   # A request is queued — the gate for run/remove/clear.
   abstract def authorize_has_target? : Bool
   # A run is in flight — gates Stop, and hides the run verbs while one is going.

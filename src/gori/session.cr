@@ -30,6 +30,10 @@ module Gori
     getter proxy : Proxy::Server
     getter tunnel : Proxy::Tls::Tunnel
     getter flow_events : Channel(Store::FlowEvent)
+    # The Authorize tab's live feed. A third channel because a Crystal Channel is
+    # single-consumer; nothing drains it until passive replay is switched on, and the store's
+    # publish drops on a full channel, so an idle feed costs nothing.
+    getter authorize_events : Channel(Store::FlowEvent)
     # The passive/active scanner. Subscribes to the store's parallel probe_events feed and
     # writes grouped issues; runs for both the TUI and headless capture.
     getter probe : Probe::Analyzer
@@ -61,7 +65,9 @@ module Gori
                   bind_fallback : Bool = false) : Session
       events = Channel(Store::FlowEvent).new(1024)
       probe_events = Channel(Store::FlowEvent).new(256)
-      store = Store.open(project.db_path, events, probe_events, Settings.retention_flows)
+      authorize_events = Channel(Store::FlowEvent).new(256)
+      store = Store.open(project.db_path, events, probe_events, Settings.retention_flows,
+        authorize_events: authorize_events)
       probe = nil.as(Probe::Analyzer?)
       begin
         # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
@@ -170,7 +176,7 @@ module Gori
           store.clear_intercept_state!
           probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, scope, host_overrides, interceptor, sink, bind_error, lock, extra, listener_errs)
+        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, scope, host_overrides, interceptor, sink, authorize_events, bind_error, lock, extra, listener_errs)
         session.sync_capture_status!
         session
       rescue ex
@@ -185,6 +191,7 @@ module Gori
         store.close rescue nil
         events.close rescue nil
         probe_events.close rescue nil
+        authorize_events.close rescue nil
         raise ex
       end
     end
@@ -224,6 +231,7 @@ module Gori
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
                    @rules, @bindings, @scope, @host_overrides, @interceptor, @sink : Proxy::FlowSink,
+                   @authorize_events : Channel(Store::FlowEvent),
                    @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil,
                    @extra_listeners : Array(ExtraListener) = [] of ExtraListener,

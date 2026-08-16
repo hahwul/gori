@@ -1021,6 +1021,14 @@ private class FakeContext < ExecContext
     @calls << :authorize_remove
   end
 
+  def authorize_toggle_passive : Nil
+    @calls << :authorize_toggle_passive
+  end
+
+  def authorize_passive? : Bool
+    false
+  end
+
   def authorize_identities : Nil
     @calls << :authorize_identities
   end

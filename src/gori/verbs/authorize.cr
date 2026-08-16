@@ -51,6 +51,16 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :authorize && !ctx.authorize_running? },
         mnemonic: 'i') { |ctx| ctx.authorize_identities; nil }
 
+      # OFF by default and reachable only here. Passive replay is the one control in this tab
+      # that sends without a keypress per request, so it gets an explicit switch rather than
+      # riding on some other action.
+      r.register Verb::Definition.new(
+        "authorize.passive", "Passive replay",
+        "Replay authenticated GETs under each identity as they are captured (off by default)",
+        Verb::Scope::Authorize, [Verb::Chord.new("p")],
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :authorize },
+        mnemonic: 'p') { |ctx| ctx.authorize_toggle_passive; nil }
+
       r.register Verb::Definition.new(
         "authorize.remove", "Remove request", "Drop the selected request from the queue",
         Verb::Scope::Authorize, [Verb::Chord.new("d")],

@@ -103,6 +103,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     authorize_controller.running?
   end
 
+  def authorize_toggle_passive : Nil
+    authorize_controller.toggle_passive
+  end
+
+  def authorize_passive? : Bool
+    authorize_controller.passive?
+  end
+
   def authorize_identities : Nil
     if authorize_controller.identities_editable?
       open_authorize_identities

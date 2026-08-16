@@ -1038,6 +1038,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:authorize_remove)
   end
 
+  def authorize_toggle_passive : Nil
+    rec(:authorize_toggle_passive)
+  end
+
+  def authorize_passive? : Bool
+    false
+  end
+
   def authorize_identities : Nil
     rec(:authorize_identities)
   end

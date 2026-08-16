@@ -3,6 +3,7 @@ require "../authorize_view"
 require "../../authorize/engine"
 require "../../outbound"
 require "../../settings"
+require "../../authorize/passive"
 
 module Gori::Tui
   # The Authorize tab: replay one or more captured requests under several identities and read
@@ -22,6 +23,27 @@ module Gori::Tui
     private record Outcome, gen : Int32, entry_id : Int32 = 0,
       target : Authorize::Target? = nil, error : String? = nil, done : Bool = false
 
+    # Ceiling on the queue when PASSIVE replay is filling it. A browse can touch hundreds of
+    # authenticated endpoints, and every row here is a request set that will go out again; a
+    # queue that grows with the session eventually replays more traffic than the browsing did.
+    # Reported when it bites — a cap nobody is told about reads as "passive stopped working".
+    PASSIVE_CAP = 200
+
+    # Hosts named in the "outside scope" notice before it goes quiet. A browse touches many
+    # third-party origins (analytics, fonts, CDNs) and every one of them would otherwise take
+    # the status line.
+    UNSCOPED_REPORT_CAP = 3
+
+    # How often the catch-up sweep re-reads recent flows, and how many it looks at — the same
+    # shape (and the same reason) as `Probe::Analyzer`'s.
+    PASSIVE_CATCHUP_INTERVAL = 30.seconds
+    PASSIVE_CATCHUP_SCAN     = 200
+
+    # Endpoints passive replay has already queued this session, so a browser refetching a page
+    # does not add a row per load. See `Authorize::Passive.key` for why the key is the endpoint
+    # rather than the flow id.
+    @passive_seen : Set(String)
+
     def initialize(host : Host)
       super(host)
       @view = AuthorizeView.new
@@ -32,6 +54,12 @@ module Gori::Tui
       @batch_ids = Set(Int32).new
       @batch_size = 0
       @identities_loaded = nil.as(Array(Authorize::Identity)?)
+      @passive = false
+      @passive_started = false
+      @passive_seen = Set(String).new
+      @passive_capped = false
+      @passive_unscoped = Set(String).new
+      @seeds = Channel(Store::FlowDetail).new(64)
     end
 
     def view : AuthorizeView
@@ -95,6 +123,154 @@ module Gori::Tui
     # sent under, halfway through.
     def identities_editable? : Bool
       !running?
+    end
+
+    # --- passive replay ------------------------------------------------------
+
+    def passive? : Bool
+      @passive
+    end
+
+    # Flip unattended replay. OFF by default and never implied by anything else: this is the
+    # one control in the tab that puts requests on a target with nobody pressing a key, and
+    # gori's whole shape is "the operator decides what leaves the machine" (P4).
+    def toggle_passive : Nil
+      @passive = !@passive
+      if @passive
+        start_passive_watcher
+        @host.status("authorize: passive replay ON — authenticated GETs will be replayed as they are captured")
+      else
+        # The watcher fiber stays parked on the channel; it re-checks the flag per event, so
+        # turning passive off stops the work without needing to kill (and later re-spawn) it.
+        @host.status("authorize: passive replay off")
+      end
+    end
+
+    # Drains the session's live flow feed on its OWN fiber, exactly as `Probe::Analyzer` drains
+    # its parallel feed. It never touches the view: a flow that passes the filter is handed to
+    # the main fiber through `@seeds`, and `drain_events` is what adds the row.
+    #
+    # SELF-LOOP: gori's own replays go out through `Fuzz::Sender`, which dials the origin
+    # directly and bypasses the capture proxy, and nothing here writes them back with
+    # `insert_flow` — so a shadow request can never come back round as a new flow event. That
+    # is a property of the send path, not a guard here; recording a shadow send into History
+    # would reintroduce the loop and would need an explicit marker to break it.
+    private def start_passive_watcher : Nil
+      return if @passive_started
+      @passive_started = true
+      feed = @host.session.authorize_events
+      store = @host.session.store
+      spawn(name: "authorize-passive") do
+        while ev = feed.receive?
+          next unless @passive
+          next unless ev.kind == :updated # the response side exists only on the second event
+          detail = store.get_flow(ev.id)
+          next unless detail
+          next unless Authorize::Passive.replayable?(detail)
+          select
+          when @seeds.send(detail)
+          else
+            # main fiber behind — drop rather than stall the feed; the next matching flow
+            # queues the endpoint anyway, and the queue is a sample, not a ledger.
+          end
+        end
+      rescue Channel::ClosedError
+        # project closing
+      end
+      start_passive_catchup(store)
+    end
+
+    # The live feed DROPS on a full channel (see `Store#publish`), and both this consumer and
+    # the main fiber can fall behind a burst of browsing. Without a sweep a dropped event is a
+    # silently untested endpoint — the same reason `Probe::Analyzer` runs one. Re-reading is
+    # free of duplicates because `accept_seed` keys on the endpoint, so a flow that WAS handled
+    # is rejected on arrival.
+    private def start_passive_catchup(store : Store) : Nil
+      spawn(name: "authorize-passive-catchup") do
+        loop do
+          sleep PASSIVE_CATCHUP_INTERVAL
+          next unless @passive
+          store.recent_flows(PASSIVE_CATCHUP_SCAN).each do |row|
+            break unless @passive
+            next unless row.state.complete?
+            detail = store.get_flow(row.id)
+            next unless detail
+            next unless Authorize::Passive.replayable?(detail)
+            select
+            when @seeds.send(detail)
+            else
+              break # still behind — the next tick tries again
+            end
+          end
+        rescue DB::Error | SQLite3::Exception
+          # store closing / busy — the next tick re-reads
+        end
+      end
+    end
+
+    # Add what the watcher found (main fiber). Returns true when anything landed, so the render
+    # loop redraws and `drain_events` knows to consider an auto-run.
+    private def drain_seeds : Bool
+      added = false
+      DRAIN_CAP.times do
+        break unless detail = next_seed
+        added = true if accept_seed(detail)
+      end
+      added
+    end
+
+    # One queued flow if the watcher found any, else nil — a non-blocking channel poll, the
+    # twin of `next_outcome`.
+    private def next_seed : Store::FlowDetail?
+      select
+      when d = @seeds.receive
+        d
+      else
+        nil
+      end
+    end
+
+    private def accept_seed(detail : Store::FlowDetail) : Bool
+      key = Authorize::Passive.key(detail)
+      return false if @passive_seen.includes?(key)
+      # UNATTENDED sending is gated on the project's scope INCLUDE rules — the strict Layer 1
+      # allowlist, the same one Probe's active rules enqueue behind, and deliberately stricter
+      # than the manual queue (whose sender applies Sandbox/EXCLUDE alone, because a human
+      # picked that request). Passive replays whatever the browser touches, and a browser
+      # session reaches a great deal that is not the engagement.
+      #
+      # Silently is the one way it must not refuse: with no scope configured NOTHING would be
+      # replayed and the tab would look broken. Reported once per host, capped, the way Probe
+      # rate-limits its own per-host failures.
+      if Outbound.allowlist(@host.session.scope)
+           .check_request(detail.row.scheme, detail.row.host, detail.row.target).blocked?
+        host = detail.row.host
+        if @passive_unscoped.size < UNSCOPED_REPORT_CAP && @passive_unscoped.add?(host)
+          @host.status("authorize: #{host} is outside project scope — passive replay only sends to scoped hosts")
+        end
+        return false
+      end
+      if @view.size >= PASSIVE_CAP
+        unless @passive_capped
+          @passive_capped = true
+          @host.status("authorize: passive queue is full at #{PASSIVE_CAP} — clear it to keep going")
+        end
+        return false
+      end
+      @passive_seen << key
+      @view.add(detail)
+      true
+    end
+
+    # Passive's run trigger: whatever the watcher queued goes out as soon as nothing else is in
+    # flight. Deliberately routed through the SAME `run(:pending)` the operator's ^R uses, so
+    # passive inherits the batch's generation stamp, its stop, and its settling rather than
+    # growing a second, subtly different send loop.
+    private def maybe_autorun : Nil
+      return unless @passive
+      return if running?
+      return if @view.pending_entries.empty?
+      run(:pending)
     end
 
     # --- cross-tab seeding (Send to Authorize) -------------------------------
@@ -242,12 +418,15 @@ module Gori::Tui
 
     # Drain finished requests (main fiber, per render tick). Returns true when something landed.
     def drain_events : Bool
-      drained = false
+      drained = drain_seeds
       DRAIN_CAP.times do
         break unless o = next_outcome
         apply_outcome(o)
         drained = true
       end
+      # After the outcomes, not before: a batch that just finished frees the runner for
+      # whatever the watcher queued while it was busy.
+      maybe_autorun
       drained
     end
 
@@ -352,9 +531,12 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      return "mark flows in History and Send to Authorize (batch-capable) to begin" unless @view.any_requests?
-      return "↑/↓ request · ⇥ identity · ^X stop · space cmds" if running?
-      "↑/↓ request · ⇥ identity · ^R run pending · ⇧R all · t this · d remove · space cmds"
+      passive = @passive ? " · PASSIVE on" : ""
+      unless @view.any_requests?
+        return "i identities · p passive · Send to Authorize from History to begin#{passive}"
+      end
+      return "↑/↓ request · ⇥ identity · ^X stop#{passive} · space cmds" if running?
+      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · space cmds"
     end
   end
 end

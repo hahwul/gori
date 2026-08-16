@@ -225,6 +225,10 @@ module Gori
     # `@events` because a Crystal Channel is single-consumer — the TUI history refresh and
     # Probe can't share one. Same best-effort drop-on-full semantics (see #publish).
     @probe_events : Channel(FlowEvent)?
+    # Third parallel feed, for the Authorize tab's passive replay. A Crystal Channel is
+    # single-consumer, so each watcher of the live flow stream needs its own — the TUI history
+    # refresh, Probe and Authorize cannot share one. Same best-effort drop-on-full semantics.
+    @authorize_events : Channel(FlowEvent)?
 
     # Opens (and migrates) the database. `events`, when given, receives
     # best-effort post-commit notifications for the live TUI; pass nil in
@@ -233,7 +237,8 @@ module Gori
     # the kept history (0 = unlimited).
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
                   probe_events : Channel(FlowEvent)? = nil,
-                  retention_flows : Int32 = RETENTION_DEFAULT) : Store
+                  retention_flows : Int32 = RETENTION_DEFAULT,
+                  authorize_events : Channel(FlowEvent)? = nil) : Store
       # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
       # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
       # means every unindexed History filter re-reads pages off disk with almost no reuse —
@@ -303,7 +308,7 @@ module Gori
         raise ex
       end
       # Past this point the Store owns the pool and closes it in #close.
-      new(db, events, probe_events, retention_flows, open_lock: open_lock)
+      new(db, events, probe_events, retention_flows, authorize_events: authorize_events, open_lock: open_lock)
     end
 
     # Memory-mapped read window. The default is 0 — every read is a `read()` syscall — and
@@ -421,6 +426,7 @@ module Gori
     def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil,
                    @probe_events : Channel(FlowEvent)? = nil,
                    @retention_flows : Int32 = RETENTION_DEFAULT,
+                   @authorize_events : Channel(FlowEvent)? = nil,
                    @prune_interval : Int32 = PRUNE_INTERVAL,
                    @events_retention : Int32 = EVENTS_RETENTION,
                    @open_lock : OpenLock? = nil)
@@ -1409,6 +1415,14 @@ module Gori
         when probe.send(event)
         else
           # Probe analyzer behind / not running — drop (it re-reads via get_flow anyway)
+        end
+      end
+      if authorize = @authorize_events
+        select
+        when authorize.send(event)
+        else
+          # Authorize passive replay behind / off — drop. Its catch-up sweep re-reads recent
+          # flows, so a dropped event costs latency, never a missed request.
         end
       end
     rescue Channel::ClosedError
