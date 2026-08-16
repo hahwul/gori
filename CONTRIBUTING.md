@@ -37,6 +37,15 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
   version in step with `shard.yml`.
 - Keep changes scoped and behavior-preserving unless the PR is explicitly a behavior
   change; note any intentional behavior change in the PR description.
+- Add a `CHANGELOG.md` line under `## Unreleased` for anything a user would notice, in
+  the shape the released sections use: **one line per theme, plain, with the issue or PR
+  numbers in parentheses at the end**. Join an existing theme line rather than adding a
+  fourth bullet about the same area.
+
+  The reasoning that justifies the change does not belong there. It belongs in the PR
+  body — which the issue number already points at — or, when it settles a design
+  question, in [DESIGN.md §7](DESIGN.md). A changelog entry that has to be read twice is
+  one nobody can lift into release notes (#709).
 
 ## Where things live
 

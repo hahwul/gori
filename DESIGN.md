@@ -938,6 +938,57 @@ Net, on the five-variant origin: 320 findings with 310 false positives became 12
 single unavoidable one — while `/soft/admin`, which no configuration could previously surface,
 is now found.
 
+### 2026-08-16: a race is a count on the plan, not a fifth attack Mode
+
+Refines: [P0](#p0). PR #705.
+
+The Fuzzer's Race (last-byte-sync) mode arrived as `Config#race_count : Int32?`
+(`src/gori/fuzz/types.cr`) rather than as a member of `Fuzz::Mode`, which still holds exactly
+`Sniper`, `BatteringRam`, `Pitchfork`, `ClusterBomb`.
+
+`Mode` answers one question: how do payload lists combine into the sequence of requests a run
+sends. All four members are read by `Generator`, and every one of them produces a stream of
+*different* requests. A race produces N copies of the *same* request and bypasses
+`Mode`/`Generator` entirely (`Fuzz::Engine#run_race`). Modelling it as a fifth member would
+have put a value into an enum that the enum's only consumer cannot consume, and forced an
+inert arm into the exhaustive `case` in all three surfaces — structure added to describe a
+thing that does not have that shape.
+
+The cost of the choice is that "race" is not spelled the way the other attack shapes are, and
+a surface must know to read a second field. That is the right trade while `race_count` is the
+only such knob; a second orthogonal send-shape would be the concrete second caller P0 asks
+for, and the two should then be generalized together rather than one of them retrofitted into
+`Mode`.
+
+### 2026-08-16: a refused send is not an enforcement result
+
+Refines: [P4](#p4). Issues #707, #710.
+
+Extends the 2026-07-26 decision that a run which sends nothing says so, to the case where the
+answer is not merely empty but *actively misleading*.
+
+The Authorize tool replays one captured request under several identities and reports whether
+access control held. Its verdicts therefore carry a claim about the target. When gori's own
+Sandbox or an EXCLUDE rule refuses every send, the run has learned nothing about the target
+at all — but the shape of the result is indistinguishable from the shape of a run where the
+server rejected every non-baseline identity. Reporting that as `enforced` would state the
+strongest possible finding on the strength of traffic that never left the process.
+
+So `Authorize` reports `nothing_sent`, never `enforced`, when every send was blocked, and
+says in the same breath that this is not evidence access control works
+(`src/gori/mcp/tools/authorize.cr`, `src/gori/cli/run/authorize.cr`). The same reasoning
+makes an all-skipped selection raise `PlanError::NothingToSend` carrying the per-flow skip
+list rather than returning an empty plan: "we declined to test these four requests, here is
+why" and "we tested them and found nothing" are opposite findings and must not share a
+rendering.
+
+Authorize also shipped in #707 as a TUI-only tool, against the convention in [§2](#s2) that
+every tool reaches all three surfaces over a shared `Plan.build` seam. #710 added
+`src/gori/authorize/plan.cr`, `gori run authorize` and the MCP `authorize_*` family. Recorded
+here because the gap was not noticed until a structure review looked for it: a new tool's
+parity is part of shipping it, not a follow-up, and the seam is the thing that makes the two
+non-TUI surfaces cheap enough for that to be true.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
